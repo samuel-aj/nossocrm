@@ -31,6 +31,52 @@ type VercelDeployment = {
 
 const VERCEL_API_BASE = 'https://api.vercel.com';
 
+type VercelErrorPayload = {
+  error?: {
+    code?: string;
+    message?: string;
+    invalidToken?: boolean;
+  };
+};
+
+function formatVercelError(raw: string): string | null {
+  const text = raw.trim();
+  if (!text) return null;
+
+  try {
+    const parsed = JSON.parse(text) as VercelErrorPayload;
+    const err = parsed?.error;
+    if (!err) return null;
+
+    const message = err.message || '';
+    const code = err.code || '';
+
+    if (err.invalidToken || /invalid token/i.test(message)) {
+      return 'Token da Vercel invalido ou expirado. Gere um novo token com Full Account.';
+    }
+
+    if (code === 'forbidden' || /not authorized/i.test(message)) {
+      return 'Token da Vercel sem permissao para este projeto. Gere um token com Full Account.';
+    }
+
+    if (code === 'missing_scope' || code === 'insufficient_scope') {
+      return 'Token da Vercel sem escopo necessario. Crie um token com Full Account.';
+    }
+
+    if (code === 'not_found') {
+      return 'Recurso nao encontrado na Vercel para este token.';
+    }
+
+    if (message) {
+      return `Erro da Vercel: ${message}`;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
 function buildUrl(path: string, teamId?: string) {
   const url = new URL(`${VERCEL_API_BASE}${path}`);
   if (teamId) url.searchParams.set('teamId', teamId);
@@ -54,7 +100,8 @@ async function vercelFetch<T>(
 
   const text = await res.text();
   if (!res.ok) {
-    const message = text || `Vercel API error (${res.status})`;
+    const parsedMessage = text ? formatVercelError(text) : null;
+    const message = parsedMessage || text || `Vercel API error (${res.status})`;
     throw new Error(message);
   }
 

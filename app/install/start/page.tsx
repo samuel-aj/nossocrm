@@ -20,6 +20,11 @@ const STORAGE_TOKEN = 'crm_install_token';
 const STORAGE_PROJECT = 'crm_install_project';
 const STORAGE_INSTALLER_TOKEN = 'crm_install_installer_token';
 
+const shouldShowTokenHelp = (message: string) => {
+  const text = message.toLowerCase();
+  return text.includes('vercel') && text.includes('token');
+};
+
 export default function InstallStartPage() {
   const router = useRouter();
   const [meta, setMeta] = useState<InstallerMeta | null>(null);
@@ -319,7 +324,23 @@ export default function InstallStartPage() {
                   {error ? (
                     <div className="flex items-start gap-2 text-red-600 dark:text-red-400 text-sm">
                       <AlertCircle className="w-4 h-4 mt-0.5" />
-                      <span>{error}</span>
+                      <div className="space-y-1">
+                        <span className="block">{error}</span>
+                        {shouldShowTokenHelp(error) ? (
+                          <span className="block text-xs text-red-500 dark:text-red-300">
+                            Gere um novo token em{' '}
+                            <a
+                              href="https://vercel.com/account/tokens"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="underline underline-offset-2"
+                            >
+                              vercel.com/account/tokens
+                            </a>
+                            .
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
                   ) : null}
 
