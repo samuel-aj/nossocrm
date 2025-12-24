@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { TrendingUp, Clock, Target, DollarSign, Trophy, Users, Download, Settings } from 'lucide-react';
@@ -16,13 +16,19 @@ const ReportsPage: React.FC = () => {
   const [period, setPeriod] = useState<PeriodFilter>('this_month');
   const [selectedBoardId, setSelectedBoardId] = useState<string>('');
 
+  // Performance: avoid recomputing the "default board id" logic inside the effect.
+  const defaultBoardId = useMemo(() => {
+    if (!boards.length) return '';
+    const defaultB = boards.find(b => b.isDefault) || boards[0];
+    return defaultB?.id || '';
+  }, [boards]);
+
   // Inicializar board selecionado
   useEffect(() => {
-    if (!selectedBoardId && boards.length > 0) {
-      const defaultB = boards.find(b => b.isDefault) || boards[0];
-      setSelectedBoardId(defaultB.id);
+    if (!selectedBoardId && defaultBoardId) {
+      setSelectedBoardId(defaultBoardId);
     }
-  }, [boards, selectedBoardId]);
+  }, [defaultBoardId, selectedBoardId]);
 
   // Pegar o board selecionado para acessar a meta
   const selectedBoard = useMemo(() => {
@@ -77,7 +83,8 @@ const ReportsPage: React.FC = () => {
   const isOnTrack = forecastPercent >= 75;
 
   // Formatador baseado no tipo
-  const formatGoalValue = (value: number) => {
+  // Performance: keep formatter stable (prevents unnecessary child rerenders when passed down).
+  const formatGoalValue = useCallback((value: number) => {
     switch (goalType) {
       case 'currency':
         if (value >= 1000000) return `$${(value / 1000000).toFixed(1)}M`;
@@ -90,7 +97,7 @@ const ReportsPage: React.FC = () => {
       default:
         return value.toLocaleString();
     }
-  };
+  }, [goalType]);
 
   // Calcular Performance por Vendedor (Leaderboard)
   const leaderboard = React.useMemo(() => {
@@ -119,11 +126,46 @@ const ReportsPage: React.FC = () => {
   }, [wonDeals]);
 
   // Formatador de moeda
-  const formatCurrency = (value: number) => {
+  const formatCurrency = useCallback((value: number) => {
     if (value >= 1000000) return `$${(value / 1000000).toFixed(1)}M`;
     if (value >= 1000) return `$${(value / 1000).toFixed(0)}k`;
     return `$${value.toLocaleString()}`;
-  };
+  }, []);
+
+  const generatedBy = useMemo(() => {
+    if (profile?.first_name && profile?.last_name) return `${profile.first_name} ${profile.last_name}`;
+    return profile?.first_name || profile?.email || 'Usuário';
+  }, [profile?.email, profile?.first_name, profile?.last_name]);
+
+  const handleExportPDF = useCallback(() => {
+    generateReportPDF(
+      {
+        pipelineValue,
+        actualWinRate,
+        avgSalesCycle,
+        fastestDeal,
+        wonRevenue,
+        wonDeals,
+        changes,
+        funnelData,
+      },
+      period,
+      selectedBoard?.name,
+      generatedBy
+    );
+  }, [
+    actualWinRate,
+    avgSalesCycle,
+    changes,
+    fastestDeal,
+    funnelData,
+    generatedBy,
+    period,
+    pipelineValue,
+    selectedBoard?.name,
+    wonDeals,
+    wonRevenue,
+  ]);
 
   return (
     <div className="flex flex-col h-[calc(100vh-7rem)] space-y-4">
@@ -153,20 +195,7 @@ const ReportsPage: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => generateReportPDF({
-              pipelineValue,
-              actualWinRate,
-              avgSalesCycle,
-              fastestDeal,
-              wonRevenue,
-              wonDeals,
-              changes,
-              funnelData
-            }, period, selectedBoard?.name,
-              profile?.first_name && profile?.last_name
-                ? `${profile.first_name} ${profile.last_name}`
-                : profile?.first_name || profile?.email || 'Usuário'
-            )}
+            onClick={handleExportPDF}
             className="group flex items-center gap-2 px-3 py-2 rounded-lg glass border border-slate-200/50 dark:border-white/10 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:border-slate-300 dark:hover:border-white/20 transition-all duration-200"
             title="Exportar PDF"
           >

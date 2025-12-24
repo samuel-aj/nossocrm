@@ -3,7 +3,7 @@
  * Central de Decisões - Página principal
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   Sparkles,
   RefreshCw,
@@ -20,6 +20,14 @@ import { DecisionCard } from './components/DecisionCard';
 import { useDecisionQueue } from './hooks/useDecisionQueue';
 import { PRIORITY_LABELS, CATEGORY_LABELS } from './types';
 
+// Performance: reuse formatter instance.
+const PT_BR_DATE_TIME_FORMATTER = new Intl.DateTimeFormat('pt-BR', {
+  day: 'numeric',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
 export const DecisionQueuePage: React.FC = () => {
   const {
     decisions,
@@ -35,24 +43,34 @@ export const DecisionQueuePage: React.FC = () => {
     clearAll,
   } = useDecisionQueue();
 
-  const formatLastAnalyzed = () => {
+  const lastAnalyzedLabel = useMemo(() => {
     if (!lastAnalyzedAt) return 'Nunca analisado';
-    
-    const date = new Date(lastAnalyzedAt);
-    const now = new Date();
-    const diffMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
-    
+
+    const dateTs = Date.parse(lastAnalyzedAt);
+    const diffMinutes = Math.floor((Date.now() - dateTs) / (1000 * 60));
+
     if (diffMinutes < 1) return 'Agora mesmo';
     if (diffMinutes < 60) return `Há ${diffMinutes} minutos`;
     if (diffMinutes < 1440) return `Há ${Math.floor(diffMinutes / 60)} horas`;
-    return date.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-  };
+    return PT_BR_DATE_TIME_FORMATTER.format(new Date(dateTs));
+  }, [lastAnalyzedAt]);
 
-  // Group decisions by priority
-  const criticalDecisions = decisions.filter(d => d.priority === 'critical');
-  const highDecisions = decisions.filter(d => d.priority === 'high');
-  const mediumDecisions = decisions.filter(d => d.priority === 'medium');
-  const lowDecisions = decisions.filter(d => d.priority === 'low');
+  // Performance: group by priority in a single pass (instead of 4x filter per render).
+  const grouped = useMemo(() => {
+    const critical: typeof decisions = [];
+    const high: typeof decisions = [];
+    const medium: typeof decisions = [];
+    const low: typeof decisions = [];
+
+    for (const d of decisions) {
+      if (d.priority === 'critical') critical.push(d);
+      else if (d.priority === 'high') high.push(d);
+      else if (d.priority === 'medium') medium.push(d);
+      else low.push(d);
+    }
+
+    return { critical, high, medium, low };
+  }, [decisions]);
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -149,7 +167,7 @@ export const DecisionQueuePage: React.FC = () => {
 
       {/* Last analyzed info */}
       <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-        <span>Última análise: {formatLastAnalyzed()}</span>
+        <span>Última análise: {lastAnalyzedLabel}</span>
         {decisions.length > 0 && (
           <button
             onClick={approveAll}
@@ -190,14 +208,14 @@ export const DecisionQueuePage: React.FC = () => {
       )}
 
       {/* Decision Groups */}
-      {criticalDecisions.length > 0 && (
+      {grouped.critical.length > 0 && (
         <section>
           <h2 className="flex items-center gap-2 text-sm font-semibold text-red-600 dark:text-red-400 mb-3">
             <AlertTriangle size={16} />
-            {PRIORITY_LABELS.critical.toUpperCase()} ({criticalDecisions.length})
+            {PRIORITY_LABELS.critical.toUpperCase()} ({grouped.critical.length})
           </h2>
           <div className="space-y-3">
-            {criticalDecisions.map(decision => (
+            {grouped.critical.map(decision => (
               <DecisionCard
                 key={decision.id}
                 decision={decision}
@@ -211,14 +229,14 @@ export const DecisionQueuePage: React.FC = () => {
         </section>
       )}
 
-      {highDecisions.length > 0 && (
+      {grouped.high.length > 0 && (
         <section>
           <h2 className="flex items-center gap-2 text-sm font-semibold text-orange-600 dark:text-orange-400 mb-3">
             <TrendingUp size={16} />
-            {PRIORITY_LABELS.high.toUpperCase()} ({highDecisions.length})
+            {PRIORITY_LABELS.high.toUpperCase()} ({grouped.high.length})
           </h2>
           <div className="space-y-3">
-            {highDecisions.map(decision => (
+            {grouped.high.map(decision => (
               <DecisionCard
                 key={decision.id}
                 decision={decision}
@@ -232,14 +250,14 @@ export const DecisionQueuePage: React.FC = () => {
         </section>
       )}
 
-      {mediumDecisions.length > 0 && (
+      {grouped.medium.length > 0 && (
         <section>
           <h2 className="flex items-center gap-2 text-sm font-semibold text-yellow-600 dark:text-yellow-400 mb-3">
             <Clock size={16} />
-            {PRIORITY_LABELS.medium.toUpperCase()} ({mediumDecisions.length})
+            {PRIORITY_LABELS.medium.toUpperCase()} ({grouped.medium.length})
           </h2>
           <div className="space-y-3">
-            {mediumDecisions.map(decision => (
+            {grouped.medium.map(decision => (
               <DecisionCard
                 key={decision.id}
                 decision={decision}
@@ -253,14 +271,14 @@ export const DecisionQueuePage: React.FC = () => {
         </section>
       )}
 
-      {lowDecisions.length > 0 && (
+      {grouped.low.length > 0 && (
         <section>
           <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-500 dark:text-slate-400 mb-3">
             <CheckCircle2 size={16} />
-            {PRIORITY_LABELS.low.toUpperCase()} ({lowDecisions.length})
+            {PRIORITY_LABELS.low.toUpperCase()} ({grouped.low.length})
           </h2>
           <div className="space-y-3">
-            {lowDecisions.map(decision => (
+            {grouped.low.map(decision => (
               <DecisionCard
                 key={decision.id}
                 decision={decision}

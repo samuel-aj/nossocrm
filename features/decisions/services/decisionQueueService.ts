@@ -80,13 +80,14 @@ export const decisionQueueService = {
 
   getPendingDecisions(): Decision[] {
     const state = loadState();
-    const now = new Date();
+    // Performance: use timestamps to avoid repeated Date allocations.
+    const nowTs = Date.now();
     
     return state.decisions
       .filter(d => {
         if (d.status !== 'pending') return false;
-        if (d.expiresAt && new Date(d.expiresAt) < now) return false;
-        if (d.snoozeUntil && new Date(d.snoozeUntil) > now) return false;
+        if (d.expiresAt && Date.parse(d.expiresAt) < nowTs) return false;
+        if (d.snoozeUntil && Date.parse(d.snoozeUntil) > nowTs) return false;
         return true;
       })
       .sort((a, b) => {
@@ -94,7 +95,7 @@ export const decisionQueueService = {
         const priorityDiff = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
         if (priorityDiff !== 0) return priorityDiff;
         // Then by creation date (newer first)
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        return Date.parse(b.createdAt) - Date.parse(a.createdAt);
       });
   },
 
@@ -167,13 +168,37 @@ export const decisionQueueService = {
   },
 
   addDecisions(decisions: Decision[]): number {
+    /**
+     * Performance: batch-add with a single load/save.
+     * Previous implementation called `loadState()` multiple times per item.
+     */
+    const state = loadState();
+    const processed = getProcessedDecisions();
+
     let added = 0;
+
     for (const decision of decisions) {
-      const before = loadState().decisions.length;
-      this.addDecision(decision);
-      const after = loadState().decisions.length;
-      if (after > before) added++;
+      // Check if already processed (avoid duplicates)
+      const dedupeKey = `${decision.type}:${decision.dealId || decision.contactId || decision.activityId}`;
+      if (processed.has(dedupeKey)) continue;
+
+      // Check if similar pending decision exists
+      const existingSimilar = state.decisions.find(d =>
+        d.status === 'pending' &&
+        d.type === decision.type &&
+        d.dealId === decision.dealId &&
+        d.contactId === decision.contactId
+      );
+      if (existingSimilar) continue;
+
+      state.decisions.push(decision);
+      added += 1;
     }
+
+    if (added > 0) {
+      saveState(state);
+    }
+
     return added;
   },
 

@@ -1,4 +1,4 @@
-import React, { useId } from 'react';
+import React, { useCallback, useId, useMemo } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { BoardStage, DealView } from '@/types';
@@ -28,17 +28,27 @@ export const MoveToStageModal: React.FC<MoveToStageModalProps> = ({
 }) => {
   const headingId = useId();
 
+  const dealId = deal?.id ?? '';
+
+  const handleMove = useCallback(
+    (stageId: string) => {
+      if (!dealId) return;
+      if (stageId !== currentStageId) {
+        onMove(dealId, stageId);
+      }
+      onClose();
+    },
+    [currentStageId, dealId, onClose, onMove]
+  );
+
+  // Performance: compute once per input change (avoid repeated find+filter).
+  const stageData = useMemo(() => {
+    const currentStage = stages.find(s => s.id === currentStageId);
+    const availableStages = stages.filter(s => s.id !== currentStageId);
+    return { currentStage, availableStages };
+  }, [currentStageId, stages]);
+
   if (!deal) return null;
-
-  const handleMove = (stageId: string) => {
-    if (stageId !== currentStageId) {
-      onMove(deal.id, stageId);
-    }
-    onClose();
-  };
-
-  const currentStage = stages.find(s => s.id === currentStageId);
-  const availableStages = stages.filter(s => s.id !== currentStageId);
 
   return (
     <Modal
@@ -57,9 +67,9 @@ export const MoveToStageModal: React.FC<MoveToStageModalProps> = ({
           <p className="font-bold text-slate-900 dark:text-white">
             {deal.title}
           </p>
-          {currentStage && (
+          {stageData.currentStage && (
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Estágio atual: <span className="font-medium">{currentStage.label}</span>
+              Estágio atual: <span className="font-medium">{stageData.currentStage.label}</span>
             </p>
           )}
         </div>
@@ -70,7 +80,7 @@ export const MoveToStageModal: React.FC<MoveToStageModalProps> = ({
             Selecione o novo estágio:
           </p>
           <div className="space-y-2" role="listbox" aria-label="Estágios disponíveis">
-            {availableStages.map((stage, index) => (
+            {stageData.availableStages.map((stage, index) => (
               <button
                 key={stage.id}
                 type="button"

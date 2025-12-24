@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
@@ -57,7 +57,7 @@ export const UsersPage: React.FC = () => {
 
     const sb = supabase;
 
-    const fetchUsers = async () => {
+    const fetchUsers = useCallback(async () => {
         try {
             const res = await fetch('/api/admin/users', {
                 method: 'GET',
@@ -77,9 +77,9 @@ export const UsersPage: React.FC = () => {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
 
-    const fetchActiveInvites = async () => {
+    const fetchActiveInvites = useCallback(async () => {
         try {
             const res = await fetch('/api/admin/invites', {
                 method: 'GET',
@@ -93,25 +93,33 @@ export const UsersPage: React.FC = () => {
             }
 
             const invites = data?.invites || [];
+            const nowTs = Date.now();
             const validInvites = (invites || []).filter((invite: any) => {
                 if (!invite.expires_at) return true;
-                return new Date(invite.expires_at) > new Date();
+                return Date.parse(invite.expires_at) > nowTs;
             });
             setActiveInvites(validInvites);
         } catch (error) {
             console.error('Error fetching invites:', error);
         }
-    };
+    }, []);
+
+    const closeModal = useCallback(() => {
+        setIsModalOpen(false);
+        setError(null);
+        setNewUserRole('vendedor');
+        setExpirationDays(7);
+    }, []);
 
     useEffect(() => {
         fetchUsers();
-    }, []);
+    }, [fetchUsers]);
 
     useEffect(() => {
         if (isModalOpen) {
             fetchActiveInvites();
         }
-    }, [isModalOpen]);
+    }, [fetchActiveInvites, isModalOpen]);
 
     if (!sb) {
         return (
@@ -127,13 +135,6 @@ export const UsersPage: React.FC = () => {
             </div>
         );
     }
-
-    const closeModal = () => {
-        setIsModalOpen(false);
-        setError(null);
-        setNewUserRole('vendedor');
-        setExpirationDays(7);
-    };
 
     const handleDeleteUser = (user: Profile) => {
         setUserToDelete(user);

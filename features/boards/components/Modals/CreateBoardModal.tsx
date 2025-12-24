@@ -1,4 +1,4 @@
-import React, { useState, useId } from 'react';
+import React, { useMemo, useState, useId } from 'react';
 import { X, Plus, GripVertical, Trash2, ChevronDown, Settings } from 'lucide-react';
 import { Board, BoardStage, ContactStage } from '@/types';
 import { BOARD_TEMPLATES, BoardTemplateType } from '@/board-templates';
@@ -83,6 +83,13 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
     }
   }, [isOpen, editingBoard]);
 
+  // Filter out current board to prevent self-reference
+  // Performance: avoid filtering on every render.
+  const validNextBoards = useMemo(
+    () => availableBoards.filter(b => b.id !== editingBoard?.id),
+    [availableBoards, editingBoard?.id]
+  );
+
   const handleAddStage = () => {
     const colorIndex = stages.length % STAGE_COLORS.length;
     setStages([...stages, {
@@ -140,9 +147,6 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
   };
 
   if (!isOpen) return null;
-
-  // Filter out current board to prevent self-reference
-  const validNextBoards = availableBoards.filter(b => b.id !== editingBoard?.id);
 
   return (
     <>

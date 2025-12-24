@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useToast } from '@/context/ToastContext';
 import { useAuth } from '@/context/AuthContext';
@@ -63,34 +63,45 @@ export const useActivitiesController = () => {
 
   const isLoading = activitiesLoading || dealsLoading;
 
-  const filteredActivities = useMemo(() => {
+  // Performance: build lookups once (avoid `.find(...)` in handlers).
+  const activitiesById = useMemo(() => new Map(activities.map((a) => [a.id, a])), [activities]);
+  const dealsById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
+
+  // Performance: compute date boundaries once per render (used inside memoized filters).
+  const dateBoundaries = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
+    return { todayTs: today.getTime(), tomorrowTs: tomorrow.getTime() };
+  }, []);
+
+  const filteredActivities = useMemo(() => {
+    const { todayTs, tomorrowTs } = dateBoundaries;
+    const q = searchTerm.toLowerCase();
 
     return activities
-      .filter(activity => {
-        const matchesSearch = (activity.title || '').toLowerCase().includes(searchTerm.toLowerCase());
+      .map((activity) => ({ activity, ts: Date.parse(activity.date) }))
+      .filter(({ activity, ts }) => {
+        const matchesSearch = (activity.title || '').toLowerCase().includes(q);
         const matchesType = filterType === 'ALL' || activity.type === filterType;
-
-        const date = new Date(activity.date);
         const isPending = !activity.completed;
 
         const matchesDateFilter =
           dateFilter === 'ALL'
             ? true
             : dateFilter === 'overdue'
-              ? isPending && date < today
+              ? isPending && ts < todayTs
               : dateFilter === 'today'
-                ? isPending && date >= today && date < tomorrow
-                : isPending && date >= tomorrow;
+                ? isPending && ts >= todayTs && ts < tomorrowTs
+                : isPending && ts >= tomorrowTs;
 
         return matchesSearch && matchesType && matchesDateFilter;
       })
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }, [activities, searchTerm, filterType, dateFilter]);
+      // Performance: sort by numeric timestamp (avoid `new Date(...)` in comparator).
+      .sort((a, b) => a.ts - b.ts)
+      .map(({ activity }) => activity);
+  }, [activities, dateBoundaries, searchTerm, filterType, dateFilter]);
 
   const handleNewActivity = () => {
     setEditingActivity(null);
@@ -129,9 +140,11 @@ export const useActivitiesController = () => {
     }
   };
 
-  const handleToggleComplete = (id: string) => {
-    const activity = activities.find(a => a.id === id);
-    if (activity) {
+  const handleToggleComplete = useCallback(
+    (id: string) => {
+      const activity = activitiesById.get(id);
+      if (!activity) return;
+
       updateActivityMutation.mutate(
         {
           id,
@@ -143,14 +156,15 @@ export const useActivitiesController = () => {
           },
         }
       );
-    }
-  };
+    },
+    [activitiesById, showToast, updateActivityMutation]
+  );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
     const date = new Date(`${formData.date}T${formData.time}`);
-    const selectedDeal = deals.find(d => d.id === formData.dealId);
+    const selectedDeal = formData.dealId ? dealsById.get(formData.dealId) : undefined;
 
     if (editingActivity) {
       updateActivityMutation.mutate(

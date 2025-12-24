@@ -29,7 +29,34 @@ export function useDecisionQueue() {
 
   // Calculate stats
   const stats: DecisionStats = useMemo(() => {
-    return decisionQueueService.getStats();
+    /**
+     * Performance: compute stats from in-memory state (avoids re-reading localStorage + sorting).
+     * `decisions` already comes from `getPendingDecisions()`.
+     */
+    const out: DecisionStats = {
+      total: decisions.length,
+      pending: decisions.length,
+      critical: 0,
+      high: 0,
+      medium: 0,
+      low: 0,
+      byCategory: {
+        follow_up: 0,
+        deadline: 0,
+        opportunity: 0,
+        risk: 0,
+        routine: 0,
+      },
+      byType: {} as Record<string, number>,
+    };
+
+    for (const d of decisions) {
+      out[d.priority] += 1;
+      out.byCategory[d.category] += 1;
+      out.byType[d.type] = (out.byType[d.type] || 0) + 1;
+    }
+
+    return out;
   }, [decisions]);
 
   // Run all analyzers

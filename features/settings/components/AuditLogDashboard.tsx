@@ -25,22 +25,23 @@ import {
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
 
-// Simple date formatting helper (no external dependency)
+// Performance: reuse Intl formatter to avoid allocating options objects for every log row.
+const PT_BR_DATE_TIME_FORMATTER = new Intl.DateTimeFormat('pt-BR', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
 const formatDate = (dateStr: string) => {
-  const date = new Date(dateStr);
-  return date.toLocaleDateString('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  const ts = Date.parse(dateStr);
+  return PT_BR_DATE_TIME_FORMATTER.format(new Date(ts));
 };
 
-const formatRelative = (dateStr: string) => {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
+const formatRelative = (dateStr: string, nowTs: number) => {
+  const ts = Date.parse(dateStr);
+  const diffMs = nowTs - ts;
   const diffMins = Math.floor(diffMs / (1000 * 60));
   const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
@@ -49,7 +50,7 @@ const formatRelative = (dateStr: string) => {
   if (diffMins < 60) return `há ${diffMins} min`;
   if (diffHours < 24) return `há ${diffHours}h`;
   if (diffDays < 7) return `há ${diffDays}d`;
-  return formatDate(dateStr);
+  return PT_BR_DATE_TIME_FORMATTER.format(new Date(ts));
 };
 
 interface AuditLogEntry {
@@ -156,27 +157,27 @@ export const AuditLogDashboard: React.FC = () => {
     
     try {
       // Calculate date filter
-      const now = new Date();
-      const fromDate = new Date();
+      const nowTs = Date.now();
+      let fromTs = nowTs;
       switch (timeFilter) {
         case '24h':
-          fromDate.setHours(fromDate.getHours() - 24);
+          fromTs = nowTs - 24 * 60 * 60 * 1000;
           break;
         case '7d':
-          fromDate.setDate(fromDate.getDate() - 7);
+          fromTs = nowTs - 7 * 24 * 60 * 60 * 1000;
           break;
         case '30d':
-          fromDate.setDate(fromDate.getDate() - 30);
+          fromTs = nowTs - 30 * 24 * 60 * 60 * 1000;
           break;
         case '90d':
-          fromDate.setDate(fromDate.getDate() - 90);
+          fromTs = nowTs - 90 * 24 * 60 * 60 * 1000;
           break;
       }
 
       let query = sb
         .from('audit_logs')
         .select('*')
-        .gte('created_at', fromDate.toISOString())
+        .gte('created_at', new Date(fromTs).toISOString())
         .order('created_at', { ascending: false })
         .limit(100);
 
@@ -196,12 +197,16 @@ export const AuditLogDashboard: React.FC = () => {
 
       // Calculate stats
       const allLogs = data || [];
-      setStats({
-        total: allLogs.length,
-        critical: allLogs.filter(l => l.severity === 'critical').length,
-        warning: allLogs.filter(l => l.severity === 'warning').length,
-        info: allLogs.filter(l => l.severity === 'info').length,
-      });
+      // Performance: single pass (avoid 3x filter).
+      let critical = 0;
+      let warning = 0;
+      let info = 0;
+      for (const l of allLogs) {
+        if (l.severity === 'critical') critical += 1;
+        else if (l.severity === 'warning') warning += 1;
+        else info += 1;
+      }
+      setStats({ total: allLogs.length, critical, warning, info });
     } catch (err) {
       console.error('Error fetching audit logs:', err);
       setError('Erro ao carregar logs de auditoria');
@@ -229,6 +234,9 @@ export const AuditLogDashboard: React.FC = () => {
       </div>
     );
   }
+
+  // Performance: compute "now" once per render and pass into relative date formatter.
+  const nowTs = Date.now();
 
   return (
     <div className="space-y-6">
@@ -400,7 +408,7 @@ export const AuditLogDashboard: React.FC = () => {
                       <div className="flex items-center gap-4 text-sm text-slate-500 dark:text-slate-400">
                         <span className="flex items-center gap-1">
                           <Clock className="w-3.5 h-3.5" />
-                          {formatRelative(log.created_at)}
+                          {formatRelative(log.created_at, nowTs)}
                         </span>
                         <span className="flex items-center gap-1">
                           <User className="w-3.5 h-3.5" />

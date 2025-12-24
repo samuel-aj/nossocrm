@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import Image from 'next/image';
 import { getErrorMessage } from '@/utils/errorUtils';
 import { useAuth } from '@/context/AuthContext';
@@ -24,14 +24,14 @@ export const ProfilePage: React.FC = () => {
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Validação de senha
-    const passwordRequirements = {
+    // Performance: memoize validation (avoids regex work on unrelated state changes).
+    const passwordRequirements = useMemo(() => ({
         minLength: newPassword.length >= 6,
         hasLowercase: /[a-z]/.test(newPassword),
         hasUppercase: /[A-Z]/.test(newPassword),
         hasDigit: /\d/.test(newPassword),
-    };
-    const isPasswordValid = Object.values(passwordRequirements).every(Boolean);
+    }), [newPassword]);
+    const isPasswordValid = useMemo(() => Object.values(passwordRequirements).every(Boolean), [passwordRequirements]);
 
     // Campos do perfil
     const [firstName, setFirstName] = useState('');
@@ -54,7 +54,46 @@ export const ProfilePage: React.FC = () => {
         }
     }, [profile]);
 
+    // Performance: memoize derived display strings to avoid recompute during typing elsewhere.
+    const initials = useMemo(() => {
+        if (firstName && lastName) return `${firstName[0]}${lastName[0]}`.toUpperCase();
+        if (nickname) return nickname.substring(0, 2).toUpperCase();
+        return profile?.email?.substring(0, 2).toUpperCase() || 'U';
+    }, [firstName, lastName, nickname, profile?.email]);
+
+    const displayName = useMemo(() => {
+        if (nickname) return nickname;
+        if (firstName) return firstName;
+        return profile?.email?.split('@')[0] || 'Usuário';
+    }, [firstName, nickname, profile?.email]);
+
+    const fullName = useMemo(() => {
+        if (firstName && lastName) return `${firstName} ${lastName}`;
+        if (firstName) return firstName;
+        return null;
+    }, [firstName, lastName]);
+
+    const gradient = useMemo(() => {
+        const colors = [
+            'from-violet-500 to-purple-600',
+            'from-blue-500 to-cyan-500',
+            'from-emerald-500 to-teal-500',
+            'from-orange-500 to-amber-500',
+            'from-pink-500 to-rose-500',
+            'from-indigo-500 to-blue-500',
+        ];
+        const email = profile?.email || '';
+        const colorIndex = email.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % colors.length;
+        return colors[colorIndex];
+    }, [profile?.email]);
+
+    // Stable handlers (helps memoized children / prevents re-renders in some layouts).
+    const triggerAvatarPicker = useCallback(() => {
+        fileInputRef.current?.click();
+    }, []);
+
     // Sem Supabase não há como salvar/atualizar perfil.
+    // Hooks MUST come before early returns (rules-of-hooks).
     if (!sb) {
         return (
             <div className="p-6">
@@ -70,40 +109,6 @@ export const ProfilePage: React.FC = () => {
             </div>
         );
     }
-
-    // Gera iniciais e cor do avatar
-    const getInitials = () => {
-        if (firstName && lastName) {
-            return `${firstName[0]}${lastName[0]}`.toUpperCase();
-        }
-        if (nickname) {
-            return nickname.substring(0, 2).toUpperCase();
-        }
-        return profile?.email?.substring(0, 2).toUpperCase() || 'U';
-    };
-
-    const getDisplayName = () => {
-        if (nickname) return nickname;
-        if (firstName) return firstName;
-        return profile?.email?.split('@')[0] || 'Usuário';
-    };
-
-    const getFullName = () => {
-        if (firstName && lastName) return `${firstName} ${lastName}`;
-        if (firstName) return firstName;
-        return null;
-    };
-
-    const colors = [
-        'from-violet-500 to-purple-600',
-        'from-blue-500 to-cyan-500',
-        'from-emerald-500 to-teal-500',
-        'from-orange-500 to-amber-500',
-        'from-pink-500 to-rose-500',
-        'from-indigo-500 to-blue-500',
-    ];
-    const colorIndex = (profile?.email || '').split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % colors.length;
-    const gradient = colors[colorIndex];
 
     // Upload de avatar
     const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -327,7 +332,7 @@ export const ProfilePage: React.FC = () => {
                                 />
                             ) : (
                                 <div className={`w-20 h-20 rounded-2xl bg-linear-to-br ${gradient} flex items-center justify-center text-white font-bold text-2xl shadow-xl`}>
-                                    {getInitials()}
+                                    {initials}
                                 </div>
                             )}
 
@@ -337,7 +342,7 @@ export const ProfilePage: React.FC = () => {
                                     <Loader2 className="w-6 h-6 text-white animate-spin" />
                                 ) : (
                                     <button
-                                        onClick={() => fileInputRef.current?.click()}
+                                        onClick={triggerAvatarPicker}
                                         className="p-2 bg-white/20 rounded-full hover:bg-white/30 transition-colors"
                                     >
                                         <Camera className="w-5 h-5 text-white" />
@@ -369,11 +374,11 @@ export const ProfilePage: React.FC = () => {
                         {/* Info resumida */}
                         <div>
                             <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
-                                {getDisplayName()}
+                                {displayName}
                             </h2>
-                            {getFullName() && (
+                            {fullName && (
                                 <p className="text-slate-500 dark:text-slate-400 mt-0.5">
-                                    {getFullName()}
+                                    {fullName}
                                 </p>
                             )}
                             <div className="flex items-center gap-3 mt-2">

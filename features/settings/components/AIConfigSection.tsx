@@ -3,6 +3,41 @@ import { useCRM } from '@/context/CRMContext';
 import { Bot, Key, Cpu, CheckCircle, AlertCircle, Loader2, Save, Trash2, ChevronDown, ChevronUp, Shield } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 
+// Performance: keep provider/model catalog outside the component to avoid reallocations on every render.
+const AI_PROVIDERS = [
+    {
+        id: 'google',
+        name: 'Google Gemini',
+        models: [
+            { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Recomendado - Best value', price: '$0.30 / $2.50' },
+            { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', description: 'Ultra fast', price: '$0.10 / $0.40' },
+            { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', description: 'Thinking model', price: '$1.25–$2.50 / $10–$15' },
+            { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro (Preview)', description: 'Most intelligent', price: '$2–$4 / $12–$18' },
+        ]
+    },
+    {
+        id: 'anthropic',
+        name: 'Anthropic Claude',
+        models: [
+            { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', description: 'Recomendado - Best balance', price: '$3 / $15' },
+            { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', description: 'Fastest', price: '$1 / $5' },
+            { id: 'claude-opus-4-5', name: 'Claude Opus 4.5', description: 'Premium intelligence', price: '$5 / $25' },
+        ]
+    },
+    {
+        id: 'openai',
+        name: 'OpenAI',
+        models: [
+            { id: 'gpt-5.2', name: 'GPT-5.2 (Preview)', description: 'Preview', price: '$1.75 / $14' },
+            { id: 'gpt-5.2-pro', name: 'GPT-5.2 Pro', description: 'Premium', price: '$21 / $168' },
+            { id: 'gpt-5.2-chat-latest', name: 'GPT-5.2 Chat Latest', description: 'Latest chat', price: '$1.75 / $14' },
+            { id: 'gpt-5-mini', name: 'GPT-5 Mini', description: 'Fast & efficient', price: '$0.25 / $2' },
+            { id: 'gpt-5-nano', name: 'GPT-5 Nano', description: 'Ultra fast', price: '$0.05 / $0.40' },
+            { id: 'gpt-4o', name: 'GPT-4o', description: 'Legacy flagship', price: '$2.50 / $10' },
+        ]
+    },
+] as const;
+
 // Função para validar API key fazendo uma chamada real à API
 async function validateApiKey(provider: string, apiKey: string, model: string): Promise<{ valid: boolean; error?: string }> {
     if (!apiKey || apiKey.trim().length < 10) {
@@ -177,41 +212,7 @@ export const AIConfigSection: React.FC = () => {
     // - Google Gemini API: https://ai.google.dev/gemini-api/docs/pricing
     // - Anthropic (model comparison / pricing): https://platform.claude.com/docs/en/about-claude/models
     // Observação: alguns provedores têm preço em faixas (ex.: Gemini por tamanho de contexto) e/ou “cached input” (OpenAI).
-    const providers = [
-        {
-            id: 'google',
-            name: 'Google Gemini',
-            models: [
-                { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Recomendado - Best value', price: '$0.30 / $2.50' },
-                { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', description: 'Ultra fast', price: '$0.10 / $0.40' },
-                { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', description: 'Thinking model', price: '$1.25–$2.50 / $10–$15' },
-                { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro (Preview)', description: 'Most intelligent', price: '$2–$4 / $12–$18' },
-            ]
-        },
-        {
-            id: 'anthropic',
-            name: 'Anthropic Claude',
-            models: [
-                { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', description: 'Recomendado - Best balance', price: '$3 / $15' },
-                { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', description: 'Fastest', price: '$1 / $5' },
-                { id: 'claude-opus-4-5', name: 'Claude Opus 4.5', description: 'Premium intelligence', price: '$5 / $25' },
-            ]
-        },
-        {
-            id: 'openai',
-            name: 'OpenAI',
-            models: [
-                { id: 'gpt-5.2', name: 'GPT-5.2 (Preview)', description: 'Preview', price: '$1.75 / $14' },
-                { id: 'gpt-5.2-pro', name: 'GPT-5.2 Pro', description: 'Premium', price: '$21 / $168' },
-                { id: 'gpt-5.2-chat-latest', name: 'GPT-5.2 Chat Latest', description: 'Latest chat', price: '$1.75 / $14' },
-                { id: 'gpt-5-mini', name: 'GPT-5 Mini', description: 'Fast & efficient', price: '$0.25 / $2' },
-                { id: 'gpt-5-nano', name: 'GPT-5 Nano', description: 'Ultra fast', price: '$0.05 / $0.40' },
-                { id: 'gpt-4o', name: 'GPT-4o', description: 'Legacy flagship', price: '$2.50 / $10' },
-            ]
-        },
-    ];
-
-    const currentProvider = providers.find(p => p.id === aiProvider);
+    const currentProvider = AI_PROVIDERS.find(p => p.id === aiProvider);
 
     const handleProviderChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
         const newProviderId = e.target.value as 'google' | 'openai' | 'anthropic';
@@ -219,7 +220,7 @@ export const AIConfigSection: React.FC = () => {
             await setAiProvider(newProviderId);
 
             // Auto-set recommended model (first one in list usually, or one marked recommended)
-            const providerData = providers.find(p => p.id === newProviderId);
+            const providerData = AI_PROVIDERS.find(p => p.id === newProviderId);
             if (providerData && providerData.models.length > 0) {
                 // Prefer models with "Recomendado" in description, else first one
                 const recommended = providerData.models.find(m => m.description.includes('Recomendado')) || providerData.models[0];
@@ -257,7 +258,7 @@ export const AIConfigSection: React.FC = () => {
                                 onChange={handleProviderChange}
                                 className="w-full appearance-none bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg px-4 py-2.5 text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none transition-all"
                             >
-                                {providers.map(p => (
+                                {AI_PROVIDERS.map(p => (
                                     <option key={p.id} value={p.id}>{p.name}</option>
                                 ))}
                             </select>
@@ -275,7 +276,7 @@ export const AIConfigSection: React.FC = () => {
                         <div className="relative">
                             <select
                                 id="ai-model-select"
-                                value={providers.some(p => p.models.some(m => m.id === aiModel)) ? aiModel : 'custom'}
+                                value={AI_PROVIDERS.some(p => p.models.some(m => m.id === aiModel)) ? aiModel : 'custom'}
                                 onChange={(e) => {
                                     if (e.target.value === 'custom') {
                                         setAiModel('');
@@ -395,7 +396,7 @@ export const AIConfigSection: React.FC = () => {
                 {/* API Key */}
                 <div className="space-y-2">
                     <label className="text-sm font-medium text-slate-700 dark:text-slate-300 flex items-center gap-2">
-                        <Key size={14} /> Chave de API ({providers.find(p => p.id === aiProvider)?.name})
+                        <Key size={14} /> Chave de API ({AI_PROVIDERS.find(p => p.id === aiProvider)?.name})
                     </label>
                     <div className="flex gap-2">
                         <div className="relative flex-1">
@@ -501,7 +502,7 @@ export const AIConfigSection: React.FC = () => {
                                 <div className="pt-2 border-t border-amber-200 dark:border-amber-500/20">
                                     <p className="text-xs text-amber-700 dark:text-amber-300 leading-relaxed">
                                         <strong>Base legal:</strong> Consentimento do titular (Art. 7º, I e Art. 11, I da LGPD).
-                                        Seus dados são enviados diretamente ao provedor de IA que você escolheu ({providers.find(p => p.id === aiProvider)?.name}).
+                                        Seus dados são enviados diretamente ao provedor de IA que você escolheu ({AI_PROVIDERS.find(p => p.id === aiProvider)?.name}).
                                         Nós não armazenamos ou intermediamos essas comunicações.
                                     </p>
                                 </div>
@@ -539,7 +540,7 @@ export const AIConfigSection: React.FC = () => {
                         </p>
                         <p className="opacity-90 mt-1">
                             {validationStatus === 'valid' && localApiKey
-                                ? `O sistema está configurado para usar o ${providers.find(p => p.id === aiProvider)?.name} (${aiModel}).`
+                                ? `O sistema está configurado para usar o ${AI_PROVIDERS.find(p => p.id === aiProvider)?.name} (${aiModel}).`
                                 : validationStatus === 'invalid'
                                     ? 'Verifique sua chave de API e tente novamente.'
                                     : 'Insira uma chave de API válida e clique em Salvar para usar o assistente.'}

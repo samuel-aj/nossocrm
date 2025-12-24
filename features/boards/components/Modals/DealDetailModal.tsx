@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useId } from 'react';
+import React, { useState, useRef, useEffect, useId, useMemo } from 'react';
 import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
@@ -43,6 +43,9 @@ interface DealDetailModalProps {
   onClose: () => void;
 }
 
+// Performance: reuse date formatter instance.
+const PT_BR_DATE_FORMATTER = new Intl.DateTimeFormat('pt-BR');
+
 export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen, onClose }) => {
   // Accessibility: Unique ID for ARIA labelling
   const headingId = useId();
@@ -70,11 +73,19 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
   const { profile } = useAuth();
   const { addToast } = useToast();
 
-  const deal = deals.find(d => d.id === dealId);
-  const contact = deal ? contacts.find(c => c.id === deal.contactId) : null;
+  // Performance: avoid repeated `find(...)` on large arrays.
+  const dealsById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
+  const contactsById = useMemo(() => new Map(contacts.map((c) => [c.id, c])), [contacts]);
+  const boardsById = useMemo(() => new Map(boards.map((b) => [b.id, b])), [boards]);
+  const lifecycleStageById = useMemo(() => new Map(lifecycleStages.map((s) => [s.id, s])), [lifecycleStages]);
+  const productsById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
+  const activitiesById = useMemo(() => new Map(activities.map((a) => [a.id, a])), [activities]);
+
+  const deal = dealId ? dealsById.get(dealId) : undefined;
+  const contact = deal ? (contactsById.get(deal.contactId) ?? null) : null;
 
   // Determine the correct board for this deal
-  const dealBoard = deal ? boards.find(b => b.id === deal.boardId) || activeBoard : activeBoard;
+  const dealBoard = deal ? (boardsById.get(deal.boardId) ?? activeBoard) : activeBoard;
 
   // Use unified TanStack Query hook for moving deals
   const { moveDeal } = useMoveDealSimple(dealBoard, lifecycleStages);
@@ -148,13 +159,25 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
     }
   }, [activeTab, speech.isListening]);
 
+  // Pre-compute stage label once for tool prompts (avoid repeated stage lookup).
+  const stageLabel = useMemo(() => {
+    if (!dealBoard) return undefined;
+    const stage = dealBoard.stages.find((s) => s.id === deal?.status);
+    return stage?.label;
+  }, [deal?.status, dealBoard]);
+
+  // Performance: filter deal activities once per deal change (avoid filtering inside render).
+  const dealActivities = useMemo(() => {
+    if (!deal) return [] as Activity[];
+    return activities.filter((a) => a.dealId === deal.id);
+  }, [activities, deal]);
+
   if (!isOpen || !deal) return null;
 
   const handleAnalyzeDeal = async () => {
     setIsAnalyzing(true);
     try {
-      // Buscar label do estágio para não enviar UUID para a IA
-      const stageLabel = dealBoard?.stages.find(s => s.id === deal.status)?.label;
+      // Performance: stageLabel memoized above.
       const result = await analyzeLead(deal, stageLabel);
       setAiResult({ suggestion: result.suggestion, score: result.probabilityScore });
       updateDeal(deal.id, { aiSummary: result.suggestion, probability: result.probabilityScore });
@@ -172,8 +195,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
   const handleDraftEmail = async () => {
     setIsDrafting(true);
     try {
-      // Buscar label do estágio para não enviar UUID para a IA
-      const stageLabel = dealBoard?.stages.find(s => s.id === deal.status)?.label;
+      // Performance: stageLabel memoized above.
       const draft = await generateEmailDraft(deal, stageLabel);
       setEmailDraft(draft);
     } catch (error: any) {
@@ -249,7 +271,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
 
   const handleAddProduct = () => {
     if (!selectedProductId) return;
-    const product = products.find(p => p.id === selectedProductId);
+    // Performance: O(1) lookup instead of scanning all products.
+    const product = productsById.get(selectedProductId);
     if (!product) return;
 
     addItemToDeal(deal.id, {
@@ -291,7 +314,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
     updateDeal(deal.id, { customFields: updatedFields });
   };
 
-  const dealActivities = activities.filter(a => a.dealId === deal.id);
+  // dealActivities memoized above.
 
   // Handle escape key to close modal
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -532,7 +555,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
                         {deal.contactName || 'Sem contato'}
                         {contact?.stage &&
                           (() => {
-                            const stage = lifecycleStages.find(s => s.id === contact.stage);
+                            const stage = lifecycleStageById.get(contact.stage);
                             if (!stage) return null;
 
                             // Extract base color name (e.g. 'blue' from 'bg-blue-500')
@@ -566,7 +589,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
                     <div className="flex justify-between text-sm">
                       <span className="text-slate-500">Criado em</span>
                       <span className="text-slate-900 dark:text-white">
-                        {new Date(deal.createdAt).toLocaleDateString('pt-BR')}
+                        {PT_BR_DATE_FORMATTER.format(new Date(deal.createdAt))}
                       </span>
                     </div>
                     <div className="flex justify-between text-sm">
@@ -707,7 +730,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
                           activity={activity}
                           deal={deal}
                           onToggleComplete={id => {
-                            const act = activities.find(a => a.id === id);
+                            // Performance: O(1) lookup instead of scanning all activities.
+                            const act = activitiesById.get(id);
                             if (act) updateActivity(id, { completed: !act.completed });
                           }}
                           onEdit={() => { }} // Edit not implemented in modal yet
