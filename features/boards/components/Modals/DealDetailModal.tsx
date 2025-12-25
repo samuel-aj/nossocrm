@@ -4,6 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import ConfirmModal from '@/components/ConfirmModal';
 import { LossReasonModal } from '@/components/ui/LossReasonModal';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useMoveDealSimple } from '@/lib/query/hooks';
 import { FocusTrap, useFocusReturn } from '@/lib/a11y';
 import { Activity } from '@/types';
@@ -33,6 +34,7 @@ import {
   Sword,
   CheckCircle2,
   Bot,
+  ChevronDown,
 } from 'lucide-react';
 import { StageProgressBar } from '../StageProgressBar';
 import { ActivityRow } from '@/features/activities/components/ActivityRow';
@@ -102,6 +104,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
   const [emailDraft, setEmailDraft] = useState<string | null>(null);
   const [newNote, setNewNote] = useState('');
   const [activeTab, setActiveTab] = useState<'timeline' | 'products' | 'info'>('timeline');
+  // Jobs-style: "Próxima ação" deve levar o usuário ao composer da Timeline sem fricção.
+  const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Ditado por voz (Web Speech API) - client-side (sem backend)
   const speech = useSpeechRecognition();
@@ -220,6 +224,14 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
     voicePrefixRef.current = newNote.trim() ? `${newNote.trim()}\n` : '';
     speech.resetTranscript();
     speech.startListening();
+  };
+
+  const focusTimelineComposer = () => {
+    setActiveTab('timeline');
+    // Wait a tick so the textarea is mounted/visible before focusing.
+    requestAnimationFrame(() => {
+      noteTextareaRef.current?.focus();
+    });
   };
 
   const stopRecording = () => {
@@ -341,8 +353,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
       >
         <div className="bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
           {/* HEADER (Stage Bar + Won/Lost) */}
-          <div className="bg-slate-50 dark:bg-black/20 border-b border-slate-200 dark:border-white/10 p-6 shrink-0">
-            <div className="flex justify-between items-start mb-6">
+          <div className="bg-slate-50 dark:bg-black/20 border-b border-slate-200 dark:border-white/10 p-5 shrink-0">
+            <div className="flex justify-between items-start mb-4">
               <div className="flex-1 mr-8">
                 {isEditingTitle ? (
                   <div className="flex gap-2 mb-1">
@@ -429,68 +441,83 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
                     </button>
                   </>
                 ) : (
-                  /* Se aberto: mostra botões Ganho e Perdido */
+                  /* Jobs-style: 1 CTA primária + ações secundárias em menu */
                   <>
                     <button
-                      onClick={() => {
-                        // Intelligent "Won" Logic:
-                        // 0. Check for "Stay in Stage" flag (Archive/Close in place)
-                        if (dealBoard?.wonStayInStage) {
-                          moveDeal(deal, deal.status, undefined, true, false);
-                          onClose();
-                          return;
-                        }
-
-                        // 1. Check if board has explicit Won Stage configured
-                        if (dealBoard?.wonStageId) {
-                          moveDeal(deal, dealBoard.wonStageId);
-                          onClose();
-                          return;
-                        }
-
-                        // 2. Find the appropriate "Success Stage" for this board based on lifecycle
-                        const successStage = dealBoard?.stages.find(
-                          s => s.linkedLifecycleStage === 'CUSTOMER'
-                        ) || dealBoard?.stages.find(
-                          s => s.linkedLifecycleStage === 'MQL'
-                        ) || dealBoard?.stages.find(
-                          s => s.linkedLifecycleStage === 'SALES_QUALIFIED'
-                        );
-
-                        if (successStage) {
-                          moveDeal(deal, successStage.id);
-                        } else {
-                          // Fallback: just mark as won without moving
-                          updateDeal(deal.id, { isWon: true, isLost: false, closedAt: new Date().toISOString() });
-                        }
-                        onClose();
-                      }}
-                      className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold text-sm shadow-sm flex items-center gap-2"
+                      type="button"
+                      onClick={focusTimelineComposer}
+                      className="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-lg font-bold text-sm shadow-sm flex items-center gap-2 transition-colors"
+                      title="Ir para a próxima ação (registrar nota / executar)"
                     >
-                      <ThumbsUp size={16} /> GANHO
+                      Próxima ação
                     </button>
-                    <button
-                      onClick={() => {
-                        // 0. Check for "Stay in Stage" flag
-                        if (dealBoard?.lostStayInStage) {
-                          // We don't set pendingLostStageId because we aren't moving to a new stage ID
-                          // But the modal logic relies on it? No, if pendingLostStageId is null, we might need another flag.
-                          // Actually, let's keep it clean.
-                          // setPendingLostStageId(deal.status); // Hack?
-                          // Better: Just open modal, and handle logic in confirm.
-                        }
 
-                        // If board has explicit Lost Stage, queue it
-                        if (dealBoard?.lostStageId) {
-                          setPendingLostStageId(dealBoard.lostStageId);
-                        }
-                        setLossReasonOrigin('button');
-                        setShowLossReasonModal(true);
-                      }}
-                      className="px-4 py-2 bg-transparent border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg font-bold text-sm shadow-sm flex items-center gap-2"
-                    >
-                      <ThumbsDown size={16} /> PERDIDO
-                    </button>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <button
+                          type="button"
+                          className="px-3 py-2 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-200 rounded-lg font-bold text-sm shadow-sm border border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/10 flex items-center gap-2 transition-colors"
+                          title="Ações do negócio"
+                        >
+                          Fechar negócio <ChevronDown size={16} />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent align="end" className="w-56 p-2">
+                        <div className="px-2 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                          Fechar como
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // Intelligent "Won" Logic:
+                            // 0. Check for "Stay in Stage" flag (Archive/Close in place)
+                            if (dealBoard?.wonStayInStage) {
+                              moveDeal(deal, deal.status, undefined, true, false);
+                              onClose();
+                              return;
+                            }
+
+                            // 1. Check if board has explicit Won Stage configured
+                            if (dealBoard?.wonStageId) {
+                              moveDeal(deal, dealBoard.wonStageId);
+                              onClose();
+                              return;
+                            }
+
+                            // 2. Find the appropriate "Success Stage" for this board based on lifecycle
+                            const successStage =
+                              dealBoard?.stages.find((s) => s.linkedLifecycleStage === 'CUSTOMER') ||
+                              dealBoard?.stages.find((s) => s.linkedLifecycleStage === 'MQL') ||
+                              dealBoard?.stages.find((s) => s.linkedLifecycleStage === 'SALES_QUALIFIED');
+
+                            if (successStage) {
+                              moveDeal(deal, successStage.id);
+                            } else {
+                              // Fallback: just mark as won without moving
+                              updateDeal(deal.id, { isWon: true, isLost: false, closedAt: new Date().toISOString() });
+                            }
+                            onClose();
+                          }}
+                          className="w-full flex items-center gap-2 rounded-md px-2.5 py-2 text-sm font-semibold text-green-700 hover:bg-green-50 dark:text-green-300 dark:hover:bg-green-900/20"
+                        >
+                          <ThumbsUp size={16} /> Ganho
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // If board has explicit Lost Stage, queue it
+                            if (dealBoard?.lostStageId) {
+                              setPendingLostStageId(dealBoard.lostStageId);
+                            }
+                            setLossReasonOrigin('button');
+                            setShowLossReasonModal(true);
+                          }}
+                          className="w-full flex items-center gap-2 rounded-md px-2.5 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-900/20"
+                        >
+                          <ThumbsDown size={16} /> Perdido
+                        </button>
+                      </PopoverContent>
+                    </Popover>
                   </>
                 )}
                 <button
@@ -677,6 +704,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
                   <div className="space-y-6">
                     <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-4 shadow-sm">
                       <textarea
+                        ref={noteTextareaRef}
                         className="w-full bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none resize-none min-h-[80px]"
                         placeholder="Escreva uma nota..."
                         value={newNote}

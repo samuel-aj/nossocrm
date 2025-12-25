@@ -35,6 +35,7 @@
   - UX (Deals): textos de prioridade agora são normalizados para **PT-BR** (Baixa/Média/Alta) em todas as telas.
   - UX (Cockpit): rota `/deals/[dealId]/cockpit` agora abre o **cockpit “original” do modo Focus (Inbox)**. A V2 ficou isolada em `/deals/[dealId]/cockpit-v2` e `/labs/deal-cockpit-mock`.
   - UX (Deals): removido o botão **Cockpit** do modal de detalhes do deal (mantemos o cockpit pelo modo Focus).
+  - UX (Deals): modal de detalhes do deal agora tem **1 CTA primária (“Próxima ação”)** e “Ganho/Perdido” virou **ação secundária** no menu “Fechar negócio”.
 
 ## 24/12/2025
 
