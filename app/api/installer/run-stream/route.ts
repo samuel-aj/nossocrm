@@ -349,7 +349,6 @@ export async function POST(req: Request) {
           { key: 'NEXT_PUBLIC_SUPABASE_URL', value: supabase.url, targets: envTargets },
           { key: 'NEXT_PUBLIC_SUPABASE_ANON_KEY', value: resolvedAnonKey, targets: envTargets },
           { key: 'SUPABASE_SERVICE_ROLE_KEY', value: resolvedServiceRoleKey, targets: envTargets },
-          { key: 'INSTALLER_ENABLED', value: 'false', targets: envTargets },
         ],
         vercel.teamId || undefined
       );
@@ -497,6 +496,14 @@ export async function POST(req: Request) {
       }
 
       await sendPhase('redeploy'); // Complete
+
+      // Só desabilita o instalador APÓS tudo estar completo
+      await upsertProjectEnvs(
+        vercel.token,
+        vercel.projectId,
+        [{ key: 'INSTALLER_ENABLED', value: 'false', targets: envTargets }],
+        vercel.teamId || undefined
+      );
 
       // Complete!
       const completePhase = PHASES['complete'];
