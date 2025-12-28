@@ -2,6 +2,11 @@
 
 ## 28/12/2025
 
+- **Installer — Ato final agora espera a Vercel**:
+  - O `run-stream` passou a aguardar o deployment ficar **READY** via polling (`/v13/deployments/:id`) antes de emitir `complete`
+  - Evita o "Explorar o novo mundo" apontar para um deploy ainda antigo (sem `NEXT_PUBLIC_SUPABASE_*`)
+
+
 - **Installer — create-project idempotente**:
   - Se o Supabase responder "already exists", reutilizamos o projeto existente (fallback: lista global de projetos) para não travar em refresh/retry
 

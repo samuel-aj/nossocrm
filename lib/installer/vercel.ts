@@ -28,6 +28,9 @@ type VercelDeployment = {
   id?: string;
   uid?: string;
   name?: string;
+  url?: string;
+  state?: string;
+  readyState?: string;
   target?: 'production' | 'preview' | 'development';
 };
 
@@ -110,6 +113,73 @@ async function vercelFetch<T>(
   if (!text) return {} as T;
   return JSON.parse(text) as T;
 }
+
+export async function getVercelDeployment(params: {
+  token: string;
+  deploymentId: string;
+  teamId?: string;
+}): Promise<{ ok: true; deployment: VercelDeployment } | { ok: false; error: string }> {
+  try {
+    const deployment = await vercelFetch<VercelDeployment>(
+      `/v13/deployments/${encodeURIComponent(params.deploymentId)}`,
+      params.token,
+      {},
+      params.teamId
+    );
+    return { ok: true, deployment };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Erro ao buscar deployment' };
+  }
+}
+
+export async function waitForVercelDeploymentReady(params: {
+  token: string;
+  deploymentId: string;
+  teamId?: string;
+  timeoutMs?: number;
+  pollMs?: number;
+  onTick?: (info: { readyState?: string; elapsedMs: number }) => Promise<void> | void;
+}): Promise<
+  | { ok: true; deployment: VercelDeployment }
+  | { ok: false; error: string; lastReadyState?: string }
+> {
+  const timeoutMs = params.timeoutMs ?? 180_000;
+  const pollMs = params.pollMs ?? 2_500;
+
+  const t0 = Date.now();
+  let lastReadyState: string | undefined;
+
+  while (Date.now() - t0 < timeoutMs) {
+    const res = await getVercelDeployment({
+      token: params.token,
+      deploymentId: params.deploymentId,
+      teamId: params.teamId,
+    });
+
+    if (res.ok) {
+      lastReadyState = res.deployment.readyState;
+      const normalized = String(lastReadyState || '').toUpperCase();
+      if (normalized === 'READY') {
+        return { ok: true, deployment: res.deployment };
+      }
+    }
+
+    if (params.onTick) {
+      await params.onTick({ readyState: lastReadyState, elapsedMs: Date.now() - t0 });
+    }
+
+    await new Promise((r) => setTimeout(r, pollMs));
+  }
+
+  return {
+    ok: false,
+    error:
+      `Deployment da Vercel ainda está finalizando (${lastReadyState || 'desconhecido'}). ` +
+      'Aguarde e tente novamente.',
+    lastReadyState,
+  };
+}
+
 
 /**
  * Função pública `listVercelTeams` do projeto.
@@ -254,7 +324,7 @@ export async function triggerProjectRedeploy(
   token: string,
   projectId: string,
   teamId?: string
-) {
+): Promise<{ deploymentId: string }> {
   // Prefer redeploying the latest *production* deployment so NEXT_PUBLIC_* is rebuilt
   // and the production domain starts using the new env vars.
   let data = await vercelFetch<{ deployments?: VercelDeployment[] }>(
@@ -300,7 +370,7 @@ export async function triggerProjectRedeploy(
   if (!deploymentName) {
     throw new Error('Falha ao preparar redeploy: nome do deployment/projeto ausente.');
   }
-  await vercelFetch(
+  const created = await vercelFetch<VercelDeployment>(
     `/v13/deployments`,
     token,
     {
@@ -309,6 +379,13 @@ export async function triggerProjectRedeploy(
     },
     teamId
   );
+
+  const newId = (created as any)?.id || (created as any)?.uid;
+  if (!newId) {
+    throw new Error('Falha ao iniciar redeploy: id do novo deployment ausente.');
+  }
+
+  return { deploymentId: String(newId) };
 }
 
 /**

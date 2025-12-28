@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { runSchemaMigration } from '@/lib/installer/migrations';
 import { bootstrapInstance } from '@/lib/installer/supabase';
-import { triggerProjectRedeploy, upsertProjectEnvs } from '@/lib/installer/vercel';
+import { triggerProjectRedeploy, upsertProjectEnvs, waitForVercelDeploymentReady } from '@/lib/installer/vercel';
 import { validateInstallerPassword } from '@/lib/installer/passwordPolicy';
 import {
   deployAllSupabaseEdgeFunctions,
@@ -78,6 +78,7 @@ const ALL_STEPS: Step[] = [
   { id: 'edge_deploy', phase: 'comms', weight: 10, skippable: false },
   { id: 'bootstrap', phase: 'contact', weight: 5, skippable: true },
   { id: 'redeploy', phase: 'landing', weight: 5, skippable: false },
+  { id: 'wait_vercel_deploy', phase: 'landing', weight: 10, skippable: false },
 ];
 
 // Mapeamento cinematográfico Interstellar
@@ -557,23 +558,56 @@ export async function POST(req: Request) {
       // Step: redeploy
       await sendPhase('redeploy', 0);
 
+      let vercelDeploymentId: string | null = null;
+
       try {
-        await triggerProjectRedeploy(
+        const redeploy = await triggerProjectRedeploy(
           vercel.token,
           vercel.projectId,
           vercel.teamId || undefined
         );
+        vercelDeploymentId = redeploy.deploymentId;
       } catch (err) {
         // Redeploy é obrigatório para aplicar NEXT_PUBLIC_* no build do Next.js.
         const msg = err instanceof Error ? err.message : String(err);
         throw new Error(
-          'Falha ao redeployar na Vercel (necessário para aplicar as variáveis do Supabase). ' +
+          'Falha ao iniciar redeploy na Vercel (necessário para aplicar as variáveis do Supabase). ' +
             'Abra o projeto na Vercel → Deployments → Redeploy e tente novamente. ' +
             (msg ? 'Detalhe: ' + msg : '')
         );
       }
 
       await sendPhase('redeploy'); // Complete
+
+      // Step: wait_vercel_deploy (aguarda o deployment ficar READY)
+      await sendPhase('wait_vercel_deploy', 0);
+
+      if (!vercelDeploymentId) {
+        throw new Error('Falha ao acompanhar redeploy: deploymentId ausente.');
+      }
+
+      const wait = await waitForVercelDeploymentReady({
+        token: vercel.token,
+        deploymentId: vercelDeploymentId,
+        teamId: vercel.teamId || undefined,
+        timeoutMs: 240_000,
+        pollMs: 2_500,
+        onTick: async ({ readyState, elapsedMs }) => {
+          const fraction = Math.min(elapsedMs / 240_000, 0.95);
+          // Mantém o usuário informado enquanto a Vercel finaliza o build/alias.
+          await sendPhase('wait_vercel_deploy', fraction);
+          console.log('[run-stream] wait_vercel_deploy:', readyState, Math.round(elapsedMs / 1000) + 's');
+        },
+      });
+
+      if (!wait.ok) {
+        throw new Error(
+          'Redeploy disparado, mas ainda não finalizou na Vercel. ' +
+            'Abra o projeto na Vercel → Deployments e aguarde o status ficar READY.'
+        );
+      }
+
+      await sendPhase('wait_vercel_deploy'); // Complete
 
       // Só desabilita o instalador APÓS tudo estar completo
       await upsertProjectEnvs(

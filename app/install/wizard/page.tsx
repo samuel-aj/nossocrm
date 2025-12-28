@@ -1406,7 +1406,7 @@ export default function InstallWizardPage() {
                 >
                   <p className="text-slate-300">
                     Seu novo mundo está pronto.<br />
-                    <span className="text-slate-500 text-sm">Aguarde alguns segundos para o deploy finalizar.</span>
+                    <span className="text-slate-500 text-sm">Tudo está pronto — você já pode entrar. (Se parecer desatualizado, recarregue a página.)</span>
                   </p>
                   <button 
                     onClick={() => {
