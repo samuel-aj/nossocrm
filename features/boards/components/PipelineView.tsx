@@ -249,7 +249,9 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
 
   React.useEffect(() => {
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'board-appear-lag',hypothesisId:'BL2',location:'features/boards/components/PipelineView.tsx:useEffect',message:'PipelineView render snapshot',data:{isLoading,boardsCount:boards.length,activeBoardId8:(activeBoardId||'').slice(0,8)||null,hasActiveBoard:!!activeBoard,viewMode},timestamp:Date.now()})}).catch(()=>{});
+    if (process.env.NODE_ENV !== 'production') {
+      fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'board-appear-lag',hypothesisId:'BL2',location:'features/boards/components/PipelineView.tsx:useEffect',message:'PipelineView render snapshot',data:{isLoading,boardsCount:boards.length,activeBoardId8:(activeBoardId||'').slice(0,8)||null,hasActiveBoard:!!activeBoard,viewMode},timestamp:Date.now()})}).catch(()=>{});
+    }
     // #endregion
   }, [isLoading, boards.length, activeBoardId, !!activeBoard, viewMode]);
 
@@ -261,7 +263,9 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
 
   if (isLoading) {
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'board-appear-lag',hypothesisId:'BL3',location:'features/boards/components/PipelineView.tsx:return',message:'PipelineView showing PageLoader (isLoading=true)',data:{boardsCount:boards.length,activeBoardId8:(activeBoardId||'').slice(0,8)||null,hasActiveBoard:!!activeBoard,viewMode},timestamp:Date.now()})}).catch(()=>{});
+    if (process.env.NODE_ENV !== 'production') {
+      fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'board-appear-lag',hypothesisId:'BL3',location:'features/boards/components/PipelineView.tsx:return',message:'PipelineView showing PageLoader (isLoading=true)',data:{boardsCount:boards.length,activeBoardId8:(activeBoardId||'').slice(0,8)||null,hasActiveBoard:!!activeBoard,viewMode},timestamp:Date.now()})}).catch(()=>{});
+    }
     // #endregion
     return (
       <div className="h-full">
@@ -301,7 +305,9 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
         <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
           {/* #region agent log */}
           {(() => {
-            fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'board-refresh-empty-state',hypothesisId:'E1',location:'features/boards/components/PipelineView.tsx:emptyState',message:'PipelineView rendering EMPTY STATE (!activeBoard)',data:{isLoading,boardsCount:boards.length,activeBoardId8:(activeBoardId||'').slice(0,8)||null,hasActiveBoard:false,viewMode},timestamp:Date.now()})}).catch(()=>{});
+            if (process.env.NODE_ENV !== 'production') {
+              fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'board-refresh-empty-state',hypothesisId:'E1',location:'features/boards/components/PipelineView.tsx:emptyState',message:'PipelineView rendering EMPTY STATE (!activeBoard)',data:{isLoading,boardsCount:boards.length,activeBoardId8:(activeBoardId||'').slice(0,8)||null,hasActiveBoard:false,viewMode},timestamp:Date.now()})}).catch(()=>{});
+            }
             return null;
           })()}
           {/* #endregion */}

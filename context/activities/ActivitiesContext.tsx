@@ -64,7 +64,9 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
 
       const t0 = Date.now();
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'boards-activities-visibility-3',hypothesisId:'A10',location:'context/activities/ActivitiesContext.tsx:addActivity',message:'ActivitiesContext.addActivity called',data:{hasProfile:true},timestamp:Date.now()})}).catch(()=>{});
+      if (process.env.NODE_ENV !== 'production') {
+        fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'boards-activities-visibility-3',hypothesisId:'A10',location:'context/activities/ActivitiesContext.tsx:addActivity',message:'ActivitiesContext.addActivity called',data:{hasProfile:true},timestamp:Date.now()})}).catch(()=>{});
+      }
       // #endregion
       const { data, error: addError } = await activitiesService.create(activity);
 
@@ -75,9 +77,12 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
 
       // Invalida cache para TanStack Query atualizar
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'boards-activities-visibility-3',hypothesisId:'A11',location:'context/activities/ActivitiesContext.tsx:addActivity',message:'ActivitiesContext.addActivity created; invalidating activities.all',data:{ms:Date.now()-t0},timestamp:Date.now()})}).catch(()=>{});
+      if (process.env.NODE_ENV !== 'production') {
+        fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'boards-activities-visibility-3',hypothesisId:'A11',location:'context/activities/ActivitiesContext.tsx:addActivity',message:'ActivitiesContext.addActivity created; invalidating activities.all',data:{ms:Date.now()-t0},timestamp:Date.now()})}).catch(()=>{});
+      }
       // #endregion
-      await queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
+      // Don't await invalidations — awaiting can block UI flows until heavy refetches finish.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
 
       return data;
     },

@@ -523,7 +523,9 @@ export const boardsService = {
         error: null
       };
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'board-appear-lag',hypothesisId:'B4',location:'lib/supabase/boards.ts:boardsService.create',message:'Supabase create(board) finished',data:{ms:Date.now()-t0,ok:!!result.data?.id,stagesCount:insertedStages.length},timestamp:Date.now()})}).catch(()=>{});
+      if (process.env.NODE_ENV !== 'production') {
+        fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'board-appear-lag',hypothesisId:'B4',location:'lib/supabase/boards.ts:boardsService.create',message:'Supabase create(board) finished',data:{ms:Date.now()-t0,ok:!!result.data?.id,stagesCount:insertedStages.length},timestamp:Date.now()})}).catch(()=>{});
+      }
       // #endregion
       return result;
     } catch (e) {

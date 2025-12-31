@@ -51,7 +51,9 @@ export const CreateDealModalV2: React.FC<CreateDealModalV2Props> = ({ isOpen, on
 
   const handleFormSubmit = (data: DealFormData) => {
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'D0',location:'features/boards/components/Modals/CreateDealModalV2.tsx:handleFormSubmit',message:'CreateDealModalV2 submit',data:{hasActiveBoard:!!activeBoard,hasActiveBoardId:!!activeBoardId},timestamp:Date.now()})}).catch(()=>{});
+    if (process.env.NODE_ENV !== 'production') {
+      fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'D0',location:'features/boards/components/Modals/CreateDealModalV2.tsx:handleFormSubmit',message:'CreateDealModalV2 submit',data:{hasActiveBoard:!!activeBoard,hasActiveBoardId:!!activeBoardId},timestamp:Date.now()})}).catch(()=>{});
+    }
     // #endregion
     if (!activeBoard || !activeBoardId || activeBoard.stages.length === 0) {
       // Sem board ativo/estágios não dá para criar deal com status inicial.

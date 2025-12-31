@@ -1,3 +1,12 @@
+## 31/12/2025
+
+- **Realtime (board_stages) — colunas voltam a aparecer em tempo real**: `board_stages INSERT` agora **refaz fetch quando o INSERT é único** (caso típico “outro usuário criou uma coluna”), mas mantém **invalidate-only em bursts** (criação de board inserindo várias etapas) para evitar storm.
+- **AIContext — assinatura mais correta**: `setContext` agora inclui `user.id` na assinatura, evitando “contexto de usuário” stale em login/logout.
+- **Settings (IA features) — evita requests duplicadas em StrictMode**: marca o fetch como “in-flight” antes do request e libera retry em erro.
+- **Telemetria/Debug logs — não rodam em produção**: `fetch(.../ingest/...)` agora é guardado por `NODE_ENV !== 'production'` e mensagens de erro foram truncadas/sanitizadas quando logadas.
+- **Acessibilidade (Wizard)**: overlay de instalação agora anuncia estado de carregamento (`role="status"`, `aria-live`, `aria-busy`).
+- **Temp IDs + fallback por título**: `tempId` agora reduz risco de colisão e o drop mostra toast quando o fallback por título não resolve unicamente.
+
 ## 30/12/2025
 
 - **UX: removido botão "Recarregar" redundante na página de Produtos/Serviços**: os dados já são recarregados automaticamente após criar/editar/deletar produtos, tornando o botão manual desnecessário e confuso.

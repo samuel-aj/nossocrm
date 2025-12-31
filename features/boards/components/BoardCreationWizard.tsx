@@ -834,6 +834,9 @@ export const BoardCreationWizard: React.FC<BoardCreationWizardProps> = ({
       {isInstalling && (
         <div
           className="absolute inset-0 z-30 flex items-center justify-center"
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
           // Block all pointer events to the wizard while installing
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
@@ -841,7 +844,10 @@ export const BoardCreationWizard: React.FC<BoardCreationWizardProps> = ({
         >
           {/* Darken + blur the background to keep progress modal in focus */}
           <div className="absolute inset-0 bg-black/65 backdrop-blur-sm" />
-          <div className="relative z-10 w-[min(520px,calc(100vw-2rem))] rounded-2xl border border-white/10 bg-white/95 dark:bg-slate-900/95 backdrop-blur p-5 shadow-2xl">
+          <div
+            className="relative z-10 w-[min(520px,calc(100vw-2rem))] rounded-2xl border border-white/10 bg-white/95 dark:bg-slate-900/95 backdrop-blur p-5 shadow-2xl"
+            aria-label={installProgress && installProgress.total === 1 ? 'Criando board' : 'Instalando funil'}
+          >
             <div className="flex items-start gap-3">
               <Loader2 className="mt-0.5 animate-spin text-primary-500" size={22} />
               <div className="min-w-0 flex-1">

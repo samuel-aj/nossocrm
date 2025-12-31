@@ -364,7 +364,9 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   ) => {
     const t0 = Date.now();
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'D1',location:'context/CRMContext.tsx:addDeal',message:'CRMContext.addDeal start',data:{hasCompanyName:!!relatedData?.companyName,hasContactName:!!relatedData?.contact?.name,boardId8:(deal.boardId||'').slice(0,8)||null},timestamp:Date.now()})}).catch(()=>{});
+    if (process.env.NODE_ENV !== 'production') {
+      fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'D1',location:'context/CRMContext.tsx:addDeal',message:'CRMContext.addDeal start',data:{hasCompanyName:!!relatedData?.companyName,hasContactName:!!relatedData?.contact?.name,boardId8:(deal.boardId||'').slice(0,8)||null},timestamp:Date.now()})}).catch(()=>{});
+    }
     // #endregion
 
     // Optimistic insert into the Kanban deals query so the deal appears immediately (no 2-3s "waiting for refetch").
@@ -400,7 +402,9 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       } catch (e) {
         // Never let optimistic cache update break deal creation.
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'DERR',location:'context/CRMContext.tsx:addDeal',message:'Optimistic dealsByBoard cache update failed (ignored)',data:{error:String((e as any)?.message||e)},timestamp:Date.now()})}).catch(()=>{});
+        if (process.env.NODE_ENV !== 'production') {
+          fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'DERR',location:'context/CRMContext.tsx:addDeal',message:'Optimistic dealsByBoard cache update failed (ignored)',data:{error:String((e as any)?.message||e).split('\n')[0].slice(0,120)},timestamp:Date.now()})}).catch(()=>{});
+        }
         // #endregion
       }
     }
@@ -424,7 +428,9 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         }
       }
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'D2',location:'context/CRMContext.tsx:addDeal',message:'CRMContext.addDeal company resolved',data:{ms:Date.now()-t0,matchedExisting:!!existingCompany},timestamp:Date.now()})}).catch(()=>{});
+      if (process.env.NODE_ENV !== 'production') {
+        fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'D2',location:'context/CRMContext.tsx:addDeal',message:'CRMContext.addDeal company resolved',data:{ms:Date.now()-t0,matchedExisting:!!existingCompany},timestamp:Date.now()})}).catch(()=>{});
+      }
       // #endregion
     } else if (!companies.find(c => c.id === deal.companyId)) {
       const newCompany = await addCompany({
@@ -468,7 +474,9 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         }
       }
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'D2',location:'context/CRMContext.tsx:addDeal',message:'CRMContext.addDeal contact resolved',data:{ms:Date.now()-t0,matchedExisting:!!existingContact},timestamp:Date.now()})}).catch(()=>{});
+      if (process.env.NODE_ENV !== 'production') {
+        fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'D2',location:'context/CRMContext.tsx:addDeal',message:'CRMContext.addDeal contact resolved',data:{ms:Date.now()-t0,matchedExisting:!!existingContact},timestamp:Date.now()})}).catch(()=>{});
+      }
       // #endregion
     }
 
@@ -478,7 +486,9 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       contactId: finalContactId,
     });
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'D3',location:'context/CRMContext.tsx:addDeal',message:'CRMContext.addDeal deal created (addDealState finished)',data:{ms:Date.now()-t0,ok:!!createdDeal},timestamp:Date.now()})}).catch(()=>{});
+    if (process.env.NODE_ENV !== 'production') {
+      fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'D3',location:'context/CRMContext.tsx:addDeal',message:'CRMContext.addDeal deal created (addDealState finished)',data:{ms:Date.now()-t0,ok:!!createdDeal},timestamp:Date.now()})}).catch(()=>{});
+    }
     // #endregion
 
     // Replace/remove the optimistic deal with the real one (avoids duplicates when refetch completes).
@@ -510,7 +520,9 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         }
       } catch (e) {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'DERR',location:'context/CRMContext.tsx:addDeal',message:'Optimistic dealsByBoard reconcile failed (ignored)',data:{error:String((e as any)?.message||e)},timestamp:Date.now()})}).catch(()=>{});
+        if (process.env.NODE_ENV !== 'production') {
+          fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'DERR',location:'context/CRMContext.tsx:addDeal',message:'Optimistic dealsByBoard reconcile failed (ignored)',data:{error:String((e as any)?.message||e).split('\n')[0].slice(0,120)},timestamp:Date.now()})}).catch(()=>{});
+        }
         // #endregion
       }
     }
@@ -526,7 +538,9 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         completed: true,
       });
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'D4',location:'context/CRMContext.tsx:addDeal',message:'CRMContext.addDeal activity created (deal created)',data:{ms:Date.now()-t0},timestamp:Date.now()})}).catch(()=>{});
+      if (process.env.NODE_ENV !== 'production') {
+        fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'D4',location:'context/CRMContext.tsx:addDeal',message:'CRMContext.addDeal activity created (deal created)',data:{ms:Date.now()-t0},timestamp:Date.now()})}).catch(()=>{});
+      }
       // #endregion
     }
   }, [companies, contacts, activeBoard, addCompany, addContact, addDealState, addActivity, queryClient]);

@@ -27,7 +27,6 @@ export const AIProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
     // Helper to merge generic user context with specific passed context
     const setContext = useCallback((context: CallOptions) => {
-        const t0 = Date.now();
         // Automatically inject user identity if not present
         const enhancedContext: CallOptions = {
             ...context,
@@ -40,6 +39,8 @@ export const AIProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         // Guard against infinite loops: many callers rebuild objects every render.
         // We only set state if the "meaningful" context signature actually changed.
         const sig = [
+            // Include identity so login/logout/profile changes refresh the context.
+            enhancedContext.user?.id || 'anon',
             enhancedContext.view?.type || 'none',
             enhancedContext.view?.url || '',
             enhancedContext.activeObject?.type || 'none',

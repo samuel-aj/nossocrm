@@ -250,11 +250,15 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
           throw e;
         }
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'settings-ai-load',hypothesisId:'AISET1',location:'context/settings/SettingsContext.tsx:fetchSettings',message:'Finished /api/settings/ai (eager)',data:{ms:Date.now()-t0},timestamp:Date.now()})}).catch(()=>{});
+        if (process.env.NODE_ENV !== 'production') {
+          fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'settings-ai-load',hypothesisId:'AISET1',location:'context/settings/SettingsContext.tsx:fetchSettings',message:'Finished /api/settings/ai (eager)',data:{ms:Date.now()-t0},timestamp:Date.now()})}).catch(()=>{});
+        }
         // #endregion
       } else {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'settings-ai-load',hypothesisId:'AISET1',location:'context/settings/SettingsContext.tsx:fetchSettings',message:'Skipped /api/settings/ai (already loaded for user)',data:{userId8:profile.id.slice(0,8)},timestamp:Date.now()})}).catch(()=>{});
+        if (process.env.NODE_ENV !== 'production') {
+          fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'settings-ai-load',hypothesisId:'AISET1',location:'context/settings/SettingsContext.tsx:fetchSettings',message:'Skipped /api/settings/ai (already loaded for user)',data:{userId8:profile.id.slice(0,8)},timestamp:Date.now()})}).catch(()=>{});
+        }
         // #endregion
       }
 
@@ -286,8 +290,13 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
 
     const t0 = Date.now();
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'settings-ai-load',hypothesisId:'AISET2',location:'context/settings/SettingsContext.tsx:useEffect(ai-features)',message:'Fetching /api/settings/ai-features (lazy)',data:{path:(pathname||'').slice(0,40)||'/',isGlobalAIOpen,userId8:profile.id.slice(0,8)},timestamp:Date.now()})}).catch(()=>{});
+    if (process.env.NODE_ENV !== 'production') {
+      fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'settings-ai-load',hypothesisId:'AISET2',location:'context/settings/SettingsContext.tsx:useEffect(ai-features)',message:'Fetching /api/settings/ai-features (lazy)',data:{path:(pathname||'').slice(0,40)||'/',isGlobalAIOpen,userId8:profile.id.slice(0,8)},timestamp:Date.now()})}).catch(()=>{});
+    }
     // #endregion
+
+    // Mark as in-flight immediately to prevent duplicate requests in dev StrictMode.
+    aiFeaturesLoadedForUserRef.current = profile.id;
 
     (async () => {
       try {
@@ -299,13 +308,19 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
         if (ffRes.ok) {
           const ffData = (await ffRes.json().catch(() => null)) as any;
           setAiFeatureFlags((ffData?.flags as Record<string, boolean>) || {});
-          aiFeaturesLoadedForUserRef.current = profile.id;
         } else {
           console.warn('[Settings] Falha ao carregar flags de IA (features).', { status: ffRes.status });
+          // Allow retry on failure
+          aiFeaturesLoadedForUserRef.current = null;
         }
+      } catch {
+        // Allow retry on transient errors
+        aiFeaturesLoadedForUserRef.current = null;
       } finally {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'settings-ai-load',hypothesisId:'AISET2',location:'context/settings/SettingsContext.tsx:useEffect(ai-features)',message:'Finished /api/settings/ai-features (lazy)',data:{ms:Date.now()-t0},timestamp:Date.now()})}).catch(()=>{});
+        if (process.env.NODE_ENV !== 'production') {
+          fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'settings-ai-load',hypothesisId:'AISET2',location:'context/settings/SettingsContext.tsx:useEffect(ai-features)',message:'Finished /api/settings/ai-features (lazy)',data:{ms:Date.now()-t0},timestamp:Date.now()})}).catch(()=>{});
+        }
         // #endregion
       }
     })();

@@ -62,6 +62,10 @@ export function useRealtimeSync(
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingInvalidationsRef = useRef<Set<readonly unknown[]>>(new Set());
   const pendingInvalidateOnlyRef = useRef<Set<readonly unknown[]>>(new Set());
+  // Track bursty board_stages INSERTs (creating a board inserts multiple stages).
+  // We'll refetch on single INSERT (realtime stage created by someone else),
+  // but avoid storms on bursts (treat burst as invalidate-only).
+  const pendingBoardStagesInsertCountRef = useRef(0);
   const flushScheduledRef = useRef(false);
   const onchangeRef = useRef(onchange);
   
@@ -116,9 +120,11 @@ export function useRealtimeSync(
           const keys = getTableQueryKeys(table);
           // NOTE: `board_stages` INSERTs happen in bursts when creating a board (one per stage).
           // Refetching boards on each stage INSERT causes a request storm.
-          // For that specific case, we only invalidate (mark stale) and let mutations/refetch handle timing.
+          // For that specific case, we can refetch on a single INSERT (true realtime),
+          // but treat bursts as invalidate-only and let the board create mutation handle timing.
           if (payload.eventType === 'INSERT' && table === 'board_stages') {
             keys.forEach(key => pendingInvalidateOnlyRef.current.add(key));
+            pendingBoardStagesInsertCountRef.current += 1;
           } else {
             keys.forEach(key => pendingInvalidationsRef.current.add(key));
           }
@@ -128,7 +134,9 @@ export function useRealtimeSync(
           // This keeps UI instant (optimistic updates handle UX) while preventing refetch storms.
           if (payload.eventType === 'INSERT') {
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'board-appear-lag',hypothesisId:'RT1',location:'lib/realtime/useRealtimeSync.ts:useRealtimeSync',message:'Realtime INSERT queued (microtask batch)',data:{table,eventType:payload.eventType,pendingKeys:pendingInvalidationsRef.current.size},timestamp:Date.now()})}).catch(()=>{});
+            if (process.env.NODE_ENV !== 'production') {
+              fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'board-appear-lag',hypothesisId:'RT1',location:'lib/realtime/useRealtimeSync.ts:useRealtimeSync',message:'Realtime INSERT queued (microtask batch)',data:{table,eventType:payload.eventType,pendingKeys:pendingInvalidationsRef.current.size},timestamp:Date.now()})}).catch(()=>{});
+            }
             // #endregion
 
             if (!flushScheduledRef.current) {
@@ -140,12 +148,18 @@ export function useRealtimeSync(
                 pendingInvalidationsRef.current.clear();
                 const keysInvalidateOnly = Array.from(pendingInvalidateOnlyRef.current);
                 pendingInvalidateOnlyRef.current.clear();
+                const boardStagesInsertCount = pendingBoardStagesInsertCountRef.current;
+                pendingBoardStagesInsertCountRef.current = 0;
 
                 // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'board-appear-lag',hypothesisId:'RT2',location:'lib/realtime/useRealtimeSync.ts:useRealtimeSync',message:'Realtime microtask flush (invalidateQueries)',data:{keysCount:keysToFlush.length},timestamp:Date.now()})}).catch(()=>{});
+                if (process.env.NODE_ENV !== 'production') {
+                  fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'board-appear-lag',hypothesisId:'RT2',location:'lib/realtime/useRealtimeSync.ts:useRealtimeSync',message:'Realtime microtask flush (invalidateQueries)',data:{keysCount:keysToFlush.length},timestamp:Date.now()})}).catch(()=>{});
+                }
                 // #endregion
                 // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'board-appear-lag',hypothesisId:'RT3',location:'lib/realtime/useRealtimeSync.ts:useRealtimeSync',message:'Realtime microtask flush (invalidate-only)',data:{keysCount:keysInvalidateOnly.length},timestamp:Date.now()})}).catch(()=>{});
+                if (process.env.NODE_ENV !== 'production') {
+                  fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'board-appear-lag',hypothesisId:'RT3',location:'lib/realtime/useRealtimeSync.ts:useRealtimeSync',message:'Realtime microtask flush (invalidate-only)',data:{keysCount:keysInvalidateOnly.length,boardStagesInsertCount},timestamp:Date.now()})}).catch(()=>{});
+                }
                 // #endregion
 
                 keysToFlush.forEach((queryKey) => {
@@ -156,12 +170,13 @@ export function useRealtimeSync(
                   });
                 });
 
-                // Invalidate-only keys (no refetch) to avoid storms on bursty INSERT sources (ex.: board_stages).
+                // For bursty INSERT sources (ex.: board_stages create-board burst),
+                // invalidate-only (no refetch) to avoid storms. But for single INSERT, refetch to keep realtime UX.
                 keysInvalidateOnly.forEach((queryKey) => {
                   queryClient.invalidateQueries({
                     queryKey,
                     exact: false,
-                    refetchType: 'none',
+                    refetchType: boardStagesInsertCount <= 1 ? 'all' : 'none',
                   });
                 });
               });

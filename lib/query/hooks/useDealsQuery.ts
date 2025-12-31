@@ -161,14 +161,18 @@ export const useDealsByBoard = (boardId: string) => {
     queryFn: async () => {
       const t0 = Date.now();
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'D8',location:'lib/query/hooks/useDealsQuery.ts:useDealsByBoard:queryFn',message:'Fetching dealsByBoard',data:{boardId8:(boardId||'').slice(0,8)||null,authReady:!authLoading&&!!user},timestamp:Date.now()})}).catch(()=>{});
+      if (process.env.NODE_ENV !== 'production') {
+        fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'D8',location:'lib/query/hooks/useDealsQuery.ts:useDealsByBoard:queryFn',message:'Fetching dealsByBoard',data:{boardId8:(boardId||'').slice(0,8)||null,authReady:!authLoading&&!!user},timestamp:Date.now()})}).catch(()=>{});
+      }
       // #endregion
       // Guard: should never happen due to 'enabled', but safety first
       if (!boardId) return [];
       // If we're on an optimistic temp board, don't hit the backend.
       if (boardId.startsWith('temp-')) {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'D9',location:'lib/query/hooks/useDealsQuery.ts:useDealsByBoard:queryFn',message:'Skipping dealsByBoard fetch for temp board id',data:{boardId8:(boardId||'').slice(0,8)||null},timestamp:Date.now()})}).catch(()=>{});
+        if (process.env.NODE_ENV !== 'production') {
+          fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'D9',location:'lib/query/hooks/useDealsQuery.ts:useDealsByBoard:queryFn',message:'Skipping dealsByBoard fetch for temp board id',data:{boardId8:(boardId||'').slice(0,8)||null},timestamp:Date.now()})}).catch(()=>{});
+        }
         // #endregion
         return [];
       }
@@ -206,7 +210,9 @@ export const useDealsByBoard = (boardId: string) => {
       });
 
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'D8',location:'lib/query/hooks/useDealsQuery.ts:useDealsByBoard:queryFn',message:'Fetched dealsByBoard',data:{boardId8:(boardId||'').slice(0,8)||null,count:enrichedDeals.length,ms:Date.now()-t0},timestamp:Date.now()})}).catch(()=>{});
+      if (process.env.NODE_ENV !== 'production') {
+        fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'ux-lag-board-deal',hypothesisId:'D8',location:'lib/query/hooks/useDealsQuery.ts:useDealsByBoard:queryFn',message:'Fetched dealsByBoard',data:{boardId8:(boardId||'').slice(0,8)||null,count:enrichedDeals.length,ms:Date.now()-t0},timestamp:Date.now()})}).catch(()=>{});
+      }
       // #endregion
       return enrichedDeals;
     },
