@@ -1,4 +1,4 @@
-import React, {
+﻿import React, {
   createContext,
   useContext,
   useMemo,
@@ -37,7 +37,7 @@ const DealsContext = createContext<DealsContextType | undefined>(undefined);
 /**
  * Componente React `DealsProvider`.
  *
- * @param {{ children: ReactNode; }} { children } - Parâmetro `{ children }`.
+ * @param {{ children: ReactNode; }} { children } - ParÃ¢metro `{ children }`.
  * @returns {Element} Retorna um valor do tipo `Element`.
  */
 export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -45,7 +45,7 @@ export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const queryClient = useQueryClient();
 
   // ============================================
-  // TanStack Query como fonte única de verdade
+  // TanStack Query como fonte Ãºnica de verdade
   // ============================================
   const {
     data: rawDeals = [],
@@ -67,7 +67,7 @@ export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const addDeal = useCallback(
     async (deal: Omit<Deal, 'id' | 'createdAt'>): Promise<Deal | null> => {
       if (!profile) {
-        console.error('Usuário não autenticado');
+        console.error('UsuÃ¡rio nÃ£o autenticado');
         return null;
       }
       const { data, error: addError } = await dealsService.create(deal);
@@ -77,16 +77,16 @@ export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         return null;
       }
 
-      // NÃO invalidar deals aqui! O CRMContext já fez insert otimista e o Realtime
-      // também adiciona ao cache. invalidateQueries causaria um refetch que poderia
+      // NÃƒO invalidar deals aqui! O CRMContext jÃ¡ fez insert otimista e o Realtime
+      // tambÃ©m adiciona ao cache. invalidateQueries causaria um refetch que poderia
       // sobrescrever o cache otimista com dados desatualizados (eventual consistency).
       // #region agent log
       if (process.env.NODE_ENV !== 'production') {
-        console.log(`[DealsContext.addDeal] ✅ Skipping invalidateQueries (cache managed by optimistic+Realtime)`, { dealId: data?.id?.slice(0,8) });
+        console.log(`[DealsContext.addDeal] âœ… Skipping invalidateQueries (cache managed by optimistic+Realtime)`, { dealId: data?.id?.slice(0,8) });
         fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'DealsContext.tsx:82',message:'Skipping invalidateQueries',data:{dealId:data?.id?.slice(0,8)},timestamp:Date.now(),sessionId:'debug-session',runId:'crm-create-deal','hypothesisId':'H4'})}).catch(()=>{});
       }
       // #endregion
-      // Apenas dashboard stats pode ser invalidado (não afeta deals cache)
+      // Apenas dashboard stats pode ser invalidado (nÃ£o afeta deals cache)
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.stats });
 
       return data;
@@ -95,11 +95,17 @@ export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   );
 
   const updateDeal = useCallback(async (id: string, updates: Partial<Deal>) => {
-    // Optimistic update - atualiza a UI imediatamente
+    const optimisticTimestamp = new Date().toISOString();
+
+    // Optimistic update - usa DEALS_VIEW_KEY como fonte unica para listas de deals.
     queryClient.setQueryData<DealView[]>(DEALS_VIEW_KEY, (old = []) =>
-      old.map(deal =>
-        deal.id === id ? { ...deal, ...updates, updatedAt: new Date().toISOString() } : deal
+      old.map((deal) =>
+        deal.id === id ? { ...deal, ...updates, updatedAt: optimisticTimestamp } : deal
       )
+    );
+
+    queryClient.setQueryData<Deal>(queryKeys.deals.detail(id), (old) =>
+      old ? { ...old, ...updates, updatedAt: optimisticTimestamp } : old
     );
 
     const { error: updateError } = await dealsService.update(id, updates);
@@ -111,7 +117,7 @@ export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       return;
     }
 
-    // Sucesso: Realtime vai sincronizar. Não precisa de invalidateQueries.
+    // Sucesso: Realtime vai sincronizar. NÃ£o precisa de invalidateQueries.
   }, [queryClient]);
 
   const updateDealStatus = useCallback(
@@ -211,7 +217,7 @@ export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 };
 
 /**
- * Hook React `useDeals` que encapsula uma lógica reutilizável.
+ * Hook React `useDeals` que encapsula uma lÃ³gica reutilizÃ¡vel.
  * @returns {DealsContextType} Retorna um valor do tipo `DealsContextType`.
  */
 export const useDeals = () => {
@@ -224,11 +230,11 @@ export const useDeals = () => {
 
 // Hook para deals com view projection (desnormalizado)
 /**
- * Hook React `useDealsView` que encapsula uma lógica reutilizável.
+ * Hook React `useDealsView` que encapsula uma lÃ³gica reutilizÃ¡vel.
  *
- * @param {Record<string, Organization>} companyMap - Parâmetro `companyMap`.
- * @param {Record<string, Contact>} contactMap - Parâmetro `contactMap`.
- * @param {Board[]} boards - Parâmetro `boards`.
+ * @param {Record<string, Organization>} companyMap - ParÃ¢metro `companyMap`.
+ * @param {Record<string, Contact>} contactMap - ParÃ¢metro `contactMap`.
+ * @param {Board[]} boards - ParÃ¢metro `boards`.
  * @returns {DealView[]} Retorna um valor do tipo `DealView[]`.
  */
 export const useDealsView = (

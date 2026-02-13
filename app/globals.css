@@ -46,6 +46,8 @@ svg.lucide {
  * These work with both light and dark modes
  * ======================================== */
 :root {
+  color-scheme: light;
+
   /* App Shell: sidebar width (used by modals/overlays to avoid covering navigation on desktop) */
   --app-sidebar-width: 0px;
 
@@ -114,6 +116,8 @@ html, body {
 }
 
 .dark {
+  color-scheme: dark;
+
   /* Dark Mode - Deep Slate (OKLCH) */
   --color-bg: oklch(11% 0.025 260);
   --color-surface: oklch(15% 0.02 260);
@@ -175,6 +179,33 @@ body {
   font-family: var(--font-sans);
   background-color: var(--color-bg);
   color: var(--color-text-primary);
+}
+
+/* Keep native dropdown popups in sync with active theme. */
+select {
+  color-scheme: inherit;
+}
+
+select:not(.appearance-none):not([multiple]):not([size]) {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 1rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M6 8l4 4 4-4' stroke='%2364758b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  padding-inline-end: 2.25rem !important;
+}
+
+.dark select,
+.dark option,
+.dark optgroup {
+  background-color: #0f172a;
+  color: #f8fafc;
+}
+
+.dark select:not(.appearance-none):not([multiple]):not([size]) {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M6 8l4 4 4-4' stroke='%23cbd5e1' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 /* ========================================

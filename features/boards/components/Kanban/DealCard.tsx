@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import Image from 'next/image';
-import { DealView } from '@/types';
+import { DealView, CustomFieldDefinition } from '@/types';
 import { Building2, Hourglass, Trophy, XCircle } from 'lucide-react';
 import { ActivityStatusIcon } from './ActivityStatusIcon';
 import { priorityAriaLabelPtBr } from '@/lib/utils/priority';
@@ -24,6 +24,7 @@ interface DealCardProps {
     type: 'CALL' | 'MEETING' | 'EMAIL',
     dealTitle: string
   ) => void;
+  customFieldDefinitions: CustomFieldDefinition[];
   setLastMouseDownDealId: (id: string | null) => void;
   /** Callback to open move-to-stage modal for keyboard accessibility */
   onMoveToStage?: (dealId: string) => void;
@@ -55,6 +56,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
   isMenuOpen,
   setOpenMenuId,
   onQuickAddActivity,
+  customFieldDefinitions,
   setLastMouseDownDealId,
   onMoveToStage,
 }) => {
@@ -150,6 +152,8 @@ const DealCardComponent: React.FC<DealCardProps> = ({
     return parts.join(', ');
   };
 
+  const visibleCustomFields = customFieldDefinitions.slice(0, 2);
+
   return (
     <div
       data-deal-id={deal.id}
@@ -235,6 +239,27 @@ const DealCardComponent: React.FC<DealCardProps> = ({
       <p className="text-xs text-slate-500 dark:text-slate-400 mb-3 flex items-center gap-1">
         <Building2 size={10} aria-hidden="true" /> {deal.companyName}
       </p>
+
+      {visibleCustomFields.length > 0 && (
+        <div className="mb-3 space-y-1">
+          {visibleCustomFields.map((field) => (
+            <div key={`${deal.id}-${field.id}`} className="text-sm">
+              <span className="text-slate-500">{field.label}: </span>
+              {(() => {
+                const value = deal.customFields?.[field.key];
+                if (value === undefined || value === null || String(value).trim() === '') {
+                  return (
+                    <span className="italic text-slate-500 dark:text-slate-400">
+                      Campo vazio
+                    </span>
+                  );
+                }
+                return <span className="text-slate-900 dark:text-white">{String(value)}</span>;
+              })()}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="flex justify-between items-center pt-2 border-t border-slate-100 dark:border-white/5">
         <div className="flex items-center gap-2">

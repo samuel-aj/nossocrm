@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useToast } from '@/context/ToastContext';
 import { CustomFieldDefinition, CustomFieldType } from '@/types';
 import { usePersistedState } from '@/hooks/usePersistedState';
+import { useCRM } from '@/context/CRMContext';
 
 // TODO: Migrate customFieldDefinitions and tags to Supabase
 // For now, using local state as placeholder
@@ -11,22 +12,36 @@ import { usePersistedState } from '@/hooks/usePersistedState';
  */
 export const useSettingsController = () => {
   const { addToast } = useToast();
+  const {
+    customFieldDefinitions,
+    addCustomField,
+    updateCustomField,
+    removeCustomField,
+    availableTags,
+    addTag,
+    removeTag,
+  } = useCRM();
 
   // General Settings
   const [defaultRoute, setDefaultRoute] = usePersistedState<string>('crm_default_route', '/boards');
 
-  // Custom Fields State (local - TODO: migrate to Supabase)
-  const [customFieldDefinitions, setCustomFieldDefinitions] = usePersistedState<
-    CustomFieldDefinition[]
-  >('crm_custom_fields', []);
   const [newFieldLabel, setNewFieldLabel] = useState('');
   const [newFieldType, setNewFieldType] = useState<CustomFieldType>('text');
   const [newFieldOptions, setNewFieldOptions] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // Tags State (local - TODO: migrate to Supabase)
-  const [availableTags, setAvailableTags] = usePersistedState<string[]>('crm_tags', []);
   const [newTagName, setNewTagName] = useState('');
+
+  const normalizeFieldLabel = (label: string) =>
+    label.trim().replace(/\s+/g, ' ').toLowerCase();
+
+  const buildFieldKey = (label: string) =>
+    label
+      .toLowerCase()
+      .replace(/(?:^\w|[A-Z]|\b\w)/g, (word, index) =>
+        index === 0 ? word.toLowerCase() : word.toUpperCase()
+      )
+      .replace(/\s+/g, '');
 
   // Custom Fields Logic
   const startEditingField = (field: CustomFieldDefinition) => {
@@ -44,7 +59,24 @@ export const useSettingsController = () => {
   };
 
   const handleSaveField = () => {
-    if (!newFieldLabel.trim()) return;
+    const cleanedLabel = newFieldLabel.trim();
+    if (!cleanedLabel) return;
+
+    const normalizedLabel = normalizeFieldLabel(cleanedLabel);
+    const nextKey = buildFieldKey(cleanedLabel);
+    const hasDuplicateLabel = customFieldDefinitions.some((f) => {
+      if (editingId && f.id === editingId) return false;
+      return normalizeFieldLabel(f.label) === normalizedLabel;
+    });
+    const hasDuplicateKey = customFieldDefinitions.some((f) => {
+      if (editingId && f.id === editingId) return false;
+      return f.key === nextKey;
+    });
+
+    if (hasDuplicateLabel || hasDuplicateKey) {
+      addToast('Já existe um campo com esse nome.', 'warning');
+      return;
+    }
 
     const optionsArray =
       newFieldType === 'select'
@@ -56,33 +88,21 @@ export const useSettingsController = () => {
 
     if (editingId) {
       // UPDATE EXISTING
-      setCustomFieldDefinitions(prev =>
-        prev.map(f =>
-          f.id === editingId
-            ? { ...f, label: newFieldLabel, type: newFieldType, options: optionsArray }
-            : f
-        )
-      );
+      updateCustomField(editingId, { label: cleanedLabel, type: newFieldType, options: optionsArray });
       addToast('Campo personalizado atualizado com sucesso!', 'success');
       cancelEditingField();
     } else {
       // CREATE NEW
-      const key = newFieldLabel
-        .toLowerCase()
-        .replace(/(?:^\w|[A-Z]|\b\w)/g, (word, index) =>
-          index === 0 ? word.toLowerCase() : word.toUpperCase()
-        )
-        .replace(/\s+/g, '');
+      const key = nextKey;
 
-      const newField: CustomFieldDefinition = {
-        id: crypto.randomUUID(),
+      const newField: Omit<CustomFieldDefinition, 'id'> = {
         key,
-        label: newFieldLabel,
+        label: cleanedLabel,
         type: newFieldType,
         options: optionsArray,
       };
 
-      setCustomFieldDefinitions(prev => [...prev, newField]);
+      addCustomField(newField);
       addToast('Campo personalizado criado com sucesso!', 'success');
       setNewFieldLabel('');
       setNewFieldOptions('');
@@ -90,21 +110,21 @@ export const useSettingsController = () => {
   };
 
   const handleRemoveField = (id: string) => {
-    setCustomFieldDefinitions(prev => prev.filter(f => f.id !== id));
+    removeCustomField(id);
     addToast('Campo personalizado removido.', 'info');
   };
 
   // Tags Logic
   const handleAddTag = () => {
     if (newTagName.trim()) {
-      setAvailableTags(prev => [...prev, newTagName.trim()]);
+      addTag(newTagName.trim());
       addToast(`Tag "${newTagName}" adicionada!`, 'success');
       setNewTagName('');
     }
   };
 
   const handleRemoveTag = (tag: string) => {
-    setAvailableTags(prev => prev.filter(t => t !== tag));
+    removeTag(tag);
     addToast(`Tag "${tag}" removida.`, 'info');
   };
 

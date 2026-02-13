@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { DealView, BoardStage } from '@/types';
+import { DealView, BoardStage, CustomFieldDefinition } from '@/types';
 import { DealCard } from './DealCard';
 import { isDealRotting, getActivityStatus } from '@/features/boards/hooks/useBoardsController';
 import { MoveToStageModal } from '../Modals/MoveToStageModal';
@@ -51,6 +51,7 @@ function dropHighlightClasses(stageBgClass?: string): string {
 interface KanbanBoardProps {
   stages: BoardStage[];
   filteredDeals: DealView[];
+  customFieldDefinitions: CustomFieldDefinition[];
   draggingId: string | null;
   handleDragStart: (e: React.DragEvent, id: string, title: string) => void;
   handleDragOver: (e: React.DragEvent) => void;
@@ -102,6 +103,7 @@ interface KanbanBoardProps {
 export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   stages,
   filteredDeals,
+  customFieldDefinitions,
   draggingId,
   handleDragStart,
   handleDragOver,
@@ -254,7 +256,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
             </div>
 
             <div
-              className={`flex-1 p-2 overflow-y-auto space-y-2 bg-slate-100/50 dark:bg-black/20 scrollbar-thin min-h-[100px]`}
+              className={`flex-1 p-2 overflow-y-auto scrollbar-custom space-y-2 bg-slate-100/50 dark:bg-black/20 min-h-[100px]`}
             >
               {stageDeals.length === 0 && !draggingId && (
                 <div className="h-full flex items-center justify-center text-slate-400 dark:text-slate-600 text-sm py-8">
@@ -284,6 +286,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                   isMenuOpen={openActivityMenuId === deal.id}
                   setOpenMenuId={setOpenActivityMenuId}
                   onQuickAddActivity={handleQuickAddActivity}
+                  customFieldDefinitions={customFieldDefinitions}
                   setLastMouseDownDealId={setLastMouseDownDealId}
                   onMoveToStage={onMoveDealToStage ? handleOpenMoveToStage : undefined}
                 />

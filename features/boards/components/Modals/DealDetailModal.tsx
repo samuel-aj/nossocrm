@@ -129,6 +129,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
   const [showLossReasonModal, setShowLossReasonModal] = useState(false);
   const [pendingLostStageId, setPendingLostStageId] = useState<string | null>(null);
   const [lossReasonOrigin, setLossReasonOrigin] = useState<'button' | 'stage'>('button');
+  const [isCustomFieldsEditMode, setIsCustomFieldsEditMode] = useState(false);
+  const [customFieldsDraft, setCustomFieldsDraft] = useState<Record<string, string>>({});
 
   // Tags suggestions (local for now; Settings UI writes to the same key)
   const [availableTags, setAvailableTags] = usePersistedState<string[]>('crm_tags', []);
@@ -155,7 +157,9 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
       setShowLossReasonModal(false);
       setPendingLostStageId(null);
       setLossReasonOrigin('button');
+      setIsCustomFieldsEditMode(false);
       setTagQuery('');
+      setCustomFieldsDraft({});
     }
   }, [isOpen, dealId]); // Depend on dealId to reset when switching deals
 
@@ -364,9 +368,75 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
     }
   };
 
-  const updateCustomField = (key: string, value: string | number | boolean) => {
-    const updatedFields = { ...deal.customFields, [key]: value };
-    updateDeal(deal.id, { customFields: updatedFields });
+  const isEmptyCustomFieldValue = (
+    fieldType: 'text' | 'number' | 'date' | 'select',
+    value: unknown
+  ) => {
+    if (value === undefined || value === null) return true;
+    if (fieldType === 'number') return value === '' || Number.isNaN(Number(value));
+    return String(value).trim() === '';
+  };
+
+  const getCustomFieldDisplayValue = (
+    fieldType: 'text' | 'number' | 'date' | 'select',
+    value: unknown
+  ) => {
+    if (isEmptyCustomFieldValue(fieldType, value)) return null;
+    return String(value);
+  };
+
+  const startCustomFieldsEditMode = () => {
+    const nextDraft: Record<string, string> = {};
+    for (const field of customFieldDefinitions) {
+      const current = deal.customFields?.[field.key];
+      nextDraft[field.key] = current == null ? '' : String(current);
+    }
+    setCustomFieldsDraft(nextDraft);
+    setIsCustomFieldsEditMode(true);
+  };
+
+  const saveCustomFieldsDraft = () => {
+    const nextCustomFields: Record<string, unknown> = { ...(deal.customFields || {}) };
+
+    for (const field of customFieldDefinitions) {
+      const raw = (customFieldsDraft[field.key] ?? '').toString();
+
+      if (field.type === 'number') {
+        const normalized = raw.trim().replace(',', '.');
+        if (normalized === '') {
+          nextCustomFields[field.key] = null;
+          continue;
+        }
+
+        const parsed = Number(normalized);
+        if (!Number.isFinite(parsed)) {
+          addToast(`Valor numérico inválido em "${field.label}".`, 'warning');
+          return;
+        }
+
+        nextCustomFields[field.key] = parsed;
+        continue;
+      }
+
+      if (field.type === 'date' || field.type === 'select') {
+        nextCustomFields[field.key] = raw.trim() === '' ? null : raw.trim();
+        continue;
+      }
+
+      nextCustomFields[field.key] = raw.trim() === '' ? null : raw;
+    }
+
+    updateDeal(deal.id, { customFields: nextCustomFields });
+    setIsCustomFieldsEditMode(false);
+    setCustomFieldsDraft({});
+  };
+
+  const tryOpenDatePicker = (input: HTMLInputElement) => {
+    try {
+      (input as HTMLInputElement & { showPicker?: () => void }).showPicker?.();
+    } catch {
+      // Some browsers can throw when picker is not allowed in current interaction context.
+    }
   };
 
   // dealActivities memoized above.
@@ -589,7 +659,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
 
           <div className="flex-1 flex flex-col md:flex-row overflow-hidden min-h-0">
             {/* Left Sidebar (Static Info + Custom Fields) */}
-            <div className="w-full md:w-1/3 border-b md:border-b-0 md:border-r border-slate-200 dark:border-white/5 p-4 sm:p-6 overflow-y-auto bg-white dark:bg-dark-card max-h-[38vh] md:max-h-none">
+            <div className="w-full md:w-1/3 border-b md:border-b-0 md:border-r border-slate-200 dark:border-white/5 p-4 sm:p-6 overflow-y-auto overflow-x-hidden scrollbar-custom bg-white dark:bg-dark-card max-h-[38vh] md:max-h-none">
               <div className="space-y-6">
                 <div>
                   <h3 className="text-xs font-bold text-slate-400 uppercase mb-2 flex items-center gap-2">
@@ -734,37 +804,86 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
 
                 {/* DYNAMIC CUSTOM FIELDS INPUTS */}
                 {customFieldDefinitions.length > 0 && (
-                  <div className="pt-4 border-t border-slate-100 dark:border-white/5">
-                    <h3 className="text-xs font-bold text-slate-400 uppercase mb-3">
-                      Campos Personalizados
-                    </h3>
-                    <div className="space-y-4">
+                  <div className="pt-4 pb-4 mb-4 border-t border-b border-slate-100 dark:border-white/5">
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <h3 className="text-xs font-bold text-slate-400 uppercase">
+                        Campos Personalizados
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (isCustomFieldsEditMode) {
+                            saveCustomFieldsDraft();
+                          } else {
+                            startCustomFieldsEditMode();
+                          }
+                        }}
+                        className="text-xs font-bold px-2.5 py-1 rounded-md border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
+                      >
+                        {isCustomFieldsEditMode ? 'Concluir' : 'Alterar'}
+                      </button>
+                    </div>
+                    <div className="space-y-2">
                       {customFieldDefinitions.map(field => (
-                        <div key={field.id}>
-                          <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
-                            {field.label}
-                          </label>
-                          {field.type === 'select' ? (
-                            <select
-                              value={deal.customFields?.[field.key] || ''}
-                              onChange={e => updateCustomField(field.key, e.target.value)}
-                              className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded px-2 py-1.5 text-sm dark:text-white focus:ring-1 focus:ring-primary-500 outline-none"
-                            >
-                              <option value="">Selecione...</option>
-                              {field.options?.map(opt => (
-                                <option key={opt} value={opt}>
-                                  {opt}
-                                </option>
-                              ))}
-                            </select>
-                          ) : (
-                            <input
-                              type={field.type}
-                              value={deal.customFields?.[field.key] || ''}
-                              onChange={e => updateCustomField(field.key, e.target.value)}
-                              className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded px-2 py-1.5 text-sm dark:text-white focus:ring-1 focus:ring-primary-500 outline-none"
-                            />
-                          )}
+                        <div
+                          key={field.id}
+                          className="py-1.5"
+                        >
+                          <div className="flex min-w-0 items-start justify-between gap-3 text-sm">
+                            <span className="min-w-0 flex-1 text-slate-500 whitespace-nowrap truncate" title={field.label}>
+                              {field.label}
+                            </span>
+
+                            {isCustomFieldsEditMode ? (
+                              <div className="w-[50%] min-w-0">
+                                {field.type === 'select' ? (
+                                  <select
+                                    value={customFieldsDraft[field.key] ?? ''}
+                                    onChange={e =>
+                                      setCustomFieldsDraft(prev => ({ ...prev, [field.key]: e.target.value }))
+                                    }
+                                    className="w-full min-w-0 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-sm dark:text-white focus:ring-2 focus:ring-primary-500 outline-none"
+                                  >
+                                    <option value="">Selecione...</option>
+                                    {field.options?.map(opt => (
+                                      <option key={opt} value={opt}>
+                                        {opt}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <input
+                                    type={field.type}
+                                    value={customFieldsDraft[field.key] ?? ''}
+                                    onChange={e =>
+                                      setCustomFieldsDraft(prev => ({ ...prev, [field.key]: e.target.value }))
+                                    }
+                                    onClick={e => {
+                                      if (field.type === 'date') {
+                                        tryOpenDatePicker(e.currentTarget);
+                                      }
+                                    }}
+                                    className="w-full min-w-0 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-sm dark:text-white focus:ring-2 focus:ring-primary-500 outline-none"
+                                  />
+                                )}
+                              </div>
+                            ) : (
+                              <p className="min-w-0 w-[50%] text-right text-sm text-slate-900 dark:text-white break-words">
+                                {(() => {
+                                  const value = deal.customFields?.[field.key];
+                                  const displayValue = getCustomFieldDisplayValue(field.type, value);
+                                  if (!displayValue) {
+                                    return (
+                                      <span className="italic text-slate-500 dark:text-slate-400">
+                                        Campo vazio
+                                      </span>
+                                    );
+                                  }
+                                  return displayValue;
+                                })()}
+                              </p>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -798,7 +917,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-6 bg-slate-50/30 dark:bg-black/10">
+              <div className="flex-1 overflow-y-auto scrollbar-custom p-6 bg-slate-50/30 dark:bg-black/10">
                 {activeTab === 'timeline' && (
                   <div className="space-y-6">
                     <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-4 shadow-sm">

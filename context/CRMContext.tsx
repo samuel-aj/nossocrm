@@ -203,7 +203,7 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     loading: dealsLoading,
     error: dealsError,
     addDeal: addDealState,
-    updateDeal,
+    updateDeal: updateDealState,
     updateDealStatus,
     deleteDeal,
     addItemToDeal,
@@ -308,6 +308,51 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
   // Local UI State
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [optimisticDealOverrides, setOptimisticDealOverrides] = useState<Record<string, Partial<Deal>>>({});
+
+  useEffect(() => {
+    const rawDealsById = new Map(rawDeals.map((deal) => [deal.id, deal]));
+
+    setOptimisticDealOverrides((prev) => {
+      let changed = false;
+      const next: Record<string, Partial<Deal>> = {};
+
+      for (const [dealId, override] of Object.entries(prev)) {
+        const persisted = rawDealsById.get(dealId);
+        if (!persisted) {
+          changed = true;
+          continue;
+        }
+
+        const stillPending = Object.entries(override).some(([key, value]) => {
+          const persistedValue = (persisted as unknown as Record<string, unknown>)[key];
+          return JSON.stringify(persistedValue) !== JSON.stringify(value);
+        });
+
+        if (stillPending) {
+          next[dealId] = override;
+        } else {
+          changed = true;
+        }
+      }
+
+      return changed ? next : prev;
+    });
+  }, [rawDeals]);
+
+  const updateDeal = useCallback(async (id: string, updates: Partial<Deal>) => {
+    const optimisticTimestamp = new Date().toISOString();
+    setOptimisticDealOverrides((prev) => ({
+      ...prev,
+      [id]: {
+        ...(prev[id] || {}),
+        ...updates,
+        updatedAt: optimisticTimestamp,
+      },
+    }));
+
+    await updateDealState(id, updates);
+  }, [updateDealState]);
 
   // Aggregate loading and error states
   const loading = dealsLoading || contactsLoading || companiesLoading || activitiesLoading || boardsLoading || settingsLoading;
@@ -315,7 +360,11 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
   // View Projection: deals with company/contact names
   const deals: DealView[] = useMemo(() => {
-    return rawDeals.map(deal => {
+    return rawDeals.map(baseDeal => {
+      const deal = optimisticDealOverrides[baseDeal.id]
+        ? { ...baseDeal, ...optimisticDealOverrides[baseDeal.id] }
+        : baseDeal;
+
       // Find the stage label from the board stages
       const board = boards.find(b => b.id === deal.boardId);
       const stage = board?.stages?.find(s => s.id === deal.status);
@@ -335,7 +384,7 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         } : deal.owner
       };
     });
-  }, [rawDeals, companyMap, contactMap, boards, profile, user]);
+  }, [rawDeals, optimisticDealOverrides, companyMap, contactMap, boards, profile, user]);
 
   // Update contact stage helper
   const updateContactStage = useCallback(async (id: string, stage: string) => {
@@ -790,7 +839,7 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       return stagnantDeals.length;
     }
     return 0;
-  }, [rawDeals, activities, addActivity, getBoardById]);
+  }, [rawDeals, optimisticDealOverrides, activities, addActivity, getBoardById]);
 
   // Build the context value
   const value: CRMContextType = useMemo(

@@ -210,7 +210,7 @@ export const KanbanList: React.FC<KanbanListProps> = ({
 
   return (
     <div className="h-full overflow-hidden glass rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
-      <div className="h-full overflow-auto">
+      <div className="h-full overflow-auto scrollbar-custom">
         <table className="w-full text-left text-sm border-collapse">
           <thead className="bg-slate-50/80 dark:bg-white/5 border-b border-slate-200 dark:border-white/5 sticky top-0 z-10 backdrop-blur-sm">
             <tr>

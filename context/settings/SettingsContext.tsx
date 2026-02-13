@@ -21,6 +21,9 @@ const DEFAULT_LIFECYCLE_STAGES: LifecycleStage[] = [
   { id: 'OTHER', name: 'Outros / Perdidos', color: 'bg-slate-500', order: 4, isDefault: true },
 ];
 
+const CUSTOM_FIELDS_STORAGE_KEY = 'crm_custom_fields';
+const TAGS_STORAGE_KEY = 'crm_tags';
+
 interface AIConfig {
   provider: 'google' | 'openai' | 'anthropic';
   apiKey: string;
@@ -118,6 +121,7 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [customFieldDefinitions, setCustomFieldDefinitions] = useState<CustomFieldDefinition[]>([]);
   const [availableTags, setAvailableTags] = useState<string[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [localSettingsHydrated, setLocalSettingsHydrated] = useState(false);
 
   const refreshProducts = useCallback(async () => {
     try {
@@ -267,6 +271,43 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
   useEffect(() => {
     fetchSettings();
   }, [fetchSettings]);
+
+  // Hydrate temporary local settings (custom fields/tags) until migration to Supabase.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    try {
+      const rawFields = window.localStorage.getItem(CUSTOM_FIELDS_STORAGE_KEY);
+      if (rawFields) {
+        const parsed = JSON.parse(rawFields) as CustomFieldDefinition[];
+        if (Array.isArray(parsed)) setCustomFieldDefinitions(parsed);
+      }
+    } catch {
+      // ignore malformed local storage payload
+    }
+
+    try {
+      const rawTags = window.localStorage.getItem(TAGS_STORAGE_KEY);
+      if (rawTags) {
+        const parsed = JSON.parse(rawTags) as string[];
+        if (Array.isArray(parsed)) setAvailableTags(parsed);
+      }
+    } catch {
+      // ignore malformed local storage payload
+    }
+
+    setLocalSettingsHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !localSettingsHydrated) return;
+    window.localStorage.setItem(CUSTOM_FIELDS_STORAGE_KEY, JSON.stringify(customFieldDefinitions));
+  }, [customFieldDefinitions, localSettingsHydrated]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !localSettingsHydrated) return;
+    window.localStorage.setItem(TAGS_STORAGE_KEY, JSON.stringify(availableTags));
+  }, [availableTags, localSettingsHydrated]);
 
   // Lazy-load AI feature flags only when needed (settings/ai or global AI UI).
   useEffect(() => {

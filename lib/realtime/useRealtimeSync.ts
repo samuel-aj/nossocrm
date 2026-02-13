@@ -697,7 +697,9 @@ export function useRealtimeSync(
         }
         // #endregion
       } else if (status === 'CHANNEL_ERROR') {
-        console.error(`[Realtime] Channel error for ${channelName}`);
+        // Realtime channel errors can happen transiently (network/auth refresh) and are usually recovered automatically.
+        // Use warn (not error) to avoid noisy dev overlays while still keeping diagnostics.
+        console.warn(`[Realtime] Channel error for ${channelName}`);
         // #region agent log
         if (process.env.NODE_ENV !== 'production') {
           const logData = { channelName, tables: tableList.join(','), status: 'CHANNEL_ERROR' };
