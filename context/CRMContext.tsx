@@ -266,9 +266,9 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     reorderLifecycleStages,
     products,
     customFieldDefinitions,
-    addCustomField,
+    addCustomField: addCustomFieldState,
     updateCustomField,
-    removeCustomField,
+    removeCustomField: removeCustomFieldState,
     availableTags,
     addTag,
     removeTag,
@@ -309,6 +309,7 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // Local UI State
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [optimisticDealOverrides, setOptimisticDealOverrides] = useState<Record<string, Partial<Deal>>>({});
+  const [optimisticCreatedDeals, setOptimisticCreatedDeals] = useState<Record<string, Deal>>({});
 
   useEffect(() => {
     const rawDealsById = new Map(rawDeals.map((deal) => [deal.id, deal]));
@@ -340,6 +341,22 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     });
   }, [rawDeals]);
 
+  useEffect(() => {
+    const rawDealIds = new Set(rawDeals.map((deal) => deal.id));
+    setOptimisticCreatedDeals((prev) => {
+      let changed = false;
+      const next: Record<string, Deal> = {};
+      for (const [id, deal] of Object.entries(prev)) {
+        if (rawDealIds.has(id)) {
+          changed = true;
+          continue;
+        }
+        next[id] = deal;
+      }
+      return changed ? next : prev;
+    });
+  }, [rawDeals]);
+
   const updateDeal = useCallback(async (id: string, updates: Partial<Deal>) => {
     const optimisticTimestamp = new Date().toISOString();
     setOptimisticDealOverrides((prev) => ({
@@ -354,13 +371,58 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     await updateDealState(id, updates);
   }, [updateDealState]);
 
+  const clearCustomFieldDataByKey = useCallback(async (fieldKey: string) => {
+    const dealsWithField = rawDeals.filter((deal) =>
+      Object.prototype.hasOwnProperty.call(deal.customFields || {}, fieldKey)
+    );
+    if (dealsWithField.length === 0) return;
+
+    const optimisticTimestamp = new Date().toISOString();
+    setOptimisticDealOverrides((prev) => {
+      const next = { ...prev };
+      for (const deal of dealsWithField) {
+        const nextCustomFields = { ...(deal.customFields || {}) };
+        delete nextCustomFields[fieldKey];
+        next[deal.id] = {
+          ...(next[deal.id] || {}),
+          customFields: nextCustomFields,
+          updatedAt: optimisticTimestamp,
+        };
+      }
+      return next;
+    });
+
+    await Promise.allSettled(
+      dealsWithField.map((deal) => {
+        const nextCustomFields = { ...(deal.customFields || {}) };
+        delete nextCustomFields[fieldKey];
+        return updateDealState(deal.id, { customFields: nextCustomFields });
+      })
+    );
+  }, [rawDeals, updateDealState]);
+
+  const addCustomField = useCallback((field: Omit<CustomFieldDefinition, 'id'>) => {
+    addCustomFieldState(field);
+    // If a field key is re-used, ensure stale values don't auto-populate the new field.
+    void clearCustomFieldDataByKey(field.key);
+  }, [addCustomFieldState, clearCustomFieldDataByKey]);
+
+  const removeCustomField = useCallback((id: string) => {
+    const fieldKey = customFieldDefinitions.find((field) => field.id === id)?.key;
+    removeCustomFieldState(id);
+    if (fieldKey) {
+      // Remove persisted values from all deals when definition is deleted.
+      void clearCustomFieldDataByKey(fieldKey);
+    }
+  }, [customFieldDefinitions, removeCustomFieldState, clearCustomFieldDataByKey]);
+
   // Aggregate loading and error states
   const loading = dealsLoading || contactsLoading || companiesLoading || activitiesLoading || boardsLoading || settingsLoading;
   const error = dealsError || contactsError || companiesError || activitiesError || boardsError || settingsError;
 
   // View Projection: deals with company/contact names
   const deals: DealView[] = useMemo(() => {
-    return rawDeals.map(baseDeal => {
+    const fromRaw = rawDeals.map(baseDeal => {
       const deal = optimisticDealOverrides[baseDeal.id]
         ? { ...baseDeal, ...optimisticDealOverrides[baseDeal.id] }
         : baseDeal;
@@ -384,7 +446,31 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         } : deal.owner
       };
     });
-  }, [rawDeals, optimisticDealOverrides, companyMap, contactMap, boards, profile, user]);
+
+    const optimisticOnly = Object.values(optimisticCreatedDeals)
+      .filter((d) => !rawDeals.some((rd) => rd.id === d.id))
+      .map((deal) => {
+        const board = boards.find(b => b.id === deal.boardId);
+        const stage = board?.stages?.find(s => s.id === deal.status);
+
+        return {
+          ...deal,
+          companyName: deal.companyId ? companyMap[deal.companyId]?.name : undefined,
+          clientCompanyName: (deal.clientCompanyId || deal.companyId)
+            ? companyMap[(deal.clientCompanyId || deal.companyId) as string]?.name
+            : undefined,
+          contactName: deal.contactId ? (contactMap[deal.contactId]?.name || 'Sem Contato') : 'Sem Contato',
+          contactEmail: deal.contactId ? (contactMap[deal.contactId]?.email || '') : '',
+          stageLabel: stage?.label || 'Desconhecido',
+          owner: (deal.ownerId === profile?.id || deal.ownerId === user?.id) ? {
+            name: profile?.nickname || profile?.first_name || (user?.email?.split('@')[0]) || 'Eu',
+            avatar: profile?.avatar_url || ''
+          } : deal.owner
+        } as DealView;
+      });
+
+    return [...optimisticOnly, ...fromRaw];
+  }, [rawDeals, optimisticDealOverrides, optimisticCreatedDeals, companyMap, contactMap, boards, profile, user]);
 
   // Update contact stage helper
   const updateContactStage = useCallback(async (id: string, stage: string) => {
@@ -449,6 +535,10 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
           [...queryKeys.deals.lists(), 'view'],
           (old = []) => [optimisticDealView, ...old]
         );
+        setOptimisticCreatedDeals((prev) => ({
+          ...prev,
+          [optimisticTempId]: optimisticDealView as unknown as Deal,
+        }));
         
         // #region agent log
         if (process.env.NODE_ENV !== 'production') {
@@ -584,12 +674,24 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
               return already ? withoutTemp : [createdDealView, ...withoutTemp];
             }
           );
+          setOptimisticCreatedDeals((prev) => {
+            const next = { ...prev };
+            delete next[optimisticTempId];
+            next[createdDeal.id] = createdDeal;
+            return next;
+          });
         } else {
           // Failed to create: remove optimistic item
           queryClient.setQueryData<DealView[]>(
             [...queryKeys.deals.lists(), 'view'],
             (old = []) => old.filter((d) => d.id !== optimisticTempId)
           );
+          setOptimisticCreatedDeals((prev) => {
+            if (!prev[optimisticTempId]) return prev;
+            const next = { ...prev };
+            delete next[optimisticTempId];
+            return next;
+          });
         }
       } catch (e) {
         // #region agent log

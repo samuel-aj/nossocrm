@@ -59,6 +59,8 @@ export const useDeals = (filters?: DealsFilters) => {
       return deals;
     },
     staleTime: 2 * 60 * 1000, // 2 minutes
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     enabled: !authLoading && !!user, // Only fetch when auth is ready
   });
 };
@@ -130,6 +132,8 @@ export const useDealsView = (filters?: DealsFilters) => {
       return enrichedDeals;
     },
     staleTime: 2 * 60 * 1000, // 2 minutes
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     enabled: !authLoading && !!user, // Only fetch when auth is ready
   });
 };
@@ -204,6 +208,8 @@ export const useDealsByBoard = (boardId: string) => {
       return data.filter(d => d.boardId === boardId);
     },
     staleTime: 2 * 60 * 1000, // 2 minutes (same as useDealsView)
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     enabled: !authLoading && !!user && !!boardId && !boardId.startsWith('temp-'),
   });
 };

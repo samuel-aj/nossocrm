@@ -83,7 +83,7 @@ export const CustomFieldsManager: React.FC<CustomFieldsManagerProps> = ({
               type="text"
               value={newFieldLabel}
               onChange={(e) => setNewFieldLabel(e.target.value)}
-              placeholder="Ex: Data de Validade"
+              placeholder="Ex: Data de Contrato"
               className="w-full bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
             />
           </div>
