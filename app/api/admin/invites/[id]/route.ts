@@ -35,7 +35,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
     .single();
 
   if (meError || !me?.organization_id) return json({ error: 'Profile not found' }, 404);
-  if (me.role !== 'admin') return json({ error: 'Forbidden' }, 403);
+  if (me.role !== 'admin' && me.role !== 'super_admin') return json({ error: 'Forbidden' }, 403);
 
   const { error } = await supabase
     .from('organization_invites')

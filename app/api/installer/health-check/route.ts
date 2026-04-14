@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
-import { Client } from 'pg';
+import type { Client as PgClient } from 'pg';
 import {
   extractProjectRefFromSupabaseUrl,
   getSupabaseProject,
@@ -60,8 +60,10 @@ async function checkDatabaseHealth(dbUrl: string): Promise<{
   hasAdmin: boolean;
   hasOrganization: boolean;
 }> {
+  const pg = await import('pg');
+  const Client = pg.default?.Client ?? pg.Client;
   const normalizedDbUrl = stripSslModeParam(dbUrl);
-  const client = new Client({
+  const client: PgClient = new Client({
     connectionString: normalizedDbUrl,
     ssl: needsSsl(dbUrl) ? { rejectUnauthorized: false } : undefined,
     connectionTimeoutMillis: 10_000,

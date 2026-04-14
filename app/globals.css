@@ -7,27 +7,27 @@
  * ======================================== */
 @theme {
   /* Font Families */
-  --font-sans: 'Inter', var(--font-inter), sans-serif;
-  --font-display: 'Space Grotesk', sans-serif;
-  --font-serif: 'Cinzel', serif;
+  --font-sans: 'Rubik', var(--font-sans), sans-serif;
+  --font-display: 'Rubik', sans-serif;
+  --font-serif: 'Rubik', serif;
 
-  /* Primary Colors */
-  --color-primary-50: #f0f9ff;
-  --color-primary-100: #e0f2fe;
-  --color-primary-200: #bae6fd;
-  --color-primary-300: #7dd3fc;
-  --color-primary-400: #38bdf8;
-  --color-primary-500: #0ea5e9;
-  --color-primary-600: #0284c7;
-  --color-primary-700: #0369a1;
-  --color-primary-800: #075985;
-  --color-primary-900: #0c4a6e;
+  /* Primary Colors — Roxo Anúncio Jurídico */
+  --color-primary-50:  oklch(0.97 0.02 293);
+  --color-primary-100: oklch(0.93 0.06 293);
+  --color-primary-200: oklch(0.86 0.10 293);
+  --color-primary-300: oklch(0.76 0.14 293);
+  --color-primary-400: oklch(0.64 0.19 293);
+  --color-primary-500: oklch(0.55 0.22 293);
+  --color-primary-600: oklch(0.48 0.23 293);
+  --color-primary-700: oklch(0.40 0.22 293);
+  --color-primary-800: oklch(0.30 0.18 293);
+  --color-primary-900: oklch(0.20 0.12 293);
 
-  /* Dark Theme Colors */
-  --color-dark-bg: #020617;
-  --color-dark-card: #0f172a;
-  --color-dark-border: #1e293b;
-  --color-dark-hover: #334155;
+  /* Dark Theme Colors — Purple tinted */
+  --color-dark-bg: oklch(0.10 0.05 293);
+  --color-dark-card: oklch(0.17 0.05 293);
+  --color-dark-border: oklch(0.27 0.08 293);
+  --color-dark-hover: oklch(0.25 0.08 293);
 }
 
 /* ========================================
@@ -118,12 +118,12 @@ html, body {
 .dark {
   color-scheme: dark;
 
-  /* Dark Mode - Deep Slate (OKLCH) */
-  --color-bg: oklch(11% 0.025 260);
-  --color-surface: oklch(15% 0.02 260);
-  --color-muted: oklch(22% 0.015 260);
-  --color-border: oklch(26% 0.012 260);
-  --color-border-subtle: oklch(22% 0.01 260 / 0.6);
+  /* Dark Mode - Deep Purple (Anúncio Jurídico) */
+  --color-bg: oklch(0.10 0.05 293);
+  --color-surface: oklch(0.15 0.05 293);
+  --color-muted: oklch(0.20 0.06 293);
+  --color-border: oklch(0.27 0.08 293);
+  --color-border-subtle: oklch(0.22 0.06 293 / 0.6);
 
   /* Status Colors - Dark Mode */
   --color-success: oklch(70% 0.17 145);

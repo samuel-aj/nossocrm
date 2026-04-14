@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { TrendingUp, Clock, Target, DollarSign, Trophy, Users, Download, Settings } from 'lucide-react';
+import { TrendingUp, Clock, Target, DollarSign, Trophy, Users, Download, Settings, ThumbsDown, UserX, CheckCircle2 } from 'lucide-react';
 import { useDashboardMetrics, PeriodFilter, COMPARISON_LABELS } from '../dashboard/hooks/useDashboardMetrics';
 import { PeriodFilterSelect } from '@/components/filters/PeriodFilterSelect';
-import { LazyRevenueTrendChart, ChartWrapper } from '@/components/charts';
+import { LazyStageConversionChart, ChartWrapper } from '@/components/charts';
 import { generateReportPDF } from './utils/generateReportPDF';
 import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
@@ -15,10 +15,11 @@ import { useAuth } from '@/context/AuthContext';
  */
 const ReportsPage: React.FC = () => {
   const router = useRouter();
-  const { boards } = useCRM();
+  const { boards, deals: allCrmDeals } = useCRM();
   const { profile } = useAuth();
   const [period, setPeriod] = useState<PeriodFilter>('this_month');
   const [selectedBoardId, setSelectedBoardId] = useState<string>('');
+  const [selectedOwnerId, setSelectedOwnerId] = useState<string>('');
 
   // Performance: avoid recomputing the "default board id" logic inside the effect.
   const defaultBoardId = useMemo(() => {
@@ -34,13 +35,23 @@ const ReportsPage: React.FC = () => {
     }
   }, [defaultBoardId, selectedBoardId]);
 
+  // Lista de vendedores únicos para o filtro
+  const ownersList = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const deal of allCrmDeals) {
+      if (deal.ownerId && deal.owner?.name) {
+        map.set(deal.ownerId, deal.owner.name);
+      }
+    }
+    return Array.from(map, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [allCrmDeals]);
+
   // Pegar o board selecionado para acessar a meta
   const selectedBoard = useMemo(() => {
     return boards.find(b => b.id === selectedBoardId);
   }, [boards, selectedBoardId]);
 
   const {
-    trendData,
     avgSalesCycle,
     fastestDeal,
     slowestDeal,
@@ -55,7 +66,7 @@ const ReportsPage: React.FC = () => {
     deals,
     changes,
     funnelData,
-  } = useDashboardMetrics(period, selectedBoardId);
+  } = useDashboardMetrics(period, selectedBoardId, selectedOwnerId || undefined);
 
   // Extrair meta do board selecionado
   const boardGoal = selectedBoard?.goal;
@@ -91,9 +102,9 @@ const ReportsPage: React.FC = () => {
   const formatGoalValue = useCallback((value: number) => {
     switch (goalType) {
       case 'currency':
-        if (value >= 1000000) return `$${(value / 1000000).toFixed(1)}M`;
-        if (value >= 1000) return `$${(value / 1000).toFixed(0)}k`;
-        return `$${value.toLocaleString()}`;
+        if (value >= 1000000) return `R$ ${(value / 1000000).toFixed(1)}M`;
+        if (value >= 1000) return `R$ ${(value / 1000).toFixed(0)}k`;
+        return `R$ ${value.toLocaleString('pt-BR')}`;
       case 'number':
         return value.toFixed(0);
       case 'percentage':
@@ -131,10 +142,38 @@ const ReportsPage: React.FC = () => {
 
   // Formatador de moeda
   const formatCurrency = useCallback((value: number) => {
-    if (value >= 1000000) return `$${(value / 1000000).toFixed(1)}M`;
-    if (value >= 1000) return `$${(value / 1000).toFixed(0)}k`;
-    return `$${value.toLocaleString()}`;
+    if (value >= 1000000) return `R$ ${(value / 1000000).toFixed(1)}M`;
+    if (value >= 1000) return `R$ ${(value / 1000).toFixed(0)}k`;
+    return `R$ ${value.toLocaleString('pt-BR')}`;
   }, []);
+
+  // Dados de conversão por etapa (funil acumulativo)
+  // Cada etapa conta os deals que estão nela + todos que já avançaram além dela + ganhos
+  const stageConversionData = useMemo(() => {
+    const wonCount = wonDeals.length;
+
+    const accumulated = funnelData.map((stage, i) => {
+      // Soma dos deals nesta etapa + todas posteriores + ganhos (que já saíram do funil)
+      let reachedCount = wonCount;
+      for (let j = i; j < funnelData.length; j++) {
+        reachedCount += funnelData[j].count;
+      }
+      return { ...stage, count: reachedCount };
+    });
+
+    return accumulated.map((stage, i) => {
+      const isLast = i === accumulated.length - 1;
+      return {
+        ...stage,
+        conversionRate: !isLast && stage.count > 0
+          ? (accumulated[i + 1].count / stage.count) * 100
+          : stage.count > 0
+            ? (wonCount / stage.count) * 100
+            : 0,
+        conversionLabel: isLast ? 'fecham' : 'avançam',
+      };
+    });
+  }, [funnelData, wonDeals.length]);
 
   const generatedBy = useMemo(() => {
     if (profile?.first_name && profile?.last_name) return `${profile.first_name} ${profile.last_name}`;
@@ -192,6 +231,18 @@ const ReportsPage: React.FC = () => {
           >
             {boards.map(board => (
               <option key={board.id} value={board.id}>{board.name}</option>
+            ))}
+          </select>
+
+          <select
+            value={selectedOwnerId}
+            onChange={(e) => setSelectedOwnerId(e.target.value)}
+            aria-label="Filtrar por Vendedor"
+            className="px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-medium text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="">Todos os vendedores</option>
+            {ownersList.map(owner => (
+              <option key={owner.id} value={owner.id}>{owner.name}</option>
             ))}
           </select>
 
@@ -338,22 +389,119 @@ const ReportsPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Loss Analysis */}
+      {lostDeals.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Loss by Category */}
+          <div className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2 mb-4">
+              <ThumbsDown className="text-red-500" size={20} />
+              Leads Perdidos
+            </h2>
+            {(() => {
+              const qualified = lostDeals.filter(d => d.lossCategory === 'qualified' || (!d.lossCategory && d.lossReason));
+              const disqualified = lostDeals.filter(d => d.lossCategory === 'disqualified');
+              const noCategory = lostDeals.filter(d => !d.lossCategory && !d.lossReason);
+              return (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-500/20">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 size={16} className="text-orange-500" />
+                      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Qualificados</span>
+                    </div>
+                    <span className="text-lg font-bold text-orange-600 dark:text-orange-400">{qualified.length}</span>
+                  </div>
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-500/20">
+                    <div className="flex items-center gap-2">
+                      <UserX size={16} className="text-red-500" />
+                      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Desqualificados</span>
+                    </div>
+                    <span className="text-lg font-bold text-red-600 dark:text-red-400">{disqualified.length}</span>
+                  </div>
+                  {noCategory.length > 0 && (
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10">
+                      <span className="text-sm font-medium text-slate-500">Sem classificação</span>
+                      <span className="text-lg font-bold text-slate-400">{noCategory.length}</span>
+                    </div>
+                  )}
+                  <div className="pt-2 border-t border-slate-200 dark:border-white/10 flex items-center justify-between">
+                    <span className="text-sm font-medium text-slate-500">Total perdidos</span>
+                    <span className="text-lg font-bold text-slate-900 dark:text-white">{lostDeals.length}</span>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Top Loss Reasons */}
+          <div className="lg:col-span-2 glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display mb-4">
+              Motivos de Perda / Desqualificação
+            </h2>
+            {(() => {
+              // Group all reasons with category info
+              const reasonMap = new Map<string, { count: number; qualified: number; disqualified: number }>();
+              for (const deal of lostDeals) {
+                const reason = deal.lossReason || 'Não informado';
+                const entry = reasonMap.get(reason) || { count: 0, qualified: 0, disqualified: 0 };
+                entry.count++;
+                if (deal.lossCategory === 'disqualified') entry.disqualified++;
+                else entry.qualified++;
+                reasonMap.set(reason, entry);
+              }
+              const sorted = [...reasonMap.entries()].sort((a, b) => b[1].count - a[1].count);
+              const maxCount = sorted[0]?.[1].count || 1;
+
+              return (
+                <div className="space-y-2">
+                  {sorted.map(([reason, data]) => (
+                    <div key={reason} className="group">
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-sm text-slate-700 dark:text-slate-300 truncate">{reason}</span>
+                          {data.disqualified > 0 && data.qualified === 0 && (
+                            <span className="text-[10px] px-1.5 py-0.5 bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 rounded font-bold shrink-0">DESQUAL.</span>
+                          )}
+                          {data.qualified > 0 && data.disqualified === 0 && (
+                            <span className="text-[10px] px-1.5 py-0.5 bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400 rounded font-bold shrink-0">QUALIF.</span>
+                          )}
+                        </div>
+                        <span className="text-sm font-bold text-slate-900 dark:text-white ml-2 shrink-0">{data.count}</span>
+                      </div>
+                      <div className="w-full bg-slate-100 dark:bg-white/5 rounded-full h-2">
+                        <div
+                          className="bg-red-500 h-2 rounded-full transition-all"
+                          style={{ width: `${(data.count / maxCount) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  {sorted.length === 0 && (
+                    <p className="text-sm text-slate-500 italic text-center py-4">Nenhum motivo registrado.</p>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
       {/* Bottom Grid - Charts & Leaderboard */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 flex-1 min-h-[250px]">
-        {/* Revenue Trend Chart */}
+        {/* Stage Conversion Chart */}
         <div className="lg:col-span-2 glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col h-full">
           <div className="flex justify-between items-center mb-2 shrink-0">
             <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display">
-              Tendência de Receita
+              Conversão por Etapa
             </h2>
             <span className="text-xs text-slate-500 bg-slate-100 dark:bg-white/5 px-2 py-1 rounded">
-              Últimos 6 Meses
+              Snapshot Atual
             </span>
           </div>
           <div className="flex-1 min-h-0 relative">
             <div className="absolute inset-0">
               <ChartWrapper height="100%">
-                <LazyRevenueTrendChart data={trendData} />
+                <LazyStageConversionChart data={stageConversionData} />
               </ChartWrapper>
             </div>
           </div>

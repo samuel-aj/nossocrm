@@ -7,7 +7,7 @@ import { LossReasonModal } from '@/components/ui/LossReasonModal';
 import { useMoveDealSimple } from '@/lib/query/hooks';
 import { FocusTrap, useFocusReturn } from '@/lib/a11y';
 import { Activity } from '@/types';
-import { usePersistedState } from '@/hooks/usePersistedState';
+
 import { useResponsiveMode } from '@/hooks/useResponsiveMode';
 import { DealSheet } from '../DealSheet';
 import {
@@ -34,6 +34,8 @@ import {
   Bot,
   Tag as TagIcon,
   Plus,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { StageProgressBar } from '../StageProgressBar';
 import { ActivityRow } from '@/features/activities/components/ActivityRow';
@@ -80,6 +82,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
     activeBoard,
     boards,
     lifecycleStages,
+    availableTags,
+    addTag,
   } = useCRM();
   const { profile } = useAuth();
   const { addToast } = useToast();
@@ -111,8 +115,16 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
   const [aiResult, setAiResult] = useState<{ suggestion: string; score: number } | null>(null);
   const [emailDraft, setEmailDraft] = useState<string | null>(null);
   const [newNote, setNewNote] = useState('');
-  const [activeTab, setActiveTab] = useState<'timeline' | 'products' | 'info'>('timeline');
+  const [activeTab, setActiveTab] = useState<'timeline' | 'activities' | 'notes' | 'products' | 'info'>('timeline');
   const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Quick activity creation from deal card
+  const [showQuickActivity, setShowQuickActivity] = useState(false);
+  const [quickActivityType, setQuickActivityType] = useState<'CALL' | 'MEETING' | 'EMAIL' | 'TASK'>('CALL');
+  const [quickActivityTitle, setQuickActivityTitle] = useState('');
+  const [quickActivityDate, setQuickActivityDate] = useState('');
+  const [quickActivityTime, setQuickActivityTime] = useState('');
+  const [quickActivityDesc, setQuickActivityDesc] = useState('');
 
   const [objection, setObjection] = useState('');
   const [objectionResponses, setObjectionResponses] = useState<string[]>([]);
@@ -132,9 +144,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
   const [isCustomFieldsEditMode, setIsCustomFieldsEditMode] = useState(false);
   const [customFieldsDraft, setCustomFieldsDraft] = useState<Record<string, string>>({});
 
-  // Tags suggestions (local for now; Settings UI writes to the same key)
-  const [availableTags, setAvailableTags] = usePersistedState<string[]>('crm_tags', []);
   const [tagQuery, setTagQuery] = useState('');
+  const [viewMode, setViewMode] = useState<'modal' | 'fullscreen'>('modal');
 
   const normalizeTag = (value: string) => value.trim().replace(/\s+/g, ' ');
   const tagsLower = useMemo(() => new Set((deal?.tags || []).map(t => t.toLowerCase())), [deal?.tags]);
@@ -184,11 +195,27 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
     return stage?.label;
   }, [deal?.status, dealBoard]);
 
-  // Performance: filter deal activities once per deal change (avoid filtering inside render).
+  // Filter & sort: open activities first (sorted by date desc), then completed ones below.
   const dealActivities = useMemo(() => {
     if (!deal) return [] as Activity[];
-    return activities.filter((a) => a.dealId === deal.id);
+    const filtered = activities.filter((a) => a.dealId === deal.id);
+    return filtered.sort((a, b) => {
+      // Open (not completed) first
+      if (a.completed !== b.completed) return a.completed ? 1 : -1;
+      // Within each group, newest first
+      return new Date(b.date).getTime() - new Date(a.date).getTime();
+    });
   }, [activities, deal]);
+
+  // Notes-only view for the Notas tab
+  const dealNotes = useMemo(() => {
+    return dealActivities.filter((a) => a.type === 'NOTE');
+  }, [dealActivities]);
+
+  // Activities-only (tasks, calls, meetings, emails — no notes/status changes)
+  const dealTaskActivities = useMemo(() => {
+    return dealActivities.filter((a) => a.type !== 'NOTE' && a.type !== 'STATUS_CHANGE');
+  }, [dealActivities]);
 
   if (!isOpen || !deal) return null;
 
@@ -201,9 +228,9 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
     const nextTags = [...current, next];
     updateDeal(deal.id, { tags: nextTags });
 
-    // Keep suggestions up-to-date (case-insensitive)
+    // Keep global tag list in sync via CRMContext
     if (!availableTagsLower.has(next.toLowerCase())) {
-      setAvailableTags(prev => [...(prev || []), next]);
+      addTag(next);
     }
 
     setTagQuery('');
@@ -297,6 +324,30 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
     setNewNote('');
   };
 
+  const handleAddQuickActivity = () => {
+    if (!quickActivityTitle.trim() || !quickActivityDate || !quickActivityTime) return;
+
+    const dateTime = new Date(`${quickActivityDate}T${quickActivityTime}`).toISOString();
+    const newActivity: Activity = {
+      id: crypto.randomUUID(),
+      dealId: deal.id,
+      dealTitle: deal.title,
+      type: quickActivityType,
+      title: quickActivityTitle,
+      description: quickActivityDesc || undefined,
+      date: dateTime,
+      user: { name: 'Eu', avatar: 'https://i.pravatar.cc/150?u=me' },
+      completed: false,
+    };
+
+    addActivity(newActivity);
+    setQuickActivityTitle('');
+    setQuickActivityDate('');
+    setQuickActivityTime('');
+    setQuickActivityDesc('');
+    setShowQuickActivity(false);
+  };
+
   const handleAddProduct = () => {
     if (!selectedProductId) return;
     // Performance: O(1) lookup instead of scanning all products.
@@ -369,19 +420,30 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
   };
 
   const isEmptyCustomFieldValue = (
-    fieldType: 'text' | 'number' | 'date' | 'select',
+    fieldType: string,
     value: unknown
   ) => {
     if (value === undefined || value === null) return true;
-    if (fieldType === 'number') return value === '' || Number.isNaN(Number(value));
+    if (fieldType === 'number' || fieldType === 'currency') return value === '' || Number.isNaN(Number(value));
+    if (fieldType === 'multiselect') return !Array.isArray(value) || value.length === 0;
     return String(value).trim() === '';
   };
 
   const getCustomFieldDisplayValue = (
-    fieldType: 'text' | 'number' | 'date' | 'select',
+    fieldType: string,
     value: unknown
   ) => {
     if (isEmptyCustomFieldValue(fieldType, value)) return null;
+    if (fieldType === 'currency') {
+      return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    }
+    if (fieldType === 'date' && typeof value === 'string') {
+      const d = new Date(value + 'T00:00:00');
+      return isNaN(d.getTime()) ? value : d.toLocaleDateString('pt-BR');
+    }
+    if (fieldType === 'multiselect' && Array.isArray(value)) {
+      return value.join(', ');
+    }
     return String(value);
   };
 
@@ -389,6 +451,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
     const nextDraft: Record<string, string> = {};
     for (const field of customFieldDefinitions) {
       const current = deal.customFields?.[field.key];
+      // multiselect is handled directly via deal.customFields (array), skip draft
+      if (field.type === 'multiselect') continue;
       nextDraft[field.key] = current == null ? '' : String(current);
     }
     setCustomFieldsDraft(nextDraft);
@@ -401,7 +465,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
     for (const field of customFieldDefinitions) {
       const raw = (customFieldsDraft[field.key] ?? '').toString();
 
-      if (field.type === 'number') {
+      if (field.type === 'number' || field.type === 'currency') {
         const normalized = raw.trim().replace(',', '.');
         if (normalized === '') {
           nextCustomFields[field.key] = null;
@@ -415,6 +479,13 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
         }
 
         nextCustomFields[field.key] = parsed;
+        continue;
+      }
+
+      if (field.type === 'multiselect') {
+        // Stored as array from checkboxes, read from draft as comma-separated or from deal
+        const current = deal.customFields?.[field.key];
+        nextCustomFields[field.key] = Array.isArray(current) ? current : [];
         continue;
       }
 
@@ -454,7 +525,9 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
       className={
         isMobile
           ? 'bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 w-full h-[100dvh] flex flex-col overflow-hidden pb-[var(--app-safe-area-bottom,0px)]'
-          : 'bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200'
+          : viewMode === 'fullscreen'
+            ? 'bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-none w-full h-full flex flex-col overflow-hidden animate-in zoom-in-95 duration-200'
+            : 'bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200'
       }
     >
           {/* HEADER (Stage Bar + Won/Lost) */}
@@ -611,6 +684,13 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
                   </>
                 )}
                 <button
+                  onClick={() => setViewMode(v => v === 'modal' ? 'fullscreen' : 'modal')}
+                  className="ml-2 text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+                  title={viewMode === 'modal' ? 'Tela cheia' : 'Modo modal'}
+                >
+                  {viewMode === 'modal' ? <Maximize2 size={20} /> : <Minimize2 size={20} />}
+                </button>
+                <button
                   onClick={() => setDeleteId(deal.id)}
                   className="ml-2 text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
                   title="Excluir Negócio"
@@ -702,27 +782,137 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
                   </div>
                 </div>
 
-                <div className="pt-4 border-t border-slate-100 dark:border-white/5">
-                  <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Detalhes</h3>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-500">Prioridade</span>
-                      <span className="text-slate-900 dark:text-white">
-                        {formatPriorityPtBr(deal.priority)}
-                      </span>
+                {/* DYNAMIC CUSTOM FIELDS INPUTS */}
+                {customFieldDefinitions.length > 0 && (
+                  <div className="pt-4 border-t border-slate-100 dark:border-white/5">
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <h3 className="text-xs font-bold text-slate-400 uppercase">
+                        Campos Personalizados
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (isCustomFieldsEditMode) {
+                            saveCustomFieldsDraft();
+                          } else {
+                            startCustomFieldsEditMode();
+                          }
+                        }}
+                        className="text-xs font-bold px-2.5 py-1 rounded-md border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
+                      >
+                        {isCustomFieldsEditMode ? 'Concluir' : 'Alterar'}
+                      </button>
                     </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-500">Criado em</span>
-                      <span className="text-slate-900 dark:text-white">
-                        {PT_BR_DATE_FORMATTER.format(new Date(deal.createdAt))}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-500">Probabilidade</span>
-                      <span className="text-slate-900 dark:text-white">{deal.probability}%</span>
+                    <div className="space-y-2">
+                      {customFieldDefinitions.map(field => (
+                        <div
+                          key={field.id}
+                          className="py-1.5"
+                        >
+                          <div className="flex min-w-0 items-start justify-between gap-3 text-sm">
+                            <span className="min-w-0 flex-1 text-slate-500 whitespace-nowrap truncate" title={field.label}>
+                              {field.label}
+                            </span>
+
+                            {isCustomFieldsEditMode ? (
+                              <div className="w-[50%] min-w-0">
+                                {field.type === 'select' ? (
+                                  <select
+                                    value={customFieldsDraft[field.key] ?? ''}
+                                    onChange={e =>
+                                      setCustomFieldsDraft(prev => ({ ...prev, [field.key]: e.target.value }))
+                                    }
+                                    className="w-full min-w-0 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-sm dark:text-white focus:ring-2 focus:ring-primary-500 outline-none"
+                                  >
+                                    <option value="">Selecione...</option>
+                                    {field.options?.map(opt => (
+                                      <option key={opt} value={opt}>
+                                        {opt}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : field.type === 'multiselect' ? (
+                                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                                    {field.options?.map(opt => {
+                                      const current: string[] = Array.isArray(deal.customFields?.[field.key])
+                                        ? deal.customFields[field.key]
+                                        : [];
+                                      const isChecked = current.includes(opt);
+                                      return (
+                                        <label key={opt} className="flex items-center gap-2 cursor-pointer text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5 px-2 py-1 rounded">
+                                          <input
+                                            type="checkbox"
+                                            checked={isChecked}
+                                            onChange={() => {
+                                              const prev = Array.isArray(deal.customFields?.[field.key])
+                                                ? [...deal.customFields[field.key]]
+                                                : [];
+                                              const next = isChecked
+                                                ? prev.filter((v: string) => v !== opt)
+                                                : [...prev, opt];
+                                              updateDeal(deal.id, {
+                                                customFields: { ...(deal.customFields || {}), [field.key]: next }
+                                              });
+                                            }}
+                                            className="w-3.5 h-3.5 text-primary-600 rounded border-slate-300 focus:ring-primary-500"
+                                          />
+                                          {opt}
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                ) : field.type === 'currency' ? (
+                                  <div className="relative">
+                                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-slate-400">R$</span>
+                                    <input
+                                      type="text"
+                                      inputMode="decimal"
+                                      value={customFieldsDraft[field.key] ?? ''}
+                                      onChange={e =>
+                                        setCustomFieldsDraft(prev => ({ ...prev, [field.key]: e.target.value }))
+                                      }
+                                      placeholder="0,00"
+                                      className="w-full min-w-0 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg pl-8 pr-2.5 py-1.5 text-sm dark:text-white focus:ring-2 focus:ring-primary-500 outline-none"
+                                    />
+                                  </div>
+                                ) : (
+                                  <input
+                                    type={field.type === 'date' ? 'date' : field.type}
+                                    value={customFieldsDraft[field.key] ?? ''}
+                                    onChange={e =>
+                                      setCustomFieldsDraft(prev => ({ ...prev, [field.key]: e.target.value }))
+                                    }
+                                    onClick={e => {
+                                      if (field.type === 'date') {
+                                        tryOpenDatePicker(e.currentTarget);
+                                      }
+                                    }}
+                                    className="w-full min-w-0 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-sm dark:text-white focus:ring-2 focus:ring-primary-500 outline-none"
+                                  />
+                                )}
+                              </div>
+                            ) : (
+                              <p className="min-w-0 w-[50%] text-right text-sm text-slate-900 dark:text-white break-words">
+                                {(() => {
+                                  const value = deal.customFields?.[field.key];
+                                  const displayValue = getCustomFieldDisplayValue(field.type, value);
+                                  if (!displayValue) {
+                                    return (
+                                      <span className="italic text-slate-500 dark:text-slate-400">
+                                        Campo vazio
+                                      </span>
+                                    );
+                                  }
+                                  return displayValue;
+                                })()}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                </div>
+                )}
 
                 {/* TAGS */}
                 <div className="pt-4 border-t border-slate-100 dark:border-white/5">
@@ -802,93 +992,27 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
                   </div>
                 </div>
 
-                {/* DYNAMIC CUSTOM FIELDS INPUTS */}
-                {customFieldDefinitions.length > 0 && (
-                  <div className="pt-4 pb-4 mb-4 border-t border-b border-slate-100 dark:border-white/5">
-                    <div className="mb-3 flex items-center justify-between gap-2">
-                      <h3 className="text-xs font-bold text-slate-400 uppercase">
-                        Campos Personalizados
-                      </h3>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (isCustomFieldsEditMode) {
-                            saveCustomFieldsDraft();
-                          } else {
-                            startCustomFieldsEditMode();
-                          }
-                        }}
-                        className="text-xs font-bold px-2.5 py-1 rounded-md border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
-                      >
-                        {isCustomFieldsEditMode ? 'Concluir' : 'Alterar'}
-                      </button>
+                <div className="pt-4 border-t border-slate-100 dark:border-white/5">
+                  <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Detalhes</h3>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-500">Prioridade</span>
+                      <span className="text-slate-900 dark:text-white">
+                        {formatPriorityPtBr(deal.priority)}
+                      </span>
                     </div>
-                    <div className="space-y-2">
-                      {customFieldDefinitions.map(field => (
-                        <div
-                          key={field.id}
-                          className="py-1.5"
-                        >
-                          <div className="flex min-w-0 items-start justify-between gap-3 text-sm">
-                            <span className="min-w-0 flex-1 text-slate-500 whitespace-nowrap truncate" title={field.label}>
-                              {field.label}
-                            </span>
-
-                            {isCustomFieldsEditMode ? (
-                              <div className="w-[50%] min-w-0">
-                                {field.type === 'select' ? (
-                                  <select
-                                    value={customFieldsDraft[field.key] ?? ''}
-                                    onChange={e =>
-                                      setCustomFieldsDraft(prev => ({ ...prev, [field.key]: e.target.value }))
-                                    }
-                                    className="w-full min-w-0 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-sm dark:text-white focus:ring-2 focus:ring-primary-500 outline-none"
-                                  >
-                                    <option value="">Selecione...</option>
-                                    {field.options?.map(opt => (
-                                      <option key={opt} value={opt}>
-                                        {opt}
-                                      </option>
-                                    ))}
-                                  </select>
-                                ) : (
-                                  <input
-                                    type={field.type}
-                                    value={customFieldsDraft[field.key] ?? ''}
-                                    onChange={e =>
-                                      setCustomFieldsDraft(prev => ({ ...prev, [field.key]: e.target.value }))
-                                    }
-                                    onClick={e => {
-                                      if (field.type === 'date') {
-                                        tryOpenDatePicker(e.currentTarget);
-                                      }
-                                    }}
-                                    className="w-full min-w-0 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-sm dark:text-white focus:ring-2 focus:ring-primary-500 outline-none"
-                                  />
-                                )}
-                              </div>
-                            ) : (
-                              <p className="min-w-0 w-[50%] text-right text-sm text-slate-900 dark:text-white break-words">
-                                {(() => {
-                                  const value = deal.customFields?.[field.key];
-                                  const displayValue = getCustomFieldDisplayValue(field.type, value);
-                                  if (!displayValue) {
-                                    return (
-                                      <span className="italic text-slate-500 dark:text-slate-400">
-                                        Campo vazio
-                                      </span>
-                                    );
-                                  }
-                                  return displayValue;
-                                })()}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      ))}
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-500">Criado em</span>
+                      <span className="text-slate-900 dark:text-white">
+                        {PT_BR_DATE_FORMATTER.format(new Date(deal.createdAt))}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-500">Probabilidade</span>
+                      <span className="text-slate-900 dark:text-white">{deal.probability}%</span>
                     </div>
                   </div>
-                )}
+                </div>
               </div>
             </div>
 
@@ -901,6 +1025,18 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
                     className={`text-sm font-bold h-14 border-b-2 transition-colors ${activeTab === 'timeline' ? 'border-primary-500 text-primary-600 dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
                   >
                     Timeline
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('activities')}
+                    className={`text-sm font-bold h-14 border-b-2 transition-colors ${activeTab === 'activities' ? 'border-primary-500 text-primary-600 dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
+                  >
+                    Atividades
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('notes')}
+                    className={`text-sm font-bold h-14 border-b-2 transition-colors ${activeTab === 'notes' ? 'border-primary-500 text-primary-600 dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
+                  >
+                    Notas
                   </button>
                   <button
                     onClick={() => setActiveTab('products')}
@@ -940,6 +1076,72 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
                       </div>
                     </div>
 
+                    {/* Quick Activity Creation */}
+                    {!showQuickActivity ? (
+                      <button
+                        onClick={() => setShowQuickActivity(true)}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-500 dark:text-slate-400 hover:border-primary-400 hover:text-primary-600 dark:hover:border-primary-500 dark:hover:text-primary-400 transition-colors"
+                      >
+                        <Plus size={16} /> Nova Atividade
+                      </button>
+                    ) : (
+                      <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-4 shadow-sm space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-sm font-bold text-slate-700 dark:text-white">Nova Atividade</h4>
+                          <button onClick={() => setShowQuickActivity(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-white">
+                            <X size={16} />
+                          </button>
+                        </div>
+                        <input
+                          type="text"
+                          required
+                          className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
+                          placeholder="Título da atividade..."
+                          value={quickActivityTitle}
+                          onChange={e => setQuickActivityTitle(e.target.value)}
+                        />
+                        <div className="grid grid-cols-3 gap-2">
+                          <select
+                            className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
+                            value={quickActivityType}
+                            onChange={e => setQuickActivityType(e.target.value as typeof quickActivityType)}
+                          >
+                            <option value="CALL">Ligação</option>
+                            <option value="MEETING">Reunião</option>
+                            <option value="EMAIL">Email</option>
+                            <option value="TASK">Tarefa</option>
+                          </select>
+                          <input
+                            type="date"
+                            required
+                            className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
+                            value={quickActivityDate}
+                            onChange={e => setQuickActivityDate(e.target.value)}
+                          />
+                          <input
+                            type="time"
+                            required
+                            className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
+                            value={quickActivityTime}
+                            onChange={e => setQuickActivityTime(e.target.value)}
+                          />
+                        </div>
+                        <textarea
+                          className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500 min-h-[60px] resize-none"
+                          placeholder="Descrição (opcional)..."
+                          value={quickActivityDesc}
+                          onChange={e => setQuickActivityDesc(e.target.value)}
+                        />
+                        <button
+                          onClick={handleAddQuickActivity}
+                          disabled={!quickActivityTitle.trim() || !quickActivityDate || !quickActivityTime}
+                          className="w-full bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-bold transition-all"
+                        >
+                          Criar Atividade
+                        </button>
+                      </div>
+                    )}
+
                     <div className="space-y-3 pl-4 border-l border-slate-200 dark:border-slate-800">
                       {dealActivities.length === 0 && (
                         <p className="text-sm text-slate-500 italic pl-4">
@@ -959,6 +1161,147 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
                           onEdit={() => { }} // Edit not implemented in modal yet
                           onDelete={id => deleteActivity(id)}
                         />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'activities' && (
+                  <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+                    {/* Quick Activity Creation */}
+                    {!showQuickActivity ? (
+                      <button
+                        onClick={() => setShowQuickActivity(true)}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-500 dark:text-slate-400 hover:border-primary-400 hover:text-primary-600 dark:hover:border-primary-500 dark:hover:text-primary-400 transition-colors"
+                      >
+                        <Plus size={16} /> Nova Atividade
+                      </button>
+                    ) : (
+                      <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-4 shadow-sm space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-sm font-bold text-slate-700 dark:text-white">Nova Atividade</h4>
+                          <button onClick={() => setShowQuickActivity(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-white">
+                            <X size={16} />
+                          </button>
+                        </div>
+                        <input
+                          type="text"
+                          className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
+                          placeholder="Título da atividade..."
+                          value={quickActivityTitle}
+                          onChange={e => setQuickActivityTitle(e.target.value)}
+                        />
+                        <div className="grid grid-cols-3 gap-2">
+                          <select
+                            className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
+                            value={quickActivityType}
+                            onChange={e => setQuickActivityType(e.target.value as typeof quickActivityType)}
+                          >
+                            <option value="CALL">Ligação</option>
+                            <option value="MEETING">Reunião</option>
+                            <option value="EMAIL">Email</option>
+                            <option value="TASK">Tarefa</option>
+                          </select>
+                          <input
+                            type="date"
+                            className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
+                            value={quickActivityDate}
+                            onChange={e => setQuickActivityDate(e.target.value)}
+                          />
+                          <input
+                            type="time"
+                            className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
+                            value={quickActivityTime}
+                            onChange={e => setQuickActivityTime(e.target.value)}
+                          />
+                        </div>
+                        <textarea
+                          className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500 min-h-[60px] resize-none"
+                          placeholder="Descrição (opcional)..."
+                          value={quickActivityDesc}
+                          onChange={e => setQuickActivityDesc(e.target.value)}
+                        />
+                        <button
+                          onClick={handleAddQuickActivity}
+                          disabled={!quickActivityTitle.trim() || !quickActivityDate || !quickActivityTime}
+                          className="w-full bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-bold transition-all"
+                        >
+                          Criar Atividade
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="space-y-3">
+                      {dealTaskActivities.length === 0 && (
+                        <p className="text-sm text-slate-500 italic text-center py-4">
+                          Nenhuma atividade registrada.
+                        </p>
+                      )}
+                      {dealTaskActivities.map(activity => (
+                        <ActivityRow
+                          key={activity.id}
+                          activity={activity}
+                          deal={deal}
+                          onToggleComplete={id => {
+                            const act = activitiesById.get(id);
+                            if (act) updateActivity(id, { completed: !act.completed });
+                          }}
+                          onEdit={() => { }}
+                          onDelete={id => deleteActivity(id)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'notes' && (
+                  <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+                    <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-4 shadow-sm">
+                      <textarea
+                        className="w-full bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none resize-none min-h-[80px]"
+                        placeholder="Escreva uma nota..."
+                        value={newNote}
+                        onChange={e => setNewNote(e.target.value)}
+                      />
+                      <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-100 dark:border-white/5">
+                        <div />
+                        <button
+                          onClick={handleAddNote}
+                          disabled={!newNote.trim()}
+                          className="bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-all"
+                        >
+                          <Check size={14} /> Enviar
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      {dealNotes.length === 0 && (
+                        <p className="text-sm text-slate-500 italic text-center py-4">
+                          Nenhuma nota registrada.
+                        </p>
+                      )}
+                      {dealNotes.map(note => (
+                        <div
+                          key={note.id}
+                          className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-4 group"
+                        >
+                          <p className="text-sm text-slate-900 dark:text-white whitespace-pre-wrap">
+                            {note.description}
+                          </p>
+                          <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-100 dark:border-white/5">
+                            <span className="text-xs text-slate-400">
+                              {new Date(note.date).toLocaleDateString('pt-BR')} às {new Date(note.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            <button
+                              onClick={() => deleteActivity(note.id)}
+                              className="text-slate-400 hover:text-red-500 p-1 rounded opacity-0 group-hover:opacity-100 transition-all"
+                              title="Excluir nota"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -1288,15 +1631,24 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
             setPendingLostStageId(null);
             setLossReasonOrigin('button');
           }}
-          onConfirm={(reason) => {
+          onConfirm={(reason, category) => {
             // Priority:
             // 0. Stay in stage flag (Archive)
             // 1. Pending Stage (if set via click or explicit button)
             // 2. Explicit Lost Stage on Board
             // 3. Stage linked to 'OTHER' lifecycle
 
+            const lossFields = {
+              isLost: true,
+              isWon: false,
+              closedAt: new Date().toISOString(),
+              lossReason: reason,
+              lossCategory: category,
+            };
+
             if (dealBoard?.lostStayInStage) {
               moveDeal(deal, deal.status, reason, false, true); // explicitLost = true
+              updateDeal(deal.id, { lossCategory: category });
               setShowLossReasonModal(false);
               setPendingLostStageId(null);
               if (lossReasonOrigin === 'button') onClose();
@@ -1316,9 +1668,10 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
 
             if (targetStageId) {
               moveDeal(deal, targetStageId, reason);
+              updateDeal(deal.id, { lossCategory: category });
             } else {
               // Fallback: just mark as lost without moving
-              updateDeal(deal.id, { isLost: true, isWon: false, closedAt: new Date().toISOString(), lossReason: reason });
+              updateDeal(deal.id, lossFields);
             }
             setShowLossReasonModal(false);
             setPendingLostStageId(null);
@@ -1344,7 +1697,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
         // Backdrop + positioning wrapper. Clicking outside the panel should close the modal.
         // No desktop, este modal não deve cobrir a sidebar de navegação.
         // Em md+ deslocamos o overlay pela largura da sidebar via `--app-sidebar-width`.
-        className="fixed inset-0 md:left-[var(--app-sidebar-width,0px)] z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"
+        className={`fixed inset-0 md:left-[var(--app-sidebar-width,0px)] z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm ${viewMode === 'fullscreen' ? 'p-0' : 'p-4'}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={headingId}

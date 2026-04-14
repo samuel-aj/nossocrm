@@ -24,8 +24,9 @@ interface InviteResult {
 }
 
 // Gera iniciais e cor consistente baseada no email
-const getAvatarProps = (email: string) => {
-    const initials = email.substring(0, 2).toUpperCase();
+const getAvatarProps = (email: string | null | undefined) => {
+    const safe = email || '??';
+    const initials = safe.substring(0, 2).toUpperCase();
     const colors = [
         'from-violet-500 to-purple-600',
         'from-blue-500 to-cyan-500',
@@ -34,7 +35,7 @@ const getAvatarProps = (email: string) => {
         'from-pink-500 to-rose-500',
         'from-indigo-500 to-blue-500',
     ];
-    const colorIndex = email.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % colors.length;
+    const colorIndex = safe.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % colors.length;
     return { initials, gradient: colors[colorIndex] };
 };
 

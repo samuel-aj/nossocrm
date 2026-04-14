@@ -24,6 +24,7 @@ export const useSettingsController = () => {
 
   // General Settings
   const [defaultRoute, setDefaultRoute] = usePersistedState<string>('crm_default_route', '/boards');
+  const [officeName, setOfficeName] = usePersistedState<string>('crm_office_name', 'NossoCRM');
 
   const [newFieldLabel, setNewFieldLabel] = useState('');
   const [newFieldType, setNewFieldType] = useState<CustomFieldType>('text');
@@ -79,7 +80,7 @@ export const useSettingsController = () => {
     }
 
     const optionsArray =
-      newFieldType === 'select'
+      (newFieldType === 'select' || newFieldType === 'multiselect')
         ? newFieldOptions
           .split(',')
           .map(opt => opt.trim())
@@ -132,6 +133,8 @@ export const useSettingsController = () => {
     // General Settings
     defaultRoute,
     setDefaultRoute,
+    officeName,
+    setOfficeName,
 
     // Custom Fields
     customFieldDefinitions,

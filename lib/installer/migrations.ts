@@ -1,8 +1,13 @@
 import fs from 'fs';
 import path from 'path';
-import { Client } from 'pg';
+import type { Client as PgClient } from 'pg';
 
 const SCHEMA_PATH = path.resolve(process.cwd(), 'supabase/migrations/20251201000000_schema_init.sql');
+
+async function getPgClient() {
+  const { Client } = await import('pg');
+  return Client;
+}
 
 function needsSsl(connectionString: string) {
   return !/sslmode=disable/i.test(connectionString);
@@ -39,9 +44,9 @@ function isRetryableConnectError(err: unknown): boolean {
  * Isso evita o erro: "Client has already been connected. You cannot reuse a client."
  */
 async function connectClientWithRetry(
-  createClient: () => Client,
+  createClient: () => PgClient,
   opts?: { maxAttempts?: number; initialDelayMs?: number }
-): Promise<Client> {
+): Promise<PgClient> {
   const maxAttempts = opts?.maxAttempts ?? 5;
   const initialDelayMs = opts?.initialDelayMs ?? 3000;
 
@@ -78,7 +83,7 @@ async function connectClientWithRetry(
   throw lastError instanceof Error ? lastError : new Error(String(lastError ?? 'Falha ao conectar ao banco de dados'));
 }
 
-async function waitForStorageReady(client: Client, opts?: { timeoutMs?: number; pollMs?: number }) {
+async function waitForStorageReady(client: PgClient, opts?: { timeoutMs?: number; pollMs?: number }) {
   const timeoutMs = typeof opts?.timeoutMs === 'number' ? opts.timeoutMs : 210_000;
   const pollMs = typeof opts?.pollMs === 'number' ? opts?.pollMs : 4_000;
   const t0 = Date.now();
@@ -105,6 +110,7 @@ async function waitForStorageReady(client: Client, opts?: { timeoutMs?: number; 
  * Função pública `runSchemaMigration` do projeto.
  */
 export async function runSchemaMigration(dbUrl: string) {
+  const Client = await getPgClient();
   const schemaSql = fs.readFileSync(SCHEMA_PATH, 'utf8');
   const normalizedDbUrl = stripSslModeParam(dbUrl);
 

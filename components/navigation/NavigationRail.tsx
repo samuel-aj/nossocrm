@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils/cn';
 import { PRIMARY_NAV, SECONDARY_NAV } from './navConfig';
+import { usePersistedState } from '@/hooks/usePersistedState';
 
 export interface NavigationRailProps {
   /** Optional: used only if we want to keep "More" as a sheet trigger (mobile-like). */
@@ -11,6 +12,8 @@ export interface NavigationRailProps {
 
 export function NavigationRail({ onOpenMore }: NavigationRailProps) {
   const pathname = usePathname();
+  const [officeName] = usePersistedState<string>('crm_office_name', 'NossoCRM');
+  const officeInitials = officeName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase() || 'AJ';
 
   const isHrefActive = (href: string) =>
     pathname === href ||
@@ -28,8 +31,8 @@ export function NavigationRail({ onOpenMore }: NavigationRailProps) {
       )}
     >
       <div className="flex flex-col items-center gap-2 py-4">
-        <div className="w-10 h-10 bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-primary-500/20">
-          N
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
+          <img src="/logo-aj-v2.png" alt={officeName} className="w-full h-full object-contain" />
         </div>
       </div>
 

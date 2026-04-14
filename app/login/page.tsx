@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState } from 'react'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getErrorMessage } from '@/lib/utils/errorUtils'
@@ -52,6 +53,16 @@ export default function LoginPage() {
 
             <div className="max-w-md w-full relative z-10 px-4">
                 <div className="text-center mb-8">
+                    <div className="flex justify-center mb-6">
+                        <Image
+                            src="/logo-aj-v2.png"
+                            alt="Anúncio Jurídico"
+                            width={160}
+                            height={160}
+                            className="object-contain"
+                            priority
+                        />
+                    </div>
                     <h1 className="text-4xl font-bold text-slate-900 dark:text-white font-display tracking-tight mb-2">
                         Bem-vindo de volta
                     </h1>

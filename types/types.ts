@@ -195,7 +195,7 @@ export interface DealItem {
 }
 
 // CUSTOM FIELDS DEFINITION
-export type CustomFieldType = 'text' | 'number' | 'date' | 'select';
+export type CustomFieldType = 'text' | 'number' | 'date' | 'select' | 'multiselect' | 'currency';
 
 export interface CustomFieldDefinition {
   id: string;
@@ -238,6 +238,7 @@ export interface Deal {
   customFields?: Record<string, any>; // Dynamic fields storage
   lastStageChangeDate?: string; // For stagnation tracking
   lossReason?: string; // For win/loss analysis
+  lossCategory?: 'qualified' | 'disqualified'; // Lead was qualified or disqualified when lost
 
   // @deprecated - Use clientCompanyId instead
   companyId?: string;

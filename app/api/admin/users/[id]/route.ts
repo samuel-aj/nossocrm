@@ -36,7 +36,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
     .single();
 
   if (meError || !me?.organization_id) return json({ error: 'Profile not found' }, 404);
-  if (me.role !== 'admin') return json({ error: 'Forbidden' }, 403);
+  if (me.role !== 'admin' && me.role !== 'super_admin') return json({ error: 'Forbidden' }, 403);
 
   if (id === user.id) return json({ error: 'Você não pode remover a si mesmo' }, 400);
 
@@ -50,11 +50,19 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
   if (!target) return json({ error: 'User not found' }, 404);
   if (target.organization_id !== me.organization_id) return json({ error: 'Forbidden' }, 403);
 
-  // Delete auth user first (cascades profile via FK, but we also try to remove profile explicitly)
+  // Try to delete auth user first, but don't block if it fails
+  // (orphaned profiles without auth records should still be removable)
   const { error: authDeleteError } = await admin.auth.admin.deleteUser(id);
-  if (authDeleteError) return json({ error: authDeleteError.message }, 500);
 
-  await supabase.from('profiles').delete().eq('id', id);
+  // Delete profile regardless — if auth deletion failed, the profile may be orphaned
+  const { error: profileDeleteError } = await admin
+    .from('profiles')
+    .delete()
+    .eq('id', id);
+
+  if (authDeleteError && profileDeleteError) {
+    return json({ error: `Falha ao remover: ${authDeleteError.message}` }, 500);
+  }
 
   return json({ ok: true });
 }

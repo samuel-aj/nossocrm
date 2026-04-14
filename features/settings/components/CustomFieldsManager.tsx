@@ -98,7 +98,9 @@ export const CustomFieldsManager: React.FC<CustomFieldsManagerProps> = ({
               <option value="text">Texto</option>
               <option value="number">Número</option>
               <option value="date">Data</option>
+              <option value="currency">Financeiro (R$)</option>
               <option value="select">Seleção</option>
+              <option value="multiselect">Múltipla Seleção</option>
             </select>
           </div>
           <div className="flex gap-2">
@@ -121,7 +123,7 @@ export const CustomFieldsManager: React.FC<CustomFieldsManagerProps> = ({
           </div>
         </div>
 
-        {newFieldType === 'select' && (
+        {(newFieldType === 'select' || newFieldType === 'multiselect') && (
           <div className="animate-in slide-in-from-top-2 fade-in duration-200">
             <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">
               <List size={12} /> Opções (Separadas por vírgula)
@@ -133,7 +135,11 @@ export const CustomFieldsManager: React.FC<CustomFieldsManagerProps> = ({
               placeholder="Ex: Google, Facebook, Instagram, Indicação"
               className="w-full bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
             />
-            <p className="text-[10px] text-slate-400 mt-1">Essas opções aparecerão em um menu dropdown no detalhe do negócio.</p>
+            <p className="text-[10px] text-slate-400 mt-1">
+              {newFieldType === 'multiselect'
+                ? 'O usuário poderá selecionar várias opções ao mesmo tempo.'
+                : 'Essas opções aparecerão em um menu dropdown no detalhe do negócio.'}
+            </p>
           </div>
         )}
       </div>
@@ -150,7 +156,7 @@ export const CustomFieldsManager: React.FC<CustomFieldsManagerProps> = ({
                 <div className="flex items-center gap-2 text-xs text-slate-500 font-mono mt-0.5">
                   <span>{field.key}</span>
                   <span className="w-1 h-1 bg-slate-300 rounded-full"></span>
-                  <span className="uppercase">{field.type}</span>
+                  <span className="uppercase">{{ text: 'texto', number: 'número', date: 'data', select: 'seleção', multiselect: 'múltipla seleção', currency: 'financeiro' }[field.type] || field.type}</span>
                   {field.options && (
                     <>
                       <span className="w-1 h-1 bg-slate-300 rounded-full"></span>

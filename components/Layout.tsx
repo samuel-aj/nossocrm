@@ -43,12 +43,14 @@ import {
   Bug,
   CheckSquare,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  Shield,
 } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { prefetchRoute, RouteName } from '@/lib/prefetch';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import { isDebugMode, enableDebugMode, disableDebugMode } from '@/lib/debug';
 import { SkipLink } from '@/lib/a11y';
 import { useResponsiveMode } from '@/hooks/useResponsiveMode';
@@ -142,6 +144,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const isMobile = mode === 'mobile';
   const isTablet = mode === 'tablet';
   const isDesktop = mode === 'desktop';
+  const [officeName] = usePersistedState<string>('crm_office_name', 'NossoCRM');
+  const officeInitials = officeName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase() || 'AJ';
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   // Hydration safety: `isDebugMode()` reads localStorage. On SSR it is always false.
@@ -238,12 +242,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         aria-label="Menu principal"
       >
         <div className={`h-16 flex items-center border-b border-[var(--color-border-subtle)] transition-all duration-300 px-5 ${sidebarCollapsed ? 'justify-center px-0' : 'justify-between'}`}>
-          <div className={`flex items-center transition-all duration-300 ${sidebarCollapsed ? 'gap-0 justify-center' : 'gap-3'}`}>
-            <div className="w-9 h-9 bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-primary-500/20 shrink-0" aria-hidden="true">
-              N
+          <div className={`flex items-center min-w-0 transition-all duration-300 ${sidebarCollapsed ? 'gap-0 justify-center' : 'gap-3'}`}>
+            <div className="w-9 h-9 bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-lg shadow-primary-500/20 shrink-0" aria-hidden="true">
+              {officeInitials}
             </div>
-            <span className={`text-xl font-bold font-display tracking-tight text-slate-900 dark:text-white whitespace-nowrap overflow-hidden transition-all duration-300 ${sidebarCollapsed ? 'w-0 opacity-0' : 'w-auto opacity-100'}`}>
-              NossoCRM
+            <span className={`text-sm font-bold font-display tracking-tight text-slate-900 dark:text-white truncate transition-all duration-300 ${sidebarCollapsed ? 'max-w-0 opacity-0 overflow-hidden' : 'flex-1 min-w-0 opacity-100'}`}>
+              {officeName}
             </span>
           </div>
 
@@ -323,6 +327,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
         <div className={`p-4 border-t border-[var(--color-border-subtle)] ${sidebarCollapsed ? 'flex justify-center' : ''}`}>
           <div className="relative">
+
             {/* User Card - Clickable */}
             <button
               onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
@@ -389,6 +394,16 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                       <User className="w-4 h-4 text-slate-400" />
                       Editar Perfil
                     </Link>
+                    {profile?.role === 'super_admin' && (
+                      <Link
+                        href="/admin"
+                        onClick={() => setIsUserMenuOpen(false)}
+                        className="flex items-center gap-3 px-3 py-2.5 text-sm text-primary-700 dark:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-lg transition-colors focus-visible-ring"
+                      >
+                        <Shield className="w-4 h-4 text-primary-500" />
+                        Super Admin
+                      </Link>
+                    )}
                     <button
                       onClick={() => {
                         setIsUserMenuOpen(false);
@@ -404,6 +419,22 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               </>
             )}
           </div>
+
+          {/* Desenvolvido por Anúncio Jurídico */}
+          {!sidebarCollapsed && (
+            <div className="mt-3 pt-3 border-t border-[var(--color-border-subtle)] flex flex-col items-center gap-1">
+              <span className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest">
+                Desenvolvido por
+              </span>
+              <Image
+                src="/logo-aj-white.png"
+                alt="Anúncio Jurídico"
+                width={160}
+                height={64}
+                className="object-contain opacity-50 hover:opacity-80 transition-opacity"
+              />
+            </div>
+          )}
         </div>
       </aside>
       ) : null}

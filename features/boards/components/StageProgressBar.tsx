@@ -68,20 +68,20 @@ export const StageProgressBar: React.FC<StageProgressBarProps> = ({
                                         : (stage.color || 'bg-primary-500');
 
                                 const dotClass = isCurrent
-                                    ? `${dotSize} ${currentDotColor} shadow-sm shadow-black/10`
+                                    ? `${dotSize} ${currentDotColor} ring-4 ring-primary-500/20 dark:ring-primary-400/20`
                                     : isPast
-                                        ? `${dotSize} bg-slate-400/80 dark:bg-white/20`
+                                        ? `${dotSize} bg-primary-400 dark:bg-primary-500/60`
                                         : `${dotSize} bg-slate-300/70 dark:bg-white/10`;
 
                                 const labelClass = isCurrent
-                                    ? 'text-slate-900 dark:text-white font-semibold'
+                                    ? 'text-primary-700 dark:text-primary-300 font-bold'
                                     : isPast
-                                        ? 'text-slate-600 dark:text-slate-300 font-medium'
-                                        : 'text-slate-500 dark:text-slate-400 font-medium';
+                                        ? 'text-slate-700 dark:text-slate-200 font-medium'
+                                        : 'text-slate-400 dark:text-slate-500 font-medium';
 
                                 // Neutral connectors (past slightly stronger, but never colored).
                                 const connectorClass = index < currentIndex
-                                    ? 'bg-slate-300 dark:bg-white/15'
+                                    ? 'bg-primary-300 dark:bg-primary-500/30'
                                     : 'bg-slate-200 dark:bg-white/10';
 
                                 return (
@@ -91,7 +91,7 @@ export const StageProgressBar: React.FC<StageProgressBarProps> = ({
                                             onClick={() => onStageClick(stage.id)}
                                             aria-current={isCurrent ? 'step' : undefined}
                                             // "Invisible" affordance: clickable but not a chip.
-                                            className={`group inline-flex items-center gap-2 rounded-md px-0.5 py-1 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary-500/40`}
+                                            className={`group inline-flex items-center gap-2 rounded-md px-2 py-1 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary-500/40 ${isCurrent ? 'bg-primary-50 dark:bg-primary-500/10' : ''}`}
                                             title={stage.label}
                                         >
                                             <span className={`rounded-full ${dotClass}`} />

@@ -39,7 +39,7 @@ export async function GET() {
     .single();
 
   if (meError || !me?.organization_id) return json({ error: 'Profile not found' }, 404);
-  if (me.role !== 'admin') return json({ error: 'Forbidden' }, 403);
+  if (me.role !== 'admin' && me.role !== 'super_admin') return json({ error: 'Forbidden' }, 403);
 
   // Return only active (not used) invites, and let UI decide how to show expiration.
   const { data: invites, error } = await supabase
@@ -79,7 +79,7 @@ export async function POST(req: Request) {
     .single();
 
   if (meError || !me?.organization_id) return json({ error: 'Profile not found' }, 404);
-  if (me.role !== 'admin') return json({ error: 'Forbidden' }, 403);
+  if (me.role !== 'admin' && me.role !== 'super_admin') return json({ error: 'Forbidden' }, 403);
 
   const raw = await req.json().catch(() => null);
   const parsed = CreateInviteSchema.safeParse(raw);

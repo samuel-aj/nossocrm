@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { Phone, Users, Mail, CheckSquare, Clock, Trash2, Edit2, CheckCircle2, Circle, Building2 } from 'lucide-react';
+import { Phone, Users, Mail, CheckSquare, Clock, Trash2, Edit2, CheckCircle2, Circle, Building2, StickyNote } from 'lucide-react';
 import { useCRM } from '@/context/CRMContext';
 import { Activity, Deal, Contact, Company } from '@/types';
 
@@ -37,6 +37,7 @@ const ActivityRowComponent: React.FC<ActivityRowProps> = ({
             case 'MEETING': return <Users size={16} className="text-purple-500" />;
             case 'EMAIL': return <Mail size={16} className="text-green-500" />;
             case 'TASK': return <CheckSquare size={16} className="text-orange-500" />;
+            case 'NOTE': return <StickyNote size={16} className="text-yellow-500" />;
             case 'STATUS_CHANGE': return <CheckCircle2 size={16} className="text-slate-500" />;
             default: return <Circle size={16} className="text-slate-400" />;
         }
@@ -52,7 +53,7 @@ const ActivityRowComponent: React.FC<ActivityRowProps> = ({
         }
 
         // Procura em TODOS os boards, não só no ativo
-        for (const board of boards) {
+        for (const board of boards || []) {
             const stage = board.stages.find(s => s.id === status);
             if (stage) return stage.label;
         }
@@ -161,6 +162,11 @@ const ActivityRowComponent: React.FC<ActivityRowProps> = ({
                         </span>
                     )}
                 </div>
+                {activity.description && (
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2 italic">
+                        &ldquo;{activity.description}&rdquo;
+                    </p>
+                )}
                 <div className="flex items-center gap-4 text-sm text-slate-500 dark:text-slate-400">
                     {deal && (
                         <span className="flex items-center gap-1.5 text-primary-600 dark:text-primary-400 font-medium">

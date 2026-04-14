@@ -164,7 +164,7 @@ function calculateChange(current: number, previous: number): number {
  * @param {string | undefined} boardId - Identificador do recurso.
  * @returns {{ isLoading: boolean; deals: Deal[]; totalValue: number; wonDeals: Deal[]; wonRevenue: number; winRate: number; pipelineValue: number; topDeals: Deal[]; funnelData: { name: string; count: number; fill: string; }[]; ... 19 more ...; activeSnapshotDeals: Deal[]; }} Retorna um valor do tipo `{ isLoading: boolean; deals: Deal[]; totalValue: number; wonDeals: Deal[]; wonRevenue: number; winRate: number; pipelineValue: number; topDeals: Deal[]; funnelData: { name: string; count: number; fill: string; }[]; ... 19 more ...; activeSnapshotDeals: Deal[]; }`.
  */
-export const useDashboardMetrics = (period: PeriodFilter = 'this_month', boardId?: string) => {
+export const useDashboardMetrics = (period: PeriodFilter = 'this_month', boardId?: string, ownerId?: string) => {
   const { data: allDeals = [], isLoading: dealsLoading } = useDeals();
   const { data: allContacts = [], isLoading: contactsLoading } = useContacts();
   const { data: boards = [] } = useBoards();
@@ -182,18 +182,20 @@ export const useDashboardMetrics = (period: PeriodFilter = 'this_month', boardId
       const dealDate = new Date(deal.createdAt);
       const periodMatch = dealDate >= dateRange.start && dealDate <= dateRange.end;
       const boardMatch = boardId ? deal.boardId === boardId : true;
-      return periodMatch && boardMatch;
+      const ownerMatch = ownerId ? deal.ownerId === ownerId : true;
+      return periodMatch && boardMatch && ownerMatch;
     });
-  }, [allDeals, dateRange, boardId]);
+  }, [allDeals, dateRange, boardId, ownerId]);
 
   // Filtrar deals ATIVOS no Board atual - SNAPSHOT (O que está no funil HOJE, independente de data)
   const activeSnapshotDeals = React.useMemo(() => {
     return allDeals.filter(deal => {
       const boardMatch = boardId ? deal.boardId === boardId : true;
+      const ownerMatch = ownerId ? deal.ownerId === ownerId : true;
       const isClosed = deal.isWon || deal.isLost;
-      return boardMatch && !isClosed;
+      return boardMatch && ownerMatch && !isClosed;
     });
-  }, [allDeals, boardId]);
+  }, [allDeals, boardId, ownerId]);
 
   // Filtrar deals por período anterior (para comparação)
   const previousDeals = React.useMemo(() => {
@@ -201,9 +203,10 @@ export const useDashboardMetrics = (period: PeriodFilter = 'this_month', boardId
       const dealDate = new Date(deal.createdAt);
       const periodMatch = dealDate >= previousDateRange.start && dealDate <= previousDateRange.end;
       const boardMatch = boardId ? deal.boardId === boardId : true;
-      return periodMatch && boardMatch;
+      const ownerMatch = ownerId ? deal.ownerId === ownerId : true;
+      return periodMatch && boardMatch && ownerMatch;
     });
-  }, [allDeals, previousDateRange, boardId]);
+  }, [allDeals, previousDateRange, boardId, ownerId]);
 
   // Filtrar contacts por período atual
   const contacts = React.useMemo(() => {

@@ -41,6 +41,7 @@ interface MoveDealResult {
 // Context type for optimistic updates
 interface MoveDealContext {
   previousDeals: DealView[] | undefined;
+  previousRawDeals: Deal[] | undefined;
 }
 
 /**
@@ -250,8 +251,9 @@ export const useMoveDeal = () => {
       // Cancel any outgoing refetches
       await queryClient.cancelQueries({ queryKey: queryKeys.deals.all });
 
-      // Snapshot previous state - usa DEALS_VIEW_KEY (única fonte de verdade)
+      // Snapshot previous state
       const previousDeals = queryClient.getQueryData<DealView[]>(DEALS_VIEW_KEY);
+      const previousRawDeals = queryClient.getQueryData<Deal[]>(queryKeys.deals.lists());
 
       // Determine new status
       const targetStage = board.stages.find(s => s.id === targetStageId);
@@ -311,6 +313,24 @@ export const useMoveDeal = () => {
         });
       });
 
+      // Também atualizar o rawDeals cache (queryKeys.deals.lists()) para que CRMContext reflita
+      queryClient.setQueryData<Deal[]>(queryKeys.deals.lists(), (old) => {
+        if (!old) return old;
+        return old.map(d => {
+          if (d.id === dealId) {
+            return {
+              ...d,
+              status: targetStageId,
+              lastStageChangeDate: new Date().toISOString(),
+              isWon: isWon ?? d.isWon,
+              isLost: isLost ?? d.isLost,
+              updatedAt: new Date().toISOString(),
+            };
+          }
+          return d;
+        });
+      });
+
       // Também atualizar o detail cache se existir
       queryClient.setQueryData<Deal>(queryKeys.deals.detail(dealId), (old) => {
         if (!old) return old;
@@ -324,13 +344,16 @@ export const useMoveDeal = () => {
         };
       });
 
-      return { previousDeals };
+      return { previousDeals, previousRawDeals };
     },
 
     // Rollback on error
     onError: (_err, _variables, context) => {
       if (context?.previousDeals) {
         queryClient.setQueryData(DEALS_VIEW_KEY, context.previousDeals);
+      }
+      if (context?.previousRawDeals) {
+        queryClient.setQueryData(queryKeys.deals.lists(), context.previousRawDeals);
       }
     },
 

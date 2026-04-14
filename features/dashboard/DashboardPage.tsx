@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCRM } from '@/context/CRMContext';
 import { useToast } from '@/context/ToastContext';
-import { TrendingUp, TrendingDown, Users, DollarSign, Target, Clock, MoreVertical, AlertTriangle } from 'lucide-react';
+import { TrendingUp, TrendingDown, Users, DollarSign, Target, Clock, MoreVertical, AlertTriangle, Trophy, XCircle, Timer } from 'lucide-react';
 import { StatCard } from './components/StatCard';
 import { ActivityFeedItem } from './components/ActivityFeedItem';
 import { PipelineAlertsModal } from './components/PipelineAlertsModal';
@@ -142,7 +142,7 @@ const DashboardPage: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
         <StatCard
           title="Pipeline Total"
-          value={`$${pipelineValue.toLocaleString()}`}
+          value={`R$ ${pipelineValue.toLocaleString('pt-BR')}`}
           subtext={pipelineChangeInfo.text}
           subtextPositive={pipelineChangeInfo.isPositive}
           icon={DollarSign}
@@ -172,7 +172,7 @@ const DashboardPage: React.FC = () => {
         />
         <StatCard
           title="Receita (Ganha)"
-          value={`$${wonRevenue.toLocaleString()}`}
+          value={`R$ ${wonRevenue.toLocaleString('pt-BR')}`}
           subtext={revenueChangeInfo.text}
           subtextPositive={revenueChangeInfo.isPositive}
           icon={TrendingUp}
@@ -180,6 +180,130 @@ const DashboardPage: React.FC = () => {
           onClick={() => router.push('/boards?status=won&view=list')}
           comparisonLabel={COMPARISON_LABELS[period]}
         />
+      </div>
+
+      {/* Performance KPIs - Win Rate, Ciclo, Won/Lost */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 shrink-0">
+        {/* Win Rate Real */}
+        <div
+          className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm cursor-pointer hover:border-emerald-500/50 transition-colors"
+          onClick={() => router.push('/reports')}
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <div className="p-2 rounded-lg bg-emerald-500/10">
+              <Target className="text-emerald-500" size={18} />
+            </div>
+            <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Win Rate (Fechados)</span>
+          </div>
+          <div className="flex items-end gap-3">
+            <span className="text-3xl font-bold text-slate-900 dark:text-white">
+              {actualWinRate.toFixed(1)}%
+            </span>
+            <div className="flex items-center gap-2 mb-1 text-xs">
+              <span className="flex items-center gap-1 text-emerald-500 font-semibold">
+                <Trophy size={14} />
+                {wonDeals.length} ganhos
+              </span>
+              <span className="text-slate-300 dark:text-slate-600">|</span>
+              <span className="flex items-center gap-1 text-red-400 font-semibold">
+                <XCircle size={14} />
+                {lostDeals.length} perdidos
+              </span>
+            </div>
+          </div>
+          {topLossReasons.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-slate-100 dark:border-white/5">
+              <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1.5">Top motivos de perda</p>
+              <div className="space-y-1">
+                {topLossReasons.map(([reason, count]) => (
+                  <div key={reason} className="flex items-center justify-between text-xs">
+                    <span className="text-slate-600 dark:text-slate-400 truncate mr-2">{reason}</span>
+                    <span className="text-red-400 font-medium shrink-0">{count}x</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Ciclo Médio de Vendas */}
+        <div
+          className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm cursor-pointer hover:border-purple-500/50 transition-colors"
+          onClick={() => router.push('/reports')}
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <div className="p-2 rounded-lg bg-purple-500/10">
+              <Timer className="text-purple-500" size={18} />
+            </div>
+            <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Ciclo Médio de Vendas</span>
+          </div>
+          <div className="flex items-end gap-2">
+            <span className="text-3xl font-bold text-slate-900 dark:text-white">
+              {avgSalesCycle}
+            </span>
+            <span className="text-lg text-slate-400 mb-0.5">dias</span>
+          </div>
+          <div className="mt-3 flex items-center gap-4 text-xs text-slate-500">
+            <div className="flex items-center gap-1">
+              <div className="w-2 h-2 rounded-full bg-emerald-400"></div>
+              Mais rápido: <span className="font-semibold text-slate-700 dark:text-slate-300">{fastestDeal}d</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-2 h-2 rounded-full bg-red-400"></div>
+              Mais lento: <span className="font-semibold text-slate-700 dark:text-slate-300">{slowestDeal}d</span>
+            </div>
+          </div>
+          {wonDealsWithDates.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-slate-100 dark:border-white/5">
+              <div className="w-full bg-slate-100 dark:bg-white/10 rounded-full h-2 overflow-hidden">
+                <div
+                  className="bg-gradient-to-r from-emerald-400 to-purple-500 h-full rounded-full transition-all"
+                  style={{ width: `${Math.min((avgSalesCycle / Math.max(slowestDeal, 1)) * 100, 100)}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1">Baseado em {wonDealsWithDates.length} deals fechados</p>
+            </div>
+          )}
+        </div>
+
+        {/* Deals Fechados - Breakdown */}
+        <div
+          className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm cursor-pointer hover:border-orange-500/50 transition-colors"
+          onClick={() => router.push('/reports')}
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <div className="p-2 rounded-lg bg-orange-500/10">
+              <TrendingUp className="text-orange-500" size={18} />
+            </div>
+            <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Deals Fechados no Período</span>
+          </div>
+          <div className="flex items-end gap-3">
+            <span className="text-3xl font-bold text-emerald-500">{wonDeals.length}</span>
+            <span className="text-lg text-slate-300 dark:text-slate-600 mb-0.5">/</span>
+            <span className="text-3xl font-bold text-red-400">{lostDeals.length}</span>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">Ganhos / Perdidos</p>
+          {(wonDeals.length + lostDeals.length) > 0 && (
+            <div className="mt-3 pt-3 border-t border-slate-100 dark:border-white/5">
+              <div className="w-full bg-slate-100 dark:bg-white/10 rounded-full h-3 overflow-hidden flex">
+                <div
+                  className="bg-emerald-500 h-full transition-all"
+                  style={{ width: `${(wonDeals.length / (wonDeals.length + lostDeals.length)) * 100}%` }}
+                  title={`${wonDeals.length} ganhos`}
+                />
+                <div
+                  className="bg-red-400 h-full transition-all"
+                  style={{ width: `${(lostDeals.length / (wonDeals.length + lostDeals.length)) * 100}%` }}
+                  title={`${lostDeals.length} perdidos`}
+                />
+              </div>
+              <div className="flex justify-between mt-1.5 text-[10px] text-slate-400">
+                <span>R$ {wonDeals.reduce((s, d) => s + d.value, 0).toLocaleString('pt-BR')} ganho</span>
+                <span>R$ {lostDeals.reduce((s, d) => s + d.value, 0).toLocaleString('pt-BR')} perdido</span>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Wallet Health Section - Compact */}
@@ -254,7 +378,7 @@ const DashboardPage: React.FC = () => {
               Sem mudança de estágio há +10 dias.
             </p>
             <p className="text-xs text-slate-400 mt-1">
-              ${stagnantDealsValue.toLocaleString()} em risco
+              R$ {stagnantDealsValue.toLocaleString('pt-BR')} em risco
             </p>
           </div>
 
@@ -264,7 +388,7 @@ const DashboardPage: React.FC = () => {
             </h3>
             <div className="flex items-end gap-2">
               <span className="text-2xl font-bold text-slate-900 dark:text-white">
-                ${(avgLTV / 1000).toFixed(1)}k
+                R$ {(avgLTV / 1000).toFixed(1)}k
               </span>
               <span className="text-xs text-green-500 font-bold mb-1">Médio</span>
             </div>
