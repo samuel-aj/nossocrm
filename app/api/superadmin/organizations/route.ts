@@ -108,7 +108,7 @@ export async function POST(req: Request) {
     .from('organizations')
     .insert({
       name: companyName.trim(),
-      max_users: maxUsers || 5,
+      max_users: maxUsers || 1,
       is_active: true,
     })
     .select('id, name')

@@ -19,6 +19,7 @@ import {
   LogOut,
   UserPlus,
   Trash2,
+  ExternalLink,
 } from 'lucide-react'
 
 interface Organization {
@@ -58,7 +59,7 @@ export default function AdminPage() {
     adminEmail: '',
     adminPassword: '',
     adminName: '',
-    maxUsers: 5,
+    maxUsers: 1,
   })
 
   // Detail view
@@ -76,6 +77,7 @@ export default function AdminPage() {
   const [collaborators, setCollaborators] = useState<{ id: string; email: string; name: string; created_at: string }[]>([])
   const [newCollabEmail, setNewCollabEmail] = useState('')
   const [addingCollab, setAddingCollab] = useState(false)
+  const [switchingOrgId, setSwitchingOrgId] = useState<string | null>(null)
 
   const isSuperAdmin = profile?.role === 'super_admin'
 
@@ -202,7 +204,7 @@ export default function AdminPage() {
       if (!res.ok) throw new Error(data.error)
       addToast(`Organização "${formData.companyName}" criada com sucesso!`, 'success')
       setShowCreateForm(false)
-      setFormData({ companyName: '', adminEmail: '', adminPassword: '', adminName: '', maxUsers: 5 })
+      setFormData({ companyName: '', adminEmail: '', adminPassword: '', adminName: '', maxUsers: 1 })
       fetchOrganizations()
     } catch (err: any) {
       addToast(`Erro: ${err.message}`, 'error')
@@ -260,6 +262,25 @@ export default function AdminPage() {
       addToast(`Erro: ${err.message}`, 'error')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleAccessCRM = async (org: Organization) => {
+    setSwitchingOrgId(org.id)
+    try {
+      const res = await fetch('/api/superadmin/switch-org', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ organizationId: org.id }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      await refreshProfile()
+      router.push('/')
+    } catch (err: any) {
+      addToast(`Erro: ${err.message}`, 'error')
+      setSwitchingOrgId(null)
     }
   }
 
@@ -444,7 +465,7 @@ export default function AdminPage() {
                       min={1}
                       max={100}
                       value={formData.maxUsers}
-                      onChange={e => setFormData(p => ({ ...p, maxUsers: parseInt(e.target.value) || 5 }))}
+                      onChange={e => setFormData(p => ({ ...p, maxUsers: parseInt(e.target.value) || 1 }))}
                       className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2.5 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
                     />
                   </div>
@@ -740,7 +761,7 @@ export default function AdminPage() {
                   onClick={() => {
                     setEditingOrg(org)
                     setEditName(org.name)
-                    setEditMaxUsers(org.max_users || 5)
+                    setEditMaxUsers(org.max_users || 1)
                   }}
                   className="p-2 text-slate-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-500/10 rounded-lg transition-colors"
                   title="Editar"
@@ -757,6 +778,14 @@ export default function AdminPage() {
                   title={org.is_active !== false ? 'Desativar' : 'Ativar'}
                 >
                   {org.is_active !== false ? <PowerOff size={18} /> : <Power size={18} />}
+                </button>
+                <button
+                  onClick={() => handleAccessCRM(org)}
+                  disabled={switchingOrgId === org.id}
+                  className="p-2 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-lg transition-colors disabled:opacity-50"
+                  title="Acessar CRM"
+                >
+                  {switchingOrgId === org.id ? <Loader2 size={18} className="animate-spin" /> : <ExternalLink size={18} />}
                 </button>
               </div>
             </div>
