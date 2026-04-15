@@ -35,6 +35,11 @@ function isMissingColumnInSchemaCache(error: unknown, table: string, column: str
 let cachedOrgId: string | null = null;
 let cachedOrgUserId: string | null = null;
 
+export function invalidateOrgCache() {
+  cachedOrgId = null;
+  cachedOrgUserId = null;
+}
+
 async function getCurrentOrganizationId(): Promise<string | null> {
   if (!supabase) return null;
 
@@ -325,9 +330,12 @@ export const boardsService = {
     try {
       if (!supabase) return { data: null, error: new Error('Supabase não configurado') };
 
+      const orgId = await getCurrentOrganizationId();
+      if (!orgId) return { data: null, error: new Error('Organização não encontrada') };
+
       const [boardsResult, stagesResult] = await Promise.all([
-        supabase.from('boards').select('*').order('position', { ascending: true }).order('created_at', { ascending: true }),
-        supabase.from('board_stages').select('*').order('order', { ascending: true }),
+        supabase.from('boards').select('*').eq('organization_id', orgId).order('position', { ascending: true }).order('created_at', { ascending: true }),
+        supabase.from('board_stages').select('*').eq('organization_id', orgId).order('order', { ascending: true }),
       ]);
 
       if (boardsResult.error) return { data: null, error: boardsResult.error };

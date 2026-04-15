@@ -24,6 +24,11 @@ import { sanitizeUUID, requireUUID, isValidUUID } from './utils';
 let cachedOrgId: string | null = null;
 let cachedOrgUserId: string | null = null;
 
+export function invalidateOrgCache() {
+  cachedOrgId = null;
+  cachedOrgUserId = null;
+}
+
 async function getCurrentOrganizationId(): Promise<string | null> {
   if (!supabase) return null;
 
@@ -243,9 +248,12 @@ export const dealsService = {
       if (!supabase) {
         return { data: null, error: new Error('Supabase não configurado') };
       }
+      const orgId = await getCurrentOrganizationId();
+      if (!orgId) return { data: null, error: new Error('Organização não encontrada') };
+
       const [dealsResult, itemsResult] = await Promise.all([
-        supabase.from('deals').select('*').order('created_at', { ascending: false }),
-        supabase.from('deal_items').select('*'),
+        supabase.from('deals').select('*').eq('organization_id', orgId).order('created_at', { ascending: false }),
+        supabase.from('deal_items').select('*').eq('organization_id', orgId),
       ]);
 
       if (dealsResult.error) return { data: null, error: dealsResult.error };

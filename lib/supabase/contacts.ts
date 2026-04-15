@@ -17,6 +17,39 @@ import { Contact, CRMCompany, OrganizationId, PaginationState, PaginatedResponse
 import { sanitizeUUID, sanitizeText, sanitizeNumber } from './utils';
 import { normalizePhoneE164 } from '@/lib/phone';
 
+// =============================================================================
+// Organization inference (client-side, RLS-safe)
+// =============================================================================
+let cachedOrgId: string | null = null;
+let cachedOrgUserId: string | null = null;
+
+export function invalidateOrgCache() {
+  cachedOrgId = null;
+  cachedOrgUserId = null;
+}
+
+async function getCurrentOrganizationId(): Promise<string | null> {
+  if (!supabase) return null;
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  if (cachedOrgUserId === user.id && cachedOrgId) return cachedOrgId;
+
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('organization_id')
+    .eq('id', user.id)
+    .single();
+
+  if (error) return null;
+
+  const orgId = sanitizeUUID((profile as any)?.organization_id);
+  cachedOrgUserId = user.id;
+  cachedOrgId = orgId;
+  return orgId;
+}
+
 // ============================================
 // CONTACTS SERVICE
 // ============================================
@@ -233,9 +266,13 @@ export const contactsService = {
       if (!supabase) {
         return { data: null, error: new Error('Supabase não configurado') };
       }
+      const orgId = await getCurrentOrganizationId();
+      if (!orgId) return { data: null, error: new Error('Organização não encontrada') };
+
       const { data, error } = await supabase
         .from('contacts')
         .select('*')
+        .eq('organization_id', orgId)
         .order('created_at', { ascending: false });
 
       if (error) return { data: null, error };
@@ -271,6 +308,9 @@ export const contactsService = {
       if (!supabase) {
         return { data: null, error: new Error('Supabase não configurado') };
       }
+      const orgId = await getCurrentOrganizationId();
+      if (!orgId) return { data: null, error: new Error('Organização não encontrada') };
+
       const { pageIndex, pageSize } = pagination;
       const from = pageIndex * pageSize;
       const to = from + pageSize - 1;
@@ -278,7 +318,8 @@ export const contactsService = {
       // Build query with count
       let query = supabase
         .from('contacts')
-        .select('*', { count: 'exact' });
+        .select('*', { count: 'exact' })
+        .eq('organization_id', orgId);
 
       // Apply filters
       if (filters) {
