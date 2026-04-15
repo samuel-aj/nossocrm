@@ -345,17 +345,6 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
                                         />
                                     </div>
                                 </div>
-                                
-                                <div className="relative">
-                                    <Building2 size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                                    <input
-                                        type="text"
-                                        placeholder="Empresa"
-                                        value={newContactData.companyName}
-                                        onChange={(e) => setNewContactData(prev => ({ ...prev, companyName: e.target.value }))}
-                                        className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
-                                    />
-                                </div>
                             </div>
                         )}
                     </div>
