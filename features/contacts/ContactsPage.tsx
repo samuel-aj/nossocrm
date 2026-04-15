@@ -70,12 +70,7 @@ export const ContactsPage: React.FC = () => {
                 counts={controller.stageCounts}
             />
 
-            <ContactsTabs
-                viewMode={controller.viewMode}
-                setViewMode={controller.setViewMode}
-                contactsCount={controller.totalCount}
-                companiesCount={controller.companies.length}
-            />
+            {/* Tabs de Pessoas/Empresas removidas — apenas Pessoas */}
 
             {/* Bulk Actions Bar */}
             {controller.selectedIds.size > 0 && (
