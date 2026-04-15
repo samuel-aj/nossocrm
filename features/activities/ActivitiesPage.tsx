@@ -107,6 +107,7 @@ export const ActivitiesPage: React.FC = () => {
                     deals={deals}
                     currentDate={currentDate}
                     setCurrentDate={setCurrentDate}
+                    onActivityClick={handleEditActivity}
                 />
             )}
 

@@ -194,7 +194,7 @@ export const ActivityFormModal: React.FC<ActivityFormModalProps> = ({
             />
           </div>
 
-          {teamMembers.length > 1 && (
+          {teamMembers.length >= 1 && (
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
                 Atribuir a

@@ -7,6 +7,7 @@ interface ActivitiesCalendarProps {
     deals: Deal[];
     currentDate: Date;
     setCurrentDate: (date: Date) => void;
+    onActivityClick?: (activity: Activity) => void;
 }
 
 const HOURS = Array.from({ length: 10 }, (_, i) => i + 9); // 9:00 to 18:00
@@ -32,7 +33,8 @@ export const ActivitiesCalendar: React.FC<ActivitiesCalendarProps> = ({
     activities,
     deals,
     currentDate,
-    setCurrentDate
+    setCurrentDate,
+    onActivityClick,
 }) => {
     const getWeekStart = (date: Date) => {
         const d = new Date(date);
@@ -200,6 +202,7 @@ export const ActivitiesCalendar: React.FC<ActivitiesCalendarProps> = ({
                                                         overflow-hidden
                                                     `}
                                                     title={`${activity.title} - ${activity.dealId ? (dealTitleById.get(activity.dealId) ?? '') : ''}`}
+                                                    onClick={() => onActivityClick?.(activity)}
                                                 >
                                                     {/* Shine effect on hover */}
                                                     <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent transform -skew-x-12 translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000"></div>
