@@ -86,7 +86,7 @@ export async function updateSession(request: NextRequest) {
 
     // Protected routes - redirect to login if not authenticated
     const isAuthRoute = pathname.startsWith('/login') || pathname.startsWith('/auth')
-    const isPublicRoute = pathname === '/' || pathname.startsWith('/join') || isSetupRoute || isInstallRoute
+    const isPublicRoute = pathname === '/' || pathname.startsWith('/join') || pathname.startsWith('/select-org') || isSetupRoute || isInstallRoute
 
     if (!user && !isAuthRoute && !isPublicRoute) {
         const url = request.nextUrl.clone()
@@ -97,7 +97,7 @@ export async function updateSession(request: NextRequest) {
     // Redirect authenticated users away from login
     if (user && isAuthRoute) {
         const url = request.nextUrl.clone()
-        url.pathname = '/dashboard'
+        url.pathname = '/select-org'
         return NextResponse.redirect(url)
     }
 

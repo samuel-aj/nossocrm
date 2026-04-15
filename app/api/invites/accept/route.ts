@@ -97,6 +97,18 @@ export async function POST(req: Request) {
     return json({ error: profileError.message }, 400);
   }
 
+  // Add to user_organizations junction table
+  await admin
+    .from('user_organizations')
+    .upsert(
+      {
+        user_id: userId,
+        organization_id: invite.organization_id,
+        role: invite.role,
+      },
+      { onConflict: 'user_id,organization_id' }
+    );
+
   await admin
     .from('organization_invites')
     .update({ used_at: nowIso })

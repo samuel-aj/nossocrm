@@ -148,6 +148,16 @@ export async function POST(req: Request) {
     { onConflict: 'id' }
   );
 
+  // Add to user_organizations junction table
+  await admin.from('user_organizations').upsert(
+    {
+      user_id: userId,
+      organization_id: org.id,
+      role: 'admin',
+    },
+    { onConflict: 'user_id,organization_id' }
+  );
+
   return json({
     ok: true,
     organization: org,

@@ -35,7 +35,7 @@ export default function LoginPage() {
             })
 
             if (error) throw error
-            router.push('/dashboard')
+            router.push('/select-org')
         } catch (err) {
             setError(getErrorMessage(err))
         } finally {
