@@ -187,6 +187,8 @@ export const activitiesService = {
       const sb = supabase;
       if (!sb) return { data: null, error: new Error('Supabase não configurado') };
 
+      const orgId = await getCurrentOrganizationId();
+
       const insertData: any = {
         title: activity.title,
         description: activity.description || null,
@@ -198,6 +200,7 @@ export const activitiesService = {
         client_company_id: sanitizeUUID(activity.clientCompanyId),
         participant_contact_ids: activity.participantContactIds || [],
         assigned_to: sanitizeUUID(activity.assignedTo) || null,
+        organization_id: orgId,
       };
 
       const { data, error } = await sb.from('activities').insert(insertData).select().single();
