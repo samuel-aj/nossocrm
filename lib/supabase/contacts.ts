@@ -410,6 +410,9 @@ export const contactsService = {
       if (!supabase) {
         return { data: null, error: new Error('Supabase não configurado') };
       }
+      const orgId = await getCurrentOrganizationId();
+      if (!orgId) return { data: null, error: new Error('Organização não encontrada') };
+
       const phoneE164 = normalizePhoneE164(contact.phone);
       const insertData = {
         name: contact.name,
@@ -426,6 +429,7 @@ export const contactsService = {
         last_interaction: sanitizeText(contact.lastInteraction),
         last_purchase_date: sanitizeText(contact.lastPurchaseDate),
         total_value: sanitizeNumber(contact.totalValue, 0),
+        organization_id: orgId,
       };
 
       const { data, error } = await supabase
