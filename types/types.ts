@@ -276,6 +276,8 @@ export interface Activity {
     avatar: string;
   };
   completed: boolean;
+  assignedTo?: string | null;
+  assignedToName?: string | null;
 }
 
 export interface DashboardStats {

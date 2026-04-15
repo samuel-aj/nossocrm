@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { Activity, Deal } from '@/types';
+import { useAuth } from '@/context/AuthContext';
+import { supabase } from '@/lib/supabase/client';
 
 interface ActivityFormData {
   title: string;
@@ -9,6 +11,13 @@ interface ActivityFormData {
   time: string;
   description: string;
   dealId: string;
+  assignedTo?: string;
+}
+
+interface TeamMember {
+  id: string;
+  display_name: string | null;
+  role: string;
 }
 
 interface ActivityFormModalProps {
@@ -52,6 +61,21 @@ export const ActivityFormModal: React.FC<ActivityFormModalProps> = ({
   editingActivity,
   deals,
 }) => {
+  const { profile } = useAuth();
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+
+  useEffect(() => {
+    if (!isOpen || !profile?.organization_id) return;
+    const sb = supabase;
+    if (!sb) return;
+    sb.from('profiles')
+      .select('id, display_name, role')
+      .eq('organization_id', profile.organization_id)
+      .then(({ data }) => {
+        if (data) setTeamMembers(data as TeamMember[]);
+      });
+  }, [isOpen, profile?.organization_id]);
+
   React.useEffect(() => {
     if (!isOpen) return;
     const handleEscape = (event: KeyboardEvent) => {
@@ -169,6 +193,26 @@ export const ActivityFormModal: React.FC<ActivityFormModalProps> = ({
               onChange={e => setFormData({ ...formData, description: e.target.value })}
             />
           </div>
+
+          {teamMembers.length > 1 && (
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
+                Atribuir a
+              </label>
+              <select
+                className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
+                value={formData.assignedTo || ''}
+                onChange={e => setFormData({ ...formData, assignedTo: e.target.value || undefined })}
+              >
+                <option value="">Eu mesmo</option>
+                {teamMembers.map(m => (
+                  <option key={m.id} value={m.id}>
+                    {m.display_name || m.id.slice(0, 8)} ({m.role === 'admin' || m.role === 'super_admin' ? 'Admin' : 'Vendedor'})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <button
             type="submit"

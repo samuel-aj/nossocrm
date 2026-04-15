@@ -86,6 +86,8 @@ export interface DbActivity {
   created_at: string;
   /** ID do dono/responsável. */
   owner_id: string | null;
+  /** ID do usuário atribuído (quem deve executar). */
+  assigned_to: string | null;
 }
 
 // Interface auxiliar para o retorno do Supabase com o join
@@ -112,7 +114,9 @@ const transformActivity = (db: DbActivityWithDeal): Activity => ({
   clientCompanyId: (db as any).client_company_id || undefined,
   participantContactIds: (db as any).participant_contact_ids || [],
   dealTitle: db.deals?.title || '',
-  user: { name: 'Você', avatar: '' }, // Will be enriched later
+  user: { name: 'Você', avatar: '' },
+  assignedTo: db.assigned_to || null,
+  assignedToName: (db as any).assigned_profile?.display_name || null,
 });
 
 /**
@@ -133,6 +137,7 @@ const transformActivityToDb = (activity: Partial<Activity>): Partial<DbActivity>
   if (activity.contactId !== undefined) db.contact_id = sanitizeUUID(activity.contactId);
   if (activity.clientCompanyId !== undefined) (db as any).client_company_id = sanitizeUUID(activity.clientCompanyId);
   if (activity.participantContactIds !== undefined) (db as any).participant_contact_ids = activity.participantContactIds || [];
+  if ((activity as any).assignedTo !== undefined) (db as any).assigned_to = sanitizeUUID((activity as any).assignedTo) || null;
 
   return db;
 };
@@ -155,7 +160,8 @@ export const activitiesService = {
         .from('activities')
         .select(`
           *,
-          deals:deal_id (title)
+          deals:deal_id (title),
+          assigned_profile:assigned_to (display_name)
         `)
         .eq('organization_id', orgId)
         .order('date', { ascending: false });
@@ -191,6 +197,7 @@ export const activitiesService = {
         contact_id: sanitizeUUID(activity.contactId),
         client_company_id: sanitizeUUID(activity.clientCompanyId),
         participant_contact_ids: activity.participantContactIds || [],
+        assigned_to: sanitizeUUID(activity.assignedTo) || null,
       };
 
       const { data, error } = await sb.from('activities').insert(insertData).select().single();
