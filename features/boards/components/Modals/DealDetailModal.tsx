@@ -36,6 +36,8 @@ import {
   Plus,
   Maximize2,
   Minimize2,
+  Copy,
+  ExternalLink,
 } from 'lucide-react';
 import { StageProgressBar } from '../StageProgressBar';
 import { ActivityRow } from '@/features/activities/components/ActivityRow';
@@ -751,35 +753,59 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
                   <h3 className="text-xs font-bold text-slate-400 uppercase mb-2 flex items-center gap-2">
                     <User size={14} /> Contato Principal
                   </h3>
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-xs font-bold">
-                      {(deal.contactName || '?').charAt(0)}
+                  {contact ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                          {(contact.name || '?').charAt(0)}
+                        </div>
+                        <a
+                          href={`/contacts?contactId=${contact.id}`}
+                          className="text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline truncate"
+                          title="Abrir contato"
+                        >
+                          {contact.name}
+                        </a>
+                        <a
+                          href={`/contacts?contactId=${contact.id}`}
+                          className="text-slate-400 hover:text-primary-500 transition-colors flex-shrink-0"
+                          title="Abrir contato"
+                        >
+                          <ExternalLink size={12} />
+                        </a>
+                      </div>
+                      {contact.phone && (
+                        <div className="flex items-center gap-2 ml-9">
+                          <Phone size={11} className="text-slate-400 flex-shrink-0" />
+                          <span className="text-xs text-slate-600 dark:text-slate-300 truncate">{contact.phone}</span>
+                          <button
+                            type="button"
+                            onClick={() => { navigator.clipboard.writeText(contact.phone); addToast('Telefone copiado!', 'success'); }}
+                            className="text-slate-400 hover:text-primary-500 transition-colors flex-shrink-0"
+                            title="Copiar telefone"
+                          >
+                            <Copy size={11} />
+                          </button>
+                        </div>
+                      )}
+                      {contact.email && (
+                        <div className="flex items-center gap-2 ml-9">
+                          <Mail size={11} className="text-slate-400 flex-shrink-0" />
+                          <span className="text-xs text-slate-600 dark:text-slate-300 truncate">{contact.email}</span>
+                          <button
+                            type="button"
+                            onClick={() => { navigator.clipboard.writeText(contact.email); addToast('Email copiado!', 'success'); }}
+                            className="text-slate-400 hover:text-primary-500 transition-colors flex-shrink-0"
+                            title="Copiar email"
+                          >
+                            <Copy size={11} />
+                          </button>
+                        </div>
+                      )}
                     </div>
-                    <div>
-                      <p className="text-slate-900 dark:text-white font-medium text-sm flex items-center gap-2">
-                        {deal.contactName || 'Sem contato'}
-                        {contact?.stage &&
-                          (() => {
-                            const stage = lifecycleStageById.get(contact.stage);
-                            if (!stage) return null;
-
-                            // Extract base color name (e.g. 'blue' from 'bg-blue-500')
-                            const colorClass = stage.color; // e.g. bg-blue-500
-                            // We need to construct text and ring classes dynamically or just use inline styles/safe list
-                            // For now, let's just use the background color provided and white text
-
-                            return (
-                              <span
-                                className={`text-[10px] font-black px-2 py-0.5 rounded shadow-sm uppercase tracking-wider flex items-center gap-1 text-white ${colorClass}`}
-                              >
-                                {stage.name}
-                              </span>
-                            );
-                          })()}
-                      </p>
-                      <p className="text-slate-500 text-xs">{deal.contactEmail}</p>
-                    </div>
-                  </div>
+                  ) : (
+                    <p className="text-sm text-slate-500">Sem contato</p>
+                  )}
                 </div>
 
                 {/* DYNAMIC CUSTOM FIELDS INPUTS */}
