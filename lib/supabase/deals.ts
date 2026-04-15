@@ -194,8 +194,10 @@ const transformDealToDb = (deal: Partial<Deal>): Partial<DbDeal> => {
   if (deal.probability !== undefined) db.probability = deal.probability;
 
   // Status = stage_id (UUID do estágio no kanban)
+  // Sync both fields to prevent desync
   if (deal.status !== undefined && isValidUUID(deal.status)) {
     db.stage_id = deal.status;
+    db.status = deal.status;
   }
 
   // Campos de fechamento
