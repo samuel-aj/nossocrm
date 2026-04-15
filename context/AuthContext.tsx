@@ -51,6 +51,7 @@ interface Profile {
     id: string;
     email: string;
     organization_id: OrganizationId;
+    organization_name?: string | null;
     role: 'super_admin' | 'admin' | 'vendedor';
     first_name?: string | null;
     last_name?: string | null;
@@ -146,14 +147,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             const { data, error } = await sb
                 .from('profiles')
-                .select('*')
+                .select('*, organizations(name)')
                 .eq('id', userId)
                 .single();
 
             if (error) {
                 console.error('Error fetching profile:', error);
             } else {
-                setProfile(data);
+                const org = (data as any)?.organizations as { name: string } | null;
+                setProfile({
+                    ...data,
+                    organization_name: org?.name ?? null,
+                    organizations: undefined,
+                } as Profile);
             }
         } finally {
             setLoading(false);

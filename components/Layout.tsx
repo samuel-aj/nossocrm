@@ -144,7 +144,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const isMobile = mode === 'mobile';
   const isTablet = mode === 'tablet';
   const isDesktop = mode === 'desktop';
-  const [officeName] = usePersistedState<string>('crm_office_name', 'NossoCRM');
+  const [officeNameLocal] = usePersistedState<string>('crm_office_name', '');
+  const officeName = profile?.organization_name || officeNameLocal || 'NossoCRM';
   const officeInitials = officeName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase() || 'AJ';
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);

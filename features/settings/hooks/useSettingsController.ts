@@ -3,6 +3,7 @@ import { useToast } from '@/context/ToastContext';
 import { CustomFieldDefinition, CustomFieldType } from '@/types';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useCRM } from '@/context/CRMContext';
+import { useAuth } from '@/context/AuthContext';
 
 // TODO: Migrate customFieldDefinitions and tags to Supabase
 // For now, using local state as placeholder
