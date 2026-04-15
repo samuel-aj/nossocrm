@@ -40,7 +40,7 @@ export async function GET() {
   for (const row of data || []) flags[row.key] = Boolean(row.enabled);
 
   return json({
-    isAdmin: me.role === 'admin',
+    isAdmin: me.role === 'admin' || me.role === 'super_admin',
     flags,
   });
 }

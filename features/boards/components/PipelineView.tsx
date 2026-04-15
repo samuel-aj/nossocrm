@@ -244,7 +244,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   boardCreateOverlay,
 }) => {
   const { profile } = useAuth();
-  const isAdmin = profile?.role === 'admin';
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
   const [isExportModalOpen, setIsExportModalOpen] = React.useState(false);
 
   const handleUpdateStage = (updatedStage: BoardStage) => {

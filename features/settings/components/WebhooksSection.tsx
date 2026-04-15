@@ -107,7 +107,7 @@ export const WebhooksSection: React.FC = () => {
   const [confirmDeleteInboundOpen, setConfirmDeleteInboundOpen] = useState(false);
   const [confirmDeleteOutboundOpen, setConfirmDeleteOutboundOpen] = useState(false);
 
-  const canUse = profile?.role === 'admin' && !!profile?.organization_id;
+  const canUse = (profile?.role === 'admin' || profile?.role === 'super_admin') && !!profile?.organization_id;
 
   const activeInbound = useMemo(() => sources.find((s) => s.active) || sources[0] || null, [sources]);
   const hasInbound = !!activeInbound && !!activeInbound.active;

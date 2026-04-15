@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3001)",
+      "Bash(netstat -ano)",
+      "Bash(node -e ':*)",
+      "Bash(curl:*)",
+      "Bash(npx next:*)",
+      "Bash(taskkill //F //PID 4552)",
+      "Bash(taskkill //F //PID 26656)",
+      "Bash(taskkill //F //PID 9332)",
+      "Bash(rm -f .next/dev/lock)",
+      "Bash(nohup npx:*)",
+      "Bash(echo \"PID: $!\")",
+      "Bash(grep -r \"formatCurrency\\\\|format.*\\\\\\\\\\\\$\\\\|'.*\\\\\\\\\\\\$'\" \"C:\\\\Users\\\\samuk\\\\Desktop\\\\GRUPO ROCHA\\\\Agência Anúncio Jurídico\\\\nossocrm\\\\features\\\\boards\" --include=\"*.tsx\" --include=\"*.ts\" -n)",
+      "Bash(grep -rn \"\\\\`\\\\\\\\\\\\$\" \"C:\\\\Users\\\\samuk\\\\Desktop\\\\GRUPO ROCHA\\\\Agência Anúncio Jurídico\\\\nossocrm\\\\features\" --include=\"*.tsx\" --include=\"*.ts\")",
+      "Bash(grep -rn \"'\\\\\\\\\\\\$\\\\|'\\\\\\\\\\\\$\" \"C:\\\\Users\\\\samuk\\\\Desktop\\\\GRUPO ROCHA\\\\Agência Anúncio Jurídico\\\\nossocrm\\\\features\" --include=\"*.tsx\" --include=\"*.ts\")",
+      "Bash(grep:*)",
+      "Bash(cat next.config.ts)",
+      "Bash(cat next.config.js)",
+      "Bash(cat next.config.mjs)",
+      "Bash(find . -name \"page.tsx\" -path \"*protected*\" -exec grep -l \"dynamic\\\\|ssr: false\" {} \\\\;)",
+      "Bash(find \"/c/Users/samuk/Desktop/GRUPO ROCHA/Agência Anúncio Jurídico/nossocrm\" -type f \\\\\\( -name \"*.ts\" -o -name \"*.tsx\" \\\\\\) -exec grep -l \"auth.*createUser\\\\|invit\\\\|register\" {} \\\\;)",
+      "Bash(npx vercel:*)"
+    ]
+  }
+}

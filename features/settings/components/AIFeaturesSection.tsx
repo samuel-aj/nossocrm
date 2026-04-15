@@ -34,7 +34,7 @@ const FEATURES: FeatureItem[] = [
  */
 export const AIFeaturesSection: React.FC = () => {
   const { profile } = useAuth();
-  const isAdmin = profile?.role === 'admin';
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
   const { aiFeatureFlags, setAIFeatureFlag } = useCRM();
   const { showToast } = useToast();
   const [savingKey, setSavingKey] = useState<string | null>(null);

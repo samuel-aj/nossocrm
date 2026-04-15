@@ -133,7 +133,7 @@ async function validateApiKey(provider: string, apiKey: string, model: string): 
  */
 export const AIConfigSection: React.FC = () => {
     const { profile } = useAuth();
-    const isAdmin = profile?.role === 'admin';
+    const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
 
     const {
         aiProvider, setAiProvider,

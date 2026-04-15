@@ -62,7 +62,7 @@ export async function GET() {
   const aiEnabled = typeof orgSettings?.ai_enabled === 'boolean' ? orgSettings.ai_enabled : true;
 
   // Security: members should NOT receive raw API keys.
-  if (profile.role !== 'admin') {
+  if (profile.role !== 'admin' && profile.role !== 'super_admin') {
     return json({
       aiEnabled,
       aiProvider: (orgSettings?.ai_provider || 'google') as Provider,
@@ -121,7 +121,7 @@ export async function POST(req: Request) {
     return json({ error: 'Profile not found' }, 404);
   }
 
-  if (profile.role !== 'admin') {
+  if (profile.role !== 'admin' && profile.role !== 'super_admin') {
     return json({ error: 'Forbidden' }, 403);
   }
 

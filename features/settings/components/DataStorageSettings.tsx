@@ -27,7 +27,7 @@ export const DataStorageSettings: React.FC = () => {
     const [confirmText, setConfirmText] = useState('');
     const [isDeleting, setIsDeleting] = useState(false);
 
-    const isAdmin = profile?.role === 'admin';
+    const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
 
     // Estatísticas
     const stats = {

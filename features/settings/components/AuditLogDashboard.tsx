@@ -143,7 +143,7 @@ export const AuditLogDashboard: React.FC = () => {
     info: 0,
   });
 
-  const isAdmin = profile?.role === 'admin';
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
 
   const fetchLogs = async () => {
     if (!isAdmin) return;
