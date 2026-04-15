@@ -776,22 +776,22 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
                       </div>
                       {contact.phone && (
                         <div className="flex items-center gap-2 ml-9">
-                          <Phone size={11} className="text-slate-400 flex-shrink-0" />
-                          <span className="text-xs text-slate-600 dark:text-slate-300 truncate">{contact.phone}</span>
+                          <Phone size={13} className="text-slate-400 flex-shrink-0" />
+                          <span className="text-sm text-slate-600 dark:text-slate-300 truncate">{contact.phone}</span>
                           <button
                             type="button"
                             onClick={() => { navigator.clipboard.writeText(contact.phone); addToast('Telefone copiado!', 'success'); }}
                             className="text-slate-400 hover:text-primary-500 transition-colors flex-shrink-0"
                             title="Copiar telefone"
                           >
-                            <Copy size={11} />
+                            <Copy size={13} />
                           </button>
                         </div>
                       )}
                       {contact.email && (
                         <div className="flex items-center gap-2 ml-9">
-                          <Mail size={11} className="text-slate-400 flex-shrink-0" />
-                          <span className="text-xs text-slate-600 dark:text-slate-300 truncate">{contact.email}</span>
+                          <Mail size={13} className="text-slate-400 flex-shrink-0" />
+                          <span className="text-sm text-slate-600 dark:text-slate-300 truncate">{contact.email}</span>
                           <button
                             type="button"
                             onClick={() => { navigator.clipboard.writeText(contact.email); addToast('Email copiado!', 'success'); }}
