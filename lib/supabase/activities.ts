@@ -17,10 +17,38 @@ import { Activity } from '@/types';
 import { sanitizeUUID } from './utils';
 import { sortActivitiesSmart } from '@/lib/utils/activitySort';
 
-// ============================================
-// HELPERS REMOVED
-// ============================================
+// =============================================================================
+// Organization inference (client-side, RLS-safe)
+// =============================================================================
+let cachedOrgId: string | null = null;
+let cachedOrgUserId: string | null = null;
 
+export function invalidateOrgCache() {
+  cachedOrgId = null;
+  cachedOrgUserId = null;
+}
+
+async function getCurrentOrganizationId(): Promise<string | null> {
+  if (!supabase) return null;
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  if (cachedOrgUserId === user.id && cachedOrgId) return cachedOrgId;
+
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('organization_id')
+    .eq('id', user.id)
+    .single();
+
+  if (error) return null;
+
+  const orgId = sanitizeUUID((profile as any)?.organization_id);
+  cachedOrgUserId = user.id;
+  cachedOrgId = orgId;
+  return orgId;
+}
 
 // ============================================
 // ACTIVITIES SERVICE
@@ -120,13 +148,17 @@ export const activitiesService = {
       const sb = supabase;
       if (!sb) return { data: null, error: new Error('Supabase não configurado') };
 
+      const orgId = await getCurrentOrganizationId();
+      if (!orgId) return { data: null, error: new Error('Organização não encontrada') };
+
       const { data, error } = await sb
         .from('activities')
         .select(`
           *,
           deals:deal_id (title)
         `)
-        .order('date', { ascending: false }); // Ordenação básica do banco
+        .eq('organization_id', orgId)
+        .order('date', { ascending: false });
 
       if (error) return { data: null, error };
       

@@ -238,15 +238,23 @@ export const contactsService = {
       if (!supabase) {
         return { data: null, error: new Error('Supabase não configurado') };
       }
-      const { data, error } = await supabase.rpc('get_contact_stage_counts');
+
+      const orgId = await getCurrentOrganizationId();
+      if (!orgId) return { data: null, error: new Error('Organização não encontrada') };
+
+      const { data, error } = await supabase
+        .from('contacts')
+        .select('stage')
+        .eq('organization_id', orgId);
 
       if (error) return { data: null, error };
 
-      // Transform array to object
+      // Count stages manually
       const counts: Record<string, number> = {};
       if (data) {
-        for (const row of data as Array<{ stage: string; count: number }>) {
-          counts[row.stage] = row.count;
+        for (const row of data) {
+          const stage = row.stage || 'LEAD';
+          counts[stage] = (counts[stage] || 0) + 1;
         }
       }
 

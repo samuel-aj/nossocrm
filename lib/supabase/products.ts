@@ -16,6 +16,11 @@ import { sanitizeUUID } from './utils';
 let cachedOrgId: string | null = null;
 let cachedOrgUserId: string | null = null;
 
+export function invalidateOrgCache() {
+  cachedOrgId = null;
+  cachedOrgUserId = null;
+}
+
 async function getCurrentOrganizationId(): Promise<string | null> {
   if (!supabase) return null;
 
@@ -68,9 +73,13 @@ export const productsService = {
     try {
       if (!supabase) return { data: [], error: new Error('Supabase não configurado') };
 
+      const orgId = await getCurrentOrganizationId();
+      if (!orgId) return { data: [], error: new Error('Organização não encontrada') };
+
       const { data, error } = await supabase
         .from('products')
         .select('id, organization_id, name, description, price, sku, active, created_at, updated_at, owner_id')
+        .eq('organization_id', orgId)
         .order('created_at', { ascending: false });
 
       if (error) return { data: [], error };
@@ -87,9 +96,13 @@ export const productsService = {
     try {
       if (!supabase) return { data: [], error: new Error('Supabase não configurado') };
 
+      const orgId = await getCurrentOrganizationId();
+      if (!orgId) return { data: [], error: new Error('Organização não encontrada') };
+
       const { data, error } = await supabase
         .from('products')
         .select('id, organization_id, name, description, price, sku, active, created_at, updated_at, owner_id')
+        .eq('organization_id', orgId)
         .eq('active', true)
         .order('created_at', { ascending: false });
 

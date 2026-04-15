@@ -7,6 +7,8 @@ import { useToast } from '@/context/ToastContext'
 import { invalidateOrgCache as invalidateBoardsCache } from '@/lib/supabase/boards'
 import { invalidateOrgCache as invalidateDealsCache } from '@/lib/supabase/deals'
 import { invalidateOrgCache as invalidateContactsCache } from '@/lib/supabase/contacts'
+import { invalidateOrgCache as invalidateActivitiesCache } from '@/lib/supabase/activities'
+import { invalidateOrgCache as invalidateProductsCache } from '@/lib/supabase/products'
 import {
   Building2,
   Plus,
@@ -282,6 +284,8 @@ export default function AdminPage() {
       invalidateBoardsCache()
       invalidateDealsCache()
       invalidateContactsCache()
+      invalidateActivitiesCache()
+      invalidateProductsCache()
       await refreshProfile()
       router.push('/')
     } catch (err: any) {
