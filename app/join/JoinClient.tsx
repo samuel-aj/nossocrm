@@ -28,6 +28,7 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
     name: '',
     email: '',
     password: '',
+    confirmPassword: '',
   })
 
   useEffect(() => {
@@ -77,6 +78,11 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!token) return
+
+    if (formData.password !== formData.confirmPassword) {
+      setError('As senhas não coincidem. Verifique e tente novamente.')
+      return
+    }
 
     setLoading(true)
     setError(null)
@@ -150,9 +156,11 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
       <div className="max-w-md w-full relative z-10">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-slate-900 dark:text-white font-display tracking-tight mb-2">
-            Aceitar Convite
+            Bem-vindo ao NossoCRM
           </h1>
-          <p className="text-slate-500 dark:text-slate-400">Crie sua conta para se juntar à equipe.</p>
+          <p className="text-slate-500 dark:text-slate-400">
+            Preencha seus dados e defina sua senha de acesso para começar.
+          </p>
         </div>
 
         <div className="bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-2xl shadow-xl p-8 backdrop-blur-sm">
@@ -202,7 +210,7 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
 
             <div>
               <label htmlFor="join-password" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
-                Senha
+                Crie sua senha
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -215,12 +223,48 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
                   aria-required="true"
                   minLength={6}
                   className="block w-full pl-10 pr-3 py-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-900/50 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all sm:text-sm"
-                  placeholder="••••••••"
+                  placeholder="Mínimo 6 caracteres"
                   value={formData.password}
                   onChange={e => setFormData({ ...formData, password: e.target.value })}
                 />
               </div>
             </div>
+
+            <div>
+              <label htmlFor="join-confirm-password" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                Confirme sua senha
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Lock className="h-5 w-5 text-slate-400" />
+                </div>
+                <input
+                  id="join-confirm-password"
+                  type="password"
+                  required
+                  aria-required="true"
+                  minLength={6}
+                  className={`block w-full pl-10 pr-3 py-2.5 border rounded-xl bg-slate-50 dark:bg-slate-900/50 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all sm:text-sm ${
+                    formData.confirmPassword && formData.password !== formData.confirmPassword
+                      ? 'border-red-400 dark:border-red-500'
+                      : 'border-slate-300 dark:border-slate-700'
+                  }`}
+                  placeholder="Repita a senha"
+                  value={formData.confirmPassword}
+                  onChange={e => setFormData({ ...formData, confirmPassword: e.target.value })}
+                />
+              </div>
+              {formData.confirmPassword && formData.password !== formData.confirmPassword && (
+                <p className="mt-1 text-xs text-red-500">As senhas não coincidem</p>
+              )}
+            </div>
+
+            {error && (
+              <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-500/20 rounded-xl">
+                <AlertCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
+                <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+              </div>
+            )}
 
             <button
               type="submit"
@@ -231,7 +275,7 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
                 <Loader2 className="animate-spin h-5 w-5" />
               ) : (
                 <>
-                  Criar Conta e Entrar
+                  Criar Minha Conta
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </>
               )}
