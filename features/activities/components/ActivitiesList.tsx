@@ -66,6 +66,22 @@ export const ActivitiesList: React.FC<ActivitiesListProps> = ({
         return map;
     }, [companies]);
 
+    const HISTORY_TYPES = new Set(['STATUS_CHANGE', 'NOTE']);
+
+    const tasks = useMemo(() =>
+        activities
+            .filter(a => !HISTORY_TYPES.has(a.type))
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+        [activities]
+    );
+
+    const history = useMemo(() =>
+        activities
+            .filter(a => HISTORY_TYPES.has(a.type))
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+        [activities]
+    );
+
     if (activities.length === 0) {
         return (
             <div className="text-center py-12 bg-white dark:bg-dark-card rounded-xl border border-slate-200 dark:border-white/5 border-dashed">
@@ -74,22 +90,56 @@ export const ActivitiesList: React.FC<ActivitiesListProps> = ({
         );
     }
 
+    const renderRow = (activity: Activity) => (
+        <ActivityRow
+            key={activity.id}
+            activity={activity}
+            deal={activity.dealId ? dealById.get(activity.dealId) : undefined}
+            contact={activity.contactId ? contactById.get(activity.contactId) : undefined}
+            company={activity.clientCompanyId ? companyById.get(activity.clientCompanyId) : undefined}
+            onToggleComplete={onToggleComplete}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            isSelected={selectedActivities.has(activity.id)}
+            onSelect={onSelectActivity}
+        />
+    );
+
     return (
-        <div className="space-y-3">
-            {activities.map(activity => (
-                <ActivityRow
-                    key={activity.id}
-                    activity={activity}
-                    deal={activity.dealId ? dealById.get(activity.dealId) : undefined}
-                    contact={activity.contactId ? contactById.get(activity.contactId) : undefined}
-                    company={activity.clientCompanyId ? companyById.get(activity.clientCompanyId) : undefined}
-                    onToggleComplete={onToggleComplete}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                    isSelected={selectedActivities.has(activity.id)}
-                    onSelect={onSelectActivity}
-                />
-            ))}
+        <div className="space-y-6">
+            {tasks.length > 0 && (
+                <div>
+                    <h3 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-primary-500" />
+                        Tarefas ({tasks.length})
+                    </h3>
+                    <div className="space-y-3">
+                        {tasks.map(renderRow)}
+                    </div>
+                </div>
+            )}
+
+            {history.length > 0 && (
+                <div>
+                    <h3 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-slate-400" />
+                        Histórico ({history.length})
+                    </h3>
+                    <div className="space-y-1">
+                        {history.map(activity => (
+                            <div
+                                key={activity.id}
+                                className="flex items-center justify-between py-2 px-3 text-sm text-slate-500 dark:text-slate-400 bg-white/50 dark:bg-white/[0.02] rounded-lg border border-slate-100 dark:border-white/5"
+                            >
+                                <span>{activity.title}</span>
+                                <span className="text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap ml-4">
+                                    {new Date(activity.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
