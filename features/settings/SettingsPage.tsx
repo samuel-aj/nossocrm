@@ -23,14 +23,8 @@ interface GeneralSettingsProps {
 
 const GeneralSettings: React.FC<GeneralSettingsProps> = ({ hash, isAdmin }) => {
   const controller = useSettingsController();
-  const [officeNameDraft, setOfficeNameDraft] = React.useState(controller.officeName);
-  const [officeSaved, setOfficeSaved] = React.useState(false);
-
-  const handleSaveOfficeName = () => {
-    controller.setOfficeName(officeNameDraft);
-    setOfficeSaved(true);
-    setTimeout(() => setOfficeSaved(false), 2000);
-  };
+  const { profile } = useAuth();
+  const organizationName = profile?.organization_name || 'Não definido';
 
   // Scroll to hash element (e.g., #ai-config)
   useEffect(() => {
@@ -48,29 +42,15 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ hash, isAdmin }) => {
 
   return (
     <div className="pb-10">
-      {/* Office Name */}
+      {/* Office Name (read-only, managed by agency) */}
       <div className="mb-8">
         <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl p-6">
           <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-1">Nome do Escritório</h3>
           <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-            Aparece na sidebar e na identidade do sistema.
+            Definido pela agência. Aparece na sidebar e na identidade do sistema.
           </p>
-          <div className="flex items-center gap-3">
-            <input
-              type="text"
-              aria-label="Nome do Escritório"
-              value={officeNameDraft}
-              onChange={(e) => setOfficeNameDraft(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSaveOfficeName()}
-              placeholder="Ex: HW Rocha Advocacia"
-              className="w-full max-w-xs px-4 py-2.5 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-slate-900 dark:text-white transition-all"
-            />
-            <button
-              onClick={handleSaveOfficeName}
-              className="px-4 py-2.5 bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold rounded-xl transition-colors"
-            >
-              {officeSaved ? '✓ Salvo!' : 'Salvar'}
-            </button>
+          <div className="px-4 py-2.5 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl w-fit min-w-[200px]">
+            <span className="text-slate-900 dark:text-white font-medium">{organizationName}</span>
           </div>
         </div>
       </div>

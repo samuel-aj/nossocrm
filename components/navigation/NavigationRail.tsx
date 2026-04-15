@@ -3,7 +3,6 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils/cn';
 import { PRIMARY_NAV, SECONDARY_NAV } from './navConfig';
-import { usePersistedState } from '@/hooks/usePersistedState';
 import { useAuth } from '@/context/AuthContext';
 
 export interface NavigationRailProps {
@@ -14,8 +13,7 @@ export interface NavigationRailProps {
 export function NavigationRail({ onOpenMore }: NavigationRailProps) {
   const pathname = usePathname();
   const { profile } = useAuth();
-  const [officeNameLocal] = usePersistedState<string>('crm_office_name', '');
-  const officeName = profile?.organization_name || officeNameLocal || 'NossoCRM';
+  const officeName = profile?.organization_name || 'NossoCRM';
   const officeInitials = officeName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase() || 'AJ';
 
   const isHrefActive = (href: string) =>

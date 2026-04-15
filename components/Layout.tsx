@@ -50,7 +50,7 @@ import { useCRM } from '../context/CRMContext';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { prefetchRoute, RouteName } from '@/lib/prefetch';
-import { usePersistedState } from '@/hooks/usePersistedState';
+
 import { isDebugMode, enableDebugMode, disableDebugMode } from '@/lib/debug';
 import { SkipLink } from '@/lib/a11y';
 import { useResponsiveMode } from '@/hooks/useResponsiveMode';
@@ -144,8 +144,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const isMobile = mode === 'mobile';
   const isTablet = mode === 'tablet';
   const isDesktop = mode === 'desktop';
-  const [officeNameLocal] = usePersistedState<string>('crm_office_name', '');
-  const officeName = profile?.organization_name || officeNameLocal || 'NossoCRM';
+  const officeName = profile?.organization_name || 'NossoCRM';
   const officeInitials = officeName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase() || 'AJ';
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
