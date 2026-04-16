@@ -117,6 +117,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
   const [aiResult, setAiResult] = useState<{ suggestion: string; score: number } | null>(null);
   const [emailDraft, setEmailDraft] = useState<string | null>(null);
   const [newNote, setNewNote] = useState('');
+  const [showNewNote, setShowNewNote] = useState(false);
+  const [dealDescription, setDealDescription] = useState('');
   const [activeTab, setActiveTab] = useState<'timeline' | 'activities' | 'notes' | 'products' | 'info'>('timeline');
   const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -173,6 +175,9 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
       setIsCustomFieldsEditMode(false);
       setTagQuery('');
       setCustomFieldsDraft({});
+      setShowNewNote(false);
+      setNewNote('');
+      setDealDescription('');
     }
   }, [isOpen, dealId]); // Depend on dealId to reset when switching deals
 
@@ -1082,25 +1087,56 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
               <div className="flex-1 overflow-y-auto scrollbar-custom p-6 bg-slate-50/30 dark:bg-black/10">
                 {activeTab === 'timeline' && (
                   <div className="space-y-6">
+                    {/* Descrição fixa — sempre visível, sem submit, sem salvamento */}
                     <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-4 shadow-sm">
+                      <h4 className="text-sm font-bold text-slate-700 dark:text-white mb-2">Descrição</h4>
                       <textarea
-                        ref={noteTextareaRef}
                         className="w-full bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none resize-none min-h-[80px]"
-                        placeholder="Escreva uma nota..."
-                        value={newNote}
-                        onChange={e => setNewNote(e.target.value)}
-                      ></textarea>
-                      <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-100 dark:border-white/5">
-                        <div />
-                        <button
-                          onClick={handleAddNote}
-                          disabled={!newNote.trim()}
-                          className="bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-all"
-                        >
-                          <Check size={14} /> Enviar
-                        </button>
-                      </div>
+                        placeholder="Adicione uma descrição..."
+                        value={dealDescription}
+                        onChange={e => setDealDescription(e.target.value)}
+                      />
                     </div>
+
+                    {/* Nova Nota — editor só aparece após clique */}
+                    {!showNewNote ? (
+                      <button
+                        onClick={() => setShowNewNote(true)}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-500 dark:text-slate-400 hover:border-primary-400 hover:text-primary-600 dark:hover:border-primary-500 dark:hover:text-primary-400 transition-colors"
+                      >
+                        <Plus size={16} /> Nova Nota
+                      </button>
+                    ) : (
+                      <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-4 shadow-sm">
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-sm font-bold text-slate-700 dark:text-white">Nova Nota</h4>
+                          <button
+                            onClick={() => { setShowNewNote(false); setNewNote(''); }}
+                            className="text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                          >
+                            <X size={16} />
+                          </button>
+                        </div>
+                        <textarea
+                          ref={noteTextareaRef}
+                          autoFocus
+                          className="w-full bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none resize-none min-h-[80px]"
+                          placeholder="Escreva uma nota..."
+                          value={newNote}
+                          onChange={e => setNewNote(e.target.value)}
+                        />
+                        <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-100 dark:border-white/5">
+                          <div />
+                          <button
+                            onClick={() => { handleAddNote(); setShowNewNote(false); }}
+                            disabled={!newNote.trim()}
+                            className="bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-all"
+                          >
+                            <Check size={14} /> Enviar
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Quick Activity Creation */}
                     {!showQuickActivity ? (
