@@ -165,8 +165,10 @@ export const ActivityStatusIcon: React.FC<ActivityStatusIconProps> = ({
     }
   })();
 
+  // Hide the day badge when overdue by less than a full calendar day — the
+  // red icon already conveys "atrasada" and "0d" would be noisy.
   const trailingBadge =
-    status.kind === 'overdue' ? (
+    status.kind === 'overdue' && status.daysOverdue >= 1 ? (
       <span
         className="ml-1 inline-flex items-center px-1.5 h-5 rounded-md bg-red-500 text-white text-[10px] font-bold leading-none shadow-sm"
         aria-hidden="true"

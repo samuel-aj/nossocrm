@@ -77,44 +77,79 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
     [profile?.organization_id, queryClient]
   );
 
-  const updateActivity = useCallback(async (id: string, updates: Partial<Activity>) => {
-    const { error: updateError } = await activitiesService.update(id, updates);
+  /**
+   * Patch the activities cache immediately so the UI reflects the change
+   * before the server roundtrip. Returns a snapshot used to roll back on error.
+   */
+  const patchActivitiesCache = useCallback(
+    (mutator: (list: Activity[]) => Activity[]) => {
+      const listsKey = queryKeys.activities.lists();
+      const previous = queryClient.getQueryData<Activity[]>(listsKey);
+      queryClient.setQueryData<Activity[]>(listsKey, (old = []) => mutator(old));
+      return previous;
+    },
+    [queryClient]
+  );
 
-    if (updateError) {
-      console.error('Erro ao atualizar atividade:', updateError.message);
-      return;
-    }
+  const updateActivity = useCallback(
+    async (id: string, updates: Partial<Activity>) => {
+      // Optimistic update: reflect the change in the UI immediately.
+      const previous = patchActivitiesCache(list =>
+        list.map(a => (a.id === id ? { ...a, ...updates } : a))
+      );
 
-    // Invalida cache para TanStack Query atualizar
-    await queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
-  }, [queryClient]);
+      const { error: updateError } = await activitiesService.update(id, updates);
 
-  const deleteActivity = useCallback(async (id: string) => {
-    const { error: deleteError } = await activitiesService.delete(id);
+      if (updateError) {
+        console.error('Erro ao atualizar atividade:', updateError.message);
+        if (previous) queryClient.setQueryData(queryKeys.activities.lists(), previous);
+        return;
+      }
 
-    if (deleteError) {
-      console.error('Erro ao deletar atividade:', deleteError.message);
-      return;
-    }
+      void queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
+    },
+    [patchActivitiesCache, queryClient]
+  );
 
-    // Invalida cache para TanStack Query atualizar
-    await queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
-  }, [queryClient]);
+  const deleteActivity = useCallback(
+    async (id: string) => {
+      const previous = patchActivitiesCache(list => list.filter(a => a.id !== id));
 
-  const toggleActivityCompletion = useCallback(async (id: string) => {
-    const activity = activities.find(a => a.id === id);
-    if (!activity) return;
+      const { error: deleteError } = await activitiesService.delete(id);
 
-    const { error: toggleError } = await activitiesService.toggleCompletion(id);
+      if (deleteError) {
+        console.error('Erro ao deletar atividade:', deleteError.message);
+        if (previous) queryClient.setQueryData(queryKeys.activities.lists(), previous);
+        return;
+      }
 
-    if (toggleError) {
-      console.error('Erro ao alternar atividade:', toggleError.message);
-      return;
-    }
+      void queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
+    },
+    [patchActivitiesCache, queryClient]
+  );
 
-    // Invalida cache para TanStack Query atualizar
-    await queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
-  }, [activities, queryClient]);
+  const toggleActivityCompletion = useCallback(
+    async (id: string) => {
+      const activity = activities.find(a => a.id === id);
+      if (!activity) return;
+
+      // Optimistic toggle: flip completed in the cache now, rollback on error.
+      const previous = patchActivitiesCache(list =>
+        list.map(a => (a.id === id ? { ...a, completed: !a.completed } : a))
+      );
+
+      const { error: toggleError } = await activitiesService.toggleCompletion(id);
+
+      if (toggleError) {
+        console.error('Erro ao alternar atividade:', toggleError.message);
+        if (previous) queryClient.setQueryData(queryKeys.activities.lists(), previous);
+        return;
+      }
+
+      void queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
+    },
+    [activities, patchActivitiesCache, queryClient]
+  );
 
   const value = useMemo(
     () => ({

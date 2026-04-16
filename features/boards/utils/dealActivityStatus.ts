@@ -17,6 +17,11 @@ export interface DealActivityStatus {
 
 const TYPES_THAT_COUNT = new Set(['CALL', 'MEETING', 'EMAIL', 'TASK']);
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+/**
+ * Window (in ms) in which a not-yet-due activity is considered "dueSoon"
+ * and the clock indicator takes over from the regular check. 5 hours.
+ */
+const DUE_SOON_WINDOW_MS = 5 * 60 * 60 * 1000;
 
 /** Midnight of the given date, local time. */
 const startOfDay = (d: Date) => {
@@ -59,18 +64,20 @@ export function computeActivityStatus(
   const activityDay = startOfDay(new Date(next.date));
   const today = startOfDay(now);
   const daysFromToday = Math.floor((activityDay.getTime() - today.getTime()) / MS_PER_DAY);
+  const diffMs = new Date(next.date).getTime() - now.getTime();
 
-  if (daysFromToday < 0) {
+  // Overdue = the scheduled moment has already passed.
+  if (diffMs < 0) {
     return {
       kind: 'overdue',
       nextActivity: next,
       daysFromToday,
-      daysOverdue: Math.abs(daysFromToday),
+      daysOverdue: Math.max(0, -daysFromToday),
     };
   }
 
-  const diffMs = new Date(next.date).getTime() - now.getTime();
-  if (daysFromToday === 0 || (diffMs >= 0 && diffMs <= MS_PER_DAY)) {
+  // Clock only within the final 5-hour window before the activity fires.
+  if (diffMs <= DUE_SOON_WINDOW_MS) {
     return { kind: 'dueSoon', nextActivity: next, daysFromToday, daysOverdue: 0 };
   }
 
@@ -109,17 +116,18 @@ export function computeActivityStatusMap(
     }
     const activityDay = startOfDay(new Date(next.date));
     const daysFromToday = Math.floor((activityDay.getTime() - today.getTime()) / MS_PER_DAY);
-    if (daysFromToday < 0) {
+    const diffMs = new Date(next.date).getTime() - now.getTime();
+
+    if (diffMs < 0) {
       result.set(deal.id, {
         kind: 'overdue',
         nextActivity: next,
         daysFromToday,
-        daysOverdue: Math.abs(daysFromToday),
+        daysOverdue: Math.max(0, -daysFromToday),
       });
       continue;
     }
-    const diffMs = new Date(next.date).getTime() - now.getTime();
-    if (daysFromToday === 0 || (diffMs >= 0 && diffMs <= MS_PER_DAY)) {
+    if (diffMs <= DUE_SOON_WINDOW_MS) {
       result.set(deal.id, { kind: 'dueSoon', nextActivity: next, daysFromToday, daysOverdue: 0 });
       continue;
     }
