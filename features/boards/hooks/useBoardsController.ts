@@ -570,6 +570,12 @@ export const useBoardsController = () => {
       EMAIL: 'Enviar Email de Follow-up',
     };
 
+    const successLabels = {
+      CALL: 'Ligação agendada para amanhã às 10h',
+      MEETING: 'Reunião agendada para amanhã às 10h',
+      EMAIL: 'Email agendado para amanhã às 10h',
+    };
+
     createActivityMutation.mutate(
       {
         activity: {
@@ -579,11 +585,16 @@ export const useBoardsController = () => {
           title: titles[type],
           description: 'Agendado via Acesso Rápido',
           date: tomorrow.toISOString(),
+          // IMPORTANT: quick-adds always start pending. Only the user can complete them.
           completed: false,
           user: { name: 'Eu', avatar: '' },
         },
       },
-      {}
+      {
+        onSuccess: () => addToast(successLabels[type], 'success'),
+        onError: (err: Error) =>
+          addToast(`Erro ao agendar atividade: ${err.message}`, 'error'),
+      }
     );
     setOpenActivityMenuId(null);
   };

@@ -1,8 +1,10 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { DealView, BoardStage, CustomFieldDefinition } from '@/types';
 import { DealCard } from './DealCard';
-import { isDealRotting, getActivityStatus } from '@/features/boards/hooks/useBoardsController';
+import { isDealRotting } from '@/features/boards/hooks/useBoardsController';
 import { MoveToStageModal } from '../Modals/MoveToStageModal';
+import { computeActivityStatusMap } from '@/features/boards/utils/dealActivityStatus';
+import { useActivities } from '@/lib/query/hooks/useActivitiesQuery';
 
 import { useCRM } from '@/context/CRMContext';
 
@@ -117,6 +119,13 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
 }) => {
   const { lifecycleStages } = useCRM();
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
+
+  // Activity status per deal, computed once per render from the activities cache.
+  const { data: activities = [] } = useActivities();
+  const activityStatusMap = useMemo(
+    () => computeActivityStatusMap(filteredDeals, activities),
+    [filteredDeals, activities]
+  );
   
   // State for move-to-stage modal (keyboard accessibility alternative to drag-and-drop)
   const [moveToStageModal, setMoveToStageModal] = useState<{
@@ -277,7 +286,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                     !deal.isWon &&
                     !deal.isLost
                   }
-                  activityStatus={getActivityStatus(deal)}
+                  activityStatus={activityStatusMap.get(deal.id) ?? { kind: 'none', daysFromToday: 0, daysOverdue: 0 }}
                   isDragging={draggingId === deal.id}
                   onDragStart={handleDragStart}
                   onSelect={handleSelectDeal}

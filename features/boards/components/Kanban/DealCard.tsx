@@ -3,12 +3,13 @@ import Image from 'next/image';
 import { DealView, CustomFieldDefinition } from '@/types';
 import { Building2, Hourglass, Trophy, XCircle } from 'lucide-react';
 import { ActivityStatusIcon } from './ActivityStatusIcon';
+import type { DealActivityStatus } from '@/features/boards/utils/dealActivityStatus';
 import { priorityAriaLabelPtBr } from '@/lib/utils/priority';
 
 interface DealCardProps {
   deal: DealView;
   isRotting: boolean;
-  activityStatus: string;
+  activityStatus: DealActivityStatus;
   isDragging: boolean;
   onDragStart: (e: React.DragEvent, id: string, title: string) => void;
   /** Callback de seleção do deal (mantido estável via useCallback no pai para permitir memoização) */
@@ -291,7 +292,6 @@ const DealCardComponent: React.FC<DealCardProps> = ({
         <div className="flex items-center">
           <ActivityStatusIcon
             status={activityStatus}
-            type={deal.nextActivity?.type}
             dealId={deal.id}
             dealTitle={deal.title}
             isOpen={isMenuOpen}

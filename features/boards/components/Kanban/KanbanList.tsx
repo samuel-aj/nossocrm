@@ -2,8 +2,10 @@ import React, { useCallback, useMemo, useState } from 'react';
 import Image from 'next/image';
 import { DealView, CustomFieldDefinition, BoardStage } from '@/types';
 import { ActivityStatusIcon } from './ActivityStatusIcon';
-import { getActivityStatus } from '@/features/boards/hooks/useBoardsController';
 import { MoveToStageModal } from '../Modals/MoveToStageModal';
+import type { DealActivityStatus } from '@/features/boards/utils/dealActivityStatus';
+import { computeActivityStatusMap } from '@/features/boards/utils/dealActivityStatus';
+import { useActivities } from '@/lib/query/hooks/useActivitiesQuery';
 
 type QuickAddType = 'CALL' | 'MEETING' | 'EMAIL';
 
@@ -12,6 +14,7 @@ type KanbanListRowProps = {
   stageLabel: string;
   stages: BoardStage[];
   customFieldDefinitions: CustomFieldDefinition[];
+  activityStatus: DealActivityStatus;
   isMenuOpen: boolean;
   onSelect: (dealId: string) => void;
   onToggleMenu: (e: React.MouseEvent, dealId: string) => void;
@@ -29,6 +32,7 @@ const KanbanListRow = React.memo(function KanbanListRow({
   stageLabel,
   stages,
   customFieldDefinitions,
+  activityStatus,
   isMenuOpen,
   onSelect,
   onToggleMenu,
@@ -46,8 +50,7 @@ const KanbanListRow = React.memo(function KanbanListRow({
       >
         <td className="px-6 py-3 text-center">
         <ActivityStatusIcon
-          status={getActivityStatus(deal)}
-          type={deal.nextActivity?.type}
+          status={activityStatus}
           dealId={deal.id}
           dealTitle={deal.title}
           isOpen={isMenuOpen}
@@ -183,6 +186,13 @@ export const KanbanList: React.FC<KanbanListProps> = ({
     return map;
   }, [stages]);
 
+  // Activity status per deal, computed from the shared activities cache.
+  const { data: activities = [] } = useActivities();
+  const activityStatusMap = useMemo(
+    () => computeActivityStatusMap(filteredDeals, activities),
+    [filteredDeals, activities]
+  );
+
   // Performance: callbacks estáveis evitam re-render de subcomponentes memoizados.
   const handleRowClick = useCallback(
     (dealId: string) => {
@@ -249,6 +259,7 @@ export const KanbanList: React.FC<KanbanListProps> = ({
                 stageLabel={stageLabelById.get(deal.status) || deal.status}
                 stages={stages}
                 customFieldDefinitions={customFieldDefinitions}
+                activityStatus={activityStatusMap.get(deal.id) ?? { kind: 'none', daysFromToday: 0, daysOverdue: 0 }}
                 isMenuOpen={openActivityMenuId === deal.id}
                 onSelect={handleRowClick}
                 onToggleMenu={handleToggleMenu}
