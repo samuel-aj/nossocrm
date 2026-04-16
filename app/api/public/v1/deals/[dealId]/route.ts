@@ -13,6 +13,10 @@ const DealPatchSchema = z.object({
   contact_id: z.string().uuid().optional(),
   client_company_id: z.string().uuid().nullable().optional(),
   loss_reason: z.string().nullable().optional(),
+  tags: z.array(z.string()).optional(),
+  custom_fields: z.record(z.string(), z.any()).optional(),
+  probability: z.number().int().min(0).max(100).optional(),
+  priority: z.enum(['low', 'medium', 'high']).optional(),
 }).strict();
 
 export async function GET(request: Request, ctx: { params: Promise<{ dealId: string }> }) {
@@ -27,7 +31,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ dealId: str
   const sb = createStaticAdminClient();
   const { data, error } = await sb
     .from('deals')
-    .select('id,title,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at')
+    .select('id,title,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,tags,custom_fields,probability,priority')
     .eq('organization_id', auth.organizationId)
     .is('deleted_at', null)
     .eq('id', dealId)
@@ -36,7 +40,24 @@ export async function GET(request: Request, ctx: { params: Promise<{ dealId: str
   if (error) return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
   if (!data) return NextResponse.json({ error: 'Deal not found', code: 'NOT_FOUND' }, { status: 404 });
 
-  return NextResponse.json({ data });
+  // Fetch related notes and items
+  const [notesRes, itemsRes] = await Promise.all([
+    sb.from('deal_notes').select('id,content,created_at,updated_at').eq('deal_id', dealId).order('created_at', { ascending: false }),
+    sb.from('deal_items').select('id,product_id,name,quantity,price,created_at').eq('deal_id', dealId).order('created_at', { ascending: false }),
+  ]);
+
+  return NextResponse.json({
+    data: {
+      ...data,
+      value: Number(data.value ?? 0),
+      tags: data.tags ?? [],
+      custom_fields: data.custom_fields ?? {},
+      probability: data.probability ?? 0,
+      priority: data.priority ?? 'medium',
+      notes: notesRes.data ?? [],
+      items: (itemsRes.data ?? []).map((i: any) => ({ ...i, price: Number(i.price ?? 0) })),
+    },
+  });
 }
 
 export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: string }> }) {
@@ -60,6 +81,10 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
   if (parsed.data.contact_id !== undefined) updates.contact_id = sanitizeUUID(parsed.data.contact_id);
   if (parsed.data.client_company_id !== undefined) updates.client_company_id = parsed.data.client_company_id === null ? null : (sanitizeUUID(parsed.data.client_company_id) || null);
   if (parsed.data.loss_reason !== undefined) updates.loss_reason = parsed.data.loss_reason === null ? null : normalizeText(parsed.data.loss_reason);
+  if (parsed.data.tags !== undefined) updates.tags = parsed.data.tags;
+  if (parsed.data.custom_fields !== undefined) updates.custom_fields = parsed.data.custom_fields;
+  if (parsed.data.probability !== undefined) updates.probability = parsed.data.probability;
+  if (parsed.data.priority !== undefined) updates.priority = parsed.data.priority;
   updates.updated_at = new Date().toISOString();
 
   const sb = createStaticAdminClient();
@@ -68,12 +93,21 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
     .update(updates)
     .eq('organization_id', auth.organizationId)
     .eq('id', dealId)
-    .select('id,title,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at')
+    .select('id,title,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,tags,custom_fields,probability,priority')
     .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
   if (!data) return NextResponse.json({ error: 'Deal not found', code: 'NOT_FOUND' }, { status: 404 });
 
-  return NextResponse.json({ data });
+  return NextResponse.json({
+    data: {
+      ...data,
+      value: Number(data.value ?? 0),
+      tags: data.tags ?? [],
+      custom_fields: data.custom_fields ?? {},
+      probability: data.probability ?? 0,
+      priority: data.priority ?? 'medium',
+    },
+  });
 }
 

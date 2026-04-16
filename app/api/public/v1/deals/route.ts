@@ -26,6 +26,10 @@ const DealCreateSchema = z.object({
   contact_id: z.string().uuid().optional(),
   contact: ContactInlineSchema.optional(),
   client_company_id: z.string().uuid().optional(),
+  tags: z.array(z.string()).optional(),
+  custom_fields: z.record(z.string(), z.any()).optional(),
+  probability: z.number().int().min(0).max(100).optional(),
+  priority: z.enum(['low', 'medium', 'high']).optional(),
 }).strict();
 
 export async function GET(request: Request) {
@@ -53,7 +57,7 @@ export async function GET(request: Request) {
 
   let query = sb
     .from('deals')
-    .select('id,title,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at', { count: 'exact' })
+    .select('id,title,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,tags,custom_fields,probability,priority', { count: 'exact' })
     .eq('organization_id', auth.organizationId)
     .is('deleted_at', null)
     .order('updated_at', { ascending: false });
@@ -91,6 +95,10 @@ export async function GET(request: Request) {
       is_lost: !!d.is_lost,
       loss_reason: d.loss_reason ?? null,
       closed_at: d.closed_at ?? null,
+      tags: d.tags ?? [],
+      custom_fields: d.custom_fields ?? {},
+      probability: d.probability ?? 0,
+      priority: d.priority ?? 'medium',
       created_at: d.created_at,
       updated_at: d.updated_at,
     })),
@@ -202,6 +210,10 @@ export async function POST(request: Request) {
     stage_id: stageId,
     contact_id: contactId,
     client_company_id: sanitizeUUID(parsed.data.client_company_id) || null,
+    tags: parsed.data.tags ?? [],
+    custom_fields: parsed.data.custom_fields ?? {},
+    probability: parsed.data.probability ?? 0,
+    priority: parsed.data.priority ?? 'medium',
     is_won: false,
     is_lost: false,
     created_at: now,
@@ -211,10 +223,10 @@ export async function POST(request: Request) {
   const { data, error } = await sb
     .from('deals')
     .insert(insertPayload)
-    .select('id,title,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at')
+    .select('id,title,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,tags,custom_fields,probability,priority')
     .single();
   if (error) return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
 
-  return NextResponse.json({ data, action: 'created' }, { status: 201 });
+  return NextResponse.json({ data: { ...data, value: Number(data.value ?? 0), tags: data.tags ?? [], custom_fields: data.custom_fields ?? {}, probability: data.probability ?? 0, priority: data.priority ?? 'medium' }, action: 'created' }, { status: 201 });
 }
 

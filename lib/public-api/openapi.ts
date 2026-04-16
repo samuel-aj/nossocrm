@@ -148,10 +148,38 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
             is_lost: { type: 'boolean' },
             loss_reason: { type: ['string', 'null'] },
             closed_at: { type: ['string', 'null'] },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Tags do deal' },
+            custom_fields: { type: 'object', additionalProperties: true, description: 'Campos personalizados (JSONB)' },
+            probability: { type: 'integer', minimum: 0, maximum: 100, description: 'Probabilidade de ganho (0-100)' },
+            priority: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Prioridade' },
             created_at: { type: 'string' },
             updated_at: { type: 'string' },
           },
-          required: ['id', 'title', 'value', 'board_id', 'stage_id', 'contact_id', 'client_company_id', 'is_won', 'is_lost', 'loss_reason', 'closed_at', 'created_at', 'updated_at'],
+          required: ['id', 'title', 'value', 'board_id', 'stage_id', 'contact_id', 'client_company_id', 'is_won', 'is_lost', 'loss_reason', 'closed_at', 'tags', 'custom_fields', 'probability', 'priority', 'created_at', 'updated_at'],
+        },
+        DealNote: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            id: { type: 'string' },
+            content: { type: 'string' },
+            created_at: { type: 'string' },
+            updated_at: { type: 'string' },
+          },
+          required: ['id', 'content', 'created_at', 'updated_at'],
+        },
+        DealItem: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            id: { type: 'string' },
+            product_id: { type: ['string', 'null'] },
+            name: { type: 'string' },
+            quantity: { type: 'integer' },
+            price: { type: 'number' },
+            created_at: { type: 'string' },
+          },
+          required: ['id', 'product_id', 'name', 'quantity', 'price', 'created_at'],
         },
         Activity: {
           type: 'object',
@@ -559,7 +587,42 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
           tags: ['Deals'],
           summary: 'Criar deal',
           security: [{ ApiKeyAuth: [] }],
-          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object' } } } },
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    title: { type: 'string', minLength: 1 },
+                    value: { type: 'number', default: 0 },
+                    board_id: { type: 'string', description: 'UUID do board' },
+                    board_key: { type: 'string', description: 'Slug do board (alternativa ao board_id)' },
+                    stage_id: { type: 'string', description: 'UUID do estágio (default: primeiro estágio)' },
+                    contact_id: { type: 'string', description: 'UUID do contato' },
+                    contact: {
+                      type: 'object',
+                      description: 'Criar/atualizar contato inline (alternativa ao contact_id)',
+                      properties: {
+                        name: { type: 'string' },
+                        email: { type: 'string' },
+                        phone: { type: 'string' },
+                        role: { type: 'string' },
+                        client_company_id: { type: 'string' },
+                      },
+                    },
+                    client_company_id: { type: 'string' },
+                    tags: { type: 'array', items: { type: 'string' }, description: 'Tags do deal' },
+                    custom_fields: { type: 'object', additionalProperties: true, description: 'Campos personalizados (ex: {"fonte": "Google", "segmento": "Tech"})' },
+                    probability: { type: 'integer', minimum: 0, maximum: 100, description: 'Probabilidade de ganho (0-100)' },
+                    priority: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Prioridade' },
+                  },
+                  required: ['title'],
+                },
+              },
+            },
+          },
           responses: {
             201: { description: 'Created', content: { 'application/json': { schema: { type: 'object' } } } },
             401: { $ref: '#/components/responses/Unauthorized' },
@@ -716,6 +779,119 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
           },
           responses: {
             200: { description: 'OK', content: { 'application/json': { schema: { type: 'object' } } } },
+            401: { $ref: '#/components/responses/Unauthorized' },
+          },
+        },
+      },
+      '/deals/{dealId}/notes': {
+        get: {
+          tags: ['Deals'],
+          summary: 'Listar notas do deal',
+          security: [{ ApiKeyAuth: [] }],
+          parameters: [
+            { name: 'dealId', in: 'path', required: true, schema: { type: 'string' } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 250 } },
+            { name: 'cursor', in: 'query', schema: { type: 'string' } },
+          ],
+          responses: {
+            200: {
+              description: 'OK',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      data: { type: 'array', items: { $ref: '#/components/schemas/DealNote' } },
+                      nextCursor: { type: ['string', 'null'] },
+                    },
+                    required: ['data', 'nextCursor'],
+                  },
+                },
+              },
+            },
+            401: { $ref: '#/components/responses/Unauthorized' },
+          },
+        },
+        post: {
+          tags: ['Deals'],
+          summary: 'Criar nota no deal',
+          security: [{ ApiKeyAuth: [] }],
+          parameters: [{ name: 'dealId', in: 'path', required: true, schema: { type: 'string' } }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: { content: { type: 'string', minLength: 1 } },
+                  required: ['content'],
+                },
+              },
+            },
+          },
+          responses: {
+            201: { description: 'Created', content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/DealNote' }, action: { type: 'string' } }, required: ['data'] } } } },
+            401: { $ref: '#/components/responses/Unauthorized' },
+          },
+        },
+      },
+      '/deals/{dealId}/items': {
+        get: {
+          tags: ['Deals'],
+          summary: 'Listar produtos/itens do deal',
+          security: [{ ApiKeyAuth: [] }],
+          parameters: [
+            { name: 'dealId', in: 'path', required: true, schema: { type: 'string' } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 250 } },
+            { name: 'cursor', in: 'query', schema: { type: 'string' } },
+          ],
+          responses: {
+            200: {
+              description: 'OK',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      data: { type: 'array', items: { $ref: '#/components/schemas/DealItem' } },
+                      nextCursor: { type: ['string', 'null'] },
+                    },
+                    required: ['data', 'nextCursor'],
+                  },
+                },
+              },
+            },
+            401: { $ref: '#/components/responses/Unauthorized' },
+          },
+        },
+        post: {
+          tags: ['Deals'],
+          summary: 'Adicionar produto/item ao deal',
+          security: [{ ApiKeyAuth: [] }],
+          parameters: [{ name: 'dealId', in: 'path', required: true, schema: { type: 'string' } }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    name: { type: 'string', minLength: 1 },
+                    quantity: { type: 'integer', minimum: 1, default: 1 },
+                    price: { type: 'number', minimum: 0, default: 0 },
+                    product_id: { type: 'string', description: 'UUID de um produto cadastrado (opcional)' },
+                  },
+                  required: ['name'],
+                },
+              },
+            },
+          },
+          responses: {
+            201: { description: 'Created', content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/DealItem' }, action: { type: 'string' } }, required: ['data'] } } } },
             401: { $ref: '#/components/responses/Unauthorized' },
           },
         },
