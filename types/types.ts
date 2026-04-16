@@ -211,6 +211,7 @@ export interface Deal {
   organizationId?: OrganizationId; // Tenant FK (for RLS) - optional during migration
   clientCompanyId?: ClientCompanyId; // CRM company FK
   title: string; // Ex: "Licença Anual"
+  description?: string; // Descrição livre exibida no topo da timeline
   contactId: string; // Relacionamento
   boardId: string; // Qual board este deal pertence
   value: number;

@@ -118,7 +118,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
   const [emailDraft, setEmailDraft] = useState<string | null>(null);
   const [newNote, setNewNote] = useState('');
   const [showNewNote, setShowNewNote] = useState(false);
-  const [dealDescription, setDealDescription] = useState('');
+  const [descriptionDraft, setDescriptionDraft] = useState('');
   const [activeTab, setActiveTab] = useState<'timeline' | 'activities' | 'notes' | 'products' | 'info'>('timeline');
   const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -177,7 +177,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
       setCustomFieldsDraft({});
       setShowNewNote(false);
       setNewNote('');
-      setDealDescription('');
+      setDescriptionDraft(deal.description ?? '');
     }
   }, [isOpen, dealId]); // Depend on dealId to reset when switching deals
 
@@ -1087,14 +1087,19 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
               <div className="flex-1 overflow-y-auto scrollbar-custom p-6 bg-slate-50/30 dark:bg-black/10">
                 {activeTab === 'timeline' && (
                   <div className="space-y-6">
-                    {/* Descrição fixa — sempre visível, sem submit, sem salvamento */}
+                    {/* Descrição fixa — sempre visível, persistente (salva no blur) */}
                     <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-4 shadow-sm">
-                      <h4 className="text-sm font-bold text-slate-700 dark:text-white mb-2">Descrição</h4>
                       <textarea
                         className="w-full bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none resize-none min-h-[80px]"
                         placeholder="Adicione uma descrição..."
-                        value={dealDescription}
-                        onChange={e => setDealDescription(e.target.value)}
+                        value={descriptionDraft}
+                        onChange={e => setDescriptionDraft(e.target.value)}
+                        onBlur={() => {
+                          const next = descriptionDraft;
+                          if (next !== (deal.description ?? '')) {
+                            updateDeal(deal.id, { description: next });
+                          }
+                        }}
                       />
                     </div>
 

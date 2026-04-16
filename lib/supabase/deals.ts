@@ -83,6 +83,8 @@ export interface DbDeal {
   contact_id: string | null;
   /** ID da empresa CRM associada. */
   client_company_id: string | null;
+  /** Descrição livre do deal. */
+  description: string | null;
   /** Resumo gerado por IA. */
   ai_summary: string | null;
   /** Motivo da perda, se aplicável. */
@@ -158,6 +160,7 @@ const transformDeal = (db: DbDeal, items: DbDealItem[]): Deal => {
     contactId: db.contact_id || '',
     clientCompanyId: db.client_company_id || undefined,
     companyId: db.client_company_id || '', // @deprecated - backwards compatibility
+    description: db.description || undefined,
     aiSummary: db.ai_summary || undefined,
     lossReason: db.loss_reason || undefined,
     tags: db.tags || [],
@@ -211,6 +214,7 @@ const transformDealToDb = (deal: Partial<Deal>): Partial<DbDeal> => {
   // Support both new clientCompanyId and deprecated companyId
   if (deal.clientCompanyId !== undefined) db.client_company_id = sanitizeUUID(deal.clientCompanyId);
   else if (deal.companyId !== undefined) db.client_company_id = sanitizeUUID(deal.companyId);
+  if (deal.description !== undefined) db.description = deal.description || null;
   if (deal.aiSummary !== undefined) db.ai_summary = deal.aiSummary || null;
   if (deal.lossReason !== undefined) db.loss_reason = deal.lossReason || null;
   if (deal.tags !== undefined) db.tags = deal.tags;
