@@ -181,6 +181,63 @@ body {
   color: var(--color-text-primary);
 }
 
+/* ========================================
+ * Interactive Cursor Defaults
+ * Tailwind v4 removed the UA default of `cursor: pointer` on <button>,
+ * which left many clickable elements showing the arrow cursor. Restore
+ * pointer on semantically interactive elements across the whole app.
+ *
+ * Placed in @layer base so Tailwind utility classes (cursor-grab on
+ * draggable cards, cursor-help on tooltip triggers, cursor-not-allowed
+ * on disabled states, cursor-default where explicitly overridden) still
+ * win — utilities live in @layer utilities which ranks above base.
+ * ======================================== */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="tab"]:not([aria-disabled="true"]),
+  [role="menuitem"]:not([aria-disabled="true"]),
+  [role="menuitemcheckbox"]:not([aria-disabled="true"]),
+  [role="menuitemradio"]:not([aria-disabled="true"]),
+  [role="option"]:not([aria-disabled="true"]),
+  [role="switch"]:not([aria-disabled="true"]),
+  [role="checkbox"]:not([aria-disabled="true"]),
+  [role="radio"]:not([aria-disabled="true"]),
+  [role="link"]:not([aria-disabled="true"]),
+  [role="treeitem"]:not([aria-disabled="true"]),
+  [role="listitem"][tabindex]:not([aria-disabled="true"]),
+  a[href]:not([aria-disabled="true"]),
+  summary,
+  details summary,
+  label:has(> input[type="checkbox"]),
+  label:has(> input[type="radio"]),
+  label[for],
+  select:not(:disabled),
+  input[type="submit"]:not(:disabled),
+  input[type="button"]:not(:disabled),
+  input[type="reset"]:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled),
+  input[type="color"]:not(:disabled),
+  input[type="range"]:not(:disabled),
+  input[type="file"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled="true"],
+  input:disabled,
+  select:disabled,
+  textarea:disabled {
+    cursor: not-allowed;
+  }
+
+  /* Utility for non-semantic elements (div/span/etc.) that are clickable. */
+  .clickable {
+    cursor: pointer;
+  }
+}
+
 /* Keep native dropdown popups in sync with active theme. */
 select {
   color-scheme: inherit;
