@@ -118,7 +118,6 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const boardsById = useMemo(() => new Map(boards.map((b) => [b.id, b])), [boards]);
   const lifecycleStageById = useMemo(() => new Map(lifecycleStages.map((s) => [s.id, s])), [lifecycleStages]);
   const productsById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
-  const activitiesById = useMemo(() => new Map(activities.map((a) => [a.id, a])), [activities]);
 
   const deal = dealId ? dealsById.get(dealId) : undefined;
   const contact = deal ? (contactsById.get(deal.contactId) ?? null) : null;
@@ -1405,12 +1404,10 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                           key={activity.id}
                           activity={activity}
                           deal={deal}
-                          onToggleComplete={id => {
-                            const act = activitiesById.get(id);
-                            if (act) updateActivity(id, { completed: !act.completed });
-                          }}
-                          onEdit={(a) => startEditActivity(a)}
-                          onDelete={id => deleteActivity(id)}
+                          onToggleComplete={toggleActivityCompletion}
+                          onEdit={startEditActivity}
+                          onDelete={deleteActivity}
+                          isPending={isActivityPending(activity.id)}
                         />
                       ))}
                     </div>
