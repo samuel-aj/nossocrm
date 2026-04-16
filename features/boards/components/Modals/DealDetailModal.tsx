@@ -47,7 +47,21 @@ interface DealDetailModalProps {
   dealId: string | null;
   isOpen: boolean;
   onClose: () => void;
+  /**
+   * When provided, opens the modal directly on the Activities tab with the
+   * inline quick-activity form expanded and the type pre-selected. Consumed
+   * once on open and cleared by the parent after it takes effect.
+   */
+  scheduleHint?: { type: 'CALL' | 'MEETING' | 'EMAIL' } | null;
+  /** Called when the schedule hint has been consumed, so the parent can clear it. */
+  onScheduleHintConsumed?: () => void;
 }
+
+const QUICK_ACTIVITY_TITLE_BY_TYPE: Record<'CALL' | 'MEETING' | 'EMAIL', string> = {
+  CALL: 'Ligar para Cliente',
+  MEETING: 'Reunião de Acompanhamento',
+  EMAIL: 'Enviar Email de Follow-up',
+};
 
 // Performance: reuse date formatter instance.
 const PT_BR_DATE_FORMATTER = new Intl.DateTimeFormat('pt-BR');
@@ -58,7 +72,13 @@ const PT_BR_DATE_FORMATTER = new Intl.DateTimeFormat('pt-BR');
  * @param {DealDetailModalProps} { dealId, isOpen, onClose } - Parâmetro `{ dealId, isOpen, onClose }`.
  * @returns {Element | null} Retorna um valor do tipo `Element | null`.
  */
-export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen, onClose }) => {
+export const DealDetailModal: React.FC<DealDetailModalProps> = ({
+  dealId,
+  isOpen,
+  onClose,
+  scheduleHint = null,
+  onScheduleHintConsumed,
+}) => {
   // Accessibility: Unique ID for ARIA labelling
   const headingId = useId();
 
@@ -123,13 +143,36 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
   const [activeTab, setActiveTab] = useState<'timeline' | 'activities' | 'notes' | 'products' | 'info'>('timeline');
   const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Quick activity creation from deal card
+  // Quick activity creation / edition from deal card (same form).
   const [showQuickActivity, setShowQuickActivity] = useState(false);
+  const [editingActivityId, setEditingActivityId] = useState<string | null>(null);
   const [quickActivityType, setQuickActivityType] = useState<'CALL' | 'MEETING' | 'EMAIL' | 'TASK'>('CALL');
   const [quickActivityTitle, setQuickActivityTitle] = useState('');
   const [quickActivityDate, setQuickActivityDate] = useState('');
   const [quickActivityTime, setQuickActivityTime] = useState('');
   const [quickActivityDesc, setQuickActivityDesc] = useState('');
+
+  const resetQuickActivityForm = () => {
+    setShowQuickActivity(false);
+    setEditingActivityId(null);
+    setQuickActivityType('CALL');
+    setQuickActivityTitle('');
+    setQuickActivityDate('');
+    setQuickActivityTime('');
+    setQuickActivityDesc('');
+  };
+
+  const startEditActivity = (a: Activity) => {
+    const d = new Date(a.date);
+    setEditingActivityId(a.id);
+    setQuickActivityType((a.type === 'TASK' ? 'TASK' : a.type) as typeof quickActivityType);
+    setQuickActivityTitle(a.title);
+    setQuickActivityDate(d.toISOString().split('T')[0]);
+    setQuickActivityTime(d.toTimeString().slice(0, 5));
+    setQuickActivityDesc(a.description || '');
+    setShowQuickActivity(true);
+    setActiveTab('activities');
+  };
 
   const [objection, setObjection] = useState('');
   const [objectionResponses, setObjectionResponses] = useState<string[]>([]);
@@ -179,8 +222,26 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
       setShowNewNote(false);
       setNewNote('');
       setDescriptionDraft(deal.description ?? '');
+      resetQuickActivityForm();
     }
   }, [isOpen, dealId]); // Depend on dealId to reset when switching deals
+
+  // Apply schedule hint (coming from the Kanban status icon) after the
+  // base reset effect above, so the user lands directly on the activities
+  // tab with the form open and the type pre-selected. The parent clears
+  // the hint via `onScheduleHintConsumed` so it only fires once per intent.
+  useEffect(() => {
+    if (!isOpen || !deal || !scheduleHint) return;
+    setActiveTab('activities');
+    setEditingActivityId(null);
+    setQuickActivityType(scheduleHint.type);
+    setQuickActivityTitle(QUICK_ACTIVITY_TITLE_BY_TYPE[scheduleHint.type]);
+    setQuickActivityDate('');
+    setQuickActivityTime('');
+    setQuickActivityDesc('');
+    setShowQuickActivity(true);
+    onScheduleHintConsumed?.();
+  }, [isOpen, dealId, scheduleHint]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // UX: preselect board's default product when opening the Products tab (non-invasive).
   useEffect(() => {
@@ -336,6 +397,19 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
     if (!quickActivityTitle.trim() || !quickActivityDate || !quickActivityTime) return;
 
     const dateTime = new Date(`${quickActivityDate}T${quickActivityTime}`).toISOString();
+
+    if (editingActivityId) {
+      updateActivity(editingActivityId, {
+        type: quickActivityType,
+        title: quickActivityTitle,
+        description: quickActivityDesc || undefined,
+        date: dateTime,
+      });
+      addToast('Atividade atualizada', 'success');
+      resetQuickActivityForm();
+      return;
+    }
+
     const newActivity: Activity = {
       id: crypto.randomUUID(),
       dealId: deal.id,
@@ -345,15 +419,13 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
       description: quickActivityDesc || undefined,
       date: dateTime,
       user: { name: 'Eu', avatar: 'https://i.pravatar.cc/150?u=me' },
+      // Activities always start pending. Only the user can mark as completed.
       completed: false,
     };
 
     addActivity(newActivity);
-    setQuickActivityTitle('');
-    setQuickActivityDate('');
-    setQuickActivityTime('');
-    setQuickActivityDesc('');
-    setShowQuickActivity(false);
+    addToast('Atividade agendada', 'success');
+    resetQuickActivityForm();
   };
 
   const handleAddProduct = () => {
@@ -1173,8 +1245,10 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
                     ) : (
                       <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-4 shadow-sm space-y-3">
                         <div className="flex items-center justify-between">
-                          <h4 className="text-sm font-bold text-slate-700 dark:text-white">Nova Atividade</h4>
-                          <button onClick={() => setShowQuickActivity(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-white">
+                          <h4 className="text-sm font-bold text-slate-700 dark:text-white">
+                            {editingActivityId ? 'Editar Atividade' : 'Nova Atividade'}
+                          </h4>
+                          <button onClick={resetQuickActivityForm} className="text-slate-400 hover:text-slate-600 dark:hover:text-white">
                             <X size={16} />
                           </button>
                         </div>
@@ -1223,7 +1297,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
                           disabled={!quickActivityTitle.trim() || !quickActivityDate || !quickActivityTime}
                           className="w-full bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-bold transition-all"
                         >
-                          Criar Atividade
+                          {editingActivityId ? 'Salvar alterações' : 'Criar Atividade'}
                         </button>
                       </div>
                     )}
@@ -1244,7 +1318,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
                             const act = activitiesById.get(id);
                             if (act) updateActivity(id, { completed: !act.completed });
                           }}
-                          onEdit={() => { }} // Edit not implemented in modal yet
+                          onEdit={(a) => startEditActivity(a)}
                           onDelete={id => deleteActivity(id)}
                         />
                       ))}
@@ -1265,8 +1339,10 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
                     ) : (
                       <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-4 shadow-sm space-y-3">
                         <div className="flex items-center justify-between">
-                          <h4 className="text-sm font-bold text-slate-700 dark:text-white">Nova Atividade</h4>
-                          <button onClick={() => setShowQuickActivity(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-white">
+                          <h4 className="text-sm font-bold text-slate-700 dark:text-white">
+                            {editingActivityId ? 'Editar Atividade' : 'Nova Atividade'}
+                          </h4>
+                          <button onClick={resetQuickActivityForm} className="text-slate-400 hover:text-slate-600 dark:hover:text-white">
                             <X size={16} />
                           </button>
                         </div>
@@ -1312,7 +1388,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
                           disabled={!quickActivityTitle.trim() || !quickActivityDate || !quickActivityTime}
                           className="w-full bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-bold transition-all"
                         >
-                          Criar Atividade
+                          {editingActivityId ? 'Salvar alterações' : 'Criar Atividade'}
                         </button>
                       </div>
                     )}
@@ -1332,7 +1408,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({ dealId, isOpen
                             const act = activitiesById.get(id);
                             if (act) updateActivity(id, { completed: !act.completed });
                           }}
-                          onEdit={() => { }}
+                          onEdit={(a) => startEditActivity(a)}
                           onDelete={id => deleteActivity(id)}
                         />
                       ))}

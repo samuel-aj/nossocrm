@@ -58,6 +58,7 @@ interface PipelineViewProps {
   isLoading: boolean;
   handleDragStart: (e: React.DragEvent, id: string, title: string) => void;
   handleDragOver: (e: React.DragEvent) => void;
+  handleDragEnd: () => void;
   handleDrop: (e: React.DragEvent, stageId: string) => void;
   /** Keyboard-accessible handler to move a deal to a new stage */
   handleMoveDealToStage: (dealId: string, newStageId: string) => void;
@@ -67,6 +68,9 @@ interface PipelineViewProps {
     dealTitle: string
   ) => void;
   setLastMouseDownDealId: (id: string | null) => void;
+  /** Hint consumed once by DealDetailModal to pre-open the quick-activity form. */
+  scheduleHint?: { type: 'CALL' | 'MEETING' | 'EMAIL' } | null;
+  clearScheduleHint?: () => void;
   // Loss Reason Modal
   lossReasonModal: {
     isOpen: boolean;
@@ -233,10 +237,13 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   isLoading,
   handleDragStart,
   handleDragOver,
+  handleDragEnd,
   handleDrop,
   handleMoveDealToStage,
   handleQuickAddActivity,
   setLastMouseDownDealId,
+  scheduleHint,
+  clearScheduleHint,
   // Loss Reason Modal
   lossReasonModal,
   handleLossReasonConfirm,
@@ -339,6 +346,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                 draggingId={draggingId}
                 handleDragStart={handleDragStart}
                 handleDragOver={handleDragOver}
+                handleDragEnd={handleDragEnd}
                 handleDrop={handleDrop}
                 setSelectedDealId={setSelectedDealId}
                 openActivityMenuId={openActivityMenuId}
@@ -374,6 +382,8 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
         dealId={selectedDealId}
         isOpen={!!selectedDealId}
         onClose={() => setSelectedDealId(null)}
+        scheduleHint={scheduleHint ?? null}
+        onScheduleHintConsumed={clearScheduleHint}
       />
 
       <CreateBoardModal

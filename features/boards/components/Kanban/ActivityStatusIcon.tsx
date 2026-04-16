@@ -10,7 +10,6 @@ import {
   ArrowRightLeft,
 } from 'lucide-react';
 import type { DealActivityStatus } from '@/features/boards/utils/dealActivityStatus';
-import { ACTIVITY_STATUS_THEME } from '@/features/boards/utils/dealActivityStatus';
 
 interface ActivityStatusIconProps {
   status: DealActivityStatus;
@@ -18,30 +17,24 @@ interface ActivityStatusIconProps {
   dealTitle?: string;
   isOpen: boolean;
   onToggle: (e: React.MouseEvent) => void;
-  onQuickAdd: (type: 'CALL' | 'MEETING' | 'EMAIL') => void;
+  onOpenSchedule: (type: 'CALL' | 'MEETING' | 'EMAIL') => void;
   onRequestClose?: () => void;
   onMoveToStage?: () => void;
 }
 
-const TYPE_ICON: Record<'CALL' | 'MEETING' | 'EMAIL' | 'TASK', React.ComponentType<{ size?: number; strokeWidth?: number }>> = {
-  CALL: Phone,
-  MEETING: Calendar,
-  EMAIL: Mail,
-  TASK: CheckCircle2,
-};
-
 /**
- * Deal activity status indicator with a quick-add menu.
+ * Deal activity status indicator — minimal Pipedrive-like visuals.
  *
- * Visuals follow Pipedrive-like semantics:
- *  - none:      amber filled triangle (no follow-up planned)
- *  - overdue:   red pulsing badge with days-overdue counter
- *  - dueSoon:   orange clock (within next 24h)
- *  - scheduled: green check with type icon (follow-up on track)
+ * Uses a single indicator icon per state (no type-specific phone/email/meeting
+ * badges and no filled circle), because the icon communicates STATUS, not the
+ * type of the next activity:
+ *  - none      → outlined amber triangle (follow-up missing)
+ *  - scheduled → outlined emerald check (follow-up on track)
+ *  - dueSoon   → outlined orange clock (next 24h)
+ *  - overdue   → filled red triangle + "Nd" overdue badge
  *
- * The dropdown renders through a React Portal at a fixed position anchored
- * to the button rect — this guarantees the menu is never clipped by the
- * Kanban column's overflow containers.
+ * The quick-add dropdown renders through React Portal anchored to the button
+ * rect, so it never clips inside Kanban column overflow containers.
  */
 export const ActivityStatusIcon: React.FC<ActivityStatusIconProps> = ({
   status,
@@ -49,16 +42,13 @@ export const ActivityStatusIcon: React.FC<ActivityStatusIconProps> = ({
   dealTitle: _dealTitle,
   isOpen,
   onToggle,
-  onQuickAdd,
+  onOpenSchedule,
   onRequestClose,
   onMoveToStage,
 }) => {
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
-
-  const theme = ACTIVITY_STATUS_THEME[status.kind];
-  const NextIcon = status.nextActivity ? TYPE_ICON[status.nextActivity.type] : null;
 
   const ariaLabel = (() => {
     switch (status.kind) {
@@ -67,15 +57,14 @@ export const ActivityStatusIcon: React.FC<ActivityStatusIconProps> = ({
       case 'overdue':
         return `Atividade atrasada há ${status.daysOverdue} ${status.daysOverdue === 1 ? 'dia' : 'dias'}. Clique para agendar outra.`;
       case 'dueSoon':
-        return 'Atividade nas próximas 24h. Clique para agendar outra.';
+        return 'Atividade vence em breve. Clique para agendar outra.';
       case 'scheduled':
-        return `Atividade agendada em ${status.daysFromToday} ${status.daysFromToday === 1 ? 'dia' : 'dias'}. Clique para agendar outra.`;
+        return 'Atividade agendada. Clique para agendar outra.';
       default:
         return 'Agendar atividade';
     }
   })();
 
-  // Measure button and position menu when opened.
   useLayoutEffect(() => {
     if (!isOpen) {
       setMenuPos(null);
@@ -89,7 +78,6 @@ export const ActivityStatusIcon: React.FC<ActivityStatusIconProps> = ({
       const MENU_MAX_HEIGHT = 320;
       const GAP = 8;
 
-      // Right-align to the button, open upward if not enough room below.
       let left = rect.right - MENU_WIDTH;
       if (left < 8) left = 8;
       if (left + MENU_WIDTH > window.innerWidth - 8) {
@@ -105,14 +93,13 @@ export const ActivityStatusIcon: React.FC<ActivityStatusIconProps> = ({
     place();
 
     window.addEventListener('resize', place);
-    window.addEventListener('scroll', place, true); // capture scrolls on ancestors too
+    window.addEventListener('scroll', place, true);
     return () => {
       window.removeEventListener('resize', place);
       window.removeEventListener('scroll', place, true);
     };
   }, [isOpen]);
 
-  // Close on outside-click / escape.
   useEffect(() => {
     if (!isOpen) return;
     const handleDown = (e: MouseEvent) => {
@@ -132,59 +119,61 @@ export const ActivityStatusIcon: React.FC<ActivityStatusIconProps> = ({
     };
   }, [isOpen, onRequestClose]);
 
-  // Icon content per state.
-  const content = (() => {
+  // Simple outlined icons — the icon communicates the status, not the activity type.
+  const indicator = (() => {
     switch (status.kind) {
       case 'none':
         return (
-          <div
-            className={`w-6 h-6 rounded-full flex items-center justify-center shadow-sm ring-2 ${theme.ring} ${theme.iconBg}`}
+          <AlertTriangle
+            size={20}
+            strokeWidth={2.25}
+            className="text-amber-500"
             aria-hidden="true"
-          >
-            <AlertTriangle size={13} strokeWidth={2.5} />
-          </div>
+          />
         );
       case 'overdue':
         return (
-          <div className="relative" aria-hidden="true">
-            <span className="absolute inset-0 rounded-full bg-red-400/60 animate-ping" />
-            <div
-              className={`relative w-6 h-6 rounded-full flex items-center justify-center shadow-sm ring-2 ${theme.ring} ${theme.iconBg}`}
-            >
-              {NextIcon ? <NextIcon size={12} strokeWidth={3} /> : <AlertTriangle size={13} strokeWidth={2.5} />}
-            </div>
-          </div>
+          <span className="relative inline-flex" aria-hidden="true">
+            <span className="absolute inset-0 rounded-sm bg-red-400/40 animate-ping" />
+            <AlertTriangle
+              size={20}
+              strokeWidth={2.5}
+              fill="currentColor"
+              className="relative text-red-500"
+            />
+          </span>
         );
       case 'dueSoon':
         return (
-          <div
-            className={`w-6 h-6 rounded-full flex items-center justify-center shadow-sm ring-2 ${theme.ring} ${theme.iconBg}`}
+          <Clock
+            size={20}
+            strokeWidth={2.25}
+            className="text-orange-500"
             aria-hidden="true"
-          >
-            {NextIcon ? <NextIcon size={12} strokeWidth={3} /> : <Clock size={13} strokeWidth={2.5} />}
-          </div>
+          />
         );
       case 'scheduled':
       default:
         return (
-          <div
-            className={`w-6 h-6 rounded-full flex items-center justify-center shadow-sm ring-2 ${theme.ring} ${theme.iconBg}`}
+          <CheckCircle2
+            size={20}
+            strokeWidth={2.25}
+            className="text-emerald-500"
             aria-hidden="true"
-          >
-            {NextIcon ? <NextIcon size={12} strokeWidth={3} /> : <CheckCircle2 size={13} strokeWidth={2.5} />}
-          </div>
+          />
         );
     }
   })();
 
-  const trailingBadge = status.kind === 'overdue' ? (
-    <span
-      className="ml-1 inline-flex items-center px-1.5 h-5 rounded-md bg-red-500 text-white text-[10px] font-bold leading-none shadow-sm"
-      aria-hidden="true"
-    >
-      {status.daysOverdue}d
-    </span>
-  ) : null;
+  const trailingBadge =
+    status.kind === 'overdue' ? (
+      <span
+        className="ml-1 inline-flex items-center px-1.5 h-5 rounded-md bg-red-500 text-white text-[10px] font-bold leading-none shadow-sm"
+        aria-hidden="true"
+      >
+        {status.daysOverdue}d
+      </span>
+    ) : null;
 
   return (
     <div className="relative flex items-center">
@@ -196,9 +185,9 @@ export const ActivityStatusIcon: React.FC<ActivityStatusIconProps> = ({
         aria-expanded={isOpen}
         aria-haspopup="menu"
         title={ariaLabel}
-        className="flex items-center hover:scale-110 transition-transform focus-visible-ring rounded-full"
+        className="flex items-center hover:scale-110 transition-transform focus-visible-ring rounded-sm p-0.5 -m-0.5"
       >
-        {content}
+        {indicator}
       </button>
       {trailingBadge}
 
@@ -207,7 +196,7 @@ export const ActivityStatusIcon: React.FC<ActivityStatusIconProps> = ({
             <div
               ref={menuRef}
               role="menu"
-              aria-label="Agendar atividade rápida"
+              aria-label="Agendar atividade"
               style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, width: 224 }}
               className="z-[9999] bg-white dark:bg-slate-800 rounded-lg shadow-2xl ring-1 ring-slate-200 dark:ring-white/10 overflow-hidden animate-in fade-in zoom-in-95 duration-100"
               onMouseDown={e => e.stopPropagation()}
@@ -215,7 +204,7 @@ export const ActivityStatusIcon: React.FC<ActivityStatusIconProps> = ({
             >
               <div className="p-2 border-b border-slate-100 dark:border-white/5">
                 <p className="text-xs font-bold text-slate-500 uppercase px-2" id={`quick-add-heading-${dealId}`}>
-                  Ações Rápidas
+                  Agendar atividade
                 </p>
               </div>
 
@@ -236,12 +225,11 @@ export const ActivityStatusIcon: React.FC<ActivityStatusIconProps> = ({
               )}
 
               <div className="p-1" role="group" aria-labelledby={`quick-add-heading-${dealId}`}>
-                <p className="text-[10px] font-bold text-slate-400 uppercase px-3 py-1">Agendar para amanhã</p>
                 <button
                   type="button"
                   role="menuitem"
                   onClick={() => {
-                    onQuickAdd('CALL');
+                    onOpenSchedule('CALL');
                     onRequestClose?.();
                   }}
                   className="w-full text-left px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 rounded flex items-center gap-2 focus-visible-ring"
@@ -252,7 +240,7 @@ export const ActivityStatusIcon: React.FC<ActivityStatusIconProps> = ({
                   type="button"
                   role="menuitem"
                   onClick={() => {
-                    onQuickAdd('EMAIL');
+                    onOpenSchedule('EMAIL');
                     onRequestClose?.();
                   }}
                   className="w-full text-left px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 rounded flex items-center gap-2 focus-visible-ring"
@@ -263,7 +251,7 @@ export const ActivityStatusIcon: React.FC<ActivityStatusIconProps> = ({
                   type="button"
                   role="menuitem"
                   onClick={() => {
-                    onQuickAdd('MEETING');
+                    onOpenSchedule('MEETING');
                     onRequestClose?.();
                   }}
                   className="w-full text-left px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 rounded flex items-center gap-2 focus-visible-ring"

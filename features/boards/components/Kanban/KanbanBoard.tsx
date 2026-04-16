@@ -57,6 +57,7 @@ interface KanbanBoardProps {
   draggingId: string | null;
   handleDragStart: (e: React.DragEvent, id: string, title: string) => void;
   handleDragOver: (e: React.DragEvent) => void;
+  handleDragEnd: () => void;
   handleDrop: (e: React.DragEvent, stageId: string) => void;
   setSelectedDealId: (id: string | null) => void;
   openActivityMenuId: string | null;
@@ -79,6 +80,7 @@ interface KanbanBoardProps {
   draggingId,
   handleDragStart,
   handleDragOver,
+  handleDragEnd,
   handleDrop,
   setSelectedDealId,
   openActivityMenuId,
@@ -92,6 +94,7 @@ interface KanbanBoardProps {
   draggingId,
   handleDragStart,
   handleDragOver,
+  handleDragEnd,
   handleDrop,
   setSelectedDealId,
   openActivityMenuId,
@@ -109,6 +112,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   draggingId,
   handleDragStart,
   handleDragOver,
+  handleDragEnd,
   handleDrop,
   setSelectedDealId,
   openActivityMenuId,
@@ -289,6 +293,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                   activityStatus={activityStatusMap.get(deal.id) ?? { kind: 'none', daysFromToday: 0, daysOverdue: 0 }}
                   isDragging={draggingId === deal.id}
                   onDragStart={handleDragStart}
+                  onDragEnd={handleDragEnd}
                   onSelect={handleSelectDeal}
                   // Performance: avoid passing openMenuId (string) to all cards.
                   // Only 1–2 cards will flip `isMenuOpen` when the menu is toggled.

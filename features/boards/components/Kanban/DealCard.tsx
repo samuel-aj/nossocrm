@@ -12,6 +12,8 @@ interface DealCardProps {
   activityStatus: DealActivityStatus;
   isDragging: boolean;
   onDragStart: (e: React.DragEvent, id: string, title: string) => void;
+  /** Called whenever the drag session ends — including aborted/no-drop cases. */
+  onDragEnd?: () => void;
   /** Callback de seleção do deal (mantido estável via useCallback no pai para permitir memoização) */
   onSelect: (dealId: string) => void;
   /**
@@ -53,6 +55,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
   activityStatus,
   isDragging,
   onDragStart,
+  onDragEnd,
   onSelect,
   isMenuOpen,
   setOpenMenuId,
@@ -85,6 +88,9 @@ const DealCardComponent: React.FC<DealCardProps> = ({
 
   const handleDragEnd = () => {
     setLocalDragging(false);
+    // Always notify the parent so `draggingId` is cleared even when the drop
+    // happens outside any stage (HTML drag-end always fires, drop does not).
+    onDragEnd?.();
   };
 
   // Determine card styling based on won/lost status
@@ -296,7 +302,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
             dealTitle={deal.title}
             isOpen={isMenuOpen}
             onToggle={handleToggleMenu}
-            onQuickAdd={handleQuickAdd}
+            onOpenSchedule={handleQuickAdd}
             onRequestClose={() => setOpenMenuId(null)}
             onMoveToStage={onMoveToStage ? () => onMoveToStage(deal.id) : undefined}
           />

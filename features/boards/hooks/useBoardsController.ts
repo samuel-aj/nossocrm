@@ -14,7 +14,6 @@ import {
   useDealsByBoard,
 } from '@/lib/query/hooks/useDealsQuery';
 import { useMoveDeal } from '@/lib/query/hooks/useMoveDeal';
-import { useCreateActivity } from '@/lib/query/hooks/useActivitiesQuery';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useRealtimeSyncKanban } from '@/lib/realtime/useRealtimeSync';
 import { useToast } from '@/context/ToastContext';
@@ -133,7 +132,6 @@ export const useBoardsController = () => {
   const dealsBoardId = activeBoardId || '';
   const { data: deals = [], isLoading: dealsLoading } = useDealsByBoard(dealsBoardId);
   const moveDealMutation = useMoveDeal();
-  const createActivityMutation = useCreateActivity();
 
   // Filter State (declared before AI context useEffect that uses them)
   const [searchTerm, setSearchTerm] = useState('');
@@ -319,6 +317,12 @@ export const useBoardsController = () => {
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [openActivityMenuId, setOpenActivityMenuId] = useState<string | null>(null);
+  // When the user picks Ligar/Email/Reunião in the card status-icon dropdown,
+  // we route them into the deal modal on the Activities tab with the type
+  // pre-selected — no activity is created automatically.
+  const [scheduleHint, setScheduleHint] = useState<{
+    type: 'CALL' | 'MEETING' | 'EMAIL';
+  } | null>(null);
 
   // Loss Reason Modal State
   const [lossReasonModal, setLossReasonModal] = useState<{
@@ -435,6 +439,16 @@ export const useBoardsController = () => {
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
+  };
+
+  /**
+   * Always fires when the drag session ends — regardless of whether a drop
+   * landed on a valid target. Without this, aborting a drag outside any stage
+   * leaves `draggingId` set and the source card stuck tilted/translucent until
+   * the user drags it again.
+   */
+  const handleDragEnd = () => {
+    setDraggingId(null);
   };
 
   const handleDrop = (e: React.DragEvent, stageId: string) => {
@@ -555,48 +569,19 @@ export const useBoardsController = () => {
     }
   };
 
+  /**
+   * Opens the deal modal on the Activities tab with the inline creation form
+   * expanded and the chosen type pre-selected. The user fills date/time/notes
+   * and confirms — no activity is persisted before confirmation.
+   */
   const handleQuickAddActivity = (
     dealId: string,
     type: 'CALL' | 'MEETING' | 'EMAIL',
-    dealTitle: string
+    _dealTitle: string
   ) => {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(10, 0, 0, 0);
-
-    const titles = {
-      CALL: 'Ligar para Cliente',
-      MEETING: 'Reunião de Acompanhamento',
-      EMAIL: 'Enviar Email de Follow-up',
-    };
-
-    const successLabels = {
-      CALL: 'Ligação agendada para amanhã às 10h',
-      MEETING: 'Reunião agendada para amanhã às 10h',
-      EMAIL: 'Email agendado para amanhã às 10h',
-    };
-
-    createActivityMutation.mutate(
-      {
-        activity: {
-          dealId,
-          dealTitle,
-          type,
-          title: titles[type],
-          description: 'Agendado via Acesso Rápido',
-          date: tomorrow.toISOString(),
-          // IMPORTANT: quick-adds always start pending. Only the user can complete them.
-          completed: false,
-          user: { name: 'Eu', avatar: '' },
-        },
-      },
-      {
-        onSuccess: () => addToast(successLabels[type], 'success'),
-        onError: (err: Error) =>
-          addToast(`Erro ao agendar atividade: ${err.message}`, 'error'),
-      }
-    );
     setOpenActivityMenuId(null);
+    setScheduleHint({ type });
+    setSelectedDealId(dealId);
   };
 
   // Board Management Handlers
@@ -874,10 +859,14 @@ export const useBoardsController = () => {
     isLoading,
     handleDragStart,
     handleDragOver,
+    handleDragEnd,
     handleDrop,
     handleMoveDealToStage,
     handleQuickAddActivity,
     setLastMouseDownDealId,
+    // Quick-schedule hint → consumed by DealDetailModal to pre-open the form
+    scheduleHint,
+    clearScheduleHint: () => setScheduleHint(null),
     // Loss Reason Modal
     lossReasonModal,
     handleLossReasonConfirm,

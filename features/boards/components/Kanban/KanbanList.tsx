@@ -55,7 +55,7 @@ const KanbanListRow = React.memo(function KanbanListRow({
           dealTitle={deal.title}
           isOpen={isMenuOpen}
           onToggle={(e) => onToggleMenu(e, deal.id)}
-          onQuickAdd={(type) => onQuickAdd(deal.id, type, deal.title)}
+          onOpenSchedule={(type) => onQuickAdd(deal.id, type, deal.title)}
           onRequestClose={onCloseMenu}
         />
         </td>

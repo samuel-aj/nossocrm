@@ -76,16 +76,11 @@ const ActivityRowComponent: React.FC<ActivityRowProps> = ({
         return map[status] || 'Estágio não identificado';
     };
 
-    const formatRelativeTime = (dateString: string) => {
-        const date = new Date(dateString);
-        const now = new Date();
-        const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
-
-        if (diffInSeconds < 60) return 'agora mesmo';
-        if (diffInSeconds < 3600) return `há ${Math.floor(diffInSeconds / 60)} min`;
-        if (diffInSeconds < 86400) return `há ${Math.floor(diffInSeconds / 3600)} h`;
-        if (diffInSeconds < 172800) return 'ontem';
-        return date.toLocaleDateString('pt-BR');
+    const formatAbsoluteDateTime = (dateString: string) => {
+        const d = new Date(dateString);
+        const date = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+        return `${date} • ${time}`;
     };
 
     const formatTitle = (title: string) => {
@@ -120,7 +115,7 @@ const ActivityRowComponent: React.FC<ActivityRowProps> = ({
                     </div>
 
                     <span className="text-xs text-slate-400 whitespace-nowrap ml-4">
-                        {formatRelativeTime(activity.date)}
+                        {formatAbsoluteDateTime(activity.date)}
                     </span>
                 </div>
             </div>
@@ -192,7 +187,7 @@ const ActivityRowComponent: React.FC<ActivityRowProps> = ({
                     )}
                     <span className="flex items-center gap-1.5">
                         <Clock size={14} />
-                        {formatRelativeTime(activity.date)}
+                        {formatAbsoluteDateTime(activity.date)}
                     </span>
                 </div>
             </div>
