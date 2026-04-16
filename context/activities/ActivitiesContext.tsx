@@ -34,10 +34,19 @@ interface ActivitiesContextType {
 const ActivitiesContext = createContext<ActivitiesContextType | undefined>(undefined);
 
 /**
- * Componente React `ActivitiesProvider`.
+ * Activities mutations follow an OPTIMISTIC-CACHE-AS-TRUTH model:
  *
- * @param {{ children: ReactNode; }} { children } - Parâmetro `{ children }`.
- * @returns {Element} Retorna um valor do tipo `Element`.
+ *  1. Client writes the intended state to the TanStack cache immediately
+ *     (the UI re-renders from this cache, so the change is visible instantly).
+ *  2. Server call is fired. On success, WE DO NOT invalidate the cache —
+ *     that would force a refetch whose response can race with our optimistic
+ *     value and cause the "marca/desmarca sozinho" flicker.
+ *  3. Cross-client consistency comes from the Supabase Realtime subscription
+ *     applying INSERT/UPDATE/DELETE payloads directly to the same cache.
+ *  4. On error, we roll the cache back to the pre-write snapshot.
+ *
+ * This mirrors the strategy already used for `deals` UPDATE events and is the
+ * only way to make optimistic UI and Realtime echoes coexist without flicker.
  */
 export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { profile } = useAuth();
@@ -52,43 +61,15 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
     error: queryError,
   } = useTanStackActivities();
 
-  // Converte erro do TanStack Query para string
   const error = queryError ? (queryError as Error).message : null;
 
-  // Refresh = invalidar cache do TanStack Query
   const refresh = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
   }, [queryClient]);
 
-  // ============================================
-  // CRUD Operations - Usam service + invalidam cache
-  // ============================================
-  const addActivity = useCallback(
-    async (activity: Omit<Activity, 'id' | 'createdAt'>): Promise<Activity | null> => {
-      if (!profile) {
-        console.error('Usuário não autenticado');
-        return null;
-      }
-      const { data, error: addError } = await activitiesService.create(activity);
-
-      if (addError) {
-        console.error('Erro ao criar atividade:', addError.message);
-        return null;
-      }
-
-      // Invalida cache para TanStack Query atualizar
-      // Don't await invalidations — awaiting can block UI flows until heavy refetches finish.
-      void queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
-
-      return data;
-    },
-    [profile?.organization_id, queryClient]
-  );
-
   // Tracks activities currently being mutated so consumers can disable controls
-  // and we can ignore reentrant clicks. Uses ref for the write-side (so updates
-  // inside rapid sequential calls are seen by the guard check below) and mirrors
-  // into state so React can re-render on change.
+  // and we can ignore reentrant clicks. Uses ref for the write-side and mirrors
+  // into state so React re-renders on change.
   const pendingIdsRef = useRef<Set<string>>(new Set());
   const [pendingVersion, setPendingVersion] = useState(0);
   const markPending = useCallback((id: string) => {
@@ -101,17 +82,12 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
   }, []);
   const isActivityPending = useCallback(
     (id: string) => pendingIdsRef.current.has(id),
-    // pendingVersion dep keeps the function identity stable-per-change so
-    // memoized consumers re-evaluate when the pending set flips.
     [pendingVersion] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   /**
-   * Patch the activities list cache immediately and snapshot the previous
-   * value so we can roll back on error. IMPORTANT: callers must cancelQueries
-   * BEFORE invoking this so an in-flight refetch can't resolve after the patch
-   * and overwrite the optimistic state with stale data (the root cause of the
-   * "toggle flips back by itself" bug).
+   * Snapshot + mutate the activities list cache. Returns the previous list so
+   * the caller can rollback on error.
    */
   const patchActivitiesCache = useCallback(
     (mutator: (list: Activity[]) => Activity[]) => {
@@ -123,13 +99,55 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
     [queryClient]
   );
 
+  const addActivity = useCallback(
+    async (activity: Omit<Activity, 'id' | 'createdAt'>): Promise<Activity | null> => {
+      if (!profile) {
+        console.error('Usuário não autenticado');
+        return null;
+      }
+
+      // Optimistic insert with a temporary id so the timeline/list reflects
+      // the new activity immediately, before the server responds.
+      const tempId = `temp-activity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const tempActivity: Activity = {
+        ...activity,
+        id: tempId,
+      } as Activity;
+
+      // Cancel any in-flight refetch so it can't resolve after us and drop
+      // the temp activity before the real one replaces it.
+      await queryClient.cancelQueries({ queryKey: queryKeys.activities.all });
+
+      const previous = patchActivitiesCache(list => [tempActivity, ...list]);
+
+      const { data, error: addError } = await activitiesService.create(activity);
+
+      if (addError || !data) {
+        console.error('Erro ao criar atividade:', addError?.message);
+        if (previous) queryClient.setQueryData(queryKeys.activities.lists(), previous);
+        return null;
+      }
+
+      // Swap the temp entry for the real server row. If the Realtime INSERT
+      // echo already added the real row, just drop the temp and don't duplicate.
+      patchActivitiesCache(list => {
+        const withoutTemp = list.filter(a => a.id !== tempId);
+        const alreadyPresent = withoutTemp.some(a => a.id === data.id);
+        return alreadyPresent ? withoutTemp : [data, ...withoutTemp];
+      });
+
+      // NO invalidateQueries on success — cache is already correct and
+      // Realtime will keep other tabs/windows in sync.
+      return data;
+    },
+    [profile, queryClient, patchActivitiesCache]
+  );
+
   const updateActivity = useCallback(
     async (id: string, updates: Partial<Activity>) => {
-      if (pendingIdsRef.current.has(id)) return; // guard against rapid clicks
+      if (pendingIdsRef.current.has(id)) return;
       markPending(id);
       try {
-        // CRITICAL: cancel in-flight fetches before optimistic write — otherwise
-        // a refetch that resolves after us overwrites the new state with stale data.
         await queryClient.cancelQueries({ queryKey: queryKeys.activities.all });
 
         const previous = patchActivitiesCache(list =>
@@ -144,7 +162,7 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
           return;
         }
 
-        void queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
+        // NO invalidateQueries — see provider-level comment.
       } finally {
         unmarkPending(id);
       }
@@ -168,8 +186,6 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
           if (previous) queryClient.setQueryData(queryKeys.activities.lists(), previous);
           return;
         }
-
-        void queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
       } finally {
         unmarkPending(id);
       }
@@ -181,9 +197,6 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
     async (id: string) => {
       if (pendingIdsRef.current.has(id)) return;
 
-      // Read target state from the CURRENT cache, not the closure, so sequential
-      // toggles always flip relative to the latest optimistic state instead of
-      // a stale render snapshot.
       const cached = queryClient.getQueryData<Activity[]>(queryKeys.activities.lists());
       const activity = cached?.find(a => a.id === id) ?? activities.find(a => a.id === id);
       if (!activity) return;
@@ -197,9 +210,6 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
           list.map(a => (a.id === id ? { ...a, completed: nextCompleted } : a))
         );
 
-        // Use `update` with the explicit target value (not toggleCompletion which
-        // re-reads the server-side value and could race with our optimistic state
-        // if multiple toggles are issued in quick succession).
         const { error: toggleError } = await activitiesService.update(id, {
           completed: nextCompleted,
         });
@@ -209,8 +219,6 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
           if (previous) queryClient.setQueryData(queryKeys.activities.lists(), previous);
           return;
         }
-
-        void queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
       } finally {
         unmarkPending(id);
       }

@@ -13,7 +13,29 @@ import { useQueryClient } from '@tanstack/react-query';
 import { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { queryKeys, DEALS_VIEW_KEY } from '@/lib/query/queryKeys';
-import type { DealView } from '@/types';
+import type { Activity, DealView } from '@/types';
+
+// Translate a Realtime `activities` payload row (snake_case, no joins) into
+// a partial Activity with only the fields Realtime actually carries. Joined
+// fields like dealTitle and assignedToName are intentionally omitted so we
+// don't clobber existing cache values that the queryFn populated via joins.
+function normalizeActivityFromRealtime(row: Record<string, unknown>): Partial<Activity> & { id: string } {
+  const patch: Partial<Activity> & { id: string } = {
+    id: row.id as string,
+    organizationId: row.organization_id as string,
+    title: (row.title as string) ?? '',
+    description: (row.description as string) ?? undefined,
+    type: row.type as Activity['type'],
+    date: row.date as string,
+    completed: Boolean(row.completed),
+    dealId: (row.deal_id as string) ?? '',
+    contactId: (row.contact_id as string) ?? undefined,
+    clientCompanyId: (row.client_company_id as string) ?? undefined,
+    participantContactIds: (row.participant_contact_ids as string[]) ?? [],
+    assignedTo: (row.assigned_to as string) ?? null,
+  };
+  return patch;
+}
 
 // Enable detailed Realtime logging in development or when DEBUG_REALTIME env var is set
 const DEBUG_REALTIME = process.env.NODE_ENV === 'development' || process.env.NEXT_PUBLIC_DEBUG_REALTIME === 'true';
@@ -143,6 +165,78 @@ export function useRealtimeSync(
 
           // Call custom callback (if provided)
           onchangeRef.current?.(payload);
+
+          // =================================================================
+          // ACTIVITIES: direct cache writes for INSERT / UPDATE / DELETE.
+          //
+          // We never invalidate for activities events — the local mutation
+          // already wrote the intended state, and the Realtime echo we get
+          // here carries the authoritative server row. Merging it directly
+          // keeps same-tab optimistic state intact and propagates cross-tab
+          // changes instantly, with no refetch round-trip that could race.
+          // =================================================================
+          if (table === 'activities') {
+            const listsKey = queryKeys.activities.lists();
+
+            if (payload.eventType === 'DELETE') {
+              const oldRow = payload.old as Record<string, unknown> | undefined;
+              const id = oldRow?.id as string | undefined;
+              if (!id) return;
+              queryClient.setQueryData<Activity[]>(listsKey, (old = []) =>
+                old.filter(a => a.id !== id)
+              );
+              return;
+            }
+
+            const newRow = payload.new as Record<string, unknown> | undefined;
+            if (!newRow?.id) return;
+            const patch = normalizeActivityFromRealtime(newRow);
+
+            if (payload.eventType === 'INSERT') {
+              const dedupeKey = `activities-${patch.id}`;
+              if (!shouldProcessInsert(dedupeKey)) return;
+
+              queryClient.setQueryData<Activity[]>(listsKey, (old = []) => {
+                // Already present (e.g. we just wrote it optimistically and the
+                // temp id was swapped for the real one in addActivity). No-op.
+                if (old.some(a => a.id === patch.id)) return old;
+                // Drop any temp activity that matches by dealId + title —
+                // covers the case where addActivity's server response is
+                // still in flight when Realtime fires first.
+                const withoutMatchingTemp = old.filter(a => {
+                  if (!a.id.startsWith('temp-activity-')) return true;
+                  const sameDeal = a.dealId === patch.dealId;
+                  const sameTitle = a.title === patch.title;
+                  return !(sameDeal && sameTitle);
+                });
+                // Realtime doesn't carry joined fields. We build a minimally
+                // complete Activity here; joined labels (dealTitle, etc.) stay
+                // empty until the next normal refetch but the row shows up.
+                const newActivity: Activity = {
+                  dealTitle: '',
+                  user: { name: 'Você', avatar: '' },
+                  assignedToName: null,
+                  ...patch,
+                } as Activity;
+                return [newActivity, ...withoutMatchingTemp];
+              });
+              return;
+            }
+
+            if (payload.eventType === 'UPDATE') {
+              queryClient.setQueryData<Activity[]>(listsKey, (old = []) => {
+                const idx = old.findIndex(a => a.id === patch.id);
+                if (idx === -1) return old;
+                // Merge patch over existing row — joined fields (dealTitle,
+                // assignedToName) already on the cache row are preserved
+                // because the patch intentionally doesn't include them.
+                return old.map((a, i) => (i === idx ? { ...a, ...patch } : a));
+              });
+              return;
+            }
+
+            return;
+          }
 
           // Queue query keys for invalidation (lazy loaded)
           const keys = getTableQueryKeys(table);
@@ -293,163 +387,89 @@ export function useRealtimeSync(
               });
             }
           } else {
-            // For deals UPDATE: apply directly to cache to avoid race condition with optimistic updates
-            // When user moves a deal:
-            // 1. Optimistic update moves it visually
-            // 2. Server confirms
-            // 3. Realtime UPDATE arrives
-            // If we invalidate here, we might refetch stale data and the deal "jumps back"
-            // Instead, apply the update directly to cache
+            // For deals UPDATE: apply the Realtime payload directly to the
+            // cache. Authority rule: if the incoming `updated_at` is strictly
+            // newer than what we already have, apply it; otherwise skip.
+            // This is enough to:
+            //   - no-op the self-echo of our own optimistic write (same row,
+            //     same updatedAt) without flicker
+            //   - propagate cross-tab writes (incoming is newer than tab-B
+            //     cache) with zero delay and no refetch
+            //   - ignore genuinely stale out-of-order events
             if (payload.eventType === 'UPDATE' && table === 'deals') {
               const newData = payload.new as Record<string, unknown>;
-              const oldData = payload.old as Record<string, unknown>;
               const dealId = newData.id as string;
-              // CRITICAL: Realtime sends stage_id as the source of truth for deal stage.
-              // The `status` field in Realtime payload may be stale/incorrect.
-              // Always prioritize stage_id over status!
-              const incomingStatus = typeof newData.stage_id === 'string' ? newData.stage_id : 
-                                    typeof newData.status === 'string' ? newData.status : null;
-              const payloadOldStatus = typeof oldData.stage_id === 'string' ? oldData.stage_id :
-                                       typeof oldData.status === 'string' ? oldData.status : null;
 
-              // Apply update directly to DEALS_VIEW_KEY (única fonte de verdade)
-              // This avoids race condition where invalidation refetches stale data
-              // IMPORTANT: Only apply if the incoming status is different from current cache status
-              // This prevents Realtime from reverting optimistic updates with stale data
               queryClient.setQueryData<DealView[]>(
                 DEALS_VIEW_KEY,
                 (old) => {
-                  if (!old || !Array.isArray(old)) {
-                    return old;
-                  }
-                  
-                  // Find the deal in cache first to check current status
-                  const currentDeal = old.find((d) => d.id === dealId);
-                  const currentStatus = currentDeal && typeof currentDeal.status === 'string' ? currentDeal.status : null;
+                  if (!old || !Array.isArray(old)) return old;
 
-                  // If deal not found in cache, apply the update (it might be a new deal or from another tab)
-                  if (!currentDeal) {
-                    // Add the deal to cache (this can happen if deal was created in another tab)
-                    return [...old, newData as any];
+                  const idx = old.findIndex(d => d.id === dealId);
+                  // Normalize snake_case keys that the cache reads as camelCase.
+                  const normalizedData: Record<string, unknown> = { ...newData };
+                  if (newData.updated_at && !newData.updatedAt) {
+                    normalizedData.updatedAt = newData.updated_at;
+                    delete normalizedData.updated_at;
                   }
-                  
-                  // Guard: Skip update if incoming status matches current status (no-op)
-                  // This prevents Realtime from overwriting newer data with stale payloads
-                  if (currentStatus && incomingStatus && currentStatus === incomingStatus) {
-                    return old; // No change needed
+                  if (newData.created_at && !newData.createdAt) {
+                    normalizedData.createdAt = newData.created_at;
+                    delete normalizedData.created_at;
                   }
-                  
-                  // Guard: If current status is different from incoming, check if this is a stale update
-                  // This prevents Realtime from reverting optimistic updates
-                  // CRITICAL: When status differs, we need to be extra careful to avoid stale updates
-                  if (currentStatus && incomingStatus && currentStatus !== incomingStatus) {
-                    // payloadOldStatus already extracted above
-                    
-                    // If incoming status matches payload oldStatus, this is stale (reverting to old state)
-                    // This happens when we receive a delayed update that reverts our optimistic update
-                    if (payloadOldStatus && incomingStatus === payloadOldStatus) {
-                      return old; // Skip stale update
-                    }
-                    
-                    // If payload oldStatus is empty, we need to use a heuristic to determine if it's stale
-                    // Use updatedAt timestamp to check if the incoming update is newer than current
-                    // NOTE: Realtime payload uses snake_case (updated_at), cache uses camelCase (updatedAt)
-                    if (!payloadOldStatus || payloadOldStatus === '') {
-                      const incomingUpdatedAtRaw = (newData.updated_at || newData.updatedAt) as string | undefined;
-                      const incomingUpdatedAt = typeof incomingUpdatedAtRaw === 'string' ? new Date(incomingUpdatedAtRaw).getTime() : null;
-                      const currentUpdatedAtRaw = currentDeal && (currentDeal.updatedAt || (currentDeal as any).updated_at);
-                      const currentUpdatedAt = typeof currentUpdatedAtRaw === 'string' ? new Date(currentUpdatedAtRaw).getTime() : null;
-                      
-                      // CRITICAL: When payload.old.status is empty, we can't verify if the update is stale.
-                      // Strategy: Trust the server timestamp. If incoming timestamp is newer (even slightly), apply it.
-                      // This ensures cross-tab synchronization works even when timestamps are close.
-                      // Only skip if incoming timestamp is significantly older (<-100ms), which indicates a stale update.
-                      if (incomingUpdatedAt && currentUpdatedAt) {
-                        const diffMs = incomingUpdatedAt - currentUpdatedAt;
-                        
-                        // If incoming timestamp is significantly older (<-100ms), skip it (stale)
-                        // This prevents applying updates from previous operations that arrived out of order
-                        if (diffMs < -100) {
-                          return old; // Skip stale update
-                        }
-                        
-                        // If incoming timestamp is newer or close (>=-100ms), apply it
-                        // This ensures cross-tab synchronization works even when timestamps are close
-                        // Continue to apply the update below
-                      } else {
-                        // Can't compare timestamps, be conservative: only apply if status matches
-                        if (incomingStatus === currentStatus) {
-                          // Continue to apply the update below
-                        } else {
-                          return old; // Skip update - too risky without timestamp comparison
-                        }
-                      }
-                    }
-                    
-                    // If we have both oldStatus and newStatus, and newStatus is different from currentStatus,
-                    // this is likely a valid update from another tab - apply it!
-                    // Continue to apply the update below
+                  if (newData.stage_id !== undefined) {
+                    normalizedData.status = newData.stage_id;
+                    delete normalizedData.stage_id;
                   }
-                  
-                  // Also apply if currentStatus is null but incomingStatus exists (deal exists but status is missing)
-                  // Continue to apply the update below
+                  if (newData.is_won !== undefined && newData.isWon === undefined) {
+                    normalizedData.isWon = newData.is_won;
+                    delete normalizedData.is_won;
+                  }
+                  if (newData.is_lost !== undefined && newData.isLost === undefined) {
+                    normalizedData.isLost = newData.is_lost;
+                    delete normalizedData.is_lost;
+                  }
+                  if (newData.closed_at !== undefined && newData.closedAt === undefined) {
+                    normalizedData.closedAt = newData.closed_at;
+                    delete normalizedData.closed_at;
+                  }
+                  if (newData.last_stage_change_date !== undefined && newData.lastStageChangeDate === undefined) {
+                    normalizedData.lastStageChangeDate = newData.last_stage_change_date;
+                    delete normalizedData.last_stage_change_date;
+                  }
 
-                  const updated = old.map((deal) => {
-                    if (deal.id === dealId) {
-                      // Transform Realtime payload (snake_case) to app format (camelCase)
-                      // This ensures fields are properly updated in cache
-                      // CRITICAL: Without this normalization, updatedAt from Realtime (updated_at) won't update cache (updatedAt)
-                      const normalizedData: Record<string, unknown> = { ...newData };
-                      
-                      // Normalize timestamp fields
-                      if (newData.updated_at && !newData.updatedAt) {
-                        normalizedData.updatedAt = newData.updated_at;
-                        delete normalizedData.updated_at;
-                      }
-                      if (newData.created_at && !newData.createdAt) {
-                        normalizedData.createdAt = newData.created_at;
-                        delete normalizedData.created_at;
-                      }
-                      
-                      // Normalize status field (Realtime sends stage_id, cache uses status)
-                      // CRITICAL: Always use stage_id when available, as it's the source of truth!
-                      // The status field in Realtime payload may be stale/incorrect.
-                      if (newData.stage_id !== undefined) {
-                        normalizedData.status = newData.stage_id;
-                        delete normalizedData.stage_id;
-                      }
-                      
-                      // Normalize boolean fields
-                      if (newData.is_won !== undefined && newData.isWon === undefined) {
-                        normalizedData.isWon = newData.is_won;
-                        delete normalizedData.is_won;
-                      }
-                      if (newData.is_lost !== undefined && newData.isLost === undefined) {
-                        normalizedData.isLost = newData.is_lost;
-                        delete normalizedData.is_lost;
-                      }
-                      
-                      // Normalize date fields
-                      if (newData.closed_at !== undefined && newData.closedAt === undefined) {
-                        normalizedData.closedAt = newData.closed_at;
-                        delete normalizedData.closed_at;
-                      }
-                      if (newData.last_stage_change_date !== undefined && newData.lastStageChangeDate === undefined) {
-                        normalizedData.lastStageChangeDate = newData.last_stage_change_date;
-                        delete normalizedData.last_stage_change_date;
-                      }
-                      
-                      // Merge normalized data into existing deal (preserves enriched fields like companyName, owner, etc.)
-                      return { ...deal, ...normalizedData };
+                  if (idx === -1) {
+                    // Deal is not in local cache (e.g. created in another tab).
+                    // Append it rather than drop the event.
+                    return [...old, normalizedData as unknown as DealView];
+                  }
+
+                  // updatedAt comparison — strict newer wins. If the payload is
+                  // exactly the self-echo of our optimistic write, timestamps
+                  // match and we no-op (no flicker). If it's strictly older we
+                  // skip (out-of-order). Otherwise we merge.
+                  const currentDeal = old[idx];
+                  const currentUpdatedAtRaw = (currentDeal as any).updatedAt ?? (currentDeal as any).updated_at;
+                  const incomingUpdatedAtRaw = normalizedData.updatedAt as string | undefined;
+                  if (currentUpdatedAtRaw && incomingUpdatedAtRaw) {
+                    const cur = new Date(currentUpdatedAtRaw).getTime();
+                    const inc = new Date(incomingUpdatedAtRaw).getTime();
+                    if (Number.isFinite(cur) && Number.isFinite(inc) && inc < cur) {
+                      return old; // stale event
                     }
-                    return deal;
-                  });
-                  return updated;
+                  }
+
+                  return old.map((d, i) =>
+                    i === idx ? ({ ...d, ...normalizedData } as DealView) : d
+                  );
                 }
               );
 
-              // Still invalidate dashboard stats (they need recalculation)
-              queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.stats });
+              // Dashboard stats are derived from deals — invalidate so the
+              // next mount recalculates. Only refetches if it's mounted.
+              queryClient.invalidateQueries({
+                queryKey: queryKeys.dashboard.stats,
+                refetchType: 'active',
+              });
             } else {
               // For other tables or DELETE: debounce invalidation
               if (debounceTimerRef.current) {

@@ -159,41 +159,28 @@ export const useCreateActivity = () => {
       return { previousActivities, tempId: tempActivity.id };
     },
     onSuccess: (data, _variables, context) => {
-      // Replace temp activity with real one from server and re-sort
-      // This ensures immediate UI update while Realtime syncs in background
+      // Replace temp activity with real server row. Do NOT invalidate — that
+      // would trigger a refetch whose response can race with us and cause the
+      // "pisca e volta" flicker. Cross-tab consistency comes from the Realtime
+      // INSERT echo (handled directly in useRealtimeSync.ts for activities).
       queryClient.setQueryData<Activity[]>(queryKeys.activities.lists(), (old = []) => {
         if (!old) return [data];
         const tempId = context?.tempId;
-        
-        // Check if activity already exists (race condition: Realtime may have already refetched)
         const existingIndex = old.findIndex(a => a.id === data.id);
         if (existingIndex !== -1) {
-          // Activity already exists, just re-sort (Realtime already added it)
           return sortActivitiesSmart(old);
         }
-        
         if (tempId) {
-          // Remove temp activity, add real one, and re-sort
           const withoutTemp = old.filter(a => a.id !== tempId);
-          const withReal = [...withoutTemp, data];
-          return sortActivitiesSmart(withReal);
+          return sortActivitiesSmart([...withoutTemp, data]);
         }
-        // If temp not found, just add the new one and re-sort
         return sortActivitiesSmart([...old, data]);
       });
-      
-      // Invalidate to ensure Realtime updates are picked up
-      // This is a no-op if data is already fresh, but ensures consistency
-      queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
     },
     onError: (_error, _params, context) => {
       if (context?.previousActivities) {
         queryClient.setQueryData(queryKeys.activities.lists(), context.previousActivities);
       }
-    },
-    onSettled: () => {
-      // Final invalidation to ensure Realtime updates are picked up
-      queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
     },
   });
 };
@@ -225,9 +212,9 @@ export const useUpdateActivity = () => {
         queryClient.setQueryData(queryKeys.activities.lists(), context.previousActivities);
       }
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
-    },
+    // No onSettled/invalidate: cache is authoritative post-optimistic, and
+    // the Realtime UPDATE echo handled in useRealtimeSync keeps other tabs
+    // in sync without a refetch that could flicker this one.
   });
 };
 
@@ -258,9 +245,8 @@ export const useToggleActivity = () => {
         queryClient.setQueryData(queryKeys.activities.lists(), context.previousActivities);
       }
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
-    },
+    // No invalidate — optimistic cache is authoritative; Realtime echo will
+    // reconcile other subscribers without causing a local refetch flicker.
   });
 };
 
@@ -289,8 +275,6 @@ export const useDeleteActivity = () => {
         queryClient.setQueryData(queryKeys.activities.lists(), context.previousActivities);
       }
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
-    },
+    // No invalidate — see note on useUpdateActivity above.
   });
 };
