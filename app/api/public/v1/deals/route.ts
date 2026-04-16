@@ -19,6 +19,7 @@ const ContactInlineSchema = z.object({
 
 const DealCreateSchema = z.object({
   title: z.string().min(1),
+  description: z.string().optional(),
   value: z.number().optional(),
   board_id: z.string().uuid().optional(),
   board_key: z.string().min(1).optional(),
@@ -57,7 +58,7 @@ export async function GET(request: Request) {
 
   let query = sb
     .from('deals')
-    .select('id,title,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,tags,custom_fields,probability,priority', { count: 'exact' })
+    .select('id,title,description,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,tags,custom_fields,probability,priority', { count: 'exact' })
     .eq('organization_id', auth.organizationId)
     .is('deleted_at', null)
     .order('updated_at', { ascending: false });
@@ -82,13 +83,33 @@ export async function GET(request: Request) {
   const nextOffset = to + 1;
   const nextCursor = nextOffset < total ? encodeOffsetCursor(nextOffset) : null;
 
+  // Resolve board/stage names for the returned page only.
+  const rows = data || [];
+  const boardIds = Array.from(new Set(rows.map((d: any) => d.board_id).filter(Boolean)));
+  const stageIds = Array.from(new Set(rows.map((d: any) => d.stage_id).filter(Boolean)));
+  const [boardsRes, stagesRes] = await Promise.all([
+    boardIds.length
+      ? sb.from('boards').select('id,name').in('id', boardIds as string[])
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    stageIds.length
+      ? sb.from('board_stages').select('id,name,label').in('id', stageIds as string[])
+      : Promise.resolve({ data: [] as { id: string; name: string; label: string | null }[] }),
+  ]);
+  const boardNameById = new Map((boardsRes.data || []).map((b: any) => [b.id, b.name as string]));
+  const stageNameById = new Map(
+    (stagesRes.data || []).map((s: any) => [s.id, (s.label || s.name) as string])
+  );
+
   return NextResponse.json({
-    data: (data || []).map((d: any) => ({
+    data: rows.map((d: any) => ({
       id: d.id,
       title: d.title,
+      description: d.description ?? null,
       value: Number(d.value ?? 0),
       board_id: d.board_id,
+      board_name: d.board_id ? boardNameById.get(d.board_id) ?? null : null,
       stage_id: d.stage_id,
+      stage_name: d.stage_id ? stageNameById.get(d.stage_id) ?? null : null,
       contact_id: d.contact_id,
       client_company_id: d.client_company_id ?? null,
       is_won: !!d.is_won,
@@ -205,6 +226,7 @@ export async function POST(request: Request) {
   const insertPayload: any = {
     organization_id: auth.organizationId,
     title: parsed.data.title.trim(),
+    description: parsed.data.description?.trim() || null,
     value,
     board_id: boardId,
     stage_id: stageId,
@@ -223,10 +245,30 @@ export async function POST(request: Request) {
   const { data, error } = await sb
     .from('deals')
     .insert(insertPayload)
-    .select('id,title,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,tags,custom_fields,probability,priority')
+    .select('id,title,description,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,tags,custom_fields,probability,priority')
     .single();
   if (error) return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
 
-  return NextResponse.json({ data: { ...data, value: Number(data.value ?? 0), tags: data.tags ?? [], custom_fields: data.custom_fields ?? {}, probability: data.probability ?? 0, priority: data.priority ?? 'medium' }, action: 'created' }, { status: 201 });
+  const [boardRes, stageRes] = await Promise.all([
+    data.board_id ? sb.from('boards').select('name').eq('id', data.board_id).maybeSingle() : Promise.resolve({ data: null }),
+    data.stage_id ? sb.from('board_stages').select('name,label').eq('id', data.stage_id).maybeSingle() : Promise.resolve({ data: null }),
+  ]);
+  const boardName = (boardRes.data as any)?.name ?? null;
+  const stageName = (stageRes.data as any) ? ((stageRes.data as any).label || (stageRes.data as any).name) : null;
+
+  return NextResponse.json({
+    data: {
+      ...data,
+      description: data.description ?? null,
+      value: Number(data.value ?? 0),
+      tags: data.tags ?? [],
+      custom_fields: data.custom_fields ?? {},
+      probability: data.probability ?? 0,
+      priority: data.priority ?? 'medium',
+      board_name: boardName,
+      stage_name: stageName,
+    },
+    action: 'created',
+  }, { status: 201 });
 }
 
