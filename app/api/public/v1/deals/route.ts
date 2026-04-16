@@ -89,13 +89,14 @@ export async function GET(request: Request) {
   const stageIds = Array.from(new Set(rows.map((d: any) => d.stage_id).filter(Boolean)));
   const [boardsRes, stagesRes] = await Promise.all([
     boardIds.length
-      ? sb.from('boards').select('id,name').in('id', boardIds as string[])
-      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+      ? sb.from('boards').select('id,name,key').in('id', boardIds as string[])
+      : Promise.resolve({ data: [] as { id: string; name: string; key: string | null }[] }),
     stageIds.length
       ? sb.from('board_stages').select('id,name,label').in('id', stageIds as string[])
       : Promise.resolve({ data: [] as { id: string; name: string; label: string | null }[] }),
   ]);
   const boardNameById = new Map((boardsRes.data || []).map((b: any) => [b.id, b.name as string]));
+  const boardKeyById = new Map((boardsRes.data || []).map((b: any) => [b.id, (b.key ?? null) as string | null]));
   const stageNameById = new Map(
     (stagesRes.data || []).map((s: any) => [s.id, (s.label || s.name) as string])
   );
@@ -108,6 +109,7 @@ export async function GET(request: Request) {
       value: Number(d.value ?? 0),
       board_id: d.board_id,
       board_name: d.board_id ? boardNameById.get(d.board_id) ?? null : null,
+      board_key: d.board_id ? boardKeyById.get(d.board_id) ?? null : null,
       stage_id: d.stage_id,
       stage_name: d.stage_id ? stageNameById.get(d.stage_id) ?? null : null,
       contact_id: d.contact_id,
@@ -250,10 +252,11 @@ export async function POST(request: Request) {
   if (error) return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
 
   const [boardRes, stageRes] = await Promise.all([
-    data.board_id ? sb.from('boards').select('name').eq('id', data.board_id).maybeSingle() : Promise.resolve({ data: null }),
+    data.board_id ? sb.from('boards').select('name,key').eq('id', data.board_id).maybeSingle() : Promise.resolve({ data: null }),
     data.stage_id ? sb.from('board_stages').select('name,label').eq('id', data.stage_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   const boardName = (boardRes.data as any)?.name ?? null;
+  const boardKey = (boardRes.data as any)?.key ?? null;
   const stageName = (stageRes.data as any) ? ((stageRes.data as any).label || (stageRes.data as any).name) : null;
 
   return NextResponse.json({
@@ -266,6 +269,7 @@ export async function POST(request: Request) {
       probability: data.probability ?? 0,
       priority: data.priority ?? 'medium',
       board_name: boardName,
+      board_key: boardKey,
       stage_name: stageName,
     },
     action: 'created',

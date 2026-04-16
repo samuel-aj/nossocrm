@@ -45,11 +45,12 @@ export async function GET(request: Request, ctx: { params: Promise<{ dealId: str
   const [notesRes, itemsRes, boardRes, stageRes] = await Promise.all([
     sb.from('deal_notes').select('id,content,created_at,updated_at').eq('deal_id', dealId).order('created_at', { ascending: false }),
     sb.from('deal_items').select('id,product_id,name,quantity,price,created_at').eq('deal_id', dealId).order('created_at', { ascending: false }),
-    data.board_id ? sb.from('boards').select('name').eq('id', data.board_id).maybeSingle() : Promise.resolve({ data: null }),
+    data.board_id ? sb.from('boards').select('name,key').eq('id', data.board_id).maybeSingle() : Promise.resolve({ data: null }),
     data.stage_id ? sb.from('board_stages').select('name,label').eq('id', data.stage_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
 
   const boardName = (boardRes.data as any)?.name ?? null;
+  const boardKey = (boardRes.data as any)?.key ?? null;
   const stageName = (stageRes.data as any) ? ((stageRes.data as any).label || (stageRes.data as any).name) : null;
 
   return NextResponse.json({
@@ -62,6 +63,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ dealId: str
       probability: data.probability ?? 0,
       priority: data.priority ?? 'medium',
       board_name: boardName,
+      board_key: boardKey,
       stage_name: stageName,
       notes: notesRes.data ?? [],
       items: (itemsRes.data ?? []).map((i: any) => ({ ...i, price: Number(i.price ?? 0) })),
@@ -112,10 +114,11 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
   if (!data) return NextResponse.json({ error: 'Deal not found', code: 'NOT_FOUND' }, { status: 404 });
 
   const [boardRes, stageRes] = await Promise.all([
-    data.board_id ? sb.from('boards').select('name').eq('id', data.board_id).maybeSingle() : Promise.resolve({ data: null }),
+    data.board_id ? sb.from('boards').select('name,key').eq('id', data.board_id).maybeSingle() : Promise.resolve({ data: null }),
     data.stage_id ? sb.from('board_stages').select('name,label').eq('id', data.stage_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   const boardName = (boardRes.data as any)?.name ?? null;
+  const boardKey = (boardRes.data as any)?.key ?? null;
   const stageName = (stageRes.data as any) ? ((stageRes.data as any).label || (stageRes.data as any).name) : null;
 
   return NextResponse.json({
@@ -128,6 +131,7 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
       probability: data.probability ?? 0,
       priority: data.priority ?? 'medium',
       board_name: boardName,
+      board_key: boardKey,
       stage_name: stageName,
     },
   });
