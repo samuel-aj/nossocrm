@@ -409,6 +409,7 @@ export const dealsService = {
       if (deal.items && deal.items.length > 0) {
         const itemsToInsert = deal.items.map(item => ({
           deal_id: data.id,
+          organization_id: organizationId,
           product_id: item.productId || null,
           name: item.name,
           quantity: item.quantity,
@@ -505,10 +506,12 @@ export const dealsService = {
       if (!supabase) {
         return { data: null, error: new Error('Supabase não configurado') };
       }
+      const orgId = await getCurrentOrganizationId();
       const { data, error } = await supabase
         .from('deal_items')
         .insert({
           deal_id: sanitizeUUID(dealId),
+          organization_id: orgId,
           product_id: sanitizeUUID(item.productId),
           name: item.name,
           quantity: item.quantity,
