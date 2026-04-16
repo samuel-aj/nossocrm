@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Activity, Deal, Contact, Company } from '@/types';
 import { ActivityRow } from './ActivityRow';
+import { useCRM } from '@/context/CRMContext';
 
 interface ActivitiesListProps {
     activities: Activity[];
@@ -47,6 +48,7 @@ export const ActivitiesList: React.FC<ActivitiesListProps> = ({
     selectedActivities = new Set(),
     onSelectActivity
 }) => {
+    const { isActivityPending } = useCRM();
     // Performance: Activities pode ser uma lista grande; evitamos `find` por linha (O(N*M)).
     const dealById = useMemo(() => {
         const map = new Map<string, Deal>();
@@ -102,6 +104,7 @@ export const ActivitiesList: React.FC<ActivitiesListProps> = ({
             onDelete={onDelete}
             isSelected={selectedActivities.has(activity.id)}
             onSelect={onSelectActivity}
+            isPending={isActivityPending(activity.id)}
         />
     );
 

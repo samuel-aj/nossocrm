@@ -97,6 +97,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     addActivity,
     updateActivity,
     deleteActivity,
+    toggleActivityCompletion,
+    isActivityPending,
     products,
     addItemToDeal,
     removeItemFromDeal,
@@ -1313,13 +1315,10 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                           key={activity.id}
                           activity={activity}
                           deal={deal}
-                          onToggleComplete={id => {
-                            // Performance: O(1) lookup instead of scanning all activities.
-                            const act = activitiesById.get(id);
-                            if (act) updateActivity(id, { completed: !act.completed });
-                          }}
+                          onToggleComplete={toggleActivityCompletion}
                           onEdit={(a) => startEditActivity(a)}
                           onDelete={id => deleteActivity(id)}
+                          isPending={isActivityPending(activity.id)}
                         />
                       ))}
                     </div>

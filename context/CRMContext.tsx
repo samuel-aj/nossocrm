@@ -124,6 +124,8 @@ interface CRMContextType {
   updateActivity: (id: string, updates: Partial<Activity>) => Promise<void>;
   deleteActivity: (id: string) => Promise<void>;
   toggleActivityCompletion: (id: string) => Promise<void>;
+  /** True while an activity mutation is in-flight for the given id. */
+  isActivityPending: (id: string) => boolean;
 
   // Leads (deprecated)
   /** @deprecated Usar addContact com lifecycle_stage_id */
@@ -239,6 +241,7 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     updateActivity,
     deleteActivity,
     toggleActivityCompletion,
+    isActivityPending,
     refresh: refreshActivities,
   } = useActivities();
 
@@ -981,6 +984,7 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       updateActivity,
       deleteActivity,
       toggleActivityCompletion,
+      isActivityPending,
       addLead,
       updateLead,
       convertLead,
@@ -1056,6 +1060,7 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       updateActivity,
       deleteActivity,
       toggleActivityCompletion,
+      isActivityPending,
       addLead,
       updateLead,
       convertLead,

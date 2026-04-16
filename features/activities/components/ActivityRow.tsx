@@ -14,6 +14,12 @@ interface ActivityRowProps {
     onDelete: (id: string) => void;
     isSelected?: boolean;
     onSelect?: (id: string, selected: boolean) => void;
+    /**
+     * True while a mutation is in flight for this activity. Used to disable
+     * the toggle / edit / delete buttons so rapid clicks don't issue conflicting
+     * writes (source of the "task marks and unmarks by itself" bug).
+     */
+    isPending?: boolean;
 }
 
 /**
@@ -29,7 +35,8 @@ const ActivityRowComponent: React.FC<ActivityRowProps> = ({
     onEdit,
     onDelete,
     isSelected = false,
-    onSelect
+    onSelect,
+    isPending = false,
 }) => {
     const getActivityIcon = (type: Activity['type']) => {
         switch (type) {
@@ -135,7 +142,10 @@ const ActivityRowComponent: React.FC<ActivityRowProps> = ({
 
             <button
                 onClick={() => onToggleComplete(activity.id)}
-                className={`flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${activity.completed
+                disabled={isPending}
+                aria-busy={isPending}
+                aria-label={activity.completed ? 'Reabrir atividade' : 'Concluir atividade'}
+                className={`flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${activity.completed
                     ? 'bg-green-500 border-green-500 text-white'
                     : 'border-slate-300 dark:border-slate-600 hover:border-green-500 text-transparent hover:text-green-500'
                     }`}
@@ -195,14 +205,16 @@ const ActivityRowComponent: React.FC<ActivityRowProps> = ({
             <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button
                     onClick={() => onEdit(activity)}
-                    className="p-2 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-500/10 rounded-lg transition-colors"
+                    disabled={isPending}
+                    className="p-2 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-500/10 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Editar"
                 >
                     <Edit2 size={16} />
                 </button>
                 <button
                     onClick={() => onDelete(activity.id)}
-                    className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg transition-colors"
+                    disabled={isPending}
+                    className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Excluir"
                 >
                     <Trash2 size={16} />

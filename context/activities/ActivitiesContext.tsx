@@ -3,6 +3,8 @@ import React, {
   useContext,
   useMemo,
   useCallback,
+  useRef,
+  useState,
   ReactNode,
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -21,6 +23,12 @@ interface ActivitiesContextType {
   deleteActivity: (id: string) => Promise<void>;
   toggleActivityCompletion: (id: string) => Promise<void>;
   refresh: () => Promise<void>;
+  /**
+   * Returns true while a create/update/delete/toggle is in-flight for this id.
+   * Consumers should disable their mutation controls while this is true so
+   * rapid clicks can't queue up conflicting writes.
+   */
+  isActivityPending: (id: string) => boolean;
 }
 
 const ActivitiesContext = createContext<ActivitiesContextType | undefined>(undefined);
@@ -77,9 +85,33 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
     [profile?.organization_id, queryClient]
   );
 
+  // Tracks activities currently being mutated so consumers can disable controls
+  // and we can ignore reentrant clicks. Uses ref for the write-side (so updates
+  // inside rapid sequential calls are seen by the guard check below) and mirrors
+  // into state so React can re-render on change.
+  const pendingIdsRef = useRef<Set<string>>(new Set());
+  const [pendingVersion, setPendingVersion] = useState(0);
+  const markPending = useCallback((id: string) => {
+    pendingIdsRef.current.add(id);
+    setPendingVersion(v => v + 1);
+  }, []);
+  const unmarkPending = useCallback((id: string) => {
+    pendingIdsRef.current.delete(id);
+    setPendingVersion(v => v + 1);
+  }, []);
+  const isActivityPending = useCallback(
+    (id: string) => pendingIdsRef.current.has(id),
+    // pendingVersion dep keeps the function identity stable-per-change so
+    // memoized consumers re-evaluate when the pending set flips.
+    [pendingVersion] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
   /**
-   * Patch the activities cache immediately so the UI reflects the change
-   * before the server roundtrip. Returns a snapshot used to roll back on error.
+   * Patch the activities list cache immediately and snapshot the previous
+   * value so we can roll back on error. IMPORTANT: callers must cancelQueries
+   * BEFORE invoking this so an in-flight refetch can't resolve after the patch
+   * and overwrite the optimistic state with stale data (the root cause of the
+   * "toggle flips back by itself" bug).
    */
   const patchActivitiesCache = useCallback(
     (mutator: (list: Activity[]) => Activity[]) => {
@@ -93,62 +125,97 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
 
   const updateActivity = useCallback(
     async (id: string, updates: Partial<Activity>) => {
-      // Optimistic update: reflect the change in the UI immediately.
-      const previous = patchActivitiesCache(list =>
-        list.map(a => (a.id === id ? { ...a, ...updates } : a))
-      );
+      if (pendingIdsRef.current.has(id)) return; // guard against rapid clicks
+      markPending(id);
+      try {
+        // CRITICAL: cancel in-flight fetches before optimistic write — otherwise
+        // a refetch that resolves after us overwrites the new state with stale data.
+        await queryClient.cancelQueries({ queryKey: queryKeys.activities.all });
 
-      const { error: updateError } = await activitiesService.update(id, updates);
+        const previous = patchActivitiesCache(list =>
+          list.map(a => (a.id === id ? { ...a, ...updates } : a))
+        );
 
-      if (updateError) {
-        console.error('Erro ao atualizar atividade:', updateError.message);
-        if (previous) queryClient.setQueryData(queryKeys.activities.lists(), previous);
-        return;
+        const { error: updateError } = await activitiesService.update(id, updates);
+
+        if (updateError) {
+          console.error('Erro ao atualizar atividade:', updateError.message);
+          if (previous) queryClient.setQueryData(queryKeys.activities.lists(), previous);
+          return;
+        }
+
+        void queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
+      } finally {
+        unmarkPending(id);
       }
-
-      void queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
     },
-    [patchActivitiesCache, queryClient]
+    [markPending, unmarkPending, patchActivitiesCache, queryClient]
   );
 
   const deleteActivity = useCallback(
     async (id: string) => {
-      const previous = patchActivitiesCache(list => list.filter(a => a.id !== id));
+      if (pendingIdsRef.current.has(id)) return;
+      markPending(id);
+      try {
+        await queryClient.cancelQueries({ queryKey: queryKeys.activities.all });
 
-      const { error: deleteError } = await activitiesService.delete(id);
+        const previous = patchActivitiesCache(list => list.filter(a => a.id !== id));
 
-      if (deleteError) {
-        console.error('Erro ao deletar atividade:', deleteError.message);
-        if (previous) queryClient.setQueryData(queryKeys.activities.lists(), previous);
-        return;
+        const { error: deleteError } = await activitiesService.delete(id);
+
+        if (deleteError) {
+          console.error('Erro ao deletar atividade:', deleteError.message);
+          if (previous) queryClient.setQueryData(queryKeys.activities.lists(), previous);
+          return;
+        }
+
+        void queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
+      } finally {
+        unmarkPending(id);
       }
-
-      void queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
     },
-    [patchActivitiesCache, queryClient]
+    [markPending, unmarkPending, patchActivitiesCache, queryClient]
   );
 
   const toggleActivityCompletion = useCallback(
     async (id: string) => {
-      const activity = activities.find(a => a.id === id);
+      if (pendingIdsRef.current.has(id)) return;
+
+      // Read target state from the CURRENT cache, not the closure, so sequential
+      // toggles always flip relative to the latest optimistic state instead of
+      // a stale render snapshot.
+      const cached = queryClient.getQueryData<Activity[]>(queryKeys.activities.lists());
+      const activity = cached?.find(a => a.id === id) ?? activities.find(a => a.id === id);
       if (!activity) return;
+      const nextCompleted = !activity.completed;
 
-      // Optimistic toggle: flip completed in the cache now, rollback on error.
-      const previous = patchActivitiesCache(list =>
-        list.map(a => (a.id === id ? { ...a, completed: !a.completed } : a))
-      );
+      markPending(id);
+      try {
+        await queryClient.cancelQueries({ queryKey: queryKeys.activities.all });
 
-      const { error: toggleError } = await activitiesService.toggleCompletion(id);
+        const previous = patchActivitiesCache(list =>
+          list.map(a => (a.id === id ? { ...a, completed: nextCompleted } : a))
+        );
 
-      if (toggleError) {
-        console.error('Erro ao alternar atividade:', toggleError.message);
-        if (previous) queryClient.setQueryData(queryKeys.activities.lists(), previous);
-        return;
+        // Use `update` with the explicit target value (not toggleCompletion which
+        // re-reads the server-side value and could race with our optimistic state
+        // if multiple toggles are issued in quick succession).
+        const { error: toggleError } = await activitiesService.update(id, {
+          completed: nextCompleted,
+        });
+
+        if (toggleError) {
+          console.error('Erro ao alternar atividade:', toggleError.message);
+          if (previous) queryClient.setQueryData(queryKeys.activities.lists(), previous);
+          return;
+        }
+
+        void queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
+      } finally {
+        unmarkPending(id);
       }
-
-      void queryClient.invalidateQueries({ queryKey: queryKeys.activities.all });
     },
-    [activities, patchActivitiesCache, queryClient]
+    [activities, markPending, unmarkPending, patchActivitiesCache, queryClient]
   );
 
   const value = useMemo(
@@ -161,6 +228,7 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
       deleteActivity,
       toggleActivityCompletion,
       refresh,
+      isActivityPending,
     }),
     [
       activities,
@@ -171,6 +239,7 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
       deleteActivity,
       toggleActivityCompletion,
       refresh,
+      isActivityPending,
     ]
   );
 
