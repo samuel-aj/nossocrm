@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useId, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useId, useMemo, useCallback } from 'react';
 import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
@@ -154,7 +154,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const [quickActivityTime, setQuickActivityTime] = useState('');
   const [quickActivityDesc, setQuickActivityDesc] = useState('');
 
-  const resetQuickActivityForm = () => {
+  const resetQuickActivityForm = useCallback(() => {
     setShowQuickActivity(false);
     setEditingActivityId(null);
     setQuickActivityType('CALL');
@@ -162,9 +162,11 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     setQuickActivityDate('');
     setQuickActivityTime('');
     setQuickActivityDesc('');
-  };
+  }, []);
 
-  const startEditActivity = (a: Activity) => {
+  // Stable reference so the memoized ActivityRow children don't re-render
+  // on every parent state change just because the callback was inline.
+  const startEditActivity = useCallback((a: Activity) => {
     const d = new Date(a.date);
     setEditingActivityId(a.id);
     setQuickActivityType((a.type === 'TASK' ? 'TASK' : a.type) as typeof quickActivityType);
@@ -174,7 +176,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     setQuickActivityDesc(a.description || '');
     setShowQuickActivity(true);
     setActiveTab('activities');
-  };
+  }, []);
 
   const [objection, setObjection] = useState('');
   const [objectionResponses, setObjectionResponses] = useState<string[]>([]);
@@ -1316,8 +1318,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                           activity={activity}
                           deal={deal}
                           onToggleComplete={toggleActivityCompletion}
-                          onEdit={(a) => startEditActivity(a)}
-                          onDelete={id => deleteActivity(id)}
+                          onEdit={startEditActivity}
+                          onDelete={deleteActivity}
                           isPending={isActivityPending(activity.id)}
                         />
                       ))}

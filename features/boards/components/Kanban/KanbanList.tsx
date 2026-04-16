@@ -7,6 +7,10 @@ import type { DealActivityStatus } from '@/features/boards/utils/dealActivitySta
 import { computeActivityStatusMap } from '@/features/boards/utils/dealActivityStatus';
 import { useActivities } from '@/lib/query/hooks/useActivitiesQuery';
 
+// Shared default for cards with no pending activities — same reference on
+// every render so React.memo on KanbanListRow can skip re-renders.
+const NO_ACTIVITY_STATUS: DealActivityStatus = { kind: 'none', daysFromToday: 0, daysOverdue: 0 };
+
 type QuickAddType = 'CALL' | 'MEETING' | 'EMAIL';
 
 type KanbanListRowProps = {
@@ -259,7 +263,7 @@ export const KanbanList: React.FC<KanbanListProps> = ({
                 stageLabel={stageLabelById.get(deal.status) || deal.status}
                 stages={stages}
                 customFieldDefinitions={customFieldDefinitions}
-                activityStatus={activityStatusMap.get(deal.id) ?? { kind: 'none', daysFromToday: 0, daysOverdue: 0 }}
+                activityStatus={activityStatusMap.get(deal.id) ?? NO_ACTIVITY_STATUS}
                 isMenuOpen={openActivityMenuId === deal.id}
                 onSelect={handleRowClick}
                 onToggleMenu={handleToggleMenu}

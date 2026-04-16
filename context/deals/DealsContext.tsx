@@ -80,12 +80,6 @@ export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       // NÃƒO invalidar deals aqui! O CRMContext jÃ¡ fez insert otimista e o Realtime
       // tambÃ©m adiciona ao cache. invalidateQueries causaria um refetch que poderia
       // sobrescrever o cache otimista com dados desatualizados (eventual consistency).
-      // #region agent log
-      if (process.env.NODE_ENV !== 'production') {
-        console.log(`[DealsContext.addDeal] âœ… Skipping invalidateQueries (cache managed by optimistic+Realtime)`, { dealId: data?.id?.slice(0,8) });
-        fetch('http://127.0.0.1:7242/ingest/d70f541c-09d7-4128-9745-93f15f184017',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'DealsContext.tsx:82',message:'Skipping invalidateQueries',data:{dealId:data?.id?.slice(0,8)},timestamp:Date.now(),sessionId:'debug-session',runId:'crm-create-deal','hypothesisId':'H4'})}).catch(()=>{});
-      }
-      // #endregion
       // Apenas dashboard stats pode ser invalidado (nÃ£o afeta deals cache)
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.stats });
 

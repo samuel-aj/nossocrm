@@ -8,6 +8,10 @@ import { useActivities } from '@/lib/query/hooks/useActivitiesQuery';
 
 import { useCRM } from '@/context/CRMContext';
 
+// Shared immutable default so every card without pending activities reuses
+// the same reference — React.memo on DealCard can then bail out on re-renders.
+const NO_ACTIVITY_STATUS = { kind: 'none' as const, daysFromToday: 0, daysOverdue: 0 };
+
 /**
  * UI: Drop highlight should follow the stage color.
  *
@@ -130,6 +134,11 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
     () => computeActivityStatusMap(filteredDeals, activities),
     [filteredDeals, activities]
   );
+
+  // Stable resolved onMoveToStage — the inline ternary was allocating a new
+  // reference per render even when handleOpenMoveToStage itself was stable,
+  // which invalidated DealCard's React.memo for every card on every render.
+  // We compute it once per change of the two actual inputs.
   
   // State for move-to-stage modal (keyboard accessibility alternative to drag-and-drop)
   const [moveToStageModal, setMoveToStageModal] = useState<{
@@ -189,6 +198,14 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
       }
     },
     [dealsById]
+  );
+
+  // Stable resolved onMoveToStage passed to DealCard. Replaces the inline
+  // ternary `onMoveDealToStage ? handleOpenMoveToStage : undefined` which
+  // allocated a new reference every render and broke DealCard's React.memo.
+  const resolvedMoveToStage = useMemo(
+    () => (onMoveDealToStage ? handleOpenMoveToStage : undefined),
+    [onMoveDealToStage, handleOpenMoveToStage]
   );
 
   // Handler to confirm move to a new stage
@@ -290,7 +307,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                     !deal.isWon &&
                     !deal.isLost
                   }
-                  activityStatus={activityStatusMap.get(deal.id) ?? { kind: 'none', daysFromToday: 0, daysOverdue: 0 }}
+                  activityStatus={activityStatusMap.get(deal.id) ?? NO_ACTIVITY_STATUS}
                   isDragging={draggingId === deal.id}
                   onDragStart={handleDragStart}
                   onDragEnd={handleDragEnd}
@@ -302,7 +319,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                   onQuickAddActivity={handleQuickAddActivity}
                   customFieldDefinitions={customFieldDefinitions}
                   setLastMouseDownDealId={setLastMouseDownDealId}
-                  onMoveToStage={onMoveDealToStage ? handleOpenMoveToStage : undefined}
+                  onMoveToStage={resolvedMoveToStage}
                 />
               ))}
             </div>
