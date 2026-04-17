@@ -4,7 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import ConfirmModal from '@/components/ConfirmModal';
 import { LossReasonModal } from '@/components/ui/LossReasonModal';
-import { useMoveDealSimple } from '@/lib/query/hooks';
+import { useMoveDealSimple, useDeal } from '@/lib/query/hooks';
 import { FocusTrap, useFocusReturn } from '@/lib/a11y';
 import { Activity } from '@/types';
 
@@ -119,7 +119,15 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const lifecycleStageById = useMemo(() => new Map(lifecycleStages.map((s) => [s.id, s])), [lifecycleStages]);
   const productsById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
 
-  const deal = dealId ? dealsById.get(dealId) : undefined;
+  const dealFromCache = dealId ? dealsById.get(dealId) : undefined;
+  // Fallback fetch: when a deal id lands in the modal (deep link, brand-new
+  // card from Realtime, or optimistic temp→real swap race) but the DealView
+  // cache hasn't caught up yet, fetch it directly so the modal still opens
+  // instead of silently returning null. The query is disabled when the cache
+  // already has the deal to avoid redundant requests.
+  const shouldFetch = !!dealId && !!isOpen && !dealFromCache;
+  const { data: fetchedDeal } = useDeal(shouldFetch ? dealId : undefined);
+  const deal = dealFromCache ?? (fetchedDeal as unknown as typeof dealFromCache | undefined);
   const contact = deal ? (contactsById.get(deal.contactId) ?? null) : null;
 
   // Determine the correct board for this deal
@@ -140,6 +148,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const [newNote, setNewNote] = useState('');
   const [showNewNote, setShowNewNote] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState('');
+  const descriptionTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [idCopied, setIdCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<'timeline' | 'activities' | 'notes' | 'products' | 'info'>('timeline');
   const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -229,6 +238,18 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     }
   }, [isOpen, dealId]); // Depend on dealId to reset when switching deals
 
+  // Keep descriptionDraft in sync with the canonical deal.description whenever
+  // the server value changes (cross-tab Realtime, another API write). We skip
+  // the sync while the textarea is focused so we don't clobber the user's
+  // in-flight typing; onBlur handler persists the draft normally.
+  useEffect(() => {
+    if (!isOpen || !deal) return;
+    const el = descriptionTextareaRef.current;
+    if (el && typeof document !== 'undefined' && document.activeElement === el) return;
+    const incoming = deal.description ?? '';
+    setDescriptionDraft((cur) => (cur === incoming ? cur : incoming));
+  }, [isOpen, deal?.description]);
+
   // Apply schedule hint (coming from the Kanban status icon) after the
   // base reset effect above, so the user lands directly on the activities
   // tab with the form open and the type pre-selected. The parent clears
@@ -289,7 +310,32 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     return dealActivities.filter((a) => a.type !== 'NOTE' && a.type !== 'STATUS_CHANGE');
   }, [dealActivities]);
 
-  if (!isOpen || !deal) return null;
+  if (!isOpen) return null;
+
+  // isOpen but the deal hasn't hydrated yet (cache race or deep-link to a
+  // deal not yet in the current list). Show a minimal loading shell instead
+  // of silently returning null — prevents the "URL changed but nothing
+  // opens, needs F5" UX regression. `useDeal(shouldFetch)` above populates
+  // `deal` as soon as the server responds or Realtime fills the cache.
+  if (!deal) {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+        role="dialog"
+        aria-modal="true"
+        aria-busy="true"
+        onClick={onClose}
+      >
+        <div
+          className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl p-8 flex flex-col items-center gap-3"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="h-8 w-8 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm text-slate-500 dark:text-slate-400">Carregando lead…</p>
+        </div>
+      </div>
+    );
+  }
 
   const addDealTag = (raw: string) => {
     const next = normalizeTag(raw);
@@ -1184,6 +1230,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                     {/* Descrição fixa — sempre visível, persistente (salva no blur) */}
                     <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-4 shadow-sm">
                       <textarea
+                        ref={descriptionTextareaRef}
                         className="w-full bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none resize-none min-h-[80px]"
                         placeholder="Adicione uma descrição..."
                         value={descriptionDraft}

@@ -15,11 +15,12 @@ const REALTIME_PRESETS = {
   /** Contacts page: contacts and their companies */
   contacts: ['contacts', 'crm_companies'] as const,
   
-  /** Deals page: deals with contacts and companies (+ line items) */
-  deals: ['deals', 'deal_items', 'contacts', 'crm_companies'] as const,
+  /** Deals page: deals with contacts and companies (+ line items + notes) */
+  deals: ['deals', 'deal_items', 'deal_notes', 'contacts', 'crm_companies'] as const,
 
-  /** Kanban board: deals and stages (+ line items so totals stay live) */
-  kanban: ['deals', 'deal_items', 'board_stages'] as const,
+  /** Kanban board: deals, items, stages, notes, activities — everything that
+   *  can change the card content/counters stays live across tabs. */
+  kanban: ['deals', 'deal_items', 'deal_notes', 'activities', 'board_stages'] as const,
 
   /** Activities/Inbox: activities with deals */
   activities: ['activities', 'deals'] as const,
@@ -28,7 +29,7 @@ const REALTIME_PRESETS = {
   boards: ['boards', 'board_stages'] as const,
 
   /** Full CRM sync (for main layout) */
-  all: ['deals', 'deal_items', 'contacts', 'activities', 'boards', 'crm_companies'] as const,
+  all: ['deals', 'deal_items', 'deal_notes', 'contacts', 'activities', 'boards', 'crm_companies'] as const,
 } as const;
 
 export type RealtimePreset = keyof typeof REALTIME_PRESETS;

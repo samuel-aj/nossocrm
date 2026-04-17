@@ -71,6 +71,7 @@ function shouldProcessInsert(key: string): boolean {
 type RealtimeTable =
   | 'deals'
   | 'deal_items'
+  | 'deal_notes'
   | 'contacts'
   | 'activities'
   | 'boards'
@@ -84,6 +85,10 @@ const getTableQueryKeys = (table: RealtimeTable): readonly (readonly unknown[])[
     // deal_items events are handled with direct cache writes; this mapping
     // is only used as a safety net if the dedicated handler ever falls through.
     deal_items: [queryKeys.deals.all, queryKeys.dashboard.stats],
+    // deal_notes surface inside the deal detail cache; invalidate the deal
+    // detail query (via prefix match on deals.all) so the modal refetches
+    // when a note is added/edited/deleted in another tab.
+    deal_notes: [queryKeys.deals.all],
     contacts: [queryKeys.contacts.all],
     activities: [queryKeys.activities.all],
     boards: [queryKeys.boards.all],
@@ -696,7 +701,7 @@ export function useRealtimeSync(
  * Ideal for the main app layout
  */
 export function useRealtimeSyncAll(options: UseRealtimeSyncOptions = {}) {
-  return useRealtimeSync(['deals', 'deal_items', 'contacts', 'activities', 'boards', 'crm_companies'], options);
+  return useRealtimeSync(['deals', 'deal_items', 'deal_notes', 'contacts', 'activities', 'boards', 'crm_companies'], options);
 }
 
 /**
@@ -704,5 +709,5 @@ export function useRealtimeSyncAll(options: UseRealtimeSyncOptions = {}) {
  * Optimized for the boards page
  */
 export function useRealtimeSyncKanban(options: UseRealtimeSyncOptions = {}) {
-  return useRealtimeSync(['deals', 'deal_items', 'board_stages'], options);
+  return useRealtimeSync(['deals', 'deal_items', 'deal_notes', 'activities', 'board_stages'], options);
 }
