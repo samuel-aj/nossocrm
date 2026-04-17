@@ -13,7 +13,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { queryKeys, DEALS_VIEW_KEY } from '@/lib/query/queryKeys';
-import type { Activity, DealView } from '@/types';
+import type { Activity, Deal, DealItem, DealView } from '@/types';
 
 // Translate a Realtime `activities` payload row (snake_case, no joins) into
 // a partial Activity with only the fields Realtime actually carries. Joined
@@ -70,6 +70,7 @@ function shouldProcessInsert(key: string): boolean {
 // Tables that support realtime sync
 type RealtimeTable =
   | 'deals'
+  | 'deal_items'
   | 'contacts'
   | 'activities'
   | 'boards'
@@ -80,6 +81,9 @@ type RealtimeTable =
 const getTableQueryKeys = (table: RealtimeTable): readonly (readonly unknown[])[] => {
   const mapping: Record<RealtimeTable, readonly (readonly unknown[])[]> = {
     deals: [queryKeys.deals.all, queryKeys.dashboard.stats],
+    // deal_items events are handled with direct cache writes; this mapping
+    // is only used as a safety net if the dedicated handler ever falls through.
+    deal_items: [queryKeys.deals.all, queryKeys.dashboard.stats],
     contacts: [queryKeys.contacts.all],
     activities: [queryKeys.activities.all],
     boards: [queryKeys.boards.all],
@@ -232,6 +236,143 @@ export function useRealtimeSync(
                 // because the patch intentionally doesn't include them.
                 return old.map((a, i) => (i === idx ? { ...a, ...patch } : a));
               });
+              return;
+            }
+
+            return;
+          }
+
+          // =================================================================
+          // DEAL_ITEMS: direct cache writes for INSERT / UPDATE / DELETE.
+          //
+          // Items live inside the parent deal's `items[]` on three caches:
+          // deals.lists() (Deal[]), DEALS_VIEW_KEY (DealView[]) and
+          // deals.detail(dealId) (Deal). We patch all three and recalculate
+          // `deal.value` locally — the server also recalculates via
+          // dealsService.recalculateDealValue, and the deals UPDATE echo
+          // will reconcile below if they diverge.
+          //
+          // DELETE events require REPLICA IDENTITY FULL on deal_items so
+          // payload.old carries deal_id (not just the primary key).
+          // =================================================================
+          if (table === 'deal_items') {
+            const recalcValue = (items: DealItem[]): number =>
+              items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+
+            if (payload.eventType === 'DELETE') {
+              const oldRow = payload.old as Record<string, unknown> | undefined;
+              const itemId = oldRow?.id as string | undefined;
+              if (!itemId) {
+                if (DEBUG_REALTIME) {
+                  console.warn('[Realtime] deal_items DELETE without item id', payload);
+                }
+                return;
+              }
+              // With REPLICA IDENTITY FULL, oldRow carries deal_id. Without it
+              // (default identity), payload.old only has the PK — we fall back
+              // to scanning the cache for whichever deal contains this item.
+              const explicitDealId = oldRow?.deal_id as string | undefined;
+
+              const applyRemove = <T extends Deal>(d: T): T => {
+                if (explicitDealId) {
+                  if (d.id !== explicitDealId) return d;
+                } else {
+                  if (!(d.items || []).some((i) => i.id === itemId)) return d;
+                }
+                const nextItems = (d.items || []).filter((i) => i.id !== itemId);
+                return { ...d, items: nextItems, value: recalcValue(nextItems) } as T;
+              };
+              queryClient.setQueryData<Deal[]>(queryKeys.deals.lists(), (old) =>
+                old?.map(applyRemove)
+              );
+              queryClient.setQueryData<DealView[]>(DEALS_VIEW_KEY, (old) =>
+                old?.map(applyRemove)
+              );
+              if (explicitDealId) {
+                queryClient.setQueryData<Deal>(queryKeys.deals.detail(explicitDealId), (old) =>
+                  old ? applyRemove(old) : old
+                );
+              }
+              if (DEBUG_REALTIME) {
+                console.log(
+                  `[Realtime] deal_items DELETE applied (item=${itemId}, dealId=${explicitDealId ?? '<scanned>'})`
+                );
+              }
+              return;
+            }
+
+            const newRow = payload.new as Record<string, unknown> | undefined;
+            const itemId = newRow?.id as string | undefined;
+            const dealId = newRow?.deal_id as string | undefined;
+            if (!itemId || !dealId) {
+              if (DEBUG_REALTIME) {
+                console.warn('[Realtime] deal_items event missing itemId/dealId', payload);
+              }
+              return;
+            }
+
+            const realItem: DealItem = {
+              id: itemId,
+              productId: (newRow?.product_id as string) || '',
+              name: (newRow?.name as string) || '',
+              quantity: Number(newRow?.quantity) || 0,
+              price: Number(newRow?.price) || 0,
+            };
+
+            if (payload.eventType === 'INSERT') {
+              // Dedup across multiple hook instances mounted in parallel.
+              const dedupeKey = `deal_items-${itemId}`;
+              if (!shouldProcessInsert(dedupeKey)) return;
+
+              const applyInsert = <T extends Deal>(d: T): T => {
+                if (d.id !== dealId) return d;
+                const items = d.items || [];
+                // Already present (our own optimistic mutation swapped temp → real).
+                if (items.some((i) => i.id === itemId)) return d;
+                // Drop any temp item matching business keys (race: Realtime
+                // arrived before the local POST response swapped the id).
+                const withoutMatchingTemp = items.filter((i) => {
+                  if (!i.id.startsWith('temp-item-')) return true;
+                  const same =
+                    i.productId === realItem.productId &&
+                    i.name === realItem.name &&
+                    i.quantity === realItem.quantity &&
+                    i.price === realItem.price;
+                  return !same;
+                });
+                const nextItems = [...withoutMatchingTemp, realItem];
+                return { ...d, items: nextItems, value: recalcValue(nextItems) } as T;
+              };
+              queryClient.setQueryData<Deal[]>(queryKeys.deals.lists(), (old) =>
+                old?.map(applyInsert)
+              );
+              queryClient.setQueryData<DealView[]>(DEALS_VIEW_KEY, (old) =>
+                old?.map(applyInsert)
+              );
+              queryClient.setQueryData<Deal>(queryKeys.deals.detail(dealId), (old) =>
+                old ? applyInsert(old) : old
+              );
+              return;
+            }
+
+            if (payload.eventType === 'UPDATE') {
+              const applyUpdate = <T extends Deal>(d: T): T => {
+                if (d.id !== dealId) return d;
+                const items = d.items || [];
+                const idx = items.findIndex((i) => i.id === itemId);
+                if (idx === -1) return d;
+                const nextItems = items.map((i, k) => (k === idx ? { ...i, ...realItem } : i));
+                return { ...d, items: nextItems, value: recalcValue(nextItems) } as T;
+              };
+              queryClient.setQueryData<Deal[]>(queryKeys.deals.lists(), (old) =>
+                old?.map(applyUpdate)
+              );
+              queryClient.setQueryData<DealView[]>(DEALS_VIEW_KEY, (old) =>
+                old?.map(applyUpdate)
+              );
+              queryClient.setQueryData<Deal>(queryKeys.deals.detail(dealId), (old) =>
+                old ? applyUpdate(old) : old
+              );
               return;
             }
 
@@ -555,7 +696,7 @@ export function useRealtimeSync(
  * Ideal for the main app layout
  */
 export function useRealtimeSyncAll(options: UseRealtimeSyncOptions = {}) {
-  return useRealtimeSync(['deals', 'contacts', 'activities', 'boards', 'crm_companies'], options);
+  return useRealtimeSync(['deals', 'deal_items', 'contacts', 'activities', 'boards', 'crm_companies'], options);
 }
 
 /**
@@ -563,5 +704,5 @@ export function useRealtimeSyncAll(options: UseRealtimeSyncOptions = {}) {
  * Optimized for the boards page
  */
 export function useRealtimeSyncKanban(options: UseRealtimeSyncOptions = {}) {
-  return useRealtimeSync(['deals', 'board_stages'], options);
+  return useRealtimeSync(['deals', 'deal_items', 'board_stages'], options);
 }

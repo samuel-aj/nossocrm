@@ -1614,7 +1614,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                               Total do Pedido
                             </td>
                             <td className="px-4 py-3 text-right font-bold text-primary-600 dark:text-primary-400 text-lg">
-                              ${deal.value.toLocaleString()}
+                              ${(deal.items || []).reduce((sum, i) => sum + i.price * i.quantity, 0).toLocaleString()}
                             </td>
                             <td></td>
                           </tr>

@@ -153,15 +153,58 @@ export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // ============================================
   const addItemToDeal = useCallback(
     async (dealId: string, item: Omit<DealItem, 'id'>): Promise<DealItem | null> => {
+      // Optimistic insert: UI atualiza instantaneamente.
+      // Cache é a verdade; Realtime sincroniza entre abas (sem invalidateQueries).
+      const tempId = `temp-item-${Date.now()}`;
+      const optimisticItem: DealItem = { ...item, id: tempId };
+
+      const previousLists = queryClient.getQueryData<Deal[]>(queryKeys.deals.lists());
+      const previousView = queryClient.getQueryData<DealView[]>(DEALS_VIEW_KEY);
+      const previousDetail = queryClient.getQueryData<Deal>(queryKeys.deals.detail(dealId));
+
+      const withItem = <T extends Deal>(d: T): T => {
+        const nextItems = [...(d.items || []), optimisticItem];
+        const nextValue = nextItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
+        return { ...d, items: nextItems, value: nextValue } as T;
+      };
+
+      queryClient.setQueryData<Deal[]>(queryKeys.deals.lists(), (old) =>
+        old?.map((d) => (d.id === dealId ? withItem(d) : d))
+      );
+      queryClient.setQueryData<DealView[]>(DEALS_VIEW_KEY, (old) =>
+        old?.map((d) => (d.id === dealId ? withItem(d) : d))
+      );
+      queryClient.setQueryData<Deal>(queryKeys.deals.detail(dealId), (old) =>
+        old ? withItem(old) : old
+      );
+
       const { data, error: addError } = await dealsService.addItem(dealId, item);
 
-      if (addError) {
-        console.error('Erro ao adicionar item:', addError.message);
+      if (addError || !data) {
+        console.error('Erro ao adicionar item:', addError?.message);
+        // Rollback
+        queryClient.setQueryData(queryKeys.deals.lists(), previousLists);
+        queryClient.setQueryData(DEALS_VIEW_KEY, previousView);
+        queryClient.setQueryData(queryKeys.deals.detail(dealId), previousDetail);
         return null;
       }
 
-      // Invalida cache para TanStack Query atualizar
-      await queryClient.invalidateQueries({ queryKey: queryKeys.deals.all });
+      // Troca o item temp pelo real (id do servidor).
+      const swapTemp = <T extends Deal>(d: T): T => {
+        const nextItems = (d.items || []).map((i) => (i.id === tempId ? data : i));
+        const nextValue = nextItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
+        return { ...d, items: nextItems, value: nextValue } as T;
+      };
+
+      queryClient.setQueryData<Deal[]>(queryKeys.deals.lists(), (old) =>
+        old?.map((d) => (d.id === dealId ? swapTemp(d) : d))
+      );
+      queryClient.setQueryData<DealView[]>(DEALS_VIEW_KEY, (old) =>
+        old?.map((d) => (d.id === dealId ? swapTemp(d) : d))
+      );
+      queryClient.setQueryData<Deal>(queryKeys.deals.detail(dealId), (old) =>
+        old ? swapTemp(old) : old
+      );
 
       return data;
     },
@@ -169,15 +212,34 @@ export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   );
 
   const removeItemFromDeal = useCallback(async (dealId: string, itemId: string) => {
+    // Optimistic remove: UI atualiza instantaneamente.
+    const previousLists = queryClient.getQueryData<Deal[]>(queryKeys.deals.lists());
+    const previousView = queryClient.getQueryData<DealView[]>(DEALS_VIEW_KEY);
+    const previousDetail = queryClient.getQueryData<Deal>(queryKeys.deals.detail(dealId));
+
+    const withoutItem = <T extends Deal>(d: T): T => {
+      if (d.id !== dealId) return d;
+      const nextItems = (d.items || []).filter((i) => i.id !== itemId);
+      const nextValue = nextItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
+      return { ...d, items: nextItems, value: nextValue } as T;
+    };
+
+    queryClient.setQueryData<Deal[]>(queryKeys.deals.lists(), (old) => old?.map(withoutItem));
+    queryClient.setQueryData<DealView[]>(DEALS_VIEW_KEY, (old) => old?.map(withoutItem));
+    queryClient.setQueryData<Deal>(queryKeys.deals.detail(dealId), (old) =>
+      old ? withoutItem(old) : old
+    );
+
     const { error: removeError } = await dealsService.removeItem(dealId, itemId);
 
     if (removeError) {
       console.error('Erro ao remover item:', removeError.message);
-      return;
+      // Rollback
+      queryClient.setQueryData(queryKeys.deals.lists(), previousLists);
+      queryClient.setQueryData(DEALS_VIEW_KEY, previousView);
+      queryClient.setQueryData(queryKeys.deals.detail(dealId), previousDetail);
     }
-
-    // Invalida cache para TanStack Query atualizar
-    await queryClient.invalidateQueries({ queryKey: queryKeys.deals.all });
+    // Sucesso: Realtime DELETE echo é no-op (item já removido do cache).
   }, [queryClient]);
 
   const value = useMemo(

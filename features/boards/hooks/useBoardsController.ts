@@ -309,18 +309,38 @@ export const useBoardsController = () => {
     stageId: string;
   } | null>(null);
 
-  // Open deal from URL param (e.g., /boards?deal=xxx)
+  // Bidirectional URL <-> state sync for the open-deal modal.
+  // Reloading the page inside a lead should land the user back on the same
+  // card. We DON'T clear ?deal=xxx on mount (so reload preserves it), and we
+  // push ?deal=xxx to the URL whenever the user opens/closes a card.
+  const dealUrlInitDoneRef = useRef(false);
+
+  // Mount: adopt ?deal= from URL into state (once).
   useEffect(() => {
+    if (dealUrlInitDoneRef.current) return;
     if (!searchParams) return;
+    dealUrlInitDoneRef.current = true;
     const dealIdFromUrl = searchParams.get('deal');
-    if (dealIdFromUrl && !selectedDealId) {
+    if (dealIdFromUrl) {
       setSelectedDealId(dealIdFromUrl);
-      // Clear the param from URL using router
-      const params = new URLSearchParams(searchParams.toString());
-      params.delete('deal');
-      router.replace(`?${params.toString()}`, { scroll: false });
     }
-  }, [searchParams, selectedDealId, router]);
+  }, [searchParams]);
+
+  // Post-init: mirror selectedDealId into the URL so reload preserves it.
+  useEffect(() => {
+    if (!dealUrlInitDoneRef.current) return;
+    if (!router || !searchParams) return;
+    const urlValue = searchParams.get('deal') ?? null;
+    if ((selectedDealId ?? null) === urlValue) return;
+    const params = new URLSearchParams(searchParams.toString());
+    if (selectedDealId) {
+      params.set('deal', selectedDealId);
+    } else {
+      params.delete('deal');
+    }
+    const qs = params.toString();
+    router.replace(qs ? `?${qs}` : '?', { scroll: false });
+  }, [selectedDealId, router, searchParams]);
 
   // Fallback for drag issues
   const lastMouseDownDealId = React.useRef<string | null>(null);
