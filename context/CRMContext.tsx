@@ -148,12 +148,12 @@ interface CRMContextType {
   updateContactStage: (id: string, stage: string) => Promise<void>;
   convertContactToDeal: (contactId: string) => Promise<void>;
 
-  // Custom Fields & Tags
-  addCustomField: (field: Omit<CustomFieldDefinition, 'id'>) => void;
-  updateCustomField: (id: string, updates: Partial<CustomFieldDefinition>) => void;
-  removeCustomField: (id: string) => void;
-  addTag: (tag: string) => void;
-  removeTag: (tag: string) => void;
+  // Custom Fields & Tags (persisted in Supabase)
+  addCustomField: (field: Omit<CustomFieldDefinition, 'id'>) => Promise<CustomFieldDefinition | null>;
+  updateCustomField: (id: string, updates: Partial<CustomFieldDefinition>) => Promise<void>;
+  removeCustomField: (id: string) => Promise<void>;
+  addTag: (tag: string) => Promise<void>;
+  removeTag: (tag: string) => Promise<void>;
 
   // Utilities
   /** Verifica saúde da carteira */
@@ -404,15 +404,15 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     );
   }, [rawDeals, updateDealState]);
 
-  const addCustomField = useCallback((field: Omit<CustomFieldDefinition, 'id'>) => {
-    addCustomFieldState(field);
+  const addCustomField = useCallback(async (field: Omit<CustomFieldDefinition, 'id'>) => {
     // If a field key is re-used, ensure stale values don't auto-populate the new field.
     void clearCustomFieldDataByKey(field.key);
+    return addCustomFieldState(field);
   }, [addCustomFieldState, clearCustomFieldDataByKey]);
 
-  const removeCustomField = useCallback((id: string) => {
+  const removeCustomField = useCallback(async (id: string) => {
     const fieldKey = customFieldDefinitions.find((field) => field.id === id)?.key;
-    removeCustomFieldState(id);
+    await removeCustomFieldState(id);
     if (fieldKey) {
       // Remove persisted values from all deals when definition is deleted.
       void clearCustomFieldDataByKey(fieldKey);

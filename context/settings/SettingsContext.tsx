@@ -23,6 +23,10 @@ const DEFAULT_LIFECYCLE_STAGES: LifecycleStage[] = [
 
 const CUSTOM_FIELDS_STORAGE_KEY = 'crm_custom_fields';
 const TAGS_STORAGE_KEY = 'crm_tags';
+// Legacy localStorage keys retained above so we can migrate pre-existing
+// definitions to Supabase on first load after the backend-backed rollout.
+const CUSTOM_FIELDS_MIGRATED_KEY = 'crm_custom_fields_migrated_v1';
+const TAGS_MIGRATED_KEY = 'crm_tags_migrated_v1';
 
 interface AIConfig {
   provider: 'google' | 'openai' | 'anthropic';
@@ -50,16 +54,16 @@ interface SettingsContextType {
   /** Recarrega o catálogo de produtos (usado para manter o dropdown do deal atualizado). */
   refreshProducts: () => Promise<void>;
 
-  // Custom Fields (TODO: migrate to Supabase)
+  // Custom Fields (persisted in Supabase)
   customFieldDefinitions: CustomFieldDefinition[];
-  addCustomField: (field: Omit<CustomFieldDefinition, 'id'>) => void;
-  updateCustomField: (id: string, updates: Partial<CustomFieldDefinition>) => void;
-  removeCustomField: (id: string) => void;
+  addCustomField: (field: Omit<CustomFieldDefinition, 'id'>) => Promise<CustomFieldDefinition | null>;
+  updateCustomField: (id: string, updates: Partial<CustomFieldDefinition>) => Promise<void>;
+  removeCustomField: (id: string) => Promise<void>;
 
-  // Tags (TODO: migrate to Supabase)
+  // Tags (persisted in Supabase)
   availableTags: string[];
-  addTag: (tag: string) => void;
-  removeTag: (tag: string) => void;
+  addTag: (tag: string) => Promise<void>;
+  removeTag: (tag: string) => Promise<void>;
 
   // AI Config
   aiProvider: AIConfig['provider'];
@@ -119,9 +123,10 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [lifecycleStages, setLifecycleStages] = useState<LifecycleStage[]>(DEFAULT_LIFECYCLE_STAGES);
   const [products, setProducts] = useState<Product[]>([]);
   const [customFieldDefinitions, setCustomFieldDefinitions] = useState<CustomFieldDefinition[]>([]);
+  // Internal row map for tags (id ↔ name) so external API can stay `string[]`.
+  const [tagsById, setTagsById] = useState<Map<string, string>>(new Map());
   const [availableTags, setAvailableTags] = useState<string[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [localSettingsHydrated, setLocalSettingsHydrated] = useState(false);
 
   const refreshProducts = useCallback(async () => {
     try {
@@ -272,42 +277,125 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
     fetchSettings();
   }, [fetchSettings]);
 
-  // Hydrate temporary local settings (custom fields/tags) until migration to Supabase.
+  // Fetch custom fields + tags from Supabase on mount. On first load after the
+  // rollout, migrate any pre-existing localStorage definitions to the backend
+  // so users don't lose their schema.
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (!profile) return;
+    let cancelled = false;
 
-    try {
-      const rawFields = window.localStorage.getItem(CUSTOM_FIELDS_STORAGE_KEY);
-      if (rawFields) {
-        const parsed = JSON.parse(rawFields) as CustomFieldDefinition[];
-        if (Array.isArray(parsed)) setCustomFieldDefinitions(parsed);
+    type FieldRow = CustomFieldDefinition & { entity_type?: string; created_at?: string | null };
+    type TagRow = { id: string; name: string };
+
+    const migrateCustomFieldsFromLocalStorage = async (): Promise<boolean> => {
+      if (typeof window === 'undefined') return false;
+      if (window.localStorage.getItem(CUSTOM_FIELDS_MIGRATED_KEY) === '1') return false;
+      try {
+        const raw = window.localStorage.getItem(CUSTOM_FIELDS_STORAGE_KEY);
+        if (!raw) {
+          window.localStorage.setItem(CUSTOM_FIELDS_MIGRATED_KEY, '1');
+          return false;
+        }
+        const parsed = JSON.parse(raw) as CustomFieldDefinition[];
+        const items = (Array.isArray(parsed) ? parsed : [])
+          .filter(f => f && typeof f.key === 'string' && f.key.trim() && typeof f.label === 'string' && f.label.trim())
+          .map(f => ({
+            key: f.key,
+            label: f.label,
+            type: f.type,
+            options: Array.isArray(f.options) ? f.options : undefined,
+          }));
+        if (items.length === 0) {
+          window.localStorage.setItem(CUSTOM_FIELDS_MIGRATED_KEY, '1');
+          return false;
+        }
+        const res = await fetch('/api/custom-fields', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ items }),
+        });
+        if (res.ok) {
+          window.localStorage.setItem(CUSTOM_FIELDS_MIGRATED_KEY, '1');
+          return true;
+        }
+      } catch {
+        // best-effort migration — leave legacy key so a future boot can retry
       }
-    } catch {
-      // ignore malformed local storage payload
-    }
+      return false;
+    };
 
-    try {
-      const rawTags = window.localStorage.getItem(TAGS_STORAGE_KEY);
-      if (rawTags) {
-        const parsed = JSON.parse(rawTags) as string[];
-        if (Array.isArray(parsed)) setAvailableTags(parsed);
+    const migrateTagsFromLocalStorage = async (): Promise<boolean> => {
+      if (typeof window === 'undefined') return false;
+      if (window.localStorage.getItem(TAGS_MIGRATED_KEY) === '1') return false;
+      try {
+        const raw = window.localStorage.getItem(TAGS_STORAGE_KEY);
+        if (!raw) {
+          window.localStorage.setItem(TAGS_MIGRATED_KEY, '1');
+          return false;
+        }
+        const parsed = JSON.parse(raw) as string[];
+        const items = (Array.isArray(parsed) ? parsed : [])
+          .filter(t => typeof t === 'string' && t.trim())
+          .map(name => ({ name: name.trim() }));
+        if (items.length === 0) {
+          window.localStorage.setItem(TAGS_MIGRATED_KEY, '1');
+          return false;
+        }
+        const res = await fetch('/api/tags', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ items }),
+        });
+        if (res.ok) {
+          window.localStorage.setItem(TAGS_MIGRATED_KEY, '1');
+          return true;
+        }
+      } catch {
+        // best-effort
       }
-    } catch {
-      // ignore malformed local storage payload
-    }
+      return false;
+    };
 
-    setLocalSettingsHydrated(true);
-  }, []);
+    const loadCustomFields = async () => {
+      const res = await fetch('/api/custom-fields', { credentials: 'include' });
+      if (!res.ok) return;
+      const body = await res.json().catch(() => null);
+      if (cancelled || !body?.data) return;
+      setCustomFieldDefinitions((body.data as FieldRow[]).map(r => ({
+        id: r.id,
+        key: r.key,
+        label: r.label,
+        type: r.type,
+        options: Array.isArray(r.options) ? r.options : undefined,
+      })));
+    };
 
-  useEffect(() => {
-    if (typeof window === 'undefined' || !localSettingsHydrated) return;
-    window.localStorage.setItem(CUSTOM_FIELDS_STORAGE_KEY, JSON.stringify(customFieldDefinitions));
-  }, [customFieldDefinitions, localSettingsHydrated]);
+    const loadTags = async () => {
+      const res = await fetch('/api/tags', { credentials: 'include' });
+      if (!res.ok) return;
+      const body = await res.json().catch(() => null);
+      if (cancelled || !body?.data) return;
+      const rows = body.data as TagRow[];
+      setAvailableTags(rows.map(r => r.name));
+      setTagsById(new Map(rows.map(r => [r.id, r.name])));
+    };
 
-  useEffect(() => {
-    if (typeof window === 'undefined' || !localSettingsHydrated) return;
-    window.localStorage.setItem(TAGS_STORAGE_KEY, JSON.stringify(availableTags));
-  }, [availableTags, localSettingsHydrated]);
+    (async () => {
+      const [migratedFields, migratedTags] = await Promise.all([
+        migrateCustomFieldsFromLocalStorage(),
+        migrateTagsFromLocalStorage(),
+      ]);
+      await Promise.all([loadCustomFields(), loadTags()]);
+      // If we migrated, the initial GET above already reflects the new rows
+      // because the POST happens before the GET in the Promise.all ordering.
+      void migratedFields;
+      void migratedTags;
+    })();
+
+    return () => { cancelled = true; };
+  }, [profile]);
 
   // Lazy-load AI feature flags only when needed (settings/ai or global AI UI).
   useEffect(() => {
@@ -536,30 +624,165 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
     [updateSettings]
   );
 
-  // Custom Fields (local state for now)
-  const addCustomField = useCallback((field: Omit<CustomFieldDefinition, 'id'>) => {
-    const newField = { ...field, id: crypto.randomUUID() };
-    setCustomFieldDefinitions(prev => [...prev, newField]);
-  }, []);
+  // Custom Fields (persisted in Supabase via /api/custom-fields)
+  const addCustomField = useCallback(
+    async (field: Omit<CustomFieldDefinition, 'id'>): Promise<CustomFieldDefinition | null> => {
+      const res = await fetch('/api/custom-fields', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          key: field.key,
+          label: field.label,
+          type: field.type,
+          options: field.options,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setError(body?.error || `Falha ao criar campo (HTTP ${res.status})`);
+        return null;
+      }
+      const body = await res.json().catch(() => null);
+      const created = body?.data as CustomFieldDefinition | undefined;
+      if (created) {
+        setCustomFieldDefinitions(prev => [...prev, {
+          id: created.id,
+          key: created.key,
+          label: created.label,
+          type: created.type,
+          options: Array.isArray(created.options) ? created.options : undefined,
+        }]);
+        return created;
+      }
+      return null;
+    },
+    []
+  );
 
-  const updateCustomField = useCallback((id: string, updates: Partial<CustomFieldDefinition>) => {
-    setCustomFieldDefinitions(prev => prev.map(f => (f.id === id ? { ...f, ...updates } : f)));
-  }, []);
+  const updateCustomField = useCallback(
+    async (id: string, updates: Partial<CustomFieldDefinition>) => {
+      const payload: Record<string, unknown> = {};
+      if (updates.label !== undefined) payload.label = updates.label;
+      if (updates.type !== undefined) payload.type = updates.type;
+      if (updates.options !== undefined) payload.options = updates.options;
 
-  const removeCustomField = useCallback((id: string) => {
+      const res = await fetch(`/api/custom-fields/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setError(body?.error || `Falha ao atualizar campo (HTTP ${res.status})`);
+        return;
+      }
+      const body = await res.json().catch(() => null);
+      const updated = body?.data as CustomFieldDefinition | undefined;
+      if (updated) {
+        setCustomFieldDefinitions(prev => prev.map(f => (f.id === id ? {
+          id: updated.id,
+          key: updated.key,
+          label: updated.label,
+          type: updated.type,
+          options: Array.isArray(updated.options) ? updated.options : undefined,
+        } : f)));
+      }
+    },
+    []
+  );
+
+  const removeCustomField = useCallback(async (id: string) => {
+    const res = await fetch(`/api/custom-fields/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setError(body?.error || `Falha ao remover campo (HTTP ${res.status})`);
+      return;
+    }
     setCustomFieldDefinitions(prev => prev.filter(f => f.id !== id));
   }, []);
 
-  // Tags (local state for now)
-  const addTag = useCallback((tag: string) => {
-    if (!availableTags.includes(tag)) {
-      setAvailableTags(prev => [...prev, tag]);
+  // Tags (persisted in Supabase via /api/tags)
+  const addTag = useCallback(async (tag: string) => {
+    const name = tag.trim();
+    if (!name || availableTags.includes(name)) return;
+    const res = await fetch('/api/tags', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ name }),
+    });
+    if (res.status === 409) {
+      // already exists server-side; make sure local state has it
+      if (!availableTags.includes(name)) setAvailableTags(prev => [...prev, name]);
+      return;
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setError(body?.error || `Falha ao adicionar tag (HTTP ${res.status})`);
+      return;
+    }
+    const body = await res.json().catch(() => null);
+    const created = body?.data as { id: string; name: string } | undefined;
+    if (created) {
+      setAvailableTags(prev => (prev.includes(created.name) ? prev : [...prev, created.name]));
+      setTagsById(prev => {
+        const next = new Map(prev);
+        next.set(created.id, created.name);
+        return next;
+      });
     }
   }, [availableTags]);
 
-  const removeTag = useCallback((tag: string) => {
-    setAvailableTags(prev => prev.filter(t => t !== tag));
-  }, []);
+  const removeTag = useCallback(async (tag: string) => {
+    const name = tag.trim();
+    // Lookup the UUID from the cached name map, then DELETE.
+    let id: string | null = null;
+    for (const [rowId, rowName] of tagsById.entries()) {
+      if (rowName === name) {
+        id = rowId;
+        break;
+      }
+    }
+    if (!id) {
+      // Not tracked yet (e.g., added by another tab) — fall back to a fresh GET
+      try {
+        const res = await fetch('/api/tags', { credentials: 'include' });
+        if (res.ok) {
+          const body = await res.json().catch(() => null);
+          const rows = (body?.data || []) as { id: string; name: string }[];
+          const hit = rows.find(r => r.name === name);
+          if (hit) id = hit.id;
+        }
+      } catch {
+        // ignore — best effort
+      }
+    }
+    if (!id) {
+      // If we still can't find it, just drop from local state.
+      setAvailableTags(prev => prev.filter(t => t !== name));
+      return;
+    }
+    const res = await fetch(`/api/tags/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setError(body?.error || `Falha ao remover tag (HTTP ${res.status})`);
+      return;
+    }
+    setAvailableTags(prev => prev.filter(t => t !== name));
+    setTagsById(prev => {
+      const next = new Map(prev);
+      next.delete(id!);
+      return next;
+    });
+  }, [tagsById]);
 
   // Legacy Leads
   const addLead = useCallback((lead: Lead) => {
