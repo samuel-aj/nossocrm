@@ -728,16 +728,23 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                     </button>
                   </div>
                 ) : (
-                  <p
-                    onClick={() => {
-                      setEditValue(deal.value.toString());
-                      setIsEditingValue(true);
-                    }}
-                    className="text-lg text-primary-600 dark:text-primary-400 font-mono font-bold cursor-pointer hover:underline decoration-dashed underline-offset-4"
-                    title="Clique para editar valor"
-                  >
-                    ${deal.value.toLocaleString()}
-                  </p>
+                  <div className="flex flex-col">
+                    {deal.items && deal.items.length > 0 && (
+                      <span className="text-xs text-slate-500 dark:text-slate-400 mb-0.5">
+                        {deal.items.map(i => i.name).join(', ')}
+                      </span>
+                    )}
+                    <p
+                      onClick={() => {
+                        setEditValue(deal.value.toString());
+                        setIsEditingValue(true);
+                      }}
+                      className="text-lg text-primary-600 dark:text-primary-400 font-mono font-bold cursor-pointer hover:underline decoration-dashed underline-offset-4"
+                      title="Clique para editar valor"
+                    >
+                      R$ {deal.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
                 )}
               </div>
               <div className="flex gap-3 items-center">

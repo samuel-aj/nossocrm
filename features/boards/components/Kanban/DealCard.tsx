@@ -323,9 +323,9 @@ const DealCardComponent: React.FC<DealCardProps> = ({
             )
           )}
           {deal.items && deal.items.length > 0 ? (
-            <span className="text-xs font-medium text-slate-600 dark:text-slate-300 flex items-center gap-1 truncate max-w-[140px]" title={deal.items[0].name}>
-              <Package size={12} aria-hidden="true" className="flex-shrink-0" />
-              {deal.items[0].name}
+            <span className="text-xs font-medium text-slate-600 dark:text-slate-300 flex items-center gap-1 min-w-0" title={`${deal.items[0].name} — R$ ${deal.items[0].price.toLocaleString('pt-BR')}`}>
+              <Package size={11} aria-hidden="true" className="flex-shrink-0 text-primary-500" />
+              <span className="truncate">{deal.items[0].name}</span>
             </span>
           ) : (
             <span className="text-sm font-bold text-slate-700 dark:text-slate-200 font-mono">
