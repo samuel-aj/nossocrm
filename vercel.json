@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/webhook-retry",
-      "schedule": "* * * * *"
+      "schedule": "0 8 * * *"
     }
   ]
 }
