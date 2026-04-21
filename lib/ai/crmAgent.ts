@@ -5,6 +5,7 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { CRMCallOptionsSchema, type CRMCallOptions } from '@/types/ai';
 import { createCRMTools } from './tools';
 import { formatPriorityPtBr } from '@/lib/utils/priority';
+import { AIProvider as AIProviderConst } from '@/types/constants';
 
 type AIProvider = 'google' | 'openai' | 'anthropic';
 
@@ -451,7 +452,7 @@ export async function createCRMAgent(
     userId: string,
     apiKey: string,
     modelId: string = 'gemini-2.0-flash-exp',
-    provider: AIProvider = 'google'
+    provider: AIProvider = AIProviderConst.GOOGLE
 ) {
     console.log('[CRMAgent] 🤖 Creating agent with context:', {
         boardId: context.boardId,
@@ -466,11 +467,11 @@ export async function createCRMAgent(
     // NOTE: Model IDs are stored in organization_settings and passed through.
     const model = (() => {
         switch (provider) {
-            case 'google': {
+            case AIProviderConst.GOOGLE: {
                 const google = createGoogleGenerativeAI({ apiKey });
                 return google(modelId);
             }
-            case 'openai': {
+            case AIProviderConst.OPENAI: {
                 const openai = createOpenAI({
                     apiKey,
                     fetch: createRetryingFetch(fetch, {
@@ -490,7 +491,7 @@ export async function createCRMAgent(
                 });
                 return openai(modelId);
             }
-            case 'anthropic': {
+            case AIProviderConst.ANTHROPIC: {
                 const anthropic = createAnthropic({ apiKey });
                 return anthropic(modelId);
             }

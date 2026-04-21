@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/server';
 import type { CRMCallOptions } from '@/types/ai';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { isAIFeatureEnabled } from '@/lib/ai/features/server';
+import { AIProvider as AIProviderConst } from '@/types/constants';
 
 export const maxDuration = 60;
 
@@ -152,18 +153,18 @@ export async function POST(req: Request) {
         );
     }
 
-    const provider = (orgSettings?.ai_provider ?? 'google') as AIProvider;
+    const provider = (orgSettings?.ai_provider ?? AIProviderConst.GOOGLE) as AIProvider;
     const modelId: string | null = orgSettings?.ai_model ?? null;
 
     const apiKey: string | null =
-        provider === 'google'
+        provider === AIProviderConst.GOOGLE
             ? (orgSettings?.ai_google_key ?? null)
-            : provider === 'openai'
+            : provider === AIProviderConst.OPENAI
                 ? (orgSettings?.ai_openai_key ?? null)
                 : (orgSettings?.ai_anthropic_key ?? null);
 
     if (!apiKey) {
-        const providerLabel = provider === 'google' ? 'Google Gemini' : provider === 'openai' ? 'OpenAI' : 'Anthropic';
+        const providerLabel = provider === AIProviderConst.GOOGLE ? 'Google Gemini' : provider === AIProviderConst.OPENAI ? 'OpenAI' : 'Anthropic';
         return new Response(
             `API key não configurada para ${providerLabel}. Configure em Configurações → Inteligência Artificial.`,
             { status: 400 }
@@ -171,7 +172,7 @@ export async function POST(req: Request) {
     }
 
     const resolvedModelId =
-        modelId || (provider === 'google' ? 'gemini-2.5-flash' : provider === 'openai' ? 'gpt-4o' : 'claude-sonnet-4-5');
+        modelId || (provider === AIProviderConst.GOOGLE ? 'gemini-2.5-flash' : provider === AIProviderConst.OPENAI ? 'gpt-4o' : 'claude-sonnet-4-5');
 
     // 5. Build type-safe context for agent
     const context: CRMCallOptions = {

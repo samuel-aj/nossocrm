@@ -1,5 +1,7 @@
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+import { logSuperAdminAction } from '@/lib/security/auditLog';
+import { UserRole } from '@/types/constants';
 
 function json<T>(body: T, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -36,11 +38,11 @@ export async function POST(req: Request) {
   }
 
   // Already super_admin - return success
-  if (profile.role === 'super_admin') {
+  if (profile.role === UserRole.SUPER_ADMIN) {
     return json({ ok: true, message: 'Você já é super admin.' });
   }
 
-  if (profile.role !== 'admin') {
+  if (profile.role !== UserRole.ADMIN) {
     return json({ error: 'Apenas administradores podem executar o setup' }, 403);
   }
 
@@ -48,7 +50,7 @@ export async function POST(req: Request) {
   const { data: existingSuperAdmin } = await admin
     .from('profiles')
     .select('id')
-    .eq('role', 'super_admin')
+    .eq('role', UserRole.SUPER_ADMIN)
     .limit(1);
 
   if (existingSuperAdmin && existingSuperAdmin.length > 0) {
@@ -78,12 +80,21 @@ export async function POST(req: Request) {
   // Promote current user to super_admin
   const { error: promoteError } = await admin
     .from('profiles')
-    .update({ role: 'super_admin' })
+    .update({ role: UserRole.SUPER_ADMIN })
     .eq('id', user.id);
 
   if (promoteError) {
     return json({ error: `Erro ao promover: ${promoteError.message}` }, 500);
   }
+
+  await logSuperAdminAction(admin, {
+    action: 'superadmin.setup',
+    actor_id: user.id,
+    org_id: profile.organization_id,
+    resource_type: 'system',
+    details: { promoted_user: user.email },
+    severity: 'critical',
+  });
 
   return json({
     ok: true,

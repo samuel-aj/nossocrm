@@ -3,11 +3,12 @@ import { useCRM } from '@/context/CRMContext';
 import { Bot, Key, Cpu, CheckCircle, AlertCircle, Loader2, Save, Trash2, ChevronDown, ChevronUp, Shield } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 import { useAuth } from '@/context/AuthContext';
+import { UserRole, AIProvider as AIProviderConst } from '@/types/constants';
 
 // Performance: keep provider/model catalog outside the component to avoid reallocations on every render.
 const AI_PROVIDERS = [
     {
-        id: 'google',
+        id: AIProviderConst.GOOGLE,
         name: 'Google Gemini',
         models: [
             { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Recomendado - Best value', price: '$0.30 / $2.50' },
@@ -17,7 +18,7 @@ const AI_PROVIDERS = [
         ]
     },
     {
-        id: 'anthropic',
+        id: AIProviderConst.ANTHROPIC,
         name: 'Anthropic Claude',
         models: [
             { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', description: 'Recomendado - Best balance', price: '$3 / $15' },
@@ -26,7 +27,7 @@ const AI_PROVIDERS = [
         ]
     },
     {
-        id: 'openai',
+        id: AIProviderConst.OPENAI,
         name: 'OpenAI',
         models: [
             { id: 'gpt-5.2', name: 'GPT-5.2 (Preview)', description: 'Preview', price: '$1.75 / $14' },
@@ -46,7 +47,7 @@ async function validateApiKey(provider: string, apiKey: string, model: string): 
     }
 
     try {
-        if (provider === 'google') {
+        if (provider === AIProviderConst.GOOGLE) {
             // Gemini API validation - usa endpoint generateContent com texto mínimo
             const response = await fetch(
                 `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -77,7 +78,7 @@ async function validateApiKey(provider: string, apiKey: string, model: string): 
             }
             return { valid: false, error: error?.error?.message || 'Erro desconhecido' };
 
-        } else if (provider === 'openai') {
+        } else if (provider === AIProviderConst.OPENAI) {
             // OpenAI validation
             const response = await fetch('https://api.openai.com/v1/models', {
                 headers: { 'Authorization': `Bearer ${apiKey}` }
@@ -91,7 +92,7 @@ async function validateApiKey(provider: string, apiKey: string, model: string): 
             }
             return { valid: false, error: 'Erro ao validar chave' };
 
-        } else if (provider === 'anthropic') {
+        } else if (provider === AIProviderConst.ANTHROPIC) {
             // Anthropic validation - não tem endpoint de validação simples
             // Fazemos uma chamada mínima
             const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -133,7 +134,7 @@ async function validateApiKey(provider: string, apiKey: string, model: string): 
  */
 export const AIConfigSection: React.FC = () => {
     const { profile } = useAuth();
-    const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
+    const isAdmin = profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN;
 
     const {
         aiProvider, setAiProvider,
@@ -267,7 +268,7 @@ export const AIConfigSection: React.FC = () => {
     }, [modelSelectValue, aiModel, customModelDirty, isCatalogModel]);
 
     const handleProviderChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const newProviderId = e.target.value as 'google' | 'openai' | 'anthropic';
+        const newProviderId = e.target.value as typeof AIProviderConst.GOOGLE | typeof AIProviderConst.OPENAI | typeof AIProviderConst.ANTHROPIC;
         try {
             await setAiProvider(newProviderId);
 
@@ -450,7 +451,7 @@ export const AIConfigSection: React.FC = () => {
                 </div>
 
                 {/* Google Thinking Config */}
-                {aiProvider === 'google' && (
+                {aiProvider === AIProviderConst.GOOGLE && (
                     <div className="bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-500/20 rounded-lg p-3 animate-in fade-in slide-in-from-top-2">
                         <div className="flex items-center justify-between">
                             <div>
@@ -476,7 +477,7 @@ export const AIConfigSection: React.FC = () => {
                 )}
 
                 {/* Anthropic Prompt Caching Config */}
-                {aiProvider === 'anthropic' && (
+                {aiProvider === AIProviderConst.ANTHROPIC && (
                     <div className="bg-orange-50 dark:bg-orange-900/10 border border-orange-100 dark:border-orange-500/20 rounded-lg p-3 animate-in fade-in slide-in-from-top-2">
                         <div className="flex items-center justify-between">
                             <div>
@@ -502,12 +503,12 @@ export const AIConfigSection: React.FC = () => {
                 )}
 
                 {/* Search Config (Google & Anthropic) */}
-                {(aiProvider === 'google' || aiProvider === 'anthropic') && (
+                {(aiProvider === AIProviderConst.GOOGLE || aiProvider === AIProviderConst.ANTHROPIC) && (
                     <div className="bg-green-50 dark:bg-green-900/10 border border-green-100 dark:border-green-500/20 rounded-lg p-3 animate-in fade-in slide-in-from-top-2">
                         <div className="flex items-center justify-between">
                             <div>
                                 <h3 className="font-medium text-green-900 dark:text-green-100 flex items-center gap-2">
-                                    <span className="text-lg">🌍</span> {aiProvider === 'google' ? 'Google Search Grounding' : 'Web Search'}
+                                    <span className="text-lg">🌍</span> {aiProvider === AIProviderConst.GOOGLE ? 'Google Search Grounding' : 'Web Search'}
                                 </h3>
                                 <p className="text-sm text-green-700 dark:text-green-300 mt-1">
                                     Conecta o modelo à internet para buscar informações atualizadas.
@@ -538,7 +539,7 @@ export const AIConfigSection: React.FC = () => {
                                 type="password"
                                 value={localApiKey}
                                 onChange={(e) => handleKeyChange(e.target.value)}
-                                placeholder={`Cole sua chave ${aiProvider === 'google' ? 'AIza...' : 'sk-...'}`}
+                                placeholder={`Cole sua chave ${aiProvider === AIProviderConst.GOOGLE ? 'AIza...' : 'sk-...'}`}
                                 className={`w-full bg-slate-50 dark:bg-slate-800 border rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none transition-all font-mono ${validationStatus === 'invalid'
                                         ? 'border-red-300 dark:border-red-500/50'
                                         : validationStatus === 'valid'

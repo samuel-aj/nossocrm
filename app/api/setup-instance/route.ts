@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+import { UserRole } from '@/types/constants';
 
 function json<T>(body: T, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -56,7 +57,7 @@ export async function POST(req: Request) {
     password,
     email_confirm: true,
     user_metadata: {
-      role: 'admin',
+      role: UserRole.ADMIN,
       organization_id: organization.id,
     },
   });
@@ -76,7 +77,7 @@ export async function POST(req: Request) {
       name: displayName,
       first_name: displayName,
       organization_id: organization.id,
-      role: 'admin',
+      role: UserRole.ADMIN,
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'id' }

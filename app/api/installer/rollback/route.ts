@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { createClient } from '@supabase/supabase-js';
+import { UserRole } from '@/types/constants';
 
 export const maxDuration = 60;
 export const runtime = 'nodejs';
@@ -53,7 +54,7 @@ export async function POST(req: Request) {
           const { data: admins } = await supabase
             .from('user_settings')
             .select('user_id')
-            .eq('role', 'admin');
+            .eq('role', UserRole.ADMIN);
           
           if (admins && admins.length > 0) {
             for (const admin of admins) {
@@ -63,7 +64,7 @@ export async function POST(req: Request) {
           }
           
           // Delete from user_settings
-          await supabase.from('user_settings').delete().eq('role', 'admin');
+          await supabase.from('user_settings').delete().eq('role', UserRole.ADMIN);
           
           results.push({ action, success: true });
           break;

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+import { UserRole } from '@/types/constants';
 
 function json<T>(body: T, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -62,7 +63,7 @@ export async function GET() {
   const aiEnabled = typeof orgSettings?.ai_enabled === 'boolean' ? orgSettings.ai_enabled : true;
 
   // Security: members should NOT receive raw API keys.
-  if (profile.role !== 'admin' && profile.role !== 'super_admin') {
+  if (profile.role !== UserRole.ADMIN && profile.role !== UserRole.SUPER_ADMIN) {
     return json({
       aiEnabled,
       aiProvider: (orgSettings?.ai_provider || 'google') as Provider,
@@ -76,13 +77,20 @@ export async function GET() {
     });
   }
 
+  // Mask keys: show only last 4 chars so admin can identify which key is set
+  const maskKey = (key: string | null | undefined): string => {
+    if (!key) return '';
+    if (key.length <= 8) return '••••' + key.slice(-2);
+    return '••••••••' + key.slice(-4);
+  };
+
   return json({
     aiEnabled,
     aiProvider: (orgSettings?.ai_provider || 'google') as Provider,
     aiModel: orgSettings?.ai_model || 'gemini-2.5-flash',
-    aiGoogleKey: orgSettings?.ai_google_key || '',
-    aiOpenaiKey: orgSettings?.ai_openai_key || '',
-    aiAnthropicKey: orgSettings?.ai_anthropic_key || '',
+    aiGoogleKey: maskKey(orgSettings?.ai_google_key),
+    aiOpenaiKey: maskKey(orgSettings?.ai_openai_key),
+    aiAnthropicKey: maskKey(orgSettings?.ai_anthropic_key),
     aiHasGoogleKey: Boolean(orgSettings?.ai_google_key),
     aiHasOpenaiKey: Boolean(orgSettings?.ai_openai_key),
     aiHasAnthropicKey: Boolean(orgSettings?.ai_anthropic_key),
@@ -121,7 +129,7 @@ export async function POST(req: Request) {
     return json({ error: 'Profile not found' }, 404);
   }
 
-  if (profile.role !== 'admin' && profile.role !== 'super_admin') {
+  if (profile.role !== UserRole.ADMIN && profile.role !== UserRole.SUPER_ADMIN) {
     return json({ error: 'Forbidden' }, 403);
   }
 
@@ -133,11 +141,14 @@ export async function POST(req: Request) {
 
   const updates = parsed.data;
 
-  // Normalize empty-string keys to null
+  // Normalize empty-string keys to null; ignore masked values (from GET response)
   const normalizeKey = (value: string | undefined) => {
     if (value === undefined) return undefined;
     const trimmed = value.trim();
-    return trimmed.length === 0 ? null : trimmed;
+    if (trimmed.length === 0) return null;
+    // Masked keys start with "••••" — don't overwrite the real key
+    if (trimmed.startsWith('••••')) return undefined;
+    return trimmed;
   };
 
   const dbUpdates: Record<string, unknown> = {

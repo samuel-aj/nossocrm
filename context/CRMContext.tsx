@@ -51,6 +51,7 @@ import { ContactsProvider, useContacts } from './contacts/ContactsContext';
 import { ActivitiesProvider, useActivities } from './activities/ActivitiesContext';
 import { BoardsProvider, useBoards } from './boards/BoardsContext';
 import { SettingsProvider, useSettings } from './settings/SettingsContext';
+import { DealPriority } from '@/types/constants';
 
 // ============================================
 // CRM CONTEXT TYPE (Legacy API - Backward Compatible)
@@ -442,6 +443,7 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
           : undefined,
         contactName: deal.contactId ? (contactMap[deal.contactId]?.name || 'Sem Contato') : 'Sem Contato',
         contactEmail: deal.contactId ? (contactMap[deal.contactId]?.email || '') : '',
+        contactPhone: deal.contactId ? (contactMap[deal.contactId]?.phone || '') : '',
         stageLabel: stage?.label || 'Desconhecido',
         owner: (deal.ownerId === profile?.id || deal.ownerId === user?.id) ? {
           name: profile?.nickname || profile?.first_name || (user?.email?.split('@')[0]) || 'Eu',
@@ -464,6 +466,7 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
             : undefined,
           contactName: deal.contactId ? (contactMap[deal.contactId]?.name || 'Sem Contato') : 'Sem Contato',
           contactEmail: deal.contactId ? (contactMap[deal.contactId]?.email || '') : '',
+          contactPhone: deal.contactId ? (contactMap[deal.contactId]?.phone || '') : '',
           stageLabel: stage?.label || 'Desconhecido',
           owner: (deal.ownerId === profile?.id || deal.ownerId === user?.id) ? {
             name: profile?.nickname || profile?.first_name || (user?.email?.split('@')[0]) || 'Eu',
@@ -696,7 +699,7 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         status: activeBoard.stages[0].id,
         updatedAt: new Date().toISOString(),
         probability: 20,
-        priority: 'medium',
+        priority: DealPriority.MEDIUM,
         owner: { name: 'Eu', avatar: 'https://i.pravatar.cc/150?u=me' },
         tags: [],
         customFields: {},

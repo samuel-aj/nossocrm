@@ -4,6 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import ConfirmModal from '@/components/ConfirmModal';
 import { Loader2, UserPlus, Crown, Briefcase, KeyRound, Mail, Check, X, Sparkles, Clock, RefreshCw, Trash2, Link, Copy, CheckCircle2 } from 'lucide-react';
+import { UserRole } from '@/types/constants';
 
 interface Profile {
     id: string;
@@ -52,7 +53,7 @@ export const UsersPage: React.FC = () => {
     const [users, setUsers] = useState<Profile[]>([]);
     const [loading, setLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [newUserRole, setNewUserRole] = useState('vendedor');
+    const [newUserRole, setNewUserRole] = useState<string>(UserRole.VENDEDOR);
     const [sendingInvites, setSendingInvites] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [actionLoading, setActionLoading] = useState<string | null>(null); // id do usuário em ação
@@ -120,7 +121,7 @@ export const UsersPage: React.FC = () => {
     const closeModal = useCallback(() => {
         setIsModalOpen(false);
         setError(null);
-        setNewUserRole('vendedor');
+        setNewUserRole(UserRole.VENDEDOR);
         setExpirationDays(7);
     }, []);
 
@@ -255,7 +256,7 @@ export const UsersPage: React.FC = () => {
         );
     }
 
-    if (currentUserProfile?.role !== 'admin' && currentUserProfile?.role !== 'super_admin') {
+    if (currentUserProfile?.role !== UserRole.ADMIN && currentUserProfile?.role !== UserRole.SUPER_ADMIN) {
         return (
             <div className="min-h-[60vh] flex items-center justify-center">
                 <div className="text-center">
@@ -271,8 +272,8 @@ export const UsersPage: React.FC = () => {
         );
     }
 
-    const admins = users.filter(u => u.role === 'admin');
-    const vendedores = users.filter(u => u.role === 'vendedor');
+    const admins = users.filter(u => u.role === UserRole.ADMIN);
+    const vendedores = users.filter(u => u.role === UserRole.VENDEDOR);
 
     return (
         <div className="max-w-4xl mx-auto pb-10">
@@ -315,7 +316,7 @@ export const UsersPage: React.FC = () => {
                                 {/* Avatar */}
                                 <div className={`relative flex-shrink-0 h-14 w-14 rounded-2xl bg-gradient-to-br ${gradient} flex items-center justify-center text-white font-bold text-lg shadow-lg`}>
                                     {initials}
-                                    {user.role === 'admin' && (
+                                    {user.role === UserRole.ADMIN && (
                                         <div className="absolute -top-1 -right-1 h-5 w-5 bg-amber-400 rounded-full flex items-center justify-center shadow-md ring-2 ring-white dark:ring-slate-900">
                                             <Crown className="h-3 w-3 text-amber-900" />
                                         </div>
@@ -341,11 +342,11 @@ export const UsersPage: React.FC = () => {
                                         )}
                                     </div>
                                     <div className="flex items-center gap-3 mt-1.5">
-                                        <span className={`inline-flex items-center gap-1.5 text-sm ${user.role === 'admin'
+                                        <span className={`inline-flex items-center gap-1.5 text-sm ${user.role === UserRole.ADMIN
                                             ? 'text-amber-600 dark:text-amber-400'
                                             : 'text-slate-500 dark:text-slate-400'
                                             }`}>
-                                            {user.role === 'admin' ? (
+                                            {user.role === UserRole.ADMIN ? (
                                                 <>
                                                     <Crown className="h-3.5 w-3.5" />
                                                     Administrador
@@ -457,7 +458,7 @@ export const UsersPage: React.FC = () => {
                                             <div key={invite.id} className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-3 border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
                                                 <div className="min-w-0 flex-1">
                                                     <div className="flex items-center gap-2 mb-1">
-                                                        <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${invite.role === 'admin'
+                                                        <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${invite.role === UserRole.ADMIN
                                                             ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
                                                             : 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
                                                             }`}>
@@ -511,37 +512,37 @@ export const UsersPage: React.FC = () => {
                                     <div className="grid grid-cols-2 gap-3">
                                         <button
                                             type="button"
-                                            onClick={() => setNewUserRole('vendedor')}
-                                            className={`relative p-3 rounded-xl border-2 text-left transition-all ${newUserRole === 'vendedor'
+                                            onClick={() => setNewUserRole(UserRole.VENDEDOR)}
+                                            className={`relative p-3 rounded-xl border-2 text-left transition-all ${newUserRole === UserRole.VENDEDOR
                                                 ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
                                                 : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
                                                 }`}
                                         >
                                             <div className="flex items-center gap-2 mb-1">
-                                                <Briefcase className={`h-4 w-4 ${newUserRole === 'vendedor' ? 'text-primary-600 dark:text-primary-400' : 'text-slate-400'}`} />
-                                                <span className={`font-medium text-sm ${newUserRole === 'vendedor' ? 'text-primary-900 dark:text-primary-100' : 'text-slate-700 dark:text-slate-300'}`}>
+                                                <Briefcase className={`h-4 w-4 ${newUserRole === UserRole.VENDEDOR ? 'text-primary-600 dark:text-primary-400' : 'text-slate-400'}`} />
+                                                <span className={`font-medium text-sm ${newUserRole === UserRole.VENDEDOR ? 'text-primary-900 dark:text-primary-100' : 'text-slate-700 dark:text-slate-300'}`}>
                                                     Vendedor
                                                 </span>
                                             </div>
-                                            {newUserRole === 'vendedor' && (
+                                            {newUserRole === UserRole.VENDEDOR && (
                                                 <div className="absolute top-2 right-2 h-2 w-2 rounded-full bg-primary-500" />
                                             )}
                                         </button>
                                         <button
                                             type="button"
-                                            onClick={() => setNewUserRole('admin')}
-                                            className={`relative p-3 rounded-xl border-2 text-left transition-all ${newUserRole === 'admin'
+                                            onClick={() => setNewUserRole(UserRole.ADMIN)}
+                                            className={`relative p-3 rounded-xl border-2 text-left transition-all ${newUserRole === UserRole.ADMIN
                                                 ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20'
                                                 : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
                                                 }`}
                                         >
                                             <div className="flex items-center gap-2 mb-1">
-                                                <Crown className={`h-4 w-4 ${newUserRole === 'admin' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400'}`} />
-                                                <span className={`font-medium text-sm ${newUserRole === 'admin' ? 'text-amber-900 dark:text-amber-100' : 'text-slate-700 dark:text-slate-300'}`}>
+                                                <Crown className={`h-4 w-4 ${newUserRole === UserRole.ADMIN ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400'}`} />
+                                                <span className={`font-medium text-sm ${newUserRole === UserRole.ADMIN ? 'text-amber-900 dark:text-amber-100' : 'text-slate-700 dark:text-slate-300'}`}>
                                                     Admin
                                                 </span>
                                             </div>
-                                            {newUserRole === 'admin' && (
+                                            {newUserRole === UserRole.ADMIN && (
                                                 <div className="absolute top-2 right-2 h-2 w-2 rounded-full bg-amber-500" />
                                             )}
                                         </button>

@@ -73,7 +73,10 @@ enable_signup = true
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true
 # If enabled, users need to confirm their email address before signing in.
-enable_confirmations = false
+# SECURITY: habilitado para evitar account takeover via email nao verificado.
+# OBS: isso afeta apenas o ambiente LOCAL (supabase start). Em producao, configurar
+# diretamente no Supabase Dashboard > Authentication > Email.
+enable_confirmations = true
 
 [auth.sms]
 # Allow/disallow new user signups via SMS to your project.

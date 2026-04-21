@@ -1,5 +1,7 @@
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+import { logSuperAdminAction } from '@/lib/security/auditLog';
+import { UserRole } from '@/types/constants';
 
 function json<T>(body: T, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -27,7 +29,7 @@ export async function POST(req: Request) {
     .eq('id', user.id)
     .single();
 
-  if (!profile || profile.role !== 'super_admin') {
+  if (!profile || profile.role !== UserRole.SUPER_ADMIN) {
     return json({ error: 'Unauthorized' }, 403);
   }
 
@@ -60,6 +62,15 @@ export async function POST(req: Request) {
     .eq('id', profile.id);
 
   if (error) return json({ error: error.message }, 500);
+
+  await logSuperAdminAction(admin, {
+    action: 'superadmin.org.switch',
+    actor_id: profile.id,
+    org_id: organizationId,
+    resource_type: 'organization',
+    resource_id: organizationId,
+    details: { org_name: org.name },
+  });
 
   return json({ ok: true, organization: org });
 }

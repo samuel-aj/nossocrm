@@ -20,6 +20,7 @@ import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { getResolvedPrompt } from '@/lib/ai/prompts/server';
 import { renderPromptTemplate } from '@/lib/ai/prompts/render';
 import { isAIFeatureEnabled } from '@/lib/ai/features/server';
+import { AIProvider as AIProviderConst } from '@/types/constants';
 
 export const maxDuration = 60;
 
@@ -212,11 +213,11 @@ export async function POST(req: Request) {
   }
 
   // Frontend expects "AI consent required" as a *payload* error.
-  const provider: AIProvider = (orgSettings?.ai_provider ?? 'google') as AIProvider;
+  const provider: AIProvider = (orgSettings?.ai_provider ?? AIProviderConst.GOOGLE) as AIProvider;
   const apiKey: string | null =
-    provider === 'google'
+    provider === AIProviderConst.GOOGLE
       ? (orgSettings?.ai_google_key ?? null)
-      : provider === 'openai'
+      : provider === AIProviderConst.OPENAI
         ? (orgSettings?.ai_openai_key ?? null)
         : (orgSettings?.ai_anthropic_key ?? null);
 

@@ -2,6 +2,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { createStaticAdminClient } from '@/lib/supabase/staticAdminClient';
 import type { CRMCallOptions } from '@/types/ai';
+import { DealPriority } from '@/types/constants';
 
 /**
  * Creates all CRM tools with context injection
@@ -647,7 +648,7 @@ export function createCRMTools(context: CRMCallOptions, userId: string) {
                     value: `R$ ${(deal.value || 0).toLocaleString('pt-BR')}`,
                     status: deal.is_won ? '✅ Ganho' : deal.is_lost ? '❌ Perdido' : '🔄 Aberto',
                     stage: (deal.stage as any)?.name || (deal.stage as any)?.label || 'N/A',
-                    priority: deal.priority || 'medium',
+                    priority: deal.priority || DealPriority.MEDIUM,
                     contact: (deal.contact as any)?.name || 'N/A',
                     contactEmail: (deal.contact as any)?.email || 'N/A',
                     pendingActivities: pendingActivities.length,
@@ -786,7 +787,7 @@ export function createCRMTools(context: CRMCallOptions, userId: string) {
                         value,
                         contact_id: contactId,
                         stage_id: firstStageId,
-                        priority: 'medium',
+                        priority: DealPriority.MEDIUM,
                         is_won: false,
                         is_lost: false,
                         owner_id: userId,
@@ -816,7 +817,7 @@ export function createCRMTools(context: CRMCallOptions, userId: string) {
                 dealId: z.string().optional().describe('ID do deal (usa contexto se não fornecido)'),
                 title: z.string().optional().describe('Novo título'),
                 value: z.number().optional().describe('Novo valor'),
-                priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
+                priority: z.enum([DealPriority.LOW, DealPriority.MEDIUM, DealPriority.HIGH, DealPriority.URGENT]).optional(),
             }),
             needsApproval: !bypassApproval,
             execute: async ({ dealId, title, value, priority }) => {

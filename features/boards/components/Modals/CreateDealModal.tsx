@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
-import { Deal, Board, Contact, Company } from '@/types';
-import { X, Building2, User, Mail, Phone, AlertCircle, Loader2 } from 'lucide-react';
+import { Deal, Board, Contact, Company, Product } from '@/types';
+import { X, Building2, User, Mail, Phone, AlertCircle, Loader2, Package } from 'lucide-react';
 import { DebugFillButton } from '@/components/debug/DebugFillButton';
 import { fakeDeal, fakeContact, fakeCompany } from '@/lib/debug';
 import { ContactSearchCombobox } from '@/components/ui/ContactSearchCombobox';
@@ -26,7 +26,7 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
     activeBoard: propActiveBoard,
     activeBoardId: propActiveBoardId
 }) => {
-    const { addDeal, activeBoard: contextActiveBoard, activeBoardId: contextActiveBoardId } = useCRM();
+    const { addDeal, activeBoard: contextActiveBoard, activeBoardId: contextActiveBoardId, products } = useCRM();
     const { profile, user } = useAuth();
 
     // Prioriza props sobre contexto (permite que o Kanban passe o board correto)
@@ -52,6 +52,9 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
         value: ''
     });
 
+    // Produto selecionado
+    const [selectedProductId, setSelectedProductId] = useState<string>('');
+
     // Estado de UI
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -62,6 +65,7 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
         setIsCreatingNew(false);
         setNewContactData({ name: '', email: '', phone: '', companyName: '' });
         setDealData({ title: '', value: '' });
+        setSelectedProductId('');
         setError(null);
         setIsSubmitting(false);
     };
@@ -132,6 +136,16 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
                 (profile?.email || user?.email || '').split('@')[0] ||
                 'Eu';
 
+            const selectedProduct = products.find(p => p.id === selectedProductId);
+            const dealValue = selectedProduct ? selectedProduct.price : (Number(dealData.value) || 0);
+            const dealItems: Deal['items'] = selectedProduct ? [{
+                id: crypto.randomUUID(),
+                productId: selectedProduct.id,
+                name: selectedProduct.name,
+                quantity: 1,
+                price: selectedProduct.price,
+            }] : [];
+
             const deal: Deal = {
                 id: crypto.randomUUID(),
                 title: dealData.title,
@@ -139,8 +153,8 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
                 contactId: selectedContact?.id || '',
                 boardId: activeBoardId || activeBoard.id,
                 ownerId: user?.id || '',
-                value: Number(dealData.value) || 0,
-                items: [],
+                value: dealValue,
+                items: dealItems,
                 status: firstStage.id,
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
@@ -367,14 +381,27 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
                             </div>
                             
                             <div>
-                                <label className="block text-xs font-medium text-slate-500 mb-1">Valor Estimado (R$)</label>
-                                <input
-                                    type="number"
-                                    className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
-                                    placeholder="0.00"
-                                    value={dealData.value}
-                                    onChange={e => setDealData(prev => ({ ...prev, value: e.target.value }))}
-                                />
+                                <label className="block text-xs font-medium text-slate-500 mb-1">Produto</label>
+                                <div className="relative">
+                                    <Package size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                                    <select
+                                        className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg pl-10 pr-3 py-2.5 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500 appearance-none"
+                                        value={selectedProductId}
+                                        onChange={e => setSelectedProductId(e.target.value)}
+                                    >
+                                        <option value="">Selecione um produto...</option>
+                                        {products.filter(p => p.active).map(product => (
+                                            <option key={product.id} value={product.id}>
+                                                {product.name} — R$ {product.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                                {selectedProductId && (
+                                    <p className="text-xs text-slate-400 mt-1">
+                                        Valor: R$ {(products.find(p => p.id === selectedProductId)?.price || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </p>
+                                )}
                             </div>
                         </div>
                     </div>

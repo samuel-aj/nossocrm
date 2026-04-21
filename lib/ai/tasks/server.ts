@@ -3,6 +3,7 @@ import 'server-only';
 import { createClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { getModel, type AIProvider } from '@/lib/ai/config';
+import { AIProvider as AIProviderConst } from '@/types/constants';
 
 export type AITaskContext = {
   supabase: Awaited<ReturnType<typeof createClient>>;
@@ -96,17 +97,17 @@ export async function requireAITaskContext(req: Request): Promise<AITaskContext>
     throw new AITaskHttpError(403, 'AI_DISABLED', 'IA desativada pela organização. Um admin pode ativar em Configurações → Central de I.A.');
   }
 
-  const provider: AIProvider = (orgSettings?.ai_provider ?? 'google') as AIProvider;
+  const provider: AIProvider = (orgSettings?.ai_provider ?? AIProviderConst.GOOGLE) as AIProvider;
 
   const apiKey: string | null =
-    provider === 'google'
+    provider === AIProviderConst.GOOGLE
       ? (orgSettings?.ai_google_key ?? null)
-      : provider === 'openai'
+      : provider === AIProviderConst.OPENAI
         ? (orgSettings?.ai_openai_key ?? null)
         : (orgSettings?.ai_anthropic_key ?? null);
 
   if (orgError || !apiKey) {
-    const providerLabel = provider === 'google' ? 'Google Gemini' : provider === 'openai' ? 'OpenAI' : 'Anthropic';
+    const providerLabel = provider === AIProviderConst.GOOGLE ? 'Google Gemini' : provider === AIProviderConst.OPENAI ? 'OpenAI' : 'Anthropic';
     throw new AITaskHttpError(
       400,
       'AI_KEY_NOT_CONFIGURED',

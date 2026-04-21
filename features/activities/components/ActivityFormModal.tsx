@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { Activity, Deal } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase/client';
+import { UserRole } from '@/types/constants';
 
 interface ActivityFormData {
   title: string;
@@ -207,7 +208,7 @@ export const ActivityFormModal: React.FC<ActivityFormModalProps> = ({
                 <option value="">Eu mesmo</option>
                 {teamMembers.map(m => (
                   <option key={m.id} value={m.id}>
-                    {m.display_name || m.id.slice(0, 8)} ({m.role === 'admin' || m.role === 'super_admin' ? 'Admin' : 'Vendedor'})
+                    {m.display_name || m.id.slice(0, 8)} ({m.role === UserRole.ADMIN || m.role === UserRole.SUPER_ADMIN ? 'Admin' : 'Vendedor'})
                   </option>
                 ))}
               </select>

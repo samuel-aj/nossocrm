@@ -8,6 +8,7 @@ import { WebhooksSection } from './components/WebhooksSection';
 import { McpSection } from './components/McpSection';
 import { DataStorageSettings } from './components/DataStorageSettings';
 import { ProductsCatalogManager } from './components/ProductsCatalogManager';
+import { UserRole } from '@/types/constants';
 import { AICenterSettings } from './AICenterSettings';
 
 import { UsersPage } from './UsersPage';
@@ -213,7 +214,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
     }
   }, [pathname]);
 
-  const isAdminOrSuper = profile?.role === 'admin' || profile?.role === 'super_admin';
+  const isAdminOrSuper = profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN;
   const tabs = [
     { id: 'general' as SettingsTab, name: 'Geral', icon: SettingsIcon },
     ...(isAdminOrSuper ? [{ id: 'products' as SettingsTab, name: 'Produtos/Serviços', icon: Package }] : []),

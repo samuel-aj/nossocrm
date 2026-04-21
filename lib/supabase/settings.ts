@@ -1,6 +1,7 @@
 import { supabase } from './client';
 import { LifecycleStage } from '@/types';
 import { sanitizeUUID } from './utils';
+import { AIProvider } from '@/types/constants';
 
 // ============================================
 // SETTINGS SERVICE
@@ -58,9 +59,9 @@ const transformSettings = (db: DbUserSettings): UserSettings => {
   // Get the key for the current provider
   const getActiveKey = () => {
     switch (db.ai_provider) {
-      case 'google': return db.ai_google_key || db.ai_api_key || '';
-      case 'openai': return db.ai_openai_key || '';
-      case 'anthropic': return db.ai_anthropic_key || '';
+      case AIProvider.GOOGLE: return db.ai_google_key || db.ai_api_key || '';
+      case AIProvider.OPENAI: return db.ai_openai_key || '';
+      case AIProvider.ANTHROPIC: return db.ai_anthropic_key || '';
       default: return db.ai_api_key || '';
     }
   };
@@ -140,7 +141,7 @@ export const settingsService = {
         .from('user_settings')
         .upsert({
           user_id: user.id,
-          ai_provider: 'google',
+          ai_provider: AIProvider.GOOGLE,
           ai_model: 'gemini-2.5-flash',
           ai_thinking: true,
           ai_search: true,

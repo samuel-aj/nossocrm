@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { cn } from '@/lib/utils/cn';
+import { UserRole } from '@/types/constants';
 
 type InboundSourceRow = {
   id: string;
@@ -107,7 +108,7 @@ export const WebhooksSection: React.FC = () => {
   const [confirmDeleteInboundOpen, setConfirmDeleteInboundOpen] = useState(false);
   const [confirmDeleteOutboundOpen, setConfirmDeleteOutboundOpen] = useState(false);
 
-  const canUse = (profile?.role === 'admin' || profile?.role === 'super_admin') && !!profile?.organization_id;
+  const canUse = (profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN) && !!profile?.organization_id;
 
   const activeInbound = useMemo(() => sources.find((s) => s.active) || sources[0] || null, [sources]);
   const hasInbound = !!activeInbound && !!activeInbound.active;

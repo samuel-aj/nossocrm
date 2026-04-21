@@ -8,6 +8,7 @@ import React, {
   ReactNode,
   useRef,
 } from 'react';
+import { AIProvider as AIProviderConst } from '@/types/constants';
 import { usePathname } from 'next/navigation';
 import { LifecycleStage, Product, CustomFieldDefinition, Lead } from '@/types';
 import { settingsService, lifecycleStagesService, productsService } from '@/lib/supabase';
@@ -142,7 +143,7 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
   }, []);
 
   // AI Config state - separate keys per provider
-  const [aiProvider, setAiProviderState] = useState<AIConfig['provider']>('google');
+  const [aiProvider, setAiProviderState] = useState<AIConfig['provider']>(AIProviderConst.GOOGLE);
   const [aiGoogleKey, setAiGoogleKeyState] = useState<string>('');
   const [aiOpenaiKey, setAiOpenaiKeyState] = useState<string>('');
   const [aiAnthropicKey, setAiAnthropicKeyState] = useState<string>('');
@@ -159,18 +160,18 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
   // Computed: current API key based on provider
   const aiApiKey = useMemo(() => {
     switch (aiProvider) {
-      case 'google': return aiGoogleKey;
-      case 'openai': return aiOpenaiKey;
-      case 'anthropic': return aiAnthropicKey;
+      case AIProviderConst.GOOGLE: return aiGoogleKey;
+      case AIProviderConst.OPENAI: return aiOpenaiKey;
+      case AIProviderConst.ANTHROPIC: return aiAnthropicKey;
       default: return '';
     }
   }, [aiProvider, aiGoogleKey, aiOpenaiKey, aiAnthropicKey]);
 
   const aiKeyConfigured = useMemo(() => {
     switch (aiProvider) {
-      case 'google': return aiHasGoogleKey || Boolean(aiGoogleKey && aiGoogleKey.trim());
-      case 'openai': return aiHasOpenaiKey || Boolean(aiOpenaiKey && aiOpenaiKey.trim());
-      case 'anthropic': return aiHasAnthropicKey || Boolean(aiAnthropicKey && aiAnthropicKey.trim());
+      case AIProviderConst.GOOGLE: return aiHasGoogleKey || Boolean(aiGoogleKey && aiGoogleKey.trim());
+      case AIProviderConst.OPENAI: return aiHasOpenaiKey || Boolean(aiOpenaiKey && aiOpenaiKey.trim());
+      case AIProviderConst.ANTHROPIC: return aiHasAnthropicKey || Boolean(aiAnthropicKey && aiAnthropicKey.trim());
       default: return false;
     }
   }, [aiProvider, aiHasGoogleKey, aiHasOpenaiKey, aiHasAnthropicKey, aiGoogleKey, aiOpenaiKey, aiAnthropicKey]);
@@ -546,15 +547,15 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
     async (key: string) => {
       // Update the correct provider's key (org-wide)
       switch (aiProvider) {
-        case 'google':
+        case AIProviderConst.GOOGLE:
           await updateOrgAISettings({ aiGoogleKey: key });
           setAiGoogleKeyState(key);
           break;
-        case 'openai':
+        case AIProviderConst.OPENAI:
           await updateOrgAISettings({ aiOpenaiKey: key });
           setAiOpenaiKeyState(key);
           break;
-        case 'anthropic':
+        case AIProviderConst.ANTHROPIC:
           await updateOrgAISettings({ aiAnthropicKey: key });
           setAiAnthropicKeyState(key);
           break;

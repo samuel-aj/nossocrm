@@ -1,5 +1,7 @@
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+import { logSuperAdminAction } from '@/lib/security/auditLog';
+import { UserRole } from '@/types/constants';
 
 function json<T>(body: T, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -20,7 +22,7 @@ async function requireSuperAdmin(supabase: Awaited<ReturnType<typeof createClien
     .eq('id', user.id)
     .single();
 
-  if (!profile || profile.role !== 'super_admin') return null;
+  if (!profile || profile.role !== UserRole.SUPER_ADMIN) return null;
   return profile;
 }
 
@@ -87,6 +89,15 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 
   if (error) return json({ error: error.message }, 500);
 
+  await logSuperAdminAction(admin, {
+    action: 'superadmin.org.update',
+    actor_id: me.id,
+    org_id: id,
+    resource_type: 'organization',
+    resource_id: id,
+    details: { fields_updated: Object.keys(updates).filter(k => k !== 'updated_at') },
+  });
+
   return json({ ok: true });
 }
 
@@ -114,6 +125,15 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
     .eq('id', id);
 
   if (error) return json({ error: error.message }, 500);
+
+  await logSuperAdminAction(admin, {
+    action: 'superadmin.org.delete',
+    actor_id: me.id,
+    org_id: id,
+    resource_type: 'organization',
+    resource_id: id,
+    severity: 'critical',
+  });
 
   return json({ ok: true });
 }

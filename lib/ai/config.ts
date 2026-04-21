@@ -11,10 +11,11 @@
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
+import { AIProvider as AIProviderConst } from '@/types/constants';
 
 /**
  * Provedores de IA suportados pelo sistema.
- * 
+ *
  * @typedef {'google' | 'openai' | 'anthropic'} AIProvider
  */
 export type AIProvider = 'google' | 'openai' | 'anthropic';
@@ -48,15 +49,15 @@ export const getModel = (provider: AIProvider, apiKey: string, modelId: string) 
     }
 
     switch (provider) {
-        case 'google':
+        case AIProviderConst.GOOGLE:
             const google = createGoogleGenerativeAI({ apiKey });
             return google(modelId || 'gemini-1.5-flash');
 
-        case 'openai':
+        case AIProviderConst.OPENAI:
             const openai = createOpenAI({ apiKey });
             return openai(modelId || 'gpt-4o');
 
-        case 'anthropic':
+        case AIProviderConst.ANTHROPIC:
             const anthropic = createAnthropic({ apiKey });
             return anthropic(modelId || 'claude-3-5-sonnet-20240620');
 

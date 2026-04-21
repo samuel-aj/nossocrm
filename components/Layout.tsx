@@ -50,6 +50,7 @@ import { useCRM } from '../context/CRMContext';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { prefetchRoute, RouteName } from '@/lib/prefetch';
+import { UserRole } from '@/types/constants';
 
 import { isDebugMode, enableDebugMode, disableDebugMode } from '@/lib/debug';
 import { SkipLink } from '@/lib/a11y';
@@ -394,7 +395,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                       <User className="w-4 h-4 text-slate-400" />
                       Editar Perfil
                     </Link>
-                    {profile?.role === 'super_admin' && (
+                    {profile?.role === UserRole.SUPER_ADMIN && (
                       <Link
                         href="/admin"
                         onClick={() => setIsUserMenuOpen(false)}

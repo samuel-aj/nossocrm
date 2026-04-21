@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useToast } from '@/context/ToastContext'
+import { UserRole } from '@/types/constants'
 import {
   Building2,
   Plus,
@@ -79,7 +80,7 @@ export default function AdminPage() {
   const [addingCollab, setAddingCollab] = useState(false)
   const [switchingOrgId, setSwitchingOrgId] = useState<string | null>(null)
 
-  const isSuperAdmin = profile?.role === 'super_admin'
+  const isSuperAdmin = profile?.role === UserRole.SUPER_ADMIN
 
   const fetchOrganizations = useCallback(async () => {
     try {
@@ -159,10 +160,10 @@ export default function AdminPage() {
       refreshProfile().then(() => setProfileRefreshed(true))
       return
     }
-    if (profile.role === 'super_admin') {
+    if (profile.role === UserRole.SUPER_ADMIN) {
       fetchOrganizations()
       fetchCollaborators()
-    } else if (profile.role === 'admin') {
+    } else if (profile.role === UserRole.ADMIN) {
       setSetupNeeded(true)
       setLoading(false)
     } else {
@@ -621,7 +622,7 @@ export default function AdminPage() {
                             </div>
                           </div>
                           <span className={`text-xs font-bold px-2 py-1 rounded ${
-                            member.role === 'admin'
+                            member.role === UserRole.ADMIN
                               ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
                               : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
                           }`}>

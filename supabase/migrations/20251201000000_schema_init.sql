@@ -1793,10 +1793,10 @@ BEGIN
     RAISE EXCEPTION 'Organization not found for user';
   END IF;
 
-  -- Must be admin
+  -- Must be admin or super_admin
   IF NOT EXISTS (
     SELECT 1 FROM public.profiles p
-    WHERE p.id = uid AND p.organization_id = org_id AND p.role = 'admin'
+    WHERE p.id = uid AND p.organization_id = org_id AND p.role IN ('admin', 'super_admin')
   ) THEN
     RAISE EXCEPTION 'Forbidden';
   END IF;
@@ -1842,7 +1842,7 @@ BEGIN
 
   IF NOT EXISTS (
     SELECT 1 FROM public.profiles p
-    WHERE p.id = uid AND p.organization_id = org_id AND p.role = 'admin'
+    WHERE p.id = uid AND p.organization_id = org_id AND p.role IN ('admin', 'super_admin')
   ) THEN
     RAISE EXCEPTION 'Forbidden';
   END IF;

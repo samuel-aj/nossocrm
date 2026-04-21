@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import Image from 'next/image';
 import { DealView, CustomFieldDefinition } from '@/types';
-import { Building2, Hourglass, Trophy, XCircle } from 'lucide-react';
+import { Phone, Copy, Check, Hourglass, Trophy, XCircle, Package } from 'lucide-react';
 import { ActivityStatusIcon } from './ActivityStatusIcon';
 import type { DealActivityStatus } from '@/features/boards/utils/dealActivityStatus';
 import { priorityAriaLabelPtBr } from '@/lib/utils/priority';
@@ -31,6 +31,26 @@ interface DealCardProps {
   setLastMouseDownDealId: (id: string | null) => void;
   /** Callback to open move-to-stage modal for keyboard accessibility */
   onMoveToStage?: (dealId: string) => void;
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+      className="p-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+      title="Copiar número"
+      aria-label={`Copiar ${text}`}
+    >
+      {copied ? <Check size={10} className="text-green-500" /> : <Copy size={10} />}
+    </button>
+  );
 }
 
 // Check if deal is closed (won or lost)
@@ -243,9 +263,21 @@ const DealCardComponent: React.FC<DealCardProps> = ({
       >
         {deal.title}
       </h4>
-      <p className="text-xs text-slate-500 dark:text-slate-400 mb-3 flex items-center gap-1">
-        <Building2 size={10} aria-hidden="true" /> {deal.companyName}
-      </p>
+      {deal.contactPhone ? (
+        <div className="text-xs text-slate-500 dark:text-slate-400 mb-3 flex items-center gap-1">
+          <Phone size={10} aria-hidden="true" />
+          <span>{deal.contactPhone}</span>
+          <CopyButton text={deal.contactPhone} />
+        </div>
+      ) : deal.companyName ? (
+        <p className="text-xs text-slate-500 dark:text-slate-400 mb-3 flex items-center gap-1">
+          <Phone size={10} aria-hidden="true" /> {deal.contactEmail || 'Sem contato'}
+        </p>
+      ) : (
+        <p className="text-xs text-slate-500 dark:text-slate-400 mb-3 flex items-center gap-1">
+          <Phone size={10} aria-hidden="true" /> {deal.contactEmail || 'Sem contato'}
+        </p>
+      )}
 
       {visibleCustomFields.length > 0 && (
         <div className="mb-3 space-y-1">
@@ -290,9 +322,16 @@ const DealCardComponent: React.FC<DealCardProps> = ({
               </div>
             )
           )}
-          <span className="text-sm font-bold text-slate-700 dark:text-slate-200 font-mono">
-            ${deal.value.toLocaleString()}
-          </span>
+          {deal.items && deal.items.length > 0 ? (
+            <span className="text-xs font-medium text-slate-600 dark:text-slate-300 flex items-center gap-1 truncate max-w-[140px]" title={deal.items[0].name}>
+              <Package size={12} aria-hidden="true" className="flex-shrink-0" />
+              {deal.items[0].name}
+            </span>
+          ) : (
+            <span className="text-sm font-bold text-slate-700 dark:text-slate-200 font-mono">
+              ${deal.value.toLocaleString()}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center">

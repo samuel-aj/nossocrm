@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase/client'
 import { Building2, Loader2, ChevronRight } from 'lucide-react'
+import { UserRole } from '@/types/constants'
 
 interface UserOrg {
   organization_id: string
@@ -37,7 +38,7 @@ export default function SelectOrgPage() {
         .eq('id', user.id)
         .single()
 
-      if (profile?.role === 'super_admin') {
+      if (profile?.role === UserRole.SUPER_ADMIN) {
         router.push('/dashboard')
         return
       }
@@ -135,7 +136,7 @@ export default function SelectOrgPage() {
                   {org.organizations?.name}
                 </p>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  {org.role === 'admin' ? 'Administrador' : 'Vendedor'}
+                  {org.role === UserRole.ADMIN ? 'Administrador' : 'Vendedor'}
                 </p>
               </div>
               {switching === org.organization_id ? (

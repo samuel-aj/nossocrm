@@ -19,6 +19,27 @@
  */
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+// ---------------------------------------------------------------------------
+// Rate limiting (in-memory, per Edge Function instance)
+// ---------------------------------------------------------------------------
+const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minuto
+const RATE_LIMIT_MAX_REQUESTS = 30;  // max 30 requests por source_id por minuto
+
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+function isRateLimited(sourceId: string): boolean {
+  const now = Date.now();
+  const entry = rateLimitMap.get(sourceId);
+
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(sourceId, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return false;
+  }
+
+  entry.count++;
+  return entry.count > RATE_LIMIT_MAX_REQUESTS;
+}
+
 type LeadPayload = {
   /**
    * ID do evento no sistema de origem (opcional).
@@ -164,6 +185,11 @@ Deno.serve(async (req) => {
   const sourceId = getSourceIdFromPath(req);
   if (!sourceId) return json(404, { error: "source_id ausente na URL" });
 
+  // Rate limiting por source_id
+  if (isRateLimited(sourceId)) {
+    return json(429, { error: "Muitas requisições. Tente novamente em 1 minuto." });
+  }
+
   const secretHeader = getSecretFromRequest(req);
   if (!secretHeader) return json(401, { error: "Secret ausente" });
 
@@ -185,7 +211,7 @@ Deno.serve(async (req) => {
     .eq("id", sourceId)
     .maybeSingle();
 
-  if (sourceErr) return json(500, { error: "Erro ao buscar fonte", details: sourceErr.message });
+  if (sourceErr) { console.error("[webhook-in] source lookup:", sourceErr.message); return json(500, { error: "Erro ao buscar fonte" }); }
   if (!source || !source.active) return json(404, { error: "Fonte não encontrada/inativa" });
   if (String(source.secret) !== String(secretHeader)) return json(401, { error: "Secret inválido" });
 
@@ -221,7 +247,7 @@ Deno.serve(async (req) => {
     if (insertEventErr) {
       const msg = String(insertEventErr.message).toLowerCase();
       if (!msg.includes("duplicate")) {
-        return json(500, { error: "Falha ao registrar evento", details: insertEventErr.message });
+        console.error("[webhook-in] event insert:", insertEventErr.message); return json(500, { error: "Falha ao registrar evento" });
       }
 
       const { data: existingEvent, error: existingEventErr } = await supabase
@@ -302,7 +328,7 @@ Deno.serve(async (req) => {
       .or(filters.join(","))
       .limit(1);
 
-    if (findErr) return json(500, { error: "Falha ao buscar contato", details: findErr.message });
+    if (findErr) { console.error("[webhook-in] contact find:", findErr.message); return json(500, { error: "Falha ao buscar contato" }); }
 
     if (existingContacts && existingContacts.length > 0) {
       const existing = existingContacts[0];
@@ -322,7 +348,7 @@ Deno.serve(async (req) => {
           .from("contacts")
           .update(updates)
           .eq("id", contactId);
-        if (updErr) return json(500, { error: "Falha ao atualizar contato", details: updErr.message });
+        if (updErr) { console.error("[webhook-in] contact update:", updErr.message); return json(500, { error: "Falha ao atualizar contato" }); }
         contactAction = "updated";
       } else {
         contactAction = "none";
@@ -343,7 +369,7 @@ Deno.serve(async (req) => {
         .select("id")
         .single();
 
-      if (createErr) return json(500, { error: "Falha ao criar contato", details: createErr.message });
+      if (createErr) { console.error("[webhook-in] contact create:", createErr.message); return json(500, { error: "Falha ao criar contato" }); }
       contactId = created?.id ?? null;
       if (contactId) contactAction = "created";
     }
@@ -371,7 +397,7 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (findDealErr) {
-      return json(500, { error: "Falha ao buscar deal existente", details: findDealErr.message });
+      console.error("[webhook-in] deal find:", findDealErr.message); return json(500, { error: "Falha ao buscar deal existente" });
     }
 
     if (existingDeal?.id) {
@@ -398,7 +424,7 @@ Deno.serve(async (req) => {
         .update(updates)
         .eq("id", dealId);
 
-      if (updDealErr) return json(500, { error: "Falha ao atualizar deal", details: updDealErr.message });
+      if (updDealErr) { console.error("[webhook-in] deal update:", updDealErr.message); return json(500, { error: "Falha ao atualizar deal" }); }
     }
   }
 
@@ -426,7 +452,7 @@ Deno.serve(async (req) => {
       .select("id")
       .single();
 
-    if (dealErr) return json(500, { error: "Falha ao criar deal", details: dealErr.message });
+    if (dealErr) { console.error("[webhook-in] deal create:", dealErr.message); return json(500, { error: "Falha ao criar deal" }); }
     dealId = createdDeal?.id ?? null;
     dealAction = "created";
   }

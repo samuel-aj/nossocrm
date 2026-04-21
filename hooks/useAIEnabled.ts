@@ -15,6 +15,7 @@
 import { useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCRM } from '@/context/CRMContext';
+import { AIProvider } from '@/types/constants';
 
 export interface UseAIEnabledResult {
   /** Se a IA está habilitada (tem API Key configurada) */
@@ -44,7 +45,7 @@ export function useAIEnabled(): UseAIEnabledResult {
   return {
     isAIEnabled,
     apiKey: null,
-    provider: aiProvider || 'google',
+    provider: aiProvider || AIProvider.GOOGLE,
     goToSettings,
   };
 }

@@ -208,15 +208,32 @@ O payload do outbound (em `webhook_events_out.payload`) tem este formato:
 }
 ```
 
-### Entrega (pg_net) e status
+### Entrega e retry automático
 
-O envio é feito via `pg_net` (async):
+O disparo inicial é feito via `pg_net` (async no Postgres). A entrega é registrada em `webhook_deliveries` com status `queued`.
 
-- a entrega é registrada em `webhook_deliveries`
-- `webhook_deliveries.request_id` guarda o id do `net.http_post(...)`
-- em caso de exceção no disparo, a delivery é marcada como `failed`
+**Retry com backoff exponencial:**
 
-> **MVP**: não existe retry/backoff automático no banco.
+Um cron job (Vercel Cron, a cada 1 minuto) verifica entregas pendentes e tenta reenviar:
+
+- **Backoff**: 1min, 5min, 30min, 2h, 12h (5 tentativas no total)
+- **Timeout**: 10 segundos por tentativa
+- **Status do evento** (`webhook_events_out.status`):
+  - `pending` → aguardando entrega
+  - `delivered` → pelo menos uma entrega bem-sucedida (2xx)
+  - `failed` → todas as tentativas esgotadas
+
+Cada tentativa registra em `webhook_deliveries`:
+- `response_status` (HTTP status code)
+- `response_body` (truncado em 4KB)
+- `duration_ms` (tempo da requisição)
+- `retry_count` (tentativa atual)
+- `next_retry_at` (quando a proxima tentativa sera feita)
+
+**Endpoint do cron**: `GET /api/cron/webhook-retry` (protegido por `CRON_SECRET`).
+
+**Env vars necessarias**:
+- `CRON_SECRET` — secret para autenticar o cron job (configurar no Vercel)
 
 ---
 

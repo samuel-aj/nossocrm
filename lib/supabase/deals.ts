@@ -17,6 +17,7 @@
 import { supabase } from './client';
 import { Deal, DealItem, OrganizationId } from '@/types';
 import { sanitizeUUID, requireUUID, isValidUUID } from './utils';
+import { DealPriority } from '@/types/constants';
 
 // =============================================================================
 // Organization inference (client-side, RLS-safe)
@@ -155,7 +156,7 @@ const transformDeal = (db: DbDeal, items: DbDealItem[]): Deal => {
     isWon: db.is_won ?? false,
     isLost: db.is_lost ?? false,
     closedAt: db.closed_at || undefined,
-    priority: (db.priority as Deal['priority']) || 'medium',
+    priority: (db.priority as Deal['priority']) || DealPriority.MEDIUM,
     boardId: db.board_id || '',
     contactId: db.contact_id || '',
     clientCompanyId: db.client_company_id || undefined,
@@ -376,7 +377,7 @@ export const dealsService = {
         value: deal.value || 0,
         probability: deal.probability || 0,
         status: deal.status,
-        priority: deal.priority || 'medium',
+        priority: deal.priority || DealPriority.MEDIUM,
         board_id: boardId,
         stage_id: sanitizeUUID(stageId),
         contact_id: sanitizeUUID(deal.contactId),

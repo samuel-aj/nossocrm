@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+import { UserRole } from '@/types/constants';
 
 function json<T>(body: T, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -28,7 +29,7 @@ export async function GET() {
     .single();
 
   if (meError || !me?.organization_id) return json({ error: 'Profile not found' }, 404);
-  if (me.role !== 'admin' && me.role !== 'super_admin') return json({ error: 'Forbidden' }, 403);
+  if (me.role !== UserRole.ADMIN && me.role !== UserRole.SUPER_ADMIN) return json({ error: 'Forbidden' }, 403);
 
   const { data, error } = await supabase
     .from('ai_prompt_templates')
@@ -83,7 +84,7 @@ export async function POST(req: Request) {
     .single();
 
   if (meError || !me?.organization_id) return json({ error: 'Profile not found' }, 404);
-  if (me.role !== 'admin' && me.role !== 'super_admin') return json({ error: 'Forbidden' }, 403);
+  if (me.role !== UserRole.ADMIN && me.role !== UserRole.SUPER_ADMIN) return json({ error: 'Forbidden' }, 403);
 
   const { key, content } = parsed.data;
 

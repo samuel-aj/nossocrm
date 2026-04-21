@@ -8,6 +8,7 @@
  */
 
 import { faker } from '@faker-js/faker/locale/pt_BR';
+import { DealPriority } from '@/types/constants';
 
 // ============================================
 // DEBUG MODE CHECK
@@ -102,7 +103,7 @@ export const fakeDeal = () => ({
   title: `${faker.commerce.productAdjective()} ${faker.commerce.product()}`,
   value: faker.number.int({ min: 1000, max: 500000 }),
   probability: faker.helpers.arrayElement([10, 20, 30, 40, 50, 60, 70, 80, 90]),
-  priority: faker.helpers.arrayElement(['low', 'medium', 'high'] as const),
+  priority: faker.helpers.arrayElement([DealPriority.LOW, DealPriority.MEDIUM, DealPriority.HIGH] as const),
   tags: faker.helpers.arrayElements(
     ['Urgente', 'Enterprise', 'Renovação', 'Upsell', 'Novo Cliente', 'Indicação'],
     faker.number.int({ min: 0, max: 3 })

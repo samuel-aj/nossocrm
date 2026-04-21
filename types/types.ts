@@ -250,6 +250,7 @@ export interface DealView extends Deal {
   clientCompanyName?: string; // Name of the CRM client company
   contactName: string;
   contactEmail: string;
+  contactPhone: string;
   /** Nome/label do estágio atual (resolvido a partir do status UUID) */
   stageLabel: string;
 

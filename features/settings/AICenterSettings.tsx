@@ -3,6 +3,7 @@
 import React from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useCRM } from '@/context/CRMContext';
+import { UserRole } from '@/types/constants';
 import { AIConfigSection } from './components/AIConfigSection';
 import { AIFeaturesSection } from './components/AIFeaturesSection';
 
@@ -13,7 +14,7 @@ import { AIFeaturesSection } from './components/AIFeaturesSection';
 export const AICenterSettings: React.FC = () => {
   const { profile } = useAuth();
   const { aiOrgEnabled, setAiOrgEnabled } = useCRM();
-  const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
+  const isAdmin = profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN;
 
   return (
     <div className="pb-10">

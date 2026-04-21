@@ -1,5 +1,6 @@
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+import { UserRole } from '@/types/constants';
 
 function json<T>(body: T, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -54,7 +55,7 @@ export async function POST(req: Request) {
   if (!org) return json({ error: 'Organization not found' }, 404);
 
   // Check access: super_admin can access any org, others need user_organizations entry
-  if (profile.role !== 'super_admin') {
+  if (profile.role !== UserRole.SUPER_ADMIN) {
     const { data: membership } = await admin
       .from('user_organizations')
       .select('id')

@@ -1,5 +1,7 @@
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+import { logSuperAdminAction } from '@/lib/security/auditLog';
+import { UserRole } from '@/types/constants';
 
 function json<T>(body: T, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -21,7 +23,7 @@ async function requireSuperAdmin(supabase: Awaited<ReturnType<typeof createClien
     .eq('id', user.id)
     .single();
 
-  if (!profile || profile.role !== 'super_admin') return null;
+  if (!profile || profile.role !== UserRole.SUPER_ADMIN) return null;
   return profile;
 }
 
@@ -59,8 +61,8 @@ export async function GET(req: Request) {
     if (!p.organization_id) continue;
     const entry = orgCounts.get(p.organization_id) || { total: 0, admins: 0, vendedores: 0 };
     entry.total++;
-    if (p.role === 'admin') entry.admins++;
-    if (p.role === 'vendedor') entry.vendedores++;
+    if (p.role === UserRole.ADMIN) entry.admins++;
+    if (p.role === UserRole.VENDEDOR) entry.vendedores++;
     orgCounts.set(p.organization_id, entry);
   }
 
@@ -123,7 +125,7 @@ export async function POST(req: Request) {
     email_confirm: true,
     user_metadata: {
       name: adminName?.trim() || adminEmail.split('@')[0],
-      role: 'admin',
+      role: UserRole.ADMIN,
       organization_id: org.id,
     },
   });
@@ -141,7 +143,7 @@ export async function POST(req: Request) {
       id: userId,
       email: adminEmail.trim(),
       name: adminName?.trim() || adminEmail.split('@')[0],
-      role: 'admin',
+      role: UserRole.ADMIN,
       organization_id: org.id,
       updated_at: new Date().toISOString(),
     },
@@ -153,10 +155,19 @@ export async function POST(req: Request) {
     {
       user_id: userId,
       organization_id: org.id,
-      role: 'admin',
+      role: UserRole.ADMIN,
     },
     { onConflict: 'user_id,organization_id' }
   );
+
+  await logSuperAdminAction(admin, {
+    action: 'superadmin.org.create',
+    actor_id: me.id,
+    org_id: org.id,
+    resource_type: 'organization',
+    resource_id: org.id,
+    details: { org_name: org.name, admin_email: adminEmail.trim() },
+  });
 
   return json({
     ok: true,

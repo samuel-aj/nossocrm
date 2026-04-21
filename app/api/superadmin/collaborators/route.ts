@@ -1,5 +1,7 @@
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+import { logSuperAdminAction } from '@/lib/security/auditLog';
+import { UserRole } from '@/types/constants';
 
 function json<T>(body: T, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -20,7 +22,7 @@ async function requireSuperAdmin(supabase: Awaited<ReturnType<typeof createClien
     .eq('id', user.id)
     .single();
 
-  if (!profile || profile.role !== 'super_admin') return null;
+  if (!profile || profile.role !== UserRole.SUPER_ADMIN) return null;
   return profile;
 }
 
@@ -39,7 +41,7 @@ export async function GET(req: Request) {
   const { data: superAdmins, error } = await admin
     .from('profiles')
     .select('id, email, name, role, created_at')
-    .eq('role', 'super_admin')
+    .eq('role', UserRole.SUPER_ADMIN)
     .order('created_at', { ascending: true });
 
   if (error) return json({ error: error.message }, 500);
@@ -82,19 +84,28 @@ export async function POST(req: Request) {
     return json({ error: 'Usuário não encontrado com esse email' }, 404);
   }
 
-  if (targetProfile.role === 'super_admin') {
+  if (targetProfile.role === UserRole.SUPER_ADMIN) {
     return json({ error: 'Esse usuário já é Super Admin' }, 400);
   }
 
   // Promote to super_admin
   const { error: updateError } = await admin
     .from('profiles')
-    .update({ role: 'super_admin' })
+    .update({ role: UserRole.SUPER_ADMIN })
     .eq('id', targetProfile.id);
 
   if (updateError) {
     return json({ error: `Erro ao promover: ${updateError.message}` }, 500);
   }
+
+  await logSuperAdminAction(admin, {
+    action: 'superadmin.user.promote',
+    actor_id: me.id,
+    resource_type: 'user',
+    resource_id: targetProfile.id,
+    details: { email: targetProfile.email, previous_role: targetProfile.role },
+    severity: 'critical',
+  });
 
   return json({
     ok: true,
@@ -130,10 +141,18 @@ export async function DELETE(req: Request) {
 
   const { error } = await admin
     .from('profiles')
-    .update({ role: 'admin' })
+    .update({ role: UserRole.ADMIN })
     .eq('id', userId);
 
   if (error) return json({ error: error.message }, 500);
+
+  await logSuperAdminAction(admin, {
+    action: 'superadmin.user.demote',
+    actor_id: me.id,
+    resource_type: 'user',
+    resource_id: userId,
+    severity: 'critical',
+  });
 
   return json({ ok: true });
 }

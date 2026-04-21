@@ -5,6 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { isE164, normalizePhoneE164 } from '@/lib/phone';
 import { Loader2, User, Mail, Shield, Calendar, Key, Check, Eye, EyeOff, Phone, Pencil, Save, Camera, X } from 'lucide-react';
+import { UserRole } from '@/types/constants';
 
 /**
  * Componente React `ProfilePage`.
@@ -386,12 +387,12 @@ export const ProfilePage: React.FC = () => {
                                 </p>
                             )}
                             <div className="flex items-center gap-3 mt-2">
-                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${profile?.role === 'admin' || profile?.role === 'super_admin'
+                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN
                                     ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
                                     : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
                                     }`}>
                                     <Shield className="w-3 h-3" />
-                                    {profile?.role === 'admin' || profile?.role === 'super_admin' ? 'Admin' : 'Vendedor'}
+                                    {profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN ? 'Admin' : 'Vendedor'}
                                 </span>
                             </div>
                         </div>

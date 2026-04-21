@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { UserRole } from '@/types/constants';
 
 type BootstrapInput = {
   supabaseUrl: string;
@@ -94,7 +95,7 @@ export async function bootstrapInstance({
       password,
       email_confirm: true,
       user_metadata: {
-        role: 'admin',
+        role: UserRole.ADMIN,
         organization_id: organizationId,
       },
     });
@@ -114,7 +115,7 @@ export async function bootstrapInstance({
       password,
       email_confirm: true,
       user_metadata: {
-        role: 'admin',
+        role: UserRole.ADMIN,
         organization_id: organizationId,
       },
     });
@@ -136,7 +137,7 @@ export async function bootstrapInstance({
       name: displayName,
       first_name: displayName,
       organization_id: organizationId,
-      role: 'admin',
+      role: UserRole.ADMIN,
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'id' }

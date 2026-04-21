@@ -314,6 +314,7 @@ export const useDealsView = (
           : undefined,
         contactName: deal.contactId ? (contactMap[deal.contactId]?.name || 'Sem Contato') : 'Sem Contato',
         contactEmail: deal.contactId ? (contactMap[deal.contactId]?.email || '') : '',
+        contactPhone: deal.contactId ? (contactMap[deal.contactId]?.phone || '') : '',
         stageLabel: stage?.label || 'Desconhecido',
       };
     });
