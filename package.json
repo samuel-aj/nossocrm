@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
-    "smoke:integrations": "node scripts/smoke-integrations.mjs"
+    "smoke:integrations": "node scripts/smoke-integrations.mjs",
+    "smoke:deals": "node scripts/smoke-deals.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "3.0.1",

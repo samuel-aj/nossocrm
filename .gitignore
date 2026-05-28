@@ -77,8 +77,10 @@ docs/specs/
 docs/stories/
 docs/security/
 
-# Dev/debug scripts (not needed for app to run)
-scripts/
+# Dev/debug scripts (not needed for app to run) — mas mantenha as exceções abaixo versionadas.
+scripts/*
+!scripts/smoke-deals.mjs
+!scripts/smoke-integrations.mjs
 
 # Test documentation (test code stays, docs are local)
 test/*.md
