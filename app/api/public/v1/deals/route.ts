@@ -31,6 +31,7 @@ const DealCreateSchema = z.object({
   probability: z.number().int().min(0).max(100).optional(),
   tags: z.array(z.string().max(100)).max(20).optional(),
   custom_fields: z.record(z.string(), z.unknown()).optional(),
+  external_id: z.string().min(1).max(200).optional(),
 }).strict();
 
 export async function GET(request: Request) {
@@ -195,6 +196,40 @@ export async function POST(request: Request) {
 
   const sb = createStaticAdminClient();
 
+  const externalId = parsed.data.external_id?.trim() || null;
+  if (externalId) {
+    const existing = await sb
+      .from('deals')
+      .select('id,title,description,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at')
+      .eq('organization_id', auth.organizationId)
+      .eq('external_id', externalId)
+      .is('deleted_at', null)
+      .maybeSingle();
+    if (existing.error) return NextResponse.json({ error: existing.error.message, code: 'DB_ERROR' }, { status: 500 });
+    if (existing.data) {
+      const d: any = existing.data;
+      const [boardRes, stageRes] = await Promise.all([
+        d.board_id ? sb.from('boards').select('name,key').eq('id', d.board_id).maybeSingle() : Promise.resolve({ data: null }),
+        d.stage_id ? sb.from('board_stages').select('name,label').eq('id', d.stage_id).maybeSingle() : Promise.resolve({ data: null }),
+      ]);
+      return NextResponse.json({
+        data: {
+          ...d,
+          description: d.description ?? null,
+          value: Number(d.value ?? 0),
+          tags: d.tags ?? [],
+          custom_fields: d.custom_fields ?? {},
+          probability: d.probability ?? 0,
+          priority: d.priority ?? 'medium',
+          board_name: (boardRes.data as any)?.name ?? null,
+          board_key: (boardRes.data as any)?.key ?? null,
+          stage_name: (stageRes.data as any) ? ((stageRes.data as any).label || (stageRes.data as any).name) : null,
+        },
+        action: 'existing',
+      }, { status: 200 });
+    }
+  }
+
   let boardId = sanitizeUUID(parsed.data.board_id);
   if (!boardId && parsed.data.board_key) {
     boardId = await resolveBoardIdFromKey({ organizationId: auth.organizationId, boardKey: parsed.data.board_key });
@@ -242,6 +277,7 @@ export async function POST(request: Request) {
     is_lost: false,
     created_at: now,
     updated_at: now,
+    external_id: externalId,
   };
 
   const { data, error } = await sb
@@ -249,7 +285,35 @@ export async function POST(request: Request) {
     .insert(insertPayload)
     .select('id,title,description,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at')
     .single();
-  if (error) return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
+  if (error) {
+    // Race: another request inserted the same external_id between our check above and this insert.
+    // Return the existing deal so callers stay idempotent.
+    if (externalId && (error as any).code === '23505') {
+      const recovered = await sb
+        .from('deals')
+        .select('id,title,description,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at')
+        .eq('organization_id', auth.organizationId)
+        .eq('external_id', externalId)
+        .is('deleted_at', null)
+        .maybeSingle();
+      if (recovered.data) {
+        const d: any = recovered.data;
+        return NextResponse.json({
+          data: {
+            ...d,
+            description: d.description ?? null,
+            value: Number(d.value ?? 0),
+            tags: d.tags ?? [],
+            custom_fields: d.custom_fields ?? {},
+            probability: d.probability ?? 0,
+            priority: d.priority ?? 'medium',
+          },
+          action: 'existing',
+        }, { status: 200 });
+      }
+    }
+    return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
+  }
 
   const [boardRes, stageRes] = await Promise.all([
     data.board_id ? sb.from('boards').select('name,key').eq('id', data.board_id).maybeSingle() : Promise.resolve({ data: null }),
