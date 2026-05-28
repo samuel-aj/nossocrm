@@ -5,7 +5,12 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase/client'
 import { Building2, Loader2, ChevronRight } from 'lucide-react'
 import { UserRole } from '@/types/constants'
-import { useAuth } from '@/context/AuthContext'
+
+// /select-org NÃO está envolto pelo AuthProvider (que vive só em
+// app/(protected)/layout.tsx e app/(admin)/admin/layout.tsx). Por isso
+// não dá pra usar useAuth aqui — quebra o prerender no build.
+// Para garantir que o menu reflita a org nova, usamos full reload
+// (window.location.href), que reinicializa o AuthProvider no destino.
 
 interface UserOrg {
   organization_id: string
@@ -15,7 +20,6 @@ interface UserOrg {
 
 export default function SelectOrgPage() {
   const router = useRouter()
-  const { refreshProfile } = useAuth()
   const [orgs, setOrgs] = useState<UserOrg[]>([])
   const [loading, setLoading] = useState(true)
   const [switching, setSwitching] = useState<string | null>(null)
@@ -63,16 +67,14 @@ export default function SelectOrgPage() {
       }
 
       if (validOrgs.length === 1) {
-        // Single org — switch silently and go to dashboard
+        // Single org — switch silently and go to dashboard (full reload p/ remontar AuthProvider).
         await fetch('/api/switch-org', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({ organizationId: validOrgs[0].organization_id }),
         })
-        await refreshProfile()
-        router.refresh()
-        router.push('/dashboard')
+        window.location.href = '/dashboard'
         return
       }
 
@@ -93,11 +95,8 @@ export default function SelectOrgPage() {
         credentials: 'include',
         body: JSON.stringify({ organizationId: orgId }),
       })
-      // Atualiza AuthContext (org_name no menu) e invalida cache do router
-      // antes de navegar; sem isso o menu mostra a org antiga até F5.
-      await refreshProfile()
-      router.refresh()
-      router.push('/dashboard')
+      // Full reload p/ remontar AuthProvider com a org nova já no profile.
+      window.location.href = '/dashboard'
     } catch {
       setSwitching(null)
     }
