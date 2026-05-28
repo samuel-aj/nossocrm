@@ -30,6 +30,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import { queryClient } from '@/lib/query';
 import type { OrganizationId } from '../types';
 
 /**
@@ -201,6 +202,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (session?.user) {
                 fetchProfile(session.user.id);
             } else {
+                // Sessão saiu (logout, token expirado, refresh falhou). Garante
+                // que o cache do usuário anterior não permaneça acessível.
+                queryClient.clear();
                 setProfile(null);
                 setLoading(false);
             }
@@ -211,6 +215,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const signOut = async () => {
         if (sb) await sb.auth.signOut();
+        // CRÍTICO: limpa o QueryClient para evitar que dados do usuário anterior
+        // vazem para a sessão seguinte (próximo login sem hard reload mostraria
+        // listas/contadores da sessão anterior até o staleTime expirar).
+        queryClient.clear();
         setProfile(null);
         setUser(null);
         setSession(null);
