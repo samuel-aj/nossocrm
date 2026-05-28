@@ -471,7 +471,15 @@ export function useRealtimeSync(
               // dessincronia: o deal aparecia no Kanban mas sumia em telas que liam o
               // cache raw — e o effect de limpeza de optimistic só liberava o item local
               // quando o staleTime (2min) expirava OU outra invalidação forçava refetch.
-              const insertOrUpdate = <T extends { id?: string; title?: string }>(old: T[] | undefined): T[] | undefined => {
+              //
+              // Critério de dedup de temp deals: antes era só `sameTitle`, o que removia
+              // o temp errado quando o usuário criava dois deals com o mesmo título
+              // (acontecia ao corrigir digitação). Agora exigimos title + boardId +
+              // contactId + temp recente (≤30s) — drasticamente menos colisão.
+              const TEMP_MAX_AGE_MS = 30_000;
+              const incomingBoardId = newData.board_id as string | undefined;
+              const incomingContactId = newData.contact_id as string | undefined;
+              const insertOrUpdate = <T extends { id?: string; title?: string; createdAt?: string; boardId?: string; contactId?: string }>(old: T[] | undefined): T[] | undefined => {
                 if (!old || !Array.isArray(old)) return old;
                 const existingIndex = old.findIndex((d) => d.id === dealId);
                 if (existingIndex !== -1) {
@@ -479,8 +487,22 @@ export function useRealtimeSync(
                 }
                 const tempDealsRemoved = old.filter((d) => {
                   const isTemp = typeof d.id === 'string' && d.id.startsWith('temp-');
+                  if (!isTemp) return true;
                   const sameTitle = d.title === newData.title;
-                  return !(isTemp && sameTitle);
+                  if (!sameTitle) return true;
+                  // Match em board+contact pra reduzir falso-positivo entre temps similares.
+                  const dBoardId = (d as any).boardId ?? (d as any).board_id;
+                  const dContactId = (d as any).contactId ?? (d as any).contact_id;
+                  if (incomingBoardId && dBoardId && dBoardId !== incomingBoardId) return true;
+                  if (incomingContactId && dContactId && dContactId !== incomingContactId) return true;
+                  // Idade: temp velhos (>30s) provavelmente são órfãos de mutation que falhou —
+                  // não dá pra associar com confiança ao INSERT atual, então preserva.
+                  const dCreatedAt = (d as any).createdAt ?? (d as any).created_at;
+                  if (dCreatedAt) {
+                    const ageMs = Date.now() - new Date(dCreatedAt).getTime();
+                    if (Number.isFinite(ageMs) && ageMs > TEMP_MAX_AGE_MS) return true;
+                  }
+                  return false; // é temp deste INSERT — remove
                 });
                 return [normalizedDeal as unknown as T, ...tempDealsRemoved];
               };
