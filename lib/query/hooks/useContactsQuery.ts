@@ -97,6 +97,8 @@ export const useContacts = (filters?: ContactsFilters) => {
       return contacts;
     },
     staleTime: 2 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     enabled: !authLoading && !!user, // Only fetch when auth is ready
   });
 };
@@ -113,6 +115,8 @@ export const useContact = (id: string | undefined) => {
       if (error) throw error;
       return (data || []).find(c => c.id === id) || null;
     },
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     enabled: !authLoading && !!user && !!id,
   });
 };
@@ -129,6 +133,8 @@ export const useContactsByCompany = (clientCompanyId: string) => {
       if (error) throw error;
       return (data || []).filter(c => c.clientCompanyId === clientCompanyId || c.companyId === clientCompanyId);
     },
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     enabled: !authLoading && !!user && !!clientCompanyId,
   });
 };
@@ -145,6 +151,8 @@ export const useLeadContacts = () => {
       if (error) throw error;
       return (data || []).filter(c => c.stage === 'LEAD');
     },
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     enabled: !authLoading && !!user,
   });
 };
@@ -181,6 +189,8 @@ export const useContactsPaginated = (
     },
     placeholderData: keepPreviousData,
     staleTime: 2 * 60 * 1000, // 2 minutes
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     enabled: !authLoading && !!user,
   });
 };
@@ -207,6 +217,8 @@ export const useContactStageCounts = () => {
       return data || {};
     },
     staleTime: 30 * 1000, // 30 seconds - counts can be slightly stale
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     enabled: !authLoading && !!user,
   });
 };
@@ -224,6 +236,8 @@ export const useCompanies = () => {
       return data || [];
     },
     staleTime: 5 * 60 * 1000, // 5 minutes - companies change less frequently
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     enabled: !authLoading && !!user,
   });
 };
