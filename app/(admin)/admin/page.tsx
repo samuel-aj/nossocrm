@@ -277,11 +277,13 @@ export default function AdminPage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      // Atualiza AuthContext (org_name no menu) e invalida cache do router
-      // antes de navegar; sem isso o menu mostra a org antiga até o user dar F5.
-      await refreshProfile()
-      router.refresh()
-      router.push('/')
+      // Full reload p/ remontar o AuthProvider de `(protected)` do zero.
+      // Tentativa anterior com router.refresh + router.push fazia soft nav
+      // entre route groups `(admin)` → `(protected)`, com comportamento
+      // errático (usuário precisava clicar 2x pra navegação completar).
+      // O AuthProvider em `(protected)` faz `fetchProfile` no mount, então
+      // o reload garante que o menu reflete a org nova sem precisar de F5.
+      window.location.href = '/'
     } catch (err: any) {
       addToast(`Erro: ${err.message}`, 'error')
       setSwitchingOrgId(null)

@@ -196,15 +196,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
         });
 
-        const { data: { subscription } } = sb.auth.onAuthStateChange((_event, session) => {
+        const { data: { subscription } } = sb.auth.onAuthStateChange((event, session) => {
             setSession(session);
             setUser(session?.user ?? null);
             if (session?.user) {
                 fetchProfile(session.user.id);
             } else {
-                // Sessão saiu (logout, token expirado, refresh falhou). Garante
-                // que o cache do usuário anterior não permaneça acessível.
-                queryClient.clear();
+                // IMPORTANTE: só limpar o queryClient em SIGNED_OUT explícito.
+                // O Supabase dispara INITIAL_SESSION com session=null toda vez
+                // que o AuthProvider remonta (ex.: navegação entre route groups
+                // `(protected)` ↔ `(admin)`) — limpar o cache nesses momentos
+                // transientes deixava telas (ex.: Kanban) vazias até F5.
+                if (event === 'SIGNED_OUT') {
+                    queryClient.clear();
+                }
                 setProfile(null);
                 setLoading(false);
             }
