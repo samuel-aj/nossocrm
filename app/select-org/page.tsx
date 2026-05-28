@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase/client'
 import { Building2, Loader2, ChevronRight } from 'lucide-react'
 import { UserRole } from '@/types/constants'
+import { useAuth } from '@/context/AuthContext'
 
 interface UserOrg {
   organization_id: string
@@ -14,6 +15,7 @@ interface UserOrg {
 
 export default function SelectOrgPage() {
   const router = useRouter()
+  const { refreshProfile } = useAuth()
   const [orgs, setOrgs] = useState<UserOrg[]>([])
   const [loading, setLoading] = useState(true)
   const [switching, setSwitching] = useState<string | null>(null)
@@ -68,6 +70,8 @@ export default function SelectOrgPage() {
           credentials: 'include',
           body: JSON.stringify({ organizationId: validOrgs[0].organization_id }),
         })
+        await refreshProfile()
+        router.refresh()
         router.push('/dashboard')
         return
       }
@@ -89,7 +93,11 @@ export default function SelectOrgPage() {
         credentials: 'include',
         body: JSON.stringify({ organizationId: orgId }),
       })
-      window.location.href = '/dashboard'
+      // Atualiza AuthContext (org_name no menu) e invalida cache do router
+      // antes de navegar; sem isso o menu mostra a org antiga até F5.
+      await refreshProfile()
+      router.refresh()
+      router.push('/dashboard')
     } catch {
       setSwitching(null)
     }

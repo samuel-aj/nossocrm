@@ -277,8 +277,11 @@ export default function AdminPage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      // Full page reload to clear all module-level org caches
-      window.location.href = '/'
+      // Atualiza AuthContext (org_name no menu) e invalida cache do router
+      // antes de navegar; sem isso o menu mostra a org antiga até o user dar F5.
+      await refreshProfile()
+      router.refresh()
+      router.push('/')
     } catch (err: any) {
       addToast(`Erro: ${err.message}`, 'error')
       setSwitchingOrgId(null)
