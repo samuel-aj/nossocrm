@@ -61,6 +61,7 @@ export const useDeals = (filters?: DealsFilters) => {
     staleTime: 2 * 60 * 1000, // 2 minutes
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+    refetchOnMount: 'always',
     enabled: !authLoading && !!user, // Only fetch when auth is ready
   });
 };
