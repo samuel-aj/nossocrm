@@ -99,6 +99,7 @@ export const useContacts = (filters?: ContactsFilters) => {
     staleTime: 2 * 60 * 1000,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+    refetchOnMount: 'always',
     enabled: !authLoading && !!user, // Only fetch when auth is ready
   });
 };
@@ -135,6 +136,7 @@ export const useContactsByCompany = (clientCompanyId: string) => {
     },
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+    refetchOnMount: 'always',
     enabled: !authLoading && !!user && !!clientCompanyId,
   });
 };
@@ -153,6 +155,7 @@ export const useLeadContacts = () => {
     },
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+    refetchOnMount: 'always',
     enabled: !authLoading && !!user,
   });
 };
@@ -191,6 +194,7 @@ export const useContactsPaginated = (
     staleTime: 2 * 60 * 1000, // 2 minutes
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+    refetchOnMount: 'always',
     enabled: !authLoading && !!user,
   });
 };
@@ -219,6 +223,7 @@ export const useContactStageCounts = () => {
     staleTime: 30 * 1000, // 30 seconds - counts can be slightly stale
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+    refetchOnMount: 'always',
     enabled: !authLoading && !!user,
   });
 };
@@ -238,6 +243,7 @@ export const useCompanies = () => {
     staleTime: 5 * 60 * 1000, // 5 minutes - companies change less frequently
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+    refetchOnMount: 'always',
     enabled: !authLoading && !!user,
   });
 };

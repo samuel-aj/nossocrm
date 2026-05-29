@@ -66,6 +66,9 @@ export const useActivities = (filters?: ActivitiesFilters) => {
     },
     enabled: !authLoading && !!user, // Only fetch when auth is ready
     staleTime: 30 * 1000, // 30 seconds - short staleTime for Realtime updates
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 };
 
@@ -83,6 +86,9 @@ export const useActivitiesByDeal = (dealId: string | undefined) => {
       return sortActivitiesSmart(filtered);
     },
     enabled: !authLoading && !!user && !!dealId,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 };
 
@@ -100,6 +106,9 @@ export const usePendingActivities = () => {
       return sortActivitiesSmart(filtered);
     },
     enabled: !authLoading && !!user,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 };
 
@@ -120,6 +129,9 @@ export const useTodayActivities = () => {
     },
     staleTime: 30 * 1000, // 30 seconds - very fresh for today's view
     enabled: !authLoading && !!user,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 };
 
