@@ -30,13 +30,11 @@ export const useBoards = () => {
     },
     staleTime: 5 * 60 * 1000, // 5 minutes - boards don't change often
     refetchOnWindowFocus: false,
-    // Sempre refetch ao entrar na tela de Boards. Antes era condicional
-    // (só refazia se nunca tinha buscado ou tinha sido invalidado), o que
-    // permitia que cache stale (de outra sessão, outro tab, etc.) ficasse
-    // visível até o usuário invalidar manualmente — sintoma reportado de
-    // "preciso recarregar várias vezes pra aparecer o conteúdo certo".
     refetchOnMount: 'always',
     refetchOnReconnect: false,
+    // Polling de 30s — boards mudam menos que deals, mas se outro user
+    // criar/renomear/excluir board, queremos ver sem F5.
+    refetchInterval: 30_000,
     enabled: !authLoading && !!user, // Only fetch when auth is ready
   });
 };
