@@ -296,7 +296,11 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
           </div>
         </div>
       )}
-      {!activeBoard ? (
+      {boards.length === 0 ? (
+        // Empty state DE VERDADE — não há nenhum board criado para a org.
+        // Antes esse bloco era exibido quando !activeBoard, mas isso causava
+        // falso-positivo durante a janela em que boards já carregaram e o
+        // activeBoardId ainda não foi resolvido pelo useEffect do controller.
         <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
           <div className="w-24 h-24 bg-primary-50 dark:bg-primary-900/20 rounded-full flex items-center justify-center mb-6">
             <span className="text-4xl">🚀</span>
@@ -314,6 +318,12 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
           >
             ✨ Criar meu primeiro Board
           </button>
+        </div>
+      ) : !activeBoard ? (
+        // Transient: boards carregados mas activeBoard ainda não foi escolhido.
+        // Mostra loader em vez de empty state.
+        <div className="h-full">
+          <PageLoader />
         </div>
       ) : (
         <>

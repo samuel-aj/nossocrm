@@ -83,15 +83,23 @@ export const useBoardsController = () => {
     null
   );
 
-  // Set default board when boards load OR when active board doesn't exist anymore
+  // Set active board: prefer persisted choice → defaultBoard → primeiro board carregado.
+  // FIX: antes só selecionava se `defaultBoard` estivesse carregado, deixando
+  // `activeBoardId` null quando a org não tinha nenhum board marcado como default
+  // (caso comum). Com isso o PipelineView renderizava o empty state ("Crie seu
+  // primeiro Board") mesmo havendo boards. Agora também fazemos fallback para
+  // boards[0] quando defaultBoard está ausente.
   useEffect(() => {
-    // Se não há activeBoardId, usa o default
-    if (!activeBoardId && defaultBoard) {
-      setActiveBoardId(defaultBoard.id);
+    if (!activeBoardId) {
+      if (defaultBoard?.id) {
+        setActiveBoardId(defaultBoard.id);
+      } else if (boards.length > 0) {
+        setActiveBoardId(boards[0].id);
+      }
       return;
     }
 
-    // Se o activeBoardId não existe mais nos boards carregados, limpa e usa default
+    // Se o activeBoardId não existe mais nos boards carregados, limpa e usa default/primeiro
     if (activeBoardId && boards.length > 0) {
       const boardExists = boards.some(b => b.id === activeBoardId);
       if (!boardExists) {
