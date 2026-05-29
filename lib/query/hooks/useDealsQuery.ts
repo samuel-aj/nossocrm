@@ -135,6 +135,9 @@ export const useDealsView = (filters?: DealsFilters) => {
     staleTime: 2 * 60 * 1000, // 2 minutes
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+    // Sempre refetch ao montar — garante que mudanças feitas em outras
+    // sessões/tabs apareçam sem o usuário precisar dar F5.
+    refetchOnMount: 'always',
     enabled: !authLoading && !!user, // Only fetch when auth is ready
   });
 };
@@ -212,6 +215,11 @@ export const useDealsByBoard = (boardId: string) => {
     staleTime: 2 * 60 * 1000, // 2 minutes (same as useDealsView)
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+    // Sempre refetch ao entrar no Kanban — sintoma reportado: "preciso
+    // ficar recarregando a página até aparecer os leads". Cache stale de
+    // sessões anteriores agora é descartado sempre que o usuário abre o
+    // board, eliminando a necessidade de F5.
+    refetchOnMount: 'always',
     enabled: !authLoading && !!user && !!boardId && !boardId.startsWith('temp-'),
   });
 };

@@ -29,12 +29,13 @@ export const useBoards = () => {
       return data || [];
     },
     staleTime: 5 * 60 * 1000, // 5 minutes - boards don't change often
-    // Avoid "refetch storms" during UI focus/mount churn (especially in dev/StrictMode).
-    // Updates happen via mutations + optimistic cache updates + explicit invalidations.
     refetchOnWindowFocus: false,
-    // Refetch only when (a) never fetched or (b) explicitly invalidated.
-    // This avoids refetch storms while still preventing "stale forever" on navigation.
-    refetchOnMount: (query) => query.state.dataUpdatedAt === 0 || query.state.isInvalidated,
+    // Sempre refetch ao entrar na tela de Boards. Antes era condicional
+    // (só refazia se nunca tinha buscado ou tinha sido invalidado), o que
+    // permitia que cache stale (de outra sessão, outro tab, etc.) ficasse
+    // visível até o usuário invalidar manualmente — sintoma reportado de
+    // "preciso recarregar várias vezes pra aparecer o conteúdo certo".
+    refetchOnMount: 'always',
     refetchOnReconnect: false,
     enabled: !authLoading && !!user, // Only fetch when auth is ready
   });
@@ -73,11 +74,8 @@ export const useDefaultBoard = () => {
     },
     // Keep it fresh-ish, but allow invalidation to force a refetch when coming back from other pages.
     staleTime: 5 * 60 * 1000,
-    // Same reasoning as `useBoards`: prevent redundant refetches caused by focus/mount churn.
     refetchOnWindowFocus: false,
-    // Critical: when user deleted boards elsewhere (settings), this query might be stale when the boards page mounts.
-    // We want a stale query to refetch on mount so we don't show a deleted board until F5.
-    refetchOnMount: (query) => query.state.dataUpdatedAt === 0 || query.state.isInvalidated,
+    refetchOnMount: 'always',
     refetchOnReconnect: false,
     enabled: !authLoading && !!user, // Only fetch when auth is ready
   });
