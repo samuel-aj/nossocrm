@@ -2,23 +2,15 @@
 
 import { usePathname } from 'next/navigation'
 
-import { QueryProvider } from '@/lib/query'
-import { ToastProvider } from '@/context/ToastContext'
-import { ThemeProvider } from '@/context/ThemeContext'
-import { AuthProvider } from '@/context/AuthContext'
 import { CRMProvider } from '@/context/CRMContext'
 import { AIProvider } from '@/context/AIContext'
 import Layout from '@/components/Layout'
 
 /**
- * Componente React `ProtectedLayout`.
- *
- * @param {{ children: ReactNode; }} {
-    children,
-} - Parâmetro `{
-    children,
-}`.
- * @returns {Element} Retorna um valor do tipo `Element`.
+ * Layout do grupo `(protected)`. Providers globais (Query, Toast, Theme,
+ * Auth) ficam no root (`app/providers.tsx`) — aqui só ficam os providers
+ * específicos da área autenticada do app (CRM, AI) que dependem de auth
+ * já estar resolvido.
  */
 export default function ProtectedLayout({
     children,
@@ -31,19 +23,11 @@ export default function ProtectedLayout({
     const shouldUseAppShell = !isSetupRoute && !isLabsRoute
 
     return (
-        <QueryProvider>
-            <ToastProvider>
-                <ThemeProvider>
-                    <AuthProvider>
-                        <CRMProvider>
-                            <AIProvider>
-                                {shouldUseAppShell ? <Layout>{children}</Layout> : children}
-                            </AIProvider>
-                        </CRMProvider>
-                    </AuthProvider>
-                </ThemeProvider>
-            </ToastProvider>
-        </QueryProvider>
+        <CRMProvider>
+            <AIProvider>
+                {shouldUseAppShell ? <Layout>{children}</Layout> : children}
+            </AIProvider>
+        </CRMProvider>
     )
 }
 

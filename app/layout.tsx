@@ -3,6 +3,7 @@ import { Rubik } from 'next/font/google'
 import './globals.css'
 import { ServiceWorkerRegister } from '@/components/pwa/ServiceWorkerRegister'
 import { InstallBanner } from '@/components/pwa/InstallBanner'
+import RootProviders from './providers'
 
 const rubik = Rubik({ subsets: ['latin'], variable: '--font-sans' })
 
@@ -11,16 +12,6 @@ export const metadata: Metadata = {
   description: 'CRM Inteligente para Gestão de Vendas',
 }
 
-/**
- * Componente React `RootLayout`.
- *
- * @param {{ children: ReactNode; }} {
-  children,
-} - Parâmetro `{
-  children,
-}`.
- * @returns {Element} Retorna um valor do tipo `Element`.
- */
 export default function RootLayout({
   children,
 }: {
@@ -31,7 +22,7 @@ export default function RootLayout({
       <body className={`${rubik.variable} font-sans antialiased bg-[var(--color-bg)] text-[var(--color-text-primary)]`}>
         <ServiceWorkerRegister />
         <InstallBanner />
-        {children}
+        <RootProviders>{children}</RootProviders>
       </body>
     </html>
   )
