@@ -994,7 +994,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                       {customFieldDefinitions.map(field => (
                         <div
                           key={field.id}
-                          className="py-2.5"
+                          className="py-2.5 last:pb-0"
                         >
                           <div className="min-w-0 text-sm">
                             <span className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1" title={field.label}>
