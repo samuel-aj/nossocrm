@@ -20,11 +20,6 @@ export default function RootLayout({
   return (
     <html lang="pt-BR" className="dark" suppressHydrationWarning>
       <body className={`${rubik.variable} font-sans antialiased bg-[var(--color-bg)] text-[var(--color-text-primary)]`}>
-        {/* TEST BANNER — remover depois */}
-        <div className="w-full bg-amber-400 text-black text-center text-sm font-medium py-2 px-4">
-          🚧 Banner de teste — remover depois
-        </div>
-        {/* FIM TEST BANNER */}
         <ServiceWorkerRegister />
         <InstallBanner />
         <RootProviders>{children}</RootProviders>
