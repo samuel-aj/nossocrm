@@ -1078,22 +1078,25 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                                   />
                                 )}
                               </div>
-                            ) : (
-                              <p className="min-w-0 text-sm text-slate-900 dark:text-white break-words">
-                                {(() => {
-                                  const value = deal.customFields?.[field.key];
-                                  const displayValue = getCustomFieldDisplayValue(field.type, value);
-                                  if (!displayValue) {
-                                    return (
-                                      <span className="italic text-slate-500 dark:text-slate-400">
-                                        Campo vazio
-                                      </span>
-                                    );
-                                  }
-                                  return displayValue;
-                                })()}
-                              </p>
-                            )}
+                            ) : (() => {
+                              const value = deal.customFields?.[field.key];
+                              const displayValue = getCustomFieldDisplayValue(field.type, value);
+                              if (!displayValue) {
+                                return (
+                                  <p className="min-w-0 text-sm italic text-slate-500 dark:text-slate-400">
+                                    Campo vazio
+                                  </p>
+                                );
+                              }
+                              return (
+                                <p
+                                  className="min-w-0 truncate text-sm text-slate-900 dark:text-white cursor-default"
+                                  title={String(displayValue)}
+                                >
+                                  {displayValue}
+                                </p>
+                              );
+                            })()}
                           </div>
                         </div>
                       ))}
