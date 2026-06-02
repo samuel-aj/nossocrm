@@ -990,19 +990,19 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                         {isCustomFieldsEditMode ? 'Concluir' : 'Alterar'}
                       </button>
                     </div>
-                    <div className="space-y-2">
+                    <div className="divide-y divide-slate-100 dark:divide-white/5">
                       {customFieldDefinitions.map(field => (
                         <div
                           key={field.id}
-                          className="py-1.5"
+                          className="py-2.5 first:pt-0"
                         >
-                          <div className="flex min-w-0 items-start justify-between gap-3 text-sm">
-                            <span className="min-w-0 flex-1 text-slate-500 whitespace-nowrap truncate" title={field.label}>
+                          <div className="min-w-0 text-sm">
+                            <span className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1" title={field.label}>
                               {field.label}
                             </span>
 
                             {isCustomFieldsEditMode ? (
-                              <div className="w-[50%] min-w-0">
+                              <div className="w-full min-w-0">
                                 {field.type === 'select' ? (
                                   <select
                                     value={customFieldsDraft[field.key] ?? ''}
@@ -1079,7 +1079,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                                 )}
                               </div>
                             ) : (
-                              <p className="min-w-0 w-[50%] text-right text-sm text-slate-900 dark:text-white break-words">
+                              <p className="min-w-0 text-sm text-slate-900 dark:text-white break-words">
                                 {(() => {
                                   const value = deal.customFields?.[field.key];
                                   const displayValue = getCustomFieldDisplayValue(field.type, value);
