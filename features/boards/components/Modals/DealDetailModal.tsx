@@ -250,6 +250,15 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     setDescriptionDraft((cur) => (cur === incoming ? cur : incoming));
   }, [isOpen, deal?.description]);
 
+  // Auto-grow the description textarea so the full text is always visible
+  // (no inner scroll). Re-runs when the draft changes, on open, and on tab switch.
+  useEffect(() => {
+    const el = descriptionTextareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [descriptionDraft, isOpen, activeTab]);
+
   // Apply schedule hint (coming from the Kanban status icon) after the
   // base reset effect above, so the user lands directly on the activities
   // tab with the form open and the type pre-selected. The parent clears
@@ -1238,7 +1247,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                     <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-4 shadow-sm">
                       <textarea
                         ref={descriptionTextareaRef}
-                        className="w-full bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none resize-none min-h-[80px]"
+                        className="w-full bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none resize-none overflow-hidden min-h-[120px]"
                         placeholder="Adicione uma descrição..."
                         value={descriptionDraft}
                         onChange={e => setDescriptionDraft(e.target.value)}
