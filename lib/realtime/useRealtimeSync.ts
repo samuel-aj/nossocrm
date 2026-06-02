@@ -465,6 +465,12 @@ export function useRealtimeSync(
                 normalizedDeal.lossReason = newData.loss_reason;
                 delete normalizedDeal.loss_reason;
               }
+              // Sem isso, o card entra via Realtime sem os campos personalizados
+              // (a UI lê `customFields`) e eles só aparecem no refetch (staleTime ~2min).
+              if (newData.custom_fields !== undefined) {
+                normalizedDeal.customFields = newData.custom_fields ?? {};
+                delete normalizedDeal.custom_fields;
+              }
 
               // Atualizar DEALS_VIEW_KEY (Kanban / useDealsView) E queryKeys.deals.lists()
               // (useDeals / DealsContext). Antes, só o primeiro era atualizado, causando
@@ -598,6 +604,10 @@ export function useRealtimeSync(
                   if (newData.last_stage_change_date !== undefined && newData.lastStageChangeDate === undefined) {
                     normalizedData.lastStageChangeDate = newData.last_stage_change_date;
                     delete normalizedData.last_stage_change_date;
+                  }
+                  if (newData.custom_fields !== undefined && newData.customFields === undefined) {
+                    normalizedData.customFields = newData.custom_fields ?? {};
+                    delete normalizedData.custom_fields;
                   }
 
                   if (idx === -1) {
