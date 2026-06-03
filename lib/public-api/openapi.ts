@@ -23,6 +23,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
       { name: 'Contacts', description: 'Contatos (leads/pessoas)' },
       { name: 'Deals', description: 'Negócios (cards)' },
       { name: 'Activities', description: 'Atividades (nota/tarefa/reunião/ligação)' },
+      { name: 'Catálogo', description: 'Produtos e campos personalizados (IDs/keys para usar em deals)' },
     ],
     components: {
       securitySchemes: {
@@ -151,7 +152,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
             tags: { type: 'array', items: { type: 'string' }, description: 'Tags do deal' },
             custom_fields: { type: 'object', additionalProperties: true, description: 'Campos personalizados (JSONB)' },
             probability: { type: 'integer', minimum: 0, maximum: 100, description: 'Probabilidade de ganho (0-100)' },
-            priority: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Prioridade' },
+            priority: { type: 'string', enum: ['low', 'medium', 'high', 'urgent'], description: 'Prioridade' },
             created_at: { type: 'string' },
             updated_at: { type: 'string' },
           },
@@ -197,6 +198,31 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
             created_at: { type: 'string' },
           },
           required: ['id', 'title', 'description', 'type', 'date', 'completed', 'deal_id', 'contact_id', 'client_company_id', 'created_at'],
+        },
+        Product: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            id: { type: 'string', description: 'UUID do produto (use em product_id ao criar deal)' },
+            name: { type: 'string' },
+            price: { type: 'number' },
+            description: { type: ['string', 'null'] },
+            sku: { type: ['string', 'null'] },
+          },
+          required: ['id', 'name', 'price'],
+        },
+        CustomFieldDefinition: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            id: { type: 'string', description: 'UUID da definição' },
+            key: { type: 'string', description: 'Chave estável — use como chave em custom_fields ao criar deal' },
+            label: { type: 'string' },
+            type: { type: 'string', enum: ['text', 'number', 'date', 'select', 'multiselect', 'currency'] },
+            options: { type: ['array', 'null'], items: { type: 'string' } },
+            entity_type: { type: 'string', description: 'Entidade do campo (ex: deal)' },
+          },
+          required: ['id', 'key', 'label', 'type'],
         },
       },
       responses: {
@@ -265,6 +291,61 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
                         },
                       },
                     },
+                  },
+                },
+              },
+            },
+            401: { $ref: '#/components/responses/Unauthorized' },
+          },
+        },
+      },
+      '/products': {
+        get: {
+          tags: ['Catálogo'],
+          summary: 'Listar produtos do catálogo',
+          description: 'Retorna os produtos ativos da organização. Use o `id` no campo `product_id` ao criar um deal.',
+          security: [{ ApiKeyAuth: [] }],
+          responses: {
+            200: {
+              description: 'OK',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      data: { type: 'array', items: { $ref: '#/components/schemas/Product' } },
+                    },
+                    required: ['data'],
+                  },
+                },
+              },
+            },
+            401: { $ref: '#/components/responses/Unauthorized' },
+          },
+        },
+      },
+      '/custom-fields': {
+        get: {
+          tags: ['Catálogo'],
+          summary: 'Listar campos personalizados',
+          description: 'Retorna as definições de campos personalizados da organização. Use a `key` como chave no objeto `custom_fields` ao criar um deal.',
+          security: [{ ApiKeyAuth: [] }],
+          parameters: [
+            { name: 'entity_type', in: 'query', schema: { type: 'string' }, description: 'Filtra por entidade (ex: deal)' },
+          ],
+          responses: {
+            200: {
+              description: 'OK',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      data: { type: 'array', items: { $ref: '#/components/schemas/CustomFieldDefinition' } },
+                    },
+                    required: ['data'],
                   },
                 },
               },
@@ -614,11 +695,41 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
                     },
                     client_company_id: { type: 'string' },
                     tags: { type: 'array', items: { type: 'string' }, description: 'Tags do deal' },
-                    custom_fields: { type: 'object', additionalProperties: true, description: 'Campos personalizados (ex: {"fonte": "Google", "segmento": "Tech"})' },
+                    custom_fields: { type: 'object', additionalProperties: true, description: 'Campos personalizados, indexados pela KEY do campo (veja GET /custom-fields). Ex: {"motivo_busca": "Revisão de contrato"}' },
                     probability: { type: 'integer', minimum: 0, maximum: 100, description: 'Probabilidade de ganho (0-100)' },
-                    priority: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Prioridade' },
+                    priority: { type: 'string', enum: ['low', 'medium', 'high', 'urgent'], description: 'Prioridade' },
+                    product_id: { type: 'string', description: 'UUID de um produto do catálogo (veja GET /products). Cria o item do deal e, se "value" não for enviado, usa o preço do produto como valor do deal.' },
+                    products: {
+                      type: 'array',
+                      maxItems: 50,
+                      description: 'Vários produtos/itens. Cada item usa product_id do catálogo (nome/preço automáticos) OU name+price manual.',
+                      items: {
+                        type: 'object',
+                        additionalProperties: false,
+                        properties: {
+                          product_id: { type: 'string', description: 'UUID do produto (nome/preço resolvidos do catálogo)' },
+                          name: { type: 'string', maxLength: 200, description: 'Nome do item (item manual, sem product_id)' },
+                          quantity: { type: 'integer', minimum: 1, maximum: 100000, default: 1 },
+                          price: { type: 'number', minimum: 0, description: 'Sobrescreve o preço do catálogo' },
+                        },
+                      },
+                    },
+                    external_id: { type: 'string', description: 'ID externo para idempotência (reenvios com o mesmo external_id retornam o deal existente)' },
                   },
                   required: ['title'],
+                },
+                examples: {
+                  comProduto: {
+                    summary: 'Criar lead com contato + produto + campos',
+                    value: {
+                      title: 'João da Silva',
+                      board_key: 'pre-venda',
+                      contact_id: '00000000-0000-0000-0000-000000000000',
+                      description: 'Veio do Google Ads. Quer revisar contrato de veículo.',
+                      product_id: '11111111-1111-1111-1111-111111111111',
+                      custom_fields: { motivo_busca: 'Revisão de contrato', origem: 'Google Ads' },
+                    },
+                  },
                 },
               },
             },

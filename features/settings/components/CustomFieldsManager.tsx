@@ -1,5 +1,5 @@
-import React from 'react';
-import { PenTool, Pencil, Check, Plus, List, Tag, Trash2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { PenTool, Pencil, Check, Copy, Plus, List, Tag, Trash2 } from 'lucide-react';
 import { SettingsSection } from './SettingsSection';
 import { CustomFieldDefinition, CustomFieldType } from '@/types';
 
@@ -64,6 +64,18 @@ export const CustomFieldsManager: React.FC<CustomFieldsManagerProps> = ({
   onSaveField,
   onRemoveField
 }) => {
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const copyKey = async (key: string) => {
+    try {
+      await navigator.clipboard.writeText(key);
+      setCopiedKey(key);
+      window.setTimeout(() => setCopiedKey((cur) => (cur === key ? null : cur)), 1500);
+    } catch {
+      // Clipboard pode falhar em contextos sem permissão; ignora silenciosamente.
+    }
+  };
+
   return (
     <SettingsSection title="Campos Personalizados" icon={PenTool}>
       <p className="text-sm text-slate-600 dark:text-slate-300 mb-4 leading-relaxed">
@@ -154,7 +166,15 @@ export const CustomFieldsManager: React.FC<CustomFieldsManagerProps> = ({
               <div>
                 <p className="text-sm font-bold text-slate-900 dark:text-white">{field.label}</p>
                 <div className="flex items-center gap-2 text-xs text-slate-500 font-mono mt-0.5">
-                  <span>{field.key}</span>
+                  <button
+                    type="button"
+                    onClick={() => copyKey(field.key)}
+                    title="Copiar a chave (use no campo custom_fields da API/n8n)"
+                    className="inline-flex items-center gap-1 rounded bg-slate-100 dark:bg-white/10 px-1.5 py-0.5 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-slate-200 dark:hover:bg-white/15 transition-colors"
+                  >
+                    {copiedKey === field.key ? <Check size={11} className="text-green-600" /> : <Copy size={11} />}
+                    {copiedKey === field.key ? 'copiado!' : field.key}
+                  </button>
                   <span className="w-1 h-1 bg-slate-300 rounded-full"></span>
                   <span className="uppercase">{{ text: 'texto', number: 'número', date: 'data', select: 'seleção', multiselect: 'múltipla seleção', currency: 'financeiro' }[field.type] || field.type}</span>
                   {field.options && (
