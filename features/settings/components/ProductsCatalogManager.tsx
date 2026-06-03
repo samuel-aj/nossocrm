@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Package, Pencil, Plus, Save, Trash2, ToggleLeft, ToggleRight, X } from 'lucide-react';
+import { Check, Copy, Package, Pencil, Plus, Save, Trash2, ToggleLeft, ToggleRight, X } from 'lucide-react';
 import { productsService } from '@/lib/supabase';
 import type { Product } from '@/types';
 
@@ -19,6 +19,17 @@ export const ProductsCatalogManager: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const copyId = async (id: string) => {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopiedId(id);
+      window.setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 1500);
+    } catch {
+      // Clipboard pode falhar em contextos sem permissão; ignora silenciosamente.
+    }
+  };
 
   const [name, setName] = useState('');
   const [price, setPrice] = useState<string>('0');
@@ -302,6 +313,15 @@ export const ProductsCatalogManager: React.FC = () => {
                           <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
                             {formatBRL(p.price)}{p.sku ? ` • SKU: ${p.sku}` : ''}{p.description ? ` • ${p.description}` : ''}
                           </div>
+                          <button
+                            type="button"
+                            onClick={() => copyId(p.id)}
+                            title="Copiar ID do produto (use no campo product_id da API/n8n)"
+                            className="mt-1 inline-flex max-w-full items-center gap-1.5 rounded-md bg-slate-100 dark:bg-white/10 px-2 py-0.5 font-mono text-[11px] text-slate-500 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-slate-200 dark:hover:bg-white/15 transition-colors"
+                          >
+                            {copiedId === p.id ? <Check className="h-3 w-3 shrink-0 text-green-600" /> : <Copy className="h-3 w-3 shrink-0" />}
+                            <span className="truncate">{copiedId === p.id ? 'ID copiado!' : `ID: ${p.id}`}</span>
+                          </button>
                         </>
                       )}
                     </div>

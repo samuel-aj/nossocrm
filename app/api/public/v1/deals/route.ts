@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { authPublicApi } from '@/lib/public-api/auth';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { decodeOffsetCursor, encodeOffsetCursor, parseLimit } from '@/lib/public-api/cursor';
-import { resolveBoardIdFromKey, resolveFirstStageId } from '@/lib/public-api/resolve';
+import { resolveBoardId, resolveBoardIdFromKey, resolveFirstStageId } from '@/lib/public-api/resolve';
 import { normalizeEmail, normalizePhone, normalizeText } from '@/lib/public-api/sanitize';
 import { isValidUUID, sanitizeUUID } from '@/lib/supabase/utils';
 
@@ -32,6 +32,17 @@ const DealCreateSchema = z.object({
   tags: z.array(z.string().max(100)).max(20).optional(),
   custom_fields: z.record(z.string(), z.unknown()).optional(),
   external_id: z.string().min(1).max(200).optional(),
+  // Produto(s) do deal — criados como deal_items na mesma chamada (dispensa /deals/{id}/items).
+  // `product_id`: atalho para 1 produto do catálogo (nome e preço resolvidos automaticamente).
+  product_id: z.string().uuid().optional(),
+  // `products`: lista para múltiplos itens. Cada item usa um product_id do catálogo
+  // (nome/preço automáticos) OU um name+price manual.
+  products: z.array(z.object({
+    product_id: z.string().uuid().optional(),
+    name: z.string().min(1).max(200).optional(),
+    quantity: z.number().int().min(1).max(100000).optional(),
+    price: z.number().min(0).optional(),
+  }).strict()).max(50).optional(),
 }).strict();
 
 export async function GET(request: Request) {
@@ -90,10 +101,10 @@ export async function GET(request: Request) {
   const stageIds = Array.from(new Set(rows.map((d: any) => d.stage_id).filter(Boolean)));
   const [boardsRes, stagesRes] = await Promise.all([
     boardIds.length
-      ? sb.from('boards').select('id,name,key').in('id', boardIds as string[])
+      ? sb.from('boards').select('id,name,key').eq('organization_id', auth.organizationId).in('id', boardIds as string[])
       : Promise.resolve({ data: [] as { id: string; name: string; key: string | null }[] }),
     stageIds.length
-      ? sb.from('board_stages').select('id,name,label').in('id', stageIds as string[])
+      ? sb.from('board_stages').select('id,name,label').eq('organization_id', auth.organizationId).in('id', stageIds as string[])
       : Promise.resolve({ data: [] as { id: string; name: string; label: string | null }[] }),
   ]);
   const boardNameById = new Map((boardsRes.data || []).map((b: any) => [b.id, b.name as string]));
@@ -208,9 +219,10 @@ export async function POST(request: Request) {
     if (existing.error) return NextResponse.json({ error: existing.error.message, code: 'DB_ERROR' }, { status: 500 });
     if (existing.data) {
       const d: any = existing.data;
-      const [boardRes, stageRes] = await Promise.all([
-        d.board_id ? sb.from('boards').select('name,key').eq('id', d.board_id).maybeSingle() : Promise.resolve({ data: null }),
-        d.stage_id ? sb.from('board_stages').select('name,label').eq('id', d.stage_id).maybeSingle() : Promise.resolve({ data: null }),
+      const [boardRes, stageRes, itemsRes] = await Promise.all([
+        d.board_id ? sb.from('boards').select('name,key').eq('organization_id', auth.organizationId).eq('id', d.board_id).maybeSingle() : Promise.resolve({ data: null }),
+        d.stage_id ? sb.from('board_stages').select('name,label').eq('organization_id', auth.organizationId).eq('id', d.stage_id).maybeSingle() : Promise.resolve({ data: null }),
+        sb.from('deal_items').select('id,product_id,name,quantity,price,created_at').eq('organization_id', auth.organizationId).eq('deal_id', d.id),
       ]);
       return NextResponse.json({
         data: {
@@ -224,30 +236,59 @@ export async function POST(request: Request) {
           board_name: (boardRes.data as any)?.name ?? null,
           board_key: (boardRes.data as any)?.key ?? null,
           stage_name: (stageRes.data as any) ? ((stageRes.data as any).label || (stageRes.data as any).name) : null,
+          items: ((itemsRes as any).data || []).map((i: any) => ({ ...i, price: Number(i.price ?? 0) })),
         },
         action: 'existing',
       }, { status: 200 });
     }
   }
 
-  let boardId = sanitizeUUID(parsed.data.board_id);
-  if (!boardId && parsed.data.board_key) {
-    boardId = await resolveBoardIdFromKey({ organizationId: auth.organizationId, boardKey: parsed.data.board_key });
-  }
-  if (!boardId) {
+  // board: aceita board_id (UUID) ou board_key; resolveBoardId valida que pertence à org (senão null → 422).
+  const boardInput = sanitizeUUID(parsed.data.board_id) || parsed.data.board_key?.trim();
+  if (!boardInput) {
     return NextResponse.json({ error: 'Provide board_id or board_key', code: 'VALIDATION_ERROR' }, { status: 422 });
   }
+  const boardId = await resolveBoardId({ organizationId: auth.organizationId, boardKeyOrId: boardInput });
+  if (!boardId) {
+    return NextResponse.json({ error: 'board não encontrado nesta organização', code: 'BOARD_NOT_FOUND' }, { status: 422 });
+  }
 
+  // stage: se enviado, precisa pertencer à org E ao board; senão usa o primeiro estágio (já org-scoped).
   let stageId = sanitizeUUID(parsed.data.stage_id);
-  if (!stageId) {
+  if (stageId) {
+    const { data: stageRow, error: stageErr } = await sb
+      .from('board_stages')
+      .select('id')
+      .eq('id', stageId)
+      .eq('organization_id', auth.organizationId)
+      .eq('board_id', boardId)
+      .maybeSingle();
+    if (stageErr) return NextResponse.json({ error: stageErr.message, code: 'DB_ERROR' }, { status: 500 });
+    if (!stageRow) {
+      return NextResponse.json({ error: 'stage_id não pertence a esta organização/board', code: 'STAGE_NOT_FOUND' }, { status: 422 });
+    }
+  } else {
     stageId = await resolveFirstStageId({ organizationId: auth.organizationId, boardId });
   }
   if (!stageId) {
     return NextResponse.json({ error: 'No stages found for board', code: 'VALIDATION_ERROR' }, { status: 422 });
   }
 
+  // contact: se contact_id enviado, precisa pertencer à org; senão upsert inline (já org-scoped).
   let contactId = sanitizeUUID(parsed.data.contact_id);
-  if (!contactId && parsed.data.contact) {
+  if (contactId) {
+    const { data: contactRow, error: contactErr } = await sb
+      .from('contacts')
+      .select('id')
+      .eq('id', contactId)
+      .eq('organization_id', auth.organizationId)
+      .is('deleted_at', null)
+      .maybeSingle();
+    if (contactErr) return NextResponse.json({ error: contactErr.message, code: 'DB_ERROR' }, { status: 500 });
+    if (!contactRow) {
+      return NextResponse.json({ error: 'contact_id não pertence a esta organização', code: 'CONTACT_NOT_FOUND' }, { status: 422 });
+    }
+  } else if (parsed.data.contact) {
     try {
       contactId = await upsertContactForDeal({ organizationId: auth.organizationId, contact: parsed.data.contact });
     } catch (e: any) {
@@ -258,8 +299,69 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Provide contact_id or contact', code: 'VALIDATION_ERROR' }, { status: 422 });
   }
 
+  // client_company_id (opcional): se enviado, precisa pertencer à org.
+  const clientCompanyId = sanitizeUUID(parsed.data.client_company_id) || null;
+  if (clientCompanyId) {
+    const { data: companyRow, error: companyErr } = await sb
+      .from('crm_companies')
+      .select('id')
+      .eq('id', clientCompanyId)
+      .eq('organization_id', auth.organizationId)
+      .is('deleted_at', null)
+      .maybeSingle();
+    if (companyErr) return NextResponse.json({ error: companyErr.message, code: 'DB_ERROR' }, { status: 500 });
+    if (!companyRow) {
+      return NextResponse.json({ error: 'client_company_id não pertence a esta organização', code: 'COMPANY_NOT_FOUND' }, { status: 422 });
+    }
+  }
+
+  // Resolve produto(s) → itens do deal. Aceita `product_id` (atalho p/ 1 produto) e/ou `products[]`.
+  // Para product_id do catálogo, nome e preço são preenchidos automaticamente — a integração só envia o ID.
+  type ResolvedItem = { product_id: string | null; name: string; quantity: number; price: number };
+  const rawItems: Array<{ product_id?: string; name?: string; quantity?: number; price?: number }> = [];
+  if (parsed.data.product_id) rawItems.push({ product_id: parsed.data.product_id });
+  if (parsed.data.products?.length) rawItems.push(...parsed.data.products);
+
+  let resolvedItems: ResolvedItem[] = [];
+  if (rawItems.length) {
+    const productIds = Array.from(
+      new Set(rawItems.map((i) => sanitizeUUID(i.product_id)).filter(Boolean) as string[])
+    );
+    const productMap = new Map<string, { name: string; price: number }>();
+    if (productIds.length) {
+      const { data: prods, error: prodErr } = await sb
+        .from('products')
+        .select('id,name,price')
+        .eq('organization_id', auth.organizationId)
+        .in('id', productIds);
+      if (prodErr) return NextResponse.json({ error: prodErr.message, code: 'DB_ERROR' }, { status: 500 });
+      for (const p of prods || []) {
+        productMap.set(p.id as string, { name: p.name as string, price: Number((p as any).price ?? 0) });
+      }
+      // Falha clara se um product_id não pertence a esta organização — evita criar deal com produto errado.
+      const missing = productIds.find((id) => !productMap.has(id));
+      if (missing) {
+        return NextResponse.json({ error: `Produto não encontrado nesta organização: ${missing}`, code: 'PRODUCT_NOT_FOUND' }, { status: 422 });
+      }
+    }
+    resolvedItems = rawItems.map((i) => {
+      const pid = sanitizeUUID(i.product_id) || null;
+      const prod = pid ? productMap.get(pid) : null;
+      const name = (i.name?.trim() || prod?.name || '').trim();
+      const price = i.price != null ? Number(i.price) : prod ? prod.price : 0;
+      const quantity = i.quantity ?? 1;
+      return { product_id: pid, name, quantity, price };
+    });
+    // Cada item precisa de um nome (vindo do catálogo via product_id, ou enviado manualmente).
+    if (resolvedItems.some((it) => !it.name)) {
+      return NextResponse.json({ error: 'Cada produto precisa de product_id (do catálogo) ou name', code: 'VALIDATION_ERROR' }, { status: 422 });
+    }
+  }
+
   const now = new Date().toISOString();
-  const value = Number(parsed.data.value ?? 0);
+  // Valor do deal: usa o enviado; senão soma os itens (preço × quantidade); senão 0.
+  const itemsTotal = resolvedItems.reduce((sum, it) => sum + it.price * it.quantity, 0);
+  const value = parsed.data.value != null ? Number(parsed.data.value) : (resolvedItems.length ? itemsTotal : 0);
   const insertPayload: any = {
     organization_id: auth.organizationId,
     title: parsed.data.title.trim(),
@@ -268,7 +370,7 @@ export async function POST(request: Request) {
     board_id: boardId,
     stage_id: stageId,
     contact_id: contactId,
-    client_company_id: sanitizeUUID(parsed.data.client_company_id) || null,
+    client_company_id: clientCompanyId,
     priority: parsed.data.priority ?? 'medium',
     probability: parsed.data.probability ?? 0,
     tags: parsed.data.tags ?? [],
@@ -298,6 +400,11 @@ export async function POST(request: Request) {
         .maybeSingle();
       if (recovered.data) {
         const d: any = recovered.data;
+        const recoveredItems = await sb
+          .from('deal_items')
+          .select('id,product_id,name,quantity,price,created_at')
+          .eq('organization_id', auth.organizationId)
+          .eq('deal_id', d.id);
         return NextResponse.json({
           data: {
             ...d,
@@ -307,6 +414,7 @@ export async function POST(request: Request) {
             custom_fields: d.custom_fields ?? {},
             probability: d.probability ?? 0,
             priority: d.priority ?? 'medium',
+            items: ((recoveredItems as any).data || []).map((i: any) => ({ ...i, price: Number(i.price ?? 0) })),
           },
           action: 'existing',
         }, { status: 200 });
@@ -315,9 +423,29 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
   }
 
+  // Cria os itens (produtos) do deal na mesma chamada — dispensa o node /deals/{id}/items.
+  let createdItems: any[] = [];
+  if (resolvedItems.length) {
+    const { data: itemsData, error: itemsErr } = await sb
+      .from('deal_items')
+      .insert(resolvedItems.map((it) => ({
+        deal_id: data.id,
+        organization_id: auth.organizationId,
+        name: it.name,
+        quantity: it.quantity,
+        price: it.price,
+        product_id: it.product_id,
+      })))
+      .select('id,product_id,name,quantity,price,created_at');
+    // O deal já foi criado; se os itens falharem não derrubamos o lead (retornamos o deal mesmo assim).
+    if (!itemsErr && itemsData) {
+      createdItems = itemsData.map((i: any) => ({ ...i, price: Number(i.price ?? 0) }));
+    }
+  }
+
   const [boardRes, stageRes] = await Promise.all([
-    data.board_id ? sb.from('boards').select('name,key').eq('id', data.board_id).maybeSingle() : Promise.resolve({ data: null }),
-    data.stage_id ? sb.from('board_stages').select('name,label').eq('id', data.stage_id).maybeSingle() : Promise.resolve({ data: null }),
+    data.board_id ? sb.from('boards').select('name,key').eq('organization_id', auth.organizationId).eq('id', data.board_id).maybeSingle() : Promise.resolve({ data: null }),
+    data.stage_id ? sb.from('board_stages').select('name,label').eq('organization_id', auth.organizationId).eq('id', data.stage_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   const boardName = (boardRes.data as any)?.name ?? null;
   const boardKey = (boardRes.data as any)?.key ?? null;
@@ -335,6 +463,7 @@ export async function POST(request: Request) {
       board_name: boardName,
       board_key: boardKey,
       stage_name: stageName,
+      items: createdItems,
     },
     action: 'created',
   }, { status: 201 });
