@@ -21,6 +21,10 @@ const InlineActivitySchema = z.object({
 const DealPatchSchema = z.object({
   title: z.string().optional(),
   description: z.string().nullable().optional(),
+  // Append-to-existing description (mirrors tags_add) — lets integrations add a
+  // line without a GET-merge-PATCH round-trip. Mutually exclusive with
+  // `description` (replace).
+  description_append: z.string().optional(),
   value: z.number().optional(),
   contact_id: z.string().uuid().optional(),
   client_company_id: z.string().uuid().nullable().optional(),
@@ -48,6 +52,9 @@ const DealPatchSchema = z.object({
 ).refine(
   (v) => !(v.custom_fields !== undefined && v.custom_fields_patch !== undefined),
   { message: 'Use either `custom_fields` (replace) OR `custom_fields_patch` (merge), not both.' }
+).refine(
+  (v) => !(v.description !== undefined && v.description_append !== undefined),
+  { message: 'Use either `description` (replace) OR `description_append` (append), not both.' }
 );
 
 export async function GET(request: Request, ctx: { params: Promise<{ dealId: string }> }) {
@@ -126,7 +133,7 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
   // for incremental semantics.
   const { data: current, error: currentError } = await sb
     .from('deals')
-    .select('id,tags,custom_fields')
+    .select('id,description,tags,custom_fields')
     .eq('organization_id', auth.organizationId)
     .eq('id', dealId)
     .is('deleted_at', null)
@@ -144,6 +151,14 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
   if (parsed.data.title !== undefined) updates.title = normalizeText(parsed.data.title);
   if (parsed.data.description !== undefined) {
     updates.description = parsed.data.description === null ? null : (parsed.data.description.trim() || null);
+  } else if (parsed.data.description_append !== undefined) {
+    // Append onto the current description (newline-separated). A blank/whitespace
+    // addition is a no-op so we never dirty the field for nothing.
+    const addition = parsed.data.description_append.trim();
+    if (addition) {
+      const cur = typeof current.description === 'string' ? current.description.trim() : '';
+      updates.description = cur ? `${cur}\n${addition}` : addition;
+    }
   }
   if (parsed.data.value !== undefined) updates.value = Number(parsed.data.value ?? 0);
   if (parsed.data.contact_id !== undefined) updates.contact_id = sanitizeUUID(parsed.data.contact_id);

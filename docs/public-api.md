@@ -41,7 +41,7 @@ Todas as chamadas usam:
   - `GET /api/public/v1/deals`
   - `POST /api/public/v1/deals`
   - `GET /api/public/v1/deals/{dealId}`
-  - `PATCH /api/public/v1/deals/{dealId}`
+  - `PATCH /api/public/v1/deals/{dealId}` — atualização unificada numa só chamada: muda etapa (`to_stage_id`/`to_stage_label`/`mark`), tags (`tags` ou `tags_add`/`tags_remove`), descrição (`description` substitui ou `description_append` anexa), `custom_fields`/`custom_fields_patch`, e cria `activity` inline
   - `POST /api/public/v1/deals/{dealId}/move-stage`
   - `POST /api/public/v1/deals/{dealId}/mark-won`
   - `POST /api/public/v1/deals/{dealId}/mark-lost`

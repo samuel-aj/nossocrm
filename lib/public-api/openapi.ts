@@ -754,9 +754,61 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
         patch: {
           tags: ['Deals'],
           summary: 'Atualizar deal',
+          description:
+            'Atualização parcial (tudo opcional). Permite mudar etapa, tags e descrição numa única chamada — sem precisar de um POST /move-stage separado.',
           security: [{ ApiKeyAuth: [] }],
           parameters: [{ name: 'dealId', in: 'path', required: true, schema: { type: 'string' } }],
-          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object' } } } },
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    title: { type: 'string' },
+                    description: { type: 'string', nullable: true, description: 'Substitui a descrição (null limpa)' },
+                    description_append: { type: 'string', description: 'Anexa este texto à descrição atual (nova linha). Exclusivo com description.' },
+                    value: { type: 'number', description: 'Ignorado quando o valor é calculado por produtos' },
+                    contact_id: { type: 'string', description: 'UUID do contato' },
+                    client_company_id: { type: 'string', nullable: true },
+                    loss_reason: { type: 'string', nullable: true },
+                    tags: { type: 'array', items: { type: 'string' }, description: 'Substitui todas as tags' },
+                    tags_add: { type: 'array', items: { type: 'string' }, description: 'Adiciona tags (dedup). Exclusivo com tags.' },
+                    tags_remove: { type: 'array', items: { type: 'string' }, description: 'Remove tags. Exclusivo com tags.' },
+                    custom_fields: { type: 'object', additionalProperties: true, description: 'Substitui todos os campos personalizados (pela KEY)' },
+                    custom_fields_patch: { type: 'object', additionalProperties: true, description: 'Mescla campos; valor null remove a key. Exclusivo com custom_fields.' },
+                    probability: { type: 'integer', minimum: 0, maximum: 100 },
+                    priority: { type: 'string', enum: ['low', 'medium', 'high'] },
+                    to_stage_id: { type: 'string', description: 'UUID do estágio de destino (move a etapa)' },
+                    to_stage_label: { type: 'string', description: 'Label do estágio de destino (alternativa ao id)' },
+                    mark: { type: 'string', enum: ['won', 'lost'], description: 'Marca como ganho/perdido' },
+                    activity: {
+                      type: 'object',
+                      additionalProperties: false,
+                      description: 'Cria uma atividade ligada a este deal na mesma chamada',
+                      properties: {
+                        type: { type: 'string' },
+                        title: { type: 'string' },
+                        description: { type: 'string' },
+                        date: { type: 'string', description: 'ISO; default = agora' },
+                      },
+                      required: ['type', 'title'],
+                    },
+                  },
+                },
+                examples: {
+                  qualificar: {
+                    summary: 'Mover etapa + anexar descrição + adicionar tag (1 chamada)',
+                    value: { to_stage_id: '00000000-0000-0000-0000-000000000000', description_append: 'Cliente enviou documentos.', tags_add: ['em-qualificacao'] },
+                  },
+                  editarCampos: {
+                    value: { title: 'Maria Silva', priority: 'high', custom_fields_patch: { origem: 'Meta Ads' } },
+                  },
+                },
+              },
+            },
+          },
           responses: { 200: { description: 'OK', content: { 'application/json': { schema: { type: 'object' } } } }, 401: { $ref: '#/components/responses/Unauthorized' } },
         },
       },
