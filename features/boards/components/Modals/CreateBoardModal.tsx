@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useId } from 'react';
-import { Plus, GripVertical, Trash2, ChevronDown, Settings, Copy } from 'lucide-react';
+import { Plus, GripVertical, Trash2, ChevronDown, Settings, Copy, Check } from 'lucide-react';
 import { Board, BoardStage, ContactStage } from '@/types';
 import { BOARD_TEMPLATES, BoardTemplateType } from '@/lib/templates/board-templates';
 import { LifecycleSettingsModal } from '@/features/settings/components/LifecycleSettingsModal';
@@ -136,6 +136,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
   const [isLifecycleModalOpen, setIsLifecycleModalOpen] = useState(false);
   const [draggingStageId, setDraggingStageId] = useState<string | null>(null);
   const [dragOverStageId, setDragOverStageId] = useState<string | null>(null);
+  const [copiedStageId, setCopiedStageId] = useState<string | null>(null);
 
   React.useEffect(() => {
     if (isOpen) {
@@ -215,6 +216,16 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
       label: `Etapa ${stages.length + 1}`,
       color: STAGE_COLORS[colorIndex]
     }]);
+  };
+
+  const copyStageId = async (id: string) => {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopiedStageId(id);
+      window.setTimeout(() => setCopiedStageId((cur) => (cur === id ? null : cur)), 1500);
+    } catch {
+      // clipboard pode falhar sem permissão/HTTPS; ignorar silenciosamente
+    }
   };
 
   const handleRemoveStage = (id: string) => {
@@ -722,6 +733,21 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                           <Trash2 size={18} />
                         </button>
                       </div>
+
+                      {/* Copiar ID do estágio (use em to_stage_id da API/n8n) */}
+                      {editingBoard ? (
+                        <div className="pl-9 mb-3">
+                          <button
+                            type="button"
+                            onClick={() => copyStageId(stage.id)}
+                            title="Copiar ID do estágio (use no to_stage_id da API/n8n)"
+                            className="inline-flex max-w-full items-center gap-1.5 rounded-md bg-slate-100 dark:bg-white/10 px-2 py-0.5 font-mono text-[11px] text-slate-500 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-slate-200 dark:hover:bg-white/15 transition-colors"
+                          >
+                            {copiedStageId === stage.id ? <Check className="h-3 w-3 shrink-0 text-green-600" /> : <Copy className="h-3 w-3 shrink-0" />}
+                            <span className="truncate">{copiedStageId === stage.id ? 'ID copiado!' : `ID: ${stage.id}`}</span>
+                          </button>
+                        </div>
+                      ) : null}
 
                       {/* Lifecycle Automation */}
                       <div className="pl-9">
