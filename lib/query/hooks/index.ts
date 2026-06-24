@@ -83,6 +83,7 @@ export {
 // Suggestions / Feedback (beta)
 export {
   useSuggestions,
+  useSuggestionsCount,
   useCreateSuggestion,
   useVoteSuggestion,
   useDeleteSuggestion,

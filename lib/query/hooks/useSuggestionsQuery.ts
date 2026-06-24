@@ -38,6 +38,25 @@ export const useSuggestions = () => {
   });
 };
 
+/**
+ * Contagem global de sugestões (só o número) — para usuários que NÃO são
+ * super_admin, como incentivo. Não busca para super_admin (que vê a lista).
+ */
+export const useSuggestionsCount = () => {
+  const { user, profile, loading: authLoading } = useAuth();
+  const isSuperAdmin = profile?.role === 'super_admin';
+  return useQuery({
+    queryKey: [...queryKeys.suggestions.all, 'count'] as const,
+    queryFn: async () => {
+      const json = await fetchJson('/api/suggestions/count');
+      return (json as { count?: number }).count ?? 0;
+    },
+    enabled: !authLoading && !!user && !isSuperAdmin,
+    staleTime: 30 * 1000,
+    refetchOnWindowFocus: false,
+  });
+};
+
 export const useCreateSuggestion = () => {
   const queryClient = useQueryClient();
   return useMutation({

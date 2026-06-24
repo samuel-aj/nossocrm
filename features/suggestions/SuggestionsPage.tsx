@@ -2,18 +2,20 @@
 
 import { Lightbulb } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
-import { useSuggestions } from '@/lib/query/hooks';
+import { useSuggestions, useSuggestionsCount } from '@/lib/query/hooks';
 import { SuggestionForm } from './components/SuggestionForm';
 import { SuggestionList } from './components/SuggestionList';
 
 /**
  * Página de Sugestões/Feedback (beta): QUALQUER usuário logado pode enviar uma
- * sugestão. A LISTA global (de todas as organizações) só aparece para super_admin.
+ * sugestão. A LISTA global (de todas as organizações) só aparece para super_admin;
+ * os demais veem apenas o contador de quantas já foram enviadas.
  */
 export function SuggestionsPage() {
   const { profile } = useAuth();
   const isSuperAdmin = profile?.role === 'super_admin';
   const { data: suggestions = [], isLoading } = useSuggestions();
+  const { data: count = 0 } = useSuggestionsCount();
 
   return (
     <div className="space-y-6 p-6 sm:p-8 max-w-3xl mx-auto">
@@ -32,9 +34,12 @@ export function SuggestionsPage() {
       {isSuperAdmin ? (
         <SuggestionList suggestions={suggestions} isLoading={isLoading} />
       ) : (
-        <p className="rounded-xl border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400 dark:border-white/10">
-          Obrigado! Sua sugestão vai direto para a equipe. 💜
-        </p>
+        <div className="rounded-xl border border-dashed border-slate-200 py-8 text-center dark:border-white/10">
+          <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
+            💡 {count} {count === 1 ? 'sugestão já enviada' : 'sugestões já enviadas'}
+          </p>
+          <p className="mt-1 text-xs text-slate-400">Obrigado por contribuir! 💜</p>
+        </div>
       )}
     </div>
   );

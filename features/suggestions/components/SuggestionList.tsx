@@ -19,7 +19,7 @@ export function SuggestionList({
   if (!suggestions.length) {
     return (
       <div className="rounded-xl border border-dashed border-slate-200 py-10 text-center text-sm text-slate-400 dark:border-white/10">
-        Nenhuma sugestão ainda. Seja o primeiro! 🚀
+        Nenhuma sugestão recebida ainda.
       </div>
     );
   }
