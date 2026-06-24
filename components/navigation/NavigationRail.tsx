@@ -13,6 +13,7 @@ export interface NavigationRailProps {
 export function NavigationRail({ onOpenMore }: NavigationRailProps) {
   const pathname = usePathname();
   const { profile } = useAuth();
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
   const officeName = profile?.organization_name || 'NossoCRM';
   const officeInitials = officeName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase() || 'AJ';
 
@@ -66,7 +67,7 @@ export function NavigationRail({ onOpenMore }: NavigationRailProps) {
         <div className="my-3 h-px bg-slate-200/60 dark:bg-white/10" />
 
         <div className="space-y-2">
-          {SECONDARY_NAV.map((item) => {
+          {SECONDARY_NAV.filter((item) => !item.adminOnly || isAdmin).map((item) => {
             const Icon = item.icon;
             const isActive = isHrefActive(item.href);
             return (

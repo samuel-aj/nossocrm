@@ -2,6 +2,7 @@ import React from 'react';
 import Link from 'next/link';
 import { ActionSheet } from '@/components/ui/ActionSheet';
 import { cn } from '@/lib/utils/cn';
+import { useAuth } from '@/context/AuthContext';
 import { SECONDARY_NAV } from './navConfig';
 
 export interface MoreMenuSheetProps {
@@ -10,10 +11,12 @@ export interface MoreMenuSheetProps {
 }
 
 export function MoreMenuSheet({ isOpen, onClose }: MoreMenuSheetProps) {
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
   return (
     <ActionSheet isOpen={isOpen} onClose={onClose} title="Mais" description="Acesse outras áreas do CRM">
       <div className="space-y-2">
-        {SECONDARY_NAV.map((item) => {
+        {SECONDARY_NAV.filter((item) => !item.adminOnly || isAdmin).map((item) => {
           const Icon = item.icon;
           return (
             <Link

@@ -42,6 +42,7 @@ function displayName(p: { first_name?: string | null; last_name?: string | null;
 export async function GET() {
   const auth = await getAuthedProfile();
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  if (auth.profile.role !== 'admin' && auth.profile.role !== 'super_admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const sb = createStaticAdminClient();
   let query = sb
@@ -93,6 +94,7 @@ export async function POST(req: Request) {
 
   const auth = await getAuthedProfile();
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  if (auth.profile.role !== 'admin' && auth.profile.role !== 'super_admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json().catch(() => null);
   const parsed = CreateSchema.safeParse(body);

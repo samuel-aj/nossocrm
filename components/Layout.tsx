@@ -155,6 +155,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const isDesktop = mode === 'desktop';
   const officeName = profile?.organization_name || 'NossoCRM';
   const officeInitials = officeName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase() || 'AJ';
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   // Hydration safety: `isDebugMode()` reads localStorage. On SSR it is always false.
@@ -282,7 +283,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             { to: '/reports', icon: BarChart3, label: 'Relatórios', prefetch: 'reports' as const },
             { to: '/settings', icon: Settings, label: 'Configurações', prefetch: 'settings' as const },
             { to: '/suggestions', icon: Lightbulb, label: 'Sugestões', prefetch: 'suggestions' as const },
-          ].map((item) => {
+          ].filter((item) => item.to !== '/suggestions' || isAdmin).map((item) => {
             if (sidebarCollapsed) {
               return (
                 <Link

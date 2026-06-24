@@ -47,6 +47,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   const { id } = await ctx.params;
   if (!isValidUUID(id)) return NextResponse.json({ error: 'Invalid id' }, { status: 422 });
+  if (auth.profile.role !== 'admin' && auth.profile.role !== 'super_admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const sb = createStaticAdminClient();
   const visible = await assertVisibleSuggestion(sb, id, auth.profile);
@@ -72,6 +73,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
 
   const { id } = await ctx.params;
   if (!isValidUUID(id)) return NextResponse.json({ error: 'Invalid id' }, { status: 422 });
+  if (auth.profile.role !== 'admin' && auth.profile.role !== 'super_admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const sb = createStaticAdminClient();
   const { error } = await sb
