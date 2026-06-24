@@ -20,8 +20,7 @@ export function SuggestionsPage() {
           Sugestões
         </h1>
         <p className="text-sm text-slate-500 dark:text-slate-400">
-          O sistema está em beta. Mande suas ideias e melhorias — e vote nas que você
-          quer ver primeiro.
+          Mande suas ideias e melhorias.
         </p>
       </header>
 

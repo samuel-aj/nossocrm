@@ -37,13 +37,15 @@ export interface SecondaryNavItem {
   label: string;
   href: string;
   icon: ComponentType<{ className?: string }>;
+  /** Pequeno destaque (ex.: 'Novo') exibido ao lado do item. */
+  badge?: string;
 }
 
 /** Mirrors non-primary destinations available in the desktop sidebar/user menu. */
 export const SECONDARY_NAV: SecondaryNavItem[] = [
   { id: 'dashboard', label: 'Visão Geral', href: '/dashboard', icon: LayoutDashboard },
   { id: 'reports', label: 'Relatórios', href: '/reports', icon: BarChart3 },
-  { id: 'suggestions', label: 'Sugestões', href: '/suggestions', icon: Lightbulb },
   { id: 'settings', label: 'Configurações', href: '/settings', icon: Settings },
+  { id: 'suggestions', label: 'Sugestões', href: '/suggestions', icon: Lightbulb, badge: 'Novo' },
   { id: 'profile', label: 'Perfil', href: '/profile', icon: User },
 ];

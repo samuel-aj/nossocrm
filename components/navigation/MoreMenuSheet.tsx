@@ -30,6 +30,11 @@ export function MoreMenuSheet({ isOpen, onClose }: MoreMenuSheetProps) {
             >
               <Icon className="h-5 w-5 text-slate-500" aria-hidden="true" />
               <span className="font-display tracking-wide">{item.label}</span>
+              {item.badge && (
+                <span className="ml-auto rounded-full bg-primary-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-600 dark:text-primary-400">
+                  {item.badge}
+                </span>
+              )}
             </Link>
           );
         })}

@@ -91,6 +91,7 @@ const NavItem = ({
   prefetch,
   clickedPath,
   onItemClick,
+  badge,
 }: {
   to: string;
   icon: React.ComponentType<{ size?: number; className?: string }>;
@@ -98,6 +99,7 @@ const NavItem = ({
   prefetch?: RouteName;
   clickedPath?: string;
   onItemClick?: (path: string) => void;
+  badge?: string;
 }) => {
   const pathname = usePathname();
   const isActive = pathname === to || (to === '/boards' && pathname === '/pipeline');
@@ -122,6 +124,11 @@ const NavItem = ({
     >
       <Icon size={20} className={isActuallyActive ? 'text-primary-500' : ''} aria-hidden="true" />
       <span className="font-display tracking-wide">{label}</span>
+      {badge && (
+        <span className="ml-auto rounded-full bg-primary-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-600 dark:text-primary-400">
+          {badge}
+        </span>
+      )}
     </Link>
   );
 };
@@ -273,8 +280,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             { to: '/contacts', icon: Users, label: 'Contatos', prefetch: 'contacts' as const },
             { to: '/activities', icon: CheckSquare, label: 'Atividades', prefetch: 'activities' as const },
             { to: '/reports', icon: BarChart3, label: 'Relatórios', prefetch: 'reports' as const },
-            { to: '/suggestions', icon: Lightbulb, label: 'Sugestões', prefetch: 'suggestions' as const },
             { to: '/settings', icon: Settings, label: 'Configurações', prefetch: 'settings' as const },
+            { to: '/suggestions', icon: Lightbulb, label: 'Sugestões', prefetch: 'suggestions' as const },
           ].map((item) => {
             if (sidebarCollapsed) {
               return (
@@ -289,7 +296,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                     // If user clicked on a DIFFERENT item, immediately deactivate this one
                     const anotherItemWasClicked = clickedPath && clickedPath !== item.to;
                     const isActuallyActive = anotherItemWasClicked ? false : (isActive || wasJustClicked);
-                    return `w-10 h-10 rounded-lg flex items-center justify-center ${isActuallyActive
+                    return `relative w-10 h-10 rounded-lg flex items-center justify-center ${isActuallyActive
                       ? 'bg-primary-500/10 text-primary-600 dark:text-primary-400 border border-primary-200 dark:border-primary-900/50'
                       : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white'
                       }`;
@@ -297,6 +304,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                   title={item.label}
                 >
                   <item.icon size={20} />
+                  {item.to === '/suggestions' && (
+                    <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-primary-500" aria-hidden="true" />
+                  )}
                 </Link>
               );
             }
@@ -310,6 +320,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 prefetch={item.prefetch}
                 clickedPath={clickedPath}
                 onItemClick={setClickedPath}
+                badge={item.to === '/suggestions' ? 'Novo' : undefined}
               />
             );
           })}
