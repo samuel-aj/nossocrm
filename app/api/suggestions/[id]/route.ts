@@ -26,7 +26,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
 
   const auth = await getAuthedProfile();
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
-  if (auth.profile.role !== 'admin' && auth.profile.role !== 'super_admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (auth.profile.role !== 'super_admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { id } = await ctx.params;
   if (!isValidUUID(id)) return NextResponse.json({ error: 'Invalid id' }, { status: 422 });

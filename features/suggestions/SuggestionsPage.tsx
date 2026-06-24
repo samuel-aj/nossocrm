@@ -7,26 +7,13 @@ import { SuggestionForm } from './components/SuggestionForm';
 import { SuggestionList } from './components/SuggestionList';
 
 /**
- * Pagina de Sugestoes/Feedback (beta): qualquer usuario logado posta uma
- * sugestao e vota nas dos colegas da mesma organizacao.
+ * Página de Sugestões/Feedback (beta): QUALQUER usuário logado pode enviar uma
+ * sugestão. A LISTA global (de todas as organizações) só aparece para super_admin.
  */
 export function SuggestionsPage() {
-  const { profile, loading } = useAuth();
-  const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
+  const { profile } = useAuth();
+  const isSuperAdmin = profile?.role === 'super_admin';
   const { data: suggestions = [], isLoading } = useSuggestions();
-
-  if (!loading && profile && !isAdmin) {
-    return (
-      <div className="space-y-6 p-6 sm:p-8 max-w-3xl mx-auto">
-        <div className="rounded-xl border border-slate-200 bg-white p-8 text-center dark:border-white/10 dark:bg-white/5">
-          <Lightbulb className="mx-auto h-8 w-8 text-slate-300" />
-          <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
-            Esta área é exclusiva para administradores.
-          </p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-6 p-6 sm:p-8 max-w-3xl mx-auto">
@@ -42,7 +29,13 @@ export function SuggestionsPage() {
 
       <SuggestionForm />
 
-      <SuggestionList suggestions={suggestions} isLoading={isLoading} />
+      {isSuperAdmin ? (
+        <SuggestionList suggestions={suggestions} isLoading={isLoading} />
+      ) : (
+        <p className="rounded-xl border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400 dark:border-white/10">
+          Obrigado! Sua sugestão vai direto para a equipe. 💜
+        </p>
+      )}
     </div>
   );
 }

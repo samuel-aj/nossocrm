@@ -25,14 +25,14 @@ function sortByVotes(list: Suggestion[]): Suggestion[] {
 
 export const useSuggestions = () => {
   const { user, profile, loading: authLoading } = useAuth();
-  const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
+  const isSuperAdmin = profile?.role === 'super_admin';
   return useQuery({
     queryKey: queryKeys.suggestions.lists(),
     queryFn: async () => {
       const json = await fetchJson('/api/suggestions');
       return ((json as { data?: Suggestion[] }).data || []) as Suggestion[];
     },
-    enabled: !authLoading && !!user && isAdmin,
+    enabled: !authLoading && !!user && isSuperAdmin,
     staleTime: 30 * 1000,
     refetchOnWindowFocus: false,
   });

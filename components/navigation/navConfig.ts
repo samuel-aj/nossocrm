@@ -48,6 +48,6 @@ export const SECONDARY_NAV: SecondaryNavItem[] = [
   { id: 'dashboard', label: 'Visão Geral', href: '/dashboard', icon: LayoutDashboard },
   { id: 'reports', label: 'Relatórios', href: '/reports', icon: BarChart3 },
   { id: 'settings', label: 'Configurações', href: '/settings', icon: Settings },
-  { id: 'suggestions', label: 'Sugestões', href: '/suggestions', icon: Lightbulb, badge: 'Novo', adminOnly: true },
+  { id: 'suggestions', label: 'Sugestões', href: '/suggestions', icon: Lightbulb, badge: 'Novo' },
   { id: 'profile', label: 'Perfil', href: '/profile', icon: User },
 ];

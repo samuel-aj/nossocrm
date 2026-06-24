@@ -24,8 +24,7 @@ export function SuggestionCard({ suggestion }: { suggestion: Suggestion }) {
   const { addToast } = useToast();
   const del = useDeleteSuggestion();
 
-  const canDelete =
-    !!profile && (profile.role === 'super_admin' || profile.id === suggestion.author_id);
+  const canDelete = profile?.role === 'super_admin';
 
   const handleDelete = async () => {
     if (del.isPending) return;
@@ -50,6 +49,11 @@ export function SuggestionCard({ suggestion }: { suggestion: Suggestion }) {
           <span className="font-medium text-slate-500 dark:text-slate-300">
             {suggestion.author_name}
           </span>
+          {suggestion.organization_name && (
+            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-white/10 dark:text-slate-300">
+              {suggestion.organization_name}
+            </span>
+          )}
           <span>·</span>
           <span>{formatDate(suggestion.created_at)}</span>
         </div>

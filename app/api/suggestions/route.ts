@@ -39,19 +39,18 @@ function displayName(p: { first_name?: string | null; last_name?: string | null;
   return p.nickname || full || p.email || 'Usuário';
 }
 
+// Listagem GLOBAL das sugestões — visível apenas para super_admin (a agência),
+// independente da organização ativa. Inclui de qual cliente veio cada sugestão.
 export async function GET() {
   const auth = await getAuthedProfile();
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
-  if (auth.profile.role !== 'admin' && auth.profile.role !== 'super_admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (auth.profile.role !== 'super_admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const sb = createStaticAdminClient();
-  let query = sb
+  const { data: rows, error } = await sb
     .from('suggestions')
-    .select('id, content, created_at, author_id, organization_id');
-  if (auth.profile.role !== 'super_admin') {
-    query = query.eq('organization_id', auth.profile.organization_id);
-  }
-  const { data: rows, error } = await query.order('created_at', { ascending: false });
+    .select('id, content, created_at, author_id, organization_id')
+    .order('created_at', { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const suggestions = rows || [];
@@ -59,13 +58,16 @@ export async function GET() {
 
   const ids = suggestions.map(s => s.id);
   const authorIds = Array.from(new Set(suggestions.map(s => s.author_id)));
+  const orgIds = Array.from(new Set(suggestions.map(s => s.organization_id)));
 
-  const [authorsRes, votesRes] = await Promise.all([
+  const [authorsRes, votesRes, orgsRes] = await Promise.all([
     sb.from('profiles').select('id, first_name, last_name, nickname, email').in('id', authorIds),
     sb.from('suggestion_votes').select('suggestion_id, user_id').in('suggestion_id', ids),
+    sb.from('organizations').select('id, name').in('id', orgIds),
   ]);
 
   const authorById = new Map((authorsRes.data || []).map(a => [a.id, a]));
+  const orgNameById = new Map((orgsRes.data || []).map(o => [o.id, o.name as string]));
   const voteCount = new Map<string, number>();
   const myVotes = new Set<string>();
   for (const v of votesRes.data || []) {
@@ -81,6 +83,7 @@ export async function GET() {
       author_id: s.author_id,
       author_name: displayName(authorById.get(s.author_id) || {}),
       organization_id: s.organization_id,
+      organization_name: orgNameById.get(s.organization_id) || null,
       votes_count: voteCount.get(s.id) || 0,
       voted_by_me: myVotes.has(s.id),
     }))
@@ -89,12 +92,12 @@ export async function GET() {
   return NextResponse.json({ data });
 }
 
+// Criar sugestão — QUALQUER usuário autenticado pode enviar.
 export async function POST(req: Request) {
   if (!isAllowedOrigin(req)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const auth = await getAuthedProfile();
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
-  if (auth.profile.role !== 'admin' && auth.profile.role !== 'super_admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json().catch(() => null);
   const parsed = CreateSchema.safeParse(body);
