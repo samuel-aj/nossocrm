@@ -79,3 +79,11 @@ export {
   useMoveDeal,
   useMoveDealSimple,
 } from './useMoveDeal';
+
+// Suggestions / Feedback (beta)
+export {
+  useSuggestions,
+  useCreateSuggestion,
+  useVoteSuggestion,
+  useDeleteSuggestion,
+} from './useSuggestionsQuery';

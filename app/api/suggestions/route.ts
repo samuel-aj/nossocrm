@@ -1,0 +1,124 @@
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
+import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+
+export const runtime = 'nodejs';
+
+const CreateSchema = z.object({
+  content: z.string().min(1).max(2000),
+}).strict();
+
+type AuthedProfile = {
+  id: string;
+  organization_id: string;
+  role: string;
+  first_name: string | null;
+  last_name: string | null;
+  nickname: string | null;
+  email: string | null;
+};
+
+async function getAuthedProfile() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Unauthorized' as const, status: 401 };
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('id, organization_id, role, first_name, last_name, nickname, email')
+    .eq('id', user.id)
+    .single();
+  if (error || !profile?.organization_id) {
+    return { error: 'Profile not found' as const, status: 404 };
+  }
+  return { profile: profile as AuthedProfile };
+}
+
+function displayName(p: { first_name?: string | null; last_name?: string | null; nickname?: string | null; email?: string | null }) {
+  const full = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim();
+  return p.nickname || full || p.email || 'Usuário';
+}
+
+export async function GET() {
+  const auth = await getAuthedProfile();
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+  const sb = createStaticAdminClient();
+  let query = sb
+    .from('suggestions')
+    .select('id, content, created_at, author_id, organization_id');
+  if (auth.profile.role !== 'super_admin') {
+    query = query.eq('organization_id', auth.profile.organization_id);
+  }
+  const { data: rows, error } = await query.order('created_at', { ascending: false });
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  const suggestions = rows || [];
+  if (suggestions.length === 0) return NextResponse.json({ data: [] });
+
+  const ids = suggestions.map(s => s.id);
+  const authorIds = Array.from(new Set(suggestions.map(s => s.author_id)));
+
+  const [authorsRes, votesRes] = await Promise.all([
+    sb.from('profiles').select('id, first_name, last_name, nickname, email').in('id', authorIds),
+    sb.from('suggestion_votes').select('suggestion_id, user_id').in('suggestion_id', ids),
+  ]);
+
+  const authorById = new Map((authorsRes.data || []).map(a => [a.id, a]));
+  const voteCount = new Map<string, number>();
+  const myVotes = new Set<string>();
+  for (const v of votesRes.data || []) {
+    voteCount.set(v.suggestion_id, (voteCount.get(v.suggestion_id) || 0) + 1);
+    if (v.user_id === auth.profile.id) myVotes.add(v.suggestion_id);
+  }
+
+  const data = suggestions
+    .map(s => ({
+      id: s.id,
+      content: s.content,
+      created_at: s.created_at,
+      author_id: s.author_id,
+      author_name: displayName(authorById.get(s.author_id) || {}),
+      organization_id: s.organization_id,
+      votes_count: voteCount.get(s.id) || 0,
+      voted_by_me: myVotes.has(s.id),
+    }))
+    .sort((a, b) => b.votes_count - a.votes_count || (a.created_at < b.created_at ? 1 : -1));
+
+  return NextResponse.json({ data });
+}
+
+export async function POST(req: Request) {
+  if (!isAllowedOrigin(req)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+  const auth = await getAuthedProfile();
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+  const body = await req.json().catch(() => null);
+  const parsed = CreateSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Invalid payload', details: parsed.error.flatten() }, { status: 422 });
+  }
+
+  const sb = createStaticAdminClient();
+  const { data, error } = await sb
+    .from('suggestions')
+    .insert({
+      organization_id: auth.profile.organization_id,
+      author_id: auth.profile.id,
+      content: parsed.data.content.trim(),
+    })
+    .select('id, content, created_at, author_id, organization_id')
+    .single();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  return NextResponse.json({
+    data: {
+      ...data,
+      author_name: displayName(auth.profile),
+      votes_count: 0,
+      voted_by_me: false,
+    },
+  }, { status: 201 });
+}
