@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import Image from 'next/image';
 import { DealView, CustomFieldDefinition } from '@/types';
 import { Phone, Copy, Check, Hourglass, Trophy, XCircle, Package } from 'lucide-react';
 import { ActivityStatusIcon } from './ActivityStatusIcon';
+import { OwnerBadge } from './OwnerBadge';
 import type { DealActivityStatus } from '@/features/boards/utils/dealActivityStatus';
 import { priorityAriaLabelPtBr } from '@/lib/utils/priority';
 
@@ -58,16 +58,6 @@ const isDealClosed = (deal: DealView) => deal.isWon || deal.isLost;
 
 // Get priority label for accessibility (PT-BR)
 const getPriorityLabel = (priority: string | undefined) => priorityAriaLabelPtBr(priority);
-
-// Get initials from name
-const getInitials = (name: string) => {
-  return name
-    .split(' ')
-    .map(n => n[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
-};
 
 const DealCardComponent: React.FC<DealCardProps> = ({
   deal,
@@ -302,26 +292,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
 
       <div className="flex justify-between items-center pt-2 border-t border-slate-100 dark:border-white/5">
         <div className="flex items-center gap-2">
-          {deal.owner && deal.owner.name !== 'Sem Dono' && (
-            deal.owner.avatar ? (
-              <Image
-                src={deal.owner.avatar}
-                alt={`Responsável: ${deal.owner.name}`}
-                width={20}
-                height={20}
-                className="w-5 h-5 rounded-full ring-1 ring-white dark:ring-slate-800"
-                title={`Responsável: ${deal.owner.name}`}
-                unoptimized
-              />
-            ) : (
-              <div
-                className="w-5 h-5 rounded-full bg-primary-100 dark:bg-primary-900/50 text-primary-700 dark:text-primary-300 flex items-center justify-center text-[9px] font-bold ring-1 ring-white dark:ring-slate-800"
-                title={`Responsável: ${deal.owner.name}`}
-              >
-                {getInitials(deal.owner.name)}
-              </div>
-            )
-          )}
+          <OwnerBadge ownerId={deal.ownerId} />
           {deal.items && deal.items.length > 0 ? (
             <span className="text-xs font-medium text-slate-600 dark:text-slate-300 flex items-center gap-1 min-w-0" title={`${deal.items[0].name} — R$ ${deal.items[0].price.toLocaleString('pt-BR')}`}>
               <Package size={11} aria-hidden="true" className="flex-shrink-0 text-primary-500" />
