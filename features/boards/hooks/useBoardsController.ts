@@ -130,7 +130,8 @@ export const useBoardsController = () => {
 
   // Filter State (declared before AI context useEffect that uses them)
   const [searchTerm, setSearchTerm] = useState('');
-  const [ownerFilter, setOwnerFilter] = useState<'all' | 'mine'>('all');
+  // 'all' = todos | 'mine' = meus (profile.id) | 'none' = sem responsável | <userId> = um responsável específico
+  const [ownerFilter, setOwnerFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'open' | 'won' | 'lost' | 'all'>('open');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
 
@@ -384,7 +385,13 @@ export const useBoardsController = () => {
         (l.companyName || '').toLowerCase().includes(searchTerm.toLowerCase());
 
       const matchesOwner =
-        ownerFilter === 'all' || l.ownerId === profile?.id;
+        ownerFilter === 'all'
+          ? true
+          : ownerFilter === 'mine'
+            ? l.ownerId === profile?.id
+            : ownerFilter === 'none'
+              ? !l.ownerId
+              : l.ownerId === ownerFilter;
 
       let matchesDate = true;
       if (dateRange.start) {

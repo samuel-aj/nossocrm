@@ -3,6 +3,8 @@ import { Plus, Search, LayoutGrid, Table as TableIcon, User, Settings, Lightbulb
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Board } from '@/types';
 import { BoardSelector } from '../BoardSelector';
+import { useOrgUsers } from '@/lib/query/hooks';
+import { useAuth } from '@/context/AuthContext';
 
 interface KanbanHeaderProps {
     // Boards
@@ -18,8 +20,8 @@ interface KanbanHeaderProps {
     setViewMode: (mode: 'kanban' | 'list') => void;
     searchTerm: string;
     setSearchTerm: (term: string) => void;
-    ownerFilter: 'all' | 'mine';
-    setOwnerFilter: (filter: 'all' | 'mine') => void;
+    ownerFilter: string;
+    setOwnerFilter: (filter: string) => void;
     statusFilter: 'open' | 'won' | 'lost' | 'all';
     setStatusFilter: (filter: 'open' | 'won' | 'lost' | 'all') => void;
     onNewDeal: () => void;
@@ -71,6 +73,12 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
     statusFilter, setStatusFilter,
     onNewDeal
 }) => {
+    // Lista de responsáveis da org (admin/super_admin); para vendedor vem vazia
+    // (hook desabilitado), então só aparecem "Todos" e "Meus".
+    const { users: orgUsers } = useOrgUsers();
+    const { profile } = useAuth();
+    // "Meus Negócios" já cobre o próprio usuário — evita opção duplicada na lista.
+    const assignableOwners = orgUsers.filter((u) => u.id !== profile?.id);
     return (
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
             <div className="flex items-center gap-4 w-full sm:w-auto flex-wrap">
@@ -196,12 +204,24 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                 <div className="relative">
                     <select
                         value={ownerFilter}
-                        onChange={(e) => setOwnerFilter(e.target.value as 'all' | 'mine')}
+                        onChange={(e) => setOwnerFilter(e.target.value)}
                         aria-label="Filtrar negócios por proprietário"
                         className="pl-3 pr-8 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm appearance-none cursor-pointer"
                     >
                         <option value="all">Todos os Donos</option>
                         <option value="mine">Meus Negócios</option>
+                        {assignableOwners.length > 0 && (
+                            <>
+                                <option value="none">Sem responsável</option>
+                                <optgroup label="Responsáveis">
+                                    {assignableOwners.map((u) => (
+                                        <option key={u.id} value={u.id}>
+                                            {u.name}{u.role === 'admin' ? ' (admin)' : ''}
+                                        </option>
+                                    ))}
+                                </optgroup>
+                            </>
+                        )}
                     </select>
                     <User className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
                 </div>

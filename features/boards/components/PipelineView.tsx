@@ -43,8 +43,8 @@ interface PipelineViewProps {
   setViewMode: (mode: 'kanban' | 'list') => void;
   searchTerm: string;
   setSearchTerm: (term: string) => void;
-  ownerFilter: 'all' | 'mine';
-  setOwnerFilter: (filter: 'all' | 'mine') => void;
+  ownerFilter: string;
+  setOwnerFilter: (filter: string) => void;
   statusFilter: 'open' | 'won' | 'lost' | 'all';
   setStatusFilter: (filter: 'open' | 'won' | 'lost' | 'all') => void;
   draggingId: string | null;
