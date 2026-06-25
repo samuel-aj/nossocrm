@@ -570,7 +570,13 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     }
 
     // Handle Contact
-    if (relatedData?.contact && relatedData.contact.name) {
+    // Contato EXISTENTE selecionado: o deal já vem com `contactId` preenchido —
+    // usa esse e NUNCA cria outro (corrige a duplicação que acontecia quando o
+    // contato não tinha email pra casar). Só busca-por-email / cria-novo quando
+    // NÃO há contato pré-selecionado.
+    if (deal.contactId) {
+      finalContactId = deal.contactId;
+    } else if (relatedData?.contact && relatedData.contact.name) {
       const existingContact = relatedData.contact.email
         ? contacts.find(c => (c.email || '').toLowerCase() === relatedData.contact!.email!.toLowerCase())
         : undefined;
