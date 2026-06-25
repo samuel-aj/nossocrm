@@ -88,3 +88,7 @@ export {
   useSetSuggestionStatus,
   useDeleteSuggestion,
 } from './useSuggestionsQuery';
+
+// Org users (responsável / owner picker)
+export { useOrgUsers } from './useOrgUsers';
+export type { OrgUser } from './useOrgUsers';

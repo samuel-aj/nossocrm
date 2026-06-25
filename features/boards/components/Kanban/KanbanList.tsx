@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import Image from 'next/image';
 import { DealView, CustomFieldDefinition, BoardStage } from '@/types';
 import { ActivityStatusIcon } from './ActivityStatusIcon';
+import { OwnerBadge } from './OwnerBadge';
 import { MoveToStageModal } from '../Modals/MoveToStageModal';
 import type { DealActivityStatus } from '@/features/boards/utils/dealActivityStatus';
 import { computeActivityStatusMap } from '@/features/boards/utils/dealActivityStatus';
@@ -104,8 +104,7 @@ const KanbanListRow = React.memo(function KanbanListRow({
         </td>
         <td className="px-6 py-3">
           <div className="flex items-center gap-2">
-            <Image src={deal.owner.avatar} alt="" width={20} height={20} className="w-5 h-5 rounded-full" unoptimized />
-            <span className="text-xs text-slate-500">{deal.owner.name}</span>
+            <OwnerBadge ownerId={deal.ownerId} showName />
           </div>
         </td>
         {/* Custom Fields Cells */}

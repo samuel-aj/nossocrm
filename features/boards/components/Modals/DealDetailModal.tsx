@@ -4,7 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import ConfirmModal from '@/components/ConfirmModal';
 import { LossReasonModal } from '@/components/ui/LossReasonModal';
-import { useMoveDealSimple, useDeal } from '@/lib/query/hooks';
+import { useMoveDealSimple, useDeal, useOrgUsers } from '@/lib/query/hooks';
 import { FocusTrap, useFocusReturn } from '@/lib/a11y';
 import { Activity } from '@/types';
 
@@ -111,6 +111,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   } = useCRM();
   const { profile } = useAuth();
   const { addToast } = useToast();
+  const { users: orgUsers, isAdmin: canAssignOwner } = useOrgUsers();
 
   // Performance: avoid repeated `find(...)` on large arrays.
   const dealsById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
@@ -968,6 +969,27 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                     <p className="text-sm text-slate-500">Sem contato</p>
                   )}
                 </div>
+
+                {/* RESPONSÁVEL (owner) — só admin/super_admin pode atribuir */}
+                {canAssignOwner && (
+                  <div className="pt-4 border-t border-slate-100 dark:border-white/5">
+                    <h3 className="text-xs font-bold text-slate-400 uppercase mb-2 flex items-center gap-2">
+                      <User size={14} /> Responsável
+                    </h3>
+                    <select
+                      value={deal.ownerId || ''}
+                      onChange={(e) => updateDeal(deal.id, { ownerId: e.target.value })}
+                      className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-2.5 py-2 text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 outline-none"
+                    >
+                      <option value="">Sem responsável</option>
+                      {orgUsers.map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.name}{u.role === 'admin' ? ' (admin)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 {/* DYNAMIC CUSTOM FIELDS INPUTS */}
                 {customFieldDefinitions.length > 0 && (
