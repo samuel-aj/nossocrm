@@ -39,8 +39,11 @@ function displayName(p: { first_name?: string | null; last_name?: string | null;
   return p.nickname || full || p.email || 'Usuário';
 }
 
+const STATUS_RANK: Record<string, number> = { pending: 0, done: 1, discarded: 2 };
+
 // Listagem GLOBAL das sugestões — visível apenas para super_admin (a agência),
-// independente da organização ativa. Inclui de qual cliente veio cada sugestão.
+// independente da organização ativa. Mostra de qual cliente veio cada uma e o
+// status: pendentes primeiro, feitas/descartadas ao fim.
 export async function GET() {
   const auth = await getAuthedProfile();
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
@@ -49,31 +52,23 @@ export async function GET() {
   const sb = createStaticAdminClient();
   const { data: rows, error } = await sb
     .from('suggestions')
-    .select('id, content, created_at, author_id, organization_id')
+    .select('id, content, created_at, author_id, organization_id, status')
     .order('created_at', { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const suggestions = rows || [];
   if (suggestions.length === 0) return NextResponse.json({ data: [] });
 
-  const ids = suggestions.map(s => s.id);
   const authorIds = Array.from(new Set(suggestions.map(s => s.author_id)));
   const orgIds = Array.from(new Set(suggestions.map(s => s.organization_id)));
 
-  const [authorsRes, votesRes, orgsRes] = await Promise.all([
+  const [authorsRes, orgsRes] = await Promise.all([
     sb.from('profiles').select('id, first_name, last_name, nickname, email').in('id', authorIds),
-    sb.from('suggestion_votes').select('suggestion_id, user_id').in('suggestion_id', ids),
     sb.from('organizations').select('id, name').in('id', orgIds),
   ]);
 
   const authorById = new Map((authorsRes.data || []).map(a => [a.id, a]));
   const orgNameById = new Map((orgsRes.data || []).map(o => [o.id, o.name as string]));
-  const voteCount = new Map<string, number>();
-  const myVotes = new Set<string>();
-  for (const v of votesRes.data || []) {
-    voteCount.set(v.suggestion_id, (voteCount.get(v.suggestion_id) || 0) + 1);
-    if (v.user_id === auth.profile.id) myVotes.add(v.suggestion_id);
-  }
 
   const data = suggestions
     .map(s => ({
@@ -84,10 +79,11 @@ export async function GET() {
       author_name: displayName(authorById.get(s.author_id) || {}),
       organization_id: s.organization_id,
       organization_name: orgNameById.get(s.organization_id) || null,
-      votes_count: voteCount.get(s.id) || 0,
-      voted_by_me: myVotes.has(s.id),
+      status: (s.status as string) || 'pending',
     }))
-    .sort((a, b) => b.votes_count - a.votes_count || (a.created_at < b.created_at ? 1 : -1));
+    .sort((a, b) =>
+      (STATUS_RANK[a.status] - STATUS_RANK[b.status]) || (a.created_at < b.created_at ? 1 : -1),
+    );
 
   return NextResponse.json({ data });
 }
@@ -113,7 +109,7 @@ export async function POST(req: Request) {
       author_id: auth.profile.id,
       content: parsed.data.content.trim(),
     })
-    .select('id, content, created_at, author_id, organization_id')
+    .select('id, content, created_at, author_id, organization_id, status')
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -122,8 +118,7 @@ export async function POST(req: Request) {
     data: {
       ...data,
       author_name: displayName(auth.profile),
-      votes_count: 0,
-      voted_by_me: false,
+      organization_name: null,
     },
   }, { status: 201 });
 }

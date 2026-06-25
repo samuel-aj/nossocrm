@@ -85,6 +85,6 @@ export {
   useSuggestions,
   useSuggestionsCount,
   useCreateSuggestion,
-  useVoteSuggestion,
+  useSetSuggestionStatus,
   useDeleteSuggestion,
 } from './useSuggestionsQuery';

@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { isValidUUID } from '@/lib/supabase/utils';
+
+const StatusSchema = z.object({
+  status: z.enum(['pending', 'done', 'discarded']),
+}).strict();
 
 export const runtime = 'nodejs';
 
@@ -18,6 +23,34 @@ async function getAuthedProfile() {
     return { error: 'Profile not found' as const, status: 404 };
   }
   return { profile };
+}
+
+// Define o status da sugestao (pendente/feito/descartado) — apenas super_admin.
+export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  if (!isAllowedOrigin(req)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+  const auth = await getAuthedProfile();
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  if (auth.profile.role !== 'super_admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+  const { id } = await ctx.params;
+  if (!isValidUUID(id)) return NextResponse.json({ error: 'Invalid id' }, { status: 422 });
+
+  const body = await req.json().catch(() => null);
+  const parsed = StatusSchema.safeParse(body);
+  if (!parsed.success) return NextResponse.json({ error: 'Invalid payload' }, { status: 422 });
+
+  const sb = createStaticAdminClient();
+  const { data, error } = await sb
+    .from('suggestions')
+    .update({ status: parsed.data.status })
+    .eq('id', id)
+    .select('id, status')
+    .maybeSingle();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  return NextResponse.json({ data });
 }
 
 // Apaga uma sugestao: permitido ao proprio autor (na sua org) ou a um super_admin.
