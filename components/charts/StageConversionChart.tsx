@@ -67,17 +67,21 @@ const renderConversionLabel = (props: any) => {
 
 export const StageConversionChart: React.FC<StageConversionChartProps> = ({ data }) => (
   <ResponsiveContainer width="100%" height="100%">
-    <BarChart data={data} margin={{ top: 24, right: 12, bottom: 4, left: 0 }}>
+    <BarChart data={data} margin={{ top: 24, right: 12, bottom: 8, left: 4 }}>
       <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
       <XAxis
         dataKey="name"
         axisLine={false}
         tickLine={false}
         tick={{ fill: 'var(--chart-text)', fontSize: 11 }}
-        dy={6}
         interval={0}
-        angle={data.length > 6 ? -25 : 0}
-        textAnchor={data.length > 6 ? 'end' : 'middle'}
+        /* Reserva altura suficiente p/ os rótulos rotacionados quando há muitas
+           etapas — sem isso os nomes longos (ex.: "Qualificação", "Negociação")
+           ficam cortados. */
+        height={data.length > 5 ? 88 : 28}
+        angle={data.length > 5 ? -35 : 0}
+        textAnchor={data.length > 5 ? 'end' : 'middle'}
+        dy={data.length > 5 ? 4 : 6}
       />
       <YAxis
         axisLine={false}
