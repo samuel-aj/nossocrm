@@ -1,0 +1,224 @@
+/**
+ * Webhook de entrada do WhatsApp (Evolution API).
+ *
+ * Rota (Supabase Edge Function, pública):
+ *   POST /functions/v1/whatsapp-webhook/<webhook_secret>
+ *
+ * Por que Edge Function (e não rota Next): o preview do app tem Vercel
+ * Authentication (SSO), que bloquearia o POST da Evolution. A Edge Function
+ * fica fora desse bloqueio (mesmo padrão do webhook-in).
+ *
+ * Fluxo: valida o secret -> acha a conexão pela `instance` do payload ->
+ * casa o telefone com um contato -> grava conversa + mensagem (idempotente
+ * por evolution_message_id) -> atualiza a conversa. Também trata status e
+ * connection.update.
+ *
+ * Usa SUPABASE_SERVICE_ROLE_KEY (ignora RLS).
+ */
+import { createClient } from "npm:@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Max-Age": "86400",
+};
+
+function json(status: number, body: unknown) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json", ...corsHeaders },
+  });
+}
+
+function getSecretFromPath(req: Request): string | null {
+  const parts = new URL(req.url).pathname.split("/").filter(Boolean);
+  const idx = parts.findIndex((p) => p === "whatsapp-webhook");
+  if (idx === -1) return null;
+  return parts[idx + 1] ?? null;
+}
+
+function jidToE164(jid?: string): string {
+  if (!jid) return "";
+  const digits = String(jid).split("@")[0].split(":")[0].replace(/\D/g, "");
+  return digits ? `+${digits}` : "";
+}
+
+// deno-lint-ignore no-explicit-any
+function extractContent(message: any): { text?: string; mediaType?: string; mediaMime?: string } {
+  if (!message) return {};
+  if (typeof message.conversation === "string") return { text: message.conversation };
+  if (message.extendedTextMessage?.text) return { text: message.extendedTextMessage.text };
+  const kinds: [string, string][] = [
+    ["imageMessage", "image"],
+    ["videoMessage", "video"],
+    ["audioMessage", "audio"],
+    ["documentMessage", "document"],
+    ["stickerMessage", "sticker"],
+  ];
+  for (const [field, type] of kinds) {
+    if (message[field]) return { text: message[field].caption, mediaType: type, mediaMime: message[field].mimetype };
+  }
+  return {};
+}
+
+function mapState(s?: string): string {
+  if (s === "open") return "connected";
+  if (s === "connecting") return "connecting";
+  return "disconnected";
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
+  if (req.method !== "POST") return json(405, { error: "Método não permitido" });
+
+  const supabaseUrl = Deno.env.get("CRM_SUPABASE_URL") ?? Deno.env.get("SUPABASE_URL");
+  const serviceKey =
+    Deno.env.get("CRM_SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseUrl || !serviceKey) return json(500, { error: "Supabase não configurado no runtime" });
+  const supabase = createClient(supabaseUrl, serviceKey);
+
+  // deno-lint-ignore no-explicit-any
+  let payload: any;
+  try {
+    payload = await req.json();
+  } catch {
+    return json(400, { error: "JSON inválido" });
+  }
+
+  const event = String(payload?.event ?? "").toLowerCase().replace(/_/g, ".");
+  const instanceName = payload?.instance ?? payload?.instanceName;
+  if (!instanceName) return json(200, { ok: true, ignored: "sem instance" });
+
+  const { data: conn } = await supabase
+    .from("wa_connections")
+    .select("id, organization_id, webhook_secret")
+    .eq("instance_name", instanceName)
+    .maybeSingle();
+  if (!conn) return json(200, { ok: true, ignored: "instancia nao vinculada" });
+
+  const pathSecret = getSecretFromPath(req);
+  if (pathSecret && String(conn.webhook_secret) !== String(pathSecret)) {
+    return json(401, { error: "secret inválido" });
+  }
+
+  const orgId = conn.organization_id as string;
+  const data = payload?.data;
+
+  // --- Estado da conexão ---
+  if (event === "connection.update") {
+    const state = mapState(data?.state);
+    await supabase
+      .from("wa_connections")
+      .update({ status: state, ...(state === "connected" ? { last_connected_at: new Date().toISOString() } : {}) })
+      .eq("id", conn.id);
+    return json(200, { ok: true });
+  }
+
+  // --- Status de entrega/leitura (✓✓) ---
+  if (event === "messages.update") {
+    const item = Array.isArray(data) ? data[0] : data;
+    const id = item?.key?.id ?? item?.keyId;
+    const raw = String(item?.status ?? item?.update?.status ?? "").toUpperCase();
+    const map: Record<string, string> = {
+      SERVER_ACK: "sent",
+      DELIVERY_ACK: "delivered",
+      READ: "read",
+      PLAYED: "read",
+      ERROR: "failed",
+    };
+    const status = map[raw];
+    if (id && status) {
+      await supabase
+        .from("wa_messages")
+        .update({ status })
+        .eq("organization_id", orgId)
+        .eq("evolution_message_id", id);
+    }
+    return json(200, { ok: true });
+  }
+
+  // --- Mensagens (recebidas e eco de enviadas) ---
+  if (event === "messages.upsert") {
+    const msgs = Array.isArray(data) ? data : Array.isArray(data?.messages) ? data.messages : [data];
+    for (const m of msgs) {
+      if (!m) continue;
+      const key = m.key ?? {};
+      const remoteJid: string = key.remoteJid ?? "";
+      if (remoteJid.endsWith("@g.us") || remoteJid.endsWith("@broadcast")) continue;
+      const phone = jidToE164(remoteJid);
+      const providerId = key.id;
+      if (!phone || !providerId) continue;
+
+      const fromMe = !!key.fromMe;
+      const { text, mediaType, mediaMime } = extractContent(m.message);
+      const tsRaw = m.messageTimestamp;
+      const tsNum = typeof tsRaw === "string" ? parseInt(tsRaw, 10) : tsRaw;
+      const waTs = tsNum ? new Date(tsNum * 1000).toISOString() : new Date().toISOString();
+
+      // conversa (casa contato pelo telefone)
+      let convId: string | null = null;
+      const { data: conv } = await supabase
+        .from("wa_conversations")
+        .select("id")
+        .eq("organization_id", orgId)
+        .eq("wa_phone", phone)
+        .maybeSingle();
+      if (conv) {
+        convId = conv.id;
+      } else {
+        const { data: contact } = await supabase
+          .from("contacts")
+          .select("id")
+          .eq("organization_id", orgId)
+          .eq("phone", phone)
+          .limit(1)
+          .maybeSingle();
+        const { data: created } = await supabase
+          .from("wa_conversations")
+          .insert({
+            organization_id: orgId,
+            connection_id: conn.id,
+            contact_id: contact?.id ?? null,
+            wa_phone: phone,
+            wa_name: m.pushName ?? null,
+          })
+          .select("id")
+          .single();
+        convId = created?.id ?? null;
+      }
+      if (!convId) continue;
+
+      // idempotente: o índice único (org, evolution_message_id) descarta o eco
+      // das mensagens que NÓS enviamos (já gravadas no /send).
+      const { error: insErr } = await supabase.from("wa_messages").insert({
+        organization_id: orgId,
+        conversation_id: convId,
+        direction: fromMe ? "out" : "in",
+        status: fromMe ? "sent" : "received",
+        body: text ?? null,
+        media_type: mediaType ?? null,
+        media_mime: mediaMime ?? null,
+        evolution_message_id: providerId,
+        from_phone: fromMe ? null : phone,
+        to_phone: fromMe ? phone : null,
+        wa_timestamp: waTs,
+      });
+      const dup = insErr && String(insErr.message).toLowerCase().includes("duplicate");
+      if (insErr && !dup) {
+        console.error("[wa-webhook] insert:", insErr.message);
+        continue;
+      }
+      if (dup) continue; // já tínhamos essa mensagem; não mexe na conversa
+
+      const preview = text ? text.slice(0, 140) : mediaType ? `[${mediaType}]` : "";
+      await supabase
+        .from("wa_conversations")
+        .update({ last_message_at: waTs, last_message_preview: preview })
+        .eq("id", convId);
+    }
+    return json(200, { ok: true });
+  }
+
+  return json(200, { ok: true, ignored: event });
+});
