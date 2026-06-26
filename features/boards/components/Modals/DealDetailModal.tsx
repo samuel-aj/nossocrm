@@ -10,6 +10,7 @@ import { Activity } from '@/types';
 
 import { useResponsiveMode } from '@/hooks/useResponsiveMode';
 import { DealSheet } from '../DealSheet';
+import { DealWhatsAppChat } from '@/features/whatsapp/DealWhatsAppChat';
 import {
   analyzeLead,
   generateEmailDraft,
@@ -38,6 +39,7 @@ import {
   Minimize2,
   Copy,
   ExternalLink,
+  MessageCircle,
 } from 'lucide-react';
 import { StageProgressBar } from '../StageProgressBar';
 import { ActivityRow } from '@/features/activities/components/ActivityRow';
@@ -151,7 +153,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const [descriptionDraft, setDescriptionDraft] = useState('');
   const descriptionTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [idCopied, setIdCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState<'timeline' | 'activities' | 'notes' | 'products' | 'info'>('timeline');
+  const [activeTab, setActiveTab] = useState<'whatsapp' | 'timeline' | 'activities' | 'notes' | 'products' | 'info'>('whatsapp');
   const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Quick activity creation / edition from deal card (same form).
@@ -223,7 +225,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
       setEmailDraft(null);
       setObjectionResponses([]);
       setObjection('');
-      setActiveTab('timeline');
+      setActiveTab('whatsapp');
       setIsEditingTitle(false);
       setIsEditingValue(false);
       setShowLossReasonModal(false);
@@ -1233,6 +1235,12 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
               <div className="h-14 border-b border-slate-200 dark:border-white/5 flex items-center px-6 shrink-0">
                 <div className="flex gap-6">
                   <button
+                    onClick={() => setActiveTab('whatsapp')}
+                    className={`text-sm font-bold h-14 border-b-2 transition-colors flex items-center gap-1.5 ${activeTab === 'whatsapp' ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
+                  >
+                    <MessageCircle size={15} /> WhatsApp
+                  </button>
+                  <button
                     onClick={() => setActiveTab('timeline')}
                     className={`text-sm font-bold h-14 border-b-2 transition-colors ${activeTab === 'timeline' ? 'border-primary-500 text-primary-600 dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
                   >
@@ -1266,6 +1274,11 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
               </div>
 
               <div className="flex-1 overflow-y-auto scrollbar-custom p-6 bg-slate-50/30 dark:bg-black/10">
+                {activeTab === 'whatsapp' && (
+                  <div className="h-full">
+                    <DealWhatsAppChat contact={contact} />
+                  </div>
+                )}
                 {activeTab === 'timeline' && (
                   <div className="space-y-6">
                     {/* Descrição fixa — sempre visível, persistente (salva no blur) */}
