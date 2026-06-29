@@ -420,6 +420,49 @@ export async function POST(request: Request) {
         }, { status: 200 });
       }
     }
+
+    // Duplicidade da trigger (mesmo contato + estágio aberto): em vez de erro,
+    // devolve o negócio já existente (idempotente). Evita falso "erro" em
+    // integrações (ex.: n8n) quando o lead já está no funil. Só faz o atalho se
+    // realmente encontrar o negócio aberto; senão propaga o erro original.
+    if ((error as any).code === '23505') {
+      const dup = await sb
+        .from('deals')
+        .select('id,title,description,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at')
+        .eq('organization_id', auth.organizationId)
+        .eq('contact_id', contactId)
+        .eq('stage_id', stageId)
+        .eq('is_won', false)
+        .eq('is_lost', false)
+        .is('deleted_at', null)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (dup.data) {
+        const d: any = dup.data;
+        const [boardResDup, stageResDup, itemsResDup] = await Promise.all([
+          d.board_id ? sb.from('boards').select('name,key').eq('organization_id', auth.organizationId).eq('id', d.board_id).maybeSingle() : Promise.resolve({ data: null }),
+          d.stage_id ? sb.from('board_stages').select('name,label').eq('organization_id', auth.organizationId).eq('id', d.stage_id).maybeSingle() : Promise.resolve({ data: null }),
+          sb.from('deal_items').select('id,product_id,name,quantity,price,created_at').eq('organization_id', auth.organizationId).eq('deal_id', d.id),
+        ]);
+        return NextResponse.json({
+          data: {
+            ...d,
+            description: d.description ?? null,
+            value: Number(d.value ?? 0),
+            tags: d.tags ?? [],
+            custom_fields: d.custom_fields ?? {},
+            probability: d.probability ?? 0,
+            priority: d.priority ?? 'medium',
+            board_name: (boardResDup.data as any)?.name ?? null,
+            board_key: (boardResDup.data as any)?.key ?? null,
+            stage_name: (stageResDup.data as any) ? ((stageResDup.data as any).label || (stageResDup.data as any).name) : null,
+            items: ((itemsResDup as any).data || []).map((i: any) => ({ ...i, price: Number(i.price ?? 0) })),
+          },
+          action: 'existing',
+        }, { status: 200 });
+      }
+    }
     return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
   }
 
