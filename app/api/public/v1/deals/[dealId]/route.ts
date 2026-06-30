@@ -5,6 +5,7 @@ import { createStaticAdminClient } from '@/lib/supabase/server';
 import { isValidUUID, sanitizeUUID } from '@/lib/supabase/utils';
 import { normalizeText } from '@/lib/public-api/sanitize';
 import { moveStageByDealId } from '@/lib/public-api/dealsMoveStage';
+import { resolveOwnerId } from '@/lib/public-api/resolve';
 
 export const runtime = 'nodejs';
 
@@ -28,6 +29,9 @@ const DealPatchSchema = z.object({
   value: z.number().optional(),
   contact_id: z.string().uuid().optional(),
   client_company_id: z.string().uuid().nullable().optional(),
+  // Responsável (owner): owner_id (UUID; null limpa) OU owner_email.
+  owner_id: z.string().uuid().nullable().optional(),
+  owner_email: z.string().email().optional(),
   loss_reason: z.string().nullable().optional(),
   // Full-replace semantics (backwards compatible).
   tags: z.array(z.string()).optional(),
@@ -69,7 +73,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ dealId: str
   const sb = createStaticAdminClient();
   const { data, error } = await sb
     .from('deals')
-    .select('id,title,description,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,tags,custom_fields,probability,priority')
+    .select('id,title,description,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id,tags,custom_fields,probability,priority')
     .eq('organization_id', auth.organizationId)
     .is('deleted_at', null)
     .eq('id', dealId)
@@ -164,6 +168,21 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
   if (parsed.data.contact_id !== undefined) updates.contact_id = sanitizeUUID(parsed.data.contact_id);
   if (parsed.data.client_company_id !== undefined) updates.client_company_id = parsed.data.client_company_id === null ? null : (sanitizeUUID(parsed.data.client_company_id) || null);
   if (parsed.data.loss_reason !== undefined) updates.loss_reason = parsed.data.loss_reason === null ? null : normalizeText(parsed.data.loss_reason);
+
+  // Responsável (owner): owner_id (null limpa) OU owner_email (resolve p/ id).
+  if (parsed.data.owner_id !== undefined || parsed.data.owner_email !== undefined) {
+    if (parsed.data.owner_id === null) {
+      updates.owner_id = null;
+    } else {
+      const ownerRes = await resolveOwnerId({
+        organizationId: auth.organizationId,
+        ownerId: parsed.data.owner_id,
+        ownerEmail: parsed.data.owner_email,
+      });
+      if (!ownerRes.ok) return NextResponse.json({ error: ownerRes.error, code: 'OWNER_NOT_FOUND' }, { status: 422 });
+      updates.owner_id = ownerRes.ownerId;
+    }
+  }
 
   // Tags: replace vs. incremental. Incremental path merges onto the current
   // array, dedupes (case-sensitive), removes anything in tags_remove, and
@@ -268,7 +287,7 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
   // the stage move in a single payload.
   const { data: finalRow, error: finalErr } = await sb
     .from('deals')
-    .select('id,title,description,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,tags,custom_fields,probability,priority')
+    .select('id,title,description,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id,tags,custom_fields,probability,priority')
     .eq('organization_id', auth.organizationId)
     .eq('id', dealId)
     .maybeSingle();

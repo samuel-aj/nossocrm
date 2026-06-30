@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { authPublicApi } from '@/lib/public-api/auth';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { decodeOffsetCursor, encodeOffsetCursor, parseLimit } from '@/lib/public-api/cursor';
-import { resolveBoardId, resolveBoardIdFromKey, resolveFirstStageId } from '@/lib/public-api/resolve';
+import { resolveBoardId, resolveBoardIdFromKey, resolveFirstStageId, resolveOwnerId } from '@/lib/public-api/resolve';
 import { normalizeEmail, normalizePhone, normalizeText } from '@/lib/public-api/sanitize';
 import { isValidUUID, sanitizeUUID } from '@/lib/supabase/utils';
 
@@ -27,6 +27,9 @@ const DealCreateSchema = z.object({
   contact_id: z.string().uuid().optional(),
   contact: ContactInlineSchema.optional(),
   client_company_id: z.string().uuid().optional(),
+  // Responsável (owner) do lead. Aceita owner_id (UUID do usuário) OU owner_email.
+  owner_id: z.string().uuid().optional(),
+  owner_email: z.string().email().optional(),
   priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
   probability: z.number().int().min(0).max(100).optional(),
   tags: z.array(z.string().max(100)).max(20).optional(),
@@ -70,7 +73,7 @@ export async function GET(request: Request) {
 
   let query = sb
     .from('deals')
-    .select('id,title,description,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at', { count: 'exact' })
+    .select('id,title,description,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id', { count: 'exact' })
     .eq('organization_id', auth.organizationId)
     .is('deleted_at', null)
     .order('updated_at', { ascending: false });
@@ -127,6 +130,7 @@ export async function GET(request: Request) {
       stage_id: d.stage_id,
       stage_name: d.stage_id ? stageNameById.get(d.stage_id) ?? null : null,
       contact_id: d.contact_id,
+      owner_id: d.owner_id ?? null,
       client_company_id: d.client_company_id ?? null,
       tags: d.tags ?? [],
       custom_fields: d.custom_fields ?? {},
@@ -211,7 +215,7 @@ export async function POST(request: Request) {
   if (externalId) {
     const existing = await sb
       .from('deals')
-      .select('id,title,description,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at')
+      .select('id,title,description,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id')
       .eq('organization_id', auth.organizationId)
       .eq('external_id', externalId)
       .is('deleted_at', null)
@@ -315,6 +319,19 @@ export async function POST(request: Request) {
     }
   }
 
+  // Responsável (owner) do lead: resolve owner_id/owner_email e valida que
+  // pertence à org. Nada enviado -> ownerId null (não atribui).
+  let ownerId: string | null = null;
+  if (parsed.data.owner_id || parsed.data.owner_email) {
+    const ownerRes = await resolveOwnerId({
+      organizationId: auth.organizationId,
+      ownerId: parsed.data.owner_id,
+      ownerEmail: parsed.data.owner_email,
+    });
+    if (!ownerRes.ok) return NextResponse.json({ error: ownerRes.error, code: 'OWNER_NOT_FOUND' }, { status: 422 });
+    ownerId = ownerRes.ownerId;
+  }
+
   // Resolve produto(s) → itens do deal. Aceita `product_id` (atalho p/ 1 produto) e/ou `products[]`.
   // Para product_id do catálogo, nome e preço são preenchidos automaticamente — a integração só envia o ID.
   type ResolvedItem = { product_id: string | null; name: string; quantity: number; price: number };
@@ -371,6 +388,7 @@ export async function POST(request: Request) {
     stage_id: stageId,
     contact_id: contactId,
     client_company_id: clientCompanyId,
+    owner_id: ownerId,
     priority: parsed.data.priority ?? 'medium',
     probability: parsed.data.probability ?? 0,
     tags: parsed.data.tags ?? [],
@@ -385,7 +403,7 @@ export async function POST(request: Request) {
   const { data, error } = await sb
     .from('deals')
     .insert(insertPayload)
-    .select('id,title,description,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at')
+    .select('id,title,description,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id')
     .single();
   if (error) {
     // Race: another request inserted the same external_id between our check above and this insert.
@@ -393,7 +411,7 @@ export async function POST(request: Request) {
     if (externalId && (error as any).code === '23505') {
       const recovered = await sb
         .from('deals')
-        .select('id,title,description,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at')
+        .select('id,title,description,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id')
         .eq('organization_id', auth.organizationId)
         .eq('external_id', externalId)
         .is('deleted_at', null)
@@ -428,7 +446,7 @@ export async function POST(request: Request) {
     if ((error as any).code === '23505') {
       const dup = await sb
         .from('deals')
-        .select('id,title,description,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at')
+        .select('id,title,description,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id')
         .eq('organization_id', auth.organizationId)
         .eq('contact_id', contactId)
         .eq('stage_id', stageId)

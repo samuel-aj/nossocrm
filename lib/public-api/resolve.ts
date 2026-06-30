@@ -36,3 +36,32 @@ export async function resolveFirstStageId(opts: { organizationId: string; boardI
   return sanitizeUUID((data as any)?.id) || null;
 }
 
+/**
+ * Resolve o RESPONSÁVEL (owner) de um deal. Aceita `ownerId` (UUID) ou
+ * `ownerEmail`, e valida que o usuário pertence à organização.
+ * - Nada enviado            -> { ok: true, ownerId: null } (não mexe)
+ * - Inválido/não encontrado -> { ok: false, error }
+ */
+export async function resolveOwnerId(opts: {
+  organizationId: string;
+  ownerId?: string | null;
+  ownerEmail?: string | null;
+}): Promise<{ ok: true; ownerId: string | null } | { ok: false; error: string }> {
+  const id = sanitizeUUID(opts.ownerId);
+  const email = (opts.ownerEmail || '').trim();
+  if (!id && !email) return { ok: true, ownerId: null };
+
+  const sb = createStaticAdminClient();
+  let query = sb.from('profiles').select('id').eq('organization_id', opts.organizationId).limit(1);
+  query = id ? query.eq('id', id) : query.ilike('email', email);
+  const { data, error } = await query.maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    return {
+      ok: false,
+      error: id ? 'owner_id não pertence a esta organização' : 'owner_email não encontrado nesta organização',
+    };
+  }
+  return { ok: true, ownerId: (data as any).id as string };
+}
+
