@@ -10,6 +10,7 @@ import {
   Lightbulb,
   Settings,
   User,
+  GraduationCap,
 } from 'lucide-react';
 
 export type PrimaryNavId = 'inbox' | 'boards' | 'contacts' | 'activities' | 'more';
@@ -30,7 +31,7 @@ export const PRIMARY_NAV: PrimaryNavItem[] = [
   { id: 'more', label: 'Mais', icon: MoreHorizontal },
 ];
 
-export type SecondaryNavId = 'dashboard' | 'reports' | 'suggestions' | 'settings' | 'profile';
+export type SecondaryNavId = 'dashboard' | 'reports' | 'suggestions' | 'tutorial' | 'settings' | 'profile';
 
 export interface SecondaryNavItem {
   id: SecondaryNavId;
@@ -49,5 +50,6 @@ export const SECONDARY_NAV: SecondaryNavItem[] = [
   { id: 'reports', label: 'Relatórios', href: '/reports', icon: BarChart3 },
   { id: 'settings', label: 'Configurações', href: '/settings', icon: Settings },
   { id: 'suggestions', label: 'Sugestões', href: '/suggestions', icon: Lightbulb, badge: 'Novo' },
+  { id: 'tutorial', label: 'Tutorial', href: '/tutorial', icon: GraduationCap, badge: 'Novo' },
   { id: 'profile', label: 'Perfil', href: '/profile', icon: User },
 ];

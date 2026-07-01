@@ -37,6 +37,7 @@ import {
   Moon,
   BarChart3,
   Lightbulb,
+  GraduationCap,
   Inbox,
   Sparkles,
   LogOut,
@@ -282,6 +283,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             { to: '/reports', icon: BarChart3, label: 'Relatórios', prefetch: 'reports' as const },
             { to: '/settings', icon: Settings, label: 'Configurações', prefetch: 'settings' as const },
             { to: '/suggestions', icon: Lightbulb, label: 'Sugestões', prefetch: 'suggestions' as const },
+            { to: '/tutorial', icon: GraduationCap, label: 'Tutorial', prefetch: 'tutorial' as const },
           ].map((item) => {
             if (sidebarCollapsed) {
               return (
@@ -304,7 +306,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                   title={item.label}
                 >
                   <item.icon size={20} />
-                  {item.to === '/suggestions' && (
+                  {(item.to === '/suggestions' || item.to === '/tutorial') && (
                     <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-primary-500" aria-hidden="true" />
                   )}
                 </Link>
@@ -320,7 +322,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 prefetch={item.prefetch}
                 clickedPath={clickedPath}
                 onItemClick={setClickedPath}
-                badge={item.to === '/suggestions' ? 'Novo' : undefined}
+                badge={(item.to === '/suggestions' || item.to === '/tutorial') ? 'Novo' : undefined}
               />
             );
           })}
