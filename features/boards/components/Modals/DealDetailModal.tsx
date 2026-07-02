@@ -40,6 +40,7 @@ import {
   Copy,
   ExternalLink,
   MessageCircle,
+  ChevronDown,
 } from 'lucide-react';
 import { StageProgressBar } from '../StageProgressBar';
 import { ActivityRow } from '@/features/activities/components/ActivityRow';
@@ -153,6 +154,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const [descriptionDraft, setDescriptionDraft] = useState('');
   const descriptionTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [idCopied, setIdCopied] = useState(false);
+  const [utmsOpen, setUtmsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'whatsapp' | 'timeline' | 'activities' | 'notes' | 'products' | 'info'>('whatsapp');
   const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -1205,6 +1207,45 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                       <span className="text-slate-900 dark:text-white">{deal.probability}%</span>
                     </div>
                   </div>
+                </div>
+
+                {/* UTMs — padrão em todos os cards, colapsável (fica escondido até abrir) */}
+                <div className="pt-4 border-t border-slate-100 dark:border-white/5">
+                  <button
+                    type="button"
+                    onClick={() => setUtmsOpen((o) => !o)}
+                    aria-expanded={utmsOpen}
+                    className="w-full flex items-center justify-between text-xs font-bold text-slate-400 uppercase hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                  >
+                    <span className="flex items-center gap-2"><TagIcon size={14} /> UTMs</span>
+                    <ChevronDown size={14} className={`transition-transform ${utmsOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {utmsOpen && (
+                    <div className="mt-2 space-y-2">
+                      {([
+                        ['utm_source', 'Source'],
+                        ['utm_medium', 'Medium'],
+                        ['utm_campaign', 'Campaign'],
+                        ['utm_content', 'Content'],
+                        ['utm_term', 'Term'],
+                      ] as const).map(([key, label]) => {
+                        const raw = deal.customFields?.[key];
+                        const value = raw !== undefined && raw !== null && String(raw).trim() !== '' ? String(raw) : null;
+                        return (
+                          <div key={key} className="flex justify-between gap-2 text-sm">
+                            <span className="text-slate-500 shrink-0">{label}</span>
+                            {value ? (
+                              <span className="min-w-0 text-right text-slate-900 dark:text-white truncate" title={value}>
+                                {value}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 italic">—</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 {/* RESPONSÁVEL (owner) — só admin/super_admin pode atribuir — última seção */}

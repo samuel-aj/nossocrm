@@ -384,6 +384,7 @@ export const useBoardsController = () => {
       const cf = d.customFields;
       if (cf && typeof cf === 'object') {
         for (const k of Object.keys(cf)) {
+          if (k.startsWith('inbound_')) continue; // ignora metadados internos (webhook-in)
           const v = (cf as Record<string, unknown>)[k];
           if (v !== null && v !== undefined && String(v).trim() !== '') set.add(k);
         }
