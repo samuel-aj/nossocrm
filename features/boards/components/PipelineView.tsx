@@ -45,8 +45,8 @@ interface PipelineViewProps {
   setSearchTerm: (term: string) => void;
   ownerFilter: string;
   setOwnerFilter: (filter: string) => void;
-  customFieldFilter: { key: string; value: string };
-  setCustomFieldFilter: (f: { key: string; value: string }) => void;
+  customFieldSearch: string;
+  setCustomFieldSearch: (v: string) => void;
   customFieldKeys: string[];
   statusFilter: 'open' | 'won' | 'lost' | 'all';
   setStatusFilter: (filter: 'open' | 'won' | 'lost' | 'all') => void;
@@ -198,8 +198,8 @@ interface PipelineViewProps {
  * @returns {Element} Retorna um valor do tipo `Element`.
  */
 export const PipelineView: React.FC<PipelineViewProps> = ({
-  customFieldFilter,
-  setCustomFieldFilter,
+  customFieldSearch,
+  setCustomFieldSearch,
   customFieldKeys,
   // Boards
   boards,
@@ -347,8 +347,8 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
             setSearchTerm={setSearchTerm}
             ownerFilter={ownerFilter}
             setOwnerFilter={setOwnerFilter}
-            customFieldFilter={customFieldFilter}
-            setCustomFieldFilter={setCustomFieldFilter}
+            customFieldSearch={customFieldSearch}
+            setCustomFieldSearch={setCustomFieldSearch}
             customFieldKeys={customFieldKeys}
             statusFilter={statusFilter}
             setStatusFilter={setStatusFilter}

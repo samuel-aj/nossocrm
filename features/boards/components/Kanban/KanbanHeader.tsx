@@ -22,8 +22,8 @@ interface KanbanHeaderProps {
     setSearchTerm: (term: string) => void;
     ownerFilter: string;
     setOwnerFilter: (filter: string) => void;
-    customFieldFilter: { key: string; value: string };
-    setCustomFieldFilter: (f: { key: string; value: string }) => void;
+    customFieldSearch: string;
+    setCustomFieldSearch: (v: string) => void;
     customFieldKeys: string[];
     statusFilter: 'open' | 'won' | 'lost' | 'all';
     setStatusFilter: (filter: 'open' | 'won' | 'lost' | 'all') => void;
@@ -74,7 +74,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
     searchTerm, setSearchTerm,
     ownerFilter, setOwnerFilter,
     statusFilter, setStatusFilter,
-    customFieldFilter, setCustomFieldFilter, customFieldKeys,
+    customFieldSearch, setCustomFieldSearch, customFieldKeys,
     onNewDeal
 }) => {
     // Lista de responsáveis da org (admin/super_admin); para vendedor vem vazia
@@ -83,9 +83,6 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
     const { profile } = useAuth();
     // "Meus Negócios" já cobre o próprio usuário — evita opção duplicada na lista.
     const assignableOwners = orgUsers.filter((u) => u.id !== profile?.id);
-    // Filtro por campo: separa UTMs dos demais custom fields (dropdown agrupado).
-    const utmKeys = customFieldKeys.filter((k) => k.startsWith('utm_'));
-    const otherCustomKeys = customFieldKeys.filter((k) => !k.startsWith('utm_'));
     return (
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
             <div className="flex items-center gap-4 w-full sm:w-auto flex-wrap">
@@ -233,44 +230,19 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                     <User className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
                 </div>
 
-                {/* Filtro por campo personalizado / UTM */}
+                {/* Busca livre por campo personalizado / UTM */}
                 {customFieldKeys.length > 0 && (
-                    <div className="flex items-center gap-2">
-                        <div className="relative">
-                            <select
-                                value={customFieldFilter.key}
-                                onChange={(e) => setCustomFieldFilter({ key: e.target.value, value: '' })}
-                                aria-label="Filtrar por campo personalizado ou UTM"
-                                className="pl-3 pr-8 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm appearance-none cursor-pointer"
-                            >
-                                <option value="">Campo (UTM/custom)</option>
-                                {utmKeys.length > 0 && (
-                                    <optgroup label="UTMs">
-                                        {utmKeys.map((k) => (
-                                            <option key={k} value={k}>{k}</option>
-                                        ))}
-                                    </optgroup>
-                                )}
-                                {otherCustomKeys.length > 0 && (
-                                    <optgroup label="Campos personalizados">
-                                        {otherCustomKeys.map((k) => (
-                                            <option key={k} value={k}>{k}</option>
-                                        ))}
-                                    </optgroup>
-                                )}
-                            </select>
-                            <Tag className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
-                        </div>
-                        {customFieldFilter.key && (
-                            <input
-                                type="text"
-                                value={customFieldFilter.value}
-                                onChange={(e) => setCustomFieldFilter({ key: customFieldFilter.key, value: e.target.value })}
-                                placeholder={`valor (${customFieldFilter.key})`}
-                                aria-label="Valor do campo"
-                                className="w-44 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm"
-                            />
-                        )}
+                    <div className="relative">
+                        <Tag className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+                        <input
+                            type="text"
+                            value={customFieldSearch}
+                            onChange={(e) => setCustomFieldSearch(e.target.value)}
+                            placeholder="Buscar em campos/UTM..."
+                            aria-label="Filtrar por valor em campos personalizados ou UTM"
+                            title="Filtra os leads que tenham esse texto em qualquer campo personalizado ou UTM"
+                            className="w-48 pl-9 pr-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm"
+                        />
                     </div>
                 )}
             </div>

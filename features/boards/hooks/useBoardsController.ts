@@ -135,7 +135,7 @@ export const useBoardsController = () => {
   const [statusFilter, setStatusFilter] = useState<'open' | 'won' | 'lost' | 'all'>('open');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   // Filtro por campo personalizado / UTM (ex.: utm_source, utm_campaign): { chave, valor }.
-  const [customFieldFilter, setCustomFieldFilter] = useState<{ key: string; value: string }>({ key: '', value: '' });
+  const [customFieldSearch, setCustomFieldSearch] = useState('');
 
   // Track last context signature to avoid unnecessary setContext calls
   const lastContextSignatureRef = useRef<string | null>(null);
@@ -412,17 +412,24 @@ export const useBoardsController = () => {
               ? !l.ownerId
               : l.ownerId === ownerFilter;
 
-      // Filtro por campo personalizado / UTM: mostra só quem tem o campo
-      // preenchido; se houver valor, casa por "contém" (case-insensitive).
+      // Busca livre por campo/UTM: casa se o texto aparecer em QUALQUER valor
+      // de custom field do lead (ignora metadados internos inbound_).
       let matchesCustomField = true;
-      if (customFieldFilter.key) {
-        const raw = l.customFields?.[customFieldFilter.key];
-        const has = raw !== null && raw !== undefined && String(raw).trim() !== '';
-        if (!has) {
-          matchesCustomField = false;
-        } else if (customFieldFilter.value) {
-          const val = Array.isArray(raw) ? raw.join(', ') : String(raw);
-          matchesCustomField = val.toLowerCase().includes(customFieldFilter.value.toLowerCase());
+      const cfTerm = customFieldSearch.trim().toLowerCase();
+      if (cfTerm) {
+        matchesCustomField = false;
+        const cf = l.customFields;
+        if (cf && typeof cf === 'object') {
+          for (const k of Object.keys(cf)) {
+            if (k.startsWith('inbound_')) continue;
+            const v = (cf as Record<string, unknown>)[k];
+            if (v === null || v === undefined) continue;
+            const str = Array.isArray(v) ? v.join(', ') : String(v);
+            if (str.toLowerCase().includes(cfTerm)) {
+              matchesCustomField = true;
+              break;
+            }
+          }
         }
       }
 
@@ -470,7 +477,7 @@ export const useBoardsController = () => {
       }
       return deal;
     });
-  }, [deals, searchTerm, ownerFilter, customFieldFilter, dateRange, statusFilter, profile]);
+  }, [deals, searchTerm, ownerFilter, customFieldSearch, dateRange, statusFilter, profile]);
 
   // Drag & Drop Handlers
   const handleDragStart = (e: React.DragEvent, id: string, title: string) => {
@@ -887,8 +894,8 @@ export const useBoardsController = () => {
     setSearchTerm,
     ownerFilter,
     setOwnerFilter,
-    customFieldFilter,
-    setCustomFieldFilter,
+    customFieldSearch,
+    setCustomFieldSearch,
     customFieldKeys,
     statusFilter,
     setStatusFilter,
