@@ -134,6 +134,8 @@ export const useBoardsController = () => {
   const [ownerFilter, setOwnerFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'open' | 'won' | 'lost' | 'all'>('open');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
+  // Filtro por campo personalizado / UTM (ex.: utm_source, utm_campaign): { chave, valor }.
+  const [customFieldFilter, setCustomFieldFilter] = useState<{ key: string; value: string }>({ key: '', value: '' });
 
   // Track last context signature to avoid unnecessary setContext calls
   const lastContextSignatureRef = useRef<string | null>(null);
@@ -374,6 +376,22 @@ export const useBoardsController = () => {
     return () => document.removeEventListener('click', handleClickOutside);
   }, [openActivityMenuId]);
 
+  // Chaves de custom fields presentes nos deals (ex.: utm_source, utm_campaign…),
+  // usadas no filtro por campo. Só inclui chaves com algum valor preenchido.
+  const customFieldKeys = useMemo(() => {
+    const set = new Set<string>();
+    for (const d of deals) {
+      const cf = d.customFields;
+      if (cf && typeof cf === 'object') {
+        for (const k of Object.keys(cf)) {
+          const v = (cf as Record<string, unknown>)[k];
+          if (v !== null && v !== undefined && String(v).trim() !== '') set.add(k);
+        }
+      }
+    }
+    return Array.from(set).sort();
+  }, [deals]);
+
   // Filtering Logic
   const filteredDeals = useMemo(() => {
     const cutoffDate = new Date();
@@ -392,6 +410,20 @@ export const useBoardsController = () => {
             : ownerFilter === 'none'
               ? !l.ownerId
               : l.ownerId === ownerFilter;
+
+      // Filtro por campo personalizado / UTM: mostra só quem tem o campo
+      // preenchido; se houver valor, casa por "contém" (case-insensitive).
+      let matchesCustomField = true;
+      if (customFieldFilter.key) {
+        const raw = l.customFields?.[customFieldFilter.key];
+        const has = raw !== null && raw !== undefined && String(raw).trim() !== '';
+        if (!has) {
+          matchesCustomField = false;
+        } else if (customFieldFilter.value) {
+          const val = Array.isArray(raw) ? raw.join(', ') : String(raw);
+          matchesCustomField = val.toLowerCase().includes(customFieldFilter.value.toLowerCase());
+        }
+      }
 
       let matchesDate = true;
       if (dateRange.start) {
@@ -423,7 +455,7 @@ export const useBoardsController = () => {
         }
       }
 
-      return matchesSearch && matchesOwner && matchesDate && matchesStatus && matchesRecent;
+      return matchesSearch && matchesOwner && matchesCustomField && matchesDate && matchesStatus && matchesRecent;
     }).map(deal => {
       // Enrich owner info if it matches current user
       if (deal.ownerId === profile?.id || deal.ownerId === (profile as any)?.user_id) { // Fallback for some profile types
@@ -437,7 +469,7 @@ export const useBoardsController = () => {
       }
       return deal;
     });
-  }, [deals, searchTerm, ownerFilter, dateRange, statusFilter, profile]);
+  }, [deals, searchTerm, ownerFilter, customFieldFilter, dateRange, statusFilter, profile]);
 
   // Drag & Drop Handlers
   const handleDragStart = (e: React.DragEvent, id: string, title: string) => {
@@ -854,6 +886,9 @@ export const useBoardsController = () => {
     setSearchTerm,
     ownerFilter,
     setOwnerFilter,
+    customFieldFilter,
+    setCustomFieldFilter,
+    customFieldKeys,
     statusFilter,
     setStatusFilter,
     dateRange,
