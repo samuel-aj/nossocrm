@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Search, LayoutGrid, Table as TableIcon, User, Settings, Lightbulb, Download } from 'lucide-react';
+import { Plus, Search, LayoutGrid, Table as TableIcon, User, Tag, Settings, Lightbulb, Download } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Board } from '@/types';
 import { BoardSelector } from '../BoardSelector';
@@ -22,6 +22,9 @@ interface KanbanHeaderProps {
     setSearchTerm: (term: string) => void;
     ownerFilter: string;
     setOwnerFilter: (filter: string) => void;
+    customFieldFilter: { key: string; value: string };
+    setCustomFieldFilter: (f: { key: string; value: string }) => void;
+    customFieldKeys: string[];
     statusFilter: 'open' | 'won' | 'lost' | 'all';
     setStatusFilter: (filter: 'open' | 'won' | 'lost' | 'all') => void;
     onNewDeal: () => void;
@@ -71,6 +74,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
     searchTerm, setSearchTerm,
     ownerFilter, setOwnerFilter,
     statusFilter, setStatusFilter,
+    customFieldFilter, setCustomFieldFilter, customFieldKeys,
     onNewDeal
 }) => {
     // Lista de responsáveis da org (admin/super_admin); para vendedor vem vazia
@@ -225,6 +229,36 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                     </select>
                     <User className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
                 </div>
+
+                {/* Filtro por campo personalizado / UTM */}
+                {customFieldKeys.length > 0 && (
+                    <div className="flex items-center gap-2">
+                        <div className="relative">
+                            <select
+                                value={customFieldFilter.key}
+                                onChange={(e) => setCustomFieldFilter({ key: e.target.value, value: '' })}
+                                aria-label="Filtrar por campo personalizado ou UTM"
+                                className="pl-3 pr-8 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm appearance-none cursor-pointer"
+                            >
+                                <option value="">Campo (UTM/custom)</option>
+                                {customFieldKeys.map((k) => (
+                                    <option key={k} value={k}>{k}</option>
+                                ))}
+                            </select>
+                            <Tag className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+                        </div>
+                        {customFieldFilter.key && (
+                            <input
+                                type="text"
+                                value={customFieldFilter.value}
+                                onChange={(e) => setCustomFieldFilter({ key: customFieldFilter.key, value: e.target.value })}
+                                placeholder={`valor (${customFieldFilter.key})`}
+                                aria-label="Valor do campo"
+                                className="w-44 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm"
+                            />
+                        )}
+                    </div>
+                )}
             </div>
 
             <div className="flex gap-3">
