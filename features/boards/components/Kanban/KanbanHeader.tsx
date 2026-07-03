@@ -24,7 +24,7 @@ interface KanbanHeaderProps {
     setOwnerFilter: (filter: string) => void;
     customFieldFilters: Record<string, string>;
     setCustomFieldFilters: (f: Record<string, string>) => void;
-    customFieldOptions: Array<{ key: string; values: string[] }>;
+    customFieldOptions: Array<{ key: string; label: string; kind: 'select' | 'text'; options: string[] }>;
     statusFilter: 'open' | 'won' | 'lost' | 'all';
     setStatusFilter: (filter: 'open' | 'won' | 'lost' | 'all') => void;
     onNewDeal: () => void;
@@ -43,7 +43,7 @@ function CustomFieldFiltersButton({
 }: {
     filters: Record<string, string>;
     onChange: (f: Record<string, string>) => void;
-    options: Array<{ key: string; values: string[] }>;
+    options: Array<{ key: string; label: string; kind: 'select' | 'text'; options: string[] }>;
 }) {
     const [open, setOpen] = React.useState(false);
     const containerRef = React.useRef<HTMLDivElement>(null);
@@ -68,23 +68,21 @@ function CustomFieldFiltersButton({
     const utms = options.filter((o) => o.key.startsWith('utm_'));
     const customs = options.filter((o) => !o.key.startsWith('utm_'));
 
-    const renderField = (o: { key: string; values: string[] }) => {
+    const renderField = (o: { key: string; label: string; kind: 'select' | 'text'; options: string[] }) => {
         const current = filters[o.key] ?? '';
-        // Poucos valores distintos = campo de escolha (select); senão, texto livre.
-        const useSelect = o.values.length > 0 && o.values.length <= 8;
         return (
             <div key={o.key} className="space-y-1">
                 <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate" title={o.key}>
-                    {o.key}
+                    {o.label}
                 </label>
-                {useSelect ? (
+                {o.kind === 'select' ? (
                     <select
                         value={current}
                         onChange={(e) => setField(o.key, e.target.value)}
                         className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white cursor-pointer"
                     >
                         <option value="">Todos</option>
-                        {o.values.map((v) => (
+                        {o.options.map((v) => (
                             <option key={v} value={v}>{v}</option>
                         ))}
                     </select>

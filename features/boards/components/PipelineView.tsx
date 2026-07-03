@@ -47,7 +47,7 @@ interface PipelineViewProps {
   setOwnerFilter: (filter: string) => void;
   customFieldFilters: Record<string, string>;
   setCustomFieldFilters: (f: Record<string, string>) => void;
-  customFieldOptions: Array<{ key: string; values: string[] }>;
+  customFieldOptions: Array<{ key: string; label: string; kind: 'select' | 'text'; options: string[] }>;
   statusFilter: 'open' | 'won' | 'lost' | 'all';
   setStatusFilter: (filter: 'open' | 'won' | 'lost' | 'all') => void;
   draggingId: string | null;
