@@ -65,7 +65,7 @@ const QUICK_ACTIVITY_TITLE_BY_TYPE: Record<'CALL' | 'MEETING' | 'EMAIL', string>
 };
 
 // Performance: reuse date formatter instance.
-const PT_BR_DATE_FORMATTER = new Intl.DateTimeFormat('pt-BR');
+const PT_BR_DATETIME_FORMATTER = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 
 /**
  * Componente React `DealDetailModal`.
@@ -1197,7 +1197,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                     <div className="flex justify-between text-sm">
                       <span className="text-slate-500">Criado em</span>
                       <span className="text-slate-900 dark:text-white">
-                        {PT_BR_DATE_FORMATTER.format(new Date(deal.createdAt))}
+                        {PT_BR_DATETIME_FORMATTER.format(new Date(deal.createdAt))}
                       </span>
                     </div>
                     <div className="flex justify-between text-sm">
@@ -1451,6 +1451,16 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                           isPending={isActivityPending(activity.id)}
                         />
                       ))}
+                      {/* Marco fixo: criação do lead (sempre o evento mais antigo) */}
+                      <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 pt-1">
+                        <Calendar size={13} className="text-primary-500 shrink-0" />
+                        <span>
+                          Lead criado em{' '}
+                          <span className="font-semibold text-slate-700 dark:text-slate-200">
+                            {PT_BR_DATETIME_FORMATTER.format(new Date(deal.createdAt))}
+                          </span>
+                        </span>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1539,6 +1549,16 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                           isPending={isActivityPending(activity.id)}
                         />
                       ))}
+                      {/* Marco fixo: criação do lead (com horário) */}
+                      <div className="flex items-center justify-center gap-2 text-xs text-slate-500 dark:text-slate-400 pt-1">
+                        <Calendar size={13} className="text-primary-500 shrink-0" />
+                        <span>
+                          Lead criado em{' '}
+                          <span className="font-semibold text-slate-700 dark:text-slate-200">
+                            {PT_BR_DATETIME_FORMATTER.format(new Date(deal.createdAt))}
+                          </span>
+                        </span>
+                      </div>
                     </div>
                   </div>
                 )}
