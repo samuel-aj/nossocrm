@@ -45,10 +45,9 @@ interface PipelineViewProps {
   setSearchTerm: (term: string) => void;
   ownerFilter: string;
   setOwnerFilter: (filter: string) => void;
-  customFieldSearch: string;
-  setCustomFieldSearch: (v: string) => void;
-  customFieldKeys: string[];
-  customFieldValueOptions: Array<{ key: string; value: string }>;
+  customFieldFilters: Record<string, string>;
+  setCustomFieldFilters: (f: Record<string, string>) => void;
+  customFieldOptions: Array<{ key: string; values: string[] }>;
   statusFilter: 'open' | 'won' | 'lost' | 'all';
   setStatusFilter: (filter: 'open' | 'won' | 'lost' | 'all') => void;
   draggingId: string | null;
@@ -199,10 +198,9 @@ interface PipelineViewProps {
  * @returns {Element} Retorna um valor do tipo `Element`.
  */
 export const PipelineView: React.FC<PipelineViewProps> = ({
-  customFieldSearch,
-  setCustomFieldSearch,
-  customFieldKeys,
-  customFieldValueOptions,
+  customFieldFilters,
+  setCustomFieldFilters,
+  customFieldOptions,
   // Boards
   boards,
   activeBoard,
@@ -349,10 +347,9 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
             setSearchTerm={setSearchTerm}
             ownerFilter={ownerFilter}
             setOwnerFilter={setOwnerFilter}
-            customFieldSearch={customFieldSearch}
-            setCustomFieldSearch={setCustomFieldSearch}
-            customFieldKeys={customFieldKeys}
-            customFieldValueOptions={customFieldValueOptions}
+            customFieldFilters={customFieldFilters}
+            setCustomFieldFilters={setCustomFieldFilters}
+            customFieldOptions={customFieldOptions}
             statusFilter={statusFilter}
             setStatusFilter={setStatusFilter}
             onNewDeal={() => setIsCreateModalOpen(true)}
