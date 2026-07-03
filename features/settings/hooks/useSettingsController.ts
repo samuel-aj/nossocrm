@@ -36,13 +36,21 @@ export const useSettingsController = () => {
   const normalizeFieldLabel = (label: string) =>
     label.trim().replace(/\s+/g, ' ').toLowerCase();
 
-  const buildFieldKey = (label: string) =>
-    label
+  // Gera a key técnica (camelCase, só [a-zA-Z0-9_]) a partir do nome digitado.
+  // O LABEL fica como o usuário escreveu (com acentos, "?", etc.) — só a key é
+  // sanitizada, porque a API exige identificador válido.
+  const buildFieldKey = (label: string) => {
+    const key = label
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '') // remove acentos (médico -> medico)
       .toLowerCase()
       .replace(/(?:^\w|[A-Z]|\b\w)/g, (word, index) =>
         index === 0 ? word.toLowerCase() : word.toUpperCase()
       )
-      .replace(/\s+/g, '');
+      .replace(/[^a-zA-Z0-9_]/g, '') // remove espaços e pontuação (?, !, …)
+      .replace(/^[0-9_]+/, ''); // key precisa começar com letra
+    return key || 'campo';
+  };
 
   // Custom Fields Logic
   const startEditingField = (field: CustomFieldDefinition) => {
