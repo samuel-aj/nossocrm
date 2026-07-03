@@ -48,6 +48,7 @@ interface PipelineViewProps {
   customFieldSearch: string;
   setCustomFieldSearch: (v: string) => void;
   customFieldKeys: string[];
+  customFieldValueOptions: Array<{ key: string; value: string }>;
   statusFilter: 'open' | 'won' | 'lost' | 'all';
   setStatusFilter: (filter: 'open' | 'won' | 'lost' | 'all') => void;
   draggingId: string | null;
@@ -201,6 +202,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   customFieldSearch,
   setCustomFieldSearch,
   customFieldKeys,
+  customFieldValueOptions,
   // Boards
   boards,
   activeBoard,
@@ -350,6 +352,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
             customFieldSearch={customFieldSearch}
             setCustomFieldSearch={setCustomFieldSearch}
             customFieldKeys={customFieldKeys}
+            customFieldValueOptions={customFieldValueOptions}
             statusFilter={statusFilter}
             setStatusFilter={setStatusFilter}
             onNewDeal={() => setIsCreateModalOpen(true)}
