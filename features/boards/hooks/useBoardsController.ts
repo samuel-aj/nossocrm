@@ -260,7 +260,7 @@ export const useBoardsController = () => {
   }, [activeBoard, deals, statusFilter, ownerFilter, searchTerm, dateRange]);
 
   // Get lifecycle stages from CRM context for automations
-  const { lifecycleStages } = useCRM();
+  const { lifecycleStages, customFieldDefinitions: orgFieldDefs } = useCRM();
 
   // Enable realtime sync for Kanban
   useRealtimeSyncKanban();
@@ -377,11 +377,12 @@ export const useBoardsController = () => {
     return () => document.removeEventListener('click', handleClickOutside);
   }, [openActivityMenuId]);
 
-  // Opções do filtro por campo: para cada custom field/UTM presente nos leads,
-  // os valores distintos (a UI decide: poucos valores -> select; muitos ou
-  // texto livre -> input). Ignora metadados internos (inbound_). Valores muito
-  // longos não entram como opção de select, mas o campo segue filtrável por texto.
+  // Opções do filtro por campo. O TIPO do controle segue a DEFINIÇÃO do campo
+  // no CRM (Configurações → Campos personalizados): type select/multiselect ->
+  // SELECT com as opções configuradas; demais tipos -> texto. UTMs e campos
+  // sem definição são sempre texto. Ignora metadados internos (inbound_).
   const customFieldOptions = useMemo(() => {
+    // valores observados nos leads: fallback de opções p/ selects sem options
     const byKey = new Map<string, Set<string>>();
     for (const d of deals) {
       const cf = d.customFields;
@@ -400,10 +401,23 @@ export const useBoardsController = () => {
         if (value.length <= 80 && set.size < 30) set.add(value);
       }
     }
+    const defByKey = new Map(orgFieldDefs.map((f) => [f.key, f]));
     return Array.from(byKey.entries())
-      .map(([key, values]) => ({ key, values: Array.from(values).sort((a, b) => a.localeCompare(b)) }))
-      .sort((a, b) => a.key.localeCompare(b.key));
-  }, [deals]);
+      .map(([key, observed]) => {
+        const def = defByKey.get(key);
+        const isSelect = !key.startsWith('utm_') && (def?.type === 'select' || def?.type === 'multiselect');
+        const options = isSelect
+          ? (def?.options?.length ? def.options : Array.from(observed).sort((a, b) => a.localeCompare(b)))
+          : [];
+        return {
+          key,
+          label: def?.label || key,
+          kind: (isSelect ? 'select' : 'text') as 'select' | 'text',
+          options,
+        };
+      })
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [deals, orgFieldDefs]);
 
   // Filtering Logic
   const filteredDeals = useMemo(() => {
