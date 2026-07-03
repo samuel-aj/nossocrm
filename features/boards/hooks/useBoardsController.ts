@@ -135,7 +135,8 @@ export const useBoardsController = () => {
   const [statusFilter, setStatusFilter] = useState<'open' | 'won' | 'lost' | 'all'>('open');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   // Filtro por campo personalizado / UTM (ex.: utm_source, utm_campaign): { chave, valor }.
-  const [customFieldSearch, setCustomFieldSearch] = useState('');
+  // Filtro por campo personalizado/UTM: { campo -> valor filtrado } (AND entre campos).
+  const [customFieldFilters, setCustomFieldFilters] = useState<Record<string, string>>({});
 
   // Track last context signature to avoid unnecessary setContext calls
   const lastContextSignatureRef = useRef<string | null>(null);
@@ -376,30 +377,13 @@ export const useBoardsController = () => {
     return () => document.removeEventListener('click', handleClickOutside);
   }, [openActivityMenuId]);
 
-  // Chaves de custom fields presentes nos deals (ex.: utm_source, utm_campaign…),
-  // usadas no filtro por campo. Só inclui chaves com algum valor preenchido.
-  const customFieldKeys = useMemo(() => {
-    const set = new Set<string>();
+  // Opções do filtro por campo: para cada custom field/UTM presente nos leads,
+  // os valores distintos (a UI decide: poucos valores -> select; muitos ou
+  // texto livre -> input). Ignora metadados internos (inbound_). Valores muito
+  // longos não entram como opção de select, mas o campo segue filtrável por texto.
+  const customFieldOptions = useMemo(() => {
+    const byKey = new Map<string, Set<string>>();
     for (const d of deals) {
-      const cf = d.customFields;
-      if (cf && typeof cf === 'object') {
-        for (const k of Object.keys(cf)) {
-          if (k.startsWith('inbound_')) continue; // ignora metadados internos (webhook-in)
-          const v = (cf as Record<string, unknown>)[k];
-          if (v !== null && v !== undefined && String(v).trim() !== '') set.add(k);
-        }
-      }
-    }
-    return Array.from(set).sort();
-  }, [deals]);
-
-  // Sugestões da busca por campo/UTM: valores distintos presentes nos leads
-  // (rótulo = campo de origem), p/ autocomplete. Valores muito longos (ex.:
-  // respostas de textarea) ficam de fora — não ajudam como sugestão.
-  const customFieldValueOptions = useMemo(() => {
-    const seen = new Set<string>();
-    const options: Array<{ key: string; value: string }> = [];
-    outer: for (const d of deals) {
       const cf = d.customFields;
       if (!cf || typeof cf !== 'object') continue;
       for (const k of Object.keys(cf)) {
@@ -407,21 +391,28 @@ export const useBoardsController = () => {
         const raw = (cf as Record<string, unknown>)[k];
         if (raw === null || raw === undefined) continue;
         const value = (Array.isArray(raw) ? raw.join(', ') : String(raw)).trim();
-        if (!value || value.length > 80) continue;
-        const dedupe = value.toLowerCase();
-        if (seen.has(dedupe)) continue;
-        seen.add(dedupe);
-        options.push({ key: k, value });
-        if (options.length >= 500) break outer;
+        if (!value) continue;
+        let set = byKey.get(k);
+        if (!set) {
+          set = new Set();
+          byKey.set(k, set);
+        }
+        if (value.length <= 80 && set.size < 30) set.add(value);
       }
     }
-    return options.sort((a, b) => a.key.localeCompare(b.key) || a.value.localeCompare(b.value));
+    return Array.from(byKey.entries())
+      .map(([key, values]) => ({ key, values: Array.from(values).sort((a, b) => a.localeCompare(b)) }))
+      .sort((a, b) => a.key.localeCompare(b.key));
   }, [deals]);
 
   // Filtering Logic
   const filteredDeals = useMemo(() => {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - 30);
+
+    const activeCfFilters = Object.entries(customFieldFilters)
+      .map(([k, v]) => [k, v.trim().toLowerCase()] as const)
+      .filter(([, v]) => v !== '');
 
     return deals.filter(l => {
       const matchesSearch =
@@ -437,25 +428,17 @@ export const useBoardsController = () => {
               ? !l.ownerId
               : l.ownerId === ownerFilter;
 
-      // Busca livre por campo/UTM: casa se o texto aparecer em QUALQUER valor
-      // de custom field do lead (ignora metadados internos inbound_).
+      // Filtro por campo/UTM: cada campo com valor definido precisa casar
+      // ("contém", case-insensitive) no custom field correspondente do lead.
       let matchesCustomField = true;
-      const cfTerm = customFieldSearch.trim().toLowerCase();
-      if (cfTerm) {
-        matchesCustomField = false;
+      if (activeCfFilters.length > 0) {
         const cf = l.customFields;
-        if (cf && typeof cf === 'object') {
-          for (const k of Object.keys(cf)) {
-            if (k.startsWith('inbound_')) continue;
-            const v = (cf as Record<string, unknown>)[k];
-            if (v === null || v === undefined) continue;
-            const str = Array.isArray(v) ? v.join(', ') : String(v);
-            if (str.toLowerCase().includes(cfTerm)) {
-              matchesCustomField = true;
-              break;
-            }
-          }
-        }
+        matchesCustomField = activeCfFilters.every(([key, term]) => {
+          const raw = cf && typeof cf === 'object' ? (cf as Record<string, unknown>)[key] : undefined;
+          if (raw === null || raw === undefined) return false;
+          const str = Array.isArray(raw) ? raw.join(', ') : String(raw);
+          return str.toLowerCase().includes(term);
+        });
       }
 
       let matchesDate = true;
@@ -502,7 +485,7 @@ export const useBoardsController = () => {
       }
       return deal;
     });
-  }, [deals, searchTerm, ownerFilter, customFieldSearch, dateRange, statusFilter, profile]);
+  }, [deals, searchTerm, ownerFilter, customFieldFilters, dateRange, statusFilter, profile]);
 
   // Drag & Drop Handlers
   const handleDragStart = (e: React.DragEvent, id: string, title: string) => {
@@ -919,10 +902,9 @@ export const useBoardsController = () => {
     setSearchTerm,
     ownerFilter,
     setOwnerFilter,
-    customFieldSearch,
-    setCustomFieldSearch,
-    customFieldKeys,
-    customFieldValueOptions,
+    customFieldFilters,
+    setCustomFieldFilters,
+    customFieldOptions,
     statusFilter,
     setStatusFilter,
     dateRange,

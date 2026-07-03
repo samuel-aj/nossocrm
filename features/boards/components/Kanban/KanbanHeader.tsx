@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Search, LayoutGrid, Table as TableIcon, User, Tag, X, Settings, Lightbulb, Download } from 'lucide-react';
+import { Plus, Search, LayoutGrid, Table as TableIcon, User, Tag, Settings, Lightbulb, Download } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Board } from '@/types';
 import { BoardSelector } from '../BoardSelector';
@@ -22,28 +22,28 @@ interface KanbanHeaderProps {
     setSearchTerm: (term: string) => void;
     ownerFilter: string;
     setOwnerFilter: (filter: string) => void;
-    customFieldSearch: string;
-    setCustomFieldSearch: (v: string) => void;
-    customFieldKeys: string[];
-    customFieldValueOptions: Array<{ key: string; value: string }>;
+    customFieldFilters: Record<string, string>;
+    setCustomFieldFilters: (f: Record<string, string>) => void;
+    customFieldOptions: Array<{ key: string; values: string[] }>;
     statusFilter: 'open' | 'won' | 'lost' | 'all';
     setStatusFilter: (filter: 'open' | 'won' | 'lost' | 'all') => void;
     onNewDeal: () => void;
 }
 
 /**
- * Busca por campo personalizado/UTM com dropdown próprio (o <datalist> nativo
- * não abre de forma consistente e "trava" após selecionar um valor).
- * Abre ao focar, filtra conforme digita, opção clicável e botão X pra limpar.
+ * Filtro por campo personalizado/UTM: botão "Filtros" que abre um painel com
+ * um controle por campo — SELECT quando o campo tem poucos valores distintos
+ * (ex.: Laudo médico: Sim/Não) e INPUT de texto quando é valor livre (ex.:
+ * renda). Vários campos combinam em E (AND). Badge mostra quantos ativos.
  */
-function CustomFieldSearchBox({
-    value,
+function CustomFieldFiltersButton({
+    filters,
     onChange,
     options,
 }: {
-    value: string;
-    onChange: (v: string) => void;
-    options: Array<{ key: string; value: string }>;
+    filters: Record<string, string>;
+    onChange: (f: Record<string, string>) => void;
+    options: Array<{ key: string; values: string[] }>;
 }) {
     const [open, setOpen] = React.useState(false);
     const containerRef = React.useRef<HTMLDivElement>(null);
@@ -57,50 +57,96 @@ function CustomFieldSearchBox({
         return () => document.removeEventListener('mousedown', handler);
     }, [open]);
 
-    const term = value.trim().toLowerCase();
-    const filtered = (term ? options.filter((o) => o.value.toLowerCase().includes(term)) : options).slice(0, 100);
+    const activeCount = Object.values(filters).filter((v) => v && v.trim() !== '').length;
+    const setField = (key: string, value: string) => {
+        const next = { ...filters };
+        if (value) next[key] = value;
+        else delete next[key];
+        onChange(next);
+    };
+
+    const utms = options.filter((o) => o.key.startsWith('utm_'));
+    const customs = options.filter((o) => !o.key.startsWith('utm_'));
+
+    const renderField = (o: { key: string; values: string[] }) => {
+        const current = filters[o.key] ?? '';
+        // Poucos valores distintos = campo de escolha (select); senão, texto livre.
+        const useSelect = o.values.length > 0 && o.values.length <= 8;
+        return (
+            <div key={o.key} className="space-y-1">
+                <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate" title={o.key}>
+                    {o.key}
+                </label>
+                {useSelect ? (
+                    <select
+                        value={current}
+                        onChange={(e) => setField(o.key, e.target.value)}
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white cursor-pointer"
+                    >
+                        <option value="">Todos</option>
+                        {o.values.map((v) => (
+                            <option key={v} value={v}>{v}</option>
+                        ))}
+                    </select>
+                ) : (
+                    <input
+                        type="text"
+                        value={current}
+                        onChange={(e) => setField(o.key, e.target.value)}
+                        placeholder="Digite para filtrar..."
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                    />
+                )}
+            </div>
+        );
+    };
 
     return (
         <div ref={containerRef} className="relative">
-            <Tag className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
-            <input
-                type="text"
-                value={value}
-                onChange={(e) => { onChange(e.target.value); setOpen(true); }}
-                onFocus={() => setOpen(true)}
-                onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}
-                placeholder="Buscar em campos/UTM..."
-                aria-label="Filtrar por valor em campos personalizados ou UTM"
-                title="Filtra os leads que tenham esse texto em qualquer campo personalizado ou UTM"
-                className="w-48 pl-9 pr-8 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm"
-            />
-            {value && (
-                <button
-                    type="button"
-                    onClick={() => { onChange(''); setOpen(false); }}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors"
-                    aria-label="Limpar filtro"
-                    title="Limpar filtro"
-                >
-                    <X size={14} />
-                </button>
-            )}
-            {open && filtered.length > 0 && (
-                <div className="absolute z-50 mt-1 w-72 max-h-64 overflow-y-auto scrollbar-custom rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg">
-                    {filtered.map((o) => (
-                        <button
-                            key={`${o.key}:${o.value}`}
-                            type="button"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => { onChange(o.value); setOpen(false); }}
-                            className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
-                        >
-                            <span className="truncate">{o.value}</span>
-                            <span className="shrink-0 text-[10px] uppercase tracking-wide text-slate-400 bg-slate-100 dark:bg-white/10 px-1.5 py-0.5 rounded">
-                                {o.key}
-                            </span>
-                        </button>
-                    ))}
+            <button
+                type="button"
+                onClick={() => setOpen((o) => !o)}
+                aria-expanded={open}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-colors backdrop-blur-sm ${activeCount > 0
+                    ? 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
+                    : 'border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10'
+                    }`}
+                title="Filtrar por campos personalizados e UTMs"
+            >
+                <Tag size={14} />
+                Filtros
+                {activeCount > 0 && (
+                    <span className="ml-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-primary-600 text-white text-[11px] font-bold flex items-center justify-center">
+                        {activeCount}
+                    </span>
+                )}
+            </button>
+            {open && (
+                <div className="absolute z-50 mt-1 w-80 max-h-96 overflow-y-auto scrollbar-custom rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg p-3 space-y-3">
+                    <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-slate-400 uppercase">Filtrar por campos</p>
+                        {activeCount > 0 && (
+                            <button
+                                type="button"
+                                onClick={() => onChange({})}
+                                className="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
+                            >
+                                Limpar ({activeCount})
+                            </button>
+                        )}
+                    </div>
+                    {utms.length > 0 && (
+                        <div className="space-y-2">
+                            <p className="text-[11px] font-bold text-slate-400 uppercase border-b border-slate-100 dark:border-white/10 pb-1">UTMs</p>
+                            {utms.map(renderField)}
+                        </div>
+                    )}
+                    {customs.length > 0 && (
+                        <div className="space-y-2">
+                            <p className="text-[11px] font-bold text-slate-400 uppercase border-b border-slate-100 dark:border-white/10 pb-1">Campos personalizados</p>
+                            {customs.map(renderField)}
+                        </div>
+                    )}
                 </div>
             )}
         </div>
@@ -151,7 +197,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
     searchTerm, setSearchTerm,
     ownerFilter, setOwnerFilter,
     statusFilter, setStatusFilter,
-    customFieldSearch, setCustomFieldSearch, customFieldKeys, customFieldValueOptions,
+    customFieldFilters, setCustomFieldFilters, customFieldOptions,
     onNewDeal
 }) => {
     // Lista de responsáveis da org (admin/super_admin); para vendedor vem vazia
@@ -307,12 +353,12 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                     <User className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
                 </div>
 
-                {/* Busca livre por campo personalizado / UTM (dropdown próprio) */}
-                {customFieldKeys.length > 0 && (
-                    <CustomFieldSearchBox
-                        value={customFieldSearch}
-                        onChange={setCustomFieldSearch}
-                        options={customFieldValueOptions}
+                {/* Filtros por campo personalizado / UTM (um controle por campo) */}
+                {customFieldOptions.length > 0 && (
+                    <CustomFieldFiltersButton
+                        filters={customFieldFilters}
+                        onChange={setCustomFieldFilters}
+                        options={customFieldOptions}
                     />
                 )}
             </div>
