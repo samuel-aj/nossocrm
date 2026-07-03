@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Search, LayoutGrid, Table as TableIcon, User, Tag, Settings, Lightbulb, Download } from 'lucide-react';
+import { Plus, Search, LayoutGrid, Table as TableIcon, User, Tag, X, Settings, Lightbulb, Download } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Board } from '@/types';
 import { BoardSelector } from '../BoardSelector';
@@ -29,6 +29,82 @@ interface KanbanHeaderProps {
     statusFilter: 'open' | 'won' | 'lost' | 'all';
     setStatusFilter: (filter: 'open' | 'won' | 'lost' | 'all') => void;
     onNewDeal: () => void;
+}
+
+/**
+ * Busca por campo personalizado/UTM com dropdown próprio (o <datalist> nativo
+ * não abre de forma consistente e "trava" após selecionar um valor).
+ * Abre ao focar, filtra conforme digita, opção clicável e botão X pra limpar.
+ */
+function CustomFieldSearchBox({
+    value,
+    onChange,
+    options,
+}: {
+    value: string;
+    onChange: (v: string) => void;
+    options: Array<{ key: string; value: string }>;
+}) {
+    const [open, setOpen] = React.useState(false);
+    const containerRef = React.useRef<HTMLDivElement>(null);
+
+    React.useEffect(() => {
+        if (!open) return;
+        const handler = (e: MouseEvent) => {
+            if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, [open]);
+
+    const term = value.trim().toLowerCase();
+    const filtered = (term ? options.filter((o) => o.value.toLowerCase().includes(term)) : options).slice(0, 100);
+
+    return (
+        <div ref={containerRef} className="relative">
+            <Tag className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+            <input
+                type="text"
+                value={value}
+                onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+                onFocus={() => setOpen(true)}
+                onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}
+                placeholder="Buscar em campos/UTM..."
+                aria-label="Filtrar por valor em campos personalizados ou UTM"
+                title="Filtra os leads que tenham esse texto em qualquer campo personalizado ou UTM"
+                className="w-48 pl-9 pr-8 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm"
+            />
+            {value && (
+                <button
+                    type="button"
+                    onClick={() => { onChange(''); setOpen(false); }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors"
+                    aria-label="Limpar filtro"
+                    title="Limpar filtro"
+                >
+                    <X size={14} />
+                </button>
+            )}
+            {open && filtered.length > 0 && (
+                <div className="absolute z-50 mt-1 w-72 max-h-64 overflow-y-auto scrollbar-custom rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg">
+                    {filtered.map((o) => (
+                        <button
+                            key={`${o.key}:${o.value}`}
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => { onChange(o.value); setOpen(false); }}
+                            className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
+                        >
+                            <span className="truncate">{o.value}</span>
+                            <span className="shrink-0 text-[10px] uppercase tracking-wide text-slate-400 bg-slate-100 dark:bg-white/10 px-1.5 py-0.5 rounded">
+                                {o.key}
+                            </span>
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
 }
 
 /**
@@ -231,27 +307,13 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                     <User className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
                 </div>
 
-                {/* Busca livre por campo personalizado / UTM */}
+                {/* Busca livre por campo personalizado / UTM (dropdown próprio) */}
                 {customFieldKeys.length > 0 && (
-                    <div className="relative">
-                        <Tag className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
-                        <input
-                            type="text"
-                            list="cf-utm-options"
-                            value={customFieldSearch}
-                            onChange={(e) => setCustomFieldSearch(e.target.value)}
-                            placeholder="Buscar em campos/UTM..."
-                            aria-label="Filtrar por valor em campos personalizados ou UTM"
-                            title="Filtra os leads que tenham esse texto em qualquer campo personalizado ou UTM"
-                            className="w-48 pl-9 pr-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm"
-                        />
-                        {/* Sugestões: valores que existem nos leads deste board (rótulo = campo) */}
-                        <datalist id="cf-utm-options">
-                            {customFieldValueOptions.map((o) => (
-                                <option key={`${o.key}:${o.value}`} value={o.value} label={o.key} />
-                            ))}
-                        </datalist>
-                    </div>
+                    <CustomFieldSearchBox
+                        value={customFieldSearch}
+                        onChange={setCustomFieldSearch}
+                        options={customFieldValueOptions}
+                    />
                 )}
             </div>
 
