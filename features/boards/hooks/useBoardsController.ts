@@ -393,6 +393,31 @@ export const useBoardsController = () => {
     return Array.from(set).sort();
   }, [deals]);
 
+  // Sugestões da busca por campo/UTM: valores distintos presentes nos leads
+  // (rótulo = campo de origem), p/ autocomplete. Valores muito longos (ex.:
+  // respostas de textarea) ficam de fora — não ajudam como sugestão.
+  const customFieldValueOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const options: Array<{ key: string; value: string }> = [];
+    outer: for (const d of deals) {
+      const cf = d.customFields;
+      if (!cf || typeof cf !== 'object') continue;
+      for (const k of Object.keys(cf)) {
+        if (k.startsWith('inbound_')) continue;
+        const raw = (cf as Record<string, unknown>)[k];
+        if (raw === null || raw === undefined) continue;
+        const value = (Array.isArray(raw) ? raw.join(', ') : String(raw)).trim();
+        if (!value || value.length > 80) continue;
+        const dedupe = value.toLowerCase();
+        if (seen.has(dedupe)) continue;
+        seen.add(dedupe);
+        options.push({ key: k, value });
+        if (options.length >= 500) break outer;
+      }
+    }
+    return options.sort((a, b) => a.key.localeCompare(b.key) || a.value.localeCompare(b.value));
+  }, [deals]);
+
   // Filtering Logic
   const filteredDeals = useMemo(() => {
     const cutoffDate = new Date();
@@ -897,6 +922,7 @@ export const useBoardsController = () => {
     customFieldSearch,
     setCustomFieldSearch,
     customFieldKeys,
+    customFieldValueOptions,
     statusFilter,
     setStatusFilter,
     dateRange,
