@@ -27,11 +27,14 @@ function DragDropZone({
   colorBar,
   title,
   icon,
+  overClass,
 }: {
   onDropCard: (e: React.DragEvent) => void;
   colorBar: string;
   title: string;
   icon: React.ReactNode;
+  /** Classes aplicadas quando o card está POR CIMA da zona (cor de destaque). */
+  overClass: string;
 }) {
   const [over, setOver] = React.useState(false);
   return (
@@ -46,15 +49,28 @@ function DragDropZone({
         setOver(false);
         onDropCard(e);
       }}
-      className={`w-56 rounded-xl overflow-hidden border-2 border-dashed bg-white/95 dark:bg-slate-900/90 shadow-2xl backdrop-blur-sm transition-all select-none ${over ? 'scale-105 border-primary-400 dark:border-primary-500' : 'border-slate-300 dark:border-slate-600'}`}
+      className={`w-56 rounded-xl overflow-hidden border-2 shadow-2xl backdrop-blur-sm transition-all duration-200 ease-out select-none ${
+        over
+          ? `scale-110 -translate-y-2 border-solid ${overClass}`
+          : 'border-dashed border-slate-300 dark:border-slate-600 bg-white/95 dark:bg-slate-900/90'
+      }`}
     >
-      <div className={`h-1.5 w-full ${colorBar}`} />
-      <div className="px-3 py-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-700 dark:text-slate-200">
-        {icon}
-        <span className="truncate">{title}</span>
-      </div>
-      <div className="mx-3 mb-3 h-12 rounded-lg border-2 border-dashed border-slate-200 dark:border-slate-700 flex items-center justify-center text-[11px] text-slate-400 dark:text-slate-500">
-        Solte aqui
+      {/* pointer-events-none: evita flicker do dragenter/dragleave nos filhos */}
+      <div className="pointer-events-none">
+        <div className={`${over ? 'h-2.5' : 'h-1.5'} w-full transition-all ${colorBar}`} />
+        <div className="px-3 py-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-700 dark:text-slate-200">
+          <span className={over ? 'animate-bounce' : ''}>{icon}</span>
+          <span className="truncate">{title}</span>
+        </div>
+        <div
+          className={`mx-3 mb-3 h-12 rounded-lg border-2 border-dashed flex items-center justify-center text-[11px] transition-colors ${
+            over
+              ? 'border-current font-bold text-slate-800 dark:text-white'
+              : 'border-slate-200 dark:border-slate-700 text-slate-400 dark:text-slate-500'
+          }`}
+        >
+          {over ? 'Pode soltar!' : 'Solte aqui'}
+        </div>
       </div>
     </div>
   );
@@ -523,6 +539,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                 colorBar={wonStage?.color || 'bg-green-500'}
                 title={wonStage?.label || 'Ganho'}
                 icon={<CheckCircle2 size={14} className="text-green-500 shrink-0" />}
+                overClass="border-green-500 bg-green-100/95 dark:bg-green-900/70 ring-4 ring-green-400/50"
               />
             )}
             {activeBoard.lostStageId && (
@@ -531,6 +548,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                 colorBar={lostStage?.color || 'bg-red-500'}
                 title={lostStage?.label || 'Perdido'}
                 icon={<XCircle size={14} className="text-red-500 shrink-0" />}
+                overClass="border-red-500 bg-red-100/95 dark:bg-red-900/70 ring-4 ring-red-400/50"
               />
             )}
             <DragDropZone
@@ -542,6 +560,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
               colorBar="bg-slate-500"
               title="Excluir"
               icon={<Trash2 size={14} className="text-slate-500 shrink-0" />}
+              overClass="border-red-700 bg-red-100/95 dark:bg-red-950/80 ring-4 ring-red-600/40"
             />
           </div>
         );
