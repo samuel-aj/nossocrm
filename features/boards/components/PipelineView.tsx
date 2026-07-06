@@ -9,11 +9,46 @@ import { KanbanBoard } from './Kanban/KanbanBoard';
 import { KanbanList } from './Kanban/KanbanList';
 import { DeleteBoardModal } from './Modals/DeleteBoardModal';
 import { LossReasonModal } from '@/components/ui/LossReasonModal';
+import ConfirmModal from '@/components/ConfirmModal';
+import { CheckCircle2, XCircle, Trash2 } from 'lucide-react';
 import { DealView, CustomFieldDefinition, Board, BoardStage } from '@/types';
 import { ExportTemplateModal } from './Modals/ExportTemplateModal';
 import { useAuth } from '@/context/AuthContext';
 import PageLoader from '@/components/PageLoader';
 import { UserRole } from '@/types/constants';
+
+/**
+ * Zona de soltar (drop target) da barra flutuante que aparece durante o drag
+ * de um card (estilo Kommo). Realça quando o card está por cima.
+ */
+function DragDropZone({
+  onDropCard,
+  className,
+  children,
+}: {
+  onDropCard: (e: React.DragEvent) => void;
+  className: string;
+  children: React.ReactNode;
+}) {
+  const [over, setOver] = React.useState(false);
+  return (
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+      }}
+      onDragEnter={() => setOver(true)}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        setOver(false);
+        onDropCard(e);
+      }}
+      className={`flex items-center gap-2 px-8 py-4 rounded-xl border-2 border-dashed font-bold text-sm shadow-xl backdrop-blur-sm transition-all select-none ${over ? 'scale-110' : ''} ${className}`}
+    >
+      {children}
+    </div>
+  );
+}
 
 interface PipelineViewProps {
   // Boards
@@ -64,6 +99,11 @@ interface PipelineViewProps {
   handleDragOver: (e: React.DragEvent) => void;
   handleDragEnd: () => void;
   handleDrop: (e: React.DragEvent, stageId: string) => void;
+  // Zonas flutuantes de drag (Ganho/Perdido/Excluir)
+  deleteDealModal: { dealId: string; dealTitle: string } | null;
+  handleDropDelete: (dealId: string) => void;
+  handleDeleteDealConfirm: () => void;
+  handleDeleteDealClose: () => void;
   /** Keyboard-accessible handler to move a deal to a new stage */
   handleMoveDealToStage: (dealId: string, newStageId: string) => void;
   handleQuickAddActivity: (
@@ -201,6 +241,10 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   customFieldFilters,
   setCustomFieldFilters,
   customFieldOptions,
+  deleteDealModal,
+  handleDropDelete,
+  handleDeleteDealConfirm,
+  handleDeleteDealClose,
   // Boards
   boards,
   activeBoard,
@@ -443,6 +487,48 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
         onClose={handleLossReasonClose}
         onConfirm={handleLossReasonConfirm}
         dealTitle={lossReasonModal?.dealTitle}
+      />
+
+      {/* Barra flutuante de drag (estilo Kommo): solta o card em Ganho/Perdido/Excluir */}
+      {draggingId && activeBoard && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex gap-3">
+          {activeBoard.wonStageId && (
+            <DragDropZone
+              onDropCard={(e) => handleDrop(e, activeBoard.wonStageId!)}
+              className="border-green-400 bg-green-50/95 text-green-700 dark:bg-green-900/80 dark:text-green-300"
+            >
+              <CheckCircle2 size={18} /> Ganho
+            </DragDropZone>
+          )}
+          {activeBoard.lostStageId && (
+            <DragDropZone
+              onDropCard={(e) => handleDrop(e, activeBoard.lostStageId!)}
+              className="border-red-400 bg-red-50/95 text-red-700 dark:bg-red-900/80 dark:text-red-300"
+            >
+              <XCircle size={18} /> Perdido
+            </DragDropZone>
+          )}
+          <DragDropZone
+            onDropCard={(e) => {
+              e.preventDefault();
+              const dealId = e.dataTransfer.getData('dealId');
+              if (dealId) handleDropDelete(dealId);
+            }}
+            className="border-slate-400 bg-slate-100/95 text-slate-700 dark:bg-slate-800/90 dark:text-slate-200"
+          >
+            <Trash2 size={18} /> Excluir
+          </DragDropZone>
+        </div>
+      )}
+
+      <ConfirmModal
+        isOpen={!!deleteDealModal}
+        onClose={handleDeleteDealClose}
+        onConfirm={handleDeleteDealConfirm}
+        title="Excluir negócio"
+        message={`Excluir "${deleteDealModal?.dealTitle ?? ''}"? Esta ação não pode ser desfeita.`}
+        confirmText="Excluir"
+        variant="danger"
       />
 
       {activeBoard && (

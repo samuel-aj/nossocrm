@@ -260,7 +260,7 @@ export const useBoardsController = () => {
   }, [activeBoard, deals, statusFilter, ownerFilter, searchTerm, dateRange]);
 
   // Get lifecycle stages from CRM context for automations
-  const { lifecycleStages, customFieldDefinitions: orgFieldDefs } = useCRM();
+  const { lifecycleStages, customFieldDefinitions: orgFieldDefs, deleteDeal } = useCRM();
 
   // Enable realtime sync for Kanban
   useRealtimeSyncKanban();
@@ -602,6 +602,33 @@ export const useBoardsController = () => {
     // User cancelled - don't move the deal
     setLossReasonModal(null);
   };
+
+  // Zona flutuante "Excluir" (drag estilo Kommo): soltar o card na zona abre
+  // uma confirmação antes de excluir de verdade (ação destrutiva).
+  const [deleteDealModal, setDeleteDealModal] = useState<{ dealId: string; dealTitle: string } | null>(null);
+
+  const handleDropDelete = (dealId: string) => {
+    const deal = deals.find(d => d.id === dealId);
+    if (!deal) return;
+    if (deal.id.startsWith('temp-')) {
+      addToast('Aguarde o negócio salvar para excluir (1s) e tente novamente.', 'info');
+      return;
+    }
+    setDeleteDealModal({ dealId, dealTitle: deal.title });
+  };
+
+  const handleDeleteDealConfirm = async () => {
+    if (!deleteDealModal) return;
+    try {
+      await deleteDeal(deleteDealModal.dealId);
+      addToast('Negócio excluído.', 'success');
+    } catch {
+      addToast('Falha ao excluir o negócio.', 'error');
+    }
+    setDeleteDealModal(null);
+  };
+
+  const handleDeleteDealClose = () => setDeleteDealModal(null);
 
   /**
    * Keyboard-accessible handler to move a deal to a new stage.
@@ -948,6 +975,10 @@ export const useBoardsController = () => {
     lossReasonModal,
     handleLossReasonConfirm,
     handleLossReasonClose,
+    deleteDealModal,
+    handleDropDelete,
+    handleDeleteDealConfirm,
+    handleDeleteDealClose,
     // UX: global overlay while creating board (start-from-zero flow)
     boardCreateOverlay,
   };
