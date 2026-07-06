@@ -18,17 +18,20 @@ import PageLoader from '@/components/PageLoader';
 import { UserRole } from '@/types/constants';
 
 /**
- * Zona de soltar (drop target) da barra flutuante que aparece durante o drag
- * de um card (estilo Kommo). Realça quando o card está por cima.
+ * Zona de soltar da barra flutuante do drag (estilo Kommo), com visual de
+ * PREVIEW de coluna do board: barra de cor do estágio + título + área
+ * tracejada "Solte aqui". Realça quando o card está por cima.
  */
 function DragDropZone({
   onDropCard,
-  className,
-  children,
+  colorBar,
+  title,
+  icon,
 }: {
   onDropCard: (e: React.DragEvent) => void;
-  className: string;
-  children: React.ReactNode;
+  colorBar: string;
+  title: string;
+  icon: React.ReactNode;
 }) {
   const [over, setOver] = React.useState(false);
   return (
@@ -43,9 +46,16 @@ function DragDropZone({
         setOver(false);
         onDropCard(e);
       }}
-      className={`flex items-center gap-2 px-8 py-4 rounded-xl border-2 border-dashed font-bold text-sm shadow-xl backdrop-blur-sm transition-all select-none ${over ? 'scale-110' : ''} ${className}`}
+      className={`w-56 rounded-xl overflow-hidden border-2 border-dashed bg-white/95 dark:bg-slate-900/90 shadow-2xl backdrop-blur-sm transition-all select-none ${over ? 'scale-105 border-primary-400 dark:border-primary-500' : 'border-slate-300 dark:border-slate-600'}`}
     >
-      {children}
+      <div className={`h-1.5 w-full ${colorBar}`} />
+      <div className="px-3 py-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-700 dark:text-slate-200">
+        {icon}
+        <span className="truncate">{title}</span>
+      </div>
+      <div className="mx-3 mb-3 h-12 rounded-lg border-2 border-dashed border-slate-200 dark:border-slate-700 flex items-center justify-center text-[11px] text-slate-400 dark:text-slate-500">
+        Solte aqui
+      </div>
     </div>
   );
 }
@@ -311,6 +321,17 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
     handleUpdateBoard({ ...activeBoard, stages: newStages });
   };
 
+  // Visão padrão ("Em Aberto") esconde as COLUNAS de ganho/perdido do Kanban —
+  // elas só aparecem ao filtrar por Ganhos/Perdidos/Todos. Marcar ganho/perdido
+  // no dia a dia é pelas zonas flutuantes do drag (ou trocando o filtro).
+  const kanbanStages = !activeBoard
+    ? []
+    : statusFilter === 'open'
+      ? activeBoard.stages.filter(
+          (s) => s.id !== activeBoard.wonStageId && s.id !== activeBoard.lostStageId
+        )
+      : activeBoard.stages;
+
   if (isLoading) {
     return (
       <div className="h-full">
@@ -404,7 +425,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
           <div className="flex-1 overflow-hidden">
             {viewMode === 'kanban' ? (
               <KanbanBoard
-                stages={activeBoard.stages}
+                stages={kanbanStages}
                 filteredDeals={filteredDeals}
                 customFieldDefinitions={customFieldDefinitions}
                 draggingId={draggingId}
@@ -489,37 +510,42 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
         dealTitle={lossReasonModal?.dealTitle}
       />
 
-      {/* Barra flutuante de drag (estilo Kommo): solta o card em Ganho/Perdido/Excluir */}
-      {draggingId && activeBoard && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex gap-3">
-          {activeBoard.wonStageId && (
+      {/* Barra flutuante de drag (estilo Kommo): previews das colunas de
+          Ganho/Perdido (label + cor do estágio real) + Excluir */}
+      {draggingId && activeBoard && (() => {
+        const wonStage = activeBoard.stages.find((s) => s.id === activeBoard.wonStageId);
+        const lostStage = activeBoard.stages.find((s) => s.id === activeBoard.lostStageId);
+        return (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex gap-3">
+            {activeBoard.wonStageId && (
+              <DragDropZone
+                onDropCard={(e) => handleDrop(e, activeBoard.wonStageId!)}
+                colorBar={wonStage?.color || 'bg-green-500'}
+                title={wonStage?.label || 'Ganho'}
+                icon={<CheckCircle2 size={14} className="text-green-500 shrink-0" />}
+              />
+            )}
+            {activeBoard.lostStageId && (
+              <DragDropZone
+                onDropCard={(e) => handleDrop(e, activeBoard.lostStageId!)}
+                colorBar={lostStage?.color || 'bg-red-500'}
+                title={lostStage?.label || 'Perdido'}
+                icon={<XCircle size={14} className="text-red-500 shrink-0" />}
+              />
+            )}
             <DragDropZone
-              onDropCard={(e) => handleDrop(e, activeBoard.wonStageId!)}
-              className="border-green-400 bg-green-50/95 text-green-700 dark:bg-green-900/80 dark:text-green-300"
-            >
-              <CheckCircle2 size={18} /> Ganho
-            </DragDropZone>
-          )}
-          {activeBoard.lostStageId && (
-            <DragDropZone
-              onDropCard={(e) => handleDrop(e, activeBoard.lostStageId!)}
-              className="border-red-400 bg-red-50/95 text-red-700 dark:bg-red-900/80 dark:text-red-300"
-            >
-              <XCircle size={18} /> Perdido
-            </DragDropZone>
-          )}
-          <DragDropZone
-            onDropCard={(e) => {
-              e.preventDefault();
-              const dealId = e.dataTransfer.getData('dealId');
-              if (dealId) handleDropDelete(dealId);
-            }}
-            className="border-slate-400 bg-slate-100/95 text-slate-700 dark:bg-slate-800/90 dark:text-slate-200"
-          >
-            <Trash2 size={18} /> Excluir
-          </DragDropZone>
-        </div>
-      )}
+              onDropCard={(e) => {
+                e.preventDefault();
+                const dealId = e.dataTransfer.getData('dealId');
+                if (dealId) handleDropDelete(dealId);
+              }}
+              colorBar="bg-slate-500"
+              title="Excluir"
+              icon={<Trash2 size={14} className="text-slate-500 shrink-0" />}
+            />
+          </div>
+        );
+      })()}
 
       <ConfirmModal
         isOpen={!!deleteDealModal}
