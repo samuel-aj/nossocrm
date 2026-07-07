@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Search, LayoutGrid, Table as TableIcon, User, Tag, X, Settings, Lightbulb, Download } from 'lucide-react';
+import { Plus, Search, LayoutGrid, Table as TableIcon, User, Tag, X, Settings, Lightbulb, Download, MoreVertical, CheckSquare } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Board } from '@/types';
 import { BoardSelector } from '../BoardSelector';
@@ -33,6 +33,10 @@ interface KanbanHeaderProps {
     statusFilter: 'open' | 'won' | 'lost' | 'all';
     setStatusFilter: (filter: 'open' | 'won' | 'lost' | 'all') => void;
     onNewDeal: () => void;
+    // Modo de seleção múltipla (menu ⋮)
+    selectionMode: boolean;
+    onEnterSelectionMode: () => void;
+    onExitSelectionMode: () => void;
 }
 
 /** Uma condição do filtro: campo + operador + valor (quando o operador exige). */
@@ -304,12 +308,24 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
     statusFilter, setStatusFilter,
     customFieldConditions, setCustomFieldConditions, customFieldLogic, setCustomFieldLogic, customFieldOptions,
     tagFilter, setTagFilter, tagOptions,
+    selectionMode, onEnterSelectionMode, onExitSelectionMode,
     onNewDeal
 }) => {
     // Lista de responsáveis da org (admin/super_admin); para vendedor vem vazia
     // (hook desabilitado), então só aparecem "Todos" e "Meus".
     const { users: orgUsers } = useOrgUsers();
     const { profile } = useAuth();
+    // Menu ⋮ (mais opções)
+    const [moreMenuOpen, setMoreMenuOpen] = React.useState(false);
+    const moreMenuRef = React.useRef<HTMLDivElement>(null);
+    React.useEffect(() => {
+        if (!moreMenuOpen) return;
+        const handler = (e: MouseEvent) => {
+            if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) setMoreMenuOpen(false);
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, [moreMenuOpen]);
     // "Meus Negócios" já cobre o próprio usuário — evita opção duplicada na lista.
     const assignableOwners = orgUsers.filter((u) => u.id !== profile?.id);
     return (
@@ -475,6 +491,43 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
             </div>
 
             <div className="flex gap-3">
+                {/* ⋮ mais opções (ex.: Selecionar vários) */}
+                <div ref={moreMenuRef} className="relative">
+                    <button
+                        type="button"
+                        onClick={() => setMoreMenuOpen((o) => !o)}
+                        aria-expanded={moreMenuOpen}
+                        aria-label="Mais opções"
+                        title="Mais opções"
+                        className={`p-2 rounded-lg border text-sm transition-colors ${selectionMode
+                            ? 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
+                            : 'border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/10'
+                            }`}
+                    >
+                        <MoreVertical size={18} />
+                    </button>
+                    {moreMenuOpen && (
+                        <div className="absolute right-0 z-50 mt-1 w-52 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1">
+                            {!selectionMode ? (
+                                <button
+                                    type="button"
+                                    onClick={() => { onEnterSelectionMode(); setMoreMenuOpen(false); }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
+                                >
+                                    <CheckSquare size={14} /> Selecionar vários
+                                </button>
+                            ) : (
+                                <button
+                                    type="button"
+                                    onClick={() => { onExitSelectionMode(); setMoreMenuOpen(false); }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
+                                >
+                                    <X size={14} /> Cancelar seleção
+                                </button>
+                            )}
+                        </div>
+                    )}
+                </div>
                 <button
                     onClick={onNewDeal}
                     className="bg-primary-700 hover:bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-primary-700/20"

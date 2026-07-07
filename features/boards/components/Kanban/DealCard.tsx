@@ -31,7 +31,8 @@ interface DealCardProps {
   setLastMouseDownDealId: (id: string | null) => void;
   /** Callback to open move-to-stage modal for keyboard accessibility */
   onMoveToStage?: (dealId: string) => void;
-  /** Seleção em massa: card selecionado + toggle */
+  /** Seleção em massa: modo explícito + card selecionado + toggle */
+  selectionMode: boolean;
   selected: boolean;
   onToggleSelect: (dealId: string) => void;
 }
@@ -76,6 +77,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
   customFieldDefinitions,
   setLastMouseDownDealId,
   onMoveToStage,
+  selectionMode,
   selected,
   onToggleSelect,
 }) => {
@@ -185,13 +187,19 @@ const DealCardComponent: React.FC<DealCardProps> = ({
       onMouseDown={() => setLastMouseDownDealId(deal.id)}
       onClick={e => {
         if ((e.target as HTMLElement).closest('button')) return;
+        // No modo seleção, o clique no card marca/desmarca em vez de abrir.
+        if (selectionMode) {
+          if (!(e.target as HTMLElement).closest('label')) onToggleSelect(deal.id);
+          return;
+        }
         onSelect(deal.id);
       }}
       onKeyDown={e => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           if (!(e.target as HTMLElement).closest('button')) {
-            onSelect(deal.id);
+            if (selectionMode) onToggleSelect(deal.id);
+            else onSelect(deal.id);
           }
         }
       }}
@@ -200,19 +208,21 @@ const DealCardComponent: React.FC<DealCardProps> = ({
       aria-label={getAriaLabel()}
       className={`${getCardClasses()} ${getBorderLeftClass()} ${selected ? 'ring-2 ring-primary-500 dark:ring-primary-400' : ''}`}
     >
-      {/* Checkbox de seleção em massa (aparece no hover ou quando selecionado) */}
-      <label
-        onClick={(e) => e.stopPropagation()}
-        className={`absolute top-1.5 left-1.5 z-10 p-0.5 rounded cursor-pointer transition-opacity ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
-      >
-        <input
-          type="checkbox"
-          checked={selected}
-          onChange={() => onToggleSelect(deal.id)}
-          aria-label={`Selecionar ${deal.title}`}
-          className="w-3.5 h-3.5 rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500 cursor-pointer"
-        />
-      </label>
+      {/* Checkbox de seleção múltipla (só no modo "Selecionar vários") */}
+      {selectionMode && (
+        <label
+          onClick={(e) => e.stopPropagation()}
+          className="absolute top-1.5 left-1.5 z-10 p-0.5 rounded cursor-pointer"
+        >
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onToggleSelect(deal.id)}
+            aria-label={`Selecionar ${deal.title}`}
+            className="w-3.5 h-3.5 rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500 cursor-pointer"
+          />
+        </label>
+      )}
 
       {/* Won Badge */}
       {deal.isWon && (

@@ -546,7 +546,15 @@ export const useBoardsController = () => {
   }, [deals, searchTerm, ownerFilter, customFieldConditions, customFieldLogic, tagFilter, dateRange, statusFilter, profile]);
 
   // ==== Seleção em massa de leads ====
+  // Modo explícito: liga pelo menu ⋮ ("Selecionar vários"); só então os
+  // checkboxes aparecem nos cards/etapas. Sair do modo limpa a seleção.
+  const [selectionMode, setSelectionMode] = useState(false);
   const [selectedDealIds, setSelectedDealIds] = useState<string[]>([]);
+  const enterSelectionMode = () => setSelectionMode(true);
+  const exitSelectionMode = () => {
+    setSelectionMode(false);
+    setSelectedDealIds([]);
+  };
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   // Etapa de PERDA escolhida numa ação em massa: pede o motivo UMA vez p/ todos.
   const [bulkLossStageId, setBulkLossStageId] = useState<string | null>(null);
@@ -1144,6 +1152,9 @@ export const useBoardsController = () => {
     handleDeleteDealConfirm,
     handleDeleteDealClose,
     // Seleção em massa
+    selectionMode,
+    enterSelectionMode,
+    exitSelectionMode,
     selectedDealIds,
     toggleDealSelection,
     clearDealSelection,

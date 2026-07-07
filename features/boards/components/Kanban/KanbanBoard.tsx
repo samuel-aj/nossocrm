@@ -74,7 +74,8 @@ interface KanbanBoardProps {
   setLastMouseDownDealId: (id: string | null) => void;
   /** Callback to move a deal to a new stage (for keyboard accessibility) */
   onMoveDealToStage?: (dealId: string, newStageId: string) => void;
-  // Seleção em massa
+  // Seleção em massa (modo explícito via menu ⋮)
+  selectionMode: boolean;
   selectedDealIds: string[];
   onToggleDealSelection: (dealId: string) => void;
   onToggleStageSelection: (stageId: string) => void;
@@ -128,6 +129,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   handleQuickAddActivity,
   setLastMouseDownDealId,
   onMoveDealToStage,
+  selectionMode,
   selectedDealIds,
   onToggleDealSelection,
   onToggleStageSelection,
@@ -263,15 +265,17 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
             >
               <div className="flex justify-between items-center mb-1">
                 <span className="flex items-center gap-2 font-bold text-slate-700 dark:text-slate-200 font-display text-sm tracking-wide uppercase">
-                  {/* Seleciona/deseleciona todos os leads visíveis desta etapa */}
-                  <input
-                    type="checkbox"
-                    checked={stageDeals.length > 0 && stageDeals.every((d) => selectedDealIds.includes(d.id))}
-                    onChange={() => onToggleStageSelection(stage.id)}
-                    aria-label={`Selecionar todos os negócios de ${stage.label}`}
-                    title="Selecionar todos desta etapa"
-                    className="w-3.5 h-3.5 rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500 cursor-pointer"
-                  />
+                  {/* Seleciona/deseleciona todos os leads visíveis desta etapa (só no modo seleção) */}
+                  {selectionMode && (
+                    <input
+                      type="checkbox"
+                      checked={stageDeals.length > 0 && stageDeals.every((d) => selectedDealIds.includes(d.id))}
+                      onChange={() => onToggleStageSelection(stage.id)}
+                      aria-label={`Selecionar todos os negócios de ${stage.label}`}
+                      title="Selecionar todos desta etapa"
+                      className="w-3.5 h-3.5 rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500 cursor-pointer"
+                    />
+                  )}
                   {stage.label}
                 </span>
                 <span className="text-xs font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded text-slate-600 dark:text-slate-300">
@@ -336,6 +340,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                   customFieldDefinitions={customFieldDefinitions}
                   setLastMouseDownDealId={setLastMouseDownDealId}
                   onMoveToStage={resolvedMoveToStage}
+                  selectionMode={selectionMode}
                   selected={selectedDealIds.includes(deal.id)}
                   onToggleSelect={onToggleDealSelection}
                 />
