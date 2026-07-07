@@ -25,6 +25,9 @@ interface KanbanHeaderProps {
     customFieldFilters: Record<string, string>;
     setCustomFieldFilters: (f: Record<string, string>) => void;
     customFieldOptions: Array<{ key: string; label: string; kind: 'select' | 'text'; options: string[] }>;
+    tagFilter: string;
+    setTagFilter: (v: string) => void;
+    tagOptions: string[];
     statusFilter: 'open' | 'won' | 'lost' | 'all';
     setStatusFilter: (filter: 'open' | 'won' | 'lost' | 'all') => void;
     onNewDeal: () => void;
@@ -40,10 +43,16 @@ function CustomFieldFiltersButton({
     filters,
     onChange,
     options,
+    tagFilter,
+    onTagFilterChange,
+    tagOptions,
 }: {
     filters: Record<string, string>;
     onChange: (f: Record<string, string>) => void;
     options: Array<{ key: string; label: string; kind: 'select' | 'text'; options: string[] }>;
+    tagFilter: string;
+    onTagFilterChange: (v: string) => void;
+    tagOptions: string[];
 }) {
     const [open, setOpen] = React.useState(false);
     const containerRef = React.useRef<HTMLDivElement>(null);
@@ -57,7 +66,8 @@ function CustomFieldFiltersButton({
         return () => document.removeEventListener('mousedown', handler);
     }, [open]);
 
-    const activeCount = Object.values(filters).filter((v) => v && v.trim() !== '').length;
+    const activeCount =
+        Object.values(filters).filter((v) => v && v.trim() !== '').length + (tagFilter ? 1 : 0);
     const setField = (key: string, value: string) => {
         const next = { ...filters };
         if (value) next[key] = value;
@@ -126,13 +136,32 @@ function CustomFieldFiltersButton({
                         {activeCount > 0 && (
                             <button
                                 type="button"
-                                onClick={() => onChange({})}
+                                onClick={() => {
+                                    onChange({});
+                                    onTagFilterChange('');
+                                }}
                                 className="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
                             >
                                 Limpar ({activeCount})
                             </button>
                         )}
                     </div>
+                    {tagOptions.length > 0 && (
+                        <div className="space-y-2">
+                            <p className="text-[11px] font-bold text-slate-400 uppercase border-b border-slate-100 dark:border-white/10 pb-1">Tag</p>
+                            <select
+                                value={tagFilter}
+                                onChange={(e) => onTagFilterChange(e.target.value)}
+                                aria-label="Filtrar por tag"
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white cursor-pointer"
+                            >
+                                <option value="">Todas</option>
+                                {tagOptions.map((t) => (
+                                    <option key={t} value={t}>{t}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
                     {utms.length > 0 && (
                         <div className="space-y-2">
                             <p className="text-[11px] font-bold text-slate-400 uppercase border-b border-slate-100 dark:border-white/10 pb-1">UTMs</p>
@@ -196,6 +225,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
     ownerFilter, setOwnerFilter,
     statusFilter, setStatusFilter,
     customFieldFilters, setCustomFieldFilters, customFieldOptions,
+    tagFilter, setTagFilter, tagOptions,
     onNewDeal
 }) => {
     // Lista de responsáveis da org (admin/super_admin); para vendedor vem vazia
@@ -351,12 +381,15 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                     <User className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
                 </div>
 
-                {/* Filtros por campo personalizado / UTM (um controle por campo) */}
-                {customFieldOptions.length > 0 && (
+                {/* Filtros por tag / campo personalizado / UTM (um controle por campo) */}
+                {(customFieldOptions.length > 0 || tagOptions.length > 0) && (
                     <CustomFieldFiltersButton
                         filters={customFieldFilters}
                         onChange={setCustomFieldFilters}
                         options={customFieldOptions}
+                        tagFilter={tagFilter}
+                        onTagFilterChange={setTagFilter}
+                        tagOptions={tagOptions}
                     />
                 )}
             </div>

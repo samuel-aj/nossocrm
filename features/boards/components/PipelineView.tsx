@@ -109,6 +109,9 @@ interface PipelineViewProps {
   customFieldFilters: Record<string, string>;
   setCustomFieldFilters: (f: Record<string, string>) => void;
   customFieldOptions: Array<{ key: string; label: string; kind: 'select' | 'text'; options: string[] }>;
+  tagFilter: string;
+  setTagFilter: (v: string) => void;
+  tagOptions: string[];
   statusFilter: 'open' | 'won' | 'lost' | 'all';
   setStatusFilter: (filter: 'open' | 'won' | 'lost' | 'all') => void;
   draggingId: string | null;
@@ -267,6 +270,9 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   customFieldFilters,
   setCustomFieldFilters,
   customFieldOptions,
+  tagFilter,
+  setTagFilter,
+  tagOptions,
   deleteDealModal,
   handleDropDelete,
   handleDeleteDealConfirm,
@@ -431,6 +437,9 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
             customFieldFilters={customFieldFilters}
             setCustomFieldFilters={setCustomFieldFilters}
             customFieldOptions={customFieldOptions}
+            tagFilter={tagFilter}
+            setTagFilter={setTagFilter}
+            tagOptions={tagOptions}
             statusFilter={statusFilter}
             setStatusFilter={setStatusFilter}
             onNewDeal={() => setIsCreateModalOpen(true)}

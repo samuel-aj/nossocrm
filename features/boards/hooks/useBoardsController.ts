@@ -137,6 +137,8 @@ export const useBoardsController = () => {
   // Filtro por campo personalizado / UTM (ex.: utm_source, utm_campaign): { chave, valor }.
   // Filtro por campo personalizado/UTM: { campo -> valor filtrado } (AND entre campos).
   const [customFieldFilters, setCustomFieldFilters] = useState<Record<string, string>>({});
+  // Filtro por TAG (select com as tags cadastradas em Configurações). '' = todas.
+  const [tagFilter, setTagFilter] = useState('');
 
   // Track last context signature to avoid unnecessary setContext calls
   const lastContextSignatureRef = useRef<string | null>(null);
@@ -260,7 +262,7 @@ export const useBoardsController = () => {
   }, [activeBoard, deals, statusFilter, ownerFilter, searchTerm, dateRange]);
 
   // Get lifecycle stages from CRM context for automations
-  const { lifecycleStages, customFieldDefinitions: orgFieldDefs, deleteDeal } = useCRM();
+  const { lifecycleStages, customFieldDefinitions: orgFieldDefs, deleteDeal, availableTags } = useCRM();
 
   // Enable realtime sync for Kanban
   useRealtimeSyncKanban();
@@ -419,6 +421,23 @@ export const useBoardsController = () => {
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [deals, orgFieldDefs]);
 
+  // Opções do filtro de TAG: tags cadastradas (Configurações → Tags) + tags já
+  // usadas nos leads (inclui as criadas por dentro do card), dedup case-insensitive.
+  const tagOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const t of availableTags || []) {
+      const k = String(t).toLowerCase();
+      if (!seen.has(k)) seen.set(k, String(t));
+    }
+    for (const d of deals) {
+      for (const t of d.tags || []) {
+        const k = String(t).toLowerCase();
+        if (!seen.has(k)) seen.set(k, String(t));
+      }
+    }
+    return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
+  }, [availableTags, deals]);
+
   // Filtering Logic
   const filteredDeals = useMemo(() => {
     const cutoffDate = new Date();
@@ -427,6 +446,7 @@ export const useBoardsController = () => {
     const activeCfFilters = Object.entries(customFieldFilters)
       .map(([k, v]) => [k, v.trim().toLowerCase()] as const)
       .filter(([, v]) => v !== '');
+    const tagTerm = tagFilter.trim().toLowerCase();
 
     return deals.filter(l => {
       const matchesSearch =
@@ -485,7 +505,10 @@ export const useBoardsController = () => {
         }
       }
 
-      return matchesSearch && matchesOwner && matchesCustomField && matchesDate && matchesStatus && matchesRecent;
+      // Filtro por TAG selecionada (case-insensitive, match exato da tag)
+      const matchesTag = !tagTerm || (l.tags || []).some((t: string) => String(t).toLowerCase() === tagTerm);
+
+      return matchesSearch && matchesOwner && matchesCustomField && matchesTag && matchesDate && matchesStatus && matchesRecent;
     }).map(deal => {
       // Enrich owner info if it matches current user
       if (deal.ownerId === profile?.id || deal.ownerId === (profile as any)?.user_id) { // Fallback for some profile types
@@ -499,7 +522,7 @@ export const useBoardsController = () => {
       }
       return deal;
     });
-  }, [deals, searchTerm, ownerFilter, customFieldFilters, dateRange, statusFilter, profile]);
+  }, [deals, searchTerm, ownerFilter, customFieldFilters, tagFilter, dateRange, statusFilter, profile]);
 
   // Drag & Drop Handlers
   const handleDragStart = (e: React.DragEvent, id: string, title: string) => {
@@ -946,6 +969,9 @@ export const useBoardsController = () => {
     customFieldFilters,
     setCustomFieldFilters,
     customFieldOptions,
+    tagFilter,
+    setTagFilter,
+    tagOptions,
     statusFilter,
     setStatusFilter,
     dateRange,
