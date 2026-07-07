@@ -135,8 +135,13 @@ export const useBoardsController = () => {
   const [statusFilter, setStatusFilter] = useState<'open' | 'won' | 'lost' | 'all'>('open');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   // Filtro por campo personalizado / UTM (ex.: utm_source, utm_campaign): { chave, valor }.
-  // Filtro por campo personalizado/UTM: { campo -> valor filtrado } (AND entre campos).
-  const [customFieldFilters, setCustomFieldFilters] = useState<Record<string, string>>({});
+  // Filtro por campo personalizado/UTM (builder de condições): cada condição é
+  // campo + operador (contém / igual / vazio / preenchido) + valor, combinadas
+  // com E (todas) ou OU (qualquer).
+  const [customFieldConditions, setCustomFieldConditions] = useState<
+    Array<{ id: string; field: string; operator: 'contains' | 'equals' | 'empty' | 'not_empty'; value: string }>
+  >([]);
+  const [customFieldLogic, setCustomFieldLogic] = useState<'AND' | 'OR'>('AND');
   // Filtro por TAG (select com as tags cadastradas em Configurações). '' = todas.
   const [tagFilter, setTagFilter] = useState('');
 
@@ -443,9 +448,10 @@ export const useBoardsController = () => {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - 30);
 
-    const activeCfFilters = Object.entries(customFieldFilters)
-      .map(([k, v]) => [k, v.trim().toLowerCase()] as const)
-      .filter(([, v]) => v !== '');
+    // Condições completas: vazio/preenchido não precisam de valor; contém/igual sim.
+    const activeCfConditions = customFieldConditions.filter(
+      (c) => c.field && (c.operator === 'empty' || c.operator === 'not_empty' || c.value.trim() !== '')
+    );
     const tagTerm = tagFilter.trim().toLowerCase();
 
     return deals.filter(l => {
@@ -462,17 +468,32 @@ export const useBoardsController = () => {
               ? !l.ownerId
               : l.ownerId === ownerFilter;
 
-      // Filtro por campo/UTM: cada campo com valor definido precisa casar
-      // ("contém", case-insensitive) no custom field correspondente do lead.
+      // Filtro por campo/UTM (condições): avalia cada condição no custom field
+      // do lead e combina com E (todas) ou OU (qualquer).
       let matchesCustomField = true;
-      if (activeCfFilters.length > 0) {
+      if (activeCfConditions.length > 0) {
         const cf = l.customFields;
-        matchesCustomField = activeCfFilters.every(([key, term]) => {
-          const raw = cf && typeof cf === 'object' ? (cf as Record<string, unknown>)[key] : undefined;
-          if (raw === null || raw === undefined) return false;
-          const str = Array.isArray(raw) ? raw.join(', ') : String(raw);
-          return str.toLowerCase().includes(term);
-        });
+        const evalCondition = (c: { field: string; operator: string; value: string }) => {
+          const raw = cf && typeof cf === 'object' ? (cf as Record<string, unknown>)[c.field] : undefined;
+          const str = raw === null || raw === undefined
+            ? ''
+            : (Array.isArray(raw) ? raw.join(', ') : String(raw)).trim();
+          const has = str !== '';
+          const term = c.value.trim().toLowerCase();
+          switch (c.operator) {
+            case 'empty':
+              return !has;
+            case 'not_empty':
+              return has;
+            case 'equals':
+              return has && str.toLowerCase() === term;
+            default: // contains
+              return has && str.toLowerCase().includes(term);
+          }
+        };
+        matchesCustomField = customFieldLogic === 'AND'
+          ? activeCfConditions.every(evalCondition)
+          : activeCfConditions.some(evalCondition);
       }
 
       let matchesDate = true;
@@ -522,7 +543,7 @@ export const useBoardsController = () => {
       }
       return deal;
     });
-  }, [deals, searchTerm, ownerFilter, customFieldFilters, tagFilter, dateRange, statusFilter, profile]);
+  }, [deals, searchTerm, ownerFilter, customFieldConditions, customFieldLogic, tagFilter, dateRange, statusFilter, profile]);
 
   // Drag & Drop Handlers
   const handleDragStart = (e: React.DragEvent, id: string, title: string) => {
@@ -966,8 +987,10 @@ export const useBoardsController = () => {
     setSearchTerm,
     ownerFilter,
     setOwnerFilter,
-    customFieldFilters,
-    setCustomFieldFilters,
+    customFieldConditions,
+    setCustomFieldConditions,
+    customFieldLogic,
+    setCustomFieldLogic,
     customFieldOptions,
     tagFilter,
     setTagFilter,
