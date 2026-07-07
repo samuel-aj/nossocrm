@@ -208,11 +208,11 @@ const DealCardComponent: React.FC<DealCardProps> = ({
       aria-label={getAriaLabel()}
       className={`${getCardClasses()} ${getBorderLeftClass()} ${selected ? 'ring-2 ring-primary-500 dark:ring-primary-400' : ''}`}
     >
-      {/* Checkbox de seleção múltipla (só no modo "Selecionar vários") */}
+      {/* Checkbox de seleção múltipla (só no modo "Selecionar vários"; à direita p/ não cobrir as tags) */}
       {selectionMode && (
         <label
           onClick={(e) => e.stopPropagation()}
-          className="absolute top-1.5 left-1.5 z-10 p-0.5 rounded cursor-pointer"
+          className="absolute top-1.5 right-1.5 z-10 p-0.5 rounded cursor-pointer"
         >
           <input
             type="checkbox"

@@ -10,7 +10,7 @@ import { KanbanList } from './Kanban/KanbanList';
 import { DeleteBoardModal } from './Modals/DeleteBoardModal';
 import { LossReasonModal } from '@/components/ui/LossReasonModal';
 import ConfirmModal from '@/components/ConfirmModal';
-import { CheckCircle2, XCircle, Trash2, X } from 'lucide-react';
+import { CheckCircle2, XCircle, Trash2, X, Tag, Pencil, ArrowRightLeft } from 'lucide-react';
 import { DealView, CustomFieldDefinition, Board, BoardStage } from '@/types';
 import { ExportTemplateModal } from './Modals/ExportTemplateModal';
 import { useAuth } from '@/context/AuthContext';
@@ -383,6 +383,8 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
     'w-full px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white';
   const bulkApplyClass =
     'w-full py-2 rounded-lg bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold transition-colors';
+  const selActionClass =
+    'flex items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-primary-600 dark:hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
 
   const handleUpdateStage = (updatedStage: BoardStage) => {
     if (!activeBoard) return;
@@ -496,6 +498,55 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
             onExitSelectionMode={exitSelectionMode}
             onNewDeal={() => setIsCreateModalOpen(true)}
           />
+
+          {/* Barra de ações da seleção múltipla — no TOPO, estilo Kommo */}
+          {selectionMode && (
+            <div className="flex items-center gap-4 px-4 py-2 mb-4 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50/80 dark:bg-white/5 backdrop-blur-sm">
+              <button
+                type="button"
+                disabled={selectedDealIds.length === 0}
+                onClick={() => { setBulkStageId(''); setBulkModal('stage'); }}
+                className={selActionClass}
+              >
+                <ArrowRightLeft size={13} /> alterar etapa
+              </button>
+              <button
+                type="button"
+                disabled={selectedDealIds.length === 0}
+                onClick={() => { setBulkFieldKey(''); setBulkFieldValue(''); setBulkModal('field'); }}
+                className={selActionClass}
+              >
+                <Pencil size={13} /> alterar o campo
+              </button>
+              <button
+                type="button"
+                disabled={selectedDealIds.length === 0}
+                onClick={() => setBulkDeleteOpen(true)}
+                className={`${selActionClass} hover:!text-red-500 dark:hover:!text-red-400`}
+              >
+                <Trash2 size={13} /> excluir
+              </button>
+              <button
+                type="button"
+                disabled={selectedDealIds.length === 0}
+                onClick={() => { setBulkTagMode('add'); setBulkTagValue(''); setBulkModal('tags'); }}
+                className={selActionClass}
+              >
+                <Tag size={13} /> editar tags
+              </button>
+              <span className="ml-auto text-xs text-slate-500 dark:text-slate-400">
+                Selecionado{' '}
+                <span className="font-bold text-slate-700 dark:text-white">{selectedDealIds.length}</span>
+              </span>
+              <button
+                type="button"
+                onClick={exitSelectionMode}
+                className="flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
+              >
+                fechar <X size={12} />
+              </button>
+            </div>
+          )}
 
           <BoardStrategyHeader board={activeBoard} />
 
@@ -640,58 +691,6 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
         confirmText="Excluir"
         variant="danger"
       />
-
-      {/* Barra de ações em massa (aparece no modo "Selecionar vários") */}
-      {selectionMode && !draggingId && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 shadow-2xl backdrop-blur-sm px-3 py-2">
-          <span className="text-sm font-bold text-slate-700 dark:text-white pr-1">
-            {selectedDealIds.length > 0
-              ? `${selectedDealIds.length} selecionado(s)`
-              : 'Marque os leads'}
-          </span>
-          <button
-            type="button"
-            disabled={selectedDealIds.length === 0}
-            onClick={() => { setBulkStageId(''); setBulkModal('stage'); }}
-            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            Alterar etapa
-          </button>
-          <button
-            type="button"
-            disabled={selectedDealIds.length === 0}
-            onClick={() => { setBulkTagMode('add'); setBulkTagValue(''); setBulkModal('tags'); }}
-            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            Editar tags
-          </button>
-          <button
-            type="button"
-            disabled={selectedDealIds.length === 0}
-            onClick={() => { setBulkFieldKey(''); setBulkFieldValue(''); setBulkModal('field'); }}
-            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            Alterar campo
-          </button>
-          <button
-            type="button"
-            disabled={selectedDealIds.length === 0}
-            onClick={() => setBulkDeleteOpen(true)}
-            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            Excluir
-          </button>
-          <button
-            type="button"
-            onClick={exitSelectionMode}
-            aria-label="Sair da seleção"
-            title="Sair da seleção"
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors"
-          >
-            <X size={14} />
-          </button>
-        </div>
-      )}
 
       {/* Modal das ações em massa */}
       {bulkModal && activeBoard && (
