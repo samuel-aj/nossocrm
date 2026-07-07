@@ -106,8 +106,10 @@ interface PipelineViewProps {
   setSearchTerm: (term: string) => void;
   ownerFilter: string;
   setOwnerFilter: (filter: string) => void;
-  customFieldFilters: Record<string, string>;
-  setCustomFieldFilters: (f: Record<string, string>) => void;
+  customFieldConditions: Array<{ id: string; field: string; operator: 'contains' | 'equals' | 'empty' | 'not_empty'; value: string }>;
+  setCustomFieldConditions: (c: Array<{ id: string; field: string; operator: 'contains' | 'equals' | 'empty' | 'not_empty'; value: string }>) => void;
+  customFieldLogic: 'AND' | 'OR';
+  setCustomFieldLogic: (l: 'AND' | 'OR') => void;
   customFieldOptions: Array<{ key: string; label: string; kind: 'select' | 'text'; options: string[] }>;
   tagFilter: string;
   setTagFilter: (v: string) => void;
@@ -267,8 +269,10 @@ interface PipelineViewProps {
  * @returns {Element} Retorna um valor do tipo `Element`.
  */
 export const PipelineView: React.FC<PipelineViewProps> = ({
-  customFieldFilters,
-  setCustomFieldFilters,
+  customFieldConditions,
+  setCustomFieldConditions,
+  customFieldLogic,
+  setCustomFieldLogic,
   customFieldOptions,
   tagFilter,
   setTagFilter,
@@ -434,8 +438,10 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
             setSearchTerm={setSearchTerm}
             ownerFilter={ownerFilter}
             setOwnerFilter={setOwnerFilter}
-            customFieldFilters={customFieldFilters}
-            setCustomFieldFilters={setCustomFieldFilters}
+            customFieldConditions={customFieldConditions}
+            setCustomFieldConditions={setCustomFieldConditions}
+            customFieldLogic={customFieldLogic}
+            setCustomFieldLogic={setCustomFieldLogic}
             customFieldOptions={customFieldOptions}
             tagFilter={tagFilter}
             setTagFilter={setTagFilter}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Search, LayoutGrid, Table as TableIcon, User, Tag, Settings, Lightbulb, Download } from 'lucide-react';
+import { Plus, Search, LayoutGrid, Table as TableIcon, User, Tag, X, Settings, Lightbulb, Download } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Board } from '@/types';
 import { BoardSelector } from '../BoardSelector';
@@ -22,8 +22,10 @@ interface KanbanHeaderProps {
     setSearchTerm: (term: string) => void;
     ownerFilter: string;
     setOwnerFilter: (filter: string) => void;
-    customFieldFilters: Record<string, string>;
-    setCustomFieldFilters: (f: Record<string, string>) => void;
+    customFieldConditions: Array<{ id: string; field: string; operator: 'contains' | 'equals' | 'empty' | 'not_empty'; value: string }>;
+    setCustomFieldConditions: (c: Array<{ id: string; field: string; operator: 'contains' | 'equals' | 'empty' | 'not_empty'; value: string }>) => void;
+    customFieldLogic: 'AND' | 'OR';
+    setCustomFieldLogic: (l: 'AND' | 'OR') => void;
     customFieldOptions: Array<{ key: string; label: string; kind: 'select' | 'text'; options: string[] }>;
     tagFilter: string;
     setTagFilter: (v: string) => void;
@@ -33,22 +35,35 @@ interface KanbanHeaderProps {
     onNewDeal: () => void;
 }
 
+/** Uma condição do filtro: campo + operador + valor (quando o operador exige). */
+type CfCondition = {
+    id: string;
+    field: string;
+    operator: 'contains' | 'equals' | 'empty' | 'not_empty';
+    value: string;
+};
+
 /**
- * Filtro por campo personalizado/UTM: botão "Filtros" que abre um painel com
- * um controle por campo — SELECT quando o campo tem poucos valores distintos
- * (ex.: Laudo médico: Sim/Não) e INPUT de texto quando é valor livre (ex.:
- * renda). Vários campos combinam em E (AND). Badge mostra quantos ativos.
+ * Painel "Filtros" com construtor de CONDIÇÕES por campo/UTM:
+ * cada condição = campo + operador (contém / é igual a / está vazio / está
+ * preenchido) + valor (campos select oferecem as opções no "é igual a").
+ * Várias condições combinam com E (todas) ou OU (qualquer). A seção Tag é um
+ * select à parte (tags cadastradas em Configurações) e soma junto (E).
  */
 function CustomFieldFiltersButton({
-    filters,
-    onChange,
+    conditions,
+    onConditionsChange,
+    logic,
+    onLogicChange,
     options,
     tagFilter,
     onTagFilterChange,
     tagOptions,
 }: {
-    filters: Record<string, string>;
-    onChange: (f: Record<string, string>) => void;
+    conditions: CfCondition[];
+    onConditionsChange: (c: CfCondition[]) => void;
+    logic: 'AND' | 'OR';
+    onLogicChange: (l: 'AND' | 'OR') => void;
     options: Array<{ key: string; label: string; kind: 'select' | 'text'; options: string[] }>;
     tagFilter: string;
     onTagFilterChange: (v: string) => void;
@@ -66,48 +81,22 @@ function CustomFieldFiltersButton({
         return () => document.removeEventListener('mousedown', handler);
     }, [open]);
 
-    const activeCount =
-        Object.values(filters).filter((v) => v && v.trim() !== '').length + (tagFilter ? 1 : 0);
-    const setField = (key: string, value: string) => {
-        const next = { ...filters };
-        if (value) next[key] = value;
-        else delete next[key];
-        onChange(next);
-    };
+    const activeConditions = conditions.filter(
+        (c) => c.field && (c.operator === 'empty' || c.operator === 'not_empty' || c.value.trim() !== '')
+    );
+    const activeCount = activeConditions.length + (tagFilter ? 1 : 0);
 
-    const utms = options.filter((o) => o.key.startsWith('utm_'));
-    const customs = options.filter((o) => !o.key.startsWith('utm_'));
+    const updateCondition = (id: string, patch: Partial<CfCondition>) =>
+        onConditionsChange(conditions.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+    const removeCondition = (id: string) => onConditionsChange(conditions.filter((c) => c.id !== id));
+    const addCondition = () =>
+        onConditionsChange([
+            ...conditions,
+            { id: crypto.randomUUID(), field: options[0]?.key || '', operator: 'contains', value: '' },
+        ]);
 
-    const renderField = (o: { key: string; label: string; kind: 'select' | 'text'; options: string[] }) => {
-        const current = filters[o.key] ?? '';
-        return (
-            <div key={o.key} className="space-y-1">
-                <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate" title={o.key}>
-                    {o.label}
-                </label>
-                {o.kind === 'select' ? (
-                    <select
-                        value={current}
-                        onChange={(e) => setField(o.key, e.target.value)}
-                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white cursor-pointer"
-                    >
-                        <option value="">Todos</option>
-                        {o.options.map((v) => (
-                            <option key={v} value={v}>{v}</option>
-                        ))}
-                    </select>
-                ) : (
-                    <input
-                        type="text"
-                        value={current}
-                        onChange={(e) => setField(o.key, e.target.value)}
-                        placeholder="Digite para filtrar..."
-                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
-                    />
-                )}
-            </div>
-        );
-    };
+    const inputClass =
+        'px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white';
 
     return (
         <div ref={containerRef} className="relative">
@@ -119,7 +108,7 @@ function CustomFieldFiltersButton({
                     ? 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
                     : 'border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10'
                     }`}
-                title="Filtrar por campos personalizados e UTMs"
+                title="Filtrar por tag, campos personalizados e UTMs"
             >
                 <Tag size={14} />
                 Filtros
@@ -130,14 +119,14 @@ function CustomFieldFiltersButton({
                 )}
             </button>
             {open && (
-                <div className="absolute z-50 mt-1 w-80 max-h-96 overflow-y-auto scrollbar-custom rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg p-3 space-y-3">
+                <div className="absolute z-50 mt-1 w-80 max-h-[28rem] overflow-y-auto scrollbar-custom rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg p-3 space-y-3">
                     <div className="flex items-center justify-between">
-                        <p className="text-xs font-bold text-slate-400 uppercase">Filtrar por campos</p>
+                        <p className="text-xs font-bold text-slate-400 uppercase">Filtros</p>
                         {activeCount > 0 && (
                             <button
                                 type="button"
                                 onClick={() => {
-                                    onChange({});
+                                    onConditionsChange([]);
                                     onTagFilterChange('');
                                 }}
                                 className="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
@@ -153,7 +142,7 @@ function CustomFieldFiltersButton({
                                 value={tagFilter}
                                 onChange={(e) => onTagFilterChange(e.target.value)}
                                 aria-label="Filtrar por tag"
-                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white cursor-pointer"
+                                className={`${inputClass} w-full cursor-pointer`}
                             >
                                 <option value="">Todas</option>
                                 {tagOptions.map((t) => (
@@ -162,16 +151,105 @@ function CustomFieldFiltersButton({
                             </select>
                         </div>
                     )}
-                    {utms.length > 0 && (
+                    {options.length > 0 && (
                         <div className="space-y-2">
-                            <p className="text-[11px] font-bold text-slate-400 uppercase border-b border-slate-100 dark:border-white/10 pb-1">UTMs</p>
-                            {utms.map(renderField)}
-                        </div>
-                    )}
-                    {customs.length > 0 && (
-                        <div className="space-y-2">
-                            <p className="text-[11px] font-bold text-slate-400 uppercase border-b border-slate-100 dark:border-white/10 pb-1">Campos personalizados</p>
-                            {customs.map(renderField)}
+                            <p className="text-[11px] font-bold text-slate-400 uppercase border-b border-slate-100 dark:border-white/10 pb-1">
+                                Condições (campos/UTMs)
+                            </p>
+                            {conditions.length >= 2 && (
+                                <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                                    <span>Atender:</span>
+                                    <div className="flex rounded-lg border border-slate-200 dark:border-white/10 overflow-hidden">
+                                        <button
+                                            type="button"
+                                            onClick={() => onLogicChange('AND')}
+                                            className={`px-2 py-1 font-bold transition-colors ${logic === 'AND' ? 'bg-primary-600 text-white' : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-white/5'}`}
+                                        >
+                                            E (todas)
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => onLogicChange('OR')}
+                                            className={`px-2 py-1 font-bold transition-colors ${logic === 'OR' ? 'bg-primary-600 text-white' : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-white/5'}`}
+                                        >
+                                            OU (qualquer)
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                            {conditions.map((c) => {
+                                const fieldDef = options.find((o) => o.key === c.field);
+                                const needsValue = c.operator === 'contains' || c.operator === 'equals';
+                                return (
+                                    <div key={c.id} className="rounded-lg border border-slate-200 dark:border-white/10 p-2 space-y-1.5">
+                                        <div className="flex items-center gap-1.5">
+                                            <select
+                                                value={c.field}
+                                                onChange={(e) => updateCondition(c.id, { field: e.target.value, value: '' })}
+                                                aria-label="Campo"
+                                                className={`${inputClass} flex-1 min-w-0 cursor-pointer`}
+                                            >
+                                                {options.map((o) => (
+                                                    <option key={o.key} value={o.key}>{o.label}</option>
+                                                ))}
+                                            </select>
+                                            <button
+                                                type="button"
+                                                onClick={() => removeCondition(c.id)}
+                                                aria-label="Remover condição"
+                                                title="Remover condição"
+                                                className="shrink-0 p-1 rounded text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                                            >
+                                                <X size={14} />
+                                            </button>
+                                        </div>
+                                        <div className="flex items-center gap-1.5">
+                                            <select
+                                                value={c.operator}
+                                                onChange={(e) => updateCondition(c.id, { operator: e.target.value as CfCondition['operator'] })}
+                                                aria-label="Operador"
+                                                className={`${inputClass} w-32 shrink-0 cursor-pointer`}
+                                            >
+                                                <option value="contains">contém</option>
+                                                <option value="equals">é igual a</option>
+                                                <option value="empty">está vazio</option>
+                                                <option value="not_empty">está preenchido</option>
+                                            </select>
+                                            {needsValue && (
+                                                fieldDef?.kind === 'select' && fieldDef.options.length > 0 && c.operator === 'equals' ? (
+                                                    <select
+                                                        value={c.value}
+                                                        onChange={(e) => updateCondition(c.id, { value: e.target.value })}
+                                                        aria-label="Valor"
+                                                        className={`${inputClass} flex-1 min-w-0 cursor-pointer`}
+                                                    >
+                                                        <option value="">Selecione...</option>
+                                                        {fieldDef.options.map((v) => (
+                                                            <option key={v} value={v}>{v}</option>
+                                                        ))}
+                                                    </select>
+                                                ) : (
+                                                    <input
+                                                        type="text"
+                                                        value={c.value}
+                                                        onChange={(e) => updateCondition(c.id, { value: e.target.value })}
+                                                        placeholder="valor..."
+                                                        aria-label="Valor"
+                                                        className={`${inputClass} flex-1 min-w-0`}
+                                                    />
+                                                )
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                            <button
+                                type="button"
+                                onClick={addCondition}
+                                className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 text-xs font-medium text-slate-500 dark:text-slate-400 hover:border-primary-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+                            >
+                                <Plus size={13} /> Adicionar condição
+                            </button>
                         </div>
                     )}
                 </div>
@@ -224,7 +302,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
     searchTerm, setSearchTerm,
     ownerFilter, setOwnerFilter,
     statusFilter, setStatusFilter,
-    customFieldFilters, setCustomFieldFilters, customFieldOptions,
+    customFieldConditions, setCustomFieldConditions, customFieldLogic, setCustomFieldLogic, customFieldOptions,
     tagFilter, setTagFilter, tagOptions,
     onNewDeal
 }) => {
@@ -381,11 +459,13 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                     <User className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
                 </div>
 
-                {/* Filtros por tag / campo personalizado / UTM (um controle por campo) */}
+                {/* Filtros: tag (select) + construtor de condições por campo/UTM */}
                 {(customFieldOptions.length > 0 || tagOptions.length > 0) && (
                     <CustomFieldFiltersButton
-                        filters={customFieldFilters}
-                        onChange={setCustomFieldFilters}
+                        conditions={customFieldConditions}
+                        onConditionsChange={setCustomFieldConditions}
+                        logic={customFieldLogic}
+                        onLogicChange={setCustomFieldLogic}
                         options={customFieldOptions}
                         tagFilter={tagFilter}
                         onTagFilterChange={setTagFilter}
