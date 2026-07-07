@@ -136,6 +136,9 @@ interface PipelineViewProps {
   handleDeleteDealConfirm: () => void;
   handleDeleteDealClose: () => void;
   // Seleção em massa
+  selectionMode: boolean;
+  enterSelectionMode: () => void;
+  exitSelectionMode: () => void;
   selectedDealIds: string[];
   toggleDealSelection: (dealId: string) => void;
   clearDealSelection: () => void;
@@ -294,6 +297,9 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   handleDropDelete,
   handleDeleteDealConfirm,
   handleDeleteDealClose,
+  selectionMode,
+  enterSelectionMode,
+  exitSelectionMode,
   selectedDealIds,
   toggleDealSelection,
   clearDealSelection,
@@ -485,6 +491,9 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
             tagOptions={tagOptions}
             statusFilter={statusFilter}
             setStatusFilter={setStatusFilter}
+            selectionMode={selectionMode}
+            onEnterSelectionMode={enterSelectionMode}
+            onExitSelectionMode={exitSelectionMode}
             onNewDeal={() => setIsCreateModalOpen(true)}
           />
 
@@ -494,6 +503,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
             {viewMode === 'kanban' ? (
               <KanbanBoard
                 stages={kanbanStages}
+                selectionMode={selectionMode}
                 selectedDealIds={selectedDealIds}
                 onToggleDealSelection={toggleDealSelection}
                 onToggleStageSelection={toggleStageSelection}
@@ -631,45 +641,51 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
         variant="danger"
       />
 
-      {/* Barra de ações em massa (aparece com leads selecionados) */}
-      {selectedDealIds.length > 0 && !draggingId && (
+      {/* Barra de ações em massa (aparece no modo "Selecionar vários") */}
+      {selectionMode && !draggingId && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 shadow-2xl backdrop-blur-sm px-3 py-2">
           <span className="text-sm font-bold text-slate-700 dark:text-white pr-1">
-            {selectedDealIds.length} selecionado(s)
+            {selectedDealIds.length > 0
+              ? `${selectedDealIds.length} selecionado(s)`
+              : 'Marque os leads'}
           </span>
           <button
             type="button"
+            disabled={selectedDealIds.length === 0}
             onClick={() => { setBulkStageId(''); setBulkModal('stage'); }}
-            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-white/20 transition-colors"
+            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Alterar etapa
           </button>
           <button
             type="button"
+            disabled={selectedDealIds.length === 0}
             onClick={() => { setBulkTagMode('add'); setBulkTagValue(''); setBulkModal('tags'); }}
-            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-white/20 transition-colors"
+            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Editar tags
           </button>
           <button
             type="button"
+            disabled={selectedDealIds.length === 0}
             onClick={() => { setBulkFieldKey(''); setBulkFieldValue(''); setBulkModal('field'); }}
-            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-white/20 transition-colors"
+            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Alterar campo
           </button>
           <button
             type="button"
+            disabled={selectedDealIds.length === 0}
             onClick={() => setBulkDeleteOpen(true)}
-            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors"
+            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Excluir
           </button>
           <button
             type="button"
-            onClick={clearDealSelection}
-            aria-label="Cancelar seleção"
-            title="Cancelar seleção"
+            onClick={exitSelectionMode}
+            aria-label="Sair da seleção"
+            title="Sair da seleção"
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors"
           >
             <X size={14} />
