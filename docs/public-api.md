@@ -39,9 +39,9 @@ Todas as chamadas usam:
   - `PATCH /api/public/v1/contacts/{contactId}`
 - **Deals**
   - `GET /api/public/v1/deals`
-  - `POST /api/public/v1/deals`
+  - `POST /api/public/v1/deals` — aceita `owner_id`/`owner_email` para já cadastrar o **responsável** do lead. **Idempotente**: se o contato já tem negócio aberto no mesmo estágio (ou `external_id` repetido), responde `200` com o negócio existente (`action: "existing"`) em vez de erro
   - `GET /api/public/v1/deals/{dealId}`
-  - `PATCH /api/public/v1/deals/{dealId}` — atualização unificada numa só chamada: muda etapa (`to_stage_id`/`to_stage_label`/`mark`), tags (`tags` ou `tags_add`/`tags_remove`), descrição (`description` substitui ou `description_append` anexa), `custom_fields`/`custom_fields_patch`, e cria `activity` inline
+  - `PATCH /api/public/v1/deals/{dealId}` — atualização unificada numa só chamada: muda etapa (`to_stage_id`/`to_stage_label`/`mark`), tags (`tags` ou `tags_add`/`tags_remove`), descrição (`description` substitui ou `description_append` anexa), **responsável** (`owner_id`/`owner_email`; `owner_id: null` limpa), `custom_fields`/`custom_fields_patch`, e cria `activity` inline
   - `POST /api/public/v1/deals/{dealId}/move-stage`
   - `POST /api/public/v1/deals/{dealId}/mark-won`
   - `POST /api/public/v1/deals/{dealId}/mark-lost`
