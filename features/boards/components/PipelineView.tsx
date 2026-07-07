@@ -10,7 +10,7 @@ import { KanbanList } from './Kanban/KanbanList';
 import { DeleteBoardModal } from './Modals/DeleteBoardModal';
 import { LossReasonModal } from '@/components/ui/LossReasonModal';
 import ConfirmModal from '@/components/ConfirmModal';
-import { CheckCircle2, XCircle, Trash2 } from 'lucide-react';
+import { CheckCircle2, XCircle, Trash2, X } from 'lucide-react';
 import { DealView, CustomFieldDefinition, Board, BoardStage } from '@/types';
 import { ExportTemplateModal } from './Modals/ExportTemplateModal';
 import { useAuth } from '@/context/AuthContext';
@@ -135,6 +135,19 @@ interface PipelineViewProps {
   handleDropDelete: (dealId: string) => void;
   handleDeleteDealConfirm: () => void;
   handleDeleteDealClose: () => void;
+  // Seleção em massa
+  selectedDealIds: string[];
+  toggleDealSelection: (dealId: string) => void;
+  clearDealSelection: () => void;
+  toggleStageSelection: (stageId: string) => void;
+  bulkMoveToStage: (stageId: string, lossReason?: string) => void;
+  bulkEditTags: (mode: 'add' | 'remove', tag: string) => void;
+  bulkSetCustomField: (key: string, value: string) => void;
+  bulkDeleteOpen: boolean;
+  setBulkDeleteOpen: (v: boolean) => void;
+  confirmBulkDelete: () => void;
+  bulkLossStageId: string | null;
+  setBulkLossStageId: (v: string | null) => void;
   /** Keyboard-accessible handler to move a deal to a new stage */
   handleMoveDealToStage: (dealId: string, newStageId: string) => void;
   handleQuickAddActivity: (
@@ -281,6 +294,18 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   handleDropDelete,
   handleDeleteDealConfirm,
   handleDeleteDealClose,
+  selectedDealIds,
+  toggleDealSelection,
+  clearDealSelection,
+  toggleStageSelection,
+  bulkMoveToStage,
+  bulkEditTags,
+  bulkSetCustomField,
+  bulkDeleteOpen,
+  setBulkDeleteOpen,
+  confirmBulkDelete,
+  bulkLossStageId,
+  setBulkLossStageId,
   // Boards
   boards,
   activeBoard,
@@ -340,6 +365,18 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   const { profile } = useAuth();
   const isAdmin = profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN;
   const [isExportModalOpen, setIsExportModalOpen] = React.useState(false);
+
+  // Modais de ação em massa (estado local: só UI)
+  const [bulkModal, setBulkModal] = React.useState<null | 'stage' | 'tags' | 'field'>(null);
+  const [bulkStageId, setBulkStageId] = React.useState('');
+  const [bulkTagMode, setBulkTagMode] = React.useState<'add' | 'remove'>('add');
+  const [bulkTagValue, setBulkTagValue] = React.useState('');
+  const [bulkFieldKey, setBulkFieldKey] = React.useState('');
+  const [bulkFieldValue, setBulkFieldValue] = React.useState('');
+  const bulkInputClass =
+    'w-full px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white';
+  const bulkApplyClass =
+    'w-full py-2 rounded-lg bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold transition-colors';
 
   const handleUpdateStage = (updatedStage: BoardStage) => {
     if (!activeBoard) return;
@@ -457,6 +494,9 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
             {viewMode === 'kanban' ? (
               <KanbanBoard
                 stages={kanbanStages}
+                selectedDealIds={selectedDealIds}
+                onToggleDealSelection={toggleDealSelection}
+                onToggleStageSelection={toggleStageSelection}
                 filteredDeals={filteredDeals}
                 customFieldDefinitions={customFieldDefinitions}
                 draggingId={draggingId}
@@ -587,6 +627,178 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
         onConfirm={handleDeleteDealConfirm}
         title="Excluir negócio"
         message={`Excluir "${deleteDealModal?.dealTitle ?? ''}"? Esta ação não pode ser desfeita.`}
+        confirmText="Excluir"
+        variant="danger"
+      />
+
+      {/* Barra de ações em massa (aparece com leads selecionados) */}
+      {selectedDealIds.length > 0 && !draggingId && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 shadow-2xl backdrop-blur-sm px-3 py-2">
+          <span className="text-sm font-bold text-slate-700 dark:text-white pr-1">
+            {selectedDealIds.length} selecionado(s)
+          </span>
+          <button
+            type="button"
+            onClick={() => { setBulkStageId(''); setBulkModal('stage'); }}
+            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-white/20 transition-colors"
+          >
+            Alterar etapa
+          </button>
+          <button
+            type="button"
+            onClick={() => { setBulkTagMode('add'); setBulkTagValue(''); setBulkModal('tags'); }}
+            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-white/20 transition-colors"
+          >
+            Editar tags
+          </button>
+          <button
+            type="button"
+            onClick={() => { setBulkFieldKey(''); setBulkFieldValue(''); setBulkModal('field'); }}
+            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-white/20 transition-colors"
+          >
+            Alterar campo
+          </button>
+          <button
+            type="button"
+            onClick={() => setBulkDeleteOpen(true)}
+            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors"
+          >
+            Excluir
+          </button>
+          <button
+            type="button"
+            onClick={clearDealSelection}
+            aria-label="Cancelar seleção"
+            title="Cancelar seleção"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* Modal das ações em massa */}
+      {bulkModal && activeBoard && (
+        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4" onClick={() => setBulkModal(null)}>
+          <div
+            className="w-full max-w-sm rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-2xl p-4 space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {bulkModal === 'stage' && (
+              <>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Alterar etapa de {selectedDealIds.length} negócio(s)
+                </h3>
+                <select value={bulkStageId} onChange={(e) => setBulkStageId(e.target.value)} className={bulkInputClass}>
+                  <option value="">Selecione a etapa...</option>
+                  {activeBoard.stages.map((s) => (
+                    <option key={s.id} value={s.id}>{s.label}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={!bulkStageId}
+                  onClick={() => { bulkMoveToStage(bulkStageId); setBulkModal(null); }}
+                  className={bulkApplyClass}
+                >
+                  Aplicar
+                </button>
+              </>
+            )}
+            {bulkModal === 'tags' && (
+              <>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Editar tags de {selectedDealIds.length} negócio(s)
+                </h3>
+                <select value={bulkTagMode} onChange={(e) => setBulkTagMode(e.target.value as 'add' | 'remove')} className={bulkInputClass}>
+                  <option value="add">Adicionar tag</option>
+                  <option value="remove">Remover tag</option>
+                </select>
+                <select value={bulkTagValue} onChange={(e) => setBulkTagValue(e.target.value)} className={bulkInputClass}>
+                  <option value="">Selecione a tag...</option>
+                  {tagOptions.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={!bulkTagValue}
+                  onClick={() => { bulkEditTags(bulkTagMode, bulkTagValue); setBulkModal(null); }}
+                  className={bulkApplyClass}
+                >
+                  Aplicar
+                </button>
+              </>
+            )}
+            {bulkModal === 'field' && (
+              <>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Alterar campo de {selectedDealIds.length} negócio(s)
+                </h3>
+                <select
+                  value={bulkFieldKey}
+                  onChange={(e) => { setBulkFieldKey(e.target.value); setBulkFieldValue(''); }}
+                  className={bulkInputClass}
+                >
+                  <option value="">Selecione o campo...</option>
+                  {customFieldOptions.map((o) => (
+                    <option key={o.key} value={o.key}>{o.label}</option>
+                  ))}
+                </select>
+                {(() => {
+                  const def = customFieldOptions.find((o) => o.key === bulkFieldKey);
+                  return def?.kind === 'select' && def.options.length > 0 ? (
+                    <select value={bulkFieldValue} onChange={(e) => setBulkFieldValue(e.target.value)} className={bulkInputClass}>
+                      <option value="">Selecione o valor...</option>
+                      {def.options.map((v) => (
+                        <option key={v} value={v}>{v}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={bulkFieldValue}
+                      onChange={(e) => setBulkFieldValue(e.target.value)}
+                      placeholder="Novo valor (vazio limpa o campo)"
+                      className={bulkInputClass}
+                    />
+                  );
+                })()}
+                <button
+                  type="button"
+                  disabled={!bulkFieldKey}
+                  onClick={() => { bulkSetCustomField(bulkFieldKey, bulkFieldValue); setBulkModal(null); }}
+                  className={bulkApplyClass}
+                >
+                  Aplicar
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => setBulkModal(null)}
+              className="w-full py-1.5 rounded-lg text-xs font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Motivo da perda para ação em massa (uma vez p/ todos os selecionados) */}
+      <LossReasonModal
+        isOpen={!!bulkLossStageId}
+        onClose={() => setBulkLossStageId(null)}
+        onConfirm={(reason) => bulkMoveToStage(bulkLossStageId!, reason)}
+        dealTitle={`${selectedDealIds.length} negócio(s)`}
+      />
+
+      <ConfirmModal
+        isOpen={bulkDeleteOpen}
+        onClose={() => setBulkDeleteOpen(false)}
+        onConfirm={confirmBulkDelete}
+        title="Excluir negócios"
+        message={`Excluir ${selectedDealIds.length} negócio(s) selecionado(s)? Esta ação não pode ser desfeita.`}
         confirmText="Excluir"
         variant="danger"
       />

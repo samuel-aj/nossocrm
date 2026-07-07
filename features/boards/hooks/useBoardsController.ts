@@ -267,7 +267,7 @@ export const useBoardsController = () => {
   }, [activeBoard, deals, statusFilter, ownerFilter, searchTerm, dateRange]);
 
   // Get lifecycle stages from CRM context for automations
-  const { lifecycleStages, customFieldDefinitions: orgFieldDefs, deleteDeal, availableTags } = useCRM();
+  const { lifecycleStages, customFieldDefinitions: orgFieldDefs, deleteDeal, updateDeal, availableTags } = useCRM();
 
   // Enable realtime sync for Kanban
   useRealtimeSyncKanban();
@@ -544,6 +544,121 @@ export const useBoardsController = () => {
       return deal;
     });
   }, [deals, searchTerm, ownerFilter, customFieldConditions, customFieldLogic, tagFilter, dateRange, statusFilter, profile]);
+
+  // ==== Seleção em massa de leads ====
+  const [selectedDealIds, setSelectedDealIds] = useState<string[]>([]);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  // Etapa de PERDA escolhida numa ação em massa: pede o motivo UMA vez p/ todos.
+  const [bulkLossStageId, setBulkLossStageId] = useState<string | null>(null);
+
+  const toggleDealSelection = (dealId: string) => {
+    setSelectedDealIds(prev => (prev.includes(dealId) ? prev.filter(id => id !== dealId) : [...prev, dealId]));
+  };
+
+  const clearDealSelection = () => setSelectedDealIds([]);
+
+  // Seleciona/deseleciona TODOS os leads visíveis de uma etapa.
+  const toggleStageSelection = (stageId: string) => {
+    const stageDealIds = filteredDeals
+      .filter(d => d.status === stageId && !d.id.startsWith('temp-'))
+      .map(d => d.id);
+    if (stageDealIds.length === 0) return;
+    setSelectedDealIds(prev => {
+      const set = new Set(prev);
+      const allSelected = stageDealIds.every(id => set.has(id));
+      if (allSelected) stageDealIds.forEach(id => set.delete(id));
+      else stageDealIds.forEach(id => set.add(id));
+      return Array.from(set);
+    });
+  };
+
+  // Mover todos os selecionados p/ uma etapa. Etapa de perda SEM motivo →
+  // guarda a etapa e a UI abre o modal de motivo (uma vez p/ todos).
+  const bulkMoveToStage = (stageId: string, lossReason?: string) => {
+    if (!activeBoard) return;
+    const targetStage = activeBoard.stages.find(s => s.id === stageId);
+    if (targetStage?.linkedLifecycleStage === 'OTHER' && !lossReason) {
+      setBulkLossStageId(stageId);
+      return;
+    }
+    let moved = 0;
+    for (const dealId of selectedDealIds) {
+      const deal = deals.find(d => d.id === dealId);
+      if (!deal || deal.id.startsWith('temp-')) continue;
+      moveDealMutation.mutate({
+        dealId,
+        targetStageId: stageId,
+        ...(lossReason ? { lossReason } : {}),
+        deal,
+        board: activeBoard,
+        lifecycleStages,
+      });
+      moved++;
+    }
+    addToast(`${moved} negócio(s) movidos de etapa.`, 'success');
+    setBulkLossStageId(null);
+    clearDealSelection();
+  };
+
+  // Adicionar/remover uma tag em todos os selecionados.
+  const bulkEditTags = (mode: 'add' | 'remove', tag: string) => {
+    const t = tag.trim();
+    if (!t) return;
+    let changed = 0;
+    for (const dealId of selectedDealIds) {
+      const deal = deals.find(d => d.id === dealId);
+      if (!deal || deal.id.startsWith('temp-')) continue;
+      const current = deal.tags || [];
+      const has = current.some(x => x.toLowerCase() === t.toLowerCase());
+      if (mode === 'add' && !has) {
+        updateDeal(dealId, { tags: [...current, t] });
+        changed++;
+      } else if (mode === 'remove' && has) {
+        updateDeal(dealId, { tags: current.filter(x => x.toLowerCase() !== t.toLowerCase()) });
+        changed++;
+      }
+    }
+    addToast(
+      mode === 'add'
+        ? `Tag "${t}" adicionada em ${changed} negócio(s).`
+        : `Tag "${t}" removida de ${changed} negócio(s).`,
+      'success'
+    );
+    clearDealSelection();
+  };
+
+  // Definir um campo personalizado em todos os selecionados (valor vazio limpa).
+  const bulkSetCustomField = (key: string, value: string) => {
+    if (!key) return;
+    let changed = 0;
+    for (const dealId of selectedDealIds) {
+      const deal = deals.find(d => d.id === dealId);
+      if (!deal || deal.id.startsWith('temp-')) continue;
+      const next = { ...(deal.customFields || {}) } as Record<string, unknown>;
+      if (value.trim() === '') delete next[key];
+      else next[key] = value;
+      updateDeal(dealId, { customFields: next });
+      changed++;
+    }
+    addToast(`Campo "${key}" atualizado em ${changed} negócio(s).`, 'success');
+    clearDealSelection();
+  };
+
+  const confirmBulkDelete = async () => {
+    let removed = 0;
+    for (const dealId of selectedDealIds) {
+      if (dealId.startsWith('temp-')) continue;
+      try {
+        await deleteDeal(dealId);
+        removed++;
+      } catch {
+        // segue nos demais; o toast final reflete o total efetivado
+      }
+    }
+    addToast(`${removed} negócio(s) excluídos.`, 'success');
+    setBulkDeleteOpen(false);
+    clearDealSelection();
+  };
 
   // Drag & Drop Handlers
   const handleDragStart = (e: React.DragEvent, id: string, title: string) => {
@@ -1028,6 +1143,19 @@ export const useBoardsController = () => {
     handleDropDelete,
     handleDeleteDealConfirm,
     handleDeleteDealClose,
+    // Seleção em massa
+    selectedDealIds,
+    toggleDealSelection,
+    clearDealSelection,
+    toggleStageSelection,
+    bulkMoveToStage,
+    bulkEditTags,
+    bulkSetCustomField,
+    bulkDeleteOpen,
+    setBulkDeleteOpen,
+    confirmBulkDelete,
+    bulkLossStageId,
+    setBulkLossStageId,
     // UX: global overlay while creating board (start-from-zero flow)
     boardCreateOverlay,
   };
