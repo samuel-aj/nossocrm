@@ -144,6 +144,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
             board_id: { type: 'string' },
             stage_id: { type: 'string' },
             contact_id: { type: 'string' },
+            owner_id: { type: ['string', 'null'], description: 'UUID do usuário RESPONSÁVEL pelo lead (null = sem responsável)' },
             client_company_id: { type: ['string', 'null'] },
             is_won: { type: 'boolean' },
             is_lost: { type: 'boolean' },
@@ -667,6 +668,8 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
         post: {
           tags: ['Deals'],
           summary: 'Criar deal',
+          description:
+            'Cria um lead/negócio. Idempotente contra duplicados: se o contato já tem um negócio ABERTO no mesmo estágio (ou se o external_id já foi usado), responde 200 com o negócio existente (action: "existing") em vez de erro — integrações (n8n etc.) não quebram em reenvio.',
           security: [{ ApiKeyAuth: [] }],
           requestBody: {
             required: true,
@@ -677,6 +680,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
                   additionalProperties: false,
                   properties: {
                     title: { type: 'string', minLength: 1 },
+                    description: { type: 'string', description: 'Descrição inicial do lead' },
                     value: { type: 'number', default: 0 },
                     board_id: { type: 'string', description: 'UUID do board' },
                     board_key: { type: 'string', description: 'Slug do board (alternativa ao board_id)' },
@@ -694,6 +698,8 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
                       },
                     },
                     client_company_id: { type: 'string' },
+                    owner_id: { type: 'string', description: 'RESPONSÁVEL pelo lead: UUID de um usuário da organização (422 se não pertencer à org)' },
+                    owner_email: { type: 'string', description: 'RESPONSÁVEL pelo lead: e-mail de um usuário da organização (alternativa ao owner_id)' },
                     tags: { type: 'array', items: { type: 'string' }, description: 'Tags do deal' },
                     custom_fields: { type: 'object', additionalProperties: true, description: 'Campos personalizados, indexados pela KEY do campo (veja GET /custom-fields). Ex: {"motivo_busca": "Revisão de contrato"}' },
                     probability: { type: 'integer', minimum: 0, maximum: 100, description: 'Probabilidade de ganho (0-100)' },
@@ -730,12 +736,24 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
                       custom_fields: { motivo_busca: 'Revisão de contrato', origem: 'Google Ads' },
                     },
                   },
+                  comResponsavel: {
+                    summary: 'Criar lead já com responsável (owner_email)',
+                    value: {
+                      title: 'Maria Souza',
+                      board_key: 'pre-venda',
+                      contact: { name: 'Maria Souza', phone: '5569999990000' },
+                      owner_email: 'vendedor@suaempresa.com.br',
+                      custom_fields: { origem: 'Meta Ads', utm_source: 'Instagram_Feed' },
+                    },
+                  },
                 },
               },
             },
           },
           responses: {
-            201: { description: 'Created', content: { 'application/json': { schema: { type: 'object' } } } },
+            201: { description: 'Criado (action: "created")', content: { 'application/json': { schema: { type: 'object' } } } },
+            200: { description: 'Negócio já existia (idempotência por contato+estágio aberto ou external_id) — retorna o existente (action: "existing")', content: { 'application/json': { schema: { type: 'object' } } } },
+            422: { description: 'Payload inválido (ex.: owner_id/owner_email não pertence à organização — code OWNER_NOT_FOUND)' },
             401: { $ref: '#/components/responses/Unauthorized' },
           },
         },
@@ -772,6 +790,8 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
                     value: { type: 'number', description: 'Ignorado quando o valor é calculado por produtos' },
                     contact_id: { type: 'string', description: 'UUID do contato' },
                     client_company_id: { type: 'string', nullable: true },
+                    owner_id: { type: 'string', nullable: true, description: 'RESPONSÁVEL pelo lead: UUID de um usuário da organização. null LIMPA o responsável.' },
+                    owner_email: { type: 'string', description: 'RESPONSÁVEL pelo lead: e-mail de um usuário da organização (alternativa ao owner_id)' },
                     loss_reason: { type: 'string', nullable: true },
                     tags: { type: 'array', items: { type: 'string' }, description: 'Substitui todas as tags' },
                     tags_add: { type: 'array', items: { type: 'string' }, description: 'Adiciona tags (dedup). Exclusivo com tags.' },
@@ -804,6 +824,10 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
                   },
                   editarCampos: {
                     value: { title: 'Maria Silva', priority: 'high', custom_fields_patch: { origem: 'Meta Ads' } },
+                  },
+                  definirResponsavel: {
+                    summary: 'Definir/trocar o responsável do lead',
+                    value: { owner_email: 'vendedor@suaempresa.com.br' },
                   },
                 },
               },
