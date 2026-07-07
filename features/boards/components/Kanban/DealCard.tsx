@@ -31,6 +31,9 @@ interface DealCardProps {
   setLastMouseDownDealId: (id: string | null) => void;
   /** Callback to open move-to-stage modal for keyboard accessibility */
   onMoveToStage?: (dealId: string) => void;
+  /** Seleção em massa: card selecionado + toggle */
+  selected: boolean;
+  onToggleSelect: (dealId: string) => void;
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -73,6 +76,8 @@ const DealCardComponent: React.FC<DealCardProps> = ({
   customFieldDefinitions,
   setLastMouseDownDealId,
   onMoveToStage,
+  selected,
+  onToggleSelect,
 }) => {
   const [localDragging, setLocalDragging] = useState(false);
   const isClosed = isDealClosed(deal);
@@ -193,8 +198,22 @@ const DealCardComponent: React.FC<DealCardProps> = ({
       tabIndex={0}
       role="button"
       aria-label={getAriaLabel()}
-      className={`${getCardClasses()} ${getBorderLeftClass()}`}
+      className={`${getCardClasses()} ${getBorderLeftClass()} ${selected ? 'ring-2 ring-primary-500 dark:ring-primary-400' : ''}`}
     >
+      {/* Checkbox de seleção em massa (aparece no hover ou quando selecionado) */}
+      <label
+        onClick={(e) => e.stopPropagation()}
+        className={`absolute top-1.5 left-1.5 z-10 p-0.5 rounded cursor-pointer transition-opacity ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+      >
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={() => onToggleSelect(deal.id)}
+          aria-label={`Selecionar ${deal.title}`}
+          className="w-3.5 h-3.5 rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500 cursor-pointer"
+        />
+      </label>
+
       {/* Won Badge */}
       {deal.isWon && (
         <div
