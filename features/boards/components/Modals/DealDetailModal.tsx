@@ -685,10 +685,10 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     <div
       className={
         isMobile
-          ? 'bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 w-full h-[100dvh] flex flex-col overflow-hidden pb-[var(--app-safe-area-bottom,0px)]'
+          ? 'bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 w-full h-[100dvh] flex flex-col overflow-hidden pb-[var(--app-safe-area-bottom,0px)] animate-in slide-in-from-bottom-8 fade-in duration-300 ease-out'
           : viewMode === 'fullscreen'
-            ? 'bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-none w-full h-full flex flex-col overflow-hidden animate-in zoom-in-95 duration-200'
-            : 'bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200'
+            ? 'bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-none w-full max-w-full h-full flex flex-col overflow-hidden animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-300 ease-out transition-all'
+            : 'bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-300 ease-out transition-all'
       }
     >
           {/* HEADER (Stage Bar + Won/Lost) */}
@@ -2054,7 +2054,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
         // Backdrop + positioning wrapper. Clicking outside the panel should close the modal.
         // No desktop, este modal não deve cobrir a sidebar de navegação.
         // Em md+ deslocamos o overlay pela largura da sidebar via `--app-sidebar-width`.
-        className={`fixed inset-0 md:left-[var(--app-sidebar-width,0px)] z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm ${viewMode === 'fullscreen' ? 'p-0' : 'p-4'}`}
+        className={`fixed inset-0 md:left-[var(--app-sidebar-width,0px)] z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200 transition-[padding] ${viewMode === 'fullscreen' ? 'p-0' : 'p-4'}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={headingId}
