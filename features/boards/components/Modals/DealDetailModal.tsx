@@ -210,6 +210,18 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const [customFieldsDraft, setCustomFieldsDraft] = useState<Record<string, string>>({});
 
   const [tagQuery, setTagQuery] = useState('');
+  // Dropdown do seletor de tags (abre no foco; fecha ao clicar fora).
+  // Fica AQUI, antes dos returns condicionais (regra dos hooks).
+  const [tagDropdownOpen, setTagDropdownOpen] = useState(false);
+  const tagBoxRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!tagDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (tagBoxRef.current && !tagBoxRef.current.contains(e.target as Node)) setTagDropdownOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [tagDropdownOpen]);
   const [viewMode, setViewMode] = useState<'modal' | 'fullscreen'>('modal');
 
   const normalizeTag = (value: string) => value.trim().replace(/\s+/g, ' ');
@@ -374,15 +386,19 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     updateDeal(deal.id, { tags: nextTags });
   };
 
+  // Lista TODAS as tags da org (menos as já no lead); digitar filtra.
+  // Criar tag nova é só pelo botão "Criar tag" (o local oficial de gestão
+  // é Configurações → Tags — aqui é o caminho de exceção).
   const tagSuggestions = (() => {
-    const q = normalizeTag(tagQuery);
-    if (!q) return [];
-    const qLower = q.toLowerCase();
+    const qLower = normalizeTag(tagQuery).toLowerCase();
     return (availableTags || [])
       .filter(t => !tagsLower.has(t.toLowerCase()))
-      .filter(t => t.toLowerCase().includes(qLower))
-      .slice(0, 8);
+      .filter(t => !qLower || t.toLowerCase().includes(qLower))
+      .slice(0, 30);
   })();
+  // true quando não há texto OU o texto já é uma tag existente (sem botão criar)
+  const tagExactExists = !normalizeTag(tagQuery)
+    || availableTagsLower.has(normalizeTag(tagQuery).toLowerCase());
 
   const handleAnalyzeDeal = async () => {
     setIsAnalyzing(true);
@@ -1139,49 +1155,64 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                     )}
                   </div>
 
-                  <div className="mt-3">
+                  <div className="mt-3" ref={tagBoxRef}>
                     <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">
                       Adicionar tag
                     </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={tagQuery}
-                        onChange={(e) => setTagQuery(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            addDealTag(tagQuery);
+                    <input
+                      type="text"
+                      value={tagQuery}
+                      onChange={(e) => {
+                        setTagQuery(e.target.value);
+                        setTagDropdownOpen(true);
+                      }}
+                      onFocus={() => setTagDropdownOpen(true)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') setTagDropdownOpen(false);
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          // Enter só adiciona tag EXISTENTE (match exato); criar é pelo botão.
+                          const exact = (availableTags || []).find(
+                            (t) => t.toLowerCase() === normalizeTag(tagQuery).toLowerCase()
+                          );
+                          if (exact) {
+                            addDealTag(exact);
+                            setTagDropdownOpen(false);
                           }
-                        }}
-                        placeholder="Ex: VIP, Urgente, Q4..."
-                        className="min-w-0 flex-1 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
-                        aria-label="Adicionar tag"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => addDealTag(tagQuery)}
-                        disabled={!normalizeTag(tagQuery)}
-                        className="shrink-0 h-10 w-10 inline-flex items-center justify-center rounded-lg bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors"
-                        aria-label="Adicionar tag"
-                        title="Adicionar tag"
-                      >
-                        <Plus size={18} aria-hidden="true" />
-                      </button>
-                    </div>
+                        }
+                      }}
+                      placeholder="Selecionar ou buscar tag..."
+                      className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                      aria-label="Adicionar tag"
+                    />
 
-                    {(normalizeTag(tagQuery) && tagSuggestions.length > 0) && (
-                      <div className="mt-2 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg overflow-hidden">
+                    {tagDropdownOpen && (tagSuggestions.length > 0 || !tagExactExists) && (
+                      <div className="mt-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg overflow-hidden max-h-48 overflow-y-auto scrollbar-custom">
                         {tagSuggestions.map((t) => (
                           <button
                             key={t}
                             type="button"
-                            onClick={() => addDealTag(t)}
+                            onClick={() => {
+                              addDealTag(t);
+                              setTagDropdownOpen(false);
+                            }}
                             className="w-full text-left px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
                           >
                             {t}
                           </button>
                         ))}
+                        {!tagExactExists && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              addDealTag(tagQuery);
+                              setTagDropdownOpen(false);
+                            }}
+                            className="w-full flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-primary-600 dark:text-primary-400 border-t border-slate-100 dark:border-white/10 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
+                          >
+                            <Plus size={14} /> Criar tag &quot;{normalizeTag(tagQuery)}&quot;
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
