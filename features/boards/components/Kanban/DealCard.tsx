@@ -273,7 +273,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
         {/* Selo automático: contato do lead está INATIVO */}
         {contactInactive && (
           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-600 flex items-center gap-1">
-            <UserX size={10} aria-hidden="true" /> CONTATO INATIVO
+            <UserX size={10} aria-hidden="true" /> INATIVO
           </span>
         )}
         {/* Regular tags */}
