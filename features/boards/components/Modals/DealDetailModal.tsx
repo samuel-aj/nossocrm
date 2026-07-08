@@ -2047,7 +2047,9 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   }
 
   return (
-    <FocusTrap active={isOpen} onEscape={onClose}>
+    // allowOutsideClick: menu lateral (Inbox, Visão Geral, recolher…) continua
+    // clicável com o card aberto; o foco por teclado segue preso no modal.
+    <FocusTrap active={isOpen} onEscape={onClose} allowOutsideClick>
       <div
         // Backdrop + positioning wrapper. Clicking outside the panel should close the modal.
         // No desktop, este modal não deve cobrir a sidebar de navegação.

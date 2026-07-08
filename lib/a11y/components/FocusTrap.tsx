@@ -14,6 +14,11 @@ export interface FocusTrapProps {
   returnFocus?: boolean;
   /** Allow clicks outside the trap */
   clickOutsideDeactivates?: boolean;
+  /**
+   * Permite CLIQUES fora do trap sem desativá-lo (ex.: navegar pela sidebar
+   * com o modal aberto). O foco por teclado continua preso no modal.
+   */
+  allowOutsideClick?: boolean;
 }
 
 /**
@@ -40,6 +45,7 @@ export const FocusTrap: React.FC<FocusTrapProps> = ({
   initialFocus,
   returnFocus = true,
   clickOutsideDeactivates = false,
+  allowOutsideClick = false,
 }) => {
   const getInitialFocus = (): string | HTMLElement | (() => HTMLElement | null) | false | undefined => {
     if (initialFocus === false) {
@@ -65,7 +71,7 @@ export const FocusTrap: React.FC<FocusTrapProps> = ({
           return false; // Don't deactivate, let parent handle it
         } : true,
         clickOutsideDeactivates,
-        allowOutsideClick: clickOutsideDeactivates,
+        allowOutsideClick: clickOutsideDeactivates || allowOutsideClick,
         // Fallback to container if no focusable elements found
         fallbackFocus: () => {
           const container = document.querySelector('[data-focus-trap-fallback]');
