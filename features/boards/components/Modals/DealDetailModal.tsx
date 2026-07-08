@@ -220,7 +220,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [tagDropdownOpen]);
-  const [viewMode, setViewMode] = useState<'modal' | 'fullscreen'>('modal');
+  // Padrão: abre em tela cheia; o botão no topo alterna pro modo pequeno.
+  const [viewMode, setViewMode] = useState<'modal' | 'fullscreen'>('fullscreen');
 
   const normalizeTag = (value: string) => value.trim().replace(/\s+/g, ' ');
   const tagsLower = useMemo(() => new Set((deal?.tags || []).map(t => t.toLowerCase())), [deal?.tags]);
@@ -233,6 +234,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     if (isOpen && deal) {
       setEditTitle(deal.title);
       setEditValue(deal.value.toString());
+      setViewMode('fullscreen'); // toda abertura começa em tela cheia
       setAiResult(null);
       setEmailDraft(null);
       setObjectionResponses([]);
