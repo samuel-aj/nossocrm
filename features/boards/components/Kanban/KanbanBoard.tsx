@@ -134,8 +134,15 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   onToggleDealSelection,
   onToggleStageSelection,
 }) => {
-  const { lifecycleStages } = useCRM();
+  const { lifecycleStages, contacts } = useCRM();
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
+
+  // Contatos INATIVOS: sinalização automática no card (derivada do status do
+  // contato — sempre em sincronia; reativar o contato limpa o aviso sozinho).
+  const inactiveContactIds = useMemo(
+    () => new Set(contacts.filter((c) => c.status === 'INACTIVE').map((c) => c.id)),
+    [contacts]
+  );
 
   // Activity status per deal, computed once per render from the activities cache.
   const { data: activities = [] } = useActivities();
@@ -343,6 +350,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                   selectionMode={selectionMode}
                   selected={selectedDealIds.includes(deal.id)}
                   onToggleSelect={onToggleDealSelection}
+                  contactInactive={!!deal.contactId && inactiveContactIds.has(deal.contactId)}
                 />
               ))}
             </div>
