@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { DealView, CustomFieldDefinition } from '@/types';
-import { Phone, Copy, Check, Hourglass, Trophy, XCircle, Package } from 'lucide-react';
+import { Phone, Copy, Check, Hourglass, Trophy, XCircle, Package, UserX } from 'lucide-react';
 import { ActivityStatusIcon } from './ActivityStatusIcon';
 import { OwnerBadge } from './OwnerBadge';
 import type { DealActivityStatus } from '@/features/boards/utils/dealActivityStatus';
@@ -35,6 +35,8 @@ interface DealCardProps {
   selectionMode: boolean;
   selected: boolean;
   onToggleSelect: (dealId: string) => void;
+  /** Contato do lead está INATIVO (derivado do status do contato; só visual) */
+  contactInactive: boolean;
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -80,6 +82,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
   selectionMode,
   selected,
   onToggleSelect,
+  contactInactive,
 }) => {
   const [localDragging, setLocalDragging] = useState(false);
   const isClosed = isDealClosed(deal);
@@ -172,6 +175,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
     const priority = getPriorityLabel(deal.priority);
     if (priority) parts.push(priority);
     if (isRotting && !isClosed) parts.push('estagnado');
+    if (contactInactive) parts.push('contato inativo');
 
     return parts.join(', ');
   };
@@ -206,7 +210,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
       tabIndex={0}
       role="button"
       aria-label={getAriaLabel()}
-      className={`${getCardClasses()} ${getBorderLeftClass()} ${selected ? 'ring-2 ring-primary-500 dark:ring-primary-400' : ''}`}
+      className={`${getCardClasses()} ${getBorderLeftClass()} ${selected ? 'ring-2 ring-primary-500 dark:ring-primary-400' : ''} ${contactInactive ? 'opacity-60 grayscale' : ''}`}
     >
       {/* Checkbox de seleção múltipla (só no modo "Selecionar vários"; à direita p/ não cobrir as tags) */}
       {selectionMode && (
@@ -264,6 +268,12 @@ const DealCardComponent: React.FC<DealCardProps> = ({
         {deal.isLost && (
           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-800/40 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-700">
             ✗ PERDIDO
+          </span>
+        )}
+        {/* Selo automático: contato do lead está INATIVO */}
+        {contactInactive && (
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-600 flex items-center gap-1">
+            <UserX size={10} aria-hidden="true" /> CONTATO INATIVO
           </span>
         )}
         {/* Regular tags */}
