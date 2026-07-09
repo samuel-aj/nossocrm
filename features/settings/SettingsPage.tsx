@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import { useSettingsController } from './hooks/useSettingsController';
 import { TagsManager } from './components/TagsManager';
+import { InactiveLeadsSettings } from './components/InactiveLeadsSettings';
 import { CustomFieldsManager } from './components/CustomFieldsManager';
 import { ApiKeysSection } from './components/ApiKeysSection';
 import { WebhooksSection } from './components/WebhooksSection';
@@ -82,6 +83,8 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ hash, isAdmin }) => {
 
       {isAdmin && (
         <>
+          <InactiveLeadsSettings />
+
           <TagsManager
             availableTags={controller.availableTags}
             newTagName={controller.newTagName}
