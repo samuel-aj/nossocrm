@@ -407,7 +407,8 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
               </div>
             )}
             {inactiveDeals.map((deal) => {
-              const daysLeft = deal.inactiveAt ? inactiveDaysLeft(deal.inactiveAt) : 0;
+              const daysLeft = deal.inactiveAt ? inactiveDaysLeft(deal.inactiveAt) : INACTIVE_RETURN_DAYS;
+              const contactInactive = !!deal.contactId && inactiveContactIds.has(deal.contactId);
               return (
                 <div
                   key={deal.id}
@@ -423,42 +424,39 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                   {deal.contactPhone && (
                     <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">{deal.contactPhone}</p>
                   )}
-                  <div className="flex items-center justify-between gap-2">
-                    {deal.inactiveAt ? (
-                      <>
-                        <span
-                          className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                            daysLeft <= 5
-                              ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
-                              : 'bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400'
-                          }`}
-                          title={`Devolução automática em ${daysLeft} dia(s)`}
-                        >
-                          <Hourglass size={10} aria-hidden="true" />
-                          {daysLeft > 0 ? `${daysLeft}d p/ devolver` : 'devolve hoje'}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onRestoreInactive(deal.id);
-                          }}
-                          className="inline-flex items-center gap-1 text-[10px] font-medium text-primary-600 dark:text-primary-400 hover:underline"
-                          title="Devolver o lead pro funil agora"
-                        >
-                          <Undo2 size={10} aria-hidden="true" /> devolver
-                        </button>
-                      </>
-                    ) : (
-                      // Está aqui porque o CONTATO tem status INATIVO — sai da
-                      // coluna quando o contato for reativado (sem prazo de 30d).
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    {/* Countdown ESPECÍFICO do lead: conta a partir do momento
+                        em que ELE entrou em Inativos (inactive_at próprio). */}
+                    <span
+                      className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                        daysLeft <= 5
+                          ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
+                          : 'bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400'
+                      }`}
+                      title={`Devolução automática em ${daysLeft} dia(s)`}
+                    >
+                      <Hourglass size={10} aria-hidden="true" />
+                      {daysLeft > 0 ? `${daysLeft}d p/ devolver` : 'devolve hoje'}
+                    </span>
+                    {contactInactive && (
                       <span
                         className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
-                        title="Contato com status INATIVO — reative o contato para devolver ao funil"
+                        title="Contato com status INATIVO"
                       >
                         <UserX size={10} aria-hidden="true" /> contato inativo
                       </span>
                     )}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRestoreInactive(deal.id);
+                      }}
+                      className="ml-auto inline-flex items-center gap-1 text-[10px] font-medium text-primary-600 dark:text-primary-400 hover:underline"
+                      title="Devolver o lead pro funil agora"
+                    >
+                      <Undo2 size={10} aria-hidden="true" /> devolver
+                    </button>
                   </div>
                 </div>
               );

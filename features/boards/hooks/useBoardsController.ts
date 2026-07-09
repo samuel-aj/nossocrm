@@ -586,6 +586,28 @@ export const useBoardsController = () => {
       });
   }, [deals, inactiveLeadsEnabled, searchTerm, inactiveContactIds]);
 
+  // Carimbo automático: lead de contato INATIVO entra em Inativos COM data
+  // própria (inactive_at = agora). Assim CADA card tem o countdown específico
+  // do seu tempo na etapa, e a devolução de 30 dias vale pra todos.
+  const inactiveStampRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!inactiveLeadsEnabled) return;
+    const toStamp = deals.filter(
+      d =>
+        !d.inactiveAt &&
+        d.contactId &&
+        inactiveContactIds.has(d.contactId) &&
+        !d.id.startsWith('temp-') &&
+        !inactiveStampRef.current.has(d.id)
+    );
+    if (toStamp.length === 0) return;
+    const now = new Date().toISOString();
+    for (const d of toStamp) {
+      inactiveStampRef.current.add(d.id); // evita carimbo duplicado em re-render
+      updateDeal(d.id, { inactiveAt: now });
+    }
+  }, [deals, inactiveContactIds, inactiveLeadsEnabled, updateDeal]);
+
   const markDealInactive = (dealId: string) => {
     const deal = deals.find(d => d.id === dealId);
     if (!deal) return;
