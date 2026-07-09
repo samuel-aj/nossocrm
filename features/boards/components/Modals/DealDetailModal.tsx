@@ -41,6 +41,8 @@ import {
   ExternalLink,
   MessageCircle,
   ChevronDown,
+  Archive,
+  Undo2,
 } from 'lucide-react';
 import { StageProgressBar } from '../StageProgressBar';
 import { ActivityRow } from '@/features/activities/components/ActivityRow';
@@ -927,6 +929,53 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
             {/* Left Sidebar (Static Info + Custom Fields) */}
             <div className="w-full md:w-1/3 border-b md:border-b-0 md:border-r border-slate-200 dark:border-white/5 p-4 sm:p-6 overflow-y-auto overflow-x-hidden scrollbar-custom bg-white dark:bg-dark-card max-h-[38vh] md:max-h-none">
               <div className="space-y-6">
+                {/* Banner Inativos: quanto tempo falta pro lead sair (devolução automática) */}
+                {deal.inactiveAt && (() => {
+                  const daysLeft = Math.max(
+                    0,
+                    30 - Math.floor((Date.now() - new Date(deal.inactiveAt).getTime()) / 86_400_000)
+                  );
+                  const returnDate = new Date(new Date(deal.inactiveAt).getTime() + 30 * 86_400_000);
+                  return (
+                    <div className="rounded-xl border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-900/20 p-3">
+                      <p className="text-xs font-bold text-amber-800 dark:text-amber-300 uppercase flex items-center gap-1.5 mb-1">
+                        <Archive size={13} aria-hidden="true" /> Em Inativos
+                      </p>
+                      <p className="text-sm text-amber-800 dark:text-amber-200">
+                        {daysLeft > 0 ? (
+                          <>
+                            Devolução automática ao funil em{' '}
+                            <span className="font-bold">{daysLeft} dia{daysLeft === 1 ? '' : 's'}</span>{' '}
+                            ({returnDate.toLocaleDateString('pt-BR')}).
+                          </>
+                        ) : (
+                          'Devolução automática ao funil hoje.'
+                        )}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          updateDeal(deal.id, { inactiveAt: null });
+                          addToast('Lead devolvido pro funil.', 'success');
+                        }}
+                        className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-amber-800 dark:text-amber-300 hover:underline"
+                      >
+                        <Undo2 size={12} aria-hidden="true" /> Devolver agora
+                      </button>
+                    </div>
+                  );
+                })()}
+                {!deal.inactiveAt && contact?.status === 'INACTIVE' && (
+                  <div className="rounded-xl border border-slate-200 dark:border-white/10 bg-slate-100 dark:bg-white/5 p-3">
+                    <p className="text-xs font-bold text-slate-600 dark:text-slate-300 uppercase flex items-center gap-1.5 mb-1">
+                      <Archive size={13} aria-hidden="true" /> Em Inativos
+                    </p>
+                    <p className="text-sm text-slate-600 dark:text-slate-300">
+                      O contato está com status <span className="font-bold">INATIVO</span>. Reative o
+                      contato para o lead voltar ao funil.
+                    </p>
+                  </div>
+                )}
                 <div>
                   <h3 className="text-xs font-bold text-slate-400 uppercase mb-2 flex items-center gap-2">
                     <Building2 size={14} /> Empresa (Conta)
