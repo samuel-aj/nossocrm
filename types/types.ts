@@ -229,6 +229,8 @@ export interface Deal {
     avatar: string;
   };
   ownerId?: string; // ID do usuário responsável
+  /** Guardado em "Inativos" desde (ISO). null/undefined = ativo no funil. */
+  inactiveAt?: string | null;
   nextActivity?: {
     type: 'CALL' | 'MEETING' | 'EMAIL' | 'TASK';
     date: string;

@@ -108,6 +108,8 @@ export interface DbDeal {
   is_lost: boolean;
   /** Data de fechamento. */
   closed_at: string | null;
+  /** Guardado em "Inativos" desde (null = ativo no funil). */
+  inactive_at?: string | null;
 }
 
 /**
@@ -181,6 +183,7 @@ const transformDeal = (db: DbDeal, items: DbDealItem[]): Deal => {
       })),
     owner: { name: 'Sem Dono', avatar: '' }, // Will be enriched later
     ownerId: db.owner_id || undefined,
+    inactiveAt: db.inactive_at || undefined,
   };
 };
 
@@ -222,6 +225,8 @@ const transformDealToDb = (deal: Partial<Deal>): Partial<DbDeal> => {
   if (deal.lastStageChangeDate !== undefined) db.last_stage_change_date = deal.lastStageChangeDate || null;
   if (deal.customFields !== undefined) db.custom_fields = deal.customFields;
   if (deal.ownerId !== undefined) db.owner_id = sanitizeUUID(deal.ownerId);
+  // Inativos: string ISO grava; null limpa (devolve o lead pro funil)
+  if (deal.inactiveAt !== undefined) db.inactive_at = deal.inactiveAt;
 
   return db;
 };

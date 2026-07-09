@@ -14,6 +14,7 @@ import {
   useDealsByBoard,
 } from '@/lib/query/hooks/useDealsQuery';
 import { useMoveDeal } from '@/lib/query/hooks/useMoveDeal';
+import { useOrgPreferences } from '@/lib/query/hooks/useOrgPreferences';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useRealtimeSyncKanban } from '@/lib/realtime/useRealtimeSync';
 import { useToast } from '@/context/ToastContext';
@@ -268,6 +269,8 @@ export const useBoardsController = () => {
 
   // Get lifecycle stages from CRM context for automations
   const { lifecycleStages, customFieldDefinitions: orgFieldDefs, deleteDeal, updateDeal, availableTags } = useCRM();
+  // Etapa "Inativos" (opcional por organização — Configurações)
+  const { inactiveLeadsEnabled } = useOrgPreferences();
 
   // Enable realtime sync for Kanban
   useRealtimeSyncKanban();
@@ -455,6 +458,9 @@ export const useBoardsController = () => {
     const tagTerm = tagFilter.trim().toLowerCase();
 
     return deals.filter(l => {
+      // Leads guardados em "Inativos" saem do funil normal (ficam na coluna própria)
+      if (l.inactiveAt) return false;
+
       const matchesSearch =
         (l.title || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (l.companyName || '').toLowerCase().includes(searchTerm.toLowerCase());
@@ -544,6 +550,41 @@ export const useBoardsController = () => {
       return deal;
     });
   }, [deals, searchTerm, ownerFilter, customFieldConditions, customFieldLogic, tagFilter, dateRange, statusFilter, profile]);
+
+  // ==== Etapa "Inativos" ====
+  // Leads guardados (inactive_at setado), mais antigos primeiro — o countdown
+  // de devolução (30d) é derivado do inactiveAt na própria coluna.
+  const inactiveDeals = useMemo(() => {
+    if (!inactiveLeadsEnabled) return [] as typeof deals;
+    const term = searchTerm.toLowerCase();
+    return deals
+      .filter(d => d.inactiveAt)
+      .filter(d =>
+        !term ||
+        (d.title || '').toLowerCase().includes(term) ||
+        (d.companyName || '').toLowerCase().includes(term)
+      )
+      .sort((a, b) => new Date(a.inactiveAt!).getTime() - new Date(b.inactiveAt!).getTime());
+  }, [deals, inactiveLeadsEnabled, searchTerm]);
+
+  const markDealInactive = (dealId: string) => {
+    const deal = deals.find(d => d.id === dealId);
+    if (!deal) return;
+    if (deal.id.startsWith('temp-')) {
+      addToast('Aguarde o negócio salvar (1s) e tente novamente.', 'info');
+      return;
+    }
+    if (deal.inactiveAt) return; // já está em Inativos
+    updateDeal(dealId, { inactiveAt: new Date().toISOString() });
+    addToast('Lead guardado em Inativos. Será devolvido automaticamente em 30 dias.', 'success');
+  };
+
+  const restoreDealFromInactive = (dealId: string) => {
+    const deal = deals.find(d => d.id === dealId);
+    if (!deal || !deal.inactiveAt) return;
+    updateDeal(dealId, { inactiveAt: null });
+    addToast('Lead devolvido pro funil.', 'success');
+  };
 
   // ==== Seleção em massa de leads ====
   // Modo explícito: liga pelo menu ⋮ ("Selecionar vários"); só então os
@@ -721,6 +762,11 @@ export const useBoardsController = () => {
         return;
       }
 
+      // Saindo de "Inativos": soltar numa etapa devolve o lead pro funil.
+      if (deal.inactiveAt) {
+        updateDeal(deal.id, { inactiveAt: null });
+      }
+
       // Find the target stage to check if it's a won/lost stage
       const targetStage = activeBoard.stages.find(s => s.id === stageId);
 
@@ -811,6 +857,11 @@ export const useBoardsController = () => {
     if (deal.id.startsWith('temp-')) {
       addToast('Aguarde o negócio salvar para mover (1s) e tente novamente.', 'info');
       return;
+    }
+
+    // Mudar de etapa também devolve o lead caso esteja em "Inativos".
+    if (deal.inactiveAt) {
+      updateDeal(deal.id, { inactiveAt: null });
     }
 
     // Find the target stage to check if it's a lost stage
@@ -1151,6 +1202,11 @@ export const useBoardsController = () => {
     handleDropDelete,
     handleDeleteDealConfirm,
     handleDeleteDealClose,
+    // Etapa Inativos
+    inactiveLeadsEnabled,
+    inactiveDeals,
+    markDealInactive,
+    restoreDealFromInactive,
     // Seleção em massa
     selectionMode,
     enterSelectionMode,

@@ -10,7 +10,7 @@ import { KanbanList } from './Kanban/KanbanList';
 import { DeleteBoardModal } from './Modals/DeleteBoardModal';
 import { LossReasonModal } from '@/components/ui/LossReasonModal';
 import ConfirmModal from '@/components/ConfirmModal';
-import { CheckCircle2, XCircle, Trash2, X, Tag, Pencil, ArrowRightLeft } from 'lucide-react';
+import { CheckCircle2, XCircle, Trash2, X, Tag, Pencil, ArrowRightLeft, Archive } from 'lucide-react';
 import { DealView, CustomFieldDefinition, Board, BoardStage } from '@/types';
 import { ExportTemplateModal } from './Modals/ExportTemplateModal';
 import { useAuth } from '@/context/AuthContext';
@@ -135,6 +135,11 @@ interface PipelineViewProps {
   handleDropDelete: (dealId: string) => void;
   handleDeleteDealConfirm: () => void;
   handleDeleteDealClose: () => void;
+  // Etapa "Inativos" (opcional por organização)
+  inactiveLeadsEnabled: boolean;
+  inactiveDeals: DealView[];
+  markDealInactive: (dealId: string) => void;
+  restoreDealFromInactive: (dealId: string) => void;
   // Seleção em massa
   selectionMode: boolean;
   enterSelectionMode: () => void;
@@ -297,6 +302,10 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   handleDropDelete,
   handleDeleteDealConfirm,
   handleDeleteDealClose,
+  inactiveLeadsEnabled,
+  inactiveDeals,
+  markDealInactive,
+  restoreDealFromInactive,
   selectionMode,
   enterSelectionMode,
   exitSelectionMode,
@@ -554,6 +563,10 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
             {viewMode === 'kanban' ? (
               <KanbanBoard
                 stages={kanbanStages}
+                inactiveEnabled={inactiveLeadsEnabled}
+                inactiveDeals={inactiveDeals}
+                onMarkInactive={markDealInactive}
+                onRestoreInactive={restoreDealFromInactive}
                 selectionMode={selectionMode}
                 selectedDealIds={selectedDealIds}
                 onToggleDealSelection={toggleDealSelection}
@@ -665,6 +678,19 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                 title={lostStage?.label || 'Perdido'}
                 icon={<XCircle size={14} className="text-red-500 shrink-0" />}
                 overClass="border-red-500 bg-red-100/95 dark:bg-red-900/70 ring-4 ring-red-400/50"
+              />
+            )}
+            {inactiveLeadsEnabled && (
+              <DragDropZone
+                onDropCard={(e) => {
+                  e.preventDefault();
+                  const dealId = e.dataTransfer.getData('dealId');
+                  if (dealId) markDealInactive(dealId);
+                }}
+                colorBar="bg-slate-400"
+                title="Inativos"
+                icon={<Archive size={14} className="text-slate-400 shrink-0" />}
+                overClass="border-slate-500 bg-slate-200/95 dark:bg-slate-800/95 ring-4 ring-slate-400/50"
               />
             )}
             <DragDropZone

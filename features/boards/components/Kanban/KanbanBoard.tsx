@@ -7,10 +7,16 @@ import { computeActivityStatusMap } from '@/features/boards/utils/dealActivitySt
 import { useActivities } from '@/lib/query/hooks/useActivitiesQuery';
 
 import { useCRM } from '@/context/CRMContext';
+import { Archive, Hourglass, Undo2 } from 'lucide-react';
 
 // Shared immutable default so every card without pending activities reuses
 // the same reference — React.memo on DealCard can then bail out on re-renders.
 const NO_ACTIVITY_STATUS = { kind: 'none' as const, daysFromToday: 0, daysOverdue: 0 };
+
+// Etapa "Inativos": dias até a devolução automática ao funil.
+const INACTIVE_RETURN_DAYS = 30;
+const inactiveDaysLeft = (inactiveAt: string) =>
+  Math.max(0, INACTIVE_RETURN_DAYS - Math.floor((Date.now() - new Date(inactiveAt).getTime()) / 86_400_000));
 
 /**
  * UI: Drop highlight should follow the stage color.
@@ -79,6 +85,11 @@ interface KanbanBoardProps {
   selectedDealIds: string[];
   onToggleDealSelection: (dealId: string) => void;
   onToggleStageSelection: (stageId: string) => void;
+  // Etapa "Inativos" (opcional por organização)
+  inactiveEnabled: boolean;
+  inactiveDeals: DealView[];
+  onMarkInactive: (dealId: string) => void;
+  onRestoreInactive: (dealId: string) => void;
 }
 /**
  * Componente React `KanbanBoard`.
@@ -133,6 +144,10 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   selectedDealIds,
   onToggleDealSelection,
   onToggleStageSelection,
+  inactiveEnabled,
+  inactiveDeals,
+  onMarkInactive,
+  onRestoreInactive,
 }) => {
   const { lifecycleStages, contacts } = useCRM();
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
@@ -357,7 +372,88 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
           </div>
         );
       })}
-      
+
+      {/* Coluna INATIVOS (opcional): guarda leads sem resposta; cada um é
+          devolvido automaticamente ao funil após 30 dias. Solte um card aqui
+          pra guardar; arraste de volta (ou "devolver") pra restaurar. */}
+      {inactiveEnabled && (
+        <div
+          onDragOver={handleDragOver}
+          onDrop={(e) => {
+            e.preventDefault();
+            const dealId = e.dataTransfer.getData('dealId');
+            if (dealId) onMarkInactive(dealId);
+          }}
+          className="min-w-[20rem] flex-1 flex flex-col rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 overflow-visible h-full max-h-full glass"
+        >
+          <div className="h-1.5 w-full bg-slate-400"></div>
+          <div className="p-3 border-b border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/5 shrink-0">
+            <div className="flex justify-between items-center mb-1">
+              <span className="flex items-center gap-2 font-bold text-slate-500 dark:text-slate-400 font-display text-sm tracking-wide uppercase">
+                <Archive size={14} aria-hidden="true" /> Inativos
+              </span>
+              <span className="text-xs font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded text-slate-600 dark:text-slate-300">
+                {inactiveDeals.length}
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500">
+              Devolvidos automaticamente ao funil após 30 dias
+            </p>
+          </div>
+          <div className="flex-1 p-2 overflow-y-auto scrollbar-custom space-y-2 bg-slate-100/50 dark:bg-black/20 min-h-[100px]">
+            {inactiveDeals.length === 0 && (
+              <div className="h-full flex items-center justify-center text-slate-400 dark:text-slate-600 text-sm py-8 text-center px-4">
+                Arraste aqui os leads que não respondem
+              </div>
+            )}
+            {inactiveDeals.map((deal) => {
+              const daysLeft = deal.inactiveAt ? inactiveDaysLeft(deal.inactiveAt) : 0;
+              return (
+                <div
+                  key={deal.id}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, deal.id, deal.title || '')}
+                  onDragEnd={handleDragEnd}
+                  onClick={() => handleSelectDeal(deal.id)}
+                  className="p-3 rounded-lg border border-slate-200 dark:border-slate-700/50 bg-white dark:bg-slate-800 opacity-75 hover:opacity-100 shadow-sm cursor-grab active:cursor-grabbing transition-all"
+                >
+                  <h4 className="text-sm font-bold text-slate-700 dark:text-slate-200 leading-snug mb-1">
+                    {deal.title}
+                  </h4>
+                  {deal.contactPhone && (
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">{deal.contactPhone}</p>
+                  )}
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                        daysLeft <= 5
+                          ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
+                          : 'bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400'
+                      }`}
+                      title={`Devolução automática em ${daysLeft} dia(s)`}
+                    >
+                      <Hourglass size={10} aria-hidden="true" />
+                      {daysLeft > 0 ? `${daysLeft}d p/ devolver` : 'devolve hoje'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRestoreInactive(deal.id);
+                      }}
+                      className="inline-flex items-center gap-1 text-[10px] font-medium text-primary-600 dark:text-primary-400 hover:underline"
+                      title="Devolver o lead pro funil agora"
+                    >
+                      <Undo2 size={10} aria-hidden="true" /> devolver
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Keyboard-accessible modal for moving deals between stages */}
       {moveToStageModal && (
         <MoveToStageModal
