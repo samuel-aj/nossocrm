@@ -7,7 +7,7 @@ import { computeActivityStatusMap } from '@/features/boards/utils/dealActivitySt
 import { useActivities } from '@/lib/query/hooks/useActivitiesQuery';
 
 import { useCRM } from '@/context/CRMContext';
-import { Archive, Hourglass, Undo2 } from 'lucide-react';
+import { Archive, Hourglass, Undo2, UserX } from 'lucide-react';
 
 // Shared immutable default so every card without pending activities reuses
 // the same reference — React.memo on DealCard can then bail out on re-renders.
@@ -424,28 +424,41 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                     <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">{deal.contactPhone}</p>
                   )}
                   <div className="flex items-center justify-between gap-2">
-                    <span
-                      className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                        daysLeft <= 5
-                          ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
-                          : 'bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400'
-                      }`}
-                      title={`Devolução automática em ${daysLeft} dia(s)`}
-                    >
-                      <Hourglass size={10} aria-hidden="true" />
-                      {daysLeft > 0 ? `${daysLeft}d p/ devolver` : 'devolve hoje'}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRestoreInactive(deal.id);
-                      }}
-                      className="inline-flex items-center gap-1 text-[10px] font-medium text-primary-600 dark:text-primary-400 hover:underline"
-                      title="Devolver o lead pro funil agora"
-                    >
-                      <Undo2 size={10} aria-hidden="true" /> devolver
-                    </button>
+                    {deal.inactiveAt ? (
+                      <>
+                        <span
+                          className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                            daysLeft <= 5
+                              ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
+                              : 'bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400'
+                          }`}
+                          title={`Devolução automática em ${daysLeft} dia(s)`}
+                        >
+                          <Hourglass size={10} aria-hidden="true" />
+                          {daysLeft > 0 ? `${daysLeft}d p/ devolver` : 'devolve hoje'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRestoreInactive(deal.id);
+                          }}
+                          className="inline-flex items-center gap-1 text-[10px] font-medium text-primary-600 dark:text-primary-400 hover:underline"
+                          title="Devolver o lead pro funil agora"
+                        >
+                          <Undo2 size={10} aria-hidden="true" /> devolver
+                        </button>
+                      </>
+                    ) : (
+                      // Está aqui porque o CONTATO tem status INATIVO — sai da
+                      // coluna quando o contato for reativado (sem prazo de 30d).
+                      <span
+                        className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+                        title="Contato com status INATIVO — reative o contato para devolver ao funil"
+                      >
+                        <UserX size={10} aria-hidden="true" /> contato inativo
+                      </span>
+                    )}
                   </div>
                 </div>
               );

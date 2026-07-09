@@ -268,9 +268,15 @@ export const useBoardsController = () => {
   }, [activeBoard, deals, statusFilter, ownerFilter, searchTerm, dateRange]);
 
   // Get lifecycle stages from CRM context for automations
-  const { lifecycleStages, customFieldDefinitions: orgFieldDefs, deleteDeal, updateDeal, availableTags } = useCRM();
+  const { lifecycleStages, customFieldDefinitions: orgFieldDefs, deleteDeal, updateDeal, availableTags, contacts } = useCRM();
   // Etapa "Inativos" (opcional por organização — Configurações)
   const { inactiveLeadsEnabled } = useOrgPreferences();
+  // Contatos com status INATIVO: com a etapa Inativos ligada, os leads desses
+  // contatos vão automaticamente pra coluna Inativos.
+  const inactiveContactIds = useMemo(
+    () => new Set(contacts.filter(c => c.status === 'INACTIVE').map(c => c.id)),
+    [contacts]
+  );
 
   // Enable realtime sync for Kanban
   useRealtimeSyncKanban();
@@ -458,8 +464,15 @@ export const useBoardsController = () => {
     const tagTerm = tagFilter.trim().toLowerCase();
 
     return deals.filter(l => {
-      // Leads guardados em "Inativos" saem do funil normal (ficam na coluna própria)
-      if (l.inactiveAt) return false;
+      // Com a etapa Inativos LIGADA: leads guardados (inactive_at) e leads de
+      // contato INATIVO saem do funil normal — ficam na coluna Inativos
+      // (visível no filtro "Todos"). Com a etapa desligada, nada some.
+      if (
+        inactiveLeadsEnabled &&
+        (l.inactiveAt || (l.contactId && inactiveContactIds.has(l.contactId)))
+      ) {
+        return false;
+      }
 
       const matchesSearch =
         (l.title || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -549,7 +562,7 @@ export const useBoardsController = () => {
       }
       return deal;
     });
-  }, [deals, searchTerm, ownerFilter, customFieldConditions, customFieldLogic, tagFilter, dateRange, statusFilter, profile]);
+  }, [deals, searchTerm, ownerFilter, customFieldConditions, customFieldLogic, tagFilter, dateRange, statusFilter, profile, inactiveLeadsEnabled, inactiveContactIds]);
 
   // ==== Etapa "Inativos" ====
   // Leads guardados (inactive_at setado), mais antigos primeiro — o countdown
@@ -558,14 +571,20 @@ export const useBoardsController = () => {
     if (!inactiveLeadsEnabled) return [] as typeof deals;
     const term = searchTerm.toLowerCase();
     return deals
-      .filter(d => d.inactiveAt)
+      // guardados manualmente (inactive_at) OU contato com status INATIVO
+      .filter(d => d.inactiveAt || (d.contactId && inactiveContactIds.has(d.contactId)))
       .filter(d =>
         !term ||
         (d.title || '').toLowerCase().includes(term) ||
         (d.companyName || '').toLowerCase().includes(term)
       )
-      .sort((a, b) => new Date(a.inactiveAt!).getTime() - new Date(b.inactiveAt!).getTime());
-  }, [deals, inactiveLeadsEnabled, searchTerm]);
+      // guardados com prazo primeiro (mais antigos no topo); contato-inativo no fim
+      .sort((a, b) => {
+        const ta = a.inactiveAt ? new Date(a.inactiveAt).getTime() : Number.POSITIVE_INFINITY;
+        const tb = b.inactiveAt ? new Date(b.inactiveAt).getTime() : Number.POSITIVE_INFINITY;
+        return ta - tb;
+      });
+  }, [deals, inactiveLeadsEnabled, searchTerm, inactiveContactIds]);
 
   const markDealInactive = (dealId: string) => {
     const deal = deals.find(d => d.id === dealId);

@@ -563,7 +563,9 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
             {viewMode === 'kanban' ? (
               <KanbanBoard
                 stages={kanbanStages}
-                inactiveEnabled={inactiveLeadsEnabled}
+                // Coluna Inativos fica OCULTA na visão padrão; aparece só no
+                // filtro "Todos" (guardar continua possível pela zona do drag).
+                inactiveEnabled={inactiveLeadsEnabled && statusFilter === 'all'}
                 inactiveDeals={inactiveDeals}
                 onMarkInactive={markDealInactive}
                 onRestoreInactive={restoreDealFromInactive}
