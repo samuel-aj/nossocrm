@@ -210,18 +210,9 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const [customFieldsDraft, setCustomFieldsDraft] = useState<Record<string, string>>({});
 
   const [tagQuery, setTagQuery] = useState('');
-  // Dropdown do seletor de tags (abre no foco; fecha ao clicar fora).
-  // Fica AQUI, antes dos returns condicionais (regra dos hooks).
-  const [tagDropdownOpen, setTagDropdownOpen] = useState(false);
-  const tagBoxRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!tagDropdownOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (tagBoxRef.current && !tagBoxRef.current.contains(e.target as Node)) setTagDropdownOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [tagDropdownOpen]);
+  // Criação de tag nova (exceção): só aparece ao escolher "Criar nova tag…"
+  // no select — o campo padrão é SELEÇÃO, não escrita.
+  const [tagCreating, setTagCreating] = useState(false);
   // Padrão: abre em tela cheia; o botão no topo alterna pro modo pequeno.
   const [viewMode, setViewMode] = useState<'modal' | 'fullscreen'>('fullscreen');
 
@@ -249,6 +240,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
       setLossReasonOrigin('button');
       setIsCustomFieldsEditMode(false);
       setTagQuery('');
+      setTagCreating(false);
       setCustomFieldsDraft({});
       setShowNewNote(false);
       setNewNote('');
@@ -388,19 +380,10 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     updateDeal(deal.id, { tags: nextTags });
   };
 
-  // Lista TODAS as tags da org (menos as já no lead); digitar filtra.
-  // Criar tag nova é só pelo botão "Criar tag" (o local oficial de gestão
-  // é Configurações → Tags — aqui é o caminho de exceção).
-  const tagSuggestions = (() => {
-    const qLower = normalizeTag(tagQuery).toLowerCase();
-    return (availableTags || [])
-      .filter(t => !tagsLower.has(t.toLowerCase()))
-      .filter(t => !qLower || t.toLowerCase().includes(qLower))
-      .slice(0, 30);
-  })();
-  // true quando não há texto OU o texto já é uma tag existente (sem botão criar)
-  const tagExactExists = !normalizeTag(tagQuery)
-    || availableTagsLower.has(normalizeTag(tagQuery).toLowerCase());
+  // Tags disponíveis pra SELECIONAR (todas da org, menos as já no lead).
+  const selectableTags = (availableTags || [])
+    .filter(t => !tagsLower.has(t.toLowerCase()))
+    .sort((a, b) => a.localeCompare(b));
 
   const handleAnalyzeDeal = async () => {
     setIsAnalyzing(true);
@@ -1204,64 +1187,78 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                     )}
                   </div>
 
-                  <div className="mt-3" ref={tagBoxRef}>
+                  <div className="mt-3">
                     <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">
                       Adicionar tag
                     </label>
-                    <input
-                      type="text"
-                      value={tagQuery}
+                    {/* SELEÇÃO, não escrita: lista as tags da org pra escolher.
+                        Criar nova é exceção (última opção); gestão oficial em
+                        Configurações → Tags. */}
+                    <select
+                      value=""
                       onChange={(e) => {
-                        setTagQuery(e.target.value);
-                        setTagDropdownOpen(true);
-                      }}
-                      onFocus={() => setTagDropdownOpen(true)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Escape') setTagDropdownOpen(false);
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          // Enter só adiciona tag EXISTENTE (match exato); criar é pelo botão.
-                          const exact = (availableTags || []).find(
-                            (t) => t.toLowerCase() === normalizeTag(tagQuery).toLowerCase()
-                          );
-                          if (exact) {
-                            addDealTag(exact);
-                            setTagDropdownOpen(false);
-                          }
+                        const v = e.target.value;
+                        if (v === '__create__') {
+                          setTagCreating(true);
+                          setTagQuery('');
+                          return;
                         }
+                        if (v) addDealTag(v);
                       }}
-                      placeholder="Selecionar ou buscar tag..."
-                      className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                      className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white cursor-pointer"
                       aria-label="Adicionar tag"
-                    />
+                    >
+                      <option value="">Selecionar tag...</option>
+                      {selectableTags.map((t) => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                      <option value="__create__">➕ Criar nova tag…</option>
+                    </select>
 
-                    {tagDropdownOpen && (tagSuggestions.length > 0 || !tagExactExists) && (
-                      <div className="mt-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg overflow-hidden max-h-48 overflow-y-auto scrollbar-custom">
-                        {tagSuggestions.map((t) => (
-                          <button
-                            key={t}
-                            type="button"
-                            onClick={() => {
-                              addDealTag(t);
-                              setTagDropdownOpen(false);
-                            }}
-                            className="w-full text-left px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
-                          >
-                            {t}
-                          </button>
-                        ))}
-                        {!tagExactExists && (
-                          <button
-                            type="button"
-                            onClick={() => {
+                    {tagCreating && (
+                      <div className="mt-2 flex gap-2">
+                        <input
+                          type="text"
+                          autoFocus
+                          value={tagQuery}
+                          onChange={(e) => setTagQuery(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') {
+                              setTagCreating(false);
+                              setTagQuery('');
+                            }
+                            if (e.key === 'Enter' && normalizeTag(tagQuery)) {
+                              e.preventDefault();
                               addDealTag(tagQuery);
-                              setTagDropdownOpen(false);
-                            }}
-                            className="w-full flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-primary-600 dark:text-primary-400 border-t border-slate-100 dark:border-white/10 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
-                          >
-                            <Plus size={14} /> Criar tag &quot;{normalizeTag(tagQuery)}&quot;
-                          </button>
-                        )}
+                              setTagCreating(false);
+                            }
+                          }}
+                          placeholder="Nome da nova tag..."
+                          className="min-w-0 flex-1 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                          aria-label="Nome da nova tag"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            addDealTag(tagQuery);
+                            setTagCreating(false);
+                          }}
+                          disabled={!normalizeTag(tagQuery)}
+                          className="shrink-0 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold transition-colors"
+                        >
+                          Criar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTagCreating(false);
+                            setTagQuery('');
+                          }}
+                          className="shrink-0 p-2 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors"
+                          aria-label="Cancelar criação de tag"
+                        >
+                          <X size={14} />
+                        </button>
                       </div>
                     )}
                   </div>
