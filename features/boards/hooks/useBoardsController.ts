@@ -610,10 +610,13 @@ export const useBoardsController = () => {
 
   // Devolver dos Inativos precisa reativar o contato INATIVO junto — senão o
   // carimbo automático (contato inativo) manda o lead de volta pra coluna.
-  const reactivateInactiveContact = (contactId?: string | null) => {
+  const reactivateInactiveContact = (deal: { id: string; contactId?: string | null }) => {
     if (!inactiveLeadsEnabled) return;
-    if (contactId && inactiveContactIds.has(contactId)) {
-      updateContact(contactId, { status: 'ACTIVE' });
+    if (deal.contactId && inactiveContactIds.has(deal.contactId)) {
+      // Blinda o lead contra o carimbo automático enquanto o cache de
+      // contatos ainda não refletiu a reativação (evita re-guardar).
+      inactiveStampRef.current.add(deal.id);
+      updateContact(deal.contactId, { status: 'ACTIVE' });
     }
   };
 
@@ -635,7 +638,7 @@ export const useBoardsController = () => {
     const contactInactive = !!(deal.contactId && inactiveContactIds.has(deal.contactId));
     if (!deal.inactiveAt && !contactInactive) return;
     if (deal.inactiveAt) updateDeal(dealId, { inactiveAt: null });
-    reactivateInactiveContact(deal.contactId);
+    reactivateInactiveContact(deal);
     addToast('Lead devolvido pro funil.', 'success');
   };
 
@@ -820,7 +823,7 @@ export const useBoardsController = () => {
       if (deal.inactiveAt) {
         updateDeal(deal.id, { inactiveAt: null });
       }
-      reactivateInactiveContact(deal.contactId);
+      reactivateInactiveContact(deal);
 
       // Find the target stage to check if it's a won/lost stage
       const targetStage = activeBoard.stages.find(s => s.id === stageId);
@@ -919,7 +922,7 @@ export const useBoardsController = () => {
     if (deal.inactiveAt) {
       updateDeal(deal.id, { inactiveAt: null });
     }
-    reactivateInactiveContact(deal.contactId);
+    reactivateInactiveContact(deal);
 
     // Find the target stage to check if it's a lost stage
     const targetStage = activeBoard.stages.find(s => s.id === newStageId);
