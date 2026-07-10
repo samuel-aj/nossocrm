@@ -50,6 +50,16 @@ const DealPatchSchema = z.object({
   mark: z.enum(['won', 'lost']).optional(),
   // Optional activity creation (task/call/meeting/note) in the same request.
   activity: InlineActivitySchema.optional(),
+  // Produtos ADICIONADOS na mesma chamada (espelha o POST /deals):
+  // `product_id` = atalho p/ 1 produto do catálogo; `products_add` = lista
+  // (product_id do catálogo OU name+price manual). Dispensa o POST /items.
+  product_id: z.string().uuid().optional(),
+  products_add: z.array(z.object({
+    product_id: z.string().uuid().optional(),
+    name: z.string().min(1).max(200).optional(),
+    quantity: z.number().int().min(1).max(100000).optional(),
+    price: z.number().min(0).optional(),
+  }).strict()).max(50).optional(),
 }).strict().refine(
   (v) => !(v.tags !== undefined && (v.tags_add !== undefined || v.tags_remove !== undefined)),
   { message: 'Use either `tags` (replace) OR `tags_add`/`tags_remove` (incremental), not both.' }
@@ -144,6 +154,47 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
     .maybeSingle();
   if (currentError) return NextResponse.json({ error: currentError.message, code: 'DB_ERROR' }, { status: 500 });
   if (!current) return NextResponse.json({ error: 'Deal not found', code: 'NOT_FOUND' }, { status: 404 });
+
+  // Produtos (validação ANTES de aplicar qualquer update, p/ falhar limpo):
+  // resolve product_id(s) do catálogo (org-scoped) e itens manuais name+price.
+  type ResolvedItem = { product_id: string | null; name: string; quantity: number; price: number };
+  let resolvedItems: ResolvedItem[] = [];
+  {
+    const rawItems: Array<{ product_id?: string; name?: string; quantity?: number; price?: number }> = [];
+    if (parsed.data.product_id) rawItems.push({ product_id: parsed.data.product_id });
+    if (parsed.data.products_add?.length) rawItems.push(...parsed.data.products_add);
+    if (rawItems.length) {
+      const productIds = Array.from(
+        new Set(rawItems.map((i) => sanitizeUUID(i.product_id)).filter(Boolean) as string[])
+      );
+      const productMap = new Map<string, { name: string; price: number }>();
+      if (productIds.length) {
+        const { data: prods, error: prodErr } = await sb
+          .from('products')
+          .select('id,name,price')
+          .eq('organization_id', auth.organizationId)
+          .in('id', productIds);
+        if (prodErr) return NextResponse.json({ error: prodErr.message, code: 'DB_ERROR' }, { status: 500 });
+        for (const p of prods || []) {
+          productMap.set(p.id as string, { name: p.name as string, price: Number((p as any).price ?? 0) });
+        }
+        const missing = productIds.find((id) => !productMap.has(id));
+        if (missing) {
+          return NextResponse.json({ error: `Produto não encontrado nesta organização: ${missing}`, code: 'PRODUCT_NOT_FOUND' }, { status: 422 });
+        }
+      }
+      resolvedItems = rawItems.map((i) => {
+        const pid = sanitizeUUID(i.product_id) || null;
+        const prod = pid ? productMap.get(pid) : null;
+        const name = (i.name?.trim() || prod?.name || '').trim();
+        const price = i.price != null ? Number(i.price) : prod ? prod.price : 0;
+        return { product_id: pid, name, quantity: i.quantity ?? 1, price };
+      });
+      if (resolvedItems.some((it) => !it.name)) {
+        return NextResponse.json({ error: 'Cada produto precisa de product_id (do catálogo) ou name', code: 'VALIDATION_ERROR' }, { status: 422 });
+      }
+    }
+  }
 
   const currentTags: string[] = Array.isArray(current.tags) ? (current.tags as string[]) : [];
   const currentCustomFields: Record<string, unknown> =
@@ -253,6 +304,26 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
     stageMoveBody = move.body;
   }
 
+  // Insere os itens (produtos) resolvidos acima — best-effort como a activity:
+  // se falhar, o restante do PATCH já foi aplicado e o erro vai em products_error.
+  let itemsAdded: unknown[] = [];
+  let productsError: string | null = null;
+  if (resolvedItems.length) {
+    const { data: itemsData, error: itemsErr } = await sb
+      .from('deal_items')
+      .insert(resolvedItems.map((it) => ({
+        deal_id: dealId,
+        organization_id: auth.organizationId,
+        name: it.name,
+        quantity: it.quantity,
+        price: it.price,
+        product_id: it.product_id,
+      })))
+      .select('id,product_id,name,quantity,price,created_at');
+    if (itemsErr) productsError = itemsErr.message;
+    else itemsAdded = (itemsData || []).map((i: any) => ({ ...i, price: Number(i.price ?? 0) }));
+  }
+
   // Inline activity creation (optional). Best-effort: if the create fails the
   // error is surfaced in `activity_error` but the deal update already succeeded,
   // so we still return 200.
@@ -319,5 +390,7 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
   if (stageMoveBody) responseBody.stage_move = stageMoveBody;
   if (createdActivity) responseBody.activity = createdActivity;
   if (activityError) responseBody.activity_error = activityError;
+  if (itemsAdded.length) responseBody.items_added = itemsAdded;
+  if (productsError) responseBody.products_error = productsError;
   return NextResponse.json(responseBody);
 }
