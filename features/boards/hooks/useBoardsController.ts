@@ -268,7 +268,7 @@ export const useBoardsController = () => {
   }, [activeBoard, deals, statusFilter, ownerFilter, searchTerm, dateRange]);
 
   // Get lifecycle stages from CRM context for automations
-  const { lifecycleStages, customFieldDefinitions: orgFieldDefs, deleteDeal, updateDeal, availableTags, contacts } = useCRM();
+  const { lifecycleStages, customFieldDefinitions: orgFieldDefs, deleteDeal, updateDeal, updateContact, availableTags, contacts } = useCRM();
   // Etapa "Inativos" (opcional por organização — Configurações)
   const { inactiveLeadsEnabled } = useOrgPreferences();
   // Contatos com status INATIVO: com a etapa Inativos ligada, os leads desses
@@ -608,6 +608,15 @@ export const useBoardsController = () => {
     }
   }, [deals, inactiveContactIds, inactiveLeadsEnabled, updateDeal]);
 
+  // Devolver dos Inativos precisa reativar o contato INATIVO junto — senão o
+  // carimbo automático (contato inativo) manda o lead de volta pra coluna.
+  const reactivateInactiveContact = (contactId?: string | null) => {
+    if (!inactiveLeadsEnabled) return;
+    if (contactId && inactiveContactIds.has(contactId)) {
+      updateContact(contactId, { status: 'ACTIVE' });
+    }
+  };
+
   const markDealInactive = (dealId: string) => {
     const deal = deals.find(d => d.id === dealId);
     if (!deal) return;
@@ -622,8 +631,11 @@ export const useBoardsController = () => {
 
   const restoreDealFromInactive = (dealId: string) => {
     const deal = deals.find(d => d.id === dealId);
-    if (!deal || !deal.inactiveAt) return;
-    updateDeal(dealId, { inactiveAt: null });
+    if (!deal) return;
+    const contactInactive = !!(deal.contactId && inactiveContactIds.has(deal.contactId));
+    if (!deal.inactiveAt && !contactInactive) return;
+    if (deal.inactiveAt) updateDeal(dealId, { inactiveAt: null });
+    reactivateInactiveContact(deal.contactId);
     addToast('Lead devolvido pro funil.', 'success');
   };
 
@@ -803,10 +815,12 @@ export const useBoardsController = () => {
         return;
       }
 
-      // Saindo de "Inativos": soltar numa etapa devolve o lead pro funil.
+      // Saindo de "Inativos": soltar numa etapa devolve o lead pro funil
+      // (reativando o contato junto, senão ele voltaria pros Inativos).
       if (deal.inactiveAt) {
         updateDeal(deal.id, { inactiveAt: null });
       }
+      reactivateInactiveContact(deal.contactId);
 
       // Find the target stage to check if it's a won/lost stage
       const targetStage = activeBoard.stages.find(s => s.id === stageId);
@@ -900,10 +914,12 @@ export const useBoardsController = () => {
       return;
     }
 
-    // Mudar de etapa também devolve o lead caso esteja em "Inativos".
+    // Mudar de etapa também devolve o lead caso esteja em "Inativos"
+    // (reativando o contato junto, senão ele voltaria pros Inativos).
     if (deal.inactiveAt) {
       updateDeal(deal.id, { inactiveAt: null });
     }
+    reactivateInactiveContact(deal.contactId);
 
     // Find the target stage to check if it's a lost stage
     const targetStage = activeBoard.stages.find(s => s.id === newStageId);
