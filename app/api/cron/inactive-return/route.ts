@@ -35,7 +35,7 @@ export async function GET(request: Request) {
   try {
     const { data: dueDeals, error: findErr } = await supabase
       .from('deals')
-      .select('id, title, organization_id')
+      .select('id, title, organization_id, contact_id')
       .not('inactive_at', 'is', null)
       .lte('inactive_at', cutoff)
       .is('deleted_at', null)
@@ -59,6 +59,21 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: updErr.message }, { status: 500 });
     }
 
+    // Reativa os contatos INATIVOS dos leads devolvidos — senão o carimbo
+    // automático do board guarda o lead de volta em Inativos na hora.
+    const contactIds = Array.from(
+      new Set(dueDeals.map(d => d.contact_id).filter((id): id is string => !!id))
+    );
+    let contactsError: string | null = null;
+    if (contactIds.length > 0) {
+      const { error: contactErr } = await supabase
+        .from('contacts')
+        .update({ status: 'ACTIVE' })
+        .in('id', contactIds)
+        .eq('status', 'INACTIVE');
+      if (contactErr) contactsError = contactErr.message;
+    }
+
     // Notificação por lead devolvido (org-scoped; aparece no sino do CRM).
     const { error: notifErr } = await supabase.from('system_notifications').insert(
       dueDeals.map(d => ({
@@ -74,6 +89,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ok: true,
       returned: ids.length,
+      contacts_reactivated: contactsError ? `falhou: ${contactsError}` : contactIds.length,
       notifications: notifErr ? `falhou: ${notifErr.message}` : ids.length,
     });
   } catch (e) {

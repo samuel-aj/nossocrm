@@ -97,6 +97,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     deals,
     contacts,
     updateDeal,
+    updateContact,
     deleteDeal,
     activities,
     addActivity,
@@ -939,6 +940,10 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                         type="button"
                         onClick={() => {
                           updateDeal(deal.id, { inactiveAt: null });
+                          // Reativa o contato junto — senão o lead volta pros Inativos.
+                          if (contact?.status === 'INACTIVE') {
+                            updateContact(contact.id, { status: 'ACTIVE' });
+                          }
                           addToast('Lead devolvido pro funil.', 'success');
                         }}
                         className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-amber-800 dark:text-amber-300 hover:underline"
@@ -957,6 +962,16 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                       O contato está com status <span className="font-bold">INATIVO</span>. Reative o
                       contato para o lead voltar ao funil.
                     </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateContact(contact.id, { status: 'ACTIVE' });
+                        addToast('Contato reativado — lead devolvido pro funil.', 'success');
+                      }}
+                      className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-200 hover:underline"
+                    >
+                      <Undo2 size={12} aria-hidden="true" /> Reativar contato e devolver
+                    </button>
                   </div>
                 )}
                 <div>
