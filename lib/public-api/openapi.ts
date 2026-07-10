@@ -829,12 +829,37 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
                       },
                       required: ['type', 'title'],
                     },
+                    product_id: { type: 'string', description: 'ADICIONA 1 produto do catálogo ao deal na mesma chamada (nome/preço automáticos; veja GET /products)' },
+                    products_add: {
+                      type: 'array',
+                      maxItems: 50,
+                      description: 'ADICIONA vários itens ao deal na mesma chamada. Cada item usa product_id do catálogo OU name+price manual.',
+                      items: {
+                        type: 'object',
+                        additionalProperties: false,
+                        properties: {
+                          product_id: { type: 'string', description: 'UUID do produto (nome/preço resolvidos do catálogo)' },
+                          name: { type: 'string', maxLength: 200, description: 'Nome do item (item manual, sem product_id)' },
+                          quantity: { type: 'integer', minimum: 1, maximum: 100000, default: 1 },
+                          price: { type: 'number', minimum: 0, description: 'Sobrescreve o preço do catálogo' },
+                        },
+                      },
+                    },
                   },
                 },
                 examples: {
                   qualificar: {
                     summary: 'Mover etapa + anexar descrição + adicionar tag (1 chamada)',
                     value: { to_stage_id: '00000000-0000-0000-0000-000000000000', description_append: 'Cliente enviou documentos.', tags_add: ['em-qualificacao'] },
+                  },
+                  qualificarCompleto: {
+                    summary: 'Produto + etapa + tag + descrição (tudo em 1 chamada)',
+                    value: {
+                      product_id: '11111111-1111-1111-1111-111111111111',
+                      to_stage_label: 'EM QUALIFICAÇÃO',
+                      tags_add: ['qualificado'],
+                      description_append: 'Lead qualificado: tem interesse no produto.',
+                    },
                   },
                   editarCampos: {
                     value: { title: 'Maria Silva', priority: 'high', custom_fields_patch: { origem: 'Meta Ads' } },
