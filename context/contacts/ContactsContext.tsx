@@ -6,7 +6,7 @@ import React, {
   ReactNode,
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Contact, Company } from '@/types';
+import { Contact, Company, PaginatedResponse } from '@/types';
 import { contactsService, companiesService } from '@/lib/supabase';
 import { useAuth } from '../AuthContext';
 import { queryKeys } from '@/lib/query';
@@ -110,10 +110,40 @@ export const ContactsProvider: React.FC<{ children: ReactNode }> = ({ children }
   );
 
   const updateContact = useCallback(async (id: string, updates: Partial<Contact>) => {
+    // Otimista: `contacts` deste provider vem do cache do TanStack Query, e o
+    // Kanban deriva estado dele (ex.: devolver lead dos Inativos reativa o
+    // contato) — a UI precisa refletir na hora, sem esperar o refetch.
+    // O patch é aplicado de forma SÍNCRONA (antes de qualquer await) pra não
+    // abrir janela de render com o cache antigo.
+    const previous = queryClient.getQueriesData({ queryKey: queryKeys.contacts.all });
+
+    queryClient.setQueryData<Contact[]>(queryKeys.contacts.lists(), (old = []) =>
+      old.map(contact => (contact.id === id ? { ...contact, ...updates } : contact))
+    );
+    // Também os caches paginados (página de Contatos usa paginação no servidor).
+    for (const [key, data] of queryClient.getQueriesData<PaginatedResponse<Contact>>({
+      queryKey: queryKeys.contacts.all,
+    })) {
+      if (!Array.isArray(key) || key[1] !== 'paginated' || !data) continue;
+      if (!data.data.some(c => c.id === id)) continue;
+      queryClient.setQueryData<PaginatedResponse<Contact>>(key, old =>
+        old
+          ? { ...old, data: old.data.map(c => (c.id === id ? ({ ...c, ...updates } as Contact) : c)) }
+          : old
+      );
+    }
+
+    // Cancela refetches em voo pra eles não sobrescreverem o patch otimista.
+    await queryClient.cancelQueries({ queryKey: queryKeys.contacts.all });
+
     const { error } = await contactsService.update(id, updates);
 
     if (error) {
       console.error('Erro ao atualizar contato:', error.message);
+      // Desfaz o update otimista — restaura os caches como estavam.
+      for (const [key, data] of previous) {
+        queryClient.setQueryData(key, data);
+      }
       return;
     }
 
