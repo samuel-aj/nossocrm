@@ -421,7 +421,8 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
 
                 <div className="h-8 w-px bg-slate-200 dark:bg-white/10 mx-2 hidden sm:block"></div>
                 <div className="relative flex-1 sm:w-64">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                    {/* z-10: o input tem backdrop-blur (cria stacking context) e pintava POR CIMA da lupa */}
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 pointer-events-none" size={16} />
                     <input
                         type="text"
                         placeholder="Filtrar negócios ou empresas..."

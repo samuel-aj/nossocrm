@@ -78,7 +78,8 @@ export const ContactsHeader: React.FC<ContactsHeaderProps> = ({
           </select>
         )}
         <div className="relative flex-1 sm:w-72">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+          {/* z-10: o input tem backdrop-blur (cria stacking context) e pintava POR CIMA da lupa */}
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 pointer-events-none" size={16} />
           <input
             type="text"
             placeholder={
