@@ -52,6 +52,29 @@ export function isE164(input?: string | null): boolean {
 }
 
 /**
+ * Variantes equivalentes de um celular BR (nono dígito): o WhatsApp pode
+ * devolver o JID SEM o 9 (+55 DD 9XXXXXXXX <-> +55 DD XXXXXXXX). Todo
+ * casamento de telefone (conversa <-> contato) deve testar as duas formas.
+ * Para números não-BR (ou fixos), devolve só o próprio número.
+ */
+export function brPhoneVariants(input?: string | null): string[] {
+  const e164 = normalizePhoneE164(input);
+  if (!e164) return [];
+  const m = e164.match(/^\+55(\d{2})(\d{8,9})$/);
+  if (!m) return [e164];
+  const [, ddd, local] = m;
+  // celular com 9: variante sem o 9 (JIDs antigos)
+  if (local.length === 9 && local.startsWith('9') && /^[6-9]/.test(local[1])) {
+    return [e164, `+55${ddd}${local.slice(1)}`];
+  }
+  // celular sem 9 (8 dígitos começando em 6-9): variante com o 9
+  if (local.length === 8 && /^[6-9]/.test(local)) {
+    return [e164, `+55${ddd}9${local}`];
+  }
+  return [e164];
+}
+
+/**
  * Para WhatsApp (wa.me) normalmente usamos somente dígitos (sem '+').
  * Retorna '' se não houver número.
  */

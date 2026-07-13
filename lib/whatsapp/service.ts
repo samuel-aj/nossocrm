@@ -3,6 +3,7 @@
  * Centraliza leitura/escrita das tabelas wa_* para as rotas e (futuramente) o webhook.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { brPhoneVariants } from '@/lib/phone';
 
 export interface WaConnectionRow {
   id: string;
@@ -96,24 +97,28 @@ export async function updateConnectionStatus(
   await admin.from('wa_connections').update(patch).eq('id', id);
 }
 
-/** Casa um telefone E.164 com um contato da org (match exato). */
+/**
+ * Casa um telefone E.164 com um contato da org. Testa as variantes BR do
+ * nono dígito — o WhatsApp pode entregar o JID sem o 9 do celular.
+ */
 export async function matchContactByPhone(
   admin: SupabaseClient,
   orgId: string,
   e164: string
 ): Promise<string | null> {
   if (!e164) return null;
+  const variants = brPhoneVariants(e164);
   const { data } = await admin
     .from('contacts')
     .select('id')
     .eq('organization_id', orgId)
-    .eq('phone', e164)
+    .in('phone', variants.length ? variants : [e164])
     .limit(1)
     .maybeSingle();
   return (data as { id?: string } | null)?.id ?? null;
 }
 
-/** Acha a conversa por telefone na org, ou cria uma nova (casando contato). */
+/** Acha a conversa por telefone na org (variantes BR), ou cria uma nova (casando contato). */
 export async function ensureConversation(
   admin: SupabaseClient,
   orgId: string,
@@ -121,12 +126,15 @@ export async function ensureConversation(
   waPhone: string,
   waName?: string | null
 ): Promise<WaConversationRow> {
-  const { data: existing } = await admin
+  const variants = brPhoneVariants(waPhone);
+  const { data: existingList } = await admin
     .from('wa_conversations')
     .select('*')
     .eq('organization_id', orgId)
-    .eq('wa_phone', waPhone)
-    .maybeSingle();
+    .in('wa_phone', variants.length ? variants : [waPhone]);
+  // se houver conversa nas duas variantes, prefere a que já está ligada a um contato
+  const existing =
+    (existingList ?? []).find(c => (c as WaConversationRow).contact_id) ?? (existingList ?? [])[0];
   if (existing) return existing as WaConversationRow;
 
   const contactId = await matchContactByPhone(admin, orgId, waPhone);
@@ -143,12 +151,12 @@ export async function ensureConversation(
     .single();
   if (error) {
     // corrida com outra inserção (constraint org+phone): relê
-    const { data: again } = await admin
+    const { data: againList } = await admin
       .from('wa_conversations')
       .select('*')
       .eq('organization_id', orgId)
-      .eq('wa_phone', waPhone)
-      .maybeSingle();
+      .in('wa_phone', variants.length ? variants : [waPhone]);
+    const again = (againList ?? [])[0];
     if (again) return again as WaConversationRow;
     throw new Error(error.message);
   }

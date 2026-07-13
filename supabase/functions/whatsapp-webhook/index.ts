@@ -44,6 +44,27 @@ function jidToE164(jid?: string): string {
   return digits ? `+${digits}` : "";
 }
 
+/**
+ * Variantes equivalentes de um celular BR (nono dígito): o JID do WhatsApp
+ * pode vir SEM o 9 (+55 DD 9XXXXXXXX <-> +55 DD XXXXXXXX). O casamento de
+ * conversa/contato precisa testar as duas formas, senão duplica conversa.
+ * (Espelho de brPhoneVariants em lib/phone.ts do app.)
+ */
+function brPhoneVariants(e164: string): string[] {
+  if (!e164) return [];
+  const m = e164.match(/^\+55(\d{2})(\d{8,9})$/);
+  if (!m) return [e164];
+  const ddd = m[1];
+  const local = m[2];
+  if (local.length === 9 && local.startsWith("9") && /^[6-9]/.test(local[1])) {
+    return [e164, `+55${ddd}${local.slice(1)}`];
+  }
+  if (local.length === 8 && /^[6-9]/.test(local)) {
+    return [e164, `+55${ddd}9${local}`];
+  }
+  return [e164];
+}
+
 // deno-lint-ignore no-explicit-any
 function extractContent(message: any): { text?: string; mediaType?: string; mediaMime?: string } {
   if (!message) return {};
@@ -156,14 +177,15 @@ Deno.serve(async (req) => {
       const tsNum = typeof tsRaw === "string" ? parseInt(tsRaw, 10) : tsRaw;
       const waTs = tsNum ? new Date(tsNum * 1000).toISOString() : new Date().toISOString();
 
-      // conversa (casa contato pelo telefone)
+      // conversa (casa contato pelo telefone, testando variantes BR do 9)
+      const variants = brPhoneVariants(phone);
       let convId: string | null = null;
-      const { data: conv } = await supabase
+      const { data: convList } = await supabase
         .from("wa_conversations")
-        .select("id")
+        .select("id, contact_id")
         .eq("organization_id", orgId)
-        .eq("wa_phone", phone)
-        .maybeSingle();
+        .in("wa_phone", variants);
+      const conv = (convList ?? []).find((c) => c.contact_id) ?? (convList ?? [])[0];
       if (conv) {
         convId = conv.id;
       } else {
@@ -171,7 +193,7 @@ Deno.serve(async (req) => {
           .from("contacts")
           .select("id")
           .eq("organization_id", orgId)
-          .eq("phone", phone)
+          .in("phone", variants)
           .limit(1)
           .maybeSingle();
         const { data: created } = await supabase

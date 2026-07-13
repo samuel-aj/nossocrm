@@ -5,7 +5,7 @@
  */
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { getConnectionByOrg } from '@/lib/whatsapp/service';
-import { normalizePhoneE164 } from '@/lib/phone';
+import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
 
 export async function GET(req: Request) {
   const auth = await requireOrgUser();
@@ -16,21 +16,27 @@ export async function GET(req: Request) {
 
   const conn = await getConnectionByOrg(auth.admin, auth.user.organizationId);
 
-  const { data: conv } = await auth.admin
+  // Variantes BR do nono dígito: o JID do WhatsApp pode vir sem o 9 do
+  // celular, criando conversa em outra grafia do MESMO número. Busca as duas
+  // e junta as mensagens.
+  const variants = brPhoneVariants(phone);
+  const { data: convList } = await auth.admin
     .from('wa_conversations')
     .select('id, wa_phone, wa_name, contact_id, last_message_at, unread_count')
     .eq('organization_id', auth.user.organizationId)
-    .eq('wa_phone', phone)
-    .maybeSingle();
+    .in('wa_phone', variants.length ? variants : [phone]);
+
+  const convs = (convList ?? []) as Array<{ id: string; contact_id: string | null }>;
+  const conv = convs.find(c => c.contact_id) ?? convs[0] ?? null;
 
   let messages: unknown[] = [];
-  if (conv) {
+  if (convs.length > 0) {
     const { data } = await auth.admin
       .from('wa_messages')
       .select(
         'id, direction, status, body, media_type, media_url, from_phone, to_phone, wa_timestamp, created_at, sent_by'
       )
-      .eq('conversation_id', (conv as { id: string }).id)
+      .in('conversation_id', convs.map(c => c.id))
       .order('created_at', { ascending: true })
       .limit(300);
     messages = data || [];
