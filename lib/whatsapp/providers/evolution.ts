@@ -220,14 +220,19 @@ export class EvolutionProvider implements WhatsAppProvider {
 
   private parseInboundMessage(data: Record<string, unknown> | undefined): InboundEvent {
     if (!data) return { kind: 'ignored', reason: 'messages.upsert sem data' };
-    const key = (data.key as { remoteJid?: string; fromMe?: boolean; id?: string }) ?? {};
-    const remoteJid = key.remoteJid ?? '';
-    // ignora grupos/broadcast por enquanto
-    if (remoteJid.endsWith('@g.us') || remoteJid.endsWith('@broadcast')) {
-      return { kind: 'ignored', reason: 'grupo/broadcast' };
+    const key =
+      (data.key as { remoteJid?: string; remoteJidAlt?: string; fromMe?: boolean; id?: string }) ?? {};
+    // JID de privacidade (@lid): o telefone real vem em remoteJidAlt
+    const rawJid = key.remoteJid ?? '';
+    const altJid = key.remoteJidAlt ?? (data.remoteJidAlt as string | undefined) ?? '';
+    const remoteJid = rawJid.endsWith('@lid') && altJid ? altJid : rawJid;
+    // ignora grupos/broadcast (e @lid sem telefone alternativo) por enquanto
+    if (remoteJid.endsWith('@g.us') || remoteJid.endsWith('@broadcast') || remoteJid.endsWith('@lid')) {
+      return { kind: 'ignored', reason: 'grupo/broadcast/lid' };
     }
     const msg = (data.message as Record<string, unknown>) ?? {};
-    const { text, mediaType, mediaMime } = extractContent(msg);
+    const { text, mediaType, mediaMime, skip } = extractContent(msg);
+    if (skip) return { kind: 'ignored', reason: 'evento sem bolha (reação/protocolo)' };
 
     const tsRaw = data.messageTimestamp as number | string | undefined;
     const tsNum = typeof tsRaw === 'string' ? parseInt(tsRaw, 10) : tsRaw;
@@ -288,11 +293,22 @@ function unwrapMessage(message: Record<string, unknown>): Record<string, unknown
   return msg;
 }
 
+/** Extrai o telefone de um vCard (waid= ou linha TEL). */
+function vcardPhone(vcard?: string): string {
+  if (!vcard) return '';
+  const wa = vcard.match(/waid=(\d+)/);
+  if (wa) return `+${wa[1]}`;
+  const tel = vcard.match(/TEL[^:]*:([+\d][\d\s().-]{5,})/i);
+  return tel ? tel[1].trim() : '';
+}
+
 /** Extrai texto/mídia das várias formas de message da Evolution/Baileys. */
 function extractContent(rawMsg: Record<string, unknown>): {
   text?: string;
   mediaType?: string;
   mediaMime?: string;
+  /** true = evento sem bolha (reação, protocolo, voto de enquete) */
+  skip?: boolean;
 } {
   const msg = unwrapMessage(rawMsg);
   if (typeof msg.conversation === 'string') return { text: msg.conversation };
@@ -309,6 +325,50 @@ function extractContent(rawMsg: Record<string, unknown>): {
   for (const [field, type] of mediaKinds) {
     const m = msg[field] as { caption?: string; mimetype?: string } | undefined;
     if (m) return { text: m.caption, mediaType: type, mediaMime: m.mimetype };
+  }
+
+  // Cartão de contato compartilhado (vCard) — vira texto legível no chat
+  const contact = msg.contactMessage as { displayName?: string; vcard?: string } | undefined;
+  if (contact) {
+    const phone = vcardPhone(contact.vcard);
+    return { text: `👤 Contato compartilhado: ${contact.displayName || 'sem nome'}${phone ? `\n${phone}` : ''}` };
+  }
+  const contacts = msg.contactsArrayMessage as
+    | { contacts?: Array<{ displayName?: string; vcard?: string }> }
+    | undefined;
+  if (contacts?.contacts?.length) {
+    const rows = contacts.contacts.map(c => {
+      const phone = vcardPhone(c.vcard);
+      return `${c.displayName || 'sem nome'}${phone ? ` — ${phone}` : ''}`;
+    });
+    return { text: `👤 Contatos compartilhados:\n${rows.join('\n')}` };
+  }
+
+  // Localização — texto com link do Maps
+  const loc = (msg.locationMessage ?? msg.liveLocationMessage) as
+    | { degreesLatitude?: number; degreesLongitude?: number; name?: string; address?: string }
+    | undefined;
+  if (loc && loc.degreesLatitude !== undefined) {
+    const label = loc.name || loc.address || 'Localização';
+    return { text: `📍 ${label}\nhttps://maps.google.com/?q=${loc.degreesLatitude},${loc.degreesLongitude}` };
+  }
+
+  // Enquete criada — pergunta + opções como texto
+  const poll = (msg.pollCreationMessageV3 ?? msg.pollCreationMessageV2 ?? msg.pollCreationMessage) as
+    | { name?: string; options?: Array<{ optionName?: string }> }
+    | undefined;
+  if (poll?.name) {
+    const opts = (poll.options ?? []).map(o => `• ${o.optionName}`).join('\n');
+    return { text: `📊 Enquete: ${poll.name}${opts ? `\n${opts}` : ''}` };
+  }
+
+  // Eventos de protocolo/reação/voto: não são "mensagens" — sem bolha
+  if (msg.reactionMessage || msg.protocolMessage || msg.pollUpdateMessage || msg.senderKeyDistributionMessage) {
+    return { skip: true };
+  }
+  const keys = Object.keys(msg);
+  if (keys.length > 0 && keys.every(k => k === 'messageContextInfo')) {
+    return { skip: true };
   }
   return {};
 }

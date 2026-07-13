@@ -87,8 +87,23 @@ function unwrapMessage(message: any): any {
   return msg;
 }
 
+/** Extrai o telefone de um vCard (waid= ou linha TEL). */
+function vcardPhone(vcard?: string): string {
+  if (!vcard) return "";
+  const wa = vcard.match(/waid=(\d+)/);
+  if (wa) return `+${wa[1]}`;
+  const tel = vcard.match(/TEL[^:]*:([+\d][\d\s().-]{5,})/i);
+  return tel ? tel[1].trim() : "";
+}
+
 // deno-lint-ignore no-explicit-any
-function extractContent(rawMessage: any): { text?: string; mediaType?: string; mediaMime?: string; fileName?: string } {
+function extractContent(rawMessage: any): {
+  text?: string;
+  mediaType?: string;
+  mediaMime?: string;
+  fileName?: string;
+  skip?: boolean;
+} {
   const message = unwrapMessage(rawMessage);
   if (!message) return {};
   if (typeof message.conversation === "string") return { text: message.conversation };
@@ -109,6 +124,46 @@ function extractContent(rawMessage: any): { text?: string; mediaType?: string; m
         fileName: message[field].fileName,
       };
     }
+  }
+
+  // Cartão de contato compartilhado (vCard) — vira texto legível no chat
+  if (message.contactMessage) {
+    const c = message.contactMessage;
+    const phone = vcardPhone(c.vcard);
+    return { text: `👤 Contato compartilhado: ${c.displayName || "sem nome"}${phone ? `\n${phone}` : ""}` };
+  }
+  if (message.contactsArrayMessage?.contacts?.length) {
+    // deno-lint-ignore no-explicit-any
+    const rows = message.contactsArrayMessage.contacts.map((c: any) => {
+      const phone = vcardPhone(c.vcard);
+      return `${c.displayName || "sem nome"}${phone ? ` — ${phone}` : ""}`;
+    });
+    return { text: `👤 Contatos compartilhados:\n${rows.join("\n")}` };
+  }
+
+  // Localização — texto com link do Maps
+  const loc = message.locationMessage ?? message.liveLocationMessage;
+  if (loc && loc.degreesLatitude !== undefined) {
+    const label = loc.name || loc.address || "Localização";
+    return { text: `📍 ${label}\nhttps://maps.google.com/?q=${loc.degreesLatitude},${loc.degreesLongitude}` };
+  }
+
+  // Enquete criada — pergunta + opções como texto
+  const poll = message.pollCreationMessageV3 ?? message.pollCreationMessageV2 ?? message.pollCreationMessage;
+  if (poll?.name) {
+    // deno-lint-ignore no-explicit-any
+    const opts = (poll.options ?? []).map((o: any) => `• ${o.optionName}`).join("\n");
+    return { text: `📊 Enquete: ${poll.name}${opts ? `\n${opts}` : ""}` };
+  }
+
+  // Eventos de protocolo/reação/voto: não são "mensagens" — não gera bolha
+  if (message.reactionMessage || message.protocolMessage || message.pollUpdateMessage || message.senderKeyDistributionMessage) {
+    return { skip: true };
+  }
+  // Só metadados de contexto (sem conteúdo real): também ignora
+  const keys = Object.keys(message);
+  if (keys.length > 0 && keys.every(k => k === "messageContextInfo")) {
+    return { skip: true };
   }
   return {};
 }
@@ -242,14 +297,18 @@ Deno.serve(async (req) => {
     for (const m of msgs) {
       if (!m) continue;
       const key = m.key ?? {};
-      const remoteJid: string = key.remoteJid ?? "";
-      if (remoteJid.endsWith("@g.us") || remoteJid.endsWith("@broadcast")) continue;
+      // JID de privacidade (@lid): o telefone real vem em remoteJidAlt
+      const rawJid: string = key.remoteJid ?? "";
+      const altJid: string = key.remoteJidAlt ?? m.remoteJidAlt ?? "";
+      const remoteJid: string = rawJid.endsWith("@lid") && altJid ? altJid : rawJid;
+      if (remoteJid.endsWith("@g.us") || remoteJid.endsWith("@broadcast") || remoteJid.endsWith("@lid")) continue;
       const phone = jidToE164(remoteJid);
       const providerId = key.id;
       if (!phone || !providerId) continue;
 
       const fromMe = !!key.fromMe;
-      const { text, mediaType, mediaMime, fileName } = extractContent(m.message);
+      const { text, mediaType, mediaMime, fileName, skip } = extractContent(m.message);
+      if (skip) continue;
       const tsRaw = m.messageTimestamp;
       const tsNum = typeof tsRaw === "string" ? parseInt(tsRaw, 10) : tsRaw;
       const waTs = tsNum ? new Date(tsNum * 1000).toISOString() : new Date().toISOString();

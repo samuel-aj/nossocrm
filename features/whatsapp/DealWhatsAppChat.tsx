@@ -57,6 +57,32 @@ function StatusTicks({ status }: { status: string }) {
   }
 }
 
+const URL_RE = /(https?:\/\/[^\s]+)/g;
+
+/** Texto da bolha com URLs clicáveis (ex.: link do Maps em localizações). */
+function LinkifiedText({ text, className }: { text: string; className?: string }) {
+  const parts = text.split(URL_RE);
+  return (
+    <p className={className}>
+      {parts.map((part, i) =>
+        /^https?:\/\//.test(part) ? (
+          <a
+            key={i}
+            href={part}
+            target="_blank"
+            rel="noreferrer"
+            className="underline underline-offset-2 break-all"
+          >
+            {part}
+          </a>
+        ) : (
+          part
+        )
+      )}
+    </p>
+  );
+}
+
 /** Nome "humano" do arquivo a partir da URL assinada (último segmento do caminho). */
 function fileNameFromUrl(url: string): string {
   try {
@@ -131,9 +157,12 @@ function MessageBubble({ m }: { m: WaChatMessage }) {
       >
         <MediaContent m={m} />
         {m.body ? (
-          <p className={`whitespace-pre-wrap break-words ${m.media_type ? 'mt-1.5' : ''}`}>{m.body}</p>
+          <LinkifiedText
+            text={m.body}
+            className={`whitespace-pre-wrap break-words ${m.media_type ? 'mt-1.5' : ''}`}
+          />
         ) : !m.media_type ? (
-          <p className="italic opacity-70">[sem conteúdo]</p>
+          <p className="italic opacity-70">[mensagem não suportada]</p>
         ) : null}
         <div
           className={`mt-1 flex items-center justify-end gap-1 text-[10px] ${
