@@ -11,7 +11,7 @@ import {
   updateConnectionStatus,
   type WaConnectionRow,
 } from '@/lib/whatsapp/service';
-import { getProvider } from '@/lib/whatsapp';
+import { envEvolution, getProvider } from '@/lib/whatsapp';
 import { ensureEvolutionInstance, instanceNameForOrg } from '@/lib/whatsapp/admin';
 
 function mask(conn: WaConnectionRow) {
@@ -73,6 +73,7 @@ export async function POST(req: Request) {
 
   let instanceName = (body.instanceName || '').trim();
   let token = body.token?.trim() || null;
+  let baseUrl = body.baseUrl?.trim() || null;
 
   // Fluxo da UI: cria a instância DESTA org na Evolution automaticamente,
   // sem o admin do cliente precisar saber nome/token/servidor.
@@ -81,6 +82,8 @@ export async function POST(req: Request) {
     try {
       const created = await ensureEvolutionInstance(instanceName);
       token = created.token;
+      // persiste a base também: a Edge Function usa p/ buscar mídia (fallback)
+      baseUrl = envEvolution().baseUrl || null;
     } catch (e) {
       return json({ error: `Falha ao criar a instância: ${(e as Error).message}` }, 502);
     }
@@ -92,7 +95,7 @@ export async function POST(req: Request) {
     conn = await upsertConnection(auth.admin, auth.user.organizationId, {
       instanceName,
       token,
-      baseUrl: body.baseUrl?.trim() || null,
+      baseUrl,
     });
   } catch (e) {
     return json({ error: `Falha ao salvar conexão: ${(e as Error).message}` }, 400);

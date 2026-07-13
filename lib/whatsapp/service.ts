@@ -186,6 +186,10 @@ export async function recordOutboundMessage(
     sentBy: string;
     status?: string;
     error?: string | null;
+    /** Mídia enviada: tipo (image|video|audio|document|sticker), caminho no Storage e mime */
+    mediaType?: string | null;
+    mediaUrl?: string | null;
+    mediaMime?: string | null;
   }
 ): Promise<WaMessageRow> {
   const { data, error } = await admin
@@ -195,7 +199,10 @@ export async function recordOutboundMessage(
       conversation_id: input.conversationId,
       direction: 'out',
       status: input.status ?? 'sent',
-      body: input.text,
+      body: input.text || null,
+      media_type: input.mediaType ?? null,
+      media_url: input.mediaUrl ?? null,
+      media_mime: input.mediaMime ?? null,
       evolution_message_id: input.providerMessageId ?? null,
       from_phone: input.fromPhone ?? null,
       to_phone: input.toPhone,
@@ -205,6 +212,7 @@ export async function recordOutboundMessage(
     .select('*')
     .single();
   if (error) throw new Error(error.message);
-  await touchConversation(admin, input.conversationId, input.text);
+  const preview = input.text || (input.mediaType ? `[${input.mediaType}]` : '');
+  await touchConversation(admin, input.conversationId, preview);
   return data as WaMessageRow;
 }

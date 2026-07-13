@@ -23,6 +23,20 @@ export interface SendTextInput {
   text: string;
 }
 
+export type OutboundMediaKind = 'image' | 'video' | 'document' | 'audio' | 'sticker';
+
+export interface SendMediaInput {
+  to: string;
+  /** URL (pública/assinada) OU base64 do arquivo */
+  media: string;
+  kind: OutboundMediaKind;
+  mimeType?: string;
+  /** Nome exibido (documentos) */
+  fileName?: string;
+  /** Legenda (imagem/vídeo/documento) */
+  caption?: string;
+}
+
 export interface SendResult {
   ok: boolean;
   /** id da mensagem no provedor (usado p/ idempotência + atualização de status) */
@@ -72,6 +86,8 @@ export interface WhatsAppProvider {
   getQrCode(): Promise<QrResult>;
   /** Envia uma mensagem de texto. */
   sendText(input: SendTextInput): Promise<SendResult>;
+  /** Envia mídia: imagem, vídeo, documento, áudio (voz) ou figurinha. */
+  sendMedia(input: SendMediaInput): Promise<SendResult>;
   /** Configura o webhook da instância para apontar para o CRM. */
   setWebhook(url: string): Promise<void>;
   /** Desconecta o número da instância (logout) — a instância continua existindo. */

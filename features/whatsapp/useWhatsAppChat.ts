@@ -1,9 +1,14 @@
 /**
  * Hook do chat de WhatsApp dentro do card do lead.
- * Carrega a conversa por telefone, envia mensagens e mantém atualizado
- * (polling curto — "quase ao vivo"; Realtime pode ser plugado depois).
+ * Carrega a conversa por telefone, envia mensagens (texto e mídia) e mantém
+ * atualizado (polling curto — "quase ao vivo"; Realtime pode ser plugado depois).
+ *
+ * Envio de mídia: o arquivo sobe DIRETO pro Supabase Storage (URL assinada de
+ * upload — não passa pela Vercel, que limita o body a ~4,5MB) e o /send recebe
+ * só o caminho.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { createClient } from '@/lib/supabase/client';
 
 export interface WaChatMessage {
   id: string;
@@ -11,6 +16,7 @@ export interface WaChatMessage {
   status: string;
   body: string | null;
   media_type: string | null;
+  media_mime: string | null;
   media_url: string | null;
   from_phone: string | null;
   to_phone: string | null;
@@ -24,6 +30,15 @@ export interface WaChatData {
   hasConnection: boolean;
   conversation: { id: string; wa_phone: string; wa_name: string | null; contact_id: string | null } | null;
   messages: WaChatMessage[];
+}
+
+export type WaMediaKind = 'image' | 'video' | 'document' | 'audio' | 'sticker';
+
+export interface SendChatPayload {
+  text?: string;
+  file?: File | Blob;
+  fileName?: string;
+  kind?: WaMediaKind;
 }
 
 export function useWhatsAppChat(phoneE164: string | null) {
@@ -48,12 +63,48 @@ export function useWhatsAppChat(phoneE164: string | null) {
   });
 
   const send = useMutation({
-    mutationFn: async (text: string) => {
+    mutationFn: async (payload: string | SendChatPayload) => {
+      const p: SendChatPayload = typeof payload === 'string' ? { text: payload } : payload;
+
+      let media: { path: string; kind: WaMediaKind; mimeType?: string; fileName?: string } | undefined;
+      if (p.file && p.kind) {
+        const fileName =
+          p.fileName || (p.file instanceof File && p.file.name ? p.file.name : `arquivo_${Date.now()}`);
+        const mimeType = p.file.type || undefined;
+
+        // 1) pede a URL assinada de upload
+        const up = await fetch('/api/whatsapp/upload', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ fileName }),
+        });
+        const upJson = (await up.json().catch(() => ({}))) as {
+          path?: string;
+          token?: string;
+          error?: string;
+        };
+        if (!up.ok || !upJson.path || !upJson.token) {
+          throw new Error(upJson.error || 'Falha ao preparar o upload');
+        }
+
+        // 2) sobe o arquivo direto pro Storage
+        const supabase = createClient();
+        if (!supabase) throw new Error('Supabase não configurado');
+        const { error: upErr } = await supabase.storage
+          .from('wa-media')
+          .uploadToSignedUrl(upJson.path, upJson.token, p.file, { contentType: mimeType });
+        if (upErr) throw new Error(`Upload falhou: ${upErr.message}`);
+
+        media = { path: upJson.path, kind: p.kind, mimeType, fileName };
+      }
+
+      // 3) envia (texto e/ou mídia)
       const res = await fetch('/api/whatsapp/send', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ to: phoneE164, text }),
+        body: JSON.stringify({ to: phoneE164, text: p.text || '', media }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error((json as { error?: string }).error || 'Falha ao enviar');

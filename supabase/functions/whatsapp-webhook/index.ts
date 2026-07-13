@@ -66,7 +66,7 @@ function brPhoneVariants(e164: string): string[] {
 }
 
 // deno-lint-ignore no-explicit-any
-function extractContent(message: any): { text?: string; mediaType?: string; mediaMime?: string } {
+function extractContent(message: any): { text?: string; mediaType?: string; mediaMime?: string; fileName?: string } {
   if (!message) return {};
   if (typeof message.conversation === "string") return { text: message.conversation };
   if (message.extendedTextMessage?.text) return { text: message.extendedTextMessage.text };
@@ -78,9 +78,51 @@ function extractContent(message: any): { text?: string; mediaType?: string; medi
     ["stickerMessage", "sticker"],
   ];
   for (const [field, type] of kinds) {
-    if (message[field]) return { text: message[field].caption, mediaType: type, mediaMime: message[field].mimetype };
+    if (message[field]) {
+      return {
+        text: message[field].caption,
+        mediaType: type,
+        mediaMime: message[field].mimetype,
+        fileName: message[field].fileName,
+      };
+    }
   }
   return {};
+}
+
+/** Extensão de arquivo a partir do mime (fallback: nome original ou .bin). */
+function extFromMime(mime?: string, fileName?: string): string {
+  const m = (mime ?? "").split(";")[0].trim().toLowerCase();
+  const map: Record<string, string> = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/gif": "gif",
+    "video/mp4": "mp4",
+    "video/3gpp": "3gp",
+    "audio/ogg": "ogg",
+    "audio/mpeg": "mp3",
+    "audio/mp4": "m4a",
+    "audio/wav": "wav",
+    "audio/webm": "webm",
+    "application/pdf": "pdf",
+  };
+  if (map[m]) return map[m];
+  const fromName = (fileName ?? "").split(".").pop();
+  if (fromName && fromName.length <= 5 && /^[a-zA-Z0-9]+$/.test(fromName)) return fromName.toLowerCase();
+  return "bin";
+}
+
+function base64ToBytes(b64: string): Uint8Array | null {
+  try {
+    const clean = b64.includes(",") ? b64.slice(b64.indexOf(",") + 1) : b64;
+    const bin = atob(clean);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  } catch {
+    return null;
+  }
 }
 
 function mapState(s?: string): string {
@@ -113,7 +155,7 @@ Deno.serve(async (req) => {
 
   const { data: conn } = await supabase
     .from("wa_connections")
-    .select("id, organization_id, webhook_secret")
+    .select("id, organization_id, webhook_secret, instance_token, base_url")
     .eq("instance_name", instanceName)
     .maybeSingle();
   if (!conn) return json(200, { ok: true, ignored: "instancia nao vinculada" });
@@ -172,7 +214,7 @@ Deno.serve(async (req) => {
       if (!phone || !providerId) continue;
 
       const fromMe = !!key.fromMe;
-      const { text, mediaType, mediaMime } = extractContent(m.message);
+      const { text, mediaType, mediaMime, fileName } = extractContent(m.message);
       const tsRaw = m.messageTimestamp;
       const tsNum = typeof tsRaw === "string" ? parseInt(tsRaw, 10) : tsRaw;
       const waTs = tsNum ? new Date(tsNum * 1000).toISOString() : new Date().toISOString();
@@ -211,6 +253,64 @@ Deno.serve(async (req) => {
       }
       if (!convId) continue;
 
+      // Eco de mensagem já gravada (ex.: enviada pelo CRM no /send)? Pula tudo
+      // — evita upload duplicado de mídia e o insert com erro de unicidade.
+      const { data: existingMsg } = await supabase
+        .from("wa_messages")
+        .select("id")
+        .eq("organization_id", orgId)
+        .eq("evolution_message_id", providerId)
+        .maybeSingle();
+      if (existingMsg) continue;
+
+      // Mídia: base64 no payload (webhookBase64=true) ou busca na Evolution;
+      // sobe pro Storage privado e guarda o CAMINHO (a API assina URL na leitura).
+      let mediaPath: string | null = null;
+      let mediaMimeFinal = mediaMime ?? null;
+      if (mediaType) {
+        let bytes: Uint8Array | null = null;
+        // a Evolution injeta o base64 em data.message.base64 ou data.base64 (varia por versão)
+        const b64raw = m.message?.base64 ?? m.base64;
+        const b64 = typeof b64raw === "string" && b64raw.length > 0 ? b64raw : null;
+        if (b64) bytes = base64ToBytes(b64);
+        if (!bytes) {
+          // fallback: pede a mídia pra Evolution (token/base salvos na conexão)
+          const evoBase = String(conn.base_url ?? Deno.env.get("EVOLUTION_BASE_URL") ?? "").replace(/\/+$/, "");
+          const evoToken = String(conn.instance_token ?? Deno.env.get("EVOLUTION_API_KEY") ?? "");
+          if (evoBase && evoToken) {
+            try {
+              const r = await fetch(
+                `${evoBase}/chat/getBase64FromMediaMessage/${encodeURIComponent(instanceName)}`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", apikey: evoToken },
+                  body: JSON.stringify({ message: { key: { id: providerId } }, convertToMp4: false }),
+                }
+              );
+              if (r.ok) {
+                const j = await r.json();
+                if (j?.base64) {
+                  bytes = base64ToBytes(j.base64);
+                  if (j.mimetype) mediaMimeFinal = j.mimetype;
+                }
+              }
+            } catch {
+              // segue sem mídia; a mensagem entra com placeholder [tipo]
+            }
+          }
+        }
+        if (bytes && bytes.length > 0) {
+          const ext = extFromMime(mediaMimeFinal ?? undefined, fileName);
+          const safeId = String(providerId).replace(/[^a-zA-Z0-9_-]/g, "");
+          const path = `${orgId}/${convId}/${safeId}.${ext}`;
+          const { error: upErr } = await supabase.storage
+            .from("wa-media")
+            .upload(path, bytes, { contentType: mediaMimeFinal ?? "application/octet-stream", upsert: true });
+          if (!upErr) mediaPath = path;
+          else console.error("[wa-webhook] upload:", upErr.message);
+        }
+      }
+
       // idempotente: o índice único (org, evolution_message_id) descarta o eco
       // das mensagens que NÓS enviamos (já gravadas no /send).
       const { error: insErr } = await supabase.from("wa_messages").insert({
@@ -220,7 +320,8 @@ Deno.serve(async (req) => {
         status: fromMe ? "sent" : "received",
         body: text ?? null,
         media_type: mediaType ?? null,
-        media_mime: mediaMime ?? null,
+        media_mime: mediaMimeFinal,
+        media_url: mediaPath,
         evolution_message_id: providerId,
         from_phone: fromMe ? null : phone,
         to_phone: fromMe ? phone : null,

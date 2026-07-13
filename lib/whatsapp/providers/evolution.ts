@@ -15,6 +15,7 @@ import type {
   WhatsAppProvider,
   ProviderConfig,
   SendTextInput,
+  SendMediaInput,
   SendResult,
   QrResult,
   InboundEvent,
@@ -133,6 +134,36 @@ export class EvolutionProvider implements WhatsAppProvider {
     return { ok: true, providerMessageId: data?.key?.id, raw: data };
   }
 
+  async sendMedia(input: SendMediaInput): Promise<SendResult> {
+    const number = toWhatsAppPhone(input.to);
+    if (!number) return { ok: false, error: 'Telefone inválido' };
+
+    let path: string;
+    let body: Record<string, unknown>;
+    if (input.kind === 'audio') {
+      // Mensagem de VOZ (PTT); encoding=true faz a Evolution converter p/ opus
+      path = `/message/sendWhatsAppAudio/${encodeURIComponent(this.instanceName)}`;
+      body = { number, audio: input.media, encoding: true };
+    } else if (input.kind === 'sticker') {
+      path = `/message/sendSticker/${encodeURIComponent(this.instanceName)}`;
+      body = { number, sticker: input.media };
+    } else {
+      path = `/message/sendMedia/${encodeURIComponent(this.instanceName)}`;
+      body = {
+        number,
+        mediatype: input.kind,
+        media: input.media,
+        ...(input.mimeType ? { mimetype: input.mimeType } : {}),
+        ...(input.fileName ? { fileName: input.fileName } : {}),
+        ...(input.caption ? { caption: input.caption } : {}),
+      };
+    }
+
+    const { ok, status, data } = await this.call<{ key?: { id?: string } }>('POST', path, body);
+    if (!ok) return { ok: false, error: `Evolution respondeu ${status}`, raw: data };
+    return { ok: true, providerMessageId: data?.key?.id, raw: data };
+  }
+
   async logout(): Promise<void> {
     const { ok, status } = await this.call(
       'DELETE',
@@ -148,8 +179,12 @@ export class EvolutionProvider implements WhatsAppProvider {
       webhook: {
         enabled: true,
         url,
+        // v2 usa byEvents/base64; mantém as grafias antigas por compatibilidade
+        byEvents: false,
         webhookByEvents: false,
-        webhookBase64: false,
+        // true: mídias chegam com base64 no payload — o webhook sobe pro Storage
+        base64: true,
+        webhookBase64: true,
         events: WEBHOOK_EVENTS,
       },
     });
