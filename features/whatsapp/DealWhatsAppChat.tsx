@@ -137,7 +137,26 @@ function MessageBubble({ m }: { m: WaChatMessage }) {
         >
           <span>{time}</span>
           {isOut && (
-            <span className={m.status === 'read' ? 'text-sky-200' : m.status === 'failed' ? 'text-red-200' : ''}>
+            <span
+              className={
+                m.status === 'read'
+                  ? 'text-sky-300 font-bold drop-shadow-sm' // ✓✓ AZUL = lida pelo contato
+                  : m.status === 'failed'
+                    ? 'text-red-200'
+                    : ''
+              }
+              title={
+                m.status === 'read'
+                  ? 'Lida'
+                  : m.status === 'delivered'
+                    ? 'Entregue'
+                    : m.status === 'sent'
+                      ? 'Enviada'
+                      : m.status === 'failed'
+                        ? 'Falhou'
+                        : 'Enviando…'
+              }
+            >
               {statusTick(m.status)}
             </span>
           )}
