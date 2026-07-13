@@ -327,11 +327,11 @@ function extractContent(rawMsg: Record<string, unknown>): {
     if (m) return { text: m.caption, mediaType: type, mediaMime: m.mimetype };
   }
 
-  // Cartão de contato compartilhado (vCard) — vira texto legível no chat
+  // Cartão de contato compartilhado (vCard) — cartão com avatar na UI
   const contact = msg.contactMessage as { displayName?: string; vcard?: string } | undefined;
   if (contact) {
     const phone = vcardPhone(contact.vcard);
-    return { text: `👤 Contato compartilhado: ${contact.displayName || 'sem nome'}${phone ? `\n${phone}` : ''}` };
+    return { text: `${contact.displayName || 'Contato'}${phone ? `\n${phone}` : ''}`, mediaType: 'contact' };
   }
   const contacts = msg.contactsArrayMessage as
     | { contacts?: Array<{ displayName?: string; vcard?: string }> }

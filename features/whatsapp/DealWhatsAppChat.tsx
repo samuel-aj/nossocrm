@@ -28,6 +28,7 @@ const MEDIA_LABEL: Record<string, string> = {
   audio: 'áudio',
   document: 'documento',
   sticker: 'figurinha',
+  contact: 'contato',
 };
 
 const EMOJIS = [
@@ -97,6 +98,42 @@ function fileNameFromUrl(url: string): string {
 
 function MediaContent({ m }: { m: WaChatMessage }) {
   if (!m.media_type) return null;
+
+  // Cartão de contato compartilhado (estilo WhatsApp): avatar + nome + telefone
+  if (m.media_type === 'contact') {
+    const [name, ...rest] = (m.body ?? 'Contato').split('\n');
+    const phone = rest.join(' ').trim();
+    const digits = phone.replace(/\D/g, '');
+    return (
+      <div className="min-w-[220px]">
+        <div className="flex items-center gap-3 p-1">
+          {m.media_url ? (
+            // eslint-disable-next-line @next/next/no-img-element -- avatar assinado do Storage
+            <img src={m.media_url} alt="" className="h-11 w-11 rounded-full object-cover shrink-0" />
+          ) : (
+            <span className="h-11 w-11 rounded-full bg-slate-500/25 flex items-center justify-center text-base font-bold shrink-0">
+              {(name || '?').charAt(0).toUpperCase()}
+            </span>
+          )}
+          <div className="min-w-0">
+            <p className="text-sm font-bold truncate">{name || 'Contato'}</p>
+            {phone && <p className="text-xs opacity-80">{phone}</p>}
+          </div>
+        </div>
+        {digits && (
+          <a
+            href={`https://wa.me/${digits}`}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-1.5 block text-center text-xs font-bold border-t border-slate-400/40 pt-1.5 hover:underline"
+          >
+            Conversar
+          </a>
+        )}
+      </div>
+    );
+  }
+
   if (!m.media_url) {
     const label = MEDIA_LABEL[m.media_type] ?? m.media_type;
     return (
@@ -156,7 +193,7 @@ function MessageBubble({ m }: { m: WaChatMessage }) {
         }`}
       >
         <MediaContent m={m} />
-        {m.body ? (
+        {m.body && m.media_type !== 'contact' ? (
           <LinkifiedText
             text={m.body}
             className={`whitespace-pre-wrap break-words ${m.media_type ? 'mt-1.5' : ''}`}

@@ -126,11 +126,12 @@ function extractContent(rawMessage: any): {
     }
   }
 
-  // Cartão de contato compartilhado (vCard) — vira texto legível no chat
+  // Cartão de contato compartilhado (vCard) — cartão com avatar na UI
+  // (body = "nome\ntelefone"; o webhook busca a foto de perfil depois)
   if (message.contactMessage) {
     const c = message.contactMessage;
     const phone = vcardPhone(c.vcard);
-    return { text: `👤 Contato compartilhado: ${c.displayName || "sem nome"}${phone ? `\n${phone}` : ""}` };
+    return { text: `${c.displayName || "Contato"}${phone ? `\n${phone}` : ""}`, mediaType: "contact" };
   }
   if (message.contactsArrayMessage?.contacts?.length) {
     // deno-lint-ignore no-explicit-any
@@ -361,7 +362,47 @@ Deno.serve(async (req) => {
       // sobe pro Storage privado e guarda o CAMINHO (a API assina URL na leitura).
       let mediaPath: string | null = null;
       let mediaMimeFinal = mediaMime ?? null;
-      if (mediaType) {
+      const evoBaseUrl = String(conn.base_url ?? Deno.env.get("EVOLUTION_BASE_URL") ?? "")
+        .replace(/\/+$/, "")
+        .replace(/\/manager$/, "");
+      const evoApiToken = String(conn.instance_token ?? Deno.env.get("EVOLUTION_API_KEY") ?? "");
+      if (mediaType === "contact") {
+        // Cartão de contato: busca a foto de perfil do número compartilhado
+        // (best-effort; sem foto o chat mostra avatar com a inicial)
+        const sharedDigits = ((text ?? "").split("\n")[1] ?? "").replace(/\D/g, "");
+        if (sharedDigits && evoBaseUrl && evoApiToken) {
+          try {
+            const pr = await fetch(
+              `${evoBaseUrl}/chat/fetchProfilePictureUrl/${encodeURIComponent(instanceName)}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json", apikey: evoApiToken },
+                body: JSON.stringify({ number: sharedDigits }),
+              }
+            );
+            if (pr.ok) {
+              const pj = await pr.json();
+              if (pj?.profilePictureUrl) {
+                const img = await fetch(pj.profilePictureUrl);
+                if (img.ok) {
+                  const buf = new Uint8Array(await img.arrayBuffer());
+                  const safeId = String(providerId).replace(/[^a-zA-Z0-9_-]/g, "");
+                  const path = `${orgId}/${convId}/${safeId}_avatar.jpg`;
+                  const { error: upErr } = await supabase.storage
+                    .from("wa-media")
+                    .upload(path, buf, { contentType: "image/jpeg", upsert: true });
+                  if (!upErr) {
+                    mediaPath = path;
+                    mediaMimeFinal = "image/jpeg";
+                  }
+                }
+              }
+            }
+          } catch {
+            // sem foto: o cartão mostra a inicial
+          }
+        }
+      } else if (mediaType) {
         let bytes: Uint8Array | null = null;
         // a Evolution injeta o base64 em data.message.base64 ou data.base64 (varia por versão)
         const b64raw = m.message?.base64 ?? m.base64;
@@ -369,17 +410,13 @@ Deno.serve(async (req) => {
         if (b64) bytes = base64ToBytes(b64);
         if (!bytes) {
           // fallback: pede a mídia pra Evolution (token/base salvos na conexão)
-          const evoBase = String(conn.base_url ?? Deno.env.get("EVOLUTION_BASE_URL") ?? "")
-            .replace(/\/+$/, "")
-            .replace(/\/manager$/, "");
-          const evoToken = String(conn.instance_token ?? Deno.env.get("EVOLUTION_API_KEY") ?? "");
-          if (evoBase && evoToken) {
+          if (evoBaseUrl && evoApiToken) {
             try {
               const r = await fetch(
-                `${evoBase}/chat/getBase64FromMediaMessage/${encodeURIComponent(instanceName)}`,
+                `${evoBaseUrl}/chat/getBase64FromMediaMessage/${encodeURIComponent(instanceName)}`,
                 {
                   method: "POST",
-                  headers: { "Content-Type": "application/json", apikey: evoToken },
+                  headers: { "Content-Type": "application/json", apikey: evoApiToken },
                   body: JSON.stringify({ message: { key: { id: providerId } }, convertToMp4: false }),
                 }
               );
