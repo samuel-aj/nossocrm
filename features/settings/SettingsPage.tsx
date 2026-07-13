@@ -5,6 +5,7 @@ import { TagsManager } from './components/TagsManager';
 import { InactiveLeadsSettings } from './components/InactiveLeadsSettings';
 import { CustomFieldsManager } from './components/CustomFieldsManager';
 import { ApiKeysSection } from './components/ApiKeysSection';
+import { WhatsAppConnectionSettings } from '@/features/whatsapp/WhatsAppConnectionSettings';
 import { WebhooksSection } from './components/WebhooksSection';
 import { McpSection } from './components/McpSection';
 import { DataStorageSettings } from './components/DataStorageSettings';
@@ -123,13 +124,13 @@ const ProductsSettings: React.FC = () => {
 };
 
 const IntegrationsSettings: React.FC = () => {
-  type IntegrationsSubTab = 'api' | 'webhooks' | 'mcp';
-  const [subTab, setSubTab] = useState<IntegrationsSubTab>('api');
+  type IntegrationsSubTab = 'whatsapp' | 'api' | 'webhooks' | 'mcp';
+  const [subTab, setSubTab] = useState<IntegrationsSubTab>('whatsapp');
 
   useEffect(() => {
     const syncFromHash = () => {
     const h = typeof window !== 'undefined' ? (window.location.hash || '').replace('#', '') : '';
-    if (h === 'webhooks' || h === 'api' || h === 'mcp') setSubTab(h as IntegrationsSubTab);
+    if (h === 'whatsapp' || h === 'webhooks' || h === 'api' || h === 'mcp') setSubTab(h as IntegrationsSubTab);
     };
 
     syncFromHash();
@@ -153,6 +154,7 @@ const IntegrationsSettings: React.FC = () => {
     <div className="pb-10">
       <div className="flex items-center gap-2 mb-6">
         {([
+          { id: 'whatsapp' as const, label: 'WhatsApp' },
           { id: 'webhooks' as const, label: 'Webhooks' },
           { id: 'api' as const, label: 'API' },
           { id: 'mcp' as const, label: 'MCP' },
@@ -175,6 +177,7 @@ const IntegrationsSettings: React.FC = () => {
         })}
       </div>
 
+      {subTab === 'whatsapp' && <WhatsAppConnectionSettings />}
       {subTab === 'api' && <ApiKeysSection />}
       {subTab === 'webhooks' && <WebhooksSection />}
       {subTab === 'mcp' && <McpSection />}

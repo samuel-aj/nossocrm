@@ -74,6 +74,8 @@ export interface WhatsAppProvider {
   sendText(input: SendTextInput): Promise<SendResult>;
   /** Configura o webhook da instância para apontar para o CRM. */
   setWebhook(url: string): Promise<void>;
+  /** Desconecta o número da instância (logout) — a instância continua existindo. */
+  logout(): Promise<void>;
   /** Normaliza um payload de webhook do provedor em um InboundEvent. */
   parseWebhook(payload: unknown): InboundEvent;
 }

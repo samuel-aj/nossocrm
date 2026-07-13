@@ -62,7 +62,7 @@ export class EvolutionProvider implements WhatsAppProvider {
   }
 
   private async call<T = unknown>(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'DELETE',
     path: string,
     body?: unknown
   ): Promise<{ ok: boolean; status: number; data: T | null }> {
@@ -131,6 +131,15 @@ export class EvolutionProvider implements WhatsAppProvider {
       return { ok: false, error: `Evolution respondeu ${status}`, raw: data };
     }
     return { ok: true, providerMessageId: data?.key?.id, raw: data };
+  }
+
+  async logout(): Promise<void> {
+    const { ok, status } = await this.call(
+      'DELETE',
+      `/instance/logout/${encodeURIComponent(this.instanceName)}`
+    );
+    // 404 = já estava desconectado; qualquer outro erro é real
+    if (!ok && status !== 404) throw new Error(`Evolution respondeu ${status} no logout`);
   }
 
   async setWebhook(url: string): Promise<void> {

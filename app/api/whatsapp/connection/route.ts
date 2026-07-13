@@ -1,6 +1,8 @@
 /**
- * GET  /api/whatsapp/connection  -> status da conexão da org (token mascarado)
- * POST /api/whatsapp/connection  -> vincula a org a uma instância da Evolution (admin)
+ * GET    /api/whatsapp/connection  -> status da conexão da org (token mascarado)
+ * POST   /api/whatsapp/connection  -> vincula a org a uma instância da Evolution (admin)
+ *                                     { autoCreate: true } cria a instância da org sozinho
+ * DELETE /api/whatsapp/connection  -> desconecta o número da org (logout; admin)
  */
 import { requireOrgUser, isOrgAdmin, json } from '@/lib/whatsapp/api';
 import {
@@ -10,6 +12,7 @@ import {
   type WaConnectionRow,
 } from '@/lib/whatsapp/service';
 import { getProvider } from '@/lib/whatsapp';
+import { ensureEvolutionInstance, instanceNameForOrg } from '@/lib/whatsapp/admin';
 
 function mask(conn: WaConnectionRow) {
   return {
@@ -21,6 +24,19 @@ function mask(conn: WaConnectionRow) {
     profileName: conn.profile_name,
     status: conn.status,
   };
+}
+
+/** Registra o webhook da instância -> Edge Function do ambiente atual (best-effort). */
+async function registerWebhook(conn: WaConnectionRow): Promise<void> {
+  const supaUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '');
+  if (!supaUrl) return;
+  try {
+    await getProvider(conn).setWebhook(
+      `${supaUrl}/functions/v1/whatsapp-webhook/${conn.webhook_secret}`
+    );
+  } catch {
+    // best-effort: sem webhook o envio ainda funciona; recebimento fica pendente
+  }
 }
 
 export async function GET() {
@@ -48,25 +64,42 @@ export async function POST(req: Request) {
   if (!auth.ok) return auth.response;
   if (!isOrgAdmin(auth.user.role)) return json({ error: 'Forbidden' }, 403);
 
-  let body: { instanceName?: string; token?: string; baseUrl?: string };
+  let body: { instanceName?: string; token?: string; baseUrl?: string; autoCreate?: boolean };
   try {
     body = await req.json();
   } catch {
     return json({ error: 'JSON inválido' }, 400);
   }
-  const instanceName = (body.instanceName || '').trim();
+
+  let instanceName = (body.instanceName || '').trim();
+  let token = body.token?.trim() || null;
+
+  // Fluxo da UI: cria a instância DESTA org na Evolution automaticamente,
+  // sem o admin do cliente precisar saber nome/token/servidor.
+  if (body.autoCreate) {
+    instanceName = instanceNameForOrg(auth.user.organizationId);
+    try {
+      const created = await ensureEvolutionInstance(instanceName);
+      token = created.token;
+    } catch (e) {
+      return json({ error: `Falha ao criar a instância: ${(e as Error).message}` }, 502);
+    }
+  }
   if (!instanceName) return json({ error: 'instanceName é obrigatório' }, 400);
 
   let conn: WaConnectionRow;
   try {
     conn = await upsertConnection(auth.admin, auth.user.organizationId, {
       instanceName,
-      token: body.token?.trim() || null,
+      token,
       baseUrl: body.baseUrl?.trim() || null,
     });
   } catch (e) {
     return json({ error: `Falha ao salvar conexão: ${(e as Error).message}` }, 400);
   }
+
+  // Aponta o webhook da instância pro ambiente atual (recebimento de mensagens).
+  await registerWebhook(conn);
 
   let status = conn.status;
   try {
@@ -77,4 +110,25 @@ export async function POST(req: Request) {
     // segue com o status salvo
   }
   return json({ connection: { ...mask(conn), status } });
+}
+
+export async function DELETE() {
+  const auth = await requireOrgUser();
+  if (!auth.ok) return auth.response;
+  if (!isOrgAdmin(auth.user.role)) return json({ error: 'Forbidden' }, 403);
+
+  const conn = await getConnectionByOrg(auth.admin, auth.user.organizationId);
+  if (!conn) return json({ error: 'Conexão não configurada' }, 404);
+
+  try {
+    await getProvider(conn).logout();
+  } catch (e) {
+    return json({ error: `Falha ao desconectar: ${(e as Error).message}` }, 502);
+  }
+  await updateConnectionStatus(auth.admin, conn.id, {
+    status: 'disconnected',
+    phone_number: null,
+    profile_name: null,
+  });
+  return json({ ok: true });
 }
