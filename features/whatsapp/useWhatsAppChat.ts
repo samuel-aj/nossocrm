@@ -7,6 +7,7 @@
  * upload — não passa pela Vercel, que limita o body a ~4,5MB) e o /send recebe
  * só o caminho.
  */
+import { useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createClient } from '@/lib/supabase/client';
 
@@ -44,6 +45,8 @@ export interface SendChatPayload {
 export function useWhatsAppChat(phoneE164: string | null) {
   const qc = useQueryClient();
   const queryKey = ['waChat', phoneE164] as const;
+  // pausa o polling durante um envio: um refetch no meio apagaria a bolha otimista
+  const sendingRef = useRef(false);
 
   const query = useQuery<WaChatData>({
     queryKey,
@@ -57,7 +60,7 @@ export function useWhatsAppChat(phoneE164: string | null) {
       return json as WaChatData;
     },
     enabled: !!phoneE164,
-    refetchInterval: phoneE164 ? 4000 : false,
+    refetchInterval: () => (!phoneE164 || sendingRef.current ? false : 4000),
     refetchOnWindowFocus: true,
     staleTime: 2000,
   });
@@ -110,7 +113,40 @@ export function useWhatsAppChat(phoneE164: string | null) {
       if (!res.ok) throw new Error((json as { error?: string }).error || 'Falha ao enviar');
       return json;
     },
-    onSuccess: () => {
+    // Bolha OTIMISTA: a mensagem aparece no instante do Enter (status ⏱) e o
+    // servidor confirma por trás — sem esperar round trip + refetch.
+    onMutate: async payload => {
+      const p: SendChatPayload = typeof payload === 'string' ? { text: payload } : payload;
+      sendingRef.current = true;
+      await qc.cancelQueries({ queryKey });
+      const previous = qc.getQueryData<WaChatData>(queryKey);
+      const temp: WaChatMessage = {
+        id: `temp-${Date.now()}`,
+        direction: 'out',
+        status: 'queued',
+        body: p.text || null,
+        media_type: p.file ? (p.kind ?? null) : null,
+        media_mime: null,
+        media_url: null,
+        from_phone: null,
+        to_phone: phoneE164,
+        wa_timestamp: null,
+        created_at: new Date().toISOString(),
+        sent_by: null,
+      };
+      qc.setQueryData<WaChatData>(queryKey, old =>
+        old
+          ? { ...old, messages: [...old.messages, temp] }
+          : { connected: true, hasConnection: true, conversation: null, messages: [temp] }
+      );
+      return { previous };
+    },
+    onError: (_err, _payload, ctx) => {
+      // desfaz a bolha otimista; o componente devolve o texto/anexo pro campo
+      if (ctx?.previous) qc.setQueryData(queryKey, ctx.previous);
+    },
+    onSettled: () => {
+      sendingRef.current = false;
       qc.invalidateQueries({ queryKey });
     },
   });

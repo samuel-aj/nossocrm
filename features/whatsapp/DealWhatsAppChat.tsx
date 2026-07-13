@@ -67,7 +67,12 @@ function fileNameFromUrl(url: string): string {
 function MediaContent({ m }: { m: WaChatMessage }) {
   if (!m.media_type) return null;
   if (!m.media_url) {
-    return <p className="italic opacity-70 text-xs">[{MEDIA_LABEL[m.media_type] ?? m.media_type} indisponível]</p>;
+    const label = MEDIA_LABEL[m.media_type] ?? m.media_type;
+    return (
+      <p className="italic opacity-70 text-xs">
+        {m.status === 'queued' ? `Enviando ${label}…` : `[${label} indisponível]`}
+      </p>
+    );
   }
   switch (m.media_type) {
     case 'image':
