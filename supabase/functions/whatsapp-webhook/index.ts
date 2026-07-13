@@ -65,8 +65,31 @@ function brPhoneVariants(e164: string): string[] {
   return [e164];
 }
 
+/**
+ * Desembrulha contêineres do WhatsApp: GIFs, mensagens temporárias e
+ * "ver uma vez" chegam como { ephemeralMessage|viewOnceMessage*|
+ * documentWithCaptionMessage|deviceSentMessage: { message: {...} } }.
+ */
 // deno-lint-ignore no-explicit-any
-function extractContent(message: any): { text?: string; mediaType?: string; mediaMime?: string; fileName?: string } {
+function unwrapMessage(message: any): any {
+  let msg = message;
+  for (let i = 0; i < 3 && msg; i++) {
+    const wrapper =
+      msg.ephemeralMessage ??
+      msg.viewOnceMessage ??
+      msg.viewOnceMessageV2 ??
+      msg.viewOnceMessageV2Extension ??
+      msg.documentWithCaptionMessage ??
+      msg.deviceSentMessage;
+    if (wrapper?.message) msg = wrapper.message;
+    else break;
+  }
+  return msg;
+}
+
+// deno-lint-ignore no-explicit-any
+function extractContent(rawMessage: any): { text?: string; mediaType?: string; mediaMime?: string; fileName?: string } {
+  const message = unwrapMessage(rawMessage);
   if (!message) return {};
   if (typeof message.conversation === "string") return { text: message.conversation };
   if (message.extendedTextMessage?.text) return { text: message.extendedTextMessage.text };

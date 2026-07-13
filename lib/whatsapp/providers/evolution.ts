@@ -265,12 +265,33 @@ export class EvolutionProvider implements WhatsAppProvider {
   }
 }
 
+/**
+ * Desembrulha contêineres do WhatsApp: GIFs, mensagens temporárias e "ver uma
+ * vez" chegam como { ephemeralMessage|viewOnceMessage*|documentWithCaption-
+ * Message|deviceSentMessage: { message: {...} } }.
+ */
+function unwrapMessage(message: Record<string, unknown>): Record<string, unknown> {
+  let msg = message;
+  for (let i = 0; i < 3 && msg; i++) {
+    const wrapper = (msg.ephemeralMessage ??
+      msg.viewOnceMessage ??
+      msg.viewOnceMessageV2 ??
+      msg.viewOnceMessageV2Extension ??
+      msg.documentWithCaptionMessage ??
+      msg.deviceSentMessage) as { message?: Record<string, unknown> } | undefined;
+    if (wrapper?.message) msg = wrapper.message;
+    else break;
+  }
+  return msg;
+}
+
 /** Extrai texto/mídia das várias formas de message da Evolution/Baileys. */
-function extractContent(msg: Record<string, unknown>): {
+function extractContent(rawMsg: Record<string, unknown>): {
   text?: string;
   mediaType?: string;
   mediaMime?: string;
 } {
+  const msg = unwrapMessage(rawMsg);
   if (typeof msg.conversation === 'string') return { text: msg.conversation };
   const ext = msg.extendedTextMessage as { text?: string } | undefined;
   if (ext?.text) return { text: ext.text };
