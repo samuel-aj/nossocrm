@@ -10,6 +10,8 @@ import {
   Mic,
   X,
   FileText,
+  Image as ImageIcon,
+  Video as VideoIcon,
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { useWhatsAppChat, type WaChatMessage, type WaMediaKind } from './useWhatsAppChat';
@@ -203,6 +205,10 @@ export function DealWhatsAppChat({
   const [text, setText] = useState('');
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  // escolha do menu de anexo: "documento" força enviar como documento
+  // (mesmo sendo imagem/vídeo), igual ao WhatsApp
+  const forcedKindRef = useRef<'document' | null>(null);
   const [recording, setRecording] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
   const [micError, setMicError] = useState<string | null>(null);
@@ -245,13 +251,24 @@ export function DealWhatsAppChat({
   const onPickFile = (f: File | null) => {
     if (!f) return;
     clearAttachment();
-    const kind = kindFromFile(f);
+    const kind = forcedKindRef.current === 'document' ? 'document' : kindFromFile(f);
+    forcedKindRef.current = null;
     setAttachment({
       file: f,
       kind,
       previewUrl: kind === 'image' ? URL.createObjectURL(f) : null,
       asSticker: false,
     });
+  };
+
+  /** Abre o seletor de arquivo já filtrado pela opção escolhida no menu do 📎. */
+  const pickWithAccept = (accept: string, forceDocument: boolean) => {
+    setAttachMenuOpen(false);
+    forcedKindRef.current = forceDocument ? 'document' : null;
+    const input = fileInputRef.current;
+    if (!input) return;
+    input.accept = accept;
+    input.click();
   };
 
   const onSend = async () => {
@@ -291,6 +308,8 @@ export function DealWhatsAppChat({
 
   const startRecording = async () => {
     setMicError(null);
+    setEmojiOpen(false);
+    setAttachMenuOpen(false);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
@@ -427,6 +446,33 @@ export function DealWhatsAppChat({
           </div>
         )}
 
+        {/* Menu do anexo (📎): foto, vídeo ou documento */}
+        {attachMenuOpen && (
+          <div className="absolute bottom-full left-12 mb-1 z-10 w-44 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card p-1.5 shadow-lg">
+            <button
+              type="button"
+              onClick={() => pickWithAccept('image/*', false)}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
+            >
+              <ImageIcon size={17} className="text-violet-500" /> Foto
+            </button>
+            <button
+              type="button"
+              onClick={() => pickWithAccept('video/*', false)}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
+            >
+              <VideoIcon size={17} className="text-rose-500" /> Vídeo
+            </button>
+            <button
+              type="button"
+              onClick={() => pickWithAccept('*/*', true)}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
+            >
+              <FileText size={17} className="text-sky-500" /> Documento
+            </button>
+          </div>
+        )}
+
         {/* Popover de emojis */}
         {emojiOpen && (
           <div className="absolute bottom-full left-3 mb-1 z-10 grid grid-cols-8 gap-1 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card p-2 shadow-lg">
@@ -470,7 +516,10 @@ export function DealWhatsAppChat({
           <div className="flex items-end gap-1.5">
             <button
               type="button"
-              onClick={() => setEmojiOpen(o => !o)}
+              onClick={() => {
+                setEmojiOpen(o => !o);
+                setAttachMenuOpen(false);
+              }}
               className={`shrink-0 h-10 w-10 inline-flex items-center justify-center rounded-xl transition-colors ${
                 emojiOpen
                   ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600'
@@ -483,10 +532,17 @@ export function DealWhatsAppChat({
             </button>
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="shrink-0 h-10 w-10 inline-flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
+              onClick={() => {
+                setAttachMenuOpen(o => !o);
+                setEmojiOpen(false);
+              }}
+              className={`shrink-0 h-10 w-10 inline-flex items-center justify-center rounded-xl transition-colors ${
+                attachMenuOpen
+                  ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600'
+                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'
+              }`}
               aria-label="Anexar arquivo"
-              title="Anexar imagem, vídeo, áudio ou documento"
+              title="Anexar foto, vídeo ou documento"
             >
               <Paperclip size={18} />
             </button>
@@ -494,7 +550,6 @@ export function DealWhatsAppChat({
               ref={fileInputRef}
               type="file"
               className="hidden"
-              accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip"
               onChange={e => {
                 onPickFile(e.target.files?.[0] ?? null);
                 e.target.value = '';
