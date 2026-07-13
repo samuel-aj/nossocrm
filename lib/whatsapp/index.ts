@@ -18,11 +18,22 @@ export interface ConnectionLike {
   base_url?: string | null;
 }
 
+/**
+ * Remove sujeira invisível de valores de env colados via CLI/painel: BOM
+ * (U+FEFF — já quebrou o header apikey em produção), aspas e espaços.
+ */
+function cleanEnv(v?: string): string {
+  return (v ?? '')
+    .replace(/^﻿/, '')
+    .replace(/^["']|["']$/g, '')
+    .trim();
+}
+
 /** Base URL e token globais (fallback) vindos do ambiente do servidor. */
 export function envEvolution(): { baseUrl: string; token: string } {
   return {
-    baseUrl: process.env.EVOLUTION_BASE_URL || '',
-    token: process.env.EVOLUTION_API_KEY || '',
+    baseUrl: cleanEnv(process.env.EVOLUTION_BASE_URL),
+    token: cleanEnv(process.env.EVOLUTION_API_KEY),
   };
 }
 
