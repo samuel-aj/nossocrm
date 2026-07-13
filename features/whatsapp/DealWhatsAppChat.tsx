@@ -12,6 +12,10 @@ import {
   FileText,
   Image as ImageIcon,
   Video as VideoIcon,
+  Check,
+  CheckCheck,
+  Clock3,
+  AlertCircle,
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { useWhatsAppChat, type WaChatMessage, type WaMediaKind } from './useWhatsAppChat';
@@ -35,20 +39,21 @@ const EMOJIS = [
   '📷', '🎤', '💰', '💵', '📅', '⏰', '⚖️', '🚀',
 ];
 
-function statusTick(status: string): string {
+/** Ticks estilo WhatsApp: ⏱ enviando · ✓ enviada · ✓✓ entregue · ✓✓ AZUL lida. */
+function StatusTicks({ status }: { status: string }) {
   switch (status) {
     case 'read':
-      return '✓✓';
+      return <CheckCheck size={15} className="text-sky-300" strokeWidth={2.6} />;
     case 'delivered':
-      return '✓✓';
+      return <CheckCheck size={15} strokeWidth={2.4} />;
     case 'sent':
-      return '✓';
+      return <Check size={15} strokeWidth={2.4} />;
     case 'failed':
-      return '⚠';
+      return <AlertCircle size={13} className="text-red-200" />;
     case 'queued':
-      return '⏱';
+      return <Clock3 size={12} />;
     default:
-      return '';
+      return null;
   }
 }
 
@@ -138,13 +143,7 @@ function MessageBubble({ m }: { m: WaChatMessage }) {
           <span>{time}</span>
           {isOut && (
             <span
-              className={
-                m.status === 'read'
-                  ? 'text-sky-300 font-bold drop-shadow-sm' // ✓✓ AZUL = lida pelo contato
-                  : m.status === 'failed'
-                    ? 'text-red-200'
-                    : ''
-              }
+              className="inline-flex items-center"
               title={
                 m.status === 'read'
                   ? 'Lida'
@@ -157,7 +156,7 @@ function MessageBubble({ m }: { m: WaChatMessage }) {
                         : 'Enviando…'
               }
             >
-              {statusTick(m.status)}
+              <StatusTicks status={m.status} />
             </span>
           )}
         </div>

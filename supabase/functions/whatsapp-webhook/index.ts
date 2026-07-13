@@ -205,9 +205,8 @@ Deno.serve(async (req) => {
 
   // --- Status de entrega/leitura (✓✓) ---
   if (event === "messages.update") {
-    const item = Array.isArray(data) ? data[0] : data;
-    const id = item?.key?.id ?? item?.keyId;
-    const raw = String(item?.status ?? item?.update?.status ?? "").toUpperCase();
+    // a Evolution pode mandar VÁRIOS updates num só evento — processa todos
+    const items = Array.isArray(data) ? data : [data];
     const map: Record<string, string> = {
       SERVER_ACK: "sent",
       DELIVERY_ACK: "delivered",
@@ -215,13 +214,24 @@ Deno.serve(async (req) => {
       PLAYED: "read",
       ERROR: "failed",
     };
-    const status = map[raw];
-    if (id && status) {
+    // só avança o status (evento fora de ordem não rebaixa "lida" p/ "entregue")
+    const lowerThan: Record<string, string[]> = {
+      sent: ["queued"],
+      delivered: ["queued", "sent"],
+      read: ["queued", "sent", "delivered"],
+      failed: ["queued", "sent", "delivered"],
+    };
+    for (const item of items) {
+      const id = item?.key?.id ?? item?.keyId;
+      const raw = String(item?.status ?? item?.update?.status ?? "").toUpperCase();
+      const status = map[raw];
+      if (!id || !status) continue;
       await supabase
         .from("wa_messages")
         .update({ status })
         .eq("organization_id", orgId)
-        .eq("evolution_message_id", id);
+        .eq("evolution_message_id", id)
+        .in("status", lowerThan[status] ?? []);
     }
     return json(200, { ok: true });
   }
