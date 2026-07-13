@@ -169,8 +169,11 @@ export class EvolutionProvider implements WhatsAppProvider {
       'DELETE',
       `/instance/logout/${encodeURIComponent(this.instanceName)}`
     );
-    // 404 = já estava desconectado; qualquer outro erro é real
-    if (!ok && status !== 404) throw new Error(`Evolution respondeu ${status} no logout`);
+    // 404/400 = instância já desconectada (a v2 devolve 400 nesse caso);
+    // qualquer outro erro é real
+    if (!ok && status !== 404 && status !== 400) {
+      throw new Error(`Evolution respondeu ${status} no logout`);
+    }
   }
 
   async setWebhook(url: string): Promise<void> {

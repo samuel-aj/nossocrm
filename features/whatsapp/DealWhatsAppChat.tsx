@@ -237,20 +237,64 @@ export function DealWhatsAppChat({
   const [recSeconds, setRecSeconds] = useState(0);
   const [micError, setMicError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const cancelRecRef = useRef(false);
   const timerRef = useRef<number | null>(null);
+  // guards SÍNCRONOS (state só atualiza no próximo render):
+  const sendGateRef = useRef(false); // evita envio duplo durante awaits do onSend
+  const recStartingRef = useRef(false); // evita 2º mic durante o prompt de permissão
+  const disposedRef = useRef(false); // componente desmontado (getUserMedia pendente)
+  const previewUrlRef = useRef<string | null>(null); // p/ revogar blob URL no unmount
+  const forceScrollRef = useRef(false); // rola pro fim após envio próprio
 
   const messages = data?.messages ?? [];
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // só auto-rola se o usuário já está perto do fim (ou acabou de enviar) —
+    // senão o polling arranca a rolagem de quem está lendo o histórico
+    const el = listRef.current;
+    const nearBottom = !el || el.scrollHeight - el.scrollTop - el.clientHeight < 300;
+    if (nearBottom || forceScrollRef.current) {
+      forceScrollRef.current = false;
+      endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
   }, [messages.length]);
+
+  // espelha o previewUrl atual num ref pra conseguir revogar no unmount
+  useEffect(() => {
+    previewUrlRef.current = attachment?.previewUrl ?? null;
+  }, [attachment]);
+
+  // fecha os popovers (emoji / menu do clipe) com clique fora ou Escape
+  useEffect(() => {
+    if (!emojiOpen && !attachMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (composerRef.current && !composerRef.current.contains(e.target as Node)) {
+        setEmojiOpen(false);
+        setAttachMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setEmojiOpen(false);
+        setAttachMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [emojiOpen, attachMenuOpen]);
 
   // limpeza ao desmontar: para gravação/timer e libera o preview
   useEffect(() => {
     return () => {
+      disposedRef.current = true;
       if (timerRef.current) window.clearInterval(timerRef.current);
       try {
         cancelRecRef.current = true;
@@ -258,6 +302,7 @@ export function DealWhatsAppChat({
       } catch {
         // já parado
       }
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
     };
   }, []);
 
@@ -297,45 +342,80 @@ export function DealWhatsAppChat({
 
   const onSend = async () => {
     const t = text.trim();
-    if ((!t && !attachment) || send.isPending || recording) return;
+    // sendGateRef fecha a janela dos awaits (isPending só vira true no render)
+    if ((!t && !attachment) || send.isPending || recording || sendGateRef.current) return;
+    sendGateRef.current = true;
+    const releaseGate = () => {
+      sendGateRef.current = false;
+    };
 
-    if (attachment) {
-      let file: File | Blob = attachment.file;
-      let kind: WaMediaKind = attachment.kind;
-      let fileName = attachment.file.name || `arquivo_${Date.now()}`;
-      if (attachment.asSticker && attachment.kind === 'image') {
-        const webp = await toWebpSticker(attachment.file);
-        if (webp) {
-          file = webp;
-          kind = 'sticker';
-          fileName = fileName.replace(/\.[^.]+$/, '') + '.webp';
+    try {
+      if (attachment) {
+        let file: File | Blob = attachment.file;
+        let kind: WaMediaKind = attachment.kind;
+        let fileName = attachment.file.name || `arquivo_${Date.now()}`;
+        if (attachment.asSticker && attachment.kind === 'image') {
+          const webp = await toWebpSticker(attachment.file);
+          if (webp) {
+            file = webp;
+            kind = 'sticker';
+            fileName = fileName.replace(/\.[^.]+$/, '') + '.webp';
+          }
         }
+        const snapshot = attachment;
+        setText('');
+        clearAttachment();
+        forceScrollRef.current = true;
+        send.mutate(
+          { text: t, file, kind, fileName },
+          {
+            onSettled: releaseGate,
+            onError: () => {
+              // restaura sem clobberar o que o usuário fez enquanto enviava,
+              // e recria o preview (o blob URL antigo foi revogado no clear)
+              setText(curr => curr || t);
+              setAttachment(curr =>
+                curr
+                  ? curr
+                  : {
+                      ...snapshot,
+                      previewUrl:
+                        snapshot.kind === 'image' ? URL.createObjectURL(snapshot.file) : null,
+                    }
+              );
+            },
+          }
+        );
+      } else {
+        setText('');
+        forceScrollRef.current = true;
+        send.mutate(t, {
+          onSettled: releaseGate,
+          onError: () => setText(curr => curr || t),
+        });
       }
-      const snapshot = attachment;
-      setText('');
-      clearAttachment();
-      send.mutate(
-        { text: t, file, kind, fileName },
-        {
-          onError: () => {
-            setText(t);
-            setAttachment(snapshot);
-          },
-        }
-      );
-    } else {
-      setText('');
-      send.mutate(t, { onError: () => setText(t) });
+    } catch {
+      releaseGate();
     }
     setEmojiOpen(false);
+    setAttachMenuOpen(false);
   };
 
   const startRecording = async () => {
+    // reentrância: um 2º clique no mic durante o prompt de permissão criaria
+    // outro stream/recorder e o 1º ficaria gravando pra sempre
+    if (recStartingRef.current || recording) return;
+    recStartingRef.current = true;
     setMicError(null);
     setEmojiOpen(false);
     setAttachMenuOpen(false);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // usuário fechou o card enquanto o prompt estava aberto: solta o mic
+      if (disposedRef.current) {
+        stream.getTracks().forEach(tr => tr.stop());
+        return;
+      }
       const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
         ? 'audio/webm;codecs=opus'
         : MediaRecorder.isTypeSupported('audio/mp4')
@@ -352,7 +432,26 @@ export function DealWhatsAppChat({
         const blob = new Blob(chunksRef.current, { type: rec.mimeType || 'audio/webm' });
         if (!cancelRecRef.current && blob.size > 0) {
           const ext = (rec.mimeType || '').includes('mp4') ? 'm4a' : 'webm';
-          send.mutate({ file: blob, kind: 'audio', fileName: `voz_${Date.now()}.${ext}` });
+          const fileName = `voz_${Date.now()}.${ext}`;
+          forceScrollRef.current = true;
+          send.mutate(
+            { file: blob, kind: 'audio', fileName },
+            {
+              onError: () => {
+                // não perde a gravação: vira anexo pro usuário reenviar
+                setAttachment(curr =>
+                  curr
+                    ? curr
+                    : {
+                        file: new File([blob], fileName, { type: blob.type }),
+                        kind: 'audio',
+                        previewUrl: null,
+                        asSticker: false,
+                      }
+                );
+              },
+            }
+          );
         }
       };
       recorderRef.current = rec;
@@ -362,6 +461,8 @@ export function DealWhatsAppChat({
       timerRef.current = window.setInterval(() => setRecSeconds(s => s + 1), 1000);
     } catch {
       setMicError('Não foi possível acessar o microfone. Verifique a permissão do navegador.');
+    } finally {
+      recStartingRef.current = false;
     }
   };
 
@@ -406,7 +507,10 @@ export function DealWhatsAppChat({
       )}
 
       {/* Mensagens */}
-      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-custom px-4 py-3 space-y-2 bg-slate-50/40 dark:bg-black/10">
+      <div
+        ref={listRef}
+        className="flex-1 min-h-0 overflow-y-auto scrollbar-custom px-4 py-3 space-y-2 bg-slate-50/40 dark:bg-black/10"
+      >
         {isLoading && (
           <div className="h-full flex items-center justify-center text-slate-400">
             <Loader2 className="animate-spin" size={20} />
@@ -423,7 +527,10 @@ export function DealWhatsAppChat({
       </div>
 
       {/* Composer */}
-      <div className="shrink-0 border-t border-slate-200 dark:border-white/10 p-3 bg-white dark:bg-dark-card relative">
+      <div
+        ref={composerRef}
+        className="shrink-0 border-t border-slate-200 dark:border-white/10 p-3 bg-white dark:bg-dark-card relative"
+      >
         {send.isError && (
           <p className="mb-1.5 text-xs text-red-500">{(send.error as Error).message}</p>
         )}

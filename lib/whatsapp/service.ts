@@ -211,8 +211,33 @@ export async function recordOutboundMessage(
     })
     .select('*')
     .single();
-  if (error) throw new Error(error.message);
+
   const preview = input.text || (input.mediaType ? `[${input.mediaType}]` : '');
+
+  if (error) {
+    // Corrida com o ECO do webhook: a Evolution dispara MESSAGES_UPSERT da
+    // nossa própria mensagem quase junto da resposta HTTP; se o eco inseriu
+    // primeiro, o índice único (org, evolution_message_id) estoura aqui.
+    // A mensagem FOI enviada — reivindica a linha do eco (autoria/status) em
+    // vez de devolver erro (que faria o usuário reenviar em duplicidade).
+    const dup = error.code === '23505' || error.message.toLowerCase().includes('duplicate');
+    if (dup && input.providerMessageId) {
+      // só marca a autoria — o status do eco pode já ter avançado (entregue/lida)
+      const { data: claimed } = await admin
+        .from('wa_messages')
+        .update({ sent_by: input.sentBy, conversation_id: input.conversationId })
+        .eq('organization_id', input.orgId)
+        .eq('evolution_message_id', input.providerMessageId)
+        .select('*')
+        .single();
+      if (claimed) {
+        await touchConversation(admin, input.conversationId, preview);
+        return claimed as WaMessageRow;
+      }
+    }
+    throw new Error(error.message);
+  }
+
   await touchConversation(admin, input.conversationId, preview);
   return data as WaMessageRow;
 }

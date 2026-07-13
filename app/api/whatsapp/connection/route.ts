@@ -82,8 +82,8 @@ export async function POST(req: Request) {
     try {
       const created = await ensureEvolutionInstance(instanceName);
       token = created.token;
-      // persiste a base também: a Edge Function usa p/ buscar mídia (fallback)
-      baseUrl = envEvolution().baseUrl || null;
+      // persiste a base também (normalizada): a Edge Function usa p/ buscar mídia
+      baseUrl = envEvolution().baseUrl.replace(/\/+$/, '').replace(/\/manager$/, '') || null;
     } catch (e) {
       return json({ error: `Falha ao criar a instância: ${(e as Error).message}` }, 502);
     }

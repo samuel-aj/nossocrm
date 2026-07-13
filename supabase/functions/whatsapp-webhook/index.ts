@@ -183,8 +183,10 @@ Deno.serve(async (req) => {
     .maybeSingle();
   if (!conn) return json(200, { ok: true, ignored: "instancia nao vinculada" });
 
+  // Secret OBRIGATÓRIO: sem o segmento na URL (ou com valor errado), rejeita.
+  // Este secret é o único gate real da função (roda com service role).
   const pathSecret = getSecretFromPath(req);
-  if (pathSecret && String(conn.webhook_secret) !== String(pathSecret)) {
+  if (!pathSecret || String(conn.webhook_secret) !== String(pathSecret)) {
     return json(401, { error: "secret inválido" });
   }
 
@@ -298,7 +300,9 @@ Deno.serve(async (req) => {
         if (b64) bytes = base64ToBytes(b64);
         if (!bytes) {
           // fallback: pede a mídia pra Evolution (token/base salvos na conexão)
-          const evoBase = String(conn.base_url ?? Deno.env.get("EVOLUTION_BASE_URL") ?? "").replace(/\/+$/, "");
+          const evoBase = String(conn.base_url ?? Deno.env.get("EVOLUTION_BASE_URL") ?? "")
+            .replace(/\/+$/, "")
+            .replace(/\/manager$/, "");
           const evoToken = String(conn.instance_token ?? Deno.env.get("EVOLUTION_API_KEY") ?? "");
           if (evoBase && evoToken) {
             try {

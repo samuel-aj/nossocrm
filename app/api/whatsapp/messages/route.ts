@@ -31,15 +31,17 @@ export async function GET(req: Request) {
 
   let messages: unknown[] = [];
   if (convs.length > 0) {
+    // As 300 mais RECENTES (desc + limit), revertidas p/ ordem cronológica —
+    // asc + limit congelaria o chat nas 300 primeiras de conversas longas.
     const { data } = await auth.admin
       .from('wa_messages')
       .select(
         'id, direction, status, body, media_type, media_mime, media_url, from_phone, to_phone, wa_timestamp, created_at, sent_by'
       )
       .in('conversation_id', convs.map(c => c.id))
-      .order('created_at', { ascending: true })
+      .order('created_at', { ascending: false })
       .limit(300);
-    const rows = (data || []) as Array<Record<string, unknown>>;
+    const rows = ((data || []) as Array<Record<string, unknown>>).reverse();
 
     // media_url guarda o CAMINHO no bucket privado wa-media — assina URLs de
     // leitura (1h) pro chat exibir imagem/vídeo/áudio/documento.
