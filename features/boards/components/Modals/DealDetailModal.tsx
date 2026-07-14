@@ -781,12 +781,10 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                         type="button"
                         onClick={() => canAssignOwner && setOwnerMenuOpen(o => !o)}
                         disabled={!canAssignOwner}
-                        className={`flex items-center justify-center h-9 w-9 rounded-full ring-2 ring-white dark:ring-slate-800 shadow transition-transform duration-200 ${
-                          canAssignOwner ? 'hover:scale-110 cursor-pointer' : 'cursor-default'
-                        } ${
-                          deal.ownerId
-                            ? 'bg-gradient-to-br from-primary-500 to-primary-600 text-white font-bold text-xs'
-                            : 'border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-400 bg-transparent'
+                        className={`group flex items-center gap-2 pl-1 pr-2.5 py-1 rounded-full border shadow-sm transition-all duration-200 ${
+                          canAssignOwner
+                            ? 'cursor-pointer border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 hover:border-primary-400 dark:hover:border-primary-500/60 hover:shadow'
+                            : 'cursor-default border-slate-200 dark:border-white/10 bg-white dark:bg-white/5'
                         }`}
                         title={
                           dealOwner
@@ -797,7 +795,29 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                         }
                         aria-label="Responsável pelo lead"
                       >
-                        {dealOwner ? initials(dealOwner.name) : deal.ownerId ? <User size={15} /> : <UserPlus size={15} />}
+                        <span
+                          className={`flex items-center justify-center h-7 w-7 rounded-full shrink-0 ${
+                            deal.ownerId
+                              ? 'bg-gradient-to-br from-primary-500 to-primary-600 text-white font-bold text-[10px]'
+                              : 'border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-400'
+                          }`}
+                        >
+                          {dealOwner ? initials(dealOwner.name) : deal.ownerId ? <User size={13} /> : <UserPlus size={13} />}
+                        </span>
+                        <span className="flex flex-col items-start leading-tight text-left">
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                            Responsável
+                          </span>
+                          <span className="text-xs font-semibold text-slate-800 dark:text-white truncate max-w-[110px]">
+                            {dealOwner ? dealOwner.name : deal.ownerId ? 'Definido' : 'Definir'}
+                          </span>
+                        </span>
+                        {canAssignOwner && (
+                          <ChevronDown
+                            size={13}
+                            className={`text-slate-400 group-hover:text-primary-500 transition-transform duration-200 ${ownerMenuOpen ? 'rotate-180' : ''}`}
+                          />
+                        )}
                       </button>
                       {ownerMenuOpen && (
                         <>
