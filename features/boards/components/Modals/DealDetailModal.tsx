@@ -849,28 +849,33 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                               <span className="truncate">Sem responsável</span>
                               {!deal.ownerId && <Check size={14} className="ml-auto shrink-0" />}
                             </button>
-                            {orgMembers.map(u => (
-                              <button
-                                key={u.id}
-                                type="button"
-                                onClick={() => {
-                                  updateDeal(deal.id, { ownerId: u.id });
-                                  setOwnerMenuOpen(false);
-                                }}
-                                className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 ${
-                                  deal.ownerId === u.id ? 'bg-primary-500/10 text-primary-600 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200'
-                                }`}
-                              >
-                                <span className="h-7 w-7 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
-                                  {initials(u.name)}
-                                </span>
-                                <span className="truncate">
-                                  {u.name}
-                                  {u.role === 'admin' ? ' (admin)' : u.role === 'super_admin' ? ' (agência)' : ''}
-                                </span>
-                                {deal.ownerId === u.id && <Check size={14} className="ml-auto shrink-0" />}
-                              </button>
-                            ))}
+                            {/* atribuíveis: só vendedores e admins DA organização —
+                                super_admins (agência) ficam de fora das opções,
+                                mas o nome deles ainda resolve no chip se já forem donos */}
+                            {orgMembers
+                              .filter(u => u.role !== 'super_admin')
+                              .map(u => (
+                                <button
+                                  key={u.id}
+                                  type="button"
+                                  onClick={() => {
+                                    updateDeal(deal.id, { ownerId: u.id });
+                                    setOwnerMenuOpen(false);
+                                  }}
+                                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 ${
+                                    deal.ownerId === u.id ? 'bg-primary-500/10 text-primary-600 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200'
+                                  }`}
+                                >
+                                  <span className="h-7 w-7 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+                                    {initials(u.name)}
+                                  </span>
+                                  <span className="truncate">
+                                    {u.name}
+                                    {u.role === 'admin' ? ' (admin)' : ''}
+                                  </span>
+                                  {deal.ownerId === u.id && <Check size={14} className="ml-auto shrink-0" />}
+                                </button>
+                              ))}
                           </div>
                         </>
                       )}
