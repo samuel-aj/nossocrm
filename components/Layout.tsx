@@ -281,7 +281,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             do lead (fica 100% dentro do menu) e os ícones fazem crossfade */}
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className="absolute right-0 top-4 z-30 h-8 w-6 rounded-l-lg border border-r-0 border-slate-200 dark:border-white/15 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm shadow-sm flex items-center justify-center text-slate-500 hover:text-primary-600 dark:text-slate-300 dark:hover:text-primary-400 hover:bg-slate-50 dark:hover:bg-slate-700/90 transition-colors duration-300 focus-visible-ring"
+          className="absolute right-0 top-16 -translate-y-1/2 z-30 h-8 w-6 rounded-l-lg border border-r-0 border-slate-200 dark:border-white/15 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm shadow-sm flex items-center justify-center text-slate-500 hover:text-primary-600 dark:text-slate-300 dark:hover:text-primary-400 hover:bg-slate-50 dark:hover:bg-slate-700/90 transition-colors duration-300 focus-visible-ring"
           title={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'}
           aria-label={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'}
         >
