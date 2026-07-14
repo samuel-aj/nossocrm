@@ -72,6 +72,24 @@ const QUICK_ACTIVITY_TITLE_BY_TYPE: Record<'CALL' | 'MEETING' | 'EMAIL', string>
 // Performance: reuse date formatter instance.
 const PT_BR_DATETIME_FORMATTER = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 
+/** Cores determinísticas pros marcadores de tag (hash do nome → paleta fixa). */
+const TAG_MARKER_STYLES = [
+  { dot: 'bg-rose-500', chip: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/10 dark:text-rose-300 dark:border-rose-500/30' },
+  { dot: 'bg-amber-500', chip: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/30' },
+  { dot: 'bg-emerald-500', chip: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/30' },
+  { dot: 'bg-sky-500', chip: 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-500/10 dark:text-sky-300 dark:border-sky-500/30' },
+  { dot: 'bg-violet-500', chip: 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-500/10 dark:text-violet-300 dark:border-violet-500/30' },
+  { dot: 'bg-fuchsia-500', chip: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200 dark:bg-fuchsia-500/10 dark:text-fuchsia-300 dark:border-fuchsia-500/30' },
+  { dot: 'bg-teal-500', chip: 'bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-500/10 dark:text-teal-300 dark:border-teal-500/30' },
+  { dot: 'bg-orange-500', chip: 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:border-orange-500/30' },
+];
+
+function tagMarkerStyle(tag: string) {
+  let h = 0;
+  for (let i = 0; i < tag.length; i++) h = (h * 31 + tag.charCodeAt(i)) >>> 0;
+  return TAG_MARKER_STYLES[h % TAG_MARKER_STYLES.length];
+}
+
 /**
  * Componente React `DealDetailModal`.
  *
@@ -239,6 +257,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   // Criação de tag nova (exceção): só aparece ao escolher "Criar nova tag…"
   // no select — o campo padrão é SELEÇÃO, não escrita.
   const [tagCreating, setTagCreating] = useState(false);
+  const [tagMenuOpen, setTagMenuOpen] = useState(false);
   // Padrão: abre em tela cheia; o botão no topo alterna pro modo pequeno.
   const [viewMode, setViewMode] = useState<'modal' | 'fullscreen'>('fullscreen');
 
@@ -733,6 +752,127 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                       {deal.title}
                       <Pencil size={16} className="opacity-0 group-hover:opacity-50 text-slate-400" />
                     </h2>
+
+                    {/* TAGS como MARCADORES junto do nome (cor por tag; × no hover) */}
+                    {(deal.tags || []).map((tag) => {
+                      const style = tagMarkerStyle(tag);
+                      return (
+                        <span
+                          key={tag}
+                          className={`group inline-flex items-center gap-1.5 pl-2 pr-1 py-0.5 rounded-md border text-[11px] font-semibold ${style.chip}`}
+                        >
+                          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${style.dot}`} aria-hidden="true" />
+                          {tag}
+                          <button
+                            type="button"
+                            onClick={() => removeDealTag(tag)}
+                            className="opacity-0 group-hover:opacity-70 hover:!opacity-100 transition-opacity"
+                            aria-label={`Remover tag ${tag}`}
+                            title="Remover tag"
+                          >
+                            <X size={11} />
+                          </button>
+                        </span>
+                      );
+                    })}
+
+                    {/* + Tag: popover de SELEÇÃO (criar nova é exceção; oficial em Configurações) */}
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTagMenuOpen(o => !o);
+                          setTagCreating(false);
+                          setTagQuery('');
+                        }}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-dashed border-slate-300 dark:border-slate-600 text-[11px] font-semibold text-slate-400 hover:text-primary-600 hover:border-primary-400 dark:hover:text-primary-400 dark:hover:border-primary-500/60 transition-colors"
+                        title="Adicionar tag"
+                        aria-label="Adicionar tag"
+                      >
+                        <TagIcon size={11} /> Tag
+                      </button>
+                      {tagMenuOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setTagMenuOpen(false)} aria-hidden="true" />
+                          <div className="absolute left-0 top-7 z-50 w-60 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 p-1.5 animate-in fade-in slide-in-from-top-2 duration-150">
+                            {tagCreating ? (
+                              <div className="flex gap-1.5 p-1">
+                                <input
+                                  type="text"
+                                  autoFocus
+                                  value={tagQuery}
+                                  onChange={(e) => setTagQuery(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Escape') {
+                                      setTagCreating(false);
+                                      setTagQuery('');
+                                    }
+                                    if (e.key === 'Enter' && normalizeTag(tagQuery)) {
+                                      e.preventDefault();
+                                      addDealTag(tagQuery);
+                                      setTagCreating(false);
+                                      setTagMenuOpen(false);
+                                    }
+                                  }}
+                                  placeholder="Nome da nova tag..."
+                                  className="min-w-0 flex-1 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                                  aria-label="Nome da nova tag"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    addDealTag(tagQuery);
+                                    setTagCreating(false);
+                                    setTagMenuOpen(false);
+                                  }}
+                                  disabled={!normalizeTag(tagQuery)}
+                                  className="shrink-0 px-2.5 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold transition-colors"
+                                >
+                                  Criar
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="max-h-52 overflow-y-auto scrollbar-custom">
+                                  {selectableTags.length === 0 && (
+                                    <p className="px-2.5 py-2 text-xs text-slate-400 italic">
+                                      Todas as tags da organização já estão no lead.
+                                    </p>
+                                  )}
+                                  {selectableTags.map((t) => {
+                                    const style = tagMarkerStyle(t);
+                                    return (
+                                      <button
+                                        key={t}
+                                        type="button"
+                                        onClick={() => {
+                                          addDealTag(t);
+                                          setTagMenuOpen(false);
+                                        }}
+                                        className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-left text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
+                                      >
+                                        <span className={`h-2 w-2 rounded-full shrink-0 ${style.dot}`} aria-hidden="true" />
+                                        <span className="truncate">{t}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setTagCreating(true);
+                                    setTagQuery('');
+                                  }}
+                                  className="w-full mt-1 border-t border-slate-100 dark:border-white/10 pt-1.5 px-2.5 pb-1 text-left text-xs font-semibold text-primary-600 dark:text-primary-400 hover:underline"
+                                >
+                                  ➕ Criar nova tag…
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -1289,113 +1429,6 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                     </div>
                   </div>
                 )}
-
-                {/* TAGS */}
-                <div className="pt-4 border-t border-slate-100 dark:border-white/5">
-                  <h3 className="text-xs font-bold text-slate-400 uppercase mb-3 flex items-center gap-2">
-                    <TagIcon size={14} /> Tags
-                  </h3>
-
-                  <div className="flex flex-wrap gap-2">
-                    {(deal.tags || []).length === 0 ? (
-                      <p className="text-xs text-slate-500 italic">Sem tags.</p>
-                    ) : (
-                      (deal.tags || []).map((tag) => (
-                        <span
-                          key={tag}
-                          className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-full bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-white/10"
-                        >
-                          {tag}
-                          <button
-                            type="button"
-                            onClick={() => removeDealTag(tag)}
-                            className="ml-0.5 text-slate-400 hover:text-red-500 dark:hover:text-red-400"
-                            aria-label={`Remover tag ${tag}`}
-                            title="Remover tag"
-                          >
-                            <X size={12} />
-                          </button>
-                        </span>
-                      ))
-                    )}
-                  </div>
-
-                  <div className="mt-3">
-                    <label className="block text-[11px] font-bold text-slate-400 uppercase mb-1">
-                      Adicionar tag
-                    </label>
-                    {/* SELEÇÃO, não escrita: lista as tags da org pra escolher.
-                        Criar nova é exceção (última opção); gestão oficial em
-                        Configurações → Tags. */}
-                    <select
-                      value=""
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        if (v === '__create__') {
-                          setTagCreating(true);
-                          setTagQuery('');
-                          return;
-                        }
-                        if (v) addDealTag(v);
-                      }}
-                      className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white cursor-pointer"
-                      aria-label="Adicionar tag"
-                    >
-                      <option value="">Selecionar tag...</option>
-                      {selectableTags.map((t) => (
-                        <option key={t} value={t}>{t}</option>
-                      ))}
-                      <option value="__create__">➕ Criar nova tag…</option>
-                    </select>
-
-                    {tagCreating && (
-                      <div className="mt-2 flex gap-2">
-                        <input
-                          type="text"
-                          autoFocus
-                          value={tagQuery}
-                          onChange={(e) => setTagQuery(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Escape') {
-                              setTagCreating(false);
-                              setTagQuery('');
-                            }
-                            if (e.key === 'Enter' && normalizeTag(tagQuery)) {
-                              e.preventDefault();
-                              addDealTag(tagQuery);
-                              setTagCreating(false);
-                            }
-                          }}
-                          placeholder="Nome da nova tag..."
-                          className="min-w-0 flex-1 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
-                          aria-label="Nome da nova tag"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            addDealTag(tagQuery);
-                            setTagCreating(false);
-                          }}
-                          disabled={!normalizeTag(tagQuery)}
-                          className="shrink-0 px-3 py-2 rounded-lg bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold transition-colors"
-                        >
-                          Criar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setTagCreating(false);
-                            setTagQuery('');
-                          }}
-                          className="shrink-0 p-2 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors"
-                          aria-label="Cancelar criação de tag"
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
 
                 <div className="pt-4 border-t border-slate-100 dark:border-white/5">
                   <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Detalhes</h3>
