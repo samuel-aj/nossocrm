@@ -1464,13 +1464,10 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                           {groupedFieldDefs.map(([groupName, fields]) => {
                             const open = isCustomFieldsEditMode || !!openFieldGroups[groupName];
                             return (
+                              // mesmo respiro do bloco de UTMs (mt-4 + pt-4 + divisória)
                               <div
                                 key={groupName}
-                                className={`pt-3 mt-1 border-t border-slate-100 dark:border-white/5 ${
-                                  ungroupedFieldDefs.length === 0 && groupName === groupedFieldDefs[0][0]
-                                    ? 'border-t-0 pt-0 mt-0'
-                                    : ''
-                                }`}
+                                className="mt-4 pt-4 border-t border-slate-100 dark:border-white/5"
                               >
                                 <button
                                   type="button"
@@ -1491,7 +1488,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                                   />
                                 </button>
                                 {open && (
-                                  <div className="mt-1 divide-y divide-slate-100 dark:divide-white/5">
+                                  <div className="mt-2 divide-y divide-slate-100 dark:divide-white/5">
                                     {fields.map(renderFieldRow)}
                                   </div>
                                 )}
