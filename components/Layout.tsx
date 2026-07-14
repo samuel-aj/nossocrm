@@ -44,8 +44,7 @@ import {
   User,
   Bug,
   CheckSquare,
-  PanelLeftClose,
-  PanelLeftOpen,
+  ChevronLeft,
   Shield,
 } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
@@ -272,11 +271,27 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       {/* Sidebar - Collapsible */}
       {isDesktop ? (
       <aside
-        className={`hidden md:flex flex-col z-20 glass border-r border-[var(--color-border-subtle)] transition-all duration-300 ease-in-out ${sidebarCollapsed ? 'w-20' : 'w-64'
+        className={`relative hidden md:flex flex-col z-20 glass border-r border-[var(--color-border-subtle)] transition-all duration-300 ease-in-out ${sidebarCollapsed ? 'w-20' : 'w-64'
           }`}
         aria-label="Menu principal"
       >
-        <div className="h-16 flex items-center justify-between border-b border-[var(--color-border-subtle)] transition-[padding] duration-300 ease-in-out px-5">
+        {/* Alternar menu: botão ÚNICO flutuando na borda — nunca muda de lugar,
+            desliza junto com a largura e o ícone gira 180° (nada brusco) */}
+        <button
+          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          className="absolute -right-3 top-5 z-30 h-6 w-6 rounded-full border border-slate-200 dark:border-white/15 bg-white dark:bg-slate-800 shadow-md flex items-center justify-center text-slate-500 hover:text-primary-600 dark:text-slate-300 dark:hover:text-primary-400 hover:scale-110 transition-transform duration-300 ease-in-out focus-visible-ring"
+          title={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'}
+          aria-label={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'}
+        >
+          <ChevronLeft
+            size={14}
+            strokeWidth={2.5}
+            className={`transition-transform duration-300 ease-in-out ${sidebarCollapsed ? 'rotate-180' : 'rotate-0'}`}
+            aria-hidden="true"
+          />
+        </button>
+
+        <div className="h-16 flex items-center border-b border-[var(--color-border-subtle)] px-5">
           <div className={`flex items-center min-w-0 transition-[gap] duration-300 ease-in-out ${sidebarCollapsed ? 'gap-0' : 'gap-3'}`}>
             <div className="w-9 h-9 bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-lg shadow-primary-500/20 shrink-0" aria-hidden="true">
               {officeInitials}
@@ -285,19 +300,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               {officeName}
             </span>
           </div>
-
-          {/* Botão de recolher: some com fade+escala (sem desmontar de estalo) */}
-          <button
-            onClick={() => setSidebarCollapsed(true)}
-            className={`text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-md hover:bg-slate-100 dark:hover:bg-white/5 overflow-hidden transition-all duration-300 ease-in-out ${
-              sidebarCollapsed ? 'opacity-0 scale-75 max-w-0 p-0 pointer-events-none' : 'opacity-100 scale-100 max-w-8 p-1'
-            }`}
-            title="Recolher Menu"
-            tabIndex={sidebarCollapsed ? -1 : 0}
-            aria-hidden={sidebarCollapsed}
-          >
-            <PanelLeftClose size={20} />
-          </button>
         </div>
 
         <nav className="flex-1 p-4 space-y-2 flex flex-col" aria-label="Navegação do sistema">
@@ -326,22 +328,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           ))}
         </nav>
 
-        {/* Botão de expandir (rodapé): entra/sai com altura+fade animados */}
-        <div
-          className={`px-4 flex justify-center overflow-hidden transition-all duration-300 ease-in-out ${
-            sidebarCollapsed ? 'max-h-14 opacity-100 pb-2' : 'max-h-0 opacity-0 pb-0 pointer-events-none'
-          }`}
-          aria-hidden={!sidebarCollapsed}
-        >
-          <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="flex items-center justify-center w-10 h-10 p-2 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 transition-all"
-            title="Expandir Menu"
-            tabIndex={sidebarCollapsed ? 0 : -1}
-          >
-            <PanelLeftOpen size={20} />
-          </button>
-        </div>
 
         <div className="p-4 border-t border-[var(--color-border-subtle)]">
           <div className="relative">
@@ -440,21 +426,27 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             )}
           </div>
 
-          {/* Desenvolvido por Anúncio Jurídico */}
-          {!sidebarCollapsed && (
-            <div className="mt-3 pt-3 border-t border-[var(--color-border-subtle)] flex flex-col items-center gap-1">
-              <span className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest">
-                Desenvolvido por
-              </span>
-              <Image
-                src="/logo-aj-white.png"
-                alt="Anúncio Jurídico"
-                width={160}
-                height={64}
-                className="object-contain opacity-50 hover:opacity-80 transition-opacity"
-              />
-            </div>
-          )}
+          {/* Desenvolvido por Anúncio Jurídico (colapsa animado junto com o menu) */}
+          <div
+            className={`flex flex-col items-center gap-1 overflow-hidden transition-all duration-300 ease-in-out ${
+              sidebarCollapsed
+                ? 'max-h-0 opacity-0 mt-0 pt-0 border-t border-transparent'
+                : 'max-h-28 opacity-100 mt-3 pt-3 border-t border-[var(--color-border-subtle)]'
+            }`}
+            aria-hidden={sidebarCollapsed}
+          >
+            <span className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest whitespace-nowrap">
+              Desenvolvido por
+            </span>
+            <Image
+              src="/logo-aj-white.png"
+              alt="Anúncio Jurídico"
+              width={160}
+              height={64}
+              // logo branca: no modo claro vira silhueta preta (brightness-0)
+              className="object-contain opacity-50 hover:opacity-80 transition-opacity brightness-0 dark:brightness-100"
+            />
+          </div>
         </div>
       </aside>
       ) : null}
