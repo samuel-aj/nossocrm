@@ -1430,28 +1430,6 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                   </div>
                 )}
 
-                <div className="pt-4 border-t border-slate-100 dark:border-white/5">
-                  <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Detalhes</h3>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-500">Prioridade</span>
-                      <span className="text-slate-900 dark:text-white">
-                        {formatPriorityPtBr(deal.priority)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-500">Criado em</span>
-                      <span className="text-slate-900 dark:text-white">
-                        {PT_BR_DATETIME_FORMATTER.format(new Date(deal.createdAt))}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-500">Probabilidade</span>
-                      <span className="text-slate-900 dark:text-white">{deal.probability}%</span>
-                    </div>
-                  </div>
-                </div>
-
                 {/* UTMs — padrão em todos os cards, colapsável (fica escondido até abrir) */}
                 <div className="pt-4 border-t border-slate-100 dark:border-white/5">
                   <button
@@ -1489,6 +1467,29 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                       })}
                     </div>
                   )}
+                </div>
+
+                {/* Detalhes — abaixo das UTMs */}
+                <div className="pt-4 border-t border-slate-100 dark:border-white/5">
+                  <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Detalhes</h3>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-500">Prioridade</span>
+                      <span className="text-slate-900 dark:text-white">
+                        {formatPriorityPtBr(deal.priority)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-500">Criado em</span>
+                      <span className="text-slate-900 dark:text-white">
+                        {PT_BR_DATETIME_FORMATTER.format(new Date(deal.createdAt))}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-500">Probabilidade</span>
+                      <span className="text-slate-900 dark:text-white">{deal.probability}%</span>
+                    </div>
+                  </div>
                 </div>
 
               </div>
