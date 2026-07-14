@@ -29,6 +29,7 @@ import {
   ThumbsDown,
   Building2,
   User,
+  UserPlus,
   Package,
   Sword,
   CheckCircle2,
@@ -176,6 +177,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const [descriptionDraft, setDescriptionDraft] = useState('');
   const descriptionTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [utmsOpen, setUtmsOpen] = useState(false);
+  const [ownerMenuOpen, setOwnerMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'whatsapp' | 'timeline' | 'activities' | 'notes' | 'products' | 'info'>('whatsapp');
   const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -768,6 +770,84 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                 )}
               </div>
               <div className="flex gap-3 items-center">
+                {/* RESPONSÁVEL — bolinha de perfil no topo (clica pra trocar; só admin) */}
+                {(canAssignOwner || deal.ownerId) && (() => {
+                  const dealOwner = orgUsers.find(u => u.id === deal.ownerId) ?? null;
+                  const initials = (name: string) =>
+                    name.split(/\s+/).slice(0, 2).map(p => p[0]?.toUpperCase() ?? '').join('') || '?';
+                  return (
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => canAssignOwner && setOwnerMenuOpen(o => !o)}
+                        disabled={!canAssignOwner}
+                        className={`flex items-center justify-center h-9 w-9 rounded-full ring-2 ring-white dark:ring-slate-800 shadow transition-transform duration-200 ${
+                          canAssignOwner ? 'hover:scale-110 cursor-pointer' : 'cursor-default'
+                        } ${
+                          deal.ownerId
+                            ? 'bg-gradient-to-br from-primary-500 to-primary-600 text-white font-bold text-xs'
+                            : 'border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-400 bg-transparent'
+                        }`}
+                        title={
+                          dealOwner
+                            ? `Responsável: ${dealOwner.name}`
+                            : deal.ownerId
+                              ? 'Responsável definido'
+                              : 'Definir responsável'
+                        }
+                        aria-label="Responsável pelo lead"
+                      >
+                        {dealOwner ? initials(dealOwner.name) : deal.ownerId ? <User size={15} /> : <UserPlus size={15} />}
+                      </button>
+                      {ownerMenuOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setOwnerMenuOpen(false)} aria-hidden="true" />
+                          <div className="absolute right-0 top-11 z-50 w-60 max-h-72 overflow-y-auto scrollbar-custom bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 p-1.5 animate-in fade-in slide-in-from-top-2 duration-150">
+                            <p className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Responsável</p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                updateDeal(deal.id, { ownerId: '' });
+                                setOwnerMenuOpen(false);
+                              }}
+                              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 ${
+                                !deal.ownerId ? 'bg-primary-500/10 text-primary-600 dark:text-primary-300' : 'text-slate-600 dark:text-slate-300'
+                              }`}
+                            >
+                              <span className="h-7 w-7 rounded-full border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-400 flex items-center justify-center shrink-0">
+                                <UserPlus size={13} />
+                              </span>
+                              <span className="truncate">Sem responsável</span>
+                              {!deal.ownerId && <Check size={14} className="ml-auto shrink-0" />}
+                            </button>
+                            {orgUsers.map(u => (
+                              <button
+                                key={u.id}
+                                type="button"
+                                onClick={() => {
+                                  updateDeal(deal.id, { ownerId: u.id });
+                                  setOwnerMenuOpen(false);
+                                }}
+                                className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 ${
+                                  deal.ownerId === u.id ? 'bg-primary-500/10 text-primary-600 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200'
+                                }`}
+                              >
+                                <span className="h-7 w-7 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+                                  {initials(u.name)}
+                                </span>
+                                <span className="truncate">
+                                  {u.name}
+                                  {u.role === 'admin' ? ' (admin)' : ''}
+                                </span>
+                                {deal.ownerId === u.id && <Check size={14} className="ml-auto shrink-0" />}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
                 {/* Se fechado: mostra badge + botão Reabrir */}
                 {(deal.isWon || deal.isLost) ? (
                   <>
@@ -1344,26 +1424,6 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                   )}
                 </div>
 
-                {/* RESPONSÁVEL (owner) — só admin/super_admin pode atribuir — última seção */}
-                {canAssignOwner && (
-                  <div className="pt-4 border-t border-slate-100 dark:border-white/5">
-                    <h3 className="text-xs font-bold text-slate-400 uppercase mb-2 flex items-center gap-2">
-                      <User size={14} /> Responsável
-                    </h3>
-                    <select
-                      value={deal.ownerId || ''}
-                      onChange={(e) => updateDeal(deal.id, { ownerId: e.target.value })}
-                      className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-2.5 py-2 text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 outline-none"
-                    >
-                      <option value="">Sem responsável</option>
-                      {orgUsers.map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {u.name}{u.role === 'admin' ? ' (admin)' : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
               </div>
             </div>
 
