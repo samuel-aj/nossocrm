@@ -388,16 +388,33 @@ export function DealWhatsAppChat({
   const forceScrollRef = useRef(false); // rola pro fim após envio próprio
 
   const messages = data?.messages ?? [];
+  // primeira carga da conversa: abre DIRETO na mensagem mais recente (embaixo)
+  const initialScrollDoneRef = useRef(false);
   useEffect(() => {
-    // só auto-rola se o usuário já está perto do fim (ou acabou de enviar) —
-    // senão o polling arranca a rolagem de quem está lendo o histórico
+    initialScrollDoneRef.current = false;
+  }, [phone]);
+  useEffect(() => {
     const el = listRef.current;
-    const nearBottom = !el || el.scrollHeight - el.scrollTop - el.clientHeight < 300;
+    if (!el) return;
+    if (!initialScrollDoneRef.current) {
+      if (messages.length > 0) {
+        el.scrollTop = el.scrollHeight; // instantâneo, sem animação
+        // mídias carregam depois e aumentam a altura — reancora no fim
+        window.setTimeout(() => {
+          el.scrollTop = el.scrollHeight;
+        }, 250);
+        initialScrollDoneRef.current = true;
+      }
+      return;
+    }
+    // depois: só auto-rola se o usuário já está perto do fim (ou acabou de
+    // enviar) — senão o polling arranca a rolagem de quem lê o histórico
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 300;
     if (nearBottom || forceScrollRef.current) {
       forceScrollRef.current = false;
       endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
-  }, [messages.length]);
+  }, [messages.length, phone]);
 
   // espelha o previewUrl atual num ref pra conseguir revogar no unmount
   useEffect(() => {
