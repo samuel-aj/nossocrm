@@ -114,10 +114,29 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     lifecycleStages,
     availableTags,
     addTag,
+    sidebarCollapsed,
+    setSidebarCollapsed,
   } = useCRM();
   const { profile } = useAuth();
   const { addToast } = useToast();
   const { users: orgUsers, isAdmin: canAssignOwner } = useOrgUsers();
+
+  // Card aberto = menu lateral RECOLHIDO por padrão (foco total no lead).
+  // O usuário ainda pode expandir pelo botão do menu; ao fechar o card,
+  // o estado anterior é restaurado. A transição anima dos dois lados
+  // (largura do menu no Layout + left do overlay aqui embaixo).
+  const sidebarCollapsedRef = useRef(sidebarCollapsed);
+  useEffect(() => {
+    sidebarCollapsedRef.current = sidebarCollapsed;
+  }, [sidebarCollapsed]);
+  useEffect(() => {
+    if (!isOpen) return;
+    const wasCollapsed = sidebarCollapsedRef.current;
+    setSidebarCollapsed(true);
+    return () => {
+      if (!wasCollapsed) setSidebarCollapsed(false);
+    };
+  }, [isOpen, setSidebarCollapsed]);
 
   // Performance: avoid repeated `find(...)` on large arrays.
   const dealsById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
@@ -2115,7 +2134,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
         // Backdrop + positioning wrapper. Clicking outside the panel should close the modal.
         // No desktop, este modal não deve cobrir a sidebar de navegação.
         // Em md+ deslocamos o overlay pela largura da sidebar via `--app-sidebar-width`.
-        className={`fixed inset-0 md:left-[var(--app-sidebar-width,0px)] z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200 transition-[padding] ${viewMode === 'fullscreen' ? 'p-0' : 'p-4'}`}
+        className={`fixed inset-0 md:left-[var(--app-sidebar-width,0px)] z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-in fade-in transition-[left,padding] duration-300 ease-in-out ${viewMode === 'fullscreen' ? 'p-0' : 'p-4'}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={headingId}
