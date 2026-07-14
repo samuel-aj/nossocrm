@@ -2198,8 +2198,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   return (
     // allowOutsideClick: menu lateral (Inbox, Visão Geral, recolher…) continua
     // clicável com o card aberto; o foco por teclado segue preso no modal.
-    {/* initialFocus no contêiner: sem isso o 1º botão (hub do responsável)
-        abria já com anel de foco, parecendo selecionado por padrão */}
+    // initialFocus no contêiner: sem isso o 1º botão (hub do responsável)
+    // abria já com anel de foco, parecendo selecionado por padrão.
     <FocusTrap
       active={isOpen}
       onEscape={onClose}
