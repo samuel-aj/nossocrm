@@ -276,31 +276,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           }`}
         aria-label="Menu principal"
       >
-        {/* Alternar menu: "abinha" ÚNICA encostada por DENTRO da borda — nunca
-            muda de lugar, desliza junto com a largura, não é coberta pelo card
-            do lead (fica 100% dentro do menu) e os ícones fazem crossfade */}
-        <button
-          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className="absolute right-0 top-16 -translate-y-1/2 z-30 h-8 w-6 rounded-l-lg border border-r-0 border-slate-200 dark:border-white/15 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm shadow-sm flex items-center justify-center text-slate-500 hover:text-primary-600 dark:text-slate-300 dark:hover:text-primary-400 hover:bg-slate-50 dark:hover:bg-slate-700/90 transition-colors duration-300 focus-visible-ring"
-          title={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'}
-          aria-label={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'}
-        >
-          <span className="relative block h-4 w-4" aria-hidden="true">
-            <PanelLeftClose
-              size={16}
-              className={`absolute inset-0 transition-all duration-300 ease-in-out ${
-                sidebarCollapsed ? 'opacity-0 scale-75' : 'opacity-100 scale-100'
-              }`}
-            />
-            <PanelLeftOpen
-              size={16}
-              className={`absolute inset-0 transition-all duration-300 ease-in-out ${
-                sidebarCollapsed ? 'opacity-100 scale-100' : 'opacity-0 scale-75'
-              }`}
-            />
-          </span>
-        </button>
-
         <div className="h-16 flex items-center border-b border-[var(--color-border-subtle)] px-5">
           <div className={`flex items-center min-w-0 transition-[gap] duration-300 ease-in-out ${sidebarCollapsed ? 'gap-0' : 'gap-3'}`}>
             <div className="w-9 h-9 bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-lg shadow-primary-500/20 shrink-0" aria-hidden="true">
@@ -338,6 +313,40 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           ))}
         </nav>
 
+        {/* Alternar menu: item no FLUXO, embaixo (acima do cartão do usuário) —
+            nunca invade outro elemento e anima igual aos itens de navegação */}
+        <div className="px-4 pb-1">
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className={`flex items-center w-full py-2.5 rounded-lg text-sm font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-700 dark:hover:text-white overflow-hidden transition-[padding,gap,background-color,color] duration-300 ease-in-out focus-visible-ring ${
+              sidebarCollapsed ? 'px-[13px] gap-0' : 'px-4 gap-3'
+            }`}
+            title={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'}
+            aria-label={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'}
+          >
+            <span className="relative block h-5 w-5 shrink-0" aria-hidden="true">
+              <PanelLeftClose
+                size={20}
+                className={`absolute inset-0 transition-all duration-300 ease-in-out ${
+                  sidebarCollapsed ? 'opacity-0 scale-75' : 'opacity-100 scale-100'
+                }`}
+              />
+              <PanelLeftOpen
+                size={20}
+                className={`absolute inset-0 transition-all duration-300 ease-in-out ${
+                  sidebarCollapsed ? 'opacity-100 scale-100' : 'opacity-0 scale-75'
+                }`}
+              />
+            </span>
+            <span
+              className={`font-display tracking-wide whitespace-nowrap overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-in-out ${
+                sidebarCollapsed ? 'max-w-0 opacity-0 -translate-x-2' : 'max-w-[9rem] opacity-100 translate-x-0'
+              }`}
+            >
+              Recolher menu
+            </span>
+          </button>
+        </div>
 
         <div className="p-4 border-t border-[var(--color-border-subtle)]">
           <div className="relative">
