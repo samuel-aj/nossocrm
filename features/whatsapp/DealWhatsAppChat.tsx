@@ -16,6 +16,9 @@ import {
   CheckCheck,
   Clock3,
   AlertCircle,
+  Search,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { useWhatsAppChat, type WaChatMessage, type WaMediaKind } from './useWhatsAppChat';
@@ -59,6 +62,53 @@ function StatusTicks({ status }: { status: string }) {
 }
 
 const URL_RE = /(https?:\/\/[^\s]+)/g;
+
+/** Normaliza pra busca: minúsculas e sem acentos (acha "João" com "joao"). */
+function normText(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+
+/**
+ * Ocorrências da busca no texto ORIGINAL (índices), com casamento
+ * insensível a caixa/acentos — mapeia os índices normalizados de volta.
+ */
+function findTextMatches(text: string, query: string): Array<[number, number]> {
+  const nq = normText(query);
+  if (!nq) return [];
+  let acc = '';
+  const map: number[] = []; // índice normalizado -> índice original
+  for (let i = 0; i < text.length; i++) {
+    const n = normText(text[i]);
+    for (let j = 0; j < n.length; j++) map.push(i);
+    acc += n;
+  }
+  const out: Array<[number, number]> = [];
+  let pos = acc.indexOf(nq);
+  while (pos !== -1 && map[pos] !== undefined) {
+    out.push([map[pos], (map[pos + nq.length - 1] ?? map[pos]) + 1]);
+    pos = acc.indexOf(nq, pos + nq.length);
+  }
+  return out;
+}
+
+/** Texto com as ocorrências da busca destacadas. */
+function HighlightedText({ text, query, className }: { text: string; query: string; className?: string }) {
+  const ranges = findTextMatches(text, query);
+  if (ranges.length === 0) return <p className={className}>{text}</p>;
+  const nodes: React.ReactNode[] = [];
+  let last = 0;
+  ranges.forEach(([s, e], i) => {
+    if (s > last) nodes.push(text.slice(last, s));
+    nodes.push(
+      <mark key={i} className="bg-amber-300/80 text-slate-900 rounded px-0.5">
+        {text.slice(s, e)}
+      </mark>
+    );
+    last = e;
+  });
+  if (last < text.length) nodes.push(text.slice(last));
+  return <p className={className}>{nodes}</p>;
+}
 
 /** Texto da bolha com URLs clicáveis (ex.: link do Maps em localizações). */
 function LinkifiedText({ text, className }: { text: string; className?: string }) {
@@ -176,7 +226,15 @@ function MediaContent({ m }: { m: WaChatMessage }) {
   }
 }
 
-function MessageBubble({ m }: { m: WaChatMessage }) {
+function MessageBubble({
+  m,
+  searchQuery = '',
+  isCurrentMatch = false,
+}: {
+  m: WaChatMessage;
+  searchQuery?: string;
+  isCurrentMatch?: boolean;
+}) {
   const isOut = m.direction === 'out';
   const time = (() => {
     const raw = m.wa_timestamp || m.created_at;
@@ -190,14 +248,22 @@ function MessageBubble({ m }: { m: WaChatMessage }) {
           isOut
             ? 'bg-emerald-600 text-white rounded-br-sm'
             : 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-bl-sm border border-slate-200 dark:border-white/10'
-        }`}
+        } ${isCurrentMatch ? 'ring-2 ring-amber-400' : ''}`}
       >
         <MediaContent m={m} />
         {m.body && m.media_type !== 'contact' ? (
-          <LinkifiedText
-            text={m.body}
-            className={`whitespace-pre-wrap break-words ${m.media_type ? 'mt-1.5' : ''}`}
-          />
+          searchQuery ? (
+            <HighlightedText
+              text={m.body}
+              query={searchQuery}
+              className={`whitespace-pre-wrap break-words ${m.media_type ? 'mt-1.5' : ''}`}
+            />
+          ) : (
+            <LinkifiedText
+              text={m.body}
+              className={`whitespace-pre-wrap break-words ${m.media_type ? 'mt-1.5' : ''}`}
+            />
+          )
         ) : !m.media_type ? (
           <p className="italic opacity-70">[mensagem não suportada]</p>
         ) : null}
@@ -301,6 +367,11 @@ export function DealWhatsAppChat({
   const [recording, setRecording] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
   const [micError, setMicError] = useState<string | null>(null);
+  // Pesquisa de mensagens (estilo WhatsApp): barra + navegação entre matches
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [matchIndex, setMatchIndex] = useState(-1); // -1 = match mais recente
+  const msgRefs = useRef(new Map<string, HTMLDivElement>());
   const endRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
@@ -332,6 +403,46 @@ export function DealWhatsAppChat({
   useEffect(() => {
     previewUrlRef.current = attachment?.previewUrl ?? null;
   }, [attachment]);
+
+  // ==== Pesquisa de mensagens ====
+  const activeQuery = searchOpen ? searchQuery.trim() : '';
+  const searchMatches = useMemo(() => {
+    if (!activeQuery) return [] as string[];
+    const nq = normText(activeQuery);
+    return messages.filter(m => m.body && normText(m.body).includes(nq)).map(m => m.id);
+  }, [messages, activeQuery]);
+
+  // mudou a busca: volta pro match mais recente (comportamento do WhatsApp)
+  useEffect(() => {
+    setMatchIndex(-1);
+  }, [searchQuery, searchOpen]);
+
+  const effMatchIndex =
+    searchMatches.length === 0
+      ? -1
+      : matchIndex === -1
+        ? searchMatches.length - 1
+        : Math.min(matchIndex, searchMatches.length - 1);
+  const currentMatchId = effMatchIndex >= 0 ? searchMatches[effMatchIndex] : null;
+
+  // rola até o match atual
+  useEffect(() => {
+    if (!currentMatchId) return;
+    msgRefs.current.get(currentMatchId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [currentMatchId]);
+
+  const gotoMatch = (dir: 1 | -1) => {
+    const len = searchMatches.length;
+    if (len === 0) return;
+    const base = effMatchIndex === -1 ? len - 1 : effMatchIndex;
+    setMatchIndex((base + dir + len) % len);
+  };
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setSearchQuery('');
+    setMatchIndex(-1);
+  };
 
   // fecha os popovers (emoji / menu do clipe) com clique fora ou Escape
   useEffect(() => {
@@ -558,10 +669,80 @@ export function DealWhatsAppChat({
           </p>
           <p className="text-[11px] text-slate-500">{phone}</p>
         </div>
-        {data && !data.connected && (
-          <span className="ml-auto text-[11px] text-amber-600 dark:text-amber-400">WhatsApp desconectado</span>
-        )}
+        <div className="ml-auto flex items-center gap-2">
+          {data && !data.connected && (
+            <span className="text-[11px] text-amber-600 dark:text-amber-400">WhatsApp desconectado</span>
+          )}
+          <button
+            type="button"
+            onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
+            className={`h-8 w-8 inline-flex items-center justify-center rounded-lg transition-colors ${
+              searchOpen
+                ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600'
+                : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'
+            }`}
+            aria-label="Pesquisar mensagens"
+            title="Pesquisar mensagens"
+          >
+            <Search size={16} />
+          </button>
+        </div>
       </div>
+
+      {/* Barra de pesquisa de mensagens */}
+      {searchOpen && (
+        <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card">
+          <Search size={15} className="text-slate-400 shrink-0" />
+          <input
+            autoFocus
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                gotoMatch(e.shiftKey ? 1 : -1);
+              }
+              if (e.key === 'Escape') closeSearch();
+            }}
+            placeholder="Pesquisar mensagens..."
+            className="flex-1 bg-transparent text-sm outline-none text-slate-900 dark:text-white"
+          />
+          {activeQuery && (
+            <span className="text-xs text-slate-400 tabular-nums shrink-0">
+              {searchMatches.length > 0 ? `${effMatchIndex + 1}/${searchMatches.length}` : '0 resultados'}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => gotoMatch(-1)}
+            disabled={searchMatches.length === 0}
+            className="h-7 w-7 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 disabled:opacity-40"
+            aria-label="Resultado anterior (mais antigo)"
+            title="Mais antigo"
+          >
+            <ChevronUp size={16} />
+          </button>
+          <button
+            type="button"
+            onClick={() => gotoMatch(1)}
+            disabled={searchMatches.length === 0}
+            className="h-7 w-7 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 disabled:opacity-40"
+            aria-label="Próximo resultado (mais recente)"
+            title="Mais recente"
+          >
+            <ChevronDown size={16} />
+          </button>
+          <button
+            type="button"
+            onClick={closeSearch}
+            className="h-7 w-7 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-red-500"
+            aria-label="Fechar pesquisa"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       {/* Aviso de não-conectado */}
       {data && !data.hasConnection && (
@@ -586,7 +767,15 @@ export function DealWhatsAppChat({
           <CenterMsg>Nenhuma mensagem ainda. Envie a primeira mensagem 👇</CenterMsg>
         )}
         {messages.map((m) => (
-          <MessageBubble key={m.id} m={m} />
+          <div
+            key={m.id}
+            ref={el => {
+              if (el) msgRefs.current.set(m.id, el);
+              else msgRefs.current.delete(m.id);
+            }}
+          >
+            <MessageBubble m={m} searchQuery={activeQuery} isCurrentMatch={m.id === currentMatchId} />
+          </div>
         ))}
         <div ref={endRef} />
       </div>
