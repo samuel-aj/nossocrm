@@ -4,7 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import ConfirmModal from '@/components/ConfirmModal';
 import { LossReasonModal } from '@/components/ui/LossReasonModal';
-import { useMoveDealSimple, useDeal, useOrgUsers } from '@/lib/query/hooks';
+import { useMoveDealSimple, useDeal, useOrgUsers, useOrgMembers } from '@/lib/query/hooks';
 import { FocusTrap, useFocusReturn } from '@/lib/a11y';
 import { Activity } from '@/types';
 
@@ -120,7 +120,10 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   } = useCRM();
   const { profile } = useAuth();
   const { addToast } = useToast();
-  const { users: orgUsers, isAdmin: canAssignOwner } = useOrgUsers();
+  const { isAdmin: canAssignOwner } = useOrgUsers();
+  // Nomes p/ exibir/atribuir responsável: acessível a todo membro e inclui
+  // super_admins (o organization_id deles muda ao trocar de org ativa)
+  const { data: orgMembers = [] } = useOrgMembers();
 
   // Card aberto = menu lateral RECOLHIDO por padrão (foco total no lead).
   // O usuário ainda pode expandir pelo botão do menu; ao fechar o card,
@@ -772,7 +775,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
               <div className="flex gap-3 items-center">
                 {/* RESPONSÁVEL — bolinha de perfil no topo (clica pra trocar; só admin) */}
                 {(canAssignOwner || deal.ownerId) && (() => {
-                  const dealOwner = orgUsers.find(u => u.id === deal.ownerId) ?? null;
+                  const dealOwner = orgMembers.find(u => u.id === deal.ownerId) ?? null;
                   const initials = (name: string) =>
                     name.split(/\s+/).slice(0, 2).map(p => p[0]?.toUpperCase() ?? '').join('') || '?';
                   return (
@@ -790,7 +793,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                           dealOwner
                             ? `Responsável: ${dealOwner.name}`
                             : deal.ownerId
-                              ? 'Responsável definido'
+                              ? 'Responsável não encontrado (usuário removido da organização)'
                               : 'Definir responsável'
                         }
                         aria-label="Responsável pelo lead"
@@ -810,7 +813,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                           </span>
                           {dealOwner || deal.ownerId ? (
                             <span className="text-xs font-semibold text-slate-800 dark:text-white truncate max-w-[110px] leading-none">
-                              {dealOwner ? dealOwner.name : 'Definido'}
+                              {dealOwner ? dealOwner.name : 'Usuário removido'}
                             </span>
                           ) : (
                             <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 truncate max-w-[110px] leading-none">
@@ -846,7 +849,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                               <span className="truncate">Sem responsável</span>
                               {!deal.ownerId && <Check size={14} className="ml-auto shrink-0" />}
                             </button>
-                            {orgUsers.map(u => (
+                            {orgMembers.map(u => (
                               <button
                                 key={u.id}
                                 type="button"
@@ -863,7 +866,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                                 </span>
                                 <span className="truncate">
                                   {u.name}
-                                  {u.role === 'admin' ? ' (admin)' : ''}
+                                  {u.role === 'admin' ? ' (admin)' : u.role === 'super_admin' ? ' (agência)' : ''}
                                 </span>
                                 {deal.ownerId === u.id && <Check size={14} className="ml-auto shrink-0" />}
                               </button>

@@ -92,6 +92,8 @@ export {
 // Org users (responsável / owner picker)
 export { useOrgUsers } from './useOrgUsers';
 export type { OrgUser } from './useOrgUsers';
+export { useOrgMembers } from './useOrgMembers';
+export type { OrgMember } from './useOrgMembers';
 
 // Preferências da organização (ex.: etapa Inativos)
 export { useOrgPreferences } from './useOrgPreferences';
