@@ -93,6 +93,7 @@ const NavItem = ({
   clickedPath,
   onItemClick,
   badge,
+  collapsed = false,
 }: {
   to: string;
   icon: React.ComponentType<{ size?: number; className?: string }>;
@@ -101,6 +102,8 @@ const NavItem = ({
   clickedPath?: string;
   onItemClick?: (path: string) => void;
   badge?: string;
+  /** Menu recolhido: o MESMO markup anima o texto pra fora (sem troca de JSX). */
+  collapsed?: boolean;
 }) => {
   const pathname = usePathname();
   const isActive = pathname === to || (to === '/boards' && pathname === '/pipeline');
@@ -117,18 +120,40 @@ const NavItem = ({
       onMouseEnter={prefetch ? () => prefetchRoute(prefetch) : undefined}
       onFocus={prefetch ? () => prefetchRoute(prefetch) : undefined}
       onClick={() => onItemClick?.(to)}
-      className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium focus-visible-ring
+      title={collapsed ? label : undefined}
+      className={`relative flex items-center py-3 rounded-lg text-sm font-medium focus-visible-ring overflow-hidden
+    transition-[padding,gap,background-color,color,border-color] duration-300 ease-in-out
+    ${collapsed ? 'px-[13px] gap-0' : 'px-4 gap-3'}
     ${isActuallyActive
           ? 'bg-primary-500/10 text-primary-600 dark:text-primary-400 border border-primary-200 dark:border-primary-900/50'
           : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white'
         }`}
     >
-      <Icon size={20} className={isActuallyActive ? 'text-primary-500' : ''} aria-hidden="true" />
-      <span className="font-display tracking-wide">{label}</span>
+      <Icon size={20} className={`shrink-0 ${isActuallyActive ? 'text-primary-500' : ''}`} aria-hidden="true" />
+      <span
+        className={`font-display tracking-wide whitespace-nowrap overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-in-out ${
+          collapsed ? 'max-w-0 opacity-0 -translate-x-2' : 'max-w-[9rem] opacity-100 translate-x-0'
+        }`}
+      >
+        {label}
+      </span>
       {badge && (
-        <span className="ml-auto rounded-full bg-primary-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-600 dark:text-primary-400">
+        <span
+          className={`ml-auto rounded-full bg-primary-500/15 text-[10px] font-bold uppercase tracking-wide text-primary-600 dark:text-primary-400 whitespace-nowrap overflow-hidden transition-[max-width,opacity,padding] duration-300 ease-in-out ${
+            collapsed ? 'max-w-0 opacity-0 px-0 py-0' : 'max-w-[4rem] opacity-100 px-2 py-0.5'
+          }`}
+        >
           {badge}
         </span>
+      )}
+      {/* no modo recolhido, o badge vira uma bolinha (crossfade) */}
+      {badge && (
+        <span
+          className={`absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-primary-500 transition-opacity duration-300 ${
+            collapsed ? 'opacity-100' : 'opacity-0'
+          }`}
+          aria-hidden="true"
+        />
       )}
     </Link>
   );
@@ -247,33 +272,35 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       {/* Sidebar - Collapsible */}
       {isDesktop ? (
       <aside
-        className={`hidden md:flex flex-col z-20 glass border-r border-[var(--color-border-subtle)] transition-all duration-300 ease-in-out ${sidebarCollapsed ? 'w-20 items-center' : 'w-64'
+        className={`hidden md:flex flex-col z-20 glass border-r border-[var(--color-border-subtle)] transition-all duration-300 ease-in-out ${sidebarCollapsed ? 'w-20' : 'w-64'
           }`}
         aria-label="Menu principal"
       >
-        <div className={`h-16 flex items-center border-b border-[var(--color-border-subtle)] transition-all duration-300 px-5 ${sidebarCollapsed ? 'justify-center px-0' : 'justify-between'}`}>
-          <div className={`flex items-center min-w-0 transition-all duration-300 ${sidebarCollapsed ? 'gap-0 justify-center' : 'gap-3'}`}>
+        <div className="h-16 flex items-center justify-between border-b border-[var(--color-border-subtle)] transition-[padding] duration-300 ease-in-out px-5">
+          <div className={`flex items-center min-w-0 transition-[gap] duration-300 ease-in-out ${sidebarCollapsed ? 'gap-0' : 'gap-3'}`}>
             <div className="w-9 h-9 bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-lg shadow-primary-500/20 shrink-0" aria-hidden="true">
               {officeInitials}
             </div>
-            <span className={`text-sm font-bold font-display tracking-tight text-slate-900 dark:text-white truncate transition-all duration-300 ${sidebarCollapsed ? 'max-w-0 opacity-0 overflow-hidden' : 'flex-1 min-w-0 opacity-100'}`}>
+            <span className={`text-sm font-bold font-display tracking-tight text-slate-900 dark:text-white truncate overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-in-out ${sidebarCollapsed ? 'max-w-0 opacity-0 -translate-x-2' : 'max-w-[9rem] flex-1 min-w-0 opacity-100 translate-x-0'}`}>
               {officeName}
             </span>
           </div>
 
-          {/* Header Toggle Button - Only visible when expanded */}
-          {!sidebarCollapsed && (
-            <button
-              onClick={() => setSidebarCollapsed(true)}
-              className="text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors p-1 rounded-md hover:bg-slate-100 dark:hover:bg-white/5"
-              title="Recolher Menu"
-            >
-              <PanelLeftClose size={20} />
-            </button>
-          )}
+          {/* Botão de recolher: some com fade+escala (sem desmontar de estalo) */}
+          <button
+            onClick={() => setSidebarCollapsed(true)}
+            className={`text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-md hover:bg-slate-100 dark:hover:bg-white/5 overflow-hidden transition-all duration-300 ease-in-out ${
+              sidebarCollapsed ? 'opacity-0 scale-75 max-w-0 p-0 pointer-events-none' : 'opacity-100 scale-100 max-w-8 p-1'
+            }`}
+            title="Recolher Menu"
+            tabIndex={sidebarCollapsed ? -1 : 0}
+            aria-hidden={sidebarCollapsed}
+          >
+            <PanelLeftClose size={20} />
+          </button>
         </div>
 
-        <nav className={`flex-1 p-4 space-y-2 flex flex-col ${sidebarCollapsed ? 'items-center px-2' : ''}`} aria-label="Navegação do sistema">
+        <nav className="flex-1 p-4 space-y-2 flex flex-col" aria-label="Navegação do sistema">
           {[
             { to: '/inbox', icon: Inbox, label: 'Inbox', prefetch: 'inbox' as const },
             { to: '/dashboard', icon: LayoutDashboard, label: 'Visão Geral', prefetch: 'dashboard' as const },
@@ -284,70 +311,45 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             { to: '/settings', icon: Settings, label: 'Configurações', prefetch: 'settings' as const },
             { to: '/suggestions', icon: Lightbulb, label: 'Sugestões', prefetch: 'suggestions' as const },
             { to: '/tutorial', icon: GraduationCap, label: 'Tutorial', prefetch: 'tutorial' as const },
-          ].map((item) => {
-            if (sidebarCollapsed) {
-              return (
-                <Link
-                  key={item.to}
-                  href={item.to}
-                  onMouseEnter={() => prefetchRoute(item.prefetch)}
-                  onClick={() => setClickedPath(item.to)}
-                  className={(() => {
-                    const isActive = pathname === item.to || (item.to === '/boards' && pathname === '/pipeline');
-                    const wasJustClicked = clickedPath === item.to;
-                    // If user clicked on a DIFFERENT item, immediately deactivate this one
-                    const anotherItemWasClicked = clickedPath && clickedPath !== item.to;
-                    const isActuallyActive = anotherItemWasClicked ? false : (isActive || wasJustClicked);
-                    return `relative w-10 h-10 rounded-lg flex items-center justify-center ${isActuallyActive
-                      ? 'bg-primary-500/10 text-primary-600 dark:text-primary-400 border border-primary-200 dark:border-primary-900/50'
-                      : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white'
-                      }`;
-                  })()}
-                  title={item.label}
-                >
-                  <item.icon size={20} />
-                  {(item.to === '/suggestions' || item.to === '/tutorial') && (
-                    <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-primary-500" aria-hidden="true" />
-                  )}
-                </Link>
-              );
-            }
-
-            return (
-              <NavItem
-                key={item.to}
-                to={item.to}
-                icon={item.icon}
-                label={item.label}
-                prefetch={item.prefetch}
-                clickedPath={clickedPath}
-                onItemClick={setClickedPath}
-                badge={(item.to === '/suggestions' || item.to === '/tutorial') ? 'Novo' : undefined}
-              />
-            );
-          })}
+          ].map((item) => (
+            <NavItem
+              key={item.to}
+              to={item.to}
+              icon={item.icon}
+              label={item.label}
+              prefetch={item.prefetch}
+              clickedPath={clickedPath}
+              onItemClick={setClickedPath}
+              badge={(item.to === '/suggestions' || item.to === '/tutorial') ? 'Novo' : undefined}
+              collapsed={sidebarCollapsed}
+            />
+          ))}
         </nav>
 
-        {/* Sidebar Toggle Button (Footer) - Only visible when collapsed */}
-        {sidebarCollapsed && (
-          <div className="px-4 pb-2 flex justify-center">
-            <button
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-              className="flex items-center justify-center w-10 h-10 p-2 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 transition-all"
-              title="Expandir Menu"
-            >
-              <PanelLeftOpen size={20} />
-            </button>
-          </div>
-        )}
+        {/* Botão de expandir (rodapé): entra/sai com altura+fade animados */}
+        <div
+          className={`px-4 flex justify-center overflow-hidden transition-all duration-300 ease-in-out ${
+            sidebarCollapsed ? 'max-h-14 opacity-100 pb-2' : 'max-h-0 opacity-0 pb-0 pointer-events-none'
+          }`}
+          aria-hidden={!sidebarCollapsed}
+        >
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className="flex items-center justify-center w-10 h-10 p-2 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 transition-all"
+            title="Expandir Menu"
+            tabIndex={sidebarCollapsed ? 0 : -1}
+          >
+            <PanelLeftOpen size={20} />
+          </button>
+        </div>
 
-        <div className={`p-4 border-t border-[var(--color-border-subtle)] ${sidebarCollapsed ? 'flex justify-center' : ''}`}>
+        <div className="p-4 border-t border-[var(--color-border-subtle)]">
           <div className="relative">
 
             {/* User Card - Clickable */}
             <button
               onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-              className={`flex items-center gap-3 rounded-xl bg-slate-50/50 dark:bg-white/5 border border-slate-100 dark:border-white/5 hover:bg-slate-100 dark:hover:bg-white/10 transition-all group focus-visible-ring ${sidebarCollapsed ? 'p-0 w-10 h-10 justify-center' : 'w-full p-3'
+              className={`flex items-center rounded-xl bg-slate-50/50 dark:bg-white/5 border border-slate-100 dark:border-white/5 hover:bg-slate-100 dark:hover:bg-white/10 transition-all duration-300 ease-in-out group focus-visible-ring ${sidebarCollapsed ? 'gap-0 p-0 w-10 h-10 justify-center mx-auto' : 'gap-3 w-full p-3'
                 }`}
             >
               {profile?.avatar_url ? (
@@ -367,27 +369,29 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 </div>
               )}
 
-              {!sidebarCollapsed && (
-                <>
-                  <div className="flex-1 min-w-0 text-left">
-                    <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
-                      {profile?.nickname || profile?.first_name || profile?.email?.split('@')[0] || 'Usuário'}
-                    </p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                      {profile?.email || ''}
-                    </p>
-                  </div>
-                  <svg
-                    className={`w-4 h-4 text-slate-400 transition-transform ${isUserMenuOpen ? 'rotate-180' : ''}`}
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    aria-hidden="true"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                  </svg>
-                </>
-              )}
+              <div
+                className={`flex-1 min-w-0 text-left overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-in-out ${
+                  sidebarCollapsed ? 'max-w-0 opacity-0 -translate-x-2' : 'max-w-[10rem] opacity-100 translate-x-0'
+                }`}
+              >
+                <p className="text-sm font-semibold text-slate-900 dark:text-white truncate whitespace-nowrap">
+                  {profile?.nickname || profile?.first_name || profile?.email?.split('@')[0] || 'Usuário'}
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 truncate whitespace-nowrap">
+                  {profile?.email || ''}
+                </p>
+              </div>
+              <svg
+                className={`h-4 text-slate-400 transition-all duration-300 ease-in-out ${isUserMenuOpen ? 'rotate-180' : ''} ${
+                  sidebarCollapsed ? 'w-0 opacity-0' : 'w-4 opacity-100'
+                }`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                aria-hidden="true"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+              </svg>
             </button>
 
             {/* Dropdown Menu */}
