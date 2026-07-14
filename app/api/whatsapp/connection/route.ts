@@ -12,7 +12,7 @@ import {
   type WaConnectionRow,
 } from '@/lib/whatsapp/service';
 import { envEvolution, getProvider } from '@/lib/whatsapp';
-import { ensureEvolutionInstance, instanceNameForOrg } from '@/lib/whatsapp/admin';
+import { ensureEvolutionInstance, instanceNameForOrg, registerWebhook } from '@/lib/whatsapp/admin';
 
 function mask(conn: WaConnectionRow) {
   return {
@@ -24,19 +24,6 @@ function mask(conn: WaConnectionRow) {
     profileName: conn.profile_name,
     status: conn.status,
   };
-}
-
-/** Registra o webhook da instância -> Edge Function do ambiente atual (best-effort). */
-async function registerWebhook(conn: WaConnectionRow): Promise<void> {
-  const supaUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '');
-  if (!supaUrl) return;
-  try {
-    await getProvider(conn).setWebhook(
-      `${supaUrl}/functions/v1/whatsapp-webhook/${conn.webhook_secret}`
-    );
-  } catch {
-    // best-effort: sem webhook o envio ainda funciona; recebimento fica pendente
-  }
 }
 
 export async function GET() {

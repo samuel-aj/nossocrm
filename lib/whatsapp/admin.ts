@@ -6,11 +6,26 @@
  * Cada organização do CRM tem a SUA instância (1 número por org). O nome é
  * derivado do id da org, então o botão "Conectar" na UI não pede nada técnico.
  */
-import { envEvolution } from './index';
+import { envEvolution, getProvider, type ConnectionLike } from './index';
 
 /** Nome determinístico da instância da org (ex.: nossocrm_44a14051b9f2). */
 export function instanceNameForOrg(orgId: string): string {
   return `nossocrm_${orgId.replace(/-/g, '').slice(0, 12)}`;
+}
+
+/** Registra o webhook da instância -> Edge Function do ambiente atual (best-effort). */
+export async function registerWebhook(
+  conn: ConnectionLike & { webhook_secret: string }
+): Promise<void> {
+  const supaUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '');
+  if (!supaUrl) return;
+  try {
+    await getProvider(conn).setWebhook(
+      `${supaUrl}/functions/v1/whatsapp-webhook/${conn.webhook_secret}`
+    );
+  } catch {
+    // best-effort: sem webhook o envio ainda funciona; recebimento fica pendente
+  }
 }
 
 async function evoAdminCall<T = unknown>(
