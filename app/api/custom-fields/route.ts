@@ -13,6 +13,7 @@ const CreateSchema = z.object({
   type: FieldTypeEnum,
   options: z.array(z.string()).optional(),
   entity_type: z.string().min(1).max(40).optional(),
+  group_name: z.string().min(1).max(60).nullable().optional(),
 }).strict();
 
 // Bulk import: used by the frontend to migrate localStorage-based definitions
@@ -49,6 +50,7 @@ function mapRow(row: any) {
     type: row.type as z.infer<typeof FieldTypeEnum>,
     options: Array.isArray(row.options) ? (row.options as string[]) : undefined,
     entity_type: (row.entity_type ?? 'deal') as string,
+    group_name: (row.group_name ?? null) as string | null,
     created_at: row.created_at as string | null,
   };
 }
@@ -60,7 +62,7 @@ export async function GET() {
   const sb = createStaticAdminClient();
   const { data, error } = await sb
     .from('custom_field_definitions')
-    .select('id,key,label,type,options,entity_type,created_at')
+    .select('id,key,label,type,options,entity_type,group_name,created_at')
     .eq('organization_id', auth.profile.organization_id)
     .order('created_at', { ascending: true });
 
@@ -93,11 +95,12 @@ export async function POST(req: Request) {
       type: it.type,
       options: (it.type === 'select' || it.type === 'multiselect') ? (it.options ?? []) : null,
       entity_type: it.entity_type ?? 'deal',
+      group_name: it.group_name ?? null,
     }));
     const { data, error } = await sb
       .from('custom_field_definitions')
       .upsert(rows, { onConflict: 'key,organization_id', ignoreDuplicates: false })
-      .select('id,key,label,type,options,entity_type,created_at');
+      .select('id,key,label,type,options,entity_type,group_name,created_at');
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ data: (data || []).map(mapRow) });
   }
@@ -118,12 +121,13 @@ export async function POST(req: Request) {
       ? (parsed.data.options ?? [])
       : null,
     entity_type: parsed.data.entity_type ?? 'deal',
+    group_name: parsed.data.group_name ?? null,
   };
 
   const { data, error } = await sb
     .from('custom_field_definitions')
     .insert(insertPayload)
-    .select('id,key,label,type,options,entity_type,created_at')
+    .select('id,key,label,type,options,entity_type,group_name,created_at')
     .single();
 
   if (error) {

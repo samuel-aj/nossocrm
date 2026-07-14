@@ -102,6 +102,9 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ hash, isAdmin }) => {
             setNewFieldType={controller.setNewFieldType}
             newFieldOptions={controller.newFieldOptions}
             setNewFieldOptions={controller.setNewFieldOptions}
+            newFieldGroup={controller.newFieldGroup}
+            setNewFieldGroup={controller.setNewFieldGroup}
+            existingFieldGroups={controller.existingFieldGroups}
             editingId={controller.editingId}
             onStartEditing={controller.startEditingField}
             onCancelEditing={controller.cancelEditingField}

@@ -12,6 +12,7 @@ const UpdateSchema = z.object({
   label: z.string().min(1).max(120).optional(),
   type: FieldTypeEnum.optional(),
   options: z.array(z.string()).optional(),
+  group_name: z.string().min(1).max(60).nullable().optional(),
 }).strict();
 
 async function getAuthedProfile() {
@@ -41,6 +42,7 @@ function mapRow(row: any) {
     type: row.type as z.infer<typeof FieldTypeEnum>,
     options: Array.isArray(row.options) ? (row.options as string[]) : undefined,
     entity_type: (row.entity_type ?? 'deal') as string,
+    group_name: (row.group_name ?? null) as string | null,
     created_at: row.created_at as string | null,
   };
 }
@@ -64,6 +66,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   const updates: any = {};
   if (parsed.data.label !== undefined) updates.label = parsed.data.label;
   if (parsed.data.type !== undefined) updates.type = parsed.data.type;
+  // null explícito desagrupa o campo
+  if (parsed.data.group_name !== undefined) updates.group_name = parsed.data.group_name;
 
   // Options only apply to select-like types; for other types clear to null.
   const nextType = parsed.data.type;
@@ -88,7 +92,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     .update(updates)
     .eq('id', id)
     .eq('organization_id', auth.profile.organization_id)
-    .select('id,key,label,type,options,entity_type,created_at')
+    .select('id,key,label,type,options,entity_type,group_name,created_at')
     .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

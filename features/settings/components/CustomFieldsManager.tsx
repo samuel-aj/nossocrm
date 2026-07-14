@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { PenTool, Pencil, Check, Copy, Plus, List, Tag, Trash2 } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { PenTool, Pencil, Check, Copy, Plus, List, Tag, Trash2, FolderOpen } from 'lucide-react';
 import { SettingsSection } from './SettingsSection';
 import { CustomFieldDefinition, CustomFieldType } from '@/types';
 
@@ -11,6 +11,9 @@ interface CustomFieldsManagerProps {
   setNewFieldType: (type: CustomFieldType) => void;
   newFieldOptions: string;
   setNewFieldOptions: (options: string) => void;
+  newFieldGroup: string;
+  setNewFieldGroup: (group: string) => void;
+  existingFieldGroups: string[];
   editingId: string | null;
   onStartEditing: (field: CustomFieldDefinition) => void;
   onCancelEditing: () => void;
@@ -58,6 +61,9 @@ export const CustomFieldsManager: React.FC<CustomFieldsManagerProps> = ({
   setNewFieldType,
   newFieldOptions,
   setNewFieldOptions,
+  newFieldGroup,
+  setNewFieldGroup,
+  existingFieldGroups,
   editingId,
   onStartEditing,
   onCancelEditing,
@@ -65,6 +71,29 @@ export const CustomFieldsManager: React.FC<CustomFieldsManagerProps> = ({
   onRemoveField
 }) => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  // true = usuário escolheu "criar novo grupo" e está digitando o nome
+  const [creatingGroup, setCreatingGroup] = useState(false);
+
+  // Ao entrar/sair do modo edição, volta o controle de grupo pro select
+  React.useEffect(() => {
+    setCreatingGroup(false);
+  }, [editingId]);
+
+  // Lista agrupada: desagrupados primeiro, depois cada grupo em ordem alfabética
+  const groupedList = useMemo(() => {
+    const ungrouped = customFieldDefinitions.filter(f => !(f.groupName ?? '').trim());
+    const groups = new Map<string, CustomFieldDefinition[]>();
+    for (const f of customFieldDefinitions) {
+      const g = (f.groupName ?? '').trim();
+      if (!g) continue;
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g)!.push(f);
+    }
+    return {
+      ungrouped,
+      groups: Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0], 'pt-BR')),
+    };
+  }, [customFieldDefinitions]);
 
   const copyKey = async (key: string) => {
     try {
@@ -135,6 +164,59 @@ export const CustomFieldsManager: React.FC<CustomFieldsManagerProps> = ({
           </div>
         </div>
 
+        {/* GRUPO (opcional): separa campos por produto/pipeline. Escolhe um
+            existente ou cria um novo; vazio = campo desagrupado (geral). */}
+        <div className="mb-3">
+          <label htmlFor="custom-field-group" className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">
+            <FolderOpen size={12} /> Grupo (opcional)
+          </label>
+          {creatingGroup ? (
+            <div className="flex gap-2">
+              <input
+                type="text"
+                autoFocus
+                value={newFieldGroup}
+                onChange={(e) => setNewFieldGroup(e.target.value)}
+                placeholder="Nome do novo grupo (ex: BPC LOAS)"
+                className="flex-1 bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  setCreatingGroup(false);
+                  setNewFieldGroup('');
+                }}
+                className="shrink-0 px-3 py-2 rounded-lg text-sm text-slate-500 border border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
+              >
+                Cancelar
+              </button>
+            </div>
+          ) : (
+            <select
+              id="custom-field-group"
+              value={newFieldGroup}
+              onChange={(e) => {
+                if (e.target.value === '__new__') {
+                  setCreatingGroup(true);
+                  setNewFieldGroup('');
+                  return;
+                }
+                setNewFieldGroup(e.target.value);
+              }}
+              className="w-full bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white cursor-pointer"
+            >
+              <option value="">Sem grupo (geral)</option>
+              {existingFieldGroups.map((g) => (
+                <option key={g} value={g}>{g}</option>
+              ))}
+              <option value="__new__">➕ Criar novo grupo…</option>
+            </select>
+          )}
+          <p className="text-[10px] text-slate-400 mt-1">
+            Use grupos pra separar campos de produtos/pipelines diferentes. No card do lead, cada grupo abre e fecha como uma sanfona.
+          </p>
+        </div>
+
         {(newFieldType === 'select' || newFieldType === 'multiselect') && (
           <div className="animate-in slide-in-from-top-2 fade-in duration-200">
             <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">
@@ -157,7 +239,8 @@ export const CustomFieldsManager: React.FC<CustomFieldsManagerProps> = ({
       </div>
 
       <div className="space-y-2">
-        {customFieldDefinitions.map(field => (
+        {(() => {
+          const renderFieldCard = (field: CustomFieldDefinition) => (
           <div key={field.id} className={`flex items-center justify-between p-3 bg-white dark:bg-white/5 border rounded-lg group transition-colors ${editingId === field.id ? 'border-amber-400 dark:border-amber-500/50 ring-1 ring-amber-400/30' : 'border-slate-200 dark:border-white/10 hover:border-primary-300 dark:hover:border-primary-500/50'}`}>
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded bg-slate-100 dark:bg-white/10 flex items-center justify-center text-slate-500 dark:text-slate-400">
@@ -203,10 +286,40 @@ export const CustomFieldsManager: React.FC<CustomFieldsManagerProps> = ({
               </button>
             </div>
           </div>
-        ))}
-        {customFieldDefinitions.length === 0 && (
-          <p className="text-center text-slate-500 text-sm py-4 italic">Nenhum campo personalizado criado.</p>
-        )}
+          );
+
+          return (
+            <>
+              {/* Campos desagrupados (gerais) */}
+              {groupedList.ungrouped.length > 0 && (
+                <div className="space-y-2">
+                  {groupedList.groups.length > 0 && (
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 pt-1">
+                      Campos gerais (sem grupo)
+                    </p>
+                  )}
+                  {groupedList.ungrouped.map(renderFieldCard)}
+                </div>
+              )}
+
+              {/* Grupos */}
+              {groupedList.groups.map(([groupName, fields]) => (
+                <div key={groupName} className="space-y-2 pt-2">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300 flex items-center gap-1.5">
+                    <FolderOpen size={12} className="text-primary-500" />
+                    {groupName}
+                    <span className="font-normal text-slate-400 normal-case">· {fields.length} campo{fields.length === 1 ? '' : 's'}</span>
+                  </p>
+                  {fields.map(renderFieldCard)}
+                </div>
+              ))}
+
+              {customFieldDefinitions.length === 0 && (
+                <p className="text-center text-slate-500 text-sm py-4 italic">Nenhum campo personalizado criado.</p>
+              )}
+            </>
+          );
+        })()}
       </div>
     </SettingsSection>
   );

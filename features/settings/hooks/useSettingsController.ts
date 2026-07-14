@@ -29,6 +29,9 @@ export const useSettingsController = () => {
   const [newFieldLabel, setNewFieldLabel] = useState('');
   const [newFieldType, setNewFieldType] = useState<CustomFieldType>('text');
   const [newFieldOptions, setNewFieldOptions] = useState('');
+  // Grupo do campo ('' = desagrupado). Grupos existem implicitamente pelos
+  // campos que os usam — criar grupo = nomear um novo ao salvar um campo.
+  const [newFieldGroup, setNewFieldGroup] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const [newTagName, setNewTagName] = useState('');
@@ -52,12 +55,22 @@ export const useSettingsController = () => {
     return key || 'campo';
   };
 
+  // Grupos existentes (derivados dos campos já criados), ordenados
+  const existingFieldGroups = Array.from(
+    new Set(
+      customFieldDefinitions
+        .map((f) => (f.groupName ?? '').trim())
+        .filter((g) => g !== '')
+    )
+  ).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+
   // Custom Fields Logic
   const startEditingField = (field: CustomFieldDefinition) => {
     setEditingId(field.id);
     setNewFieldLabel(field.label);
     setNewFieldType(field.type);
     setNewFieldOptions(field.options ? field.options.join(', ') : '');
+    setNewFieldGroup(field.groupName ?? '');
   };
 
   const cancelEditingField = () => {
@@ -65,6 +78,7 @@ export const useSettingsController = () => {
     setNewFieldLabel('');
     setNewFieldType('text');
     setNewFieldOptions('');
+    setNewFieldGroup('');
   };
 
   const handleSaveField = () => {
@@ -95,9 +109,11 @@ export const useSettingsController = () => {
           .filter(opt => opt !== '')
         : undefined;
 
+    const groupName = newFieldGroup.trim() || null;
+
     if (editingId) {
       // UPDATE EXISTING
-      updateCustomField(editingId, { label: cleanedLabel, type: newFieldType, options: optionsArray });
+      updateCustomField(editingId, { label: cleanedLabel, type: newFieldType, options: optionsArray, groupName });
       addToast('Campo personalizado atualizado com sucesso!', 'success');
       cancelEditingField();
     } else {
@@ -109,6 +125,7 @@ export const useSettingsController = () => {
         label: cleanedLabel,
         type: newFieldType,
         options: optionsArray,
+        groupName,
       };
 
       addCustomField(newField);
@@ -150,6 +167,9 @@ export const useSettingsController = () => {
     setNewFieldType,
     newFieldOptions,
     setNewFieldOptions,
+    newFieldGroup,
+    setNewFieldGroup,
+    existingFieldGroups,
     editingId,
     startEditingField,
     cancelEditingField,

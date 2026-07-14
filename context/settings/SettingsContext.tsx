@@ -370,6 +370,7 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
         label: r.label,
         type: r.type,
         options: Array.isArray(r.options) ? r.options : undefined,
+        groupName: (r as { group_name?: string | null }).group_name ?? undefined,
       })));
     };
 
@@ -637,6 +638,7 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
           label: field.label,
           type: field.type,
           options: field.options,
+          group_name: field.groupName ?? null,
         }),
       });
       if (!res.ok) {
@@ -645,7 +647,7 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
         return null;
       }
       const body = await res.json().catch(() => null);
-      const created = body?.data as CustomFieldDefinition | undefined;
+      const created = body?.data as (CustomFieldDefinition & { group_name?: string | null }) | undefined;
       if (created) {
         setCustomFieldDefinitions(prev => [...prev, {
           id: created.id,
@@ -653,6 +655,7 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
           label: created.label,
           type: created.type,
           options: Array.isArray(created.options) ? created.options : undefined,
+          groupName: created.group_name ?? undefined,
         }]);
         return created;
       }
@@ -667,6 +670,7 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
       if (updates.label !== undefined) payload.label = updates.label;
       if (updates.type !== undefined) payload.type = updates.type;
       if (updates.options !== undefined) payload.options = updates.options;
+      if (updates.groupName !== undefined) payload.group_name = updates.groupName ?? null;
 
       const res = await fetch(`/api/custom-fields/${encodeURIComponent(id)}`, {
         method: 'PATCH',
@@ -680,7 +684,7 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
         return;
       }
       const body = await res.json().catch(() => null);
-      const updated = body?.data as CustomFieldDefinition | undefined;
+      const updated = body?.data as (CustomFieldDefinition & { group_name?: string | null }) | undefined;
       if (updated) {
         setCustomFieldDefinitions(prev => prev.map(f => (f.id === id ? {
           id: updated.id,
@@ -688,6 +692,7 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
           label: updated.label,
           type: updated.type,
           options: Array.isArray(updated.options) ? updated.options : undefined,
+          groupName: updated.group_name ?? undefined,
         } : f)));
       }
     },

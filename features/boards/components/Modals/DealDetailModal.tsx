@@ -6,7 +6,7 @@ import ConfirmModal from '@/components/ConfirmModal';
 import { LossReasonModal } from '@/components/ui/LossReasonModal';
 import { useMoveDealSimple, useDeal, useOrgUsers, useOrgMembers } from '@/lib/query/hooks';
 import { FocusTrap, useFocusReturn } from '@/lib/a11y';
-import { Activity } from '@/types';
+import { Activity, CustomFieldDefinition } from '@/types';
 
 import { useResponsiveMode } from '@/hooks/useResponsiveMode';
 import { DealSheet } from '../DealSheet';
@@ -30,6 +30,7 @@ import {
   Building2,
   User,
   UserPlus,
+  FolderOpen,
   Package,
   Sword,
   CheckCircle2,
@@ -199,6 +200,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const descriptionTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [utmsOpen, setUtmsOpen] = useState(false);
   const [ownerMenuOpen, setOwnerMenuOpen] = useState(false);
+  // Grupos de campos personalizados abertos (sanfona por grupo, estilo UTMs)
+  const [openFieldGroups, setOpenFieldGroups] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState<'whatsapp' | 'timeline' | 'activities' | 'notes' | 'products' | 'info'>('whatsapp');
   const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -264,6 +267,26 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const normalizeTag = (value: string) => value.trim().replace(/\s+/g, ' ');
   const tagsLower = useMemo(() => new Set((deal?.tags || []).map(t => t.toLowerCase())), [deal?.tags]);
   const availableTagsLower = useMemo(() => new Set((availableTags || []).map(t => t.toLowerCase())), [availableTags]);
+
+  // Campos personalizados: desagrupados (lista direta, como sempre) +
+  // grupos (cada um vira uma sanfona colapsável no card)
+  const { ungroupedFieldDefs, groupedFieldDefs } = useMemo(() => {
+    const ungrouped: CustomFieldDefinition[] = [];
+    const groups = new Map<string, CustomFieldDefinition[]>();
+    for (const f of customFieldDefinitions) {
+      const g = (f.groupName ?? '').trim();
+      if (g) {
+        if (!groups.has(g)) groups.set(g, []);
+        groups.get(g)!.push(f);
+      } else {
+        ungrouped.push(f);
+      }
+    }
+    return {
+      ungroupedFieldDefs: ungrouped,
+      groupedFieldDefs: Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0], 'pt-BR')),
+    };
+  }, [customFieldDefinitions]);
 
   // Helper functions removed as they are now handled by ActivityRow component
 
@@ -1316,8 +1339,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                         {isCustomFieldsEditMode ? 'Concluir' : 'Alterar'}
                       </button>
                     </div>
-                    <div className="divide-y divide-slate-100 dark:divide-white/5">
-                      {customFieldDefinitions.map(field => (
+                    {(() => {
+                      const renderFieldRow = (field: CustomFieldDefinition) => (
                         <div
                           key={field.id}
                           className="py-2.5 last:pb-0"
@@ -1425,8 +1448,59 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                             })()}
                           </div>
                         </div>
-                      ))}
-                    </div>
+                      );
+
+                      return (
+                        <>
+                          {/* Campos desagrupados: lista direta, como sempre */}
+                          {ungroupedFieldDefs.length > 0 && (
+                            <div className="divide-y divide-slate-100 dark:divide-white/5">
+                              {ungroupedFieldDefs.map(renderFieldRow)}
+                            </div>
+                          )}
+
+                          {/* Grupos: sanfona colapsável (abre/fecha igual às UTMs).
+                              No modo edição, todos os grupos ficam abertos. */}
+                          {groupedFieldDefs.map(([groupName, fields]) => {
+                            const open = isCustomFieldsEditMode || !!openFieldGroups[groupName];
+                            return (
+                              <div
+                                key={groupName}
+                                className={`pt-3 mt-1 border-t border-slate-100 dark:border-white/5 ${
+                                  ungroupedFieldDefs.length === 0 && groupName === groupedFieldDefs[0][0]
+                                    ? 'border-t-0 pt-0 mt-0'
+                                    : ''
+                                }`}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setOpenFieldGroups(prev => ({ ...prev, [groupName]: !prev[groupName] }))
+                                  }
+                                  aria-expanded={open}
+                                  className="w-full flex items-center justify-between text-xs font-bold text-slate-400 uppercase hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                                >
+                                  <span className="flex items-center gap-2 min-w-0">
+                                    <FolderOpen size={14} className="shrink-0" />
+                                    <span className="truncate">{groupName}</span>
+                                    <span className="font-normal normal-case shrink-0">({fields.length})</span>
+                                  </span>
+                                  <ChevronDown
+                                    size={14}
+                                    className={`shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+                                  />
+                                </button>
+                                {open && (
+                                  <div className="mt-1 divide-y divide-slate-100 dark:divide-white/5">
+                                    {fields.map(renderFieldRow)}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </>
+                      );
+                    })()}
                   </div>
                 )}
 
