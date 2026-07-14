@@ -161,6 +161,9 @@ export function WhatsAppConnectionSettings() {
                 alt="QR Code para conectar o WhatsApp"
                 width={232}
                 height={232}
+                // a Evolution gera o QR colorido (azul) — força módulos PRETOS
+                // mantendo o fundo branco, independente da cor que vier
+                className="grayscale contrast-[500%]"
               />
             ) : (
               <div className="w-[232px] h-[232px] flex flex-col items-center justify-center gap-2 text-slate-400">
