@@ -44,7 +44,8 @@ import {
   User,
   Bug,
   CheckSquare,
-  ChevronLeft,
+  PanelLeftClose,
+  PanelLeftOpen,
   Shield,
 } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
@@ -275,20 +276,29 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           }`}
         aria-label="Menu principal"
       >
-        {/* Alternar menu: botão ÚNICO flutuando na borda — nunca muda de lugar,
-            desliza junto com a largura e o ícone gira 180° (nada brusco) */}
+        {/* Alternar menu: "abinha" ÚNICA encostada por DENTRO da borda — nunca
+            muda de lugar, desliza junto com a largura, não é coberta pelo card
+            do lead (fica 100% dentro do menu) e os ícones fazem crossfade */}
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className="absolute -right-3 top-5 z-30 h-6 w-6 rounded-full border border-slate-200 dark:border-white/15 bg-white dark:bg-slate-800 shadow-md flex items-center justify-center text-slate-500 hover:text-primary-600 dark:text-slate-300 dark:hover:text-primary-400 hover:scale-110 transition-transform duration-300 ease-in-out focus-visible-ring"
+          className="absolute right-0 top-4 z-30 h-8 w-6 rounded-l-lg border border-r-0 border-slate-200 dark:border-white/15 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm shadow-sm flex items-center justify-center text-slate-500 hover:text-primary-600 dark:text-slate-300 dark:hover:text-primary-400 hover:bg-slate-50 dark:hover:bg-slate-700/90 transition-colors duration-300 focus-visible-ring"
           title={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'}
           aria-label={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'}
         >
-          <ChevronLeft
-            size={14}
-            strokeWidth={2.5}
-            className={`transition-transform duration-300 ease-in-out ${sidebarCollapsed ? 'rotate-180' : 'rotate-0'}`}
-            aria-hidden="true"
-          />
+          <span className="relative block h-4 w-4" aria-hidden="true">
+            <PanelLeftClose
+              size={16}
+              className={`absolute inset-0 transition-all duration-300 ease-in-out ${
+                sidebarCollapsed ? 'opacity-0 scale-75' : 'opacity-100 scale-100'
+              }`}
+            />
+            <PanelLeftOpen
+              size={16}
+              className={`absolute inset-0 transition-all duration-300 ease-in-out ${
+                sidebarCollapsed ? 'opacity-100 scale-100' : 'opacity-0 scale-75'
+              }`}
+            />
+          </span>
         </button>
 
         <div className="h-16 flex items-center border-b border-[var(--color-border-subtle)] px-5">
