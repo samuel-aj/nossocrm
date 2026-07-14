@@ -799,18 +799,24 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                           className={`flex items-center justify-center h-7 w-7 rounded-full shrink-0 ${
                             deal.ownerId
                               ? 'bg-gradient-to-br from-primary-500 to-primary-600 text-white font-bold text-[10px]'
-                              : 'border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-400'
+                              : 'border-2 border-dashed border-amber-400/70 dark:border-amber-500/50 text-amber-500'
                           }`}
                         >
                           {dealOwner ? initials(dealOwner.name) : deal.ownerId ? <User size={13} /> : <UserPlus size={13} />}
                         </span>
-                        <span className="flex flex-col items-start leading-tight text-left">
-                          <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                        <span className="flex flex-col items-start justify-center gap-0.5 leading-none text-left">
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 leading-none">
                             Responsável
                           </span>
-                          <span className="text-xs font-semibold text-slate-800 dark:text-white truncate max-w-[110px]">
-                            {dealOwner ? dealOwner.name : deal.ownerId ? 'Definido' : 'Definir'}
-                          </span>
+                          {dealOwner || deal.ownerId ? (
+                            <span className="text-xs font-semibold text-slate-800 dark:text-white truncate max-w-[110px] leading-none">
+                              {dealOwner ? dealOwner.name : 'Definido'}
+                            </span>
+                          ) : (
+                            <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 truncate max-w-[110px] leading-none">
+                              Sem responsável
+                            </span>
+                          )}
                         </span>
                         {canAssignOwner && (
                           <ChevronDown
@@ -2192,7 +2198,14 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   return (
     // allowOutsideClick: menu lateral (Inbox, Visão Geral, recolher…) continua
     // clicável com o card aberto; o foco por teclado segue preso no modal.
-    <FocusTrap active={isOpen} onEscape={onClose} allowOutsideClick>
+    {/* initialFocus no contêiner: sem isso o 1º botão (hub do responsável)
+        abria já com anel de foco, parecendo selecionado por padrão */}
+    <FocusTrap
+      active={isOpen}
+      onEscape={onClose}
+      allowOutsideClick
+      initialFocus="[data-focus-trap-fallback]"
+    >
       <div
         // Backdrop + positioning wrapper. Clicking outside the panel should close the modal.
         // No desktop, este modal não deve cobrir a sidebar de navegação.
