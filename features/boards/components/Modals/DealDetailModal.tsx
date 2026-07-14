@@ -175,7 +175,6 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const [showNewNote, setShowNewNote] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState('');
   const descriptionTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const [idCopied, setIdCopied] = useState(false);
   const [utmsOpen, setUtmsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'whatsapp' | 'timeline' | 'activities' | 'notes' | 'products' | 'info'>('whatsapp');
   const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -729,22 +728,6 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                       {deal.title}
                       <Pencil size={16} className="opacity-0 group-hover:opacity-50 text-slate-400" />
                     </h2>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(deal.id);
-                          setIdCopied(true);
-                          setTimeout(() => setIdCopied(false), 1500);
-                        } catch {}
-                      }}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-[11px] font-mono text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 transition-colors"
-                      title={`Copiar ID: ${deal.id}`}
-                      aria-label="Copiar ID do lead"
-                    >
-                      <Copy size={12} />
-                      {idCopied ? 'Copiado!' : `ID: ${deal.id.slice(0, 8)}…`}
-                    </button>
                   </div>
                 )}
 
