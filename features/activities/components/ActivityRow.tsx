@@ -104,7 +104,10 @@ const ActivityRowComponent: React.FC<ActivityRowProps> = ({
     };
 
     const isSystemActivity = activity.type === 'STATUS_CHANGE';
-    const isOverdue = new Date(activity.date) < new Date() && !activity.completed;
+    // Nota é registro informativo, não tarefa: nunca aparece como "concluída"
+    // (riscada/apagada), não tem bolinha de concluir nem badge de atraso.
+    const isNote = activity.type === 'NOTE';
+    const isOverdue = !isNote && new Date(activity.date) < new Date() && !activity.completed;
 
     if (isSystemActivity) {
         return (
@@ -130,7 +133,7 @@ const ActivityRowComponent: React.FC<ActivityRowProps> = ({
     }
 
     return (
-        <div className={`group flex items-center gap-4 p-4 bg-white dark:bg-dark-card border border-slate-200 dark:border-white/5 rounded-xl hover:border-primary-500/50 dark:hover:border-primary-500/50 transition-all ${activity.completed ? 'opacity-60' : ''} ${isSelected ? 'border-primary-500 dark:border-primary-500 bg-primary-50/50 dark:bg-primary-500/10' : ''}`}>
+        <div className={`group flex items-center gap-4 p-4 bg-white dark:bg-dark-card border border-slate-200 dark:border-white/5 rounded-xl hover:border-primary-500/50 dark:hover:border-primary-500/50 transition-all ${activity.completed && !isNote ? 'opacity-60' : ''} ${isSelected ? 'border-primary-500 dark:border-primary-500 bg-primary-50/50 dark:bg-primary-500/10' : ''}`}>
             {onSelect && (
                 <input
                     type="checkbox"
@@ -140,6 +143,11 @@ const ActivityRowComponent: React.FC<ActivityRowProps> = ({
                 />
             )}
 
+            {isNote ? (
+                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-yellow-100 dark:bg-yellow-500/15 flex items-center justify-center" aria-hidden="true">
+                    <StickyNote size={13} className="text-yellow-600 dark:text-yellow-400" />
+                </span>
+            ) : (
             <button
                 onClick={() => onToggleComplete(activity.id)}
                 disabled={isPending}
@@ -152,13 +160,14 @@ const ActivityRowComponent: React.FC<ActivityRowProps> = ({
             >
                 <CheckCircle2 size={14} fill="currentColor" />
             </button>
+            )}
 
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                     <span className="p-1.5 bg-slate-100 dark:bg-white/5 rounded-lg">
                         {getActivityIcon(activity.type)}
                     </span>
-                    <h3 className={`font-medium text-slate-900 dark:text-white truncate ${activity.completed ? 'line-through text-slate-500' : ''}`}>
+                    <h3 className={`font-medium text-slate-900 dark:text-white truncate ${activity.completed && !isNote ? 'line-through text-slate-500' : ''}`}>
                         {formatTitle(activity.title)}
                     </h3>
                     {isOverdue && (
@@ -168,9 +177,16 @@ const ActivityRowComponent: React.FC<ActivityRowProps> = ({
                     )}
                 </div>
                 {activity.description && (
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2 italic">
-                        &ldquo;{activity.description}&rdquo;
-                    </p>
+                    isNote ? (
+                        // Nota mostra o conteúdo COMPLETO (aberta), sem clamp
+                        <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5 whitespace-pre-wrap break-words">
+                            {activity.description}
+                        </p>
+                    ) : (
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2 italic">
+                            &ldquo;{activity.description}&rdquo;
+                        </p>
+                    )
                 )}
                 <div className="flex items-center gap-4 text-sm text-slate-500 dark:text-slate-400">
                     {deal && (
