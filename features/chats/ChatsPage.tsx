@@ -11,9 +11,10 @@ import { Contact } from '@/types';
 
 // ---------------------------------------------------------------------------
 // Página CHATS: inbox de WhatsApp da organização, estilo WhatsApp Web.
-// Coluna esquerda: conversas (ordenadas pela mais recente) + todos os
-// contatos do CRM com telefone (pra puxar assunto do zero). Coluna direita:
-// o mesmo chat usado no card do lead (features/whatsapp/DealWhatsAppChat).
+// Coluna esquerda: LISTA ÚNICA com todos os contatos do CRM que têm telefone —
+// quem tem conversa mostra prévia/hora/não-lidas e sobe pro topo (mais
+// recente primeiro); quem não tem aparece em ordem alfabética pra puxar
+// assunto. Coluna direita: o mesmo chat do card do lead (DealWhatsAppChat).
 // ---------------------------------------------------------------------------
 
 type ConvRow = {
@@ -31,7 +32,8 @@ type ChatTarget = { phone: string; name: string; contactId: string | null };
 
 type ChatListItem = ChatTarget & {
   key: string;
-  contact: Contact | null;
+  contact: Contact;
+  hasConv: boolean;
   lastAt: string | null;
   preview: string;
   unread: number;
@@ -101,7 +103,6 @@ export const ChatsPage: React.FC = () => {
   const { contacts } = useCRM();
   const [selected, setSelected] = useState<ChatTarget | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [tab, setTab] = useState<'conversas' | 'contatos'>('conversas');
 
   const convsQ = useQuery<{ data: ConvRow[] }>({
     queryKey: ['waConversations'],
@@ -127,79 +128,65 @@ export const ChatsPage: React.FC = () => {
   });
   const connected = !!connQ.data?.connected;
 
-  const contactsById = useMemo(() => new Map(contacts.map(c => [c.id, c])), [contacts]);
-
-  // Índice telefone→contato cobrindo as variantes BR (com/sem nono dígito)
-  const contactByPhone = useMemo(() => {
-    const m = new Map<string, Contact>();
-    for (const c of contacts) {
-      for (const v of brPhoneVariants(c.phone)) {
-        if (!m.has(v)) m.set(v, c);
-      }
-    }
-    return m;
-  }, [contacts]);
-
-  // Conversas com nome/contato resolvidos e grafias do mesmo número unificadas.
-  // SÓ aparecem conversas de CONTATOS DO CRM — mensagens de números avulsos do
-  // WhatsApp conectado ficam de fora (crie o contato pra conversa aparecer).
-  const conversations = useMemo<ChatListItem[]>(() => {
-    const rows = convsQ.data?.data ?? [];
-    const byKey = new Map<string, ChatListItem>();
-    for (const r of rows) {
+  // Conversas indexadas pela chave canônica do telefone (une as grafias
+  // com/sem nono dígito BR): prévia/hora da mais recente, não lidas somadas.
+  const convByKey = useMemo(() => {
+    type ConvInfo = { phone: string; lastAt: string | null; preview: string; unread: number };
+    const m = new Map<string, ConvInfo>();
+    for (const r of convsQ.data?.data ?? []) {
       const key = phoneKey(r.wa_phone);
-      const contact =
-        (r.contact_id ? contactsById.get(r.contact_id) : undefined) ||
-        contactByPhone.get(r.wa_phone) ||
-        null;
-      const item: ChatListItem = {
-        key,
+      const item: ConvInfo = {
         phone: r.wa_phone,
-        name: contact?.name || r.wa_name || r.wa_phone,
-        contactId: contact?.id ?? r.contact_id,
-        contact,
         lastAt: r.last_message_at,
         preview: r.last_message_preview || '',
         unread: r.unread_count || 0,
       };
-      const prev = byKey.get(key);
+      const prev = m.get(key);
       if (!prev) {
-        byKey.set(key, item);
+        m.set(key, item);
         continue;
       }
-      // Duas grafias do mesmo número: fica a identidade com contato e o
-      // conteúdo (preview/hora) da mais recente; não lidas somam.
       const newer = (item.lastAt || '') > (prev.lastAt || '') ? item : prev;
-      const identity = item.contact ? item : prev.contact ? prev : newer;
-      byKey.set(key, {
-        ...identity,
-        lastAt: newer.lastAt,
-        preview: newer.preview || identity.preview,
-        unread: prev.unread + item.unread,
-      });
+      m.set(key, { ...newer, unread: prev.unread + item.unread });
     }
-    return Array.from(byKey.values())
-      .filter(c => !!c.contact)
-      .sort((a, b) => (b.lastAt || '').localeCompare(a.lastAt || ''));
-  }, [convsQ.data, contactsById, contactByPhone]);
+    return m;
+  }, [convsQ.data]);
 
-  const filteredConversations = useMemo(() => {
-    const q = norm(searchQuery.trim());
-    if (!q) return conversations;
-    return conversations.filter(c =>
-      norm(c.name).includes(q) || c.phone.includes(q) || norm(c.preview).includes(q)
-    );
-  }, [conversations, searchQuery]);
+  // LISTA ÚNICA: todos os contatos do CRM com telefone. Quem tem conversa
+  // carrega prévia/hora/não-lidas e fica no topo (mais recente primeiro);
+  // o resto segue em ordem alfabética. Números avulsos (sem contato) ficam
+  // de fora por construção — a lista parte dos CONTATOS.
+  const chatList = useMemo<ChatListItem[]>(() => {
+    const items: ChatListItem[] = contacts
+      .filter(c => (c.phone || '').trim() !== '')
+      .map(c => {
+        const conv = convByKey.get(phoneKey(c.phone));
+        return {
+          key: c.id,
+          phone: conv?.phone || c.phone,
+          name: c.name,
+          contactId: c.id,
+          contact: c,
+          hasConv: !!conv,
+          lastAt: conv?.lastAt ?? null,
+          preview: conv?.preview ?? '',
+          unread: conv?.unread ?? 0,
+        };
+      });
 
-  // Todos os contatos do CRM com telefone (aba Contatos)
-  const phoneContacts = useMemo(() => {
-    const list = contacts.filter(c => (c.phone || '').trim() !== '');
     const q = norm(searchQuery.trim());
     const filtered = q
-      ? list.filter(c => norm(c.name).includes(q) || c.phone.includes(q) || norm(c.email || '').includes(q))
-      : list;
-    return filtered.slice().sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
-  }, [contacts, searchQuery]);
+      ? items.filter(c =>
+          norm(c.name).includes(q) || c.phone.includes(q) || norm(c.preview).includes(q) || norm(c.contact.email || '').includes(q)
+        )
+      : items;
+
+    return filtered.sort((a, b) => {
+      if (a.hasConv && b.hasConv) return (b.lastAt || '').localeCompare(a.lastAt || '');
+      if (a.hasConv !== b.hasConv) return a.hasConv ? -1 : 1;
+      return a.name.localeCompare(b.name, 'pt-BR');
+    });
+  }, [contacts, convByKey, searchQuery]);
 
   const openChat = (target: ChatTarget) => setSelected(target);
   const selectedKey = selected ? phoneKey(selected.phone) : null;
@@ -242,7 +229,7 @@ export const ChatsPage: React.FC = () => {
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder={tab === 'conversas' ? 'Pesquisar conversa...' : 'Pesquisar contato...'}
+              placeholder="Pesquisar contato ou conversa..."
               className="w-full bg-slate-100 dark:bg-black/20 border border-transparent focus:border-emerald-400 rounded-lg pl-9 pr-8 py-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all"
             />
             {searchQuery && (
@@ -257,107 +244,53 @@ export const ChatsPage: React.FC = () => {
             )}
           </div>
 
-          {/* Abas Conversas / Contatos */}
-          <div className="flex gap-1 mt-3">
-            {([
-              { id: 'conversas' as const, label: 'Conversas', icon: MessageCircle },
-              { id: 'contatos' as const, label: 'Contatos', icon: Users },
-            ]).map(t => {
-              const active = tab === t.id;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => setTab(t.id)}
-                  className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                    active
-                      ? 'bg-emerald-600 text-white shadow-sm'
-                      : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10'
-                  }`}
-                >
-                  <t.icon size={13} /> {t.label}
-                </button>
-              );
-            })}
-          </div>
         </div>
 
-        {/* Lista */}
+        {/* Lista única: contatos do CRM — com conversa em cima, resto A→Z */}
         <div className="flex-1 min-h-0 overflow-y-auto scrollbar-custom">
-          {tab === 'conversas' ? (
-            <>
-              {convsQ.isLoading && (
-                <p className="text-sm text-slate-400 text-center py-8">Carregando conversas...</p>
-              )}
-              {!convsQ.isLoading && filteredConversations.length === 0 && (
-                <div className="text-center py-10 px-6 text-slate-400">
-                  <MessageCircle size={28} className="mx-auto mb-2 opacity-40" />
-                  <p className="text-sm">
-                    {searchQuery ? 'Nenhuma conversa encontrada.' : 'Nenhuma conversa com contatos do CRM ainda. Puxe assunto pela aba Contatos 👉'}
-                  </p>
-                </div>
-              )}
-              {filteredConversations.map(c => {
-                const active = selectedKey === c.key;
-                return (
-                  <button
-                    key={c.key}
-                    type="button"
-                    onClick={() => openChat({ phone: c.phone, name: c.name, contactId: c.contactId })}
-                    className={`w-full flex items-center gap-3 px-4 py-3 text-left border-b border-slate-50 dark:border-white/5 transition-colors ${
-                      active ? 'bg-emerald-50 dark:bg-emerald-900/15' : 'hover:bg-slate-50 dark:hover:bg-white/5'
-                    }`}
-                  >
-                    <AvatarCircle name={c.name} src={c.contact?.avatar || undefined} />
-                    <span className="flex-1 min-w-0">
-                      <span className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-semibold text-slate-900 dark:text-white truncate">{c.name}</span>
-                        <span className={`text-[10px] shrink-0 ${c.unread > 0 ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-slate-400'}`}>
-                          {fmtListTime(c.lastAt)}
-                        </span>
-                      </span>
-                      <span className="flex items-center justify-between gap-2 mt-0.5">
-                        <span className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                          {c.preview || 'Sem mensagens'}
-                        </span>
-                        {c.unread > 0 && (
-                          <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-500 text-white text-[10px] font-bold flex items-center justify-center">
-                            {c.unread > 99 ? '99+' : c.unread}
-                          </span>
-                        )}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </>
-          ) : (
-            <>
-              {phoneContacts.length === 0 && (
-                <div className="text-center py-10 px-6 text-slate-400">
-                  <Users size={28} className="mx-auto mb-2 opacity-40" />
-                  <p className="text-sm">
-                    {searchQuery ? 'Nenhum contato encontrado.' : 'Nenhum contato com telefone no CRM.'}
-                  </p>
-                </div>
-              )}
-              {phoneContacts.map(c => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => openChat({ phone: c.phone, name: c.name, contactId: c.id })}
-                  className="w-full flex items-center gap-3 px-4 py-3 text-left border-b border-slate-50 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
-                >
-                  <AvatarCircle name={c.name} src={c.avatar || undefined} size="w-10 h-10" />
-                  <span className="flex-1 min-w-0">
-                    <span className="block text-sm font-semibold text-slate-900 dark:text-white truncate">{c.name}</span>
-                    <span className="block text-xs text-slate-500 dark:text-slate-400 truncate">{c.phone}</span>
-                  </span>
-                  <MessageCircle size={15} className="shrink-0 text-emerald-500/70" />
-                </button>
-              ))}
-            </>
+          {chatList.length === 0 && (
+            <div className="text-center py-10 px-6 text-slate-400">
+              <Users size={28} className="mx-auto mb-2 opacity-40" />
+              <p className="text-sm">
+                {searchQuery ? 'Nenhum contato encontrado.' : 'Nenhum contato com telefone no CRM.'}
+              </p>
+            </div>
           )}
+          {chatList.map(c => {
+            const active = selectedKey === phoneKey(c.phone);
+            return (
+              <button
+                key={c.key}
+                type="button"
+                onClick={() => openChat({ phone: c.phone, name: c.name, contactId: c.contactId })}
+                className={`w-full flex items-center gap-3 px-4 py-3 text-left border-b border-slate-50 dark:border-white/5 transition-colors ${
+                  active ? 'bg-emerald-50 dark:bg-emerald-900/15' : 'hover:bg-slate-50 dark:hover:bg-white/5'
+                }`}
+              >
+                <AvatarCircle name={c.name} src={c.contact.avatar || undefined} />
+                <span className="flex-1 min-w-0">
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-semibold text-slate-900 dark:text-white truncate">{c.name}</span>
+                    {c.hasConv && (
+                      <span className={`text-[10px] shrink-0 ${c.unread > 0 ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-slate-400'}`}>
+                        {fmtListTime(c.lastAt)}
+                      </span>
+                    )}
+                  </span>
+                  <span className="flex items-center justify-between gap-2 mt-0.5">
+                    <span className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                      {c.hasConv ? (c.preview || 'Sem mensagens') : c.phone}
+                    </span>
+                    {c.unread > 0 && (
+                      <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-500 text-white text-[10px] font-bold flex items-center justify-center">
+                        {c.unread > 99 ? '99+' : c.unread}
+                      </span>
+                    )}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
         </div>
       </aside>
 
@@ -372,7 +305,7 @@ export const ChatsPage: React.FC = () => {
                 onClick={() => setSelected(null)}
                 className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10"
               >
-                <ArrowLeft size={16} /> Conversas
+                <ArrowLeft size={16} /> Contatos
               </button>
             </div>
             <div className="flex-1 min-h-0">
@@ -391,8 +324,8 @@ export const ChatsPage: React.FC = () => {
             </span>
             <h2 className="text-lg font-display font-bold text-slate-700 dark:text-slate-200">Suas conversas de WhatsApp</h2>
             <p className="text-sm text-slate-500 dark:text-slate-400 max-w-sm">
-              Selecione uma conversa ao lado ou escolha um contato pra começar. Tudo que chegar no
-              WhatsApp da organização aparece aqui e no card do lead.
+              Escolha um contato ao lado pra conversar. Quem já trocou mensagem fica no topo,
+              com a prévia da última conversa — tudo aparece aqui e no card do lead.
             </p>
             {!connected && (
               <Link
