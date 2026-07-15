@@ -253,8 +253,10 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const [showLossReasonModal, setShowLossReasonModal] = useState(false);
   const [pendingLostStageId, setPendingLostStageId] = useState<string | null>(null);
   const [lossReasonOrigin, setLossReasonOrigin] = useState<'button' | 'stage'>('button');
-  const [isCustomFieldsEditMode, setIsCustomFieldsEditMode] = useState(false);
-  const [customFieldsDraft, setCustomFieldsDraft] = useState<Record<string, string>>({});
+  // Edição INLINE de campos personalizados: clicar no valor edita na hora
+  // (um campo por vez). Enter/clicar fora salva; Esc cancela.
+  const [editingFieldKey, setEditingFieldKey] = useState<string | null>(null);
+  const [editingFieldValue, setEditingFieldValue] = useState('');
 
   const [tagQuery, setTagQuery] = useState('');
   // Criação de tag nova (exceção): só aparece ao escolher "Criar nova tag…"
@@ -306,10 +308,9 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
       setShowLossReasonModal(false);
       setPendingLostStageId(null);
       setLossReasonOrigin('button');
-      setIsCustomFieldsEditMode(false);
+      setEditingFieldKey(null);
       setTagQuery('');
       setTagCreating(false);
-      setCustomFieldsDraft({});
       setShowNewNote(false);
       setNewNote('');
       setDescriptionDraft(deal.description ?? '');
@@ -659,59 +660,51 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     return String(value);
   };
 
-  const startCustomFieldsEditMode = () => {
-    const nextDraft: Record<string, string> = {};
-    for (const field of customFieldDefinitions) {
-      const current = deal.customFields?.[field.key];
-      // multiselect is handled directly via deal.customFields (array), skip draft
-      if (field.type === 'multiselect') continue;
-      nextDraft[field.key] = current == null ? '' : String(current);
+  // Abre o editor inline do campo clicado, com o valor atual como rascunho.
+  const openFieldEditor = (field: CustomFieldDefinition) => {
+    if (field.type === 'multiselect') {
+      // multiselect salva direto a cada checkbox — não usa rascunho de texto
+      setEditingFieldKey(field.key);
+      return;
     }
-    setCustomFieldsDraft(nextDraft);
-    setIsCustomFieldsEditMode(true);
+    const current = deal.customFields?.[field.key];
+    setEditingFieldValue(current == null ? '' : String(current));
+    setEditingFieldKey(field.key);
   };
 
-  const saveCustomFieldsDraft = () => {
-    const nextCustomFields: Record<string, unknown> = { ...(deal.customFields || {}) };
+  const closeFieldEditor = () => setEditingFieldKey(null);
 
-    for (const field of customFieldDefinitions) {
-      const raw = (customFieldsDraft[field.key] ?? '').toString();
+  // Salva UM campo. Retorna false se o valor for inválido (mantém o editor aberto).
+  const commitFieldEdit = (field: CustomFieldDefinition, raw: string): boolean => {
+    let nextValue: unknown;
 
-      if (field.type === 'number' || field.type === 'currency') {
-        const normalized = raw.trim().replace(',', '.');
-        if (normalized === '') {
-          nextCustomFields[field.key] = null;
-          continue;
-        }
-
+    if (field.type === 'number' || field.type === 'currency') {
+      const normalized = raw.trim().replace(',', '.');
+      if (normalized === '') {
+        nextValue = null;
+      } else {
         const parsed = Number(normalized);
         if (!Number.isFinite(parsed)) {
           addToast(`Valor numérico inválido em "${field.label}".`, 'warning');
-          return;
+          return false;
         }
-
-        nextCustomFields[field.key] = parsed;
-        continue;
+        nextValue = parsed;
       }
-
-      if (field.type === 'multiselect') {
-        // Stored as array from checkboxes, read from draft as comma-separated or from deal
-        const current = deal.customFields?.[field.key];
-        nextCustomFields[field.key] = Array.isArray(current) ? current : [];
-        continue;
-      }
-
-      if (field.type === 'date' || field.type === 'select') {
-        nextCustomFields[field.key] = raw.trim() === '' ? null : raw.trim();
-        continue;
-      }
-
-      nextCustomFields[field.key] = raw.trim() === '' ? null : raw;
+    } else if (field.type === 'date' || field.type === 'select') {
+      nextValue = raw.trim() === '' ? null : raw.trim();
+    } else {
+      nextValue = raw.trim() === '' ? null : raw;
     }
 
-    updateDeal(deal.id, { customFields: nextCustomFields });
-    setIsCustomFieldsEditMode(false);
-    setCustomFieldsDraft({});
+    const current = deal.customFields?.[field.key] ?? null;
+    if (current !== (nextValue ?? null)) {
+      updateDeal(deal.id, { customFields: { ...(deal.customFields || {}), [field.key]: nextValue } });
+    }
+    return true;
+  };
+
+  const commitAndCloseFieldEditor = (field: CustomFieldDefinition, raw: string) => {
+    if (commitFieldEdit(field, raw)) setEditingFieldKey(null);
   };
 
   const tryOpenDatePicker = (input: HTMLInputElement) => {
@@ -724,9 +717,9 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
 
   // dealActivities memoized above.
 
-  // Handle escape key to close modal
+  // Handle escape key to close modal (não fecha se um campo inline está em edição)
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape' && !isEditingTitle && !isEditingValue) {
+    if (e.key === 'Escape' && !isEditingTitle && !isEditingValue && !editingFieldKey) {
       onClose();
     }
   };
@@ -1323,26 +1316,15 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                 {/* DYNAMIC CUSTOM FIELDS INPUTS */}
                 {customFieldDefinitions.length > 0 && (
                   <div className="pt-4 border-t border-slate-100 dark:border-white/5">
-                    <div className="mb-3 flex items-center justify-between gap-2">
-                      <h3 className="text-xs font-bold text-slate-400 uppercase">
-                        Campos Personalizados
-                      </h3>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (isCustomFieldsEditMode) {
-                            saveCustomFieldsDraft();
-                          } else {
-                            startCustomFieldsEditMode();
-                          }
-                        }}
-                        className="text-xs font-bold px-2.5 py-1 rounded-md border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
-                      >
-                        {isCustomFieldsEditMode ? 'Concluir' : 'Alterar'}
-                      </button>
-                    </div>
+                    <h3 className="mb-3 text-xs font-bold text-slate-400 uppercase">
+                      Campos Personalizados
+                    </h3>
                     {(() => {
-                      const renderFieldRow = (field: CustomFieldDefinition) => (
+                      // Clicar no valor abre o editor inline daquele campo (um por vez).
+                      // Enter/clicar fora salva; Esc cancela; select/data salvam ao escolher.
+                      const renderFieldRow = (field: CustomFieldDefinition) => {
+                        const isEditing = editingFieldKey === field.key;
+                        return (
                         <div
                           key={field.id}
                           className="py-2.5 last:pb-0"
@@ -1352,15 +1334,16 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                               {field.label}
                             </span>
 
-                            {isCustomFieldsEditMode ? (
+                            {isEditing ? (
                               <div className="w-full min-w-0">
                                 {field.type === 'select' ? (
                                   <select
-                                    value={customFieldsDraft[field.key] ?? ''}
-                                    onChange={e =>
-                                      setCustomFieldsDraft(prev => ({ ...prev, [field.key]: e.target.value }))
-                                    }
-                                    className="w-full min-w-0 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-sm dark:text-white focus:ring-2 focus:ring-primary-500 outline-none"
+                                    autoFocus
+                                    value={editingFieldValue}
+                                    onChange={e => commitAndCloseFieldEditor(field, e.target.value)}
+                                    onBlur={closeFieldEditor}
+                                    onKeyDown={e => { if (e.key === 'Escape') closeFieldEditor(); }}
+                                    className="w-full min-w-0 bg-white dark:bg-black/20 border border-primary-400 dark:border-primary-500/60 rounded-lg px-2.5 py-1.5 text-sm dark:text-white ring-2 ring-primary-500/20 outline-none"
                                   >
                                     <option value="">Selecione...</option>
                                     {field.options?.map(opt => (
@@ -1370,7 +1353,21 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                                     ))}
                                   </select>
                                 ) : field.type === 'multiselect' ? (
-                                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                                  <div
+                                    tabIndex={-1}
+                                    ref={el => {
+                                      // foca o container UMA vez pra que clicar fora dispare blur
+                                      if (el && !el.dataset.focused) {
+                                        el.dataset.focused = '1';
+                                        el.focus();
+                                      }
+                                    }}
+                                    onBlur={e => {
+                                      if (!e.currentTarget.contains(e.relatedTarget as Node)) closeFieldEditor();
+                                    }}
+                                    onKeyDown={e => { if (e.key === 'Escape') closeFieldEditor(); }}
+                                    className="space-y-1 max-h-40 overflow-y-auto rounded-lg border border-primary-400 dark:border-primary-500/60 ring-2 ring-primary-500/20 bg-white dark:bg-black/20 p-1.5 outline-none"
+                                  >
                                     {field.options?.map(opt => {
                                       const current: string[] = Array.isArray(deal.customFields?.[field.key])
                                         ? deal.customFields[field.key]
@@ -1403,54 +1400,78 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                                   <div className="relative">
                                     <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-slate-400">R$</span>
                                     <input
+                                      autoFocus
                                       type="text"
                                       inputMode="decimal"
-                                      value={customFieldsDraft[field.key] ?? ''}
-                                      onChange={e =>
-                                        setCustomFieldsDraft(prev => ({ ...prev, [field.key]: e.target.value }))
-                                      }
+                                      value={editingFieldValue}
+                                      onChange={e => setEditingFieldValue(e.target.value)}
+                                      onFocus={e => e.currentTarget.select()}
+                                      onBlur={() => commitAndCloseFieldEditor(field, editingFieldValue)}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter') commitAndCloseFieldEditor(field, editingFieldValue);
+                                        if (e.key === 'Escape') closeFieldEditor();
+                                      }}
                                       placeholder="0,00"
-                                      className="w-full min-w-0 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg pl-8 pr-2.5 py-1.5 text-sm dark:text-white focus:ring-2 focus:ring-primary-500 outline-none"
+                                      className="w-full min-w-0 bg-white dark:bg-black/20 border border-primary-400 dark:border-primary-500/60 rounded-lg pl-8 pr-2.5 py-1.5 text-sm dark:text-white ring-2 ring-primary-500/20 outline-none"
                                     />
                                   </div>
                                 ) : (
                                   <input
                                     type={field.type === 'date' ? 'date' : field.type}
-                                    value={customFieldsDraft[field.key] ?? ''}
-                                    onChange={e =>
-                                      setCustomFieldsDraft(prev => ({ ...prev, [field.key]: e.target.value }))
-                                    }
-                                    onClick={e => {
-                                      if (field.type === 'date') {
-                                        tryOpenDatePicker(e.currentTarget);
+                                    ref={el => {
+                                      // foco (com seleção do texto) + abre o calendário direto na data
+                                      if (el && !el.dataset.focused) {
+                                        el.dataset.focused = '1';
+                                        el.focus();
+                                        if (field.type === 'date') tryOpenDatePicker(el);
+                                        else el.select();
                                       }
                                     }}
-                                    className="w-full min-w-0 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-sm dark:text-white focus:ring-2 focus:ring-primary-500 outline-none"
+                                    value={editingFieldValue}
+                                    onChange={e => {
+                                      if (field.type === 'date') {
+                                        // escolher no calendário aplica e fecha na hora
+                                        commitAndCloseFieldEditor(field, e.target.value);
+                                      } else {
+                                        setEditingFieldValue(e.target.value);
+                                      }
+                                    }}
+                                    onBlur={() => commitAndCloseFieldEditor(field, editingFieldValue)}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') commitAndCloseFieldEditor(field, editingFieldValue);
+                                      if (e.key === 'Escape') closeFieldEditor();
+                                    }}
+                                    className="w-full min-w-0 bg-white dark:bg-black/20 border border-primary-400 dark:border-primary-500/60 rounded-lg px-2.5 py-1.5 text-sm dark:text-white ring-2 ring-primary-500/20 outline-none"
                                   />
                                 )}
                               </div>
                             ) : (() => {
                               const value = deal.customFields?.[field.key];
                               const displayValue = getCustomFieldDisplayValue(field.type, value);
-                              if (!displayValue) {
-                                return (
-                                  <p className="min-w-0 text-sm italic text-slate-500 dark:text-slate-400">
-                                    Campo vazio
-                                  </p>
-                                );
-                              }
                               return (
-                                <p
-                                  className="min-w-0 line-clamp-3 break-words text-sm text-slate-900 dark:text-white cursor-default"
-                                  title={String(displayValue)}
+                                <button
+                                  type="button"
+                                  onClick={() => openFieldEditor(field)}
+                                  title={displayValue ? `${displayValue}` : 'Clique para editar'}
+                                  className="group/field w-full min-w-0 flex items-start justify-between gap-2 text-left -mx-2 px-2 py-1 rounded-lg hover:bg-slate-100/80 dark:hover:bg-white/10 transition-colors"
                                 >
-                                  {displayValue}
-                                </p>
+                                  {displayValue ? (
+                                    <span className="min-w-0 line-clamp-3 break-words text-sm text-slate-900 dark:text-white">
+                                      {displayValue}
+                                    </span>
+                                  ) : (
+                                    <span className="text-sm italic text-slate-400 dark:text-slate-500">
+                                      Adicionar...
+                                    </span>
+                                  )}
+                                  <Pencil size={12} className="shrink-0 mt-1 text-slate-400 opacity-0 group-hover/field:opacity-100 transition-opacity" />
+                                </button>
                               );
                             })()}
                           </div>
                         </div>
-                      );
+                        );
+                      };
 
                       return (
                         <>
@@ -1461,10 +1482,9 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                             </div>
                           )}
 
-                          {/* Grupos: sanfona colapsável (abre/fecha igual às UTMs).
-                              No modo edição, todos os grupos ficam abertos. */}
+                          {/* Grupos: sanfona colapsável (abre/fecha igual às UTMs). */}
                           {groupedFieldDefs.map(([groupName, fields]) => {
-                            const open = isCustomFieldsEditMode || !!openFieldGroups[groupName];
+                            const open = !!openFieldGroups[groupName];
                             return (
                               // cabeçalho CENTRALIZADO entre as divisórias: 16px acima
                               // (pt-4) e 16px abaixo (mt-4 do próximo bloco) — simétrico
