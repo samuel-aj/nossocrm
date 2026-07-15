@@ -140,7 +140,9 @@ export const ChatsPage: React.FC = () => {
     return m;
   }, [contacts]);
 
-  // Conversas com nome/contato resolvidos e grafias do mesmo número unificadas
+  // Conversas com nome/contato resolvidos e grafias do mesmo número unificadas.
+  // SÓ aparecem conversas de CONTATOS DO CRM — mensagens de números avulsos do
+  // WhatsApp conectado ficam de fora (crie o contato pra conversa aparecer).
   const conversations = useMemo<ChatListItem[]>(() => {
     const rows = convsQ.data?.data ?? [];
     const byKey = new Map<string, ChatListItem>();
@@ -176,7 +178,9 @@ export const ChatsPage: React.FC = () => {
         unread: prev.unread + item.unread,
       });
     }
-    return Array.from(byKey.values()).sort((a, b) => (b.lastAt || '').localeCompare(a.lastAt || ''));
+    return Array.from(byKey.values())
+      .filter(c => !!c.contact)
+      .sort((a, b) => (b.lastAt || '').localeCompare(a.lastAt || ''));
   }, [convsQ.data, contactsById, contactByPhone]);
 
   const filteredConversations = useMemo(() => {
@@ -201,7 +205,12 @@ export const ChatsPage: React.FC = () => {
   const selectedKey = selected ? phoneKey(selected.phone) : null;
 
   return (
-    <div className="h-full min-h-0 flex rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card overflow-hidden shadow-sm">
+    // Tela CHEIA: ancora no <main> (que é relative) e ignora o p-6 dele —
+    // nada de cartão flutuante; o chat cola nas bordas da área de conteúdo.
+    <div
+      className="absolute inset-0 flex bg-white dark:bg-dark-card overflow-hidden"
+      style={{ paddingBottom: 'calc(var(--app-bottom-nav-height, 0px) + var(--app-safe-area-bottom, 0px))' }}
+    >
       {/* ============ COLUNA ESQUERDA: conversas + contatos ============ */}
       <aside className={`${selected ? 'hidden md:flex' : 'flex'} w-full md:w-[360px] lg:w-[380px] shrink-0 flex-col border-r border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card`}>
         {/* Cabeçalho */}
@@ -284,7 +293,7 @@ export const ChatsPage: React.FC = () => {
                 <div className="text-center py-10 px-6 text-slate-400">
                   <MessageCircle size={28} className="mx-auto mb-2 opacity-40" />
                   <p className="text-sm">
-                    {searchQuery ? 'Nenhuma conversa encontrada.' : 'Nenhuma conversa ainda. Puxe assunto pela aba Contatos 👉'}
+                    {searchQuery ? 'Nenhuma conversa encontrada.' : 'Nenhuma conversa com contatos do CRM ainda. Puxe assunto pela aba Contatos 👉'}
                   </p>
                 </div>
               )}
