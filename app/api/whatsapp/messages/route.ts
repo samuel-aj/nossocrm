@@ -57,6 +57,13 @@ export async function GET(req: Request) {
       }
     }
     messages = rows;
+
+    // Visualizou = leu: zera o contador de não lidas (badge da página Chats)
+    await auth.admin
+      .from('wa_conversations')
+      .update({ unread_count: 0 })
+      .in('id', convs.map(c => c.id))
+      .gt('unread_count', 0);
   }
 
   return json({

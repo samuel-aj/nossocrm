@@ -8,6 +8,7 @@
 const routeImports = {
   dashboard: () => import('@/features/dashboard/DashboardPage'),
   inbox: () => import('@/features/inbox/InboxPage'),
+  chats: () => import('@/features/chats/ChatsPage'),
   boards: () => import('@/features/boards/BoardsPage'),
   contacts: () => import('@/features/contacts/ContactsPage'),
   settings: () => import('@/features/settings/SettingsPage'),

@@ -47,6 +47,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Shield,
+  MessageCircle,
 } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
 import { useAuth } from '../context/AuthContext';
@@ -290,6 +291,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         <nav className="flex-1 p-4 space-y-2 flex flex-col" aria-label="Navegação do sistema">
           {[
             { to: '/inbox', icon: Inbox, label: 'Inbox', prefetch: 'inbox' as const },
+            { to: '/chats', icon: MessageCircle, label: 'Chats', prefetch: 'chats' as const },
             { to: '/dashboard', icon: LayoutDashboard, label: 'Visão Geral', prefetch: 'dashboard' as const },
             { to: '/boards', icon: KanbanSquare, label: 'Boards', prefetch: 'boards' as const },
             { to: '/contacts', icon: Users, label: 'Contatos', prefetch: 'contacts' as const },
@@ -307,7 +309,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               prefetch={item.prefetch}
               clickedPath={clickedPath}
               onItemClick={setClickedPath}
-              badge={(item.to === '/suggestions' || item.to === '/tutorial') ? 'Novo' : undefined}
+              badge={(item.to === '/suggestions' || item.to === '/tutorial' || item.to === '/chats') ? 'Novo' : undefined}
               collapsed={sidebarCollapsed}
             />
           ))}
