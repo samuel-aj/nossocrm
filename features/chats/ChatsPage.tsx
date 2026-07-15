@@ -2,12 +2,14 @@
 
 import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, MessageCircle, Search, Users, X } from 'lucide-react';
+import { ArrowLeft, ExternalLink, KanbanSquare, MessageCircle, Plus, Search, UserPlus, Users, X } from 'lucide-react';
 import { useCRM } from '@/context/CRMContext';
+import { useToast } from '@/context/ToastContext';
 import { DealWhatsAppChat } from '@/features/whatsapp/DealWhatsAppChat';
-import { brPhoneVariants } from '@/lib/phone';
-import { Contact } from '@/types';
+import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
+import { Contact, Deal } from '@/types';
 
 // ---------------------------------------------------------------------------
 // Página CHATS: inbox de WhatsApp da organização, estilo WhatsApp Web.
@@ -100,9 +102,24 @@ const AvatarCircle: React.FC<{ name: string; src?: string; size?: string }> = ({
 );
 
 export const ChatsPage: React.FC = () => {
-  const { contacts } = useCRM();
+  const { contacts, deals, boards, addContact, addDeal } = useCRM();
+  const { addToast } = useToast();
+  const router = useRouter();
   const [selected, setSelected] = useState<ChatTarget | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Modal "Novo contato" (adiciona no CRM e já abre o chat dele)
+  const [newContactOpen, setNewContactOpen] = useState(false);
+  const [ncName, setNcName] = useState('');
+  const [ncPhone, setNcPhone] = useState('');
+  const [ncEmail, setNcEmail] = useState('');
+  const [ncBusy, setNcBusy] = useState(false);
+
+  // Modal "Criar lead" (escolhe a pipeline e a etapa)
+  const [leadModalOpen, setLeadModalOpen] = useState(false);
+  const [leadBoardId, setLeadBoardId] = useState('');
+  const [leadStageId, setLeadStageId] = useState('');
+  const [leadBusy, setLeadBusy] = useState(false);
 
   const convsQ = useQuery<{ data: ConvRow[] }>({
     queryKey: ['waConversations'],
@@ -191,6 +208,102 @@ export const ChatsPage: React.FC = () => {
   const openChat = (target: ChatTarget) => setSelected(target);
   const selectedKey = selected ? phoneKey(selected.phone) : null;
 
+  // Lead do contato selecionado: prefere um deal ABERTO (nem ganho nem
+  // perdido); entre vários, o mais recente. null = "Criar lead" disponível.
+  const selectedDeal = useMemo(() => {
+    if (!selected?.contactId) return null;
+    const list = deals.filter(d => d.contactId === selected.contactId);
+    if (list.length === 0) return null;
+    const open = list.filter(d => !d.isWon && !d.isLost);
+    const pool = open.length ? open : list;
+    return pool.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0];
+  }, [deals, selected?.contactId]);
+
+  const selectedDealBoard = useMemo(
+    () => (selectedDeal ? boards.find(b => b.id === selectedDeal.boardId) ?? null : null),
+    [boards, selectedDeal]
+  );
+  const selectedDealStage = selectedDealBoard?.stages.find(s => s.id === selectedDeal?.status) ?? null;
+
+  const handleCreateContact = async () => {
+    const name = ncName.trim();
+    const phone = normalizePhoneE164(ncPhone.trim());
+    if (!name || !phone) {
+      addToast('Nome e telefone são obrigatórios.', 'warning');
+      return;
+    }
+    const dup = contacts.find(c => (c.phone || '').trim() && phoneKey(c.phone) === phoneKey(phone));
+    if (dup) {
+      addToast(`Já existe um contato com esse telefone: ${dup.name}.`, 'warning');
+      return;
+    }
+    setNcBusy(true);
+    try {
+      const created = await addContact({
+        name,
+        email: ncEmail.trim(),
+        phone,
+        status: 'ACTIVE',
+        stage: 'LEAD',
+        lastPurchaseDate: '',
+        totalValue: 0,
+      } as Omit<Contact, 'id' | 'createdAt'>);
+      if (created) {
+        addToast(`Contato "${name}" criado!`, 'success');
+        setNewContactOpen(false);
+        setNcName('');
+        setNcPhone('');
+        setNcEmail('');
+        setSelected({ phone: created.phone || phone, name: created.name, contactId: created.id });
+      } else {
+        addToast('Falha ao criar o contato. Tente novamente.', 'error');
+      }
+    } finally {
+      setNcBusy(false);
+    }
+  };
+
+  const openLeadModal = () => {
+    const firstBoard = boards[0];
+    setLeadBoardId(firstBoard?.id || '');
+    setLeadStageId(firstBoard?.stages[0]?.id || '');
+    setLeadModalOpen(true);
+  };
+
+  const handleCreateLead = async () => {
+    if (!selected?.contactId || !leadBoardId || !leadStageId || leadBusy) return;
+    const contact = contacts.find(c => c.id === selected.contactId);
+    setLeadBusy(true);
+    try {
+      const created = await addDeal({
+        title: selected.name,
+        contactId: selected.contactId,
+        companyId: contact?.clientCompanyId || contact?.companyId,
+        boardId: leadBoardId,
+        value: 0,
+        items: [],
+        status: leadStageId,
+        updatedAt: new Date().toISOString(),
+        probability: 10,
+        priority: 'medium',
+        tags: [],
+        owner: { name: 'Eu', avatar: 'https://i.pravatar.cc/150?u=me' },
+        customFields: {},
+        isWon: false,
+        isLost: false,
+      } as Omit<Deal, 'id' | 'createdAt'>);
+      if (created) {
+        const b = boards.find(x => x.id === leadBoardId);
+        addToast(`Lead criado em "${b?.name ?? 'board'}"!`, 'success');
+        setLeadModalOpen(false);
+      } else {
+        addToast('Falha ao criar o lead. Tente novamente.', 'error');
+      }
+    } finally {
+      setLeadBusy(false);
+    }
+  };
+
   return (
     // Tela CHEIA: ancora no <main> (que é relative) e ignora o p-6 dele —
     // nada de cartão flutuante; o chat cola nas bordas da área de conteúdo.
@@ -209,16 +322,27 @@ export const ChatsPage: React.FC = () => {
               </span>
               Chats
             </h1>
-            <span
-              className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-1 rounded-full ${
-                connected
-                  ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400'
-                  : 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400'
-              }`}
-              title={connected ? 'WhatsApp conectado' : 'WhatsApp desconectado — conecte em Configurações → Integrações'}
-            >
-              <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-              {connected ? 'Conectado' : 'Desconectado'}
+            <span className="flex items-center gap-1.5">
+              <span
+                className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-1 rounded-full ${
+                  connected
+                    ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400'
+                    : 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400'
+                }`}
+                title={connected ? 'WhatsApp conectado' : 'WhatsApp desconectado — conecte em Configurações → Integrações'}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                {connected ? 'Conectado' : 'Desconectado'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setNewContactOpen(true)}
+                title="Adicionar contato"
+                aria-label="Adicionar contato"
+                className="h-8 w-8 inline-flex items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors"
+              >
+                <UserPlus size={17} />
+              </button>
             </span>
           </div>
 
@@ -308,6 +432,43 @@ export const ChatsPage: React.FC = () => {
                 <ArrowLeft size={16} /> Contatos
               </button>
             </div>
+
+            {/* Barra de CRM: mostra a pipeline/etapa do lead do contato (com
+                atalho pro card) ou oferece criar o lead na hora */}
+            <div className="shrink-0 flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card">
+              {selectedDeal ? (
+                <>
+                  <span className="flex items-center gap-2 min-w-0 text-xs text-slate-600 dark:text-slate-300">
+                    <KanbanSquare size={14} className="text-primary-500 shrink-0" />
+                    <span className="font-bold truncate">{selectedDealBoard?.name ?? 'Board'}</span>
+                    <span className="text-slate-300 dark:text-slate-600 shrink-0">•</span>
+                    <span className="inline-flex items-center gap-1.5 min-w-0">
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${selectedDealStage?.color ?? 'bg-slate-400'}`} />
+                      <span className="truncate">{selectedDealStage?.label ?? 'Etapa'}</span>
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/boards?deal=${selectedDeal.id}`)}
+                    className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 border border-primary-200 dark:border-primary-500/30 transition-colors"
+                  >
+                    Abrir lead <ExternalLink size={12} />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="text-xs text-slate-400 italic truncate">Este contato ainda não tem lead.</span>
+                  <button
+                    type="button"
+                    onClick={openLeadModal}
+                    className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition-colors"
+                  >
+                    <Plus size={13} /> Criar lead
+                  </button>
+                </>
+              )}
+            </div>
+
             <div className="flex-1 min-h-0">
               {/* key={phone} garante reset total do composer/busca ao trocar de conversa */}
               <DealWhatsAppChat
@@ -338,6 +499,165 @@ export const ChatsPage: React.FC = () => {
           </div>
         )}
       </section>
+
+      {/* ============ MODAL: Novo contato ============ */}
+      {newContactOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] flex items-center justify-center p-4"
+          onClick={() => { if (!ncBusy) setNewContactOpen(false); }}
+        >
+          <div
+            className="w-full max-w-sm bg-white dark:bg-dark-card rounded-2xl border border-slate-200 dark:border-white/10 shadow-2xl p-5"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-display font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <UserPlus size={16} className="text-emerald-500" /> Novo contato
+              </h2>
+              <button
+                type="button"
+                onClick={() => setNewContactOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                aria-label="Fechar"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nome *</label>
+                <input
+                  autoFocus
+                  type="text"
+                  value={ncName}
+                  onChange={e => setNcName(e.target.value)}
+                  placeholder="Ex: Maria Silva"
+                  className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Telefone (WhatsApp) *</label>
+                <input
+                  type="tel"
+                  value={ncPhone}
+                  onChange={e => setNcPhone(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') void handleCreateContact(); }}
+                  placeholder="Ex: (66) 99999-9999"
+                  className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Email (opcional)</label>
+                <input
+                  type="email"
+                  value={ncEmail}
+                  onChange={e => setNcEmail(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') void handleCreateContact(); }}
+                  placeholder="email@exemplo.com"
+                  className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button
+                type="button"
+                onClick={() => setNewContactOpen(false)}
+                disabled={ncBusy}
+                className="px-3 py-2 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleCreateContact()}
+                disabled={ncBusy || !ncName.trim() || !ncPhone.trim()}
+                className="px-4 py-2 rounded-lg text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {ncBusy ? 'Criando...' : 'Criar e abrir chat'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============ MODAL: Criar lead (pipeline + etapa) ============ */}
+      {leadModalOpen && selected && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] flex items-center justify-center p-4"
+          onClick={() => { if (!leadBusy) setLeadModalOpen(false); }}
+        >
+          <div
+            className="w-full max-w-sm bg-white dark:bg-dark-card rounded-2xl border border-slate-200 dark:border-white/10 shadow-2xl p-5"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="text-sm font-display font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <KanbanSquare size={16} className="text-emerald-500" /> Criar lead
+              </h2>
+              <button
+                type="button"
+                onClick={() => setLeadModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                aria-label="Fechar"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 truncate">
+              Para <span className="font-semibold text-slate-700 dark:text-slate-200">{selected.name}</span>
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Pipeline (board)</label>
+                <select
+                  value={leadBoardId}
+                  onChange={e => {
+                    const boardId = e.target.value;
+                    setLeadBoardId(boardId);
+                    // trocar de board reposiciona a etapa na primeira do novo board
+                    setLeadStageId(boards.find(b => b.id === boardId)?.stages[0]?.id || '');
+                  }}
+                  className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500"
+                >
+                  {boards.map(b => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Etapa</label>
+                <select
+                  value={leadStageId}
+                  onChange={e => setLeadStageId(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500"
+                >
+                  {(boards.find(b => b.id === leadBoardId)?.stages ?? []).map(s => (
+                    <option key={s.id} value={s.id}>{s.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button
+                type="button"
+                onClick={() => setLeadModalOpen(false)}
+                disabled={leadBusy}
+                className="px-3 py-2 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleCreateLead()}
+                disabled={leadBusy || !leadBoardId || !leadStageId}
+                className="px-4 py-2 rounded-lg text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {leadBusy ? 'Criando...' : 'Criar lead'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
