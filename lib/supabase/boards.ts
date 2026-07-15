@@ -118,6 +118,8 @@ export interface DbBoard {
   entry_trigger: string | null;
   /** Sugestões de automação. */
   automation_suggestions: string[] | null;
+  /** Grupos de campos personalizados ocultos no card dos deals deste board. */
+  hidden_field_groups?: string[] | null;
   /** Posição na lista de boards. */
   position: number;
   /** Data de criação. */
@@ -211,6 +213,7 @@ const transformBoard = (db: DbBoard, stages: DbBoardStage[]): Board => {
     agentPersona,
     entryTrigger: db.entry_trigger || undefined,
     automationSuggestions: db.automation_suggestions || [],
+    hiddenFieldGroups: Array.isArray(db.hidden_field_groups) ? db.hidden_field_groups : [],
     stages: stages
       .filter(s => s.board_id === db.id)
       .sort((a, b) => a.order - b.order)
@@ -270,6 +273,11 @@ const transformToDb = (board: Omit<Board, 'id' | 'createdAt'>, order?: number): 
 
   if (defaultProductId) {
     db.default_product_id = defaultProductId;
+  }
+
+  // Omit when unset for backwards-compat (column may not exist yet).
+  if (board.hiddenFieldGroups !== undefined) {
+    db.hidden_field_groups = board.hiddenFieldGroups?.length ? board.hiddenFieldGroups : null;
   }
 
   const key = normalizeBoardKey((board as any).key);
@@ -453,6 +461,13 @@ export const boardsService = {
           insert = await supabase.from('boards').insert(retryData).select().single();
         }
 
+        // Backwards-compat: DB may not have hidden_field_groups yet (migration not applied).
+        if (insert.error && isMissingColumnInSchemaCache(insert.error, 'boards', 'hidden_field_groups')) {
+          const retryData = { ...(boardData as any) };
+          delete retryData.hidden_field_groups;
+          insert = await supabase.from('boards').insert(retryData).select().single();
+        }
+
         newBoard = insert.data as any;
         boardError = insert.error as any;
 
@@ -564,6 +579,9 @@ export const boardsService = {
       if (updates.defaultProductId !== undefined) dbUpdates.default_product_id = sanitizeUUID(updates.defaultProductId as any);
       if (updates.entryTrigger !== undefined) dbUpdates.entry_trigger = updates.entryTrigger || null;
       if (updates.automationSuggestions !== undefined) dbUpdates.automation_suggestions = updates.automationSuggestions || null;
+      if (updates.hiddenFieldGroups !== undefined) {
+        dbUpdates.hidden_field_groups = updates.hiddenFieldGroups?.length ? updates.hiddenFieldGroups : null;
+      }
 
 
       if (updates.goal !== undefined) {
@@ -601,6 +619,19 @@ export const boardsService = {
       if (error && isMissingColumnInSchemaCache(error, 'boards', 'default_product_id')) {
         const retryUpdates = { ...(dbUpdates as any) };
         delete retryUpdates.default_product_id;
+
+        const retry = await supabase
+          .from('boards')
+          .update(retryUpdates)
+          .eq('id', id);
+
+        error = retry.error as any;
+      }
+
+      // Backwards-compat: ignore hidden_field_groups updates if column isn't present yet.
+      if (error && isMissingColumnInSchemaCache(error, 'boards', 'hidden_field_groups')) {
+        const retryUpdates = { ...(dbUpdates as any) };
+        delete retryUpdates.hidden_field_groups;
 
         const retry = await supabase
           .from('boards')

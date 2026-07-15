@@ -1,9 +1,10 @@
 import React, { useMemo, useState, useId } from 'react';
-import { Plus, GripVertical, Trash2, ChevronDown, Settings, Copy, Check } from 'lucide-react';
+import { Plus, GripVertical, Trash2, ChevronDown, Settings, Copy, Check, Eye, EyeOff, FolderOpen } from 'lucide-react';
 import { Board, BoardStage, ContactStage } from '@/types';
 import { BOARD_TEMPLATES, BoardTemplateType } from '@/lib/templates/board-templates';
 import { LifecycleSettingsModal } from '@/features/settings/components/LifecycleSettingsModal';
 import { useCRM } from '@/context/CRMContext';
+import { useSettings } from '@/context/settings/SettingsContext';
 import { useToast } from '@/context/ToastContext';
 import { Modal } from '@/components/ui/Modal';
 import { MODAL_FOOTER_CLASS } from '@/components/ui/modalStyles';
@@ -118,7 +119,8 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
   React.useEffect(() => {
   }, [isOpen]);
 
-  const { lifecycleStages, products } = useCRM();
+  const { lifecycleStages, products, customFieldDefinitions } = useCRM();
+  const { customFieldGroups } = useSettings();
   const { addToast } = useToast();
   const [name, setName] = useState('');
   const [boardKey, setBoardKey] = useState('');
@@ -131,6 +133,8 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
   const [wonStayInStage, setWonStayInStage] = useState(false);
   const [lostStayInStage, setLostStayInStage] = useState(false);
   const [defaultProductId, setDefaultProductId] = useState<string>('');
+  // Grupos de campos personalizados OCULTOS no card dos deals deste board
+  const [hiddenFieldGroups, setHiddenFieldGroups] = useState<string[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<BoardTemplateType | ''>('');
   const [stages, setStages] = useState<BoardStage[]>([]);
   const [isLifecycleModalOpen, setIsLifecycleModalOpen] = useState(false);
@@ -152,6 +156,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
         setWonStayInStage(editingBoard.wonStayInStage || false);
         setLostStayInStage(editingBoard.lostStayInStage || false);
         setDefaultProductId(editingBoard.defaultProductId || '');
+        setHiddenFieldGroups(editingBoard.hiddenFieldGroups || []);
         setSelectedTemplate(editingBoard.template || '');
         setStages(editingBoard.stages);
       } else {
@@ -172,6 +177,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
               setWonStayInStage(Boolean(draft.wonStayInStage));
               setLostStayInStage(Boolean(draft.lostStayInStage));
               setDefaultProductId(String(draft.defaultProductId ?? ''));
+              setHiddenFieldGroups(Array.isArray(draft.hiddenFieldGroups) ? draft.hiddenFieldGroups : []);
               setSelectedTemplate((draft.selectedTemplate as BoardTemplateType) ?? '');
               setStages(Array.isArray(draft.stages) ? draft.stages : []);
               return;
@@ -192,6 +198,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
         setWonStayInStage(false);
         setLostStayInStage(false);
         setDefaultProductId('');
+        setHiddenFieldGroups([]);
         setSelectedTemplate('');
         setStages([
           { id: crypto.randomUUID(), label: 'Nova', color: 'bg-blue-500' },
@@ -208,6 +215,27 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
     () => availableBoards.filter(b => b.id !== editingBoard?.id),
     [availableBoards, editingBoard?.id]
   );
+
+  // Todos os grupos de campos da organização: tabela de grupos + os que ainda
+  // existem só nos campos, ordenados (mesma união usada nas Configurações)
+  const allFieldGroups = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...customFieldGroups.map(g => g.trim()).filter(g => g !== ''),
+          ...customFieldDefinitions
+            .map(f => (f.groupName ?? '').trim())
+            .filter(g => g !== ''),
+        ])
+      ).sort((a, b) => a.localeCompare(b, 'pt-BR')),
+    [customFieldGroups, customFieldDefinitions]
+  );
+
+  const toggleFieldGroupHidden = (groupName: string) => {
+    setHiddenFieldGroups(prev =>
+      prev.includes(groupName) ? prev.filter(g => g !== groupName) : [...prev, groupName]
+    );
+  };
 
   const handleAddStage = () => {
     const colorIndex = stages.length % STAGE_COLORS.length;
@@ -299,6 +327,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
       wonStayInStage,
       lostStayInStage,
       defaultProductId: (defaultProductId || null) as any,
+      hiddenFieldGroups,
       template: selectedTemplate || 'CUSTOM',
       stages,
       isDefault: false
@@ -319,6 +348,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
           wonStayInStage,
           lostStayInStage,
           defaultProductId,
+          hiddenFieldGroups,
           selectedTemplate,
           stages,
         })
@@ -538,6 +568,50 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                   Sugere (ou pré-seleciona) um produto ao adicionar itens em deals desse board.
                 </p>
               </div>
+
+              {/* Grupos de campos personalizados visíveis/ocultos neste board */}
+              {allFieldGroups.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                    🗂️ Grupos de campos no card
+                  </label>
+                  <div className="rounded-lg border border-slate-200 dark:border-white/10 divide-y divide-slate-100 dark:divide-white/5 overflow-hidden">
+                    {allFieldGroups.map(groupName => {
+                      const hidden = hiddenFieldGroups.includes(groupName);
+                      return (
+                        <button
+                          type="button"
+                          key={groupName}
+                          onClick={() => toggleFieldGroupHidden(groupName)}
+                          aria-pressed={!hidden}
+                          title={hidden ? 'Clique para mostrar este grupo no card' : 'Clique para ocultar este grupo no card'}
+                          className="w-full flex items-center justify-between gap-2 px-3 py-2.5 bg-white dark:bg-white/5 hover:bg-slate-50 dark:hover:bg-white/10 transition-colors"
+                        >
+                          <span className="flex items-center gap-2 min-w-0 text-sm">
+                            <FolderOpen size={14} className={`shrink-0 ${hidden ? 'text-slate-300 dark:text-slate-600' : 'text-primary-500'}`} />
+                            <span className={`truncate ${hidden ? 'text-slate-400 dark:text-slate-500' : 'text-slate-700 dark:text-slate-200'}`}>
+                              {groupName}
+                            </span>
+                          </span>
+                          <span
+                            className={`shrink-0 inline-flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-md transition-colors ${
+                              hidden
+                                ? 'bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400'
+                                : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400'
+                            }`}
+                          >
+                            {hidden ? <EyeOff size={13} /> : <Eye size={13} />}
+                            {hidden ? 'Oculto' : 'Visível'}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                    Grupos ocultos não aparecem no card dos leads deste board. Ex.: no board de BPC, oculte os grupos de DBA.
+                  </p>
+                </div>
+              )}
 
               {/* Next Board Automation */}
               <div>

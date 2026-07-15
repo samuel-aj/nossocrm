@@ -343,6 +343,8 @@ export interface Board {
   isDefault?: boolean;
   template?: 'PRE_SALES' | 'SALES' | 'ONBOARDING' | 'CS' | 'CUSTOM'; // Template usado para criar este board
   automationSuggestions?: string[]; // Sugestões de automação da IA
+  /** Grupos de campos personalizados OCULTOS no card dos deals deste board (por nome). */
+  hiddenFieldGroups?: string[];
 
   // AI Strategy Fields
   goal?: BoardGoal;

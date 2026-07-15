@@ -271,13 +271,17 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const availableTagsLower = useMemo(() => new Set((availableTags || []).map(t => t.toLowerCase())), [availableTags]);
 
   // Campos personalizados: desagrupados (lista direta, como sempre) +
-  // grupos (cada um vira uma sanfona colapsável no card)
+  // grupos (cada um vira uma sanfona colapsável no card). Grupos marcados
+  // como ocultos nas configurações DESTE board não aparecem no card.
+  const boardHiddenGroups = dealBoard?.hiddenFieldGroups;
   const { ungroupedFieldDefs, groupedFieldDefs } = useMemo(() => {
+    const hidden = new Set((boardHiddenGroups || []).map(g => g.trim()));
     const ungrouped: CustomFieldDefinition[] = [];
     const groups = new Map<string, CustomFieldDefinition[]>();
     for (const f of customFieldDefinitions) {
       const g = (f.groupName ?? '').trim();
       if (g) {
+        if (hidden.has(g)) continue;
         if (!groups.has(g)) groups.set(g, []);
         groups.get(g)!.push(f);
       } else {
@@ -288,7 +292,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
       ungroupedFieldDefs: ungrouped,
       groupedFieldDefs: Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0], 'pt-BR')),
     };
-  }, [customFieldDefinitions]);
+  }, [customFieldDefinitions, boardHiddenGroups]);
 
   // Helper functions removed as they are now handled by ActivityRow component
 
@@ -1316,8 +1320,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                   )}
                 </div>
 
-                {/* DYNAMIC CUSTOM FIELDS INPUTS */}
-                {customFieldDefinitions.length > 0 && (
+                {/* DYNAMIC CUSTOM FIELDS INPUTS (grupos ocultos pelo board já filtrados) */}
+                {(ungroupedFieldDefs.length > 0 || groupedFieldDefs.length > 0) && (
                   <div className="pt-4 border-t border-slate-100 dark:border-white/5">
                     <h3 className="mb-3 text-xs font-bold text-slate-400 uppercase">
                       Campos Personalizados
