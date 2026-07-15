@@ -1464,10 +1464,11 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                           {groupedFieldDefs.map(([groupName, fields]) => {
                             const open = isCustomFieldsEditMode || !!openFieldGroups[groupName];
                             return (
-                              // mesmo respiro do bloco de UTMs (mt-4 + pt-4 + divisória)
+                              // respiro IDÊNTICO às seções irmãs (UTMs/Detalhes): elas têm
+                              // 24px do space-y-6 + 16px do pt-4 = 40px → aqui mt-6 + pt-4
                               <div
                                 key={groupName}
-                                className="mt-4 pt-4 border-t border-slate-100 dark:border-white/5"
+                                className="mt-6 pt-4 border-t border-slate-100 dark:border-white/5"
                               >
                                 <button
                                   type="button"
