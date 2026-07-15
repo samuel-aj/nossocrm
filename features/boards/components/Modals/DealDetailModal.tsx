@@ -1464,11 +1464,11 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                           {groupedFieldDefs.map(([groupName, fields]) => {
                             const open = isCustomFieldsEditMode || !!openFieldGroups[groupName];
                             return (
-                              // respiro IDÊNTICO às seções irmãs (UTMs/Detalhes): elas têm
-                              // 24px do space-y-6 + 16px do pt-4 = 40px → aqui mt-6 + pt-4
+                              // cabeçalho CENTRALIZADO entre as divisórias: 16px acima
+                              // (pt-4) e 16px abaixo (mt-4 do próximo bloco) — simétrico
                               <div
                                 key={groupName}
-                                className="mt-6 pt-4 border-t border-slate-100 dark:border-white/5"
+                                className="mt-4 pt-4 border-t border-slate-100 dark:border-white/5"
                               >
                                 <button
                                   type="button"
