@@ -1612,7 +1612,9 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto scrollbar-custom p-6 bg-slate-50/30 dark:bg-black/10">
+              {/* WhatsApp ocupa a área inteira da aba (sem padding — o chat
+                  rola por dentro); as demais abas mantêm o p-6 com scroll */}
+              <div className={`flex-1 min-h-0 bg-slate-50/30 dark:bg-black/10 ${activeTab === 'whatsapp' ? 'overflow-hidden' : 'overflow-y-auto scrollbar-custom p-6'}`}>
                 {activeTab === 'whatsapp' && (
                   <div className="h-full">
                     <DealWhatsAppChat contact={contact} />
