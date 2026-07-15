@@ -110,6 +110,9 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ hash, isAdmin }) => {
             onCancelEditing={controller.cancelEditingField}
             onSaveField={controller.handleSaveField}
             onRemoveField={controller.removeCustomField}
+            onCreateGroup={controller.handleCreateGroup}
+            onRemoveGroup={controller.handleRemoveGroup}
+            onMoveFieldToGroup={controller.handleMoveFieldToGroup}
           />
         </>
       )}

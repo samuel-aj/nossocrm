@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { PenTool, Pencil, Check, Copy, Plus, List, Tag, Trash2, FolderOpen } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { PenTool, Pencil, Check, Copy, Plus, List, Tag, Trash2, FolderOpen, FolderPlus, GripVertical } from 'lucide-react';
 import { SettingsSection } from './SettingsSection';
 import { CustomFieldDefinition, CustomFieldType } from '@/types';
 
@@ -19,6 +19,9 @@ interface CustomFieldsManagerProps {
   onCancelEditing: () => void;
   onSaveField: () => void;
   onRemoveField: (id: string) => void;
+  onCreateGroup: (name: string) => Promise<boolean>;
+  onRemoveGroup: (name: string) => void | Promise<void>;
+  onMoveFieldToGroup: (fieldId: string, groupName: string | null) => void | Promise<void>;
 }
 
 /**
@@ -68,11 +71,77 @@ export const CustomFieldsManager: React.FC<CustomFieldsManagerProps> = ({
   onStartEditing,
   onCancelEditing,
   onSaveField,
-  onRemoveField
+  onRemoveField,
+  onCreateGroup,
+  onRemoveGroup,
+  onMoveFieldToGroup
 }) => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   // true = usuário escolheu "criar novo grupo" e está digitando o nome
   const [creatingGroup, setCreatingGroup] = useState(false);
+  // Criação de grupo vazio (independente de campo)
+  const [newGroupInput, setNewGroupInput] = useState('');
+  const [creatingGroupBusy, setCreatingGroupBusy] = useState(false);
+  // Drag & drop: id do campo sendo arrastado e seção sob o cursor ('' = Campos gerais)
+  const [draggingFieldId, setDraggingFieldId] = useState<string | null>(null);
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+  // Exclusão de grupo em 2 cliques (o 1º arma, o 2º confirma; desarma em 3s)
+  const [pendingDeleteGroup, setPendingDeleteGroup] = useState<string | null>(null);
+  const pendingDeleteTimer = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (pendingDeleteTimer.current) window.clearTimeout(pendingDeleteTimer.current);
+  }, []);
+
+  const armGroupDelete = (groupName: string) => {
+    if (pendingDeleteTimer.current) window.clearTimeout(pendingDeleteTimer.current);
+    setPendingDeleteGroup(groupName);
+    pendingDeleteTimer.current = window.setTimeout(() => setPendingDeleteGroup(null), 3000);
+  };
+
+  const submitNewGroup = async () => {
+    const name = newGroupInput.trim();
+    if (!name || creatingGroupBusy) return;
+    setCreatingGroupBusy(true);
+    try {
+      const ok = await onCreateGroup(name);
+      if (ok) setNewGroupInput('');
+    } finally {
+      setCreatingGroupBusy(false);
+    }
+  };
+
+  // Handlers de alvo de drop por seção (key '' = Campos gerais)
+  const dropZoneProps = (key: string) => ({
+    onDragOver: (e: React.DragEvent) => {
+      if (!draggingFieldId) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (dragOverKey !== key) setDragOverKey(key);
+    },
+    onDragLeave: (e: React.DragEvent) => {
+      // Ignora "saídas" para elementos filhos da própria seção
+      if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget as Node)) return;
+      setDragOverKey((cur) => (cur === key ? null : cur));
+    },
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault();
+      const id = e.dataTransfer.getData('text/plain') || draggingFieldId;
+      setDragOverKey(null);
+      setDraggingFieldId(null);
+      if (id) void onMoveFieldToGroup(id, key === '' ? null : key);
+    },
+  });
+
+  // Realce do alvo: ring (box-shadow) não desloca o layout
+  const dropZoneClass = (key: string) =>
+    `rounded-lg transition-shadow ${
+      dragOverKey === key
+        ? 'ring-2 ring-primary-500 bg-primary-50/50 dark:bg-primary-500/5'
+        : draggingFieldId
+          ? 'ring-1 ring-primary-300/60 dark:ring-primary-500/25'
+          : ''
+    }`;
 
   // Ao entrar/sair do modo edição, volta o controle de grupo pro select
   React.useEffect(() => {
@@ -238,11 +307,45 @@ export const CustomFieldsManager: React.FC<CustomFieldsManagerProps> = ({
         )}
       </div>
 
+      {/* Criar grupo VAZIO: não precisa criar campo junto — crie e arraste campos pra dentro */}
+      <div className="flex gap-2 items-center mb-6">
+        <div className="relative flex-1">
+          <FolderPlus size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          <input
+            type="text"
+            value={newGroupInput}
+            onChange={(e) => setNewGroupInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void submitNewGroup(); }}
+            placeholder="Novo grupo vazio (ex: BPC LOAS) — depois arraste campos pra dentro"
+            className="w-full bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => void submitNewGroup()}
+          disabled={!newGroupInput.trim() || creatingGroupBusy}
+          className="shrink-0 bg-white dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-white/10 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors h-[38px]"
+        >
+          <FolderPlus size={16} /> Criar grupo
+        </button>
+      </div>
+
       <div className="space-y-2">
         {(() => {
           const renderFieldCard = (field: CustomFieldDefinition) => (
-          <div key={field.id} className={`flex items-center justify-between p-3 bg-white dark:bg-white/5 border rounded-lg group transition-colors ${editingId === field.id ? 'border-amber-400 dark:border-amber-500/50 ring-1 ring-amber-400/30' : 'border-slate-200 dark:border-white/10 hover:border-primary-300 dark:hover:border-primary-500/50'}`}>
+          <div
+            key={field.id}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData('text/plain', field.id);
+              e.dataTransfer.effectAllowed = 'move';
+              setDraggingFieldId(field.id);
+            }}
+            onDragEnd={() => { setDraggingFieldId(null); setDragOverKey(null); }}
+            className={`flex items-center justify-between p-3 bg-white dark:bg-white/5 border rounded-lg group transition-colors cursor-grab active:cursor-grabbing ${draggingFieldId === field.id ? 'opacity-40' : ''} ${editingId === field.id ? 'border-amber-400 dark:border-amber-500/50 ring-1 ring-amber-400/30' : 'border-slate-200 dark:border-white/10 hover:border-primary-300 dark:hover:border-primary-500/50'}`}
+          >
             <div className="flex items-center gap-3">
+              <GripVertical size={14} className="shrink-0 text-slate-300 dark:text-slate-600 group-hover:text-slate-400 dark:group-hover:text-slate-500 transition-colors" />
               <div className="w-8 h-8 rounded bg-slate-100 dark:bg-white/10 flex items-center justify-center text-slate-500 dark:text-slate-400">
                 <Tag size={14} />
               </div>
@@ -288,33 +391,75 @@ export const CustomFieldsManager: React.FC<CustomFieldsManagerProps> = ({
           </div>
           );
 
+          // Grupos vêm de existingFieldGroups (inclui os vazios); os campos de
+          // cada grupo vêm do índice derivado das definições.
+          const fieldsByGroup = new Map(groupedList.groups);
+
           return (
             <>
-              {/* Campos desagrupados (gerais) */}
-              {groupedList.ungrouped.length > 0 && (
-                <div className="space-y-2">
-                  {groupedList.groups.length > 0 && (
+              {/* Campos desagrupados (gerais) — também é alvo de drop pra DESAGRUPAR */}
+              {(groupedList.ungrouped.length > 0 || existingFieldGroups.length > 0) && (
+                <div className={`space-y-2 ${dropZoneClass('')}`} {...dropZoneProps('')}>
+                  {existingFieldGroups.length > 0 && (
                     <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 pt-1">
                       Campos gerais (sem grupo)
                     </p>
                   )}
-                  {groupedList.ungrouped.map(renderFieldCard)}
+                  {groupedList.ungrouped.length > 0
+                    ? groupedList.ungrouped.map(renderFieldCard)
+                    : existingFieldGroups.length > 0 && (
+                      <div className="border border-dashed border-slate-300 dark:border-white/15 rounded-lg px-3 py-3 text-xs text-slate-400 italic text-center">
+                        Nenhum campo geral — arraste um campo pra cá pra tirá-lo do grupo
+                      </div>
+                    )}
                 </div>
               )}
 
-              {/* Grupos */}
-              {groupedList.groups.map(([groupName, fields]) => (
-                <div key={groupName} className="space-y-2 pt-2">
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300 flex items-center gap-1.5">
-                    <FolderOpen size={12} className="text-primary-500" />
-                    {groupName}
-                    <span className="font-normal text-slate-400 normal-case">· {fields.length} campo{fields.length === 1 ? '' : 's'}</span>
-                  </p>
-                  {fields.map(renderFieldCard)}
+              {/* Grupos (inclusive vazios) */}
+              {existingFieldGroups.map((groupName) => {
+                const fields = fieldsByGroup.get(groupName) ?? [];
+                return (
+                <div key={groupName} className={`space-y-2 pt-2 ${dropZoneClass(groupName)}`} {...dropZoneProps(groupName)}>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300 flex items-center gap-1.5">
+                      <FolderOpen size={12} className="text-primary-500" />
+                      {groupName}
+                      <span className="font-normal text-slate-400 normal-case">· {fields.length} campo{fields.length === 1 ? '' : 's'}</span>
+                    </p>
+                    {pendingDeleteGroup === groupName ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPendingDeleteGroup(null);
+                          void onRemoveGroup(groupName);
+                        }}
+                        className="text-[11px] font-bold text-red-600 dark:text-red-400 hover:text-red-500 px-2 py-0.5 rounded bg-red-50 dark:bg-red-900/20 transition-colors"
+                      >
+                        Confirmar exclusão?
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => armGroupDelete(groupName)}
+                        title="Excluir grupo (os campos dele voltam para Campos gerais)"
+                        className="text-slate-300 dark:text-slate-600 hover:text-red-500 dark:hover:text-red-400 p-1 rounded transition-colors"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+                  {fields.length > 0
+                    ? fields.map(renderFieldCard)
+                    : (
+                      <div className="border border-dashed border-slate-300 dark:border-white/15 rounded-lg px-3 py-3 text-xs text-slate-400 italic text-center">
+                        Grupo vazio — arraste campos pra cá
+                      </div>
+                    )}
                 </div>
-              ))}
+                );
+              })}
 
-              {customFieldDefinitions.length === 0 && (
+              {customFieldDefinitions.length === 0 && existingFieldGroups.length === 0 && (
                 <p className="text-center text-slate-500 text-sm py-4 italic">Nenhum campo personalizado criado.</p>
               )}
             </>

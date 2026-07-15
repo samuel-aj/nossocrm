@@ -3,6 +3,7 @@ import { useToast } from '@/context/ToastContext';
 import { CustomFieldDefinition, CustomFieldType } from '@/types';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useCRM } from '@/context/CRMContext';
+import { useSettings } from '@/context/settings/SettingsContext';
 import { useAuth } from '@/context/AuthContext';
 
 // TODO: Migrate customFieldDefinitions and tags to Supabase
@@ -22,6 +23,7 @@ export const useSettingsController = () => {
     addTag,
     removeTag,
   } = useCRM();
+  const { customFieldGroups, addCustomFieldGroup, removeCustomFieldGroup } = useSettings();
 
   // General Settings
   const [defaultRoute, setDefaultRoute] = usePersistedState<string>('crm_default_route', '/boards');
@@ -55,13 +57,15 @@ export const useSettingsController = () => {
     return key || 'campo';
   };
 
-  // Grupos existentes (derivados dos campos já criados), ordenados
+  // Grupos existentes: união dos grupos "de verdade" (tabela — podem estar
+  // vazios) com qualquer group_name que ainda exista só nos campos, ordenados
   const existingFieldGroups = Array.from(
-    new Set(
-      customFieldDefinitions
+    new Set([
+      ...customFieldGroups.map((g) => g.trim()).filter((g) => g !== ''),
+      ...customFieldDefinitions
         .map((f) => (f.groupName ?? '').trim())
-        .filter((g) => g !== '')
-    )
+        .filter((g) => g !== ''),
+    ])
   ).sort((a, b) => a.localeCompare(b, 'pt-BR'));
 
   // Custom Fields Logic
@@ -140,6 +144,41 @@ export const useSettingsController = () => {
     addToast('Campo personalizado removido.', 'info');
   };
 
+  // Grupos: criar vazio, excluir (campos voltam pra "gerais") e mover campo via drag & drop
+  const handleCreateGroup = async (name: string): Promise<boolean> => {
+    const clean = name.trim();
+    if (!clean) return false;
+    if (existingFieldGroups.some((g) => g.toLowerCase() === clean.toLowerCase())) {
+      addToast('Já existe um grupo com esse nome.', 'warning');
+      return false;
+    }
+    const ok = await addCustomFieldGroup(clean);
+    if (ok) addToast(`Grupo "${clean}" criado! Arraste campos pra dentro dele.`, 'success');
+    else addToast('Falha ao criar o grupo. Tente novamente.', 'error');
+    return ok;
+  };
+
+  const handleRemoveGroup = async (name: string) => {
+    const ok = await removeCustomFieldGroup(name);
+    if (ok) addToast(`Grupo "${name}" excluído. Os campos dele voltaram para "Campos gerais".`, 'info');
+    else addToast('Falha ao excluir o grupo. Tente novamente.', 'error');
+  };
+
+  const handleMoveFieldToGroup = async (fieldId: string, groupName: string | null) => {
+    const field = customFieldDefinitions.find((f) => f.id === fieldId);
+    if (!field) return;
+    const current = (field.groupName ?? '').trim() || null;
+    const target = (groupName ?? '').trim() || null;
+    if (current === target) return;
+    await updateCustomField(fieldId, { groupName: target });
+    addToast(
+      target
+        ? `Campo "${field.label}" movido para o grupo "${target}".`
+        : `Campo "${field.label}" movido para Campos gerais.`,
+      'success'
+    );
+  };
+
   // Tags Logic
   const handleAddTag = () => {
     if (newTagName.trim()) {
@@ -175,6 +214,9 @@ export const useSettingsController = () => {
     cancelEditingField,
     handleSaveField,
     removeCustomField: handleRemoveField,
+    handleCreateGroup,
+    handleRemoveGroup,
+    handleMoveFieldToGroup,
 
     // Tags
     availableTags,

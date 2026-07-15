@@ -61,6 +61,11 @@ interface SettingsContextType {
   updateCustomField: (id: string, updates: Partial<CustomFieldDefinition>) => Promise<void>;
   removeCustomField: (id: string) => Promise<void>;
 
+  // Grupos de campos personalizados (entidade própria — podem existir vazios)
+  customFieldGroups: string[];
+  addCustomFieldGroup: (name: string) => Promise<boolean>;
+  removeCustomFieldGroup: (name: string) => Promise<boolean>;
+
   // Tags (persisted in Supabase)
   availableTags: string[];
   addTag: (tag: string) => Promise<void>;
@@ -124,6 +129,7 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [lifecycleStages, setLifecycleStages] = useState<LifecycleStage[]>(DEFAULT_LIFECYCLE_STAGES);
   const [products, setProducts] = useState<Product[]>([]);
   const [customFieldDefinitions, setCustomFieldDefinitions] = useState<CustomFieldDefinition[]>([]);
+  const [customFieldGroups, setCustomFieldGroups] = useState<string[]>([]);
   // Internal row map for tags (id ↔ name) so external API can stay `string[]`.
   const [tagsById, setTagsById] = useState<Map<string, string>>(new Map());
   const [availableTags, setAvailableTags] = useState<string[]>([]);
@@ -374,6 +380,14 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
       })));
     };
 
+    const loadFieldGroups = async () => {
+      const res = await fetch('/api/custom-field-groups', { credentials: 'include' });
+      if (!res.ok) return;
+      const body = await res.json().catch(() => null);
+      if (cancelled || !Array.isArray(body?.data)) return;
+      setCustomFieldGroups((body.data as string[]).filter(g => typeof g === 'string' && g.trim()));
+    };
+
     const loadTags = async () => {
       const res = await fetch('/api/tags', { credentials: 'include' });
       if (!res.ok) return;
@@ -389,7 +403,7 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
         migrateCustomFieldsFromLocalStorage(),
         migrateTagsFromLocalStorage(),
       ]);
-      await Promise.all([loadCustomFields(), loadTags()]);
+      await Promise.all([loadCustomFields(), loadFieldGroups(), loadTags()]);
       // If we migrated, the initial GET above already reflects the new rows
       // because the POST happens before the GET in the Promise.all ordering.
       void migratedFields;
@@ -712,6 +726,50 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
     setCustomFieldDefinitions(prev => prev.filter(f => f.id !== id));
   }, []);
 
+  // Grupos de campos (persisted in Supabase via /api/custom-field-groups)
+  const addCustomFieldGroup = useCallback(async (name: string): Promise<boolean> => {
+    const clean = name.trim();
+    if (!clean) return false;
+    const res = await fetch('/api/custom-field-groups', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ name: clean }),
+    });
+    if (res.status === 409) {
+      // já existe no servidor; garante presença no estado local
+      setCustomFieldGroups(prev => (prev.includes(clean) ? prev : [...prev, clean]));
+      return true;
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setError(body?.error || `Falha ao criar grupo (HTTP ${res.status})`);
+      return false;
+    }
+    setCustomFieldGroups(prev => (prev.includes(clean) ? prev : [...prev, clean]));
+    return true;
+  }, []);
+
+  const removeCustomFieldGroup = useCallback(async (name: string): Promise<boolean> => {
+    const clean = name.trim();
+    if (!clean) return false;
+    const res = await fetch(`/api/custom-field-groups?name=${encodeURIComponent(clean)}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    if (!res.ok && res.status !== 404) {
+      const body = await res.json().catch(() => null);
+      setError(body?.error || `Falha ao remover grupo (HTTP ${res.status})`);
+      return false;
+    }
+    setCustomFieldGroups(prev => prev.filter(g => g !== clean));
+    // O servidor desagrupa os campos do grupo; espelha no estado local
+    setCustomFieldDefinitions(prev => prev.map(f => (
+      (f.groupName ?? '').trim() === clean ? { ...f, groupName: undefined } : f
+    )));
+    return true;
+  }, []);
+
   // Tags (persisted in Supabase via /api/tags)
   const addTag = useCallback(async (tag: string) => {
     const name = tag.trim();
@@ -818,6 +876,9 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
       addCustomField,
       updateCustomField,
       removeCustomField,
+      customFieldGroups,
+      addCustomFieldGroup,
+      removeCustomFieldGroup,
       availableTags,
       addTag,
       removeTag,
@@ -864,6 +925,9 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
       addCustomField,
       updateCustomField,
       removeCustomField,
+      customFieldGroups,
+      addCustomFieldGroup,
+      removeCustomFieldGroup,
       availableTags,
       addTag,
       removeTag,
