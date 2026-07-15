@@ -707,9 +707,12 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     if (commitFieldEdit(field, raw)) setEditingFieldKey(null);
   };
 
-  const tryOpenDatePicker = (input: HTMLInputElement) => {
+  // Abre o picker nativo (calendário do input date, dropdown do select) quando
+  // o navegador suporta showPicker; nos demais o elemento fica focado e abre
+  // com o próximo clique/espaço.
+  const tryOpenNativePicker = (el: HTMLInputElement | HTMLSelectElement) => {
     try {
-      (input as HTMLInputElement & { showPicker?: () => void }).showPicker?.();
+      (el as { showPicker?: () => void }).showPicker?.();
     } catch {
       // Some browsers can throw when picker is not allowed in current interaction context.
     }
@@ -1338,7 +1341,14 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                               <div className="w-full min-w-0">
                                 {field.type === 'select' ? (
                                   <select
-                                    autoFocus
+                                    ref={el => {
+                                      // foca e já ABRE a lista de opções (showPicker onde suportado)
+                                      if (el && !el.dataset.focused) {
+                                        el.dataset.focused = '1';
+                                        el.focus();
+                                        tryOpenNativePicker(el);
+                                      }
+                                    }}
                                     value={editingFieldValue}
                                     onChange={e => commitAndCloseFieldEditor(field, e.target.value)}
                                     onBlur={closeFieldEditor}
@@ -1423,7 +1433,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                                       if (el && !el.dataset.focused) {
                                         el.dataset.focused = '1';
                                         el.focus();
-                                        if (field.type === 'date') tryOpenDatePicker(el);
+                                        if (field.type === 'date') tryOpenNativePicker(el);
                                         else el.select();
                                       }
                                     }}
@@ -1460,8 +1470,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                                       {displayValue}
                                     </span>
                                   ) : (
-                                    <span className="text-sm italic text-slate-400 dark:text-slate-500">
-                                      Adicionar...
+                                    <span className="text-sm italic text-slate-500 dark:text-slate-400">
+                                      Campo vazio
                                     </span>
                                   )}
                                   <Pencil size={12} className="shrink-0 mt-1 text-slate-400 opacity-0 group-hover/field:opacity-100 transition-opacity" />
