@@ -1191,7 +1191,9 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
           <div className="flex-1 flex flex-col md:flex-row overflow-hidden min-h-0">
             {/* Left Sidebar (Static Info + Custom Fields) */}
             <div className="w-full md:w-1/3 border-b md:border-b-0 md:border-r border-slate-200 dark:border-white/5 p-4 sm:p-6 overflow-y-auto overflow-x-hidden scrollbar-custom bg-white dark:bg-dark-card max-h-[38vh] md:max-h-none">
-              <div className="space-y-6">
+              {/* space-y-4: 16px entre seções = mesmo pt-4 após cada divisória →
+                  cabeçalhos centralizados (16/16) em TODAS as faixas da lateral */}
+              <div className="space-y-4">
                 {/* Banner Inativos: quanto tempo falta pro lead sair (devolução automática) */}
                 {deal.inactiveAt && (() => {
                   const daysLeft = Math.max(
