@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Search, LayoutGrid, Table as TableIcon, User, Tag, X, Settings, Lightbulb, Download, MoreVertical, CheckSquare } from 'lucide-react';
+import { Plus, Search, LayoutGrid, Table as TableIcon, User, Tag, X, Settings, Lightbulb, Download, MoreVertical, CheckSquare, Target } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Board } from '@/types';
 import { BoardSelector } from '../BoardSelector';
@@ -510,6 +510,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                     {moreMenuOpen && (
                         <div className="absolute right-0 z-50 mt-1 w-52 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1">
                             {!selectionMode ? (
+                                <>
                                 <button
                                     type="button"
                                     onClick={() => { onEnterSelectionMode(); setMoreMenuOpen(false); }}
@@ -517,6 +518,19 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                                 >
                                     <CheckSquare size={14} /> Selecionar vários
                                 </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        // Abre o editor de estratégia do board (o banner de CTA
+                                        // não existe mais no kanban — este é o ponto de entrada).
+                                        window.dispatchEvent(new Event('crm:board-strategy-edit'));
+                                        setMoreMenuOpen(false);
+                                    }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
+                                >
+                                    <Target size={14} /> Estratégia do board
+                                </button>
+                                </>
                             ) : (
                                 <button
                                     type="button"
