@@ -315,6 +315,18 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
       setEditingFieldKey(null);
       setTagQuery('');
       setTagCreating(false);
+      // Sanfonas de grupos: grupo com ALGUM campo preenchido começa aberto;
+      // grupo com todos os campos vazios começa fechado. (Depois o usuário
+      // pode abrir/fechar à vontade — isso é só o estado inicial do card.)
+      const initialOpenGroups: Record<string, boolean> = {};
+      for (const f of customFieldDefinitions) {
+        const g = (f.groupName ?? '').trim();
+        if (!g || initialOpenGroups[g]) continue;
+        if (!isEmptyCustomFieldValue(f.type, deal.customFields?.[f.key])) {
+          initialOpenGroups[g] = true;
+        }
+      }
+      setOpenFieldGroups(initialOpenGroups);
       setShowNewNote(false);
       setNewNote('');
       setDescriptionDraft(deal.description ?? '');
