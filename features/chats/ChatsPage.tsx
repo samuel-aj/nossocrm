@@ -3,7 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ExternalLink, KanbanSquare, MessageCircle, Plus, Search, UserPlus, Users, X } from 'lucide-react';
 import { useCRM } from '@/context/CRMContext';
 import { useToast } from '@/context/ToastContext';
@@ -34,7 +34,8 @@ type ChatTarget = { phone: string; name: string; contactId: string | null };
 
 type ChatListItem = ChatTarget & {
   key: string;
-  contact: Contact;
+  /** null = número sem contato no CRM (conversa nova chegando no WhatsApp) */
+  contact: Contact | null;
   hasConv: boolean;
   lastAt: string | null;
   preview: string;
@@ -105,6 +106,7 @@ export const ChatsPage: React.FC = () => {
   const { contacts, deals, boards, addContact, addDeal } = useCRM();
   const { addToast } = useToast();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [selected, setSelected] = useState<ChatTarget | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -148,13 +150,14 @@ export const ChatsPage: React.FC = () => {
   // Conversas indexadas pela chave canônica do telefone (une as grafias
   // com/sem nono dígito BR): prévia/hora da mais recente, não lidas somadas.
   const convByKey = useMemo(() => {
-    type ConvInfo = { phone: string; contactId: string | null; lastAt: string | null; preview: string; unread: number };
+    type ConvInfo = { phone: string; contactId: string | null; waName: string; lastAt: string | null; preview: string; unread: number };
     const m = new Map<string, ConvInfo>();
     for (const r of convsQ.data?.data ?? []) {
       const key = phoneKey(r.wa_phone);
       const item: ConvInfo = {
         phone: r.wa_phone,
         contactId: r.contact_id,
+        waName: (r.wa_name || '').trim(),
         lastAt: r.last_message_at,
         preview: r.last_message_preview || '',
         unread: r.unread_count || 0,
@@ -168,16 +171,17 @@ export const ChatsPage: React.FC = () => {
       m.set(key, {
         ...newer,
         contactId: newer.contactId ?? prev.contactId ?? item.contactId,
+        waName: newer.waName || prev.waName || item.waName,
         unread: prev.unread + item.unread,
       });
     }
     return m;
   }, [convsQ.data]);
 
-  // LISTA ÚNICA: todos os contatos do CRM com telefone. Quem tem conversa
-  // carrega prévia/hora/não-lidas e fica no topo (mais recente primeiro);
-  // o resto segue em ordem alfabética. Números avulsos (sem contato) ficam
-  // de fora por construção — a lista parte dos CONTATOS.
+  // LISTA ÚNICA: contatos do CRM com telefone + conversas NOVAS de números
+  // sem contato (chegando no WhatsApp desde a conexão — histórico antigo do
+  // celular nunca é importado). Quem tem conversa fica no topo por recência;
+  // contatos sem conversa seguem em ordem alfabética.
   const chatList = useMemo<ChatListItem[]>(() => {
     // DEDUP por telefone: contatos duplicados (mesmo número) viram UMA linha
     // só — fica o contato VINCULADO à conversa; sem vínculo, o mais antigo.
@@ -214,10 +218,27 @@ export const ChatsPage: React.FC = () => {
       };
     });
 
+    // Conversas de números SEM contato no CRM: aparecem também (nome do
+    // WhatsApp ou o número) — dá pra responder e criar contato/lead dali.
+    for (const [key, conv] of convByKey.entries()) {
+      if (contactByKey.has(key)) continue;
+      items.push({
+        key,
+        phone: conv.phone,
+        name: conv.waName || conv.phone,
+        contactId: null,
+        contact: null,
+        hasConv: true,
+        lastAt: conv.lastAt,
+        preview: conv.preview,
+        unread: conv.unread,
+      });
+    }
+
     const q = norm(searchQuery.trim());
     const filtered = q
       ? items.filter(c =>
-          norm(c.name).includes(q) || c.phone.includes(q) || norm(c.preview).includes(q) || norm(c.contact.email || '').includes(q)
+          norm(c.name).includes(q) || c.phone.includes(q) || norm(c.preview).includes(q) || norm(c.contact?.email || '').includes(q)
         )
       : items;
 
@@ -247,6 +268,13 @@ export const ChatsPage: React.FC = () => {
     [boards, selectedDeal]
   );
   const selectedDealStage = selectedDealBoard?.stages.find(s => s.id === selectedDeal?.status) ?? null;
+
+  const openNewContactModal = (prefill?: { name?: string; phone?: string }) => {
+    setNcName(prefill?.name ?? '');
+    setNcPhone(prefill?.phone ?? '');
+    setNcEmail('');
+    setNewContactOpen(true);
+  };
 
   const handleCreateContact = async () => {
     const name = ncName.trim();
@@ -278,6 +306,9 @@ export const ChatsPage: React.FC = () => {
         setNcPhone('');
         setNcEmail('');
         setSelected({ phone: created.phone || phone, name: created.name, contactId: created.id });
+        // O trigger do banco vincula a conversa órfã ao contato novo — recarrega
+        // a lista pra linha "sem contato" virar o contato na hora.
+        void queryClient.invalidateQueries({ queryKey: ['waConversations'] });
       } else {
         addToast('Falha ao criar o contato. Tente novamente.', 'error');
       }
@@ -359,7 +390,7 @@ export const ChatsPage: React.FC = () => {
               </span>
               <button
                 type="button"
-                onClick={() => setNewContactOpen(true)}
+                onClick={() => openNewContactModal()}
                 title="Adicionar contato"
                 aria-label="Adicionar contato"
                 className="h-8 w-8 inline-flex items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors"
@@ -414,10 +445,17 @@ export const ChatsPage: React.FC = () => {
                   active ? 'bg-emerald-50 dark:bg-emerald-900/15' : 'hover:bg-slate-50 dark:hover:bg-white/5'
                 }`}
               >
-                <AvatarCircle name={c.name} src={c.contact.avatar || undefined} />
+                <AvatarCircle name={c.name} src={c.contact?.avatar || undefined} />
                 <span className="flex-1 min-w-0">
                   <span className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-semibold text-slate-900 dark:text-white truncate">{c.name}</span>
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-sm font-semibold text-slate-900 dark:text-white truncate">{c.name}</span>
+                      {!c.contact && (
+                        <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
+                          sem contato
+                        </span>
+                      )}
+                    </span>
                     {c.hasConv && (
                       <span className={`text-[10px] shrink-0 ${c.unread > 0 ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-slate-400'}`}>
                         {fmtListTime(c.lastAt)}
@@ -478,7 +516,7 @@ export const ChatsPage: React.FC = () => {
                     Abrir lead <ExternalLink size={12} />
                   </button>
                 </>
-              ) : (
+              ) : selected.contactId ? (
                 <>
                   <span className="text-xs text-slate-400 italic truncate">Este contato ainda não tem lead.</span>
                   <button
@@ -487,6 +525,24 @@ export const ChatsPage: React.FC = () => {
                     className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition-colors"
                   >
                     <Plus size={13} /> Criar lead
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="text-xs text-amber-600 dark:text-amber-400 truncate">
+                    Número sem contato no CRM — adicione pra criar o lead.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openNewContactModal({
+                        name: selected.name !== selected.phone ? selected.name : '',
+                        phone: selected.phone,
+                      })
+                    }
+                    className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition-colors"
+                  >
+                    <UserPlus size={13} /> Adicionar contato
                   </button>
                 </>
               )}
