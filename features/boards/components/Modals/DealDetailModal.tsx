@@ -202,7 +202,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const [ownerMenuOpen, setOwnerMenuOpen] = useState(false);
   // Grupos de campos personalizados abertos (sanfona por grupo, estilo UTMs)
   const [openFieldGroups, setOpenFieldGroups] = useState<Record<string, boolean>>({});
-  const [activeTab, setActiveTab] = useState<'whatsapp' | 'timeline' | 'activities' | 'notes' | 'products' | 'info'>('whatsapp');
+  const [activeTab, setActiveTab] = useState<'whatsapp' | 'timeline' | 'activities' | 'notes' | 'products' | 'info'>('timeline');
   const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Quick activity creation / edition from deal card (same form).
@@ -306,7 +306,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
       setEmailDraft(null);
       setObjectionResponses([]);
       setObjection('');
-      setActiveTab('whatsapp');
+      setActiveTab('timeline');
       setIsEditingTitle(false);
       setIsEditingValue(false);
       setShowLossReasonModal(false);
@@ -1620,16 +1620,16 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
               <div className="h-14 border-b border-slate-200 dark:border-white/5 flex items-center px-6 shrink-0">
                 <div className="flex gap-6">
                   <button
-                    onClick={() => setActiveTab('whatsapp')}
-                    className={`text-sm font-bold h-14 border-b-2 transition-colors flex items-center gap-1.5 ${activeTab === 'whatsapp' ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
-                  >
-                    <MessageCircle size={15} /> WhatsApp
-                  </button>
-                  <button
                     onClick={() => setActiveTab('timeline')}
                     className={`text-sm font-bold h-14 border-b-2 transition-colors ${activeTab === 'timeline' ? 'border-primary-500 text-primary-600 dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
                   >
                     Timeline
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('whatsapp')}
+                    className={`text-sm font-bold h-14 border-b-2 transition-colors flex items-center gap-1.5 ${activeTab === 'whatsapp' ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
+                  >
+                    <MessageCircle size={15} /> WhatsApp
                   </button>
                   <button
                     onClick={() => setActiveTab('activities')}
