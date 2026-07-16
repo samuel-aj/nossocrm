@@ -525,6 +525,12 @@ Deno.serve(async (req) => {
         .from("wa_conversations")
         .update({ last_message_at: waTs, last_message_preview: preview })
         .eq("id", convId);
+
+      // Bolinha de não lidas (estilo WhatsApp): só mensagem RECEBIDA conta;
+      // zera quando a conversa é aberta no CRM (GET /api/whatsapp/messages).
+      if (!fromMe) {
+        await supabase.rpc("wa_increment_unread", { p_conversation_id: convId });
+      }
     }
     return json(200, { ok: true });
   }
