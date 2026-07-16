@@ -148,12 +148,13 @@ export const ChatsPage: React.FC = () => {
   // Conversas indexadas pela chave canônica do telefone (une as grafias
   // com/sem nono dígito BR): prévia/hora da mais recente, não lidas somadas.
   const convByKey = useMemo(() => {
-    type ConvInfo = { phone: string; lastAt: string | null; preview: string; unread: number };
+    type ConvInfo = { phone: string; contactId: string | null; lastAt: string | null; preview: string; unread: number };
     const m = new Map<string, ConvInfo>();
     for (const r of convsQ.data?.data ?? []) {
       const key = phoneKey(r.wa_phone);
       const item: ConvInfo = {
         phone: r.wa_phone,
+        contactId: r.contact_id,
         lastAt: r.last_message_at,
         preview: r.last_message_preview || '',
         unread: r.unread_count || 0,
@@ -164,7 +165,11 @@ export const ChatsPage: React.FC = () => {
         continue;
       }
       const newer = (item.lastAt || '') > (prev.lastAt || '') ? item : prev;
-      m.set(key, { ...newer, unread: prev.unread + item.unread });
+      m.set(key, {
+        ...newer,
+        contactId: newer.contactId ?? prev.contactId ?? item.contactId,
+        unread: prev.unread + item.unread,
+      });
     }
     return m;
   }, [convsQ.data]);
@@ -174,22 +179,40 @@ export const ChatsPage: React.FC = () => {
   // o resto segue em ordem alfabética. Números avulsos (sem contato) ficam
   // de fora por construção — a lista parte dos CONTATOS.
   const chatList = useMemo<ChatListItem[]>(() => {
-    const items: ChatListItem[] = contacts
-      .filter(c => (c.phone || '').trim() !== '')
-      .map(c => {
-        const conv = convByKey.get(phoneKey(c.phone));
-        return {
-          key: c.id,
-          phone: conv?.phone || c.phone,
-          name: c.name,
-          contactId: c.id,
-          contact: c,
-          hasConv: !!conv,
-          lastAt: conv?.lastAt ?? null,
-          preview: conv?.preview ?? '',
-          unread: conv?.unread ?? 0,
-        };
-      });
+    // DEDUP por telefone: contatos duplicados (mesmo número) viram UMA linha
+    // só — fica o contato VINCULADO à conversa; sem vínculo, o mais antigo.
+    const contactByKey = new Map<string, Contact>();
+    for (const c of contacts) {
+      if ((c.phone || '').trim() === '') continue;
+      const key = phoneKey(c.phone);
+      const prev = contactByKey.get(key);
+      if (!prev) {
+        contactByKey.set(key, c);
+        continue;
+      }
+      const linkedId = convByKey.get(key)?.contactId;
+      if (linkedId === c.id && linkedId !== prev.id) {
+        contactByKey.set(key, c);
+        continue;
+      }
+      if (linkedId === prev.id) continue;
+      if ((c.createdAt || '') < (prev.createdAt || '')) contactByKey.set(key, c);
+    }
+
+    const items: ChatListItem[] = Array.from(contactByKey.entries()).map(([key, c]) => {
+      const conv = convByKey.get(key);
+      return {
+        key,
+        phone: conv?.phone || c.phone,
+        name: c.name,
+        contactId: c.id,
+        contact: c,
+        hasConv: !!conv,
+        lastAt: conv?.lastAt ?? null,
+        preview: conv?.preview ?? '',
+        unread: conv?.unread ?? 0,
+      };
+    });
 
     const q = norm(searchQuery.trim());
     const filtered = q
