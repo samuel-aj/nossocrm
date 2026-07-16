@@ -16,6 +16,18 @@ export async function GET(req: Request) {
 
   const conn = await getConnectionByOrg(auth.admin, auth.user.organizationId);
 
+  // WhatsApp DESCONECTADO => conversas ficam OCULTAS (guardadas no banco;
+  // reconectar o mesmo número traz de volta). Nada é exibido nem marcado
+  // como lido enquanto a conexão não estiver ativa.
+  if (!conn || conn.status !== 'connected') {
+    return json({
+      connected: false,
+      hasConnection: !!conn,
+      conversation: null,
+      messages: [],
+    });
+  }
+
   // Variantes BR do nono dígito: o JID do WhatsApp pode vir sem o 9 do
   // celular, criando conversa em outra grafia do MESMO número. Busca as duas
   // e junta as mensagens.

@@ -234,7 +234,7 @@ Deno.serve(async (req) => {
 
   const { data: conn } = await supabase
     .from("wa_connections")
-    .select("id, organization_id, webhook_secret, instance_token, base_url")
+    .select("id, organization_id, webhook_secret, instance_token, base_url, phone_number")
     .eq("instance_name", instanceName)
     .maybeSingle();
   if (!conn) return json(200, { ok: true, ignored: "instancia nao vinculada" });
@@ -252,9 +252,62 @@ Deno.serve(async (req) => {
   // --- Estado da conexão ---
   if (event === "connection.update") {
     const state = mapState(data?.state);
+
+    if (state !== "connected") {
+      // Desconectou: as conversas NÃO são apagadas — as rotas do app param de
+      // exibi-las enquanto status != connected (reconectar o MESMO número
+      // traz tudo de volta).
+      await supabase.from("wa_connections").update({ status: state }).eq("id", conn.id);
+      return json(200, { ok: true });
+    }
+
+    // Conectou: descobre o NÚMERO do WhatsApp (wuid do evento; fallback:
+    // consulta a Evolution). É a chave da posse das conversas no CRM.
+    let ownerPhone = jidToE164(data?.wuid ?? data?.ownerJid);
+    if (!ownerPhone) {
+      const evoBaseUrl = String(conn.base_url ?? Deno.env.get("EVOLUTION_BASE_URL") ?? "")
+        .replace(/\/+$/, "")
+        .replace(/\/manager$/, "");
+      const evoApiToken = String(conn.instance_token ?? Deno.env.get("EVOLUTION_API_KEY") ?? "");
+      if (evoBaseUrl && evoApiToken) {
+        try {
+          const r = await fetch(
+            `${evoBaseUrl}/instance/fetchInstances?instanceName=${encodeURIComponent(instanceName)}`,
+            { headers: { apikey: evoApiToken } }
+          );
+          if (r.ok) {
+            const arr = await r.json();
+            // deno-lint-ignore no-explicit-any
+            const inst: any = Array.isArray(arr) ? arr[0] : arr;
+            ownerPhone = jidToE164(inst?.ownerJid ?? inst?.instance?.owner ?? inst?.owner);
+          }
+        } catch {
+          // segue sem número — não arrisca apagar nada sem certeza
+        }
+      }
+    }
+
+    // Conectou um NÚMERO DIFERENTE do anterior => conversas do número antigo
+    // saem do CRM de vez (não podem aparecer sob o número novo). A comparação
+    // usa as variantes do nono dígito BR pra não confundir grafias do MESMO
+    // número com troca de número.
+    const prevPhone = String(conn.phone_number ?? "");
+    const samePhone =
+      !prevPhone || !ownerPhone ||
+      brPhoneVariants(prevPhone).includes(ownerPhone) ||
+      brPhoneVariants(ownerPhone).includes(prevPhone);
+    if (!samePhone) {
+      await supabase.from("wa_conversations").delete().eq("organization_id", orgId);
+    }
+
     await supabase
       .from("wa_connections")
-      .update({ status: state, ...(state === "connected" ? { last_connected_at: new Date().toISOString() } : {}) })
+      .update({
+        status: state,
+        last_connected_at: new Date().toISOString(),
+        ...(ownerPhone ? { phone_number: ownerPhone } : {}),
+        ...(data?.profileName ? { profile_name: String(data.profileName) } : {}),
+      })
       .eq("id", conn.id);
     return json(200, { ok: true });
   }
