@@ -4,7 +4,7 @@ import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ExternalLink, KanbanSquare, MessageCircle, Plus, Search, UserPlus, Users, X } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ExternalLink, KanbanSquare, MessageCircle, Plus, Search, UserPlus, Users, X } from 'lucide-react';
 import { useCRM } from '@/context/CRMContext';
 import { useToast } from '@/context/ToastContext';
 import { DealWhatsAppChat } from '@/features/whatsapp/DealWhatsAppChat';
@@ -109,6 +109,8 @@ export const ChatsPage: React.FC = () => {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<ChatTarget | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  // Menu da setinha (⌄) em cada conversa da lista — estilo WhatsApp
+  const [rowMenuKey, setRowMenuKey] = useState<string | null>(null);
 
   // Modal "Novo contato" (adiciona no CRM e já abre o chat dele)
   const [newContactOpen, setNewContactOpen] = useState(false);
@@ -268,6 +270,19 @@ export const ChatsPage: React.FC = () => {
     [boards, selectedDeal]
   );
   const selectedDealStage = selectedDealBoard?.stages.find(s => s.id === selectedDeal?.status) ?? null;
+
+  // "Marcar como lida": zera a bolinha sem abrir a conversa (reusa o GET de
+  // mensagens, que já faz o reset do contador ao visualizar).
+  const handleMarkRead = async (phone: string) => {
+    try {
+      const res = await fetch(`/api/whatsapp/messages?phone=${encodeURIComponent(phone)}`, { credentials: 'include' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await queryClient.invalidateQueries({ queryKey: ['waConversations'] });
+      addToast('Conversa marcada como lida.', 'success');
+    } catch {
+      addToast('Não foi possível marcar como lida.', 'error');
+    }
+  };
 
   // "Marcar como não lida" (igual WhatsApp): arma a bolinha na lista. Se a
   // conversa estiver ABERTA, fecha — senão o próprio polling de leitura
@@ -496,20 +511,58 @@ export const ChatsPage: React.FC = () => {
                   </span>
                 </span>
               </button>
-              {/* Marcar como não lida (só conversas já lidas; aparece no hover) */}
-              {c.hasConv && c.unread === 0 && (
-                <button
-                  type="button"
-                  onClick={e => {
-                    e.stopPropagation();
-                    void handleMarkUnread(c.phone);
+              {/* Setinha (⌄) estilo WhatsApp: aparece no hover e abre o menu
+                  da conversa (marcar como lida / não lida) */}
+              {c.hasConv && (
+                <div
+                  className={`absolute right-2 top-1/2 -translate-y-1/2 ${rowMenuKey === c.key ? 'block' : 'hidden group-hover/row:block'}`}
+                  onBlur={e => {
+                    if (!e.currentTarget.contains(e.relatedTarget as Node)) setRowMenuKey(null);
                   }}
-                  title="Marcar como não lida"
-                  aria-label="Marcar como não lida"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7 items-center justify-center rounded-full bg-white dark:bg-slate-700 border border-slate-200 dark:border-white/10 shadow-sm hidden group-hover/row:flex hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors"
                 >
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 block" />
-                </button>
+                  <button
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      setRowMenuKey(k => (k === c.key ? null : c.key));
+                    }}
+                    title="Opções da conversa"
+                    aria-label="Opções da conversa"
+                    aria-expanded={rowMenuKey === c.key}
+                    className="h-7 w-7 flex items-center justify-center rounded-full bg-white/90 dark:bg-slate-700/90 border border-slate-200 dark:border-white/10 shadow-sm text-slate-500 dark:text-slate-300 hover:text-slate-700 dark:hover:text-white transition-colors"
+                  >
+                    <ChevronDown size={15} />
+                  </button>
+                  {rowMenuKey === c.key && (
+                    <div className="absolute right-0 top-full mt-1 z-30 w-56 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1">
+                      {c.unread > 0 ? (
+                        <button
+                          type="button"
+                          onClick={e => {
+                            e.stopPropagation();
+                            setRowMenuKey(null);
+                            void handleMarkRead(c.phone);
+                          }}
+                          className="w-full px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
+                        >
+                          Marcar como lida
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={e => {
+                            e.stopPropagation();
+                            setRowMenuKey(null);
+                            void handleMarkUnread(c.phone);
+                          }}
+                          className="w-full px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
+                        >
+                          Marcar como não lida
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
               </div>
             );
