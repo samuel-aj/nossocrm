@@ -563,7 +563,7 @@ export const ChatsPage: React.FC = () => {
               {c.hasConv && rowMenuKey === c.key && (
                 <div
                   data-chat-row-menu
-                  className="absolute right-3 top-full -mt-1 z-40 w-60 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-2xl py-1.5"
+                  className="absolute right-1 top-full -mt-1 z-40 w-60 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-2xl py-1.5"
                 >
                   {c.unread > 0 ? (
                     <button
