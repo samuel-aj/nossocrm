@@ -269,6 +269,26 @@ export const ChatsPage: React.FC = () => {
   );
   const selectedDealStage = selectedDealBoard?.stages.find(s => s.id === selectedDeal?.status) ?? null;
 
+  // "Marcar como não lida" (igual WhatsApp): arma a bolinha na lista. Se a
+  // conversa estiver ABERTA, fecha — senão o próprio polling de leitura
+  // zeraria o marcador em seguida. 100% interno: nada vai pro WhatsApp.
+  const handleMarkUnread = async (phone: string) => {
+    try {
+      const res = await fetch('/api/whatsapp/conversations/unread', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ phone }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (selected && phoneKey(selected.phone) === phoneKey(phone)) setSelected(null);
+      await queryClient.invalidateQueries({ queryKey: ['waConversations'] });
+      addToast('Conversa marcada como não lida.', 'success');
+    } catch {
+      addToast('Não foi possível marcar como não lida.', 'error');
+    }
+  };
+
   const openNewContactModal = (prefill?: { name?: string; phone?: string }) => {
     setNcName(prefill?.name ?? '');
     setNcPhone(prefill?.phone ?? '');
@@ -437,8 +457,10 @@ export const ChatsPage: React.FC = () => {
           {chatList.map(c => {
             const active = selectedKey === phoneKey(c.phone);
             return (
+              // wrapper relative: o botão "marcar como não lida" é IRMÃO da
+              // linha (botão dentro de botão é HTML inválido), aparece no hover
+              <div key={c.key} className="relative group/row">
               <button
-                key={c.key}
                 type="button"
                 onClick={() => openChat({ phone: c.phone, name: c.name, contactId: c.contactId })}
                 className={`w-full flex items-center gap-3 px-4 py-3 text-left border-b border-slate-50 dark:border-white/5 transition-colors ${
@@ -474,6 +496,22 @@ export const ChatsPage: React.FC = () => {
                   </span>
                 </span>
               </button>
+              {/* Marcar como não lida (só conversas já lidas; aparece no hover) */}
+              {c.hasConv && c.unread === 0 && (
+                <button
+                  type="button"
+                  onClick={e => {
+                    e.stopPropagation();
+                    void handleMarkUnread(c.phone);
+                  }}
+                  title="Marcar como não lida"
+                  aria-label="Marcar como não lida"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7 items-center justify-center rounded-full bg-white dark:bg-slate-700 border border-slate-200 dark:border-white/10 shadow-sm hidden group-hover/row:flex hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors"
+                >
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 block" />
+                </button>
+              )}
+              </div>
             );
           })}
         </div>
