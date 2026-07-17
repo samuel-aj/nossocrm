@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ChevronDown, ExternalLink, KanbanSquare, MessageCircle, Plus, Search, UserPlus, Users, X } from 'lucide-react';
+import { ArrowLeft, CheckCheck, ChevronDown, ExternalLink, KanbanSquare, MessageCircle, MessageSquareDot, Plus, Search, UserPlus, Users, X } from 'lucide-react';
 import { useCRM } from '@/context/CRMContext';
 import { useToast } from '@/context/ToastContext';
 import { DealWhatsAppChat } from '@/features/whatsapp/DealWhatsAppChat';
@@ -111,6 +111,23 @@ export const ChatsPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   // Menu da setinha (⌄) em cada conversa da lista — estilo WhatsApp
   const [rowMenuKey, setRowMenuKey] = useState<string | null>(null);
+
+  // Fecha o menu da conversa ao clicar fora ou apertar Esc
+  useEffect(() => {
+    if (!rowMenuKey) return;
+    const onDown = (e: MouseEvent) => {
+      if (!(e.target as Element | null)?.closest?.('[data-chat-row-menu]')) setRowMenuKey(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setRowMenuKey(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [rowMenuKey]);
 
   // Modal "Novo contato" (adiciona no CRM e já abre o chat dele)
   const [newContactOpen, setNewContactOpen] = useState(false);
@@ -503,64 +520,77 @@ export const ChatsPage: React.FC = () => {
                     <span className="text-xs text-slate-500 dark:text-slate-400 truncate">
                       {c.hasConv ? (c.preview || 'Sem mensagens') : c.phone}
                     </span>
-                    {c.unread > 0 && (
-                      <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-500 text-white text-[10px] font-bold flex items-center justify-center">
-                        {c.unread > 99 ? '99+' : c.unread}
-                      </span>
-                    )}
+                    <span className="shrink-0 flex items-center gap-1.5">
+                      {c.unread > 0 && (
+                        <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-500 text-white text-[10px] font-bold flex items-center justify-center">
+                          {c.unread > 99 ? '99+' : c.unread}
+                        </span>
+                      )}
+                      {/* Setinha DISCRETA (estilo WhatsApp): inline abaixo do
+                          horário, sem fundo — só aparece no hover da linha */}
+                      {c.hasConv && (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          data-chat-row-menu
+                          title="Opções da conversa"
+                          aria-label="Opções da conversa"
+                          aria-expanded={rowMenuKey === c.key}
+                          onClick={e => {
+                            e.stopPropagation();
+                            setRowMenuKey(k => (k === c.key ? null : c.key));
+                          }}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setRowMenuKey(k => (k === c.key ? null : c.key));
+                            }
+                          }}
+                          className={`text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors ${
+                            rowMenuKey === c.key ? 'inline-flex' : 'hidden group-hover/row:inline-flex'
+                          }`}
+                        >
+                          <ChevronDown size={16} />
+                        </span>
+                      )}
+                    </span>
                   </span>
                 </span>
               </button>
-              {/* Setinha (⌄) estilo WhatsApp: aparece no hover e abre o menu
-                  da conversa (marcar como lida / não lida) */}
-              {c.hasConv && (
+              {/* Balão do menu da conversa (estilo WhatsApp): flutua abaixo da
+                  linha, alinhado à direita, por cima das próximas linhas */}
+              {c.hasConv && rowMenuKey === c.key && (
                 <div
-                  className={`absolute right-2 top-1/2 -translate-y-1/2 ${rowMenuKey === c.key ? 'block' : 'hidden group-hover/row:block'}`}
-                  onBlur={e => {
-                    if (!e.currentTarget.contains(e.relatedTarget as Node)) setRowMenuKey(null);
-                  }}
+                  data-chat-row-menu
+                  className="absolute right-3 top-full -mt-1 z-40 w-60 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-2xl py-1.5"
                 >
-                  <button
-                    type="button"
-                    onClick={e => {
-                      e.stopPropagation();
-                      setRowMenuKey(k => (k === c.key ? null : c.key));
-                    }}
-                    title="Opções da conversa"
-                    aria-label="Opções da conversa"
-                    aria-expanded={rowMenuKey === c.key}
-                    className="h-7 w-7 flex items-center justify-center rounded-full bg-white/90 dark:bg-slate-700/90 border border-slate-200 dark:border-white/10 shadow-sm text-slate-500 dark:text-slate-300 hover:text-slate-700 dark:hover:text-white transition-colors"
-                  >
-                    <ChevronDown size={15} />
-                  </button>
-                  {rowMenuKey === c.key && (
-                    <div className="absolute right-0 top-full mt-1 z-30 w-56 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1">
-                      {c.unread > 0 ? (
-                        <button
-                          type="button"
-                          onClick={e => {
-                            e.stopPropagation();
-                            setRowMenuKey(null);
-                            void handleMarkRead(c.phone);
-                          }}
-                          className="w-full px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
-                        >
-                          Marcar como lida
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={e => {
-                            e.stopPropagation();
-                            setRowMenuKey(null);
-                            void handleMarkUnread(c.phone);
-                          }}
-                          className="w-full px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
-                        >
-                          Marcar como não lida
-                        </button>
-                      )}
-                    </div>
+                  {c.unread > 0 ? (
+                    <button
+                      type="button"
+                      onClick={e => {
+                        e.stopPropagation();
+                        setRowMenuKey(null);
+                        void handleMarkRead(c.phone);
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
+                    >
+                      <CheckCheck size={16} className="text-slate-400 dark:text-slate-500 shrink-0" />
+                      Marcar como lida
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={e => {
+                        e.stopPropagation();
+                        setRowMenuKey(null);
+                        void handleMarkUnread(c.phone);
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
+                    >
+                      <MessageSquareDot size={16} className="text-slate-400 dark:text-slate-500 shrink-0" />
+                      Marcar como não lida
+                    </button>
                   )}
                 </div>
               )}
