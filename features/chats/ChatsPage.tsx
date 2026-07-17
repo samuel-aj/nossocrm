@@ -109,25 +109,30 @@ export const ChatsPage: React.FC = () => {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<ChatTarget | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  // Menu da setinha (⌄) em cada conversa da lista — estilo WhatsApp
-  const [rowMenuKey, setRowMenuKey] = useState<string | null>(null);
+  // Menu da setinha (⌄) em cada conversa — estilo WhatsApp. Guarda a POSIÇÃO
+  // da seta: o balão é `fixed` com a borda esquerda alinhada nela (pode
+  // avançar por cima da área do chat, sem ser cortado pela lista).
+  const [rowMenu, setRowMenu] = useState<{ key: string; x: number; y: number } | null>(null);
 
-  // Fecha o menu da conversa ao clicar fora ou apertar Esc
+  // Fecha o menu da conversa ao clicar fora, rolar a lista ou apertar Esc
   useEffect(() => {
-    if (!rowMenuKey) return;
+    if (!rowMenu) return;
     const onDown = (e: MouseEvent) => {
-      if (!(e.target as Element | null)?.closest?.('[data-chat-row-menu]')) setRowMenuKey(null);
+      if (!(e.target as Element | null)?.closest?.('[data-chat-row-menu]')) setRowMenu(null);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setRowMenuKey(null);
+      if (e.key === 'Escape') setRowMenu(null);
     };
+    const onScroll = () => setRowMenu(null);
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
+    document.addEventListener('scroll', onScroll, true);
     return () => {
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
+      document.removeEventListener('scroll', onScroll, true);
     };
-  }, [rowMenuKey]);
+  }, [rowMenu]);
 
   // Modal "Novo contato" (adiciona no CRM e já abre o chat dele)
   const [newContactOpen, setNewContactOpen] = useState(false);
@@ -535,20 +540,22 @@ export const ChatsPage: React.FC = () => {
                           data-chat-row-menu
                           title="Opções da conversa"
                           aria-label="Opções da conversa"
-                          aria-expanded={rowMenuKey === c.key}
+                          aria-expanded={rowMenu?.key === c.key}
                           onClick={e => {
                             e.stopPropagation();
-                            setRowMenuKey(k => (k === c.key ? null : c.key));
+                            const r = e.currentTarget.getBoundingClientRect();
+                            setRowMenu(m => (m?.key === c.key ? null : { key: c.key, x: r.left, y: r.bottom }));
                           }}
                           onKeyDown={e => {
                             if (e.key === 'Enter' || e.key === ' ') {
                               e.preventDefault();
                               e.stopPropagation();
-                              setRowMenuKey(k => (k === c.key ? null : c.key));
+                              const r = e.currentTarget.getBoundingClientRect();
+                              setRowMenu(m => (m?.key === c.key ? null : { key: c.key, x: r.left, y: r.bottom }));
                             }
                           }}
                           className={`text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors ${
-                            rowMenuKey === c.key ? 'inline-flex' : 'hidden group-hover/row:inline-flex'
+                            rowMenu?.key === c.key ? 'inline-flex' : 'hidden group-hover/row:inline-flex'
                           }`}
                         >
                           <ChevronDown size={16} />
@@ -558,19 +565,21 @@ export const ChatsPage: React.FC = () => {
                   </span>
                 </span>
               </button>
-              {/* Balão do menu da conversa (estilo WhatsApp): flutua abaixo da
-                  linha, alinhado à direita, por cima das próximas linhas */}
-              {c.hasConv && rowMenuKey === c.key && (
+              {/* Balão do menu da conversa (estilo WhatsApp): `fixed` com a
+                  borda ESQUERDA alinhada na seta — avança por cima da área do
+                  chat sem ser cortado pela lista; sem sombra */}
+              {c.hasConv && rowMenu?.key === c.key && (
                 <div
                   data-chat-row-menu
-                  className="absolute right-1 top-full -mt-1 z-40 w-60 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-2xl py-1.5"
+                  className="fixed z-50 w-60 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 py-1.5"
+                  style={{ left: rowMenu.x, top: rowMenu.y + 4 }}
                 >
                   {c.unread > 0 ? (
                     <button
                       type="button"
                       onClick={e => {
                         e.stopPropagation();
-                        setRowMenuKey(null);
+                        setRowMenu(null);
                         void handleMarkRead(c.phone);
                       }}
                       className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
@@ -583,7 +592,7 @@ export const ChatsPage: React.FC = () => {
                       type="button"
                       onClick={e => {
                         e.stopPropagation();
-                        setRowMenuKey(null);
+                        setRowMenu(null);
                         void handleMarkUnread(c.phone);
                       }}
                       className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
