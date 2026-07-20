@@ -128,7 +128,7 @@ export function WhatsAppConnectionSettings() {
       setConfirmDisconnect(false);
       qc.invalidateQueries({ queryKey: ['waConnection'] });
       qc.invalidateQueries({ queryKey: ['waConnectionQr'] });
-      addToast('Número desconectado desta organização.', 'success');
+      addToast('Número desconectado.', 'success');
     },
     onError: e => {
       setConfirmDisconnect(false);
@@ -312,7 +312,7 @@ export function WhatsAppConnectionSettings() {
             )}
           </div>
           <div className="text-sm text-slate-600 dark:text-slate-300 space-y-2">
-            <p className="font-bold text-slate-900 dark:text-white">Conecte o número desta organização:</p>
+            <p className="font-bold text-slate-900 dark:text-white">Conecte o número do seu escritório:</p>
             <ol className="list-decimal list-inside space-y-1">
               <li>Abra o WhatsApp no celular do número que vai atender</li>
               <li>
