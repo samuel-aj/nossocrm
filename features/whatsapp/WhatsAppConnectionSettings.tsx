@@ -64,10 +64,14 @@ export function WhatsAppConnectionSettings() {
   const connected = !!connQ.data?.connected;
   // Modo API oficial da Meta (Cloud API): sem QR/pareamento
   const isBusiness = (conn?.provider || '').toLowerCase() === 'evolution_business';
-  const waitingScan = !!conn && !connected && !isBusiness;
-  // Seletor de modo: sem conexão OU conexão business desconectada (reconectar
-  // exige credenciais de novo — o token é purgado ao desconectar)
-  const showChooser = !connQ.isLoading && (!conn || (isBusiness && !connected));
+
+  // O QR só abre depois que o usuário ESCOLHE esse modo no seletor — mesmo
+  // que já exista uma conexão QR desconectada de antes (senão o seletor
+  // nunca apareceria pra quem já conectou alguma vez).
+  const [qrFlowActive, setQrFlowActive] = useState(false);
+  const waitingScan = !!conn && !connected && !isBusiness && qrFlowActive;
+  // Desconectado (com ou sem conexão anterior) = seletor de modo na tela
+  const showChooser = !connQ.isLoading && !connected && !waitingScan;
 
   // Form do modo API oficial
   const [bizOpen, setBizOpen] = useState(false);
@@ -97,13 +101,26 @@ export function WhatsAppConnectionSettings() {
         setBizToken('');
         setBizNumberId('');
         setBizWabaId('');
+        setQrFlowActive(false);
         addToast('WhatsApp API oficial conectado! Envio e recebimento ativos.', 'success');
       } else {
+        setQrFlowActive(true);
         addToast('Instância criada. Escaneie o QR pra conectar o número.', 'success');
       }
     },
     onError: e => addToast((e as Error).message, 'error'),
   });
+
+  // Entra no fluxo do QR: reaproveita a instância existente da org (a rota do
+  // QR tem self-healing) ou cria uma nova quando não há / quando era business.
+  const startQrFlow = () => {
+    if (conn && !isBusiness) {
+      setQrFlowActive(true);
+      qc.invalidateQueries({ queryKey: ['waConnectionQr'] });
+      return;
+    }
+    createMut.mutate({ autoCreate: true });
+  };
 
   const disconnectMut = useMutation({
     mutationFn: () => fetchJson<{ ok: boolean }>('/api/whatsapp/connection', { method: 'DELETE' }),
@@ -171,7 +188,7 @@ export function WhatsAppConnectionSettings() {
               </p>
               <button
                 type="button"
-                onClick={() => createMut.mutate({ autoCreate: true })}
+                onClick={startQrFlow}
                 disabled={createMut.isPending}
                 className="mt-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold transition-colors disabled:opacity-60"
               >
@@ -309,13 +326,22 @@ export function WhatsAppConnectionSettings() {
               O QR se renova sozinho a cada 25s. Assim que o número parear, esta tela atualiza pra
               &quot;Conectado&quot; automaticamente.
             </p>
-            <button
-              type="button"
-              onClick={() => qrQ.refetch()}
-              className="text-xs font-bold text-primary-600 dark:text-primary-400 hover:underline"
-            >
-              Gerar novo QR agora
-            </button>
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                onClick={() => qrQ.refetch()}
+                className="text-xs font-bold text-primary-600 dark:text-primary-400 hover:underline"
+              >
+                Gerar novo QR agora
+              </button>
+              <button
+                type="button"
+                onClick={() => setQrFlowActive(false)}
+                className="text-xs font-bold text-slate-500 dark:text-slate-400 hover:underline"
+              >
+                ← Escolher outro modo
+              </button>
+            </div>
           </div>
         </div>
       )}
