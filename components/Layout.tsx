@@ -520,7 +520,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
           <main
             id="main-content"
-            className="flex-1 overflow-auto p-6 pb-[calc(1.5rem+var(--app-bottom-nav-height,0px)+var(--app-safe-area-bottom,0px))] relative scroll-smooth"
+            // scrollbar-gutter stable: reserva o espaço da barra de rolagem
+            // SEMPRE, então ela aparece/some sem empurrar o conteúdo pro lado
+            className="flex-1 overflow-auto [scrollbar-gutter:stable] p-6 pb-[calc(1.5rem+var(--app-bottom-nav-height,0px)+var(--app-safe-area-bottom,0px))] relative scroll-smooth"
             tabIndex={-1}
           >
             {children}
