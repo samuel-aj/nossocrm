@@ -138,7 +138,8 @@ export function WhatsAppConnectionSettings() {
 
   return (
     <div className="bg-white dark:bg-dark-card rounded-2xl border border-slate-200 dark:border-white/10 p-6">
-      <div className="flex items-center gap-2 mb-1">
+      {/* mesmos 12px: título→texto e texto→conteúdo */}
+      <div className="flex items-center gap-2 mb-3">
         <span className="w-8 h-8 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 flex items-center justify-center">
           <MessageCircle size={16} />
         </span>
@@ -154,7 +155,7 @@ export function WhatsAppConnectionSettings() {
           </span>
         )}
       </div>
-      <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
+      <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">
         Conecte o <span className="font-semibold">WhatsApp do seu escritório</span> pra atender seus
         leads direto pelo CRM. As conversas aparecem na página Chats e na aba WhatsApp dentro do
         card de cada lead.
