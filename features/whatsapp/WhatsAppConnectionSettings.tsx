@@ -155,9 +155,9 @@ export function WhatsAppConnectionSettings() {
         )}
       </div>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-        O número conectado aqui vale <span className="font-semibold">só para esta organização</span> —
-        cada cliente do CRM conecta o seu próprio WhatsApp. As conversas aparecem na aba WhatsApp
-        dentro do card de cada lead.
+        Conecte o <span className="font-semibold">WhatsApp do seu escritório</span> pra atender seus
+        leads direto pelo CRM. As conversas aparecem na página Chats e na aba WhatsApp dentro do
+        card de cada lead.
       </p>
 
       {connQ.isLoading && (
