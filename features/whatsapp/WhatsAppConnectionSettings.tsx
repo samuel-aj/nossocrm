@@ -10,7 +10,7 @@
  */
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Loader2, MessageCircle, QrCode, Unplug } from 'lucide-react';
+import { CheckCircle2, KeyRound, Loader2, MessageCircle, QrCode, Unplug } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 
 interface WaConnectionInfo {
@@ -62,7 +62,18 @@ export function WhatsAppConnectionSettings() {
 
   const conn = connQ.data?.connection ?? null;
   const connected = !!connQ.data?.connected;
-  const waitingScan = !!conn && !connected;
+  // Modo API oficial da Meta (Cloud API): sem QR/pareamento
+  const isBusiness = (conn?.provider || '').toLowerCase() === 'evolution_business';
+  const waitingScan = !!conn && !connected && !isBusiness;
+  // Seletor de modo: sem conexão OU conexão business desconectada (reconectar
+  // exige credenciais de novo — o token é purgado ao desconectar)
+  const showChooser = !connQ.isLoading && (!conn || (isBusiness && !connected));
+
+  // Form do modo API oficial
+  const [bizOpen, setBizOpen] = useState(false);
+  const [bizToken, setBizToken] = useState('');
+  const [bizNumberId, setBizNumberId] = useState('');
+  const [bizWabaId, setBizWabaId] = useState('');
 
   const qrQ = useQuery<QrResponse>({
     queryKey: ['waConnectionQr'],
@@ -73,15 +84,23 @@ export function WhatsAppConnectionSettings() {
   });
 
   const createMut = useMutation({
-    mutationFn: () =>
+    mutationFn: (payload: Record<string, unknown>) =>
       fetchJson<{ connection: WaConnectionInfo }>('/api/whatsapp/connection', {
         method: 'POST',
-        body: JSON.stringify({ autoCreate: true }),
+        body: JSON.stringify(payload),
       }),
-    onSuccess: () => {
+    onSuccess: (_data, payload) => {
       qc.invalidateQueries({ queryKey: ['waConnection'] });
       qc.invalidateQueries({ queryKey: ['waConnectionQr'] });
-      addToast('Instância criada. Escaneie o QR pra conectar o número.', 'success');
+      if ((payload as { mode?: string }).mode === 'business') {
+        setBizOpen(false);
+        setBizToken('');
+        setBizNumberId('');
+        setBizWabaId('');
+        addToast('WhatsApp API oficial conectado! Envio e recebimento ativos.', 'success');
+      } else {
+        addToast('Instância criada. Escaneie o QR pra conectar o número.', 'success');
+      }
     },
     onError: e => addToast((e as Error).message, 'error'),
   });
@@ -109,7 +128,7 @@ export function WhatsAppConnectionSettings() {
         <h2 className="text-lg font-bold text-slate-900 dark:text-white">WhatsApp</h2>
         {connected && (
           <span className="ml-auto inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
-            <CheckCircle2 size={13} /> Conectado
+            <CheckCircle2 size={13} /> Conectado{isBusiness ? ' · API oficial' : ''}
           </span>
         )}
         {waitingScan && (
@@ -130,23 +149,126 @@ export function WhatsAppConnectionSettings() {
         </div>
       )}
 
-      {/* Sem conexão ainda: um clique cria a instância da org */}
-      {!connQ.isLoading && !conn && (
-        <div className="flex flex-col items-center gap-3 py-8 text-center">
-          <QrCode size={40} className="text-slate-300 dark:text-slate-600" />
-          <p className="text-sm text-slate-600 dark:text-slate-300 max-w-md">
-            Esta organização ainda não tem WhatsApp configurado. Clique abaixo pra gerar o QR Code e
-            conectar um número.
-          </p>
-          <button
-            type="button"
-            onClick={() => createMut.mutate()}
-            disabled={createMut.isPending}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold transition-colors disabled:opacity-60"
-          >
-            {createMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <MessageCircle size={16} />}
-            Conectar WhatsApp
-          </button>
+      {/* Seletor de modo: QR Code (Baileys) ou API oficial da Meta (Cloud API) */}
+      {showChooser && (
+        <div className="space-y-4">
+          {conn && isBusiness && !connected && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              A conexão via API oficial foi desconectada — reconecte informando as credenciais da
+              Meta novamente, ou conecte via QR Code.
+            </p>
+          )}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Modo QR (padrão) */}
+            <div className="rounded-2xl border border-slate-200 dark:border-white/10 p-5 flex flex-col gap-2">
+              <span className="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                <QrCode size={18} />
+              </span>
+              <p className="text-sm font-bold text-slate-900 dark:text-white">QR Code (celular)</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 flex-1">
+                Conecta um número comum escaneando o QR com o celular — sem custo por mensagem,
+                pronto em 1 minuto.
+              </p>
+              <button
+                type="button"
+                onClick={() => createMut.mutate({ autoCreate: true })}
+                disabled={createMut.isPending}
+                className="mt-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold transition-colors disabled:opacity-60"
+              >
+                {createMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <MessageCircle size={16} />}
+                Conectar via QR
+              </button>
+            </div>
+
+            {/* Modo API oficial (Meta Cloud API) */}
+            <div className="rounded-2xl border border-slate-200 dark:border-white/10 p-5 flex flex-col gap-2">
+              <span className="w-9 h-9 rounded-xl bg-sky-100 dark:bg-sky-900/40 text-sky-600 dark:text-sky-400 flex items-center justify-center">
+                <KeyRound size={18} />
+              </span>
+              <p className="text-sm font-bold text-slate-900 dark:text-white">WhatsApp API oficial (Meta)</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 flex-1">
+                Cloud API — número registrado na Meta, sem QR, 100% estável e sem risco de bloqueio.
+                Requer conta na Meta Business e cobrança por conversa da Meta.
+              </p>
+              <button
+                type="button"
+                onClick={() => setBizOpen(o => !o)}
+                className="mt-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors"
+              >
+                <KeyRound size={16} />
+                {bizOpen ? 'Fechar configuração' : 'Configurar API oficial'}
+              </button>
+            </div>
+          </div>
+
+          {/* Form de credenciais da Meta */}
+          {bizOpen && (
+            <div className="rounded-2xl border border-sky-200 dark:border-sky-500/25 bg-sky-50/50 dark:bg-sky-900/10 p-5 space-y-3">
+              <p className="text-sm font-bold text-slate-900 dark:text-white">Credenciais da Meta (Cloud API)</p>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Token permanente *</label>
+                <input
+                  type="password"
+                  value={bizToken}
+                  onChange={e => setBizToken(e.target.value)}
+                  placeholder="Token do usuário de sistema da Business Manager"
+                  className="w-full bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-sky-500 font-mono"
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Phone Number ID *</label>
+                  <input
+                    type="text"
+                    value={bizNumberId}
+                    onChange={e => setBizNumberId(e.target.value)}
+                    placeholder="Ex: 123456789012345"
+                    className="w-full bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-sky-500 font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">É o ID do número no painel da Meta, não o telefone.</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">WABA ID (opcional)</label>
+                  <input
+                    type="text"
+                    value={bizWabaId}
+                    onChange={e => setBizWabaId(e.target.value)}
+                    placeholder="WhatsApp Business Account ID"
+                    className="w-full bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-sky-500 font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">Necessário no futuro pra templates.</p>
+                </div>
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 space-y-1 border-t border-sky-200/60 dark:border-sky-500/20 pt-3">
+                <p>
+                  ⚠️ <span className="font-semibold">Janela de 24h:</span> pela regra da Meta, fora de 24h
+                  após a última mensagem do cliente só é possível enviar templates aprovados — mensagens
+                  livres são recusadas (o CRM mostra a falha no chat).
+                </p>
+                <p>
+                  🔧 <span className="font-semibold">Pré-requisito único:</span> o webhook do app na Meta
+                  precisa apontar pro servidor da agência — a configuração é feita pela equipe do CRM
+                  junto com você na ativação.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  createMut.mutate({
+                    mode: 'business',
+                    metaToken: bizToken.trim(),
+                    metaNumberId: bizNumberId.trim(),
+                    metaBusinessId: bizWabaId.trim() || undefined,
+                  })
+                }
+                disabled={createMut.isPending || !bizToken.trim() || !bizNumberId.trim()}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {createMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <KeyRound size={16} />}
+                Conectar API oficial
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -203,10 +325,12 @@ export function WhatsAppConnectionSettings() {
         <div className="flex flex-col sm:flex-row sm:items-center gap-4">
           <div className="flex-1 rounded-xl border border-emerald-200 dark:border-emerald-500/25 bg-emerald-50 dark:bg-emerald-900/15 p-4">
             <p className="text-sm font-bold text-emerald-800 dark:text-emerald-300">
-              {conn.profileName || 'WhatsApp conectado'}
+              {conn.profileName || (isBusiness ? 'WhatsApp API oficial (Meta)' : 'WhatsApp conectado')}
             </p>
             <p className="text-sm text-emerald-700 dark:text-emerald-200">
-              {conn.phoneNumber || 'Número conectado e pronto pra uso nos cards dos leads.'}
+              {isBusiness
+                ? 'Conectado via Cloud API da Meta — sem QR; envio e recebimento ativos.'
+                : conn.phoneNumber || 'Número conectado e pronto pra uso nos cards dos leads.'}
             </p>
           </div>
           {confirmDisconnect ? (

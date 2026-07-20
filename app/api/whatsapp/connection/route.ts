@@ -11,8 +11,13 @@ import {
   updateConnectionStatus,
   type WaConnectionRow,
 } from '@/lib/whatsapp/service';
-import { envEvolution, getProvider } from '@/lib/whatsapp';
-import { ensureEvolutionInstance, instanceNameForOrg, registerWebhook } from '@/lib/whatsapp/admin';
+import { envEvolution, getProvider, isBusinessConnection } from '@/lib/whatsapp';
+import {
+  deleteEvolutionInstance,
+  ensureEvolutionInstance,
+  instanceNameForOrg,
+  registerWebhook,
+} from '@/lib/whatsapp/admin';
 
 function mask(conn: WaConnectionRow) {
   return {
@@ -51,7 +56,16 @@ export async function POST(req: Request) {
   if (!auth.ok) return auth.response;
   if (!isOrgAdmin(auth.user.role)) return json({ error: 'Forbidden' }, 403);
 
-  let body: { instanceName?: string; token?: string; baseUrl?: string; autoCreate?: boolean };
+  let body: {
+    instanceName?: string;
+    token?: string;
+    baseUrl?: string;
+    autoCreate?: boolean;
+    mode?: string;
+    metaToken?: string;
+    metaNumberId?: string;
+    metaBusinessId?: string;
+  };
   try {
     body = await req.json();
   } catch {
@@ -61,16 +75,43 @@ export async function POST(req: Request) {
   let instanceName = (body.instanceName || '').trim();
   let token = body.token?.trim() || null;
   let baseUrl = body.baseUrl?.trim() || null;
+  let provider: string | undefined;
 
-  // Fluxo da UI: cria a instância DESTA org na Evolution automaticamente,
-  // sem o admin do cliente precisar saber nome/token/servidor.
-  if (body.autoCreate) {
+  if (body.mode === 'business') {
+    // MODO API OFICIAL (Meta Cloud API via Evolution): conexão por credenciais,
+    // sem QR. A instância nasce "open"; erro de token só aparece no envio.
+    const metaToken = (body.metaToken || '').trim();
+    const metaNumberId = (body.metaNumberId || '').trim().replace(/\D/g, '');
+    const metaBusinessId = (body.metaBusinessId || '').trim().replace(/\D/g, '');
+    if (!metaToken || !metaNumberId) {
+      return json({ error: 'Token permanente e Phone Number ID da Meta são obrigatórios' }, 400);
+    }
+    // Sufixo _api: nunca colide com a instância QR da org (senão o create
+    // devolveria a instância Baileys existente em silêncio).
+    instanceName = `${instanceNameForOrg(auth.user.organizationId)}_api`;
+    try {
+      const created = await ensureEvolutionInstance(instanceName, {
+        mode: 'business',
+        metaToken,
+        metaNumberId,
+        metaBusinessId: metaBusinessId || undefined,
+      });
+      token = created.token ?? metaToken;
+      baseUrl = envEvolution().baseUrl.replace(/\/+$/, '').replace(/\/manager$/, '') || null;
+      provider = 'evolution_business';
+    } catch (e) {
+      return json({ error: `Falha ao criar a instância business: ${(e as Error).message}` }, 502);
+    }
+  } else if (body.autoCreate) {
+    // Fluxo da UI: cria a instância DESTA org na Evolution automaticamente,
+    // sem o admin do cliente precisar saber nome/token/servidor.
     instanceName = instanceNameForOrg(auth.user.organizationId);
     try {
       const created = await ensureEvolutionInstance(instanceName);
       token = created.token;
       // persiste a base também (normalizada): a Edge Function usa p/ buscar mídia
       baseUrl = envEvolution().baseUrl.replace(/\/+$/, '').replace(/\/manager$/, '') || null;
+      provider = 'evolution';
     } catch (e) {
       return json({ error: `Falha ao criar a instância: ${(e as Error).message}` }, 502);
     }
@@ -83,6 +124,7 @@ export async function POST(req: Request) {
       instanceName,
       token,
       baseUrl,
+      provider,
     });
   } catch (e) {
     return json({ error: `Falha ao salvar conexão: ${(e as Error).message}` }, 400);
@@ -109,6 +151,17 @@ export async function DELETE() {
 
   const conn = await getConnectionByOrg(auth.admin, auth.user.organizationId);
   if (!conn) return json({ error: 'Conexão não configurada' }, 404);
+
+  if (isBusinessConnection(conn)) {
+    // API oficial: apaga a instância na Evolution (purga o token da Meta) e
+    // limpa o token salvo — reconectar exige informar as credenciais de novo.
+    await deleteEvolutionInstance(conn.instance_name);
+    await auth.admin
+      .from('wa_connections')
+      .update({ status: 'disconnected', phone_number: null, profile_name: null, instance_token: null })
+      .eq('id', conn.id);
+    return json({ ok: true });
+  }
 
   try {
     await getProvider(conn).logout();

@@ -29,7 +29,7 @@ export async function registerWebhook(
 }
 
 async function evoAdminCall<T = unknown>(
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'DELETE',
   path: string,
   body?: unknown
 ): Promise<{ ok: boolean; status: number; data: T | null }> {
@@ -66,18 +66,57 @@ function extractToken(info: EvoInstanceInfo | null | undefined): string | null {
   return info.hash?.apikey ?? info.token ?? info.instance?.token ?? null;
 }
 
+/** Credenciais da Meta pro modo API oficial (Cloud API via Evolution). */
+export interface BusinessInstanceOpts {
+  mode: 'business';
+  /** Token PERMANENTE do usuário de sistema da Business Manager. */
+  metaToken: string;
+  /** phone_number_id do painel da Meta (NÃO é o número de telefone). */
+  metaNumberId: string;
+  /** WhatsApp Business Account ID (WABA) — opcional; necessário p/ templates. */
+  metaBusinessId?: string;
+}
+
 /**
  * Garante que a instância exista na Evolution e devolve o token dela.
- * Se o nome já estiver em uso (org reconectando), recupera o token existente.
+ * Modo padrão (Baileys/QR): se o nome já estiver em uso (org reconectando),
+ * recupera o token existente.
+ * Modo business (API oficial da Meta): a instância carrega as credenciais no
+ * create; se já existir uma com o mesmo nome, ela é APAGADA e recriada — é o
+ * único jeito de trocar um token da Meta rotacionado.
  */
-export async function ensureEvolutionInstance(instanceName: string): Promise<{ token: string | null }> {
-  const create = await evoAdminCall<EvoInstanceInfo>('POST', '/instance/create', {
-    instanceName,
-    integration: 'WHATSAPP-BAILEYS',
-    qrcode: false,
-  });
+export async function ensureEvolutionInstance(
+  instanceName: string,
+  opts?: BusinessInstanceOpts
+): Promise<{ token: string | null }> {
+  const createBody =
+    opts?.mode === 'business'
+      ? {
+          instanceName,
+          integration: 'WHATSAPP-BUSINESS',
+          qrcode: false,
+          token: opts.metaToken,
+          number: opts.metaNumberId,
+          ...(opts.metaBusinessId ? { businessId: opts.metaBusinessId } : {}),
+        }
+      : {
+          instanceName,
+          integration: 'WHATSAPP-BAILEYS',
+          qrcode: false,
+        };
+
+  const create = await evoAdminCall<EvoInstanceInfo>('POST', '/instance/create', createBody);
   if (create.ok) {
     return { token: extractToken(create.data) };
+  }
+
+  if (opts?.mode === 'business') {
+    // Nome em uso: apaga e recria com as credenciais NOVAS (token pode ter
+    // sido rotacionado na Meta; a Evolution não atualiza token de instância).
+    await evoAdminCall('DELETE', `/instance/delete/${encodeURIComponent(instanceName)}`);
+    const retry = await evoAdminCall<EvoInstanceInfo>('POST', '/instance/create', createBody);
+    if (retry.ok) return { token: extractToken(retry.data) };
+    throw new Error(`Evolution não criou a instância business (HTTP ${retry.status})`);
   }
 
   // Nome já em uso (403/409): recupera o token da instância existente.
@@ -94,4 +133,13 @@ export async function ensureEvolutionInstance(instanceName: string): Promise<{ t
   }
 
   throw new Error(`Evolution não criou a instância (HTTP ${create.status})`);
+}
+
+/** Apaga a instância na Evolution (best-effort; usada ao desconectar o modo API). */
+export async function deleteEvolutionInstance(instanceName: string): Promise<void> {
+  try {
+    await evoAdminCall('DELETE', `/instance/delete/${encodeURIComponent(instanceName)}`);
+  } catch {
+    // best-effort: instância pode já não existir
+  }
 }

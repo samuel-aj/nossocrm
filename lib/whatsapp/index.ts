@@ -50,8 +50,16 @@ export function getProvider(conn: ConnectionLike): WhatsAppProvider {
   };
   const provider = (conn.provider || 'evolution').toLowerCase();
   switch (provider) {
+    // API oficial da Meta via Evolution (integration WHATSAPP-BUSINESS):
+    // MESMOS endpoints de envio/estado/webhook — o adapter é idêntico.
+    case 'evolution_business':
     case 'evolution':
     default:
       return new EvolutionProvider(config);
   }
+}
+
+/** True quando a conexão é do modo API oficial da Meta (sem QR/pareamento). */
+export function isBusinessConnection(conn: Pick<ConnectionLike, 'provider'>): boolean {
+  return (conn.provider || '').toLowerCase() === 'evolution_business';
 }

@@ -67,14 +67,15 @@ export async function getConnectionByInstance(
 export async function upsertConnection(
   admin: SupabaseClient,
   orgId: string,
-  input: { instanceName: string; token?: string | null; baseUrl?: string | null }
+  input: { instanceName: string; token?: string | null; baseUrl?: string | null; provider?: string }
 ): Promise<WaConnectionRow> {
   const { data, error } = await admin
     .from('wa_connections')
     .upsert(
       {
         organization_id: orgId,
-        provider: 'evolution',
+        // 'evolution' = Baileys/QR (padrão); 'evolution_business' = API oficial da Meta
+        provider: input.provider ?? 'evolution',
         instance_name: input.instanceName,
         instance_token: input.token ?? null,
         base_url: input.baseUrl ?? null,

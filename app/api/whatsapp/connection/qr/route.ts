@@ -7,7 +7,7 @@
  */
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { getConnectionByOrg, upsertConnection } from '@/lib/whatsapp/service';
-import { getProvider } from '@/lib/whatsapp';
+import { getProvider, isBusinessConnection } from '@/lib/whatsapp';
 import { ensureEvolutionInstance, registerWebhook } from '@/lib/whatsapp/admin';
 
 export async function GET() {
@@ -16,6 +16,12 @@ export async function GET() {
 
   let conn = await getConnectionByOrg(auth.admin, auth.user.organizationId);
   if (!conn) return json({ error: 'Conexão não configurada' }, 400);
+
+  // API oficial da Meta não tem pareamento: nunca gera QR (e o self-healing
+  // abaixo recriaria a instância como Baileys — jamais rebaixar uma business).
+  if (isBusinessConnection(conn)) {
+    return json({ error: 'Conexão via API oficial não usa QR code' }, 400);
+  }
 
   try {
     let qr = await getProvider(conn).getQrCode();
