@@ -168,7 +168,7 @@ export function WhatsAppConnectionSettings() {
             ) : (
               <div className="w-[232px] h-[232px] flex flex-col items-center justify-center gap-2 text-slate-400">
                 <Loader2 className="animate-spin" size={22} />
-                <span className="text-xs">{qrQ.isError ? 'Falha ao gerar o QR — tentando de novo…' : 'Gerando QR…'}</span>
+                <span className="text-xs">{qrQ.isError ? 'Falha ao gerar o QR. Tentando de novo…' : 'Gerando QR…'}</span>
               </div>
             )}
           </div>
