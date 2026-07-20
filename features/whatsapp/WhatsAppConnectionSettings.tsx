@@ -171,26 +171,28 @@ export function WhatsAppConnectionSettings() {
         <div className="space-y-4">
           {conn && isBusiness && !connected && (
             <p className="text-xs text-amber-600 dark:text-amber-400">
-              A conexão via API oficial foi desconectada — reconecte informando as credenciais da
+              A conexão via API oficial foi desconectada. Reconecte informando as credenciais da
               Meta novamente, ou conecte via QR Code.
             </p>
           )}
+          {/* Ritmo interno dos cards: ícone 12px, título 6px, texto e botão
+              ancorado embaixo com respiro consistente nos dois cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Modo QR (padrão) */}
-            <div className="rounded-2xl border border-slate-200 dark:border-white/10 p-5 flex flex-col gap-2">
-              <span className="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+            <div className="rounded-2xl border border-slate-200 dark:border-white/10 p-5 flex flex-col">
+              <span className="w-9 h-9 mb-3 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
                 <QrCode size={18} />
               </span>
-              <p className="text-sm font-bold text-slate-900 dark:text-white">QR Code (celular)</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400 flex-1">
-                Conecta um número comum escaneando o QR com o celular — sem custo por mensagem,
+              <p className="text-sm font-bold text-slate-900 dark:text-white mb-1.5">QR Code (celular)</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed flex-1 mb-4">
+                Conecta um número comum escaneando o QR com o celular. Sem custo por mensagem,
                 pronto em 1 minuto.
               </p>
               <button
                 type="button"
                 onClick={startQrFlow}
                 disabled={createMut.isPending}
-                className="mt-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold transition-colors disabled:opacity-60"
+                className="mt-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold transition-colors disabled:opacity-60"
               >
                 {createMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <MessageCircle size={16} />}
                 Conectar via QR
@@ -198,19 +200,19 @@ export function WhatsAppConnectionSettings() {
             </div>
 
             {/* Modo API oficial (Meta Cloud API) */}
-            <div className="rounded-2xl border border-slate-200 dark:border-white/10 p-5 flex flex-col gap-2">
-              <span className="w-9 h-9 rounded-xl bg-sky-100 dark:bg-sky-900/40 text-sky-600 dark:text-sky-400 flex items-center justify-center">
+            <div className="rounded-2xl border border-slate-200 dark:border-white/10 p-5 flex flex-col">
+              <span className="w-9 h-9 mb-3 rounded-xl bg-sky-100 dark:bg-sky-900/40 text-sky-600 dark:text-sky-400 flex items-center justify-center">
                 <KeyRound size={18} />
               </span>
-              <p className="text-sm font-bold text-slate-900 dark:text-white">WhatsApp API oficial (Meta)</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400 flex-1">
-                Cloud API — número registrado na Meta, sem QR, 100% estável e sem risco de bloqueio.
-                Requer conta na Meta Business e cobrança por conversa da Meta.
+              <p className="text-sm font-bold text-slate-900 dark:text-white mb-1.5">WhatsApp API oficial (Meta)</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed flex-1 mb-4">
+                Número registrado na Meta, sem QR, 100% estável e sem risco de bloqueio. Requer
+                conta na Meta Business e tem cobrança por conversa.
               </p>
               <button
                 type="button"
                 onClick={() => setBizOpen(o => !o)}
-                className="mt-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors"
+                className="mt-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors"
               >
                 <KeyRound size={16} />
                 {bizOpen ? 'Fechar configuração' : 'Configurar API oficial'}
@@ -259,12 +261,12 @@ export function WhatsAppConnectionSettings() {
               <div className="text-[11px] text-slate-500 dark:text-slate-400 space-y-1 border-t border-sky-200/60 dark:border-sky-500/20 pt-3">
                 <p>
                   ⚠️ <span className="font-semibold">Janela de 24h:</span> pela regra da Meta, fora de 24h
-                  após a última mensagem do cliente só é possível enviar templates aprovados — mensagens
-                  livres são recusadas (o CRM mostra a falha no chat).
+                  após a última mensagem do cliente só é possível enviar templates aprovados.
+                  Mensagens livres são recusadas (o CRM mostra a falha no chat).
                 </p>
                 <p>
                   🔧 <span className="font-semibold">Pré-requisito único:</span> o webhook do app na Meta
-                  precisa apontar pro servidor da agência — a configuração é feita pela equipe do CRM
+                  precisa apontar pro servidor da agência. A configuração é feita pela equipe do CRM
                   junto com você na ativação.
                 </p>
               </div>
@@ -307,7 +309,7 @@ export function WhatsAppConnectionSettings() {
             ) : (
               <div className="w-[232px] h-[232px] flex flex-col items-center justify-center gap-2 text-slate-400">
                 <Loader2 className="animate-spin" size={22} />
-                <span className="text-xs">{qrQ.isError ? 'Falha ao gerar o QR — tentando de novo…' : 'Gerando QR…'}</span>
+                <span className="text-xs">{qrQ.isError ? 'Falha ao gerar o QR. Tentando de novo…' : 'Gerando QR…'}</span>
               </div>
             )}
           </div>
@@ -355,7 +357,7 @@ export function WhatsAppConnectionSettings() {
             </p>
             <p className="text-sm text-emerald-700 dark:text-emerald-200">
               {isBusiness
-                ? 'Conectado via Cloud API da Meta — sem QR; envio e recebimento ativos.'
+                ? 'Conectado via Cloud API da Meta, sem QR. Envio e recebimento ativos.'
                 : conn.phoneNumber || 'Número conectado e pronto pra uso nos cards dos leads.'}
             </p>
           </div>
