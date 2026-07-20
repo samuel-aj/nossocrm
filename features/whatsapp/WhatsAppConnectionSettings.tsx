@@ -92,7 +92,7 @@ export function WhatsAppConnectionSettings() {
       setConfirmDisconnect(false);
       qc.invalidateQueries({ queryKey: ['waConnection'] });
       qc.invalidateQueries({ queryKey: ['waConnectionQr'] });
-      addToast('Número desconectado desta organização.', 'success');
+      addToast('Número desconectado.', 'success');
     },
     onError: e => {
       setConfirmDisconnect(false);
@@ -119,9 +119,9 @@ export function WhatsAppConnectionSettings() {
         )}
       </div>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-        O número conectado aqui vale <span className="font-semibold">só para esta organização</span> —
-        cada cliente do CRM conecta o seu próprio WhatsApp. As conversas aparecem na aba WhatsApp
-        dentro do card de cada lead.
+        Conecte o <span className="font-semibold">WhatsApp do seu escritório</span> pra atender seus
+        leads direto pelo CRM. As conversas aparecem na página Chats e na aba WhatsApp dentro do
+        card de cada lead.
       </p>
 
       {connQ.isLoading && (
@@ -135,8 +135,8 @@ export function WhatsAppConnectionSettings() {
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <QrCode size={40} className="text-slate-300 dark:text-slate-600" />
           <p className="text-sm text-slate-600 dark:text-slate-300 max-w-md">
-            Esta organização ainda não tem WhatsApp configurado. Clique abaixo pra gerar o QR Code e
-            conectar um número.
+            Seu WhatsApp ainda não está conectado. Clique abaixo pra gerar o QR Code e conectar o
+            número do escritório.
           </p>
           <button
             type="button"
@@ -173,7 +173,7 @@ export function WhatsAppConnectionSettings() {
             )}
           </div>
           <div className="text-sm text-slate-600 dark:text-slate-300 space-y-2">
-            <p className="font-bold text-slate-900 dark:text-white">Conecte o número desta organização:</p>
+            <p className="font-bold text-slate-900 dark:text-white">Conecte o número do seu escritório:</p>
             <ol className="list-decimal list-inside space-y-1">
               <li>Abra o WhatsApp no celular do número que vai atender</li>
               <li>
