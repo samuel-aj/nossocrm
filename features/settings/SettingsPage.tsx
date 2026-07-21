@@ -14,10 +14,11 @@ import { UserRole } from '@/types/constants';
 import { AICenterSettings } from './AICenterSettings';
 
 import { UsersPage } from './UsersPage';
+import { MessageTemplatesManager } from './components/MessageTemplatesManager';
 import { useAuth } from '@/context/AuthContext';
-import { Settings as SettingsIcon, Users, Database, Sparkles, Plug, Package } from 'lucide-react';
+import { Settings as SettingsIcon, Users, Database, Sparkles, Plug, Package, FileText } from 'lucide-react';
 
-type SettingsTab = 'general' | 'products' | 'integrations' | 'ai' | 'data' | 'users';
+type SettingsTab = 'general' | 'products' | 'templates' | 'integrations' | 'ai' | 'data' | 'users';
 
 interface GeneralSettingsProps {
   hash?: string;
@@ -230,6 +231,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
   const tabs = [
     { id: 'general' as SettingsTab, name: 'Geral', icon: SettingsIcon },
     ...(isAdminOrSuper ? [{ id: 'products' as SettingsTab, name: 'Produtos/Serviços', icon: Package }] : []),
+    ...(isAdminOrSuper ? [{ id: 'templates' as SettingsTab, name: 'Modelos', icon: FileText }] : []),
     ...(isAdminOrSuper ? [{ id: 'integrations' as SettingsTab, name: 'Integrações', icon: Plug }] : []),
     { id: 'ai' as SettingsTab, name: 'Central de I.A', icon: Sparkles },
     { id: 'data' as SettingsTab, name: 'Dados', icon: Database },
@@ -240,6 +242,12 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
     switch (activeTab) {
       case 'products':
         return <ProductsSettings />;
+      case 'templates':
+        return (
+          <div className="pb-10">
+            <MessageTemplatesManager />
+          </div>
+        );
       case 'integrations':
         return <IntegrationsSettings />;
       case 'ai':
