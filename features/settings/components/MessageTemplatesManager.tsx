@@ -2,8 +2,9 @@
 
 import React, { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, FileText, KeyRound, MessageCircle, Pencil, Plus, Trash2, Variable, X } from 'lucide-react';
+import { Check, FileText, KeyRound, MessageCircle, Pencil, Plus, RefreshCw, Trash2, Variable, X } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
+import { TEMPLATE_VARIABLES, previewTemplate, toMetaName } from '@/lib/messageTemplates';
 
 // ---------------------------------------------------------------------------
 // Aba MODELOS (Configurações): modelos de mensagem da organização.
@@ -24,19 +25,9 @@ interface MessageTemplate {
   category: TemplateCategory | null;
   language: string;
   body: string;
+  meta_name: string | null;
+  meta_status: string | null;
 }
-
-// Variáveis disponíveis (chave -> exemplo usado no preview)
-const TEMPLATE_VARIABLES: { key: string; label: string; sample: string }[] = [
-  { key: '{{contato.nome}}', label: 'Nome do contato', sample: 'Maria Silva' },
-  { key: '{{contato.telefone}}', label: 'Telefone do contato', sample: '(66) 99999-0000' },
-  { key: '{{contato.email}}', label: 'Email do contato', sample: 'maria@exemplo.com' },
-  { key: '{{lead.titulo}}', label: 'Título do lead', sample: 'BPC LOAS' },
-  { key: '{{lead.valor}}', label: 'Valor do lead', sample: 'R$ 6.500,00' },
-  { key: '{{lead.etapa}}', label: 'Etapa do lead', sample: 'Em Qualificação' },
-  { key: '{{responsavel.nome}}', label: 'Responsável pelo lead', sample: 'Dra. Ana' },
-  { key: '{{escritorio.nome}}', label: 'Nome do escritório', sample: 'Seu Escritório' },
-];
 
 const LANGUAGES = [
   { value: 'pt_BR', label: 'Português (BR)' },
@@ -44,11 +35,14 @@ const LANGUAGES = [
   { value: 'es_ES', label: 'Espanhol' },
 ];
 
-function previewBody(body: string): string {
-  let out = body;
-  for (const v of TEMPLATE_VARIABLES) out = out.split(v.key).join(v.sample);
-  return out;
-}
+// Status de aprovação da Meta -> rótulo e cor do badge
+const META_STATUS_BADGE: Record<string, { label: string; className: string }> = {
+  APPROVED: { label: 'Aprovado', className: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' },
+  PENDING: { label: 'Em análise', className: 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400' },
+  REJECTED: { label: 'Rejeitado', className: 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' },
+};
+
+const previewBody = previewTemplate;
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -116,17 +110,40 @@ export function MessageTemplatesManager() {
   });
 
   const deleteMut = useMutation({
-    mutationFn: (id: string) =>
-      fetchJson(`/api/message-templates/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-    onSuccess: () => {
+    mutationFn: (t: MessageTemplate) =>
+      fetchJson(`/api/message-templates/${encodeURIComponent(t.id)}`, { method: 'DELETE' }),
+    onSuccess: (_data, t) => {
       qc.invalidateQueries({ queryKey: ['messageTemplates'] });
-      addToast('Modelo removido.', 'info');
+      addToast(
+        t.type === 'whatsapp_api'
+          ? 'Modelo removido do CRM. O template continua na Meta (remova pelo painel dela se quiser).'
+          : 'Modelo removido.',
+        'info'
+      );
       setConfirmDeleteId(null);
     },
     onError: e => {
       addToast((e as Error).message, 'error');
       setConfirmDeleteId(null);
     },
+  });
+
+  // Sincroniza com a META: atualiza status de aprovação e importa templates
+  // que existem lá e o CRM ainda não conhece
+  const syncMut = useMutation({
+    mutationFn: () =>
+      fetchJson<{ updated: number; imported: number; total_meta: number }>(
+        '/api/message-templates/sync',
+        { method: 'POST', body: JSON.stringify({}) }
+      ),
+    onSuccess: r => {
+      qc.invalidateQueries({ queryKey: ['messageTemplates'] });
+      addToast(
+        `Sincronizado com a Meta: ${r.total_meta} template${r.total_meta === 1 ? '' : 's'} lá, ${r.imported} importado${r.imported === 1 ? '' : 's'}.`,
+        'success'
+      );
+    },
+    onError: e => addToast((e as Error).message, 'error'),
   });
 
   const startEditing = (t: MessageTemplate) => {
@@ -185,6 +202,19 @@ export function MessageTemplatesManager() {
               <span className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400">
                 {t.language}
               </span>
+              {(() => {
+                const badge = t.meta_status ? META_STATUS_BADGE[t.meta_status] : null;
+                return (
+                  <span
+                    className={`text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${
+                      badge?.className ?? 'bg-slate-100 dark:bg-white/10 text-slate-400'
+                    }`}
+                    title={t.meta_name ? `Nome na Meta: ${t.meta_name}` : undefined}
+                  >
+                    {badge?.label ?? 'Não sincronizado'}
+                  </span>
+                );
+              })()}
             </>
           )}
         </div>
@@ -193,18 +223,20 @@ export function MessageTemplatesManager() {
         </p>
       </div>
       <div className="flex gap-1 shrink-0">
-        <button
-          type="button"
-          onClick={() => startEditing(t)}
-          className="text-slate-400 hover:text-amber-500 p-2 rounded hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors"
-          title="Editar modelo"
-        >
-          <Pencil size={15} />
-        </button>
+        {t.type === 'general' && (
+          <button
+            type="button"
+            onClick={() => startEditing(t)}
+            className="text-slate-400 hover:text-amber-500 p-2 rounded hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors"
+            title="Editar modelo"
+          >
+            <Pencil size={15} />
+          </button>
+        )}
         {confirmDeleteId === t.id ? (
           <button
             type="button"
-            onClick={() => deleteMut.mutate(t.id)}
+            onClick={() => deleteMut.mutate(t)}
             className="text-[11px] font-bold text-red-600 dark:text-red-400 px-2 py-0.5 rounded bg-red-50 dark:bg-red-900/20"
           >
             Confirmar?
@@ -236,9 +268,9 @@ export function MessageTemplatesManager() {
         <h2 className="text-lg font-bold text-slate-900 dark:text-white">Modelos de mensagem</h2>
       </div>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">
-        Crie mensagens prontas pra usar nas conversas. Modelos do
-        <span className="font-semibold"> WhatsApp API</span> exigem categoria (Utilidade ou
-        Marketing) e passam por aprovação da Meta antes do envio.
+        Mensagens gerais ficam prontas pra enviar direto no chat, como se fossem digitadas. Modelos
+        do <span className="font-semibold">WhatsApp API</span> são sincronizados com a Meta: criar
+        aqui cria lá, e o status de aprovação aparece na lista.
       </p>
 
       {/* Formulário de criação/edição */}
@@ -283,7 +315,9 @@ export function MessageTemplatesManager() {
               <button
                 type="button"
                 onClick={() => setType('whatsapp_api')}
-                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border transition-colors ${
+                disabled={!!editingId}
+                title={editingId ? 'Modelos da API não são editáveis; crie um novo' : undefined}
+                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                   type === 'whatsapp_api'
                     ? 'border-sky-500/60 bg-sky-50 dark:bg-sky-900/20 text-sky-700 dark:text-sky-300'
                     : 'border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10'
@@ -387,10 +421,17 @@ export function MessageTemplatesManager() {
         )}
 
         {type === 'whatsapp_api' && (
-          <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3">
-            ⚠️ Modelos do WhatsApp API precisam ser aprovados pela Meta antes de poder enviar fora
-            da janela de 24h. O envio pra aprovação será feito pela conexão da API oficial.
-          </p>
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 mb-3 space-y-1">
+            <p>
+              🔄 Criar este modelo <span className="font-semibold">cria o template direto na Meta</span> e
+              ele entra em análise (precisa da conexão WhatsApp API ativa nas Integrações).
+            </p>
+            {name.trim() !== '' && (
+              <p>
+                Nome na Meta: <span className="font-mono font-semibold">{toMetaName(name)}</span>
+              </p>
+            )}
+          </div>
         )}
 
         <div className="flex justify-end gap-2">
@@ -417,27 +458,30 @@ export function MessageTemplatesManager() {
         </div>
       </div>
 
-      {/* Listas por tipo */}
+      {/* Listas por tipo (as duas seções sempre visíveis) */}
       {listQ.isLoading ? (
         <p className="text-sm text-slate-400 text-center py-6">Carregando modelos...</p>
-      ) : templates.length === 0 ? (
-        <p className="text-center text-slate-500 text-sm py-4 italic">Nenhum modelo criado ainda.</p>
       ) : (
         <div className="space-y-5">
-          {generalTemplates.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300 flex items-center gap-1.5">
-                <MessageCircle size={12} className="text-emerald-500" />
-                Mensagens gerais
-                <span className="font-normal text-slate-400 normal-case">
-                  · {generalTemplates.length} modelo{generalTemplates.length === 1 ? '' : 's'}
-                </span>
+          <div className="space-y-2">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300 flex items-center gap-1.5">
+              <MessageCircle size={12} className="text-emerald-500" />
+              Mensagens gerais
+              <span className="font-normal text-slate-400 normal-case">
+                · {generalTemplates.length} modelo{generalTemplates.length === 1 ? '' : 's'}
+              </span>
+            </p>
+            {generalTemplates.length > 0 ? (
+              generalTemplates.map(renderTemplateCard)
+            ) : (
+              <p className="text-sm text-slate-400 italic px-1">
+                Nenhum modelo geral ainda. Eles ficam disponíveis pra enviar direto no chat.
               </p>
-              {generalTemplates.map(renderTemplateCard)}
-            </div>
-          )}
-          {apiTemplates.length > 0 && (
-            <div className="space-y-2">
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300 flex items-center gap-1.5">
                 <KeyRound size={12} className="text-sky-500" />
                 WhatsApp API (Meta)
@@ -445,9 +489,26 @@ export function MessageTemplatesManager() {
                   · {apiTemplates.length} modelo{apiTemplates.length === 1 ? '' : 's'}
                 </span>
               </p>
-              {apiTemplates.map(renderTemplateCard)}
+              <button
+                type="button"
+                onClick={() => syncMut.mutate()}
+                disabled={syncMut.isPending}
+                title="Atualiza o status de aprovação e importa templates que já existem na Meta"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-500/30 hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-colors disabled:opacity-50"
+              >
+                <RefreshCw size={12} className={syncMut.isPending ? 'animate-spin' : ''} />
+                {syncMut.isPending ? 'Sincronizando...' : 'Sincronizar com a Meta'}
+              </button>
             </div>
-          )}
+            {apiTemplates.length > 0 ? (
+              apiTemplates.map(renderTemplateCard)
+            ) : (
+              <p className="text-sm text-slate-400 italic px-1">
+                Nenhum modelo da API ainda. Sincronize pra importar os templates que já existem na
+                Meta, ou crie um novo acima.
+              </p>
+            )}
+          </div>
         </div>
       )}
     </div>

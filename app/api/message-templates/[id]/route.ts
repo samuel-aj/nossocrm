@@ -43,6 +43,8 @@ function mapRow(row: any) {
     category: (row.category ?? null) as 'UTILITY' | 'MARKETING' | null,
     language: (row.language ?? 'pt_BR') as string,
     body: row.body as string,
+    meta_name: (row.meta_name ?? null) as string | null,
+    meta_status: (row.meta_status ?? null) as string | null,
     created_at: row.created_at as string | null,
   };
 }
@@ -63,6 +65,24 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     return NextResponse.json({ error: 'Invalid payload', details: parsed.error.flatten() }, { status: 422 });
   }
 
+  const sb = createStaticAdminClient();
+
+  // Modelo do WhatsApp API é um ESPELHO da Meta: o conteúdo não é editável
+  // pelo CRM (a Meta trava templates aprovados). Pra mudar, crie um novo.
+  const { data: current } = await sb
+    .from('message_templates')
+    .select('type')
+    .eq('id', id)
+    .eq('organization_id', auth.profile.organization_id)
+    .maybeSingle();
+  if (!current) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (current.type === 'whatsapp_api') {
+    return NextResponse.json(
+      { error: 'Modelos do WhatsApp API são sincronizados com a Meta e não podem ser editados. Crie um novo modelo.' },
+      { status: 422 }
+    );
+  }
+
   const updates: any = { updated_at: new Date().toISOString() };
   if (parsed.data.name !== undefined) updates.name = parsed.data.name.trim();
   if (parsed.data.type !== undefined) updates.type = parsed.data.type;
@@ -71,14 +91,16 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   if (parsed.data.body !== undefined) updates.body = parsed.data.body;
   // modelo geral nunca carrega categoria
   if (updates.type === 'general') updates.category = null;
+  // trocar o tipo pra whatsapp_api por edição também não faz sentido (o
+  // template teria que nascer na Meta) — mantém geral
+  if (updates.type === 'whatsapp_api') delete updates.type;
 
-  const sb = createStaticAdminClient();
   const { data, error } = await sb
     .from('message_templates')
     .update(updates)
     .eq('id', id)
     .eq('organization_id', auth.profile.organization_id)
-    .select('id,name,type,category,language,body,created_at')
+    .select('id,name,type,category,language,body,meta_name,meta_status,created_at')
     .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

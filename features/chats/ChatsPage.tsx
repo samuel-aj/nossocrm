@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, CheckCheck, ChevronDown, ExternalLink, KanbanSquare, MessageCircle, MessageSquareDot, Plus, Search, UserPlus, Users, X } from 'lucide-react';
 import { useCRM } from '@/context/CRMContext';
+import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { DealWhatsAppChat } from '@/features/whatsapp/DealWhatsAppChat';
 import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
@@ -104,6 +105,7 @@ const AvatarCircle: React.FC<{ name: string; src?: string; size?: string }> = ({
 
 export const ChatsPage: React.FC = () => {
   const { contacts, deals, boards, addContact, addDeal } = useCRM();
+  const { profile } = useAuth();
   const { addToast } = useToast();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -683,6 +685,16 @@ export const ChatsPage: React.FC = () => {
               <DealWhatsAppChat
                 key={selected.phone}
                 contact={{ id: selected.contactId || selected.phone, name: selected.name, phone: selected.phone }}
+                templateContext={{
+                  'contato.email': (selected.contactId && contacts.find(c => c.id === selected.contactId)?.email) || '',
+                  'lead.titulo': selectedDeal?.title || '',
+                  'lead.valor': selectedDeal
+                    ? Number(selectedDeal.value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                    : '',
+                  'lead.etapa': selectedDealStage?.label || '',
+                  'responsavel.nome': selectedDeal?.owner?.name || '',
+                  'escritorio.nome': profile?.organization_name || '',
+                }}
               />
             </div>
           </>

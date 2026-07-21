@@ -1663,7 +1663,17 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
               <div className={`flex-1 min-h-0 bg-slate-50/30 dark:bg-black/10 ${activeTab === 'whatsapp' ? 'overflow-hidden' : 'overflow-y-auto scrollbar-custom p-6'}`}>
                 {activeTab === 'whatsapp' && (
                   <div className="h-full">
-                    <DealWhatsAppChat contact={contact} />
+                    <DealWhatsAppChat
+                      contact={contact}
+                      templateContext={{
+                        'contato.email': contact?.email || '',
+                        'lead.titulo': deal.title,
+                        'lead.valor': Number(deal.value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+                        'lead.etapa': dealBoard?.stages.find(s => s.id === deal.status)?.label || '',
+                        'responsavel.nome': orgMembers.find(u => u.id === deal.ownerId)?.name || '',
+                        'escritorio.nome': profile?.organization_name || '',
+                      }}
+                    />
                   </div>
                 )}
                 {activeTab === 'timeline' && (

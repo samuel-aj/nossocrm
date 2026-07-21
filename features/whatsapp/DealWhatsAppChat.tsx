@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   Send,
   MessageCircle,
@@ -19,8 +20,10 @@ import {
   Search,
   ChevronUp,
   ChevronDown,
+  ClipboardList,
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
+import { fillTemplate } from '@/lib/messageTemplates';
 import { useWhatsAppChat, type WaChatMessage, type WaMediaKind } from './useWhatsAppChat';
 
 const TIME_FMT = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -352,8 +355,11 @@ interface Attachment {
 
 export function DealWhatsAppChat({
   contact,
+  templateContext,
 }: {
   contact: { id: string; name?: string | null; phone?: string | null } | null;
+  /** Valores extras pras variáveis dos modelos (lead.titulo, escritorio.nome...) */
+  templateContext?: Record<string, string>;
 }) {
   const phone = useMemo(() => normalizePhoneE164(contact?.phone || ''), [contact?.phone]);
   const { data, isLoading, error, send } = useWhatsAppChat(phone || null);
@@ -361,6 +367,29 @@ export function DealWhatsAppChat({
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  // Modelos de mensagem GERAIS (aba Modelos): prontos pra inserir no composer
+  // com as variáveis já preenchidas com os dados reais do lead/contato
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const templatesQ = useQuery<{ data: { id: string; name: string; type: string; body: string }[] }>({
+    queryKey: ['messageTemplates'],
+    queryFn: async () => {
+      const res = await fetch('/api/message-templates', { credentials: 'include' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    },
+    enabled: templatesOpen,
+    staleTime: 60000,
+  });
+  const generalTemplates = (templatesQ.data?.data ?? []).filter(t => t.type === 'general');
+  const applyTemplate = (body: string) => {
+    const filled = fillTemplate(body, {
+      'contato.nome': contact?.name || '',
+      'contato.telefone': contact?.phone || '',
+      ...templateContext,
+    });
+    setText(t => (t.trim() ? `${t}\n${filled}` : filled));
+    setTemplatesOpen(false);
+  };
   // escolha do menu de anexo: "documento" força enviar como documento
   // (mesmo sendo imagem/vídeo), igual ao WhatsApp
   const forcedKindRef = useRef<'document' | null>(null);
@@ -461,19 +490,21 @@ export function DealWhatsAppChat({
     setMatchIndex(-1);
   };
 
-  // fecha os popovers (emoji / menu do clipe) com clique fora ou Escape
+  // fecha os popovers (emoji / clipe / modelos) com clique fora ou Escape
   useEffect(() => {
-    if (!emojiOpen && !attachMenuOpen) return;
+    if (!emojiOpen && !attachMenuOpen && !templatesOpen) return;
     const onDown = (e: MouseEvent) => {
       if (composerRef.current && !composerRef.current.contains(e.target as Node)) {
         setEmojiOpen(false);
         setAttachMenuOpen(false);
+        setTemplatesOpen(false);
       }
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setEmojiOpen(false);
         setAttachMenuOpen(false);
+        setTemplatesOpen(false);
       }
     };
     document.addEventListener('mousedown', onDown);
@@ -482,7 +513,7 @@ export function DealWhatsAppChat({
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
     };
-  }, [emojiOpen, attachMenuOpen]);
+  }, [emojiOpen, attachMenuOpen, templatesOpen]);
 
   // limpeza ao desmontar: para gravação/timer e libera o preview
   useEffect(() => {
@@ -875,6 +906,39 @@ export function DealWhatsAppChat({
           </div>
         )}
 
+        {/* Popover de MODELOS (mensagens gerais da aba Modelos): clicou,
+            entra no campo com as variáveis preenchidas com os dados reais */}
+        {templatesOpen && (
+          <div className="absolute bottom-full left-3 right-3 mb-1 z-10 max-h-64 overflow-y-auto scrollbar-custom rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card p-1.5 shadow-lg">
+            <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Modelos de mensagem
+            </p>
+            {templatesQ.isLoading ? (
+              <p className="px-3 py-2 text-sm text-slate-400">Carregando...</p>
+            ) : generalTemplates.length === 0 ? (
+              <p className="px-3 py-2 text-sm text-slate-400">
+                Nenhum modelo geral ainda. Crie em Configurações, aba Modelos.
+              </p>
+            ) : (
+              generalTemplates.map(t => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => applyTemplate(t.body)}
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
+                >
+                  <span className="block text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">
+                    {t.name}
+                  </span>
+                  <span className="block text-xs text-slate-500 dark:text-slate-400 truncate">
+                    {t.body}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+
         {/* Popover de emojis */}
         {emojiOpen && (
           <div className="absolute bottom-full left-3 mb-1 z-10 grid grid-cols-8 gap-1 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card p-2 shadow-lg">
@@ -921,6 +985,7 @@ export function DealWhatsAppChat({
               onClick={() => {
                 setEmojiOpen(o => !o);
                 setAttachMenuOpen(false);
+                setTemplatesOpen(false);
               }}
               className={`shrink-0 h-10 w-10 inline-flex items-center justify-center rounded-xl transition-colors ${
                 emojiOpen
@@ -935,8 +1000,26 @@ export function DealWhatsAppChat({
             <button
               type="button"
               onClick={() => {
+                setTemplatesOpen(o => !o);
+                setEmojiOpen(false);
+                setAttachMenuOpen(false);
+              }}
+              className={`shrink-0 h-10 w-10 inline-flex items-center justify-center rounded-xl transition-colors ${
+                templatesOpen
+                  ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600'
+                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'
+              }`}
+              aria-label="Modelos de mensagem"
+              title="Modelos de mensagem"
+            >
+              <ClipboardList size={19} />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
                 setAttachMenuOpen(o => !o);
                 setEmojiOpen(false);
+                setTemplatesOpen(false);
               }}
               className={`shrink-0 h-10 w-10 inline-flex items-center justify-center rounded-xl transition-colors ${
                 attachMenuOpen

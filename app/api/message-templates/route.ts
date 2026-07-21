@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+import { getConnectionByOrg } from '@/lib/whatsapp/service';
+import { isBusinessConnection } from '@/lib/whatsapp';
+import { createMetaTemplate } from '@/lib/whatsapp/templates';
+import { toMetaBody, toMetaName } from '@/lib/messageTemplates';
 
 export const runtime = 'nodejs';
 
@@ -47,6 +51,8 @@ function mapRow(row: any) {
     category: (row.category ?? null) as 'UTILITY' | 'MARKETING' | null,
     language: (row.language ?? 'pt_BR') as string,
     body: row.body as string,
+    meta_name: (row.meta_name ?? null) as string | null,
+    meta_status: (row.meta_status ?? null) as string | null,
     created_at: row.created_at as string | null,
   };
 }
@@ -58,7 +64,7 @@ export async function GET() {
   const sb = createStaticAdminClient();
   const { data, error } = await sb
     .from('message_templates')
-    .select('id,name,type,category,language,body,created_at')
+    .select('id,name,type,category,language,body,meta_name,meta_status,created_at')
     .eq('organization_id', auth.profile.organization_id)
     .order('created_at', { ascending: true });
 
@@ -80,6 +86,35 @@ export async function POST(req: Request) {
   }
 
   const sb = createStaticAdminClient();
+
+  // Modelo do WhatsApp API: cria o template NA META (via Evolution) antes de
+  // salvar no CRM — o modelo nasce sincronizado, com status PENDING até a
+  // aprovação da Meta chegar (botão Sincronizar atualiza).
+  let metaName: string | null = null;
+  let metaStatus: string | null = null;
+  if (parsed.data.type === 'whatsapp_api') {
+    const conn = await getConnectionByOrg(sb, auth.profile.organization_id);
+    if (!conn || !isBusinessConnection(conn) || conn.status !== 'connected') {
+      return NextResponse.json(
+        { error: 'Conecte o WhatsApp API oficial (Configurações, aba Integrações) antes de criar modelos da API' },
+        { status: 400 }
+      );
+    }
+    metaName = toMetaName(parsed.data.name);
+    const meta = toMetaBody(parsed.data.body);
+    const created = await createMetaTemplate(conn, {
+      name: metaName,
+      category: parsed.data.category as 'UTILITY' | 'MARKETING',
+      language: parsed.data.language?.trim() || 'pt_BR',
+      bodyText: meta.text,
+      examples: meta.examples,
+    });
+    if (!created.ok) {
+      return NextResponse.json({ error: `A Meta recusou o template: ${created.error}` }, { status: 502 });
+    }
+    metaStatus = 'PENDING';
+  }
+
   const { data, error } = await sb
     .from('message_templates')
     .insert({
@@ -89,8 +124,11 @@ export async function POST(req: Request) {
       category: parsed.data.type === 'whatsapp_api' ? parsed.data.category : null,
       language: parsed.data.language?.trim() || 'pt_BR',
       body: parsed.data.body,
+      meta_name: metaName,
+      meta_status: metaStatus,
+      ...(metaName ? { synced_at: new Date().toISOString() } : {}),
     })
-    .select('id,name,type,category,language,body,created_at')
+    .select('id,name,type,category,language,body,meta_name,meta_status,created_at')
     .single();
 
   if (error) {
