@@ -188,8 +188,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const officeInitials = officeName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase() || 'AJ';
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
-  // Grupo WhatsApp do menu (Chats/Modelos/Conexão): aberto/fechado persiste
-  const [waGroupOpen, setWaGroupOpen] = usePersistedState<boolean>('nav_group_whatsapp', true);
+  // Grupo WhatsApp do menu (Chats/Modelos/Conexão): FECHADO por padrão;
+  // aberto/fechado persiste. Chave nova (_v2) pra descartar o valor gravado
+  // quando o padrão era aberto.
+  const [waGroupOpen, setWaGroupOpen] = usePersistedState<boolean>('nav_group_whatsapp_v2', false);
   const isAdminRole = profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN;
   // Hydration safety: `isDebugMode()` reads localStorage. On SSR it is always false.
   // Initialize deterministically and sync on mount to avoid hydration mismatch warnings.
@@ -355,11 +357,20 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                     aria-hidden="true"
                   />
                 </button>
-                {waGroupOpen && (
-                  <div className="mt-1 ml-4 pl-2 border-l border-slate-200 dark:border-white/10 space-y-1">
-                    {childItems}
+                {/* Animação fluida de abrir/fechar: grid-rows 0fr↔1fr anima a
+                    altura real do conteúdo, junto com um fade */}
+                <div
+                  className={`grid transition-[grid-template-rows,opacity] duration-300 ease-in-out ${
+                    waGroupOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+                  }`}
+                  inert={!waGroupOpen}
+                >
+                  <div className="overflow-hidden min-h-0">
+                    <div className="mt-1 ml-4 pl-2 border-l border-slate-200 dark:border-white/10 space-y-1">
+                      {childItems}
+                    </div>
                   </div>
-                )}
+                </div>
               </div>
             );
           })()}
