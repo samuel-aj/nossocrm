@@ -59,12 +59,12 @@ export interface SecondaryNavItem {
 /** Mirrors non-primary destinations available in the desktop sidebar/user menu. */
 export const SECONDARY_NAV: SecondaryNavItem[] = [
   { id: 'dashboard', label: 'Visão Geral', href: '/dashboard', icon: LayoutDashboard },
-  { id: 'chats', label: 'Chats', href: '/chats', icon: MessageCircle, badge: 'Novo' },
+  { id: 'chats', label: 'Chats', href: '/chats', icon: MessageCircle },
   { id: 'modelos', label: 'Modelos', href: '/modelos', icon: FileText, adminOnly: true },
   { id: 'conexao', label: 'Conexão WhatsApp', href: '/conexao-whatsapp', icon: QrCode, adminOnly: true },
   { id: 'reports', label: 'Relatórios', href: '/reports', icon: BarChart3 },
   { id: 'settings', label: 'Configurações', href: '/settings', icon: Settings },
-  { id: 'suggestions', label: 'Sugestões', href: '/suggestions', icon: Lightbulb, badge: 'Novo' },
-  { id: 'tutorial', label: 'Tutorial', href: '/tutorial', icon: GraduationCap, badge: 'Novo' },
+  { id: 'suggestions', label: 'Sugestões', href: '/suggestions', icon: Lightbulb },
+  { id: 'tutorial', label: 'Tutorial', href: '/tutorial', icon: GraduationCap },
   { id: 'profile', label: 'Perfil', href: '/profile', icon: User },
 ];

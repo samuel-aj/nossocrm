@@ -51,6 +51,7 @@ import {
   ChevronDown,
   FileText,
   QrCode,
+  HelpCircle,
 } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
 import { useAuth } from '../context/AuthContext';
@@ -164,6 +165,66 @@ const NavItem = ({
   );
 };
 
+/**
+ * Grupo recolhível do menu lateral (ex.: WhatsApp, Ajuda). No menu compacto
+ * os itens aparecem direto (só ícones), sem o cabeçalho do grupo. Abre e
+ * fecha com animação de altura (grid-rows 0fr↔1fr) + fade em 300ms.
+ */
+const NavGroup = ({
+  label,
+  icon: Icon,
+  open,
+  onToggle,
+  childActive,
+  collapsed,
+  children,
+}: {
+  label: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  open: boolean;
+  onToggle: () => void;
+  /** Alguma rota do grupo está ativa (tinge o cabeçalho quando fechado). */
+  childActive: boolean;
+  collapsed: boolean;
+  children: React.ReactNode;
+}) => {
+  if (collapsed) return <>{children}</>;
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className={`w-full flex items-center px-4 py-3 gap-3 rounded-lg text-sm font-medium transition-colors focus-visible-ring ${
+          childActive && !open
+            ? 'text-primary-600 dark:text-primary-400'
+            : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white'
+        }`}
+      >
+        <Icon size={20} className={`shrink-0 ${childActive ? 'text-primary-500' : ''}`} aria-hidden="true" />
+        <span className="font-display tracking-wide flex-1 text-left">{label}</span>
+        <ChevronDown
+          size={15}
+          className={`shrink-0 transition-transform duration-300 ${open ? 'rotate-180' : ''}`}
+          aria-hidden="true"
+        />
+      </button>
+      <div
+        className={`grid transition-[grid-template-rows,opacity] duration-300 ease-in-out ${
+          open ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+        }`}
+        inert={!open}
+      >
+        <div className="overflow-hidden min-h-0">
+          <div className="mt-1 ml-4 pl-2 border-l border-slate-200 dark:border-white/10 space-y-1">
+            {children}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 
 /**
  * Layout principal da aplicação
@@ -192,6 +253,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   // aberto/fechado persiste. Chave nova (_v2) pra descartar o valor gravado
   // quando o padrão era aberto.
   const [waGroupOpen, setWaGroupOpen] = usePersistedState<boolean>('nav_group_whatsapp_v2', false);
+  // Grupo Ajuda do menu (Sugestões/Tutorial): também fechado por padrão
+  const [helpGroupOpen, setHelpGroupOpen] = usePersistedState<boolean>('nav_group_ajuda', false);
   const isAdminRole = profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN;
   // Hydration safety: `isDebugMode()` reads localStorage. On SSR it is always false.
   // Initialize deterministically and sync on mount to avoid hydration mismatch warnings.
@@ -308,70 +371,39 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             collapsed={sidebarCollapsed}
           />
 
-          {/* GRUPO WhatsApp (recolhível): Chats + Modelos + Conexão. No menu
-              compacto, os itens do grupo aparecem direto (só ícones). */}
+          {/* GRUPO WhatsApp (recolhível): Chats + Modelos + Conexão */}
           {(() => {
             const waChildren = [
-              { to: '/chats', icon: MessageCircle, label: 'Chats', prefetch: 'chats' as RouteName, badge: 'Novo' as string | undefined },
+              { to: '/chats', icon: MessageCircle, label: 'Chats', prefetch: 'chats' as RouteName },
               ...(isAdminRole
                 ? [
-                    { to: '/modelos', icon: FileText, label: 'Modelos', prefetch: 'modelos' as RouteName, badge: undefined },
-                    { to: '/conexao-whatsapp', icon: QrCode, label: 'Conexão', prefetch: 'conexao' as RouteName, badge: undefined },
+                    { to: '/modelos', icon: FileText, label: 'Modelos', prefetch: 'modelos' as RouteName },
+                    { to: '/conexao-whatsapp', icon: QrCode, label: 'Conexão', prefetch: 'conexao' as RouteName },
                   ]
                 : []),
             ];
-            const childActive = waChildren.some(c => pathname === c.to);
-            const childItems = waChildren.map(c => (
-              <NavItem
-                key={c.to}
-                to={c.to}
-                icon={c.icon}
-                label={c.label}
-                prefetch={c.prefetch}
-                clickedPath={clickedPath}
-                onItemClick={setClickedPath}
-                badge={c.badge}
-                collapsed={sidebarCollapsed}
-              />
-            ));
-
-            if (sidebarCollapsed) return <>{childItems}</>;
-
             return (
-              <div>
-                <button
-                  type="button"
-                  onClick={() => setWaGroupOpen(!waGroupOpen)}
-                  aria-expanded={waGroupOpen}
-                  className={`w-full flex items-center px-4 py-3 gap-3 rounded-lg text-sm font-medium transition-colors focus-visible-ring ${
-                    childActive && !waGroupOpen
-                      ? 'text-primary-600 dark:text-primary-400'
-                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  <MessageCircle size={20} className={`shrink-0 ${childActive ? 'text-primary-500' : ''}`} aria-hidden="true" />
-                  <span className="font-display tracking-wide flex-1 text-left">WhatsApp</span>
-                  <ChevronDown
-                    size={15}
-                    className={`shrink-0 transition-transform duration-300 ${waGroupOpen ? 'rotate-180' : ''}`}
-                    aria-hidden="true"
+              <NavGroup
+                label="WhatsApp"
+                icon={MessageCircle}
+                open={waGroupOpen}
+                onToggle={() => setWaGroupOpen(!waGroupOpen)}
+                childActive={waChildren.some(c => pathname === c.to)}
+                collapsed={sidebarCollapsed}
+              >
+                {waChildren.map(c => (
+                  <NavItem
+                    key={c.to}
+                    to={c.to}
+                    icon={c.icon}
+                    label={c.label}
+                    prefetch={c.prefetch}
+                    clickedPath={clickedPath}
+                    onItemClick={setClickedPath}
+                    collapsed={sidebarCollapsed}
                   />
-                </button>
-                {/* Animação fluida de abrir/fechar: grid-rows 0fr↔1fr anima a
-                    altura real do conteúdo, junto com um fade */}
-                <div
-                  className={`grid transition-[grid-template-rows,opacity] duration-300 ease-in-out ${
-                    waGroupOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
-                  }`}
-                  inert={!waGroupOpen}
-                >
-                  <div className="overflow-hidden min-h-0">
-                    <div className="mt-1 ml-4 pl-2 border-l border-slate-200 dark:border-white/10 space-y-1">
-                      {childItems}
-                    </div>
-                  </div>
-                </div>
-              </div>
+                ))}
+              </NavGroup>
             );
           })()}
 
@@ -382,8 +414,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             { to: '/activities', icon: CheckSquare, label: 'Atividades', prefetch: 'activities' as const },
             { to: '/reports', icon: BarChart3, label: 'Relatórios', prefetch: 'reports' as const },
             { to: '/settings', icon: Settings, label: 'Configurações', prefetch: 'settings' as const },
-            { to: '/suggestions', icon: Lightbulb, label: 'Sugestões', prefetch: 'suggestions' as const },
-            { to: '/tutorial', icon: GraduationCap, label: 'Tutorial', prefetch: 'tutorial' as const },
           ].map((item) => (
             <NavItem
               key={item.to}
@@ -393,10 +423,40 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               prefetch={item.prefetch}
               clickedPath={clickedPath}
               onItemClick={setClickedPath}
-              badge={(item.to === '/suggestions' || item.to === '/tutorial') ? 'Novo' : undefined}
               collapsed={sidebarCollapsed}
             />
           ))}
+
+          {/* GRUPO Ajuda (recolhível): Sugestões + Tutorial */}
+          {(() => {
+            const helpChildren = [
+              { to: '/suggestions', icon: Lightbulb, label: 'Sugestões', prefetch: 'suggestions' as RouteName },
+              { to: '/tutorial', icon: GraduationCap, label: 'Tutorial', prefetch: 'tutorial' as RouteName },
+            ];
+            return (
+              <NavGroup
+                label="Ajuda"
+                icon={HelpCircle}
+                open={helpGroupOpen}
+                onToggle={() => setHelpGroupOpen(!helpGroupOpen)}
+                childActive={helpChildren.some(c => pathname === c.to)}
+                collapsed={sidebarCollapsed}
+              >
+                {helpChildren.map(c => (
+                  <NavItem
+                    key={c.to}
+                    to={c.to}
+                    icon={c.icon}
+                    label={c.label}
+                    prefetch={c.prefetch}
+                    clickedPath={clickedPath}
+                    onItemClick={setClickedPath}
+                    collapsed={sidebarCollapsed}
+                  />
+                ))}
+              </NavGroup>
+            );
+          })()}
         </nav>
 
         {/* Alternar menu: item no FLUXO, embaixo (acima do cartão do usuário) —
