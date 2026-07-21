@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, FileText, KeyRound, MessageCircle, Pencil, Plus, RefreshCw, Trash2, Variable, X } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Check, FileText, KeyRound, MessageCircle, Pencil, Plus, RefreshCw, Trash2, Variable, X } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 import { TEMPLATE_VARIABLES, previewTemplate, toMetaName } from '@/lib/messageTemplates';
 
@@ -73,6 +74,23 @@ export function MessageTemplatesManager() {
     queryKey: ['messageTemplates'],
     queryFn: () => fetchJson('/api/message-templates'),
   });
+
+  // Conexão do WhatsApp da org: os modelos da API só funcionam com a conexão
+  // no modo API oficial (Meta). Conexão por QR code não cria template na Meta.
+  const connQ = useQuery<{
+    connected: boolean;
+    connection: { provider: string | null; status: string; phoneNumber: string | null; profileName: string | null } | null;
+  }>({
+    queryKey: ['waConnection'],
+    queryFn: () => fetchJson('/api/whatsapp/connection'),
+    refetchInterval: 30000,
+    refetchOnWindowFocus: true,
+  });
+  const connReady = !!connQ.data;
+  const apiConnected = !!connQ.data?.connected && connQ.data?.connection?.provider === 'evolution_business';
+  const qrConnected = !!connQ.data?.connected && !apiConnected;
+  // Trava o formulário da aba API enquanto o escritório não conectar a API oficial
+  const apiLocked = tab === 'whatsapp_api' && connReady && !apiConnected;
   const templates = useMemo(() => listQ.data?.data ?? [], [listQ.data]);
   const generalTemplates = templates.filter(t => t.type === 'general');
   const apiTemplates = templates.filter(t => t.type === 'whatsapp_api');
@@ -299,18 +317,67 @@ export function MessageTemplatesManager() {
               }`}
             >
               <t.icon size={14} /> {t.label}
+              {/* Aviso na própria aba: API oficial ainda não conectada */}
+              {t.id === 'whatsapp_api' && connReady && !apiConnected && (
+                <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" aria-hidden="true" />
+              )}
             </button>
           );
         })}
       </div>
 
-      {/* Formulário de criação/edição */}
+      {/* Status da conexão API oficial: deixa claro que os modelos desta aba
+          dependem do WhatsApp API da Meta conectado */}
+      {tab === 'whatsapp_api' && connReady && (
+        apiConnected ? (
+          <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-xl border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-900/15 text-emerald-700 dark:text-emerald-300 text-xs font-semibold">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+            WhatsApp API oficial conectado
+            {connQ.data?.connection?.phoneNumber && (
+              <span className="font-normal text-emerald-600/80 dark:text-emerald-400/80 truncate">
+                · {connQ.data.connection.phoneNumber}
+              </span>
+            )}
+          </div>
+        ) : (
+          <div className="mb-4 p-4 rounded-xl border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-900/15">
+            <div className="flex items-start gap-3">
+              <span className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                <AlertTriangle size={18} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-amber-800 dark:text-amber-300 mb-1">
+                  Conecte o WhatsApp API oficial pra usar estes modelos
+                </p>
+                <p className="text-xs text-amber-700/90 dark:text-amber-400/90">
+                  Os modelos desta aba são criados direto na Meta. Por isso, o WhatsApp do
+                  escritório precisa estar conectado no modo{' '}
+                  <span className="font-semibold">API oficial (Meta)</span>.
+                  {qrConnected &&
+                    ' Seu WhatsApp está conectado por QR code, que não usa a API oficial.'}{' '}
+                  Enquanto isso, criar e sincronizar modelos fica bloqueado. As mensagens gerais
+                  seguem funcionando normalmente.
+                </p>
+                <Link
+                  href="/conexao-whatsapp"
+                  className="mt-3 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-white text-xs font-bold transition-colors"
+                >
+                  Conectar WhatsApp API <ArrowRight size={13} />
+                </Link>
+              </div>
+            </div>
+          </div>
+        )
+      )}
+
+      {/* Formulário de criação/edição (trava enquanto a API oficial não conectar) */}
       <div
+        inert={apiLocked}
         className={`p-4 rounded-xl border transition-all mb-6 ${
           editingId
             ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-500/20'
             : 'bg-slate-50 dark:bg-black/20 border-slate-200 dark:border-white/5'
-        }`}
+        } ${apiLocked ? 'opacity-50 select-none' : ''}`}
       >
         {editingId && (
           <div className="flex items-center gap-2 mb-3 text-amber-600 dark:text-amber-400 text-xs font-bold uppercase tracking-wider">
@@ -447,7 +514,7 @@ export function MessageTemplatesManager() {
           <button
             type="button"
             onClick={() => saveMut.mutate()}
-            disabled={!canSave || saveMut.isPending}
+            disabled={!canSave || saveMut.isPending || apiLocked}
             className={`${
               editingId ? 'bg-amber-600 hover:bg-amber-500' : 'bg-primary-600 hover:bg-primary-500'
             } text-white px-4 py-2 rounded-lg text-sm font-bold inline-flex items-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
@@ -491,8 +558,12 @@ export function MessageTemplatesManager() {
             <button
               type="button"
               onClick={() => syncMut.mutate()}
-              disabled={syncMut.isPending}
-              title="Atualiza o status de aprovação e importa templates que já existem na Meta"
+              disabled={syncMut.isPending || apiLocked}
+              title={
+                apiLocked
+                  ? 'Conecte o WhatsApp API oficial na aba Conexão pra sincronizar'
+                  : 'Atualiza o status de aprovação e importa templates que já existem na Meta'
+              }
               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-500/30 hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-colors disabled:opacity-50"
             >
               <RefreshCw size={12} className={syncMut.isPending ? 'animate-spin' : ''} />
@@ -503,8 +574,9 @@ export function MessageTemplatesManager() {
             apiTemplates.map(renderTemplateCard)
           ) : (
             <p className="text-sm text-slate-400 italic px-1">
-              Nenhum modelo da API ainda. Sincronize pra importar os templates que já existem na
-              Meta, ou crie um novo acima.
+              {apiLocked
+                ? 'Nenhum modelo da API ainda. Conecte o WhatsApp API oficial pra criar e sincronizar modelos.'
+                : 'Nenhum modelo da API ainda. Sincronize pra importar os templates que já existem na Meta, ou crie um novo acima.'}
             </p>
           )}
         </div>
