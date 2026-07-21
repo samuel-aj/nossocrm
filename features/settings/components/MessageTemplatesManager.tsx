@@ -62,7 +62,8 @@ export function MessageTemplatesManager() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
-  const [type, setType] = useState<TemplateType>('general');
+  // Aba interna ativa: o TIPO do modelo é a própria aba (Gerais | WhatsApp API)
+  const [tab, setTab] = useState<TemplateType>('general');
   const [category, setCategory] = useState<TemplateCategory>('UTILITY');
   const [language, setLanguage] = useState('pt_BR');
   const [body, setBody] = useState('');
@@ -79,18 +80,24 @@ export function MessageTemplatesManager() {
   const resetForm = () => {
     setEditingId(null);
     setName('');
-    setType('general');
     setCategory('UTILITY');
     setLanguage('pt_BR');
     setBody('');
+  };
+
+  const switchTab = (next: TemplateType) => {
+    if (next === tab) return;
+    setTab(next);
+    resetForm();
+    setConfirmDeleteId(null);
   };
 
   const saveMut = useMutation({
     mutationFn: () => {
       const payload = {
         name: name.trim(),
-        type,
-        category: type === 'whatsapp_api' ? category : null,
+        type: tab,
+        category: tab === 'whatsapp_api' ? category : null,
         language,
         body,
       };
@@ -149,7 +156,7 @@ export function MessageTemplatesManager() {
   const startEditing = (t: MessageTemplate) => {
     setEditingId(t.id);
     setName(t.name);
-    setType(t.type);
+    setTab(t.type);
     setCategory(t.category ?? 'UTILITY');
     setLanguage(t.language || 'pt_BR');
     setBody(t.body);
@@ -273,6 +280,30 @@ export function MessageTemplatesManager() {
         aqui cria lá, e o status de aprovação aparece na lista.
       </p>
 
+      {/* Abas internas: cada tipo tem seu formulário e sua lista */}
+      <div className="flex items-center gap-2 mb-4">
+        {([
+          { id: 'general' as const, label: 'Mensagens gerais', icon: MessageCircle },
+          { id: 'whatsapp_api' as const, label: 'WhatsApp API', icon: KeyRound },
+        ]).map(t => {
+          const active = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => switchTab(t.id)}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border transition-colors ${
+                active
+                  ? 'border-primary-500/50 bg-primary-500/10 text-primary-700 dark:text-primary-300'
+                  : 'border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'
+              }`}
+            >
+              <t.icon size={14} /> {t.label}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Formulário de criação/edição */}
       <div
         className={`p-4 rounded-xl border transition-all mb-6 ${
@@ -287,50 +318,19 @@ export function MessageTemplatesManager() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nome do modelo</label>
-            <input
-              type="text"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              placeholder="Ex: Boas-vindas, Lembrete de audiência"
-              className="w-full bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tipo</label>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setType('general')}
-                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border transition-colors ${
-                  type === 'general'
-                    ? 'border-emerald-500/60 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'
-                    : 'border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10'
-                }`}
-              >
-                <MessageCircle size={13} /> Mensagem geral
-              </button>
-              <button
-                type="button"
-                onClick={() => setType('whatsapp_api')}
-                disabled={!!editingId}
-                title={editingId ? 'Modelos da API não são editáveis; crie um novo' : undefined}
-                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                  type === 'whatsapp_api'
-                    ? 'border-sky-500/60 bg-sky-50 dark:bg-sky-900/20 text-sky-700 dark:text-sky-300'
-                    : 'border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10'
-                }`}
-              >
-                <KeyRound size={13} /> WhatsApp API
-              </button>
-            </div>
-          </div>
+        <div className="mb-3">
+          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nome do modelo</label>
+          <input
+            type="text"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="Ex: Boas-vindas, Lembrete de audiência"
+            className="w-full bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+          />
         </div>
 
         {/* Opções exclusivas do WhatsApp API: categoria da Meta + idioma */}
-        {type === 'whatsapp_api' && (
+        {tab === 'whatsapp_api' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3 animate-in slide-in-from-top-2 fade-in duration-200">
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Categoria (Meta)</label>
@@ -420,7 +420,7 @@ export function MessageTemplatesManager() {
           </div>
         )}
 
-        {type === 'whatsapp_api' && (
+        {tab === 'whatsapp_api' && (
           <div className="text-[11px] text-slate-500 dark:text-slate-400 mb-3 space-y-1">
             <p>
               🔄 Criar este modelo <span className="font-semibold">cria o template direto na Meta</span> e
@@ -458,57 +458,55 @@ export function MessageTemplatesManager() {
         </div>
       </div>
 
-      {/* Listas por tipo (as duas seções sempre visíveis) */}
+      {/* Lista da aba ativa */}
       {listQ.isLoading ? (
         <p className="text-sm text-slate-400 text-center py-6">Carregando modelos...</p>
+      ) : tab === 'general' ? (
+        <div className="space-y-2">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300 flex items-center gap-1.5">
+            <MessageCircle size={12} className="text-emerald-500" />
+            Mensagens gerais
+            <span className="font-normal text-slate-400 normal-case">
+              · {generalTemplates.length} modelo{generalTemplates.length === 1 ? '' : 's'}
+            </span>
+          </p>
+          {generalTemplates.length > 0 ? (
+            generalTemplates.map(renderTemplateCard)
+          ) : (
+            <p className="text-sm text-slate-400 italic px-1">
+              Nenhum modelo geral ainda. Eles ficam disponíveis pra enviar direto no chat.
+            </p>
+          )}
+        </div>
       ) : (
-        <div className="space-y-5">
-          <div className="space-y-2">
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
             <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300 flex items-center gap-1.5">
-              <MessageCircle size={12} className="text-emerald-500" />
-              Mensagens gerais
+              <KeyRound size={12} className="text-sky-500" />
+              WhatsApp API (Meta)
               <span className="font-normal text-slate-400 normal-case">
-                · {generalTemplates.length} modelo{generalTemplates.length === 1 ? '' : 's'}
+                · {apiTemplates.length} modelo{apiTemplates.length === 1 ? '' : 's'}
               </span>
             </p>
-            {generalTemplates.length > 0 ? (
-              generalTemplates.map(renderTemplateCard)
-            ) : (
-              <p className="text-sm text-slate-400 italic px-1">
-                Nenhum modelo geral ainda. Eles ficam disponíveis pra enviar direto no chat.
-              </p>
-            )}
+            <button
+              type="button"
+              onClick={() => syncMut.mutate()}
+              disabled={syncMut.isPending}
+              title="Atualiza o status de aprovação e importa templates que já existem na Meta"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-500/30 hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={12} className={syncMut.isPending ? 'animate-spin' : ''} />
+              {syncMut.isPending ? 'Sincronizando...' : 'Sincronizar com a Meta'}
+            </button>
           </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300 flex items-center gap-1.5">
-                <KeyRound size={12} className="text-sky-500" />
-                WhatsApp API (Meta)
-                <span className="font-normal text-slate-400 normal-case">
-                  · {apiTemplates.length} modelo{apiTemplates.length === 1 ? '' : 's'}
-                </span>
-              </p>
-              <button
-                type="button"
-                onClick={() => syncMut.mutate()}
-                disabled={syncMut.isPending}
-                title="Atualiza o status de aprovação e importa templates que já existem na Meta"
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-500/30 hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-colors disabled:opacity-50"
-              >
-                <RefreshCw size={12} className={syncMut.isPending ? 'animate-spin' : ''} />
-                {syncMut.isPending ? 'Sincronizando...' : 'Sincronizar com a Meta'}
-              </button>
-            </div>
-            {apiTemplates.length > 0 ? (
-              apiTemplates.map(renderTemplateCard)
-            ) : (
-              <p className="text-sm text-slate-400 italic px-1">
-                Nenhum modelo da API ainda. Sincronize pra importar os templates que já existem na
-                Meta, ou crie um novo acima.
-              </p>
-            )}
-          </div>
+          {apiTemplates.length > 0 ? (
+            apiTemplates.map(renderTemplateCard)
+          ) : (
+            <p className="text-sm text-slate-400 italic px-1">
+              Nenhum modelo da API ainda. Sincronize pra importar os templates que já existem na
+              Meta, ou crie um novo acima.
+            </p>
+          )}
         </div>
       )}
     </div>
