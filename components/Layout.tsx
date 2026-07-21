@@ -24,7 +24,7 @@
  * ```
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
@@ -167,8 +167,9 @@ const NavItem = ({
 
 /**
  * Grupo recolhível do menu lateral (ex.: WhatsApp, Ajuda). No menu compacto
- * os itens aparecem direto (só ícones), sem o cabeçalho do grupo. Abre e
- * fecha com animação de altura (grid-rows 0fr↔1fr) + fade em 300ms.
+ * só o ícone do TÍTULO do grupo aparece; clicar nele abre um menu flutuante
+ * ao lado com os itens. No menu expandido, abre e fecha com animação de
+ * altura (grid-rows 0fr↔1fr) + fade em 300ms.
  */
 const NavGroup = ({
   label,
@@ -188,7 +189,77 @@ const NavGroup = ({
   collapsed: boolean;
   children: React.ReactNode;
 }) => {
-  if (collapsed) return <>{children}</>;
+  // Menu flutuante do modo compacto: ancorado na posição real do botão
+  // (position fixed, escapa o overflow da nav)
+  const [flyoutOpen, setFlyoutOpen] = useState(false);
+  const [flyoutPos, setFlyoutPos] = useState<{ x: number; y: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+
+  // Fecha o flyout ao clicar fora, rolar ou apertar Esc
+  useEffect(() => {
+    if (!flyoutOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!(e.target as Element | null)?.closest?.('[data-nav-group-flyout]')) setFlyoutOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFlyoutOpen(false);
+    };
+    const onScroll = () => setFlyoutOpen(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('scroll', onScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('scroll', onScroll, true);
+    };
+  }, [flyoutOpen]);
+
+  // Expandiu o menu: o flyout do modo compacto não faz mais sentido
+  useEffect(() => {
+    if (!collapsed) setFlyoutOpen(false);
+  }, [collapsed]);
+
+  if (collapsed) {
+    return (
+      <div data-nav-group-flyout>
+        <button
+          ref={btnRef}
+          type="button"
+          title={label}
+          aria-haspopup="menu"
+          aria-expanded={flyoutOpen}
+          onClick={() => {
+            const rect = btnRef.current?.getBoundingClientRect();
+            if (rect) setFlyoutPos({ x: rect.right + 10, y: rect.top });
+            setFlyoutOpen(o => !o);
+          }}
+          className={`w-full flex items-center px-[13px] py-3 rounded-lg text-sm font-medium transition-colors focus-visible-ring ${
+            childActive
+              ? 'bg-primary-500/10 text-primary-600 dark:text-primary-400 border border-primary-200 dark:border-primary-900/50'
+              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white'
+          }`}
+        >
+          <Icon size={20} className={`shrink-0 ${childActive ? 'text-primary-500' : ''}`} aria-hidden="true" />
+        </button>
+        {flyoutOpen && flyoutPos && (
+          <div
+            data-nav-group-flyout
+            role="menu"
+            className="fixed z-50 min-w-[12rem] rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card p-2 space-y-1"
+            style={{ left: flyoutPos.x, top: flyoutPos.y }}
+            onClick={() => setFlyoutOpen(false)}
+          >
+            <p className="px-2 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+              {label}
+            </p>
+            {children}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div>
       <button
@@ -249,12 +320,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const officeInitials = officeName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase() || 'AJ';
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
-  // Grupo WhatsApp do menu (Chats/Modelos/Conexão): FECHADO por padrão;
-  // aberto/fechado persiste. Chave nova (_v2) pra descartar o valor gravado
-  // quando o padrão era aberto.
-  const [waGroupOpen, setWaGroupOpen] = usePersistedState<boolean>('nav_group_whatsapp_v2', false);
-  // Grupo Ajuda do menu (Sugestões/Tutorial): também fechado por padrão
-  const [helpGroupOpen, setHelpGroupOpen] = usePersistedState<boolean>('nav_group_ajuda', false);
+  // Grupos recolhíveis do menu (WhatsApp e Ajuda): sanfona com no máximo UM
+  // aberto por vez, fechados por padrão; a escolha persiste.
+  const [openNavGroup, setOpenNavGroup] = usePersistedState<'whatsapp' | 'ajuda' | null>('nav_open_group', null);
+  const toggleNavGroup = (g: 'whatsapp' | 'ajuda') => setOpenNavGroup(cur => (cur === g ? null : g));
   const isAdminRole = profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN;
   // Hydration safety: `isDebugMode()` reads localStorage. On SSR it is always false.
   // Initialize deterministically and sync on mount to avoid hydration mismatch warnings.
@@ -386,8 +455,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               <NavGroup
                 label="WhatsApp"
                 icon={MessageCircle}
-                open={waGroupOpen}
-                onToggle={() => setWaGroupOpen(!waGroupOpen)}
+                open={openNavGroup === 'whatsapp'}
+                onToggle={() => toggleNavGroup('whatsapp')}
                 childActive={waChildren.some(c => pathname === c.to)}
                 collapsed={sidebarCollapsed}
               >
@@ -400,7 +469,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                     prefetch={c.prefetch}
                     clickedPath={clickedPath}
                     onItemClick={setClickedPath}
-                    collapsed={sidebarCollapsed}
                   />
                 ))}
               </NavGroup>
@@ -437,8 +505,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               <NavGroup
                 label="Ajuda"
                 icon={HelpCircle}
-                open={helpGroupOpen}
-                onToggle={() => setHelpGroupOpen(!helpGroupOpen)}
+                open={openNavGroup === 'ajuda'}
+                onToggle={() => toggleNavGroup('ajuda')}
                 childActive={helpChildren.some(c => pathname === c.to)}
                 collapsed={sidebarCollapsed}
               >
@@ -451,7 +519,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                     prefetch={c.prefetch}
                     clickedPath={clickedPath}
                     onItemClick={setClickedPath}
-                    collapsed={sidebarCollapsed}
                   />
                 ))}
               </NavGroup>
