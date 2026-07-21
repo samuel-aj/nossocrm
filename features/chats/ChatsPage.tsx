@@ -442,7 +442,7 @@ export const ChatsPage: React.FC = () => {
                     ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400'
                     : 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400'
                 }`}
-                title={connected ? 'WhatsApp conectado' : 'WhatsApp desconectado — conecte em Configurações → Integrações'}
+                title={connected ? 'WhatsApp conectado' : 'WhatsApp desconectado. Conecte na aba Conexão, no menu WhatsApp'}
               >
                 <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                 {connected ? 'Conectado' : 'Desconectado'}
@@ -707,14 +707,14 @@ export const ChatsPage: React.FC = () => {
             <h2 className="text-lg font-display font-bold text-slate-700 dark:text-slate-200">Suas conversas de WhatsApp</h2>
             <p className="text-sm text-slate-500 dark:text-slate-400 max-w-sm">
               Escolha um contato ao lado pra conversar. Quem já trocou mensagem fica no topo,
-              com a prévia da última conversa — tudo aparece aqui e no card do lead.
+              com a prévia da última conversa. Tudo aparece aqui e no card do lead.
             </p>
             {!connected && (
               <Link
-                href="/settings/integracoes#whatsapp"
+                href="/conexao-whatsapp"
                 className="mt-1 text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline"
               >
-                WhatsApp desconectado — conectar em Configurações → Integrações
+                WhatsApp desconectado. Conectar na aba Conexão
               </Link>
             )}
           </div>

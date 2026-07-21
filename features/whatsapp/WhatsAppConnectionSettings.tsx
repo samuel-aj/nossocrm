@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Configurações → Integrações → WhatsApp.
+ * Página Conexão (grupo WhatsApp do menu lateral).
  *
  * Conecta o WhatsApp DESTA organização (1 número por org): o admin clica em
  * "Conectar", o servidor cria a instância da org na Evolution e a tela mostra

@@ -5,7 +5,6 @@ import { TagsManager } from './components/TagsManager';
 import { InactiveLeadsSettings } from './components/InactiveLeadsSettings';
 import { CustomFieldsManager } from './components/CustomFieldsManager';
 import { ApiKeysSection } from './components/ApiKeysSection';
-import { WhatsAppConnectionSettings } from '@/features/whatsapp/WhatsAppConnectionSettings';
 import { WebhooksSection } from './components/WebhooksSection';
 import { McpSection } from './components/McpSection';
 import { DataStorageSettings } from './components/DataStorageSettings';
@@ -14,11 +13,10 @@ import { UserRole } from '@/types/constants';
 import { AICenterSettings } from './AICenterSettings';
 
 import { UsersPage } from './UsersPage';
-import { MessageTemplatesManager } from './components/MessageTemplatesManager';
 import { useAuth } from '@/context/AuthContext';
-import { Settings as SettingsIcon, Users, Database, Sparkles, Plug, Package, FileText } from 'lucide-react';
+import { Settings as SettingsIcon, Users, Database, Sparkles, Plug, Package } from 'lucide-react';
 
-type SettingsTab = 'general' | 'products' | 'templates' | 'integrations' | 'ai' | 'data' | 'users';
+type SettingsTab = 'general' | 'products' | 'integrations' | 'ai' | 'data' | 'users';
 
 interface GeneralSettingsProps {
   hash?: string;
@@ -131,13 +129,15 @@ const ProductsSettings: React.FC = () => {
 };
 
 const IntegrationsSettings: React.FC = () => {
-  type IntegrationsSubTab = 'whatsapp' | 'api' | 'webhooks' | 'mcp';
-  const [subTab, setSubTab] = useState<IntegrationsSubTab>('whatsapp');
+  // A conexão do WhatsApp saiu daqui: agora é a página Conexão, no grupo
+  // WhatsApp do menu lateral (junto de Chats e Modelos).
+  type IntegrationsSubTab = 'api' | 'webhooks' | 'mcp';
+  const [subTab, setSubTab] = useState<IntegrationsSubTab>('api');
 
   useEffect(() => {
     const syncFromHash = () => {
     const h = typeof window !== 'undefined' ? (window.location.hash || '').replace('#', '') : '';
-    if (h === 'whatsapp' || h === 'webhooks' || h === 'api' || h === 'mcp') setSubTab(h as IntegrationsSubTab);
+    if (h === 'webhooks' || h === 'api' || h === 'mcp') setSubTab(h as IntegrationsSubTab);
     };
 
     syncFromHash();
@@ -161,9 +161,8 @@ const IntegrationsSettings: React.FC = () => {
     <div className="pb-10">
       <div className="flex items-center gap-2 mb-6">
         {([
-          { id: 'whatsapp' as const, label: 'WhatsApp' },
-          { id: 'webhooks' as const, label: 'Webhooks' },
           { id: 'api' as const, label: 'API' },
+          { id: 'webhooks' as const, label: 'Webhooks' },
           { id: 'mcp' as const, label: 'MCP' },
         ] as const).map((t) => {
           const active = subTab === t.id;
@@ -184,7 +183,6 @@ const IntegrationsSettings: React.FC = () => {
         })}
       </div>
 
-      {subTab === 'whatsapp' && <WhatsAppConnectionSettings />}
       {subTab === 'api' && <ApiKeysSection />}
       {subTab === 'webhooks' && <WebhooksSection />}
       {subTab === 'mcp' && <McpSection />}
@@ -231,7 +229,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
   const tabs = [
     { id: 'general' as SettingsTab, name: 'Geral', icon: SettingsIcon },
     ...(isAdminOrSuper ? [{ id: 'products' as SettingsTab, name: 'Produtos/Serviços', icon: Package }] : []),
-    ...(isAdminOrSuper ? [{ id: 'templates' as SettingsTab, name: 'Modelos', icon: FileText }] : []),
     ...(isAdminOrSuper ? [{ id: 'integrations' as SettingsTab, name: 'Integrações', icon: Plug }] : []),
     { id: 'ai' as SettingsTab, name: 'Central de I.A', icon: Sparkles },
     { id: 'data' as SettingsTab, name: 'Dados', icon: Database },
@@ -242,12 +239,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
     switch (activeTab) {
       case 'products':
         return <ProductsSettings />;
-      case 'templates':
-        return (
-          <div className="pb-10">
-            <MessageTemplatesManager />
-          </div>
-        );
       case 'integrations':
         return <IntegrationsSettings />;
       case 'ai':

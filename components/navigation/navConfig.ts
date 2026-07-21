@@ -12,6 +12,8 @@ import {
   User,
   GraduationCap,
   MessageCircle,
+  FileText,
+  QrCode,
 } from 'lucide-react';
 
 export type PrimaryNavId = 'inbox' | 'boards' | 'contacts' | 'activities' | 'more';
@@ -32,7 +34,16 @@ export const PRIMARY_NAV: PrimaryNavItem[] = [
   { id: 'more', label: 'Mais', icon: MoreHorizontal },
 ];
 
-export type SecondaryNavId = 'dashboard' | 'chats' | 'reports' | 'suggestions' | 'tutorial' | 'settings' | 'profile';
+export type SecondaryNavId =
+  | 'dashboard'
+  | 'chats'
+  | 'modelos'
+  | 'conexao'
+  | 'reports'
+  | 'suggestions'
+  | 'tutorial'
+  | 'settings'
+  | 'profile';
 
 export interface SecondaryNavItem {
   id: SecondaryNavId;
@@ -49,6 +60,8 @@ export interface SecondaryNavItem {
 export const SECONDARY_NAV: SecondaryNavItem[] = [
   { id: 'dashboard', label: 'Visão Geral', href: '/dashboard', icon: LayoutDashboard },
   { id: 'chats', label: 'Chats', href: '/chats', icon: MessageCircle, badge: 'Novo' },
+  { id: 'modelos', label: 'Modelos', href: '/modelos', icon: FileText, adminOnly: true },
+  { id: 'conexao', label: 'Conexão WhatsApp', href: '/conexao-whatsapp', icon: QrCode, adminOnly: true },
   { id: 'reports', label: 'Relatórios', href: '/reports', icon: BarChart3 },
   { id: 'settings', label: 'Configurações', href: '/settings', icon: Settings },
   { id: 'suggestions', label: 'Sugestões', href: '/suggestions', icon: Lightbulb, badge: 'Novo' },

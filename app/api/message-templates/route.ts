@@ -96,7 +96,7 @@ export async function POST(req: Request) {
     const conn = await getConnectionByOrg(sb, auth.profile.organization_id);
     if (!conn || !isBusinessConnection(conn) || conn.status !== 'connected') {
       return NextResponse.json(
-        { error: 'Conecte o WhatsApp API oficial (Configurações, aba Integrações) antes de criar modelos da API' },
+        { error: 'Conecte o WhatsApp API oficial (aba Conexão, no menu WhatsApp) antes de criar modelos da API' },
         { status: 400 }
       );
     }

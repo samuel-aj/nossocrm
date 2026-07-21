@@ -1,4 +1,4 @@
--- Modelos de mensagem (aba Modelos nas Configurações):
+-- Modelos de mensagem (página Modelos, grupo WhatsApp do menu):
 --   type 'general'      = modelo livre pra usar nas conversas do dia a dia
 --   type 'whatsapp_api'  = modelo da API oficial da Meta (Cloud API), que exige
 --                          categoria (UTILITY | MARKETING) e idioma, e depois

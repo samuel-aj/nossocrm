@@ -795,8 +795,8 @@ export function DealWhatsAppChat({
       {/* Aviso de não-conectado */}
       {data && !data.hasConnection && (
         <div className="shrink-0 px-4 py-2 text-xs bg-amber-50 dark:bg-amber-500/10 text-amber-800 dark:text-amber-300 border-b border-amber-200/60 dark:border-amber-500/20">
-          WhatsApp ainda não conectado nesta organização. Um admin pode conectar em{' '}
-          <span className="font-semibold">Configurações → Integrações</span>.
+          WhatsApp ainda não conectado. Um admin pode conectar na aba{' '}
+          <span className="font-semibold">Conexão</span>, no menu WhatsApp.
         </div>
       )}
 

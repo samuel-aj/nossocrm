@@ -424,7 +424,7 @@ export function MessageTemplatesManager() {
           <div className="text-[11px] text-slate-500 dark:text-slate-400 mb-3 space-y-1">
             <p>
               🔄 Criar este modelo <span className="font-semibold">cria o template direto na Meta</span> e
-              ele entra em análise (precisa da conexão WhatsApp API ativa nas Integrações).
+              ele entra em análise (precisa da conexão WhatsApp API ativa na aba Conexão).
             </p>
             {name.trim() !== '' && (
               <p>

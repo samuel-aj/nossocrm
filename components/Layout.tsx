@@ -48,6 +48,9 @@ import {
   PanelLeftOpen,
   Shield,
   MessageCircle,
+  ChevronDown,
+  FileText,
+  QrCode,
 } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
 import { useAuth } from '../context/AuthContext';
@@ -56,6 +59,7 @@ import { prefetchRoute, RouteName } from '@/lib/prefetch';
 import { UserRole } from '@/types/constants';
 
 import { isDebugMode, enableDebugMode, disableDebugMode } from '@/lib/debug';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import { SkipLink } from '@/lib/a11y';
 import { useResponsiveMode } from '@/hooks/useResponsiveMode';
 import { BottomNav, MoreMenuSheet, NavigationRail } from '@/components/navigation';
@@ -184,6 +188,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const officeInitials = officeName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase() || 'AJ';
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
+  // Grupo WhatsApp do menu (Chats/Modelos/Conexão): aberto/fechado persiste
+  const [waGroupOpen, setWaGroupOpen] = usePersistedState<boolean>('nav_group_whatsapp', true);
+  const isAdminRole = profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN;
   // Hydration safety: `isDebugMode()` reads localStorage. On SSR it is always false.
   // Initialize deterministically and sync on mount to avoid hydration mismatch warnings.
   const [debugEnabled, setDebugEnabled] = useState(false);
@@ -288,10 +295,76 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           </div>
         </div>
 
-        <nav className="flex-1 p-4 space-y-2 flex flex-col" aria-label="Navegação do sistema">
+        <nav className="flex-1 p-4 space-y-2 flex flex-col overflow-y-auto" aria-label="Navegação do sistema">
+          <NavItem
+            to="/inbox"
+            icon={Inbox}
+            label="Inbox"
+            prefetch="inbox"
+            clickedPath={clickedPath}
+            onItemClick={setClickedPath}
+            collapsed={sidebarCollapsed}
+          />
+
+          {/* GRUPO WhatsApp (recolhível): Chats + Modelos + Conexão. No menu
+              compacto, os itens do grupo aparecem direto (só ícones). */}
+          {(() => {
+            const waChildren = [
+              { to: '/chats', icon: MessageCircle, label: 'Chats', prefetch: 'chats' as RouteName, badge: 'Novo' as string | undefined },
+              ...(isAdminRole
+                ? [
+                    { to: '/modelos', icon: FileText, label: 'Modelos', prefetch: 'modelos' as RouteName, badge: undefined },
+                    { to: '/conexao-whatsapp', icon: QrCode, label: 'Conexão', prefetch: 'conexao' as RouteName, badge: undefined },
+                  ]
+                : []),
+            ];
+            const childActive = waChildren.some(c => pathname === c.to);
+            const childItems = waChildren.map(c => (
+              <NavItem
+                key={c.to}
+                to={c.to}
+                icon={c.icon}
+                label={c.label}
+                prefetch={c.prefetch}
+                clickedPath={clickedPath}
+                onItemClick={setClickedPath}
+                badge={c.badge}
+                collapsed={sidebarCollapsed}
+              />
+            ));
+
+            if (sidebarCollapsed) return <>{childItems}</>;
+
+            return (
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setWaGroupOpen(!waGroupOpen)}
+                  aria-expanded={waGroupOpen}
+                  className={`w-full flex items-center px-4 py-3 gap-3 rounded-lg text-sm font-medium transition-colors focus-visible-ring ${
+                    childActive && !waGroupOpen
+                      ? 'text-primary-600 dark:text-primary-400'
+                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <MessageCircle size={20} className={`shrink-0 ${childActive ? 'text-primary-500' : ''}`} aria-hidden="true" />
+                  <span className="font-display tracking-wide flex-1 text-left">WhatsApp</span>
+                  <ChevronDown
+                    size={15}
+                    className={`shrink-0 transition-transform duration-300 ${waGroupOpen ? 'rotate-180' : ''}`}
+                    aria-hidden="true"
+                  />
+                </button>
+                {waGroupOpen && (
+                  <div className="mt-1 ml-4 pl-2 border-l border-slate-200 dark:border-white/10 space-y-1">
+                    {childItems}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           {[
-            { to: '/inbox', icon: Inbox, label: 'Inbox', prefetch: 'inbox' as const },
-            { to: '/chats', icon: MessageCircle, label: 'Chats', prefetch: 'chats' as const },
             { to: '/dashboard', icon: LayoutDashboard, label: 'Visão Geral', prefetch: 'dashboard' as const },
             { to: '/boards', icon: KanbanSquare, label: 'Boards', prefetch: 'boards' as const },
             { to: '/contacts', icon: Users, label: 'Contatos', prefetch: 'contacts' as const },
@@ -309,7 +382,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               prefetch={item.prefetch}
               clickedPath={clickedPath}
               onItemClick={setClickedPath}
-              badge={(item.to === '/suggestions' || item.to === '/tutorial' || item.to === '/chats') ? 'Novo' : undefined}
+              badge={(item.to === '/suggestions' || item.to === '/tutorial') ? 'Novo' : undefined}
               collapsed={sidebarCollapsed}
             />
           ))}
