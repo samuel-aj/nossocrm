@@ -25,6 +25,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
@@ -99,6 +100,7 @@ const NavItem = ({
   clickedPath,
   onItemClick,
   badge,
+  dot = false,
   collapsed = false,
 }: {
   to: string;
@@ -108,6 +110,8 @@ const NavItem = ({
   clickedPath?: string;
   onItemClick?: (path: string) => void;
   badge?: string;
+  /** Bolinha discreta de notificação (ex.: mensagens não lidas), sem texto. */
+  dot?: boolean;
   /** Menu recolhido: o MESMO markup anima o texto pra fora (sem troca de JSX). */
   collapsed?: boolean;
 }) => {
@@ -161,6 +165,23 @@ const NavItem = ({
           aria-hidden="true"
         />
       )}
+      {/* bolinha de notificação: à direita no menu aberto, canto do ícone no recolhido */}
+      {dot && !badge && (
+        <span
+          className={`ml-auto h-2 w-2 rounded-full bg-emerald-500 shrink-0 transition-opacity duration-300 ${
+            collapsed ? 'opacity-0' : 'opacity-100'
+          }`}
+          aria-hidden="true"
+        />
+      )}
+      {dot && !badge && (
+        <span
+          className={`absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-emerald-500 transition-opacity duration-300 ${
+            collapsed ? 'opacity-100' : 'opacity-0'
+          }`}
+          aria-hidden="true"
+        />
+      )}
     </Link>
   );
 };
@@ -178,6 +199,7 @@ const NavGroup = ({
   onToggle,
   childActive,
   collapsed,
+  dot = false,
   children,
 }: {
   label: string;
@@ -187,6 +209,9 @@ const NavGroup = ({
   /** Alguma rota do grupo está ativa (tinge o cabeçalho quando fechado). */
   childActive: boolean;
   collapsed: boolean;
+  /** Bolinha de notificação de algum item do grupo (some com o grupo aberto,
+      porque aí o próprio item mostra a dele). */
+  dot?: boolean;
   children: React.ReactNode;
 }) => {
   // Menu flutuante do modo compacto: ancorado na posição real do botão
@@ -234,13 +259,16 @@ const NavGroup = ({
             if (rect) setFlyoutPos({ x: rect.right + 10, y: rect.top });
             setFlyoutOpen(o => !o);
           }}
-          className={`w-full flex items-center px-[13px] py-3 rounded-lg text-sm font-medium transition-colors focus-visible-ring ${
+          className={`relative w-full flex items-center px-[13px] py-3 rounded-lg text-sm font-medium transition-colors focus-visible-ring ${
             childActive
               ? 'bg-primary-500/10 text-primary-600 dark:text-primary-400 border border-primary-200 dark:border-primary-900/50'
               : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white'
           }`}
         >
           <Icon size={20} className={`shrink-0 ${childActive ? 'text-primary-500' : ''}`} aria-hidden="true" />
+          {dot && (
+            <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-emerald-500" aria-hidden="true" />
+          )}
         </button>
         {flyoutOpen && flyoutPos && (
           <div
@@ -274,6 +302,9 @@ const NavGroup = ({
       >
         <Icon size={20} className={`shrink-0 ${childActive ? 'text-primary-500' : ''}`} aria-hidden="true" />
         <span className="font-display tracking-wide flex-1 text-left">{label}</span>
+        {dot && !open && (
+          <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" aria-hidden="true" />
+        )}
         <ChevronDown
           size={15}
           className={`shrink-0 transition-transform duration-300 ${open ? 'rotate-180' : ''}`}
@@ -324,6 +355,22 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   // aberto por vez, fechados por padrão; a escolha persiste.
   const [openNavGroup, setOpenNavGroup] = usePersistedState<'whatsapp' | 'ajuda' | null>('nav_open_group', null);
   const toggleNavGroup = (g: 'whatsapp' | 'ajuda') => setOpenNavGroup(cur => (cur === g ? null : g));
+
+  // Bolinha de não lidas no item Chats: mesma queryKey da página de chats
+  // (na página o polling de 10s assume; aqui um ritmo mais leve basta).
+  const waConvsQ = useQuery<{ data: Array<{ unread_count: number | null }> }>({
+    queryKey: ['waConversations'],
+    queryFn: async () => {
+      const res = await fetch('/api/whatsapp/conversations', { credentials: 'include' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    },
+    enabled: !!user,
+    refetchInterval: 30000,
+    refetchOnWindowFocus: true,
+    staleTime: 15000,
+  });
+  const hasUnreadChats = (waConvsQ.data?.data ?? []).some(c => (c.unread_count || 0) > 0);
   const isAdminRole = profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN;
   // Hydration safety: `isDebugMode()` reads localStorage. On SSR it is always false.
   // Initialize deterministically and sync on mount to avoid hydration mismatch warnings.
@@ -443,11 +490,11 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           {/* GRUPO WhatsApp (recolhível): Chats + Modelos + Conexão */}
           {(() => {
             const waChildren = [
-              { to: '/chats', icon: MessageCircle, label: 'Chats', prefetch: 'chats' as RouteName },
+              { to: '/chats', icon: MessageCircle, label: 'Chats', prefetch: 'chats' as RouteName, dot: hasUnreadChats },
               ...(isAdminRole
                 ? [
-                    { to: '/modelos', icon: FileText, label: 'Modelos', prefetch: 'modelos' as RouteName },
-                    { to: '/conexao-whatsapp', icon: QrCode, label: 'Conexão', prefetch: 'conexao' as RouteName },
+                    { to: '/modelos', icon: FileText, label: 'Modelos', prefetch: 'modelos' as RouteName, dot: false },
+                    { to: '/conexao-whatsapp', icon: QrCode, label: 'Conexão', prefetch: 'conexao' as RouteName, dot: false },
                   ]
                 : []),
             ];
@@ -459,6 +506,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 onToggle={() => toggleNavGroup('whatsapp')}
                 childActive={waChildren.some(c => pathname === c.to)}
                 collapsed={sidebarCollapsed}
+                dot={hasUnreadChats}
               >
                 {waChildren.map(c => (
                   <NavItem
@@ -469,6 +517,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                     prefetch={c.prefetch}
                     clickedPath={clickedPath}
                     onItemClick={setClickedPath}
+                    dot={c.dot}
                   />
                 ))}
               </NavGroup>
