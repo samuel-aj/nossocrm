@@ -168,7 +168,7 @@ const NavItem = ({
       {/* bolinha de notificação: à direita no menu aberto, canto do ícone no recolhido */}
       {dot && !badge && (
         <span
-          className={`ml-auto h-2 w-2 rounded-full bg-emerald-500 shrink-0 transition-opacity duration-300 ${
+          className={`ml-auto h-2 w-2 rounded-full bg-purple-500 shrink-0 transition-opacity duration-300 ${
             collapsed ? 'opacity-0' : 'opacity-100'
           }`}
           aria-hidden="true"
@@ -176,7 +176,7 @@ const NavItem = ({
       )}
       {dot && !badge && (
         <span
-          className={`absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-emerald-500 transition-opacity duration-300 ${
+          className={`absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-purple-500 transition-opacity duration-300 ${
             collapsed ? 'opacity-100' : 'opacity-0'
           }`}
           aria-hidden="true"
@@ -199,7 +199,6 @@ const NavGroup = ({
   onToggle,
   childActive,
   collapsed,
-  dot = false,
   children,
 }: {
   label: string;
@@ -209,9 +208,6 @@ const NavGroup = ({
   /** Alguma rota do grupo está ativa (tinge o cabeçalho quando fechado). */
   childActive: boolean;
   collapsed: boolean;
-  /** Bolinha de notificação de algum item do grupo (some com o grupo aberto,
-      porque aí o próprio item mostra a dele). */
-  dot?: boolean;
   children: React.ReactNode;
 }) => {
   // Menu flutuante do modo compacto: ancorado na posição real do botão
@@ -259,16 +255,13 @@ const NavGroup = ({
             if (rect) setFlyoutPos({ x: rect.right + 10, y: rect.top });
             setFlyoutOpen(o => !o);
           }}
-          className={`relative w-full flex items-center px-[13px] py-3 rounded-lg text-sm font-medium transition-colors focus-visible-ring ${
+          className={`w-full flex items-center px-[13px] py-3 rounded-lg text-sm font-medium transition-colors focus-visible-ring ${
             childActive
               ? 'bg-primary-500/10 text-primary-600 dark:text-primary-400 border border-primary-200 dark:border-primary-900/50'
               : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white'
           }`}
         >
           <Icon size={20} className={`shrink-0 ${childActive ? 'text-primary-500' : ''}`} aria-hidden="true" />
-          {dot && (
-            <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-emerald-500" aria-hidden="true" />
-          )}
         </button>
         {flyoutOpen && flyoutPos && (
           <div
@@ -302,9 +295,6 @@ const NavGroup = ({
       >
         <Icon size={20} className={`shrink-0 ${childActive ? 'text-primary-500' : ''}`} aria-hidden="true" />
         <span className="font-display tracking-wide flex-1 text-left">{label}</span>
-        {dot && !open && (
-          <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" aria-hidden="true" />
-        )}
         <ChevronDown
           size={15}
           className={`shrink-0 transition-transform duration-300 ${open ? 'rotate-180' : ''}`}
@@ -506,7 +496,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 onToggle={() => toggleNavGroup('whatsapp')}
                 childActive={waChildren.some(c => pathname === c.to)}
                 collapsed={sidebarCollapsed}
-                dot={hasUnreadChats}
               >
                 {waChildren.map(c => (
                   <NavItem
