@@ -95,7 +95,10 @@ const DashboardPage: React.FC = () => {
   const revenueChangeInfo = formatChange(changes.revenue);
 
   return (
-    <div className="flex flex-col h-[calc(100vh-7rem)] space-y-4">
+    // min-h (e não h fixo): quando o conteúdo passa da tela, o contêiner
+    // cresce junto e o padding inferior do site continua valendo (nada
+    // fica colado no rodapé)
+    <div className="flex flex-col min-h-[calc(100vh-7rem)] space-y-4 pb-2">
       <div className="flex justify-between items-center shrink-0">
         <div>
           <h1 className="text-3xl font-bold text-slate-900 dark:text-white font-display tracking-tight">
