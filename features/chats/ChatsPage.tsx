@@ -662,7 +662,7 @@ export const ChatsPage: React.FC = () => {
               ) : (
                 <>
                   <span className="text-xs text-amber-600 dark:text-amber-400 truncate">
-                    Número sem contato no CRM — adicione pra criar o lead.
+                    Número sem contato no CRM. Adicione pra criar o lead.
                   </span>
                   <button
                     type="button"

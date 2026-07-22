@@ -1259,7 +1259,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                       type="button"
                       onClick={() => {
                         updateContact(contact.id, { status: 'ACTIVE' });
-                        addToast('Contato reativado — lead devolvido pro funil.', 'success');
+                        addToast('Contato reativado. Lead devolvido pro funil.', 'success');
                       }}
                       className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-200 hover:underline"
                     >
