@@ -76,8 +76,14 @@ export async function POST(req: Request) {
   let token = body.token?.trim() || null;
   let baseUrl = body.baseUrl?.trim() || null;
   let provider: string | undefined;
+  // Conexão anterior da org (capturada ANTES do upsert): numa troca de modo
+  // o nome da instância muda e a antiga precisa ser derrubada na Evolution,
+  // senão ela segue viva emitindo webhooks que o CRM passa a descartar.
+  const previous = await getConnectionByOrg(auth.admin, auth.user.organizationId);
+  let managedSwitch = false;
 
   if (body.mode === 'business') {
+    managedSwitch = true;
     // MODO API OFICIAL (Meta Cloud API via Evolution): conexão por credenciais,
     // sem QR. A instância nasce "open"; erro de token só aparece no envio.
     const metaToken = (body.metaToken || '').trim();
@@ -103,6 +109,7 @@ export async function POST(req: Request) {
       return json({ error: `Falha ao criar a instância business: ${(e as Error).message}` }, 502);
     }
   } else if (body.autoCreate) {
+    managedSwitch = true;
     // Fluxo da UI: cria a instância DESTA org na Evolution automaticamente,
     // sem o admin do cliente precisar saber nome/token/servidor.
     instanceName = instanceNameForOrg(auth.user.organizationId);
@@ -132,6 +139,26 @@ export async function POST(req: Request) {
 
   // Aponta o webhook da instância pro ambiente atual (recebimento de mensagens).
   await registerWebhook(conn);
+
+  // Troca de modo gerenciada (QR <-> API oficial): derruba a instância
+  // anterior na Evolution DEPOIS do novo vínculo estar salvo. Se ela ficasse
+  // viva, seguiria emitindo webhooks com um instance_name que não casa mais
+  // com a conexão da org e as mensagens seriam descartadas em silêncio.
+  if (managedSwitch && previous?.instance_name && previous.instance_name !== conn.instance_name) {
+    try {
+      await getProvider(previous).logout();
+    } catch {
+      // best-effort: a sessão pode nem existir mais
+    }
+    // O delete usa a apikey/servidor GLOBAL: só roda quando a conexão antiga
+    // morava nesse servidor (vínculo manual pra outro servidor fica de fora,
+    // senão apagaria uma instância homônima de outro tenant de lá).
+    const normalize = (u: string) => u.replace(/\/+$/, '').replace(/\/manager$/, '');
+    const prevBase = normalize(previous.base_url || '');
+    if (!prevBase || prevBase === normalize(envEvolution().baseUrl)) {
+      await deleteEvolutionInstance(previous.instance_name);
+    }
+  }
 
   let status = conn.status;
   try {
