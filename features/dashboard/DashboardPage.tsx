@@ -431,7 +431,9 @@ const DashboardPage: React.FC = () => {
           <div className="flex-1 overflow-y-auto p-5 pt-2 scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-700">
             <div className="space-y-1">
               {activities.length > 0 ? (
-                activities.slice(0, 15).map(activity => (
+                // Poucos itens de propósito: o Funil divide a linha com este
+                // card e estica junto com ele; lista longa fica em /activities
+                activities.slice(0, 6).map(activity => (
                   <ActivityFeedItem key={activity.id} activity={activity} />
                 ))
               ) : (
