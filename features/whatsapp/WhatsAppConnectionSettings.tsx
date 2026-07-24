@@ -10,7 +10,7 @@
  */
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, KeyRound, Loader2, MessageCircle, QrCode, Unplug } from 'lucide-react';
+import { CheckCircle2, ExternalLink, KeyRound, Loader2, MessageCircle, QrCode, Unplug } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 
 interface WaConnectionInfo {
@@ -225,6 +225,43 @@ export function WhatsAppConnectionSettings() {
           {bizOpen && (
             <div className="rounded-2xl border border-sky-200 dark:border-sky-500/25 bg-sky-50/50 dark:bg-sky-900/10 p-5 space-y-3">
               <p className="text-sm font-bold text-slate-900 dark:text-white">Credenciais da Meta (Cloud API)</p>
+
+              {/* Onde pegar cada credencial no painel da Meta */}
+              <div className="rounded-xl border border-sky-200/70 dark:border-sky-500/20 bg-white dark:bg-black/20 p-3.5 text-[11px] text-slate-600 dark:text-slate-300 space-y-2">
+                <p className="font-bold text-slate-700 dark:text-slate-200">Onde pegar as credenciais:</p>
+                <p>
+                  <span className="font-semibold">1. Phone Number ID e WABA ID:</span> no painel de
+                  apps da Meta, abra (ou crie) o app com o produto WhatsApp e vá em{' '}
+                  <span className="font-semibold">WhatsApp, Configuração da API</span>. Os dois IDs
+                  aparecem nessa tela.
+                </p>
+                <a
+                  href="https://developers.facebook.com/apps/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 font-bold text-sky-600 dark:text-sky-400 hover:underline"
+                >
+                  Abrir painel de apps da Meta <ExternalLink size={11} />
+                </a>
+                <p>
+                  <span className="font-semibold">2. Token permanente:</span> nas configurações do
+                  negócio, em <span className="font-semibold">Usuários, Usuários do sistema</span>,
+                  crie um usuário do sistema (função Administrador), adicione o app com controle
+                  total em Adicionar ativos, e clique em Gerar token marcando as permissões{' '}
+                  <span className="font-mono">whatsapp_business_messaging</span> e{' '}
+                  <span className="font-mono">whatsapp_business_management</span> (validade: nunca
+                  expira).
+                </p>
+                <a
+                  href="https://business.facebook.com/settings/system-users"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 font-bold text-sky-600 dark:text-sky-400 hover:underline"
+                >
+                  Abrir usuários do sistema da Business Manager <ExternalLink size={11} />
+                </a>
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Token permanente *</label>
                 <input
