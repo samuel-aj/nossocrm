@@ -24,9 +24,16 @@ import {
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { fillTemplate } from '@/lib/messageTemplates';
+import { type ChatTimelineEvent } from './chatTimeline';
 import { useWhatsAppChat, type WaChatMessage, type WaMediaKind } from './useWhatsAppChat';
 
 const TIME_FMT = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
+const EVENT_DATE_FMT = new Intl.DateTimeFormat('pt-BR', {
+  day: '2-digit',
+  month: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+});
 
 const MEDIA_LABEL: Record<string, string> = {
   image: 'imagem',
@@ -353,13 +360,42 @@ interface Attachment {
   asSticker: boolean;
 }
 
+/**
+ * Linha compacta de evento da timeline DENTRO do chat (estilo Kommo):
+ * divide a conversa em blocos a cada ação no lead (etapa, nota, atividade).
+ */
+function TimelineEventRow({ e }: { e: ChatTimelineEvent }) {
+  const detail = e.detail && e.detail.length > 160 ? `${e.detail.slice(0, 160)}...` : e.detail;
+  return (
+    <div className="flex justify-center py-0.5">
+      <div className="max-w-[85%] text-center text-[10.5px] leading-snug px-3 py-1 rounded-lg bg-slate-200/70 dark:bg-white/10 text-slate-500 dark:text-slate-400">
+        <span className="font-semibold">{EVENT_DATE_FMT.format(new Date(e.at))}</span>
+        {' · '}
+        {e.kind === 'status' ? (
+          <span className="font-semibold text-slate-600 dark:text-slate-300">{e.text}</span>
+        ) : (
+          e.text
+        )}
+        {detail && (
+          <span className="block italic mt-0.5 whitespace-pre-wrap break-words">{detail}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function DealWhatsAppChat({
   contact,
   templateContext,
+  timelineEvents,
 }: {
   contact: { id: string; name?: string | null; phone?: string | null } | null;
   /** Valores extras pras variáveis dos modelos (lead.titulo, escritorio.nome...) */
   templateContext?: Record<string, string>;
+  /** Eventos da timeline do lead (etapa, notas, atividades) intercalados
+      entre as mensagens por data, dividindo o chat em blocos. Ordem
+      cronológica crescente (use buildChatTimelineEvents). */
+  timelineEvents?: ChatTimelineEvent[];
 }) {
   const phone = useMemo(() => normalizePhoneE164(contact?.phone || ''), [contact?.phone]);
   const { data, isLoading, error, send } = useWhatsAppChat(phone || null);
@@ -417,6 +453,29 @@ export function DealWhatsAppChat({
   const forceScrollRef = useRef(false); // rola pro fim após envio próprio
 
   const messages = data?.messages ?? [];
+
+  // Lista unificada do chat: mensagens + eventos da timeline intercalados
+  // por data (merge de duas listas já ordenadas crescente)
+  type ChatEntry = { kind: 'msg'; m: WaChatMessage } | { kind: 'event'; e: ChatTimelineEvent };
+  const chatEntries = useMemo<ChatEntry[]>(() => {
+    const evs = timelineEvents ?? [];
+    if (evs.length === 0) return messages.map(m => ({ kind: 'msg' as const, m }));
+    const merged: ChatEntry[] = [];
+    let i = 0;
+    for (const m of messages) {
+      const mt = new Date(m.created_at).getTime();
+      while (i < evs.length && new Date(evs[i].at).getTime() <= mt) {
+        merged.push({ kind: 'event', e: evs[i] });
+        i++;
+      }
+      merged.push({ kind: 'msg', m });
+    }
+    while (i < evs.length) {
+      merged.push({ kind: 'event', e: evs[i] });
+      i++;
+    }
+    return merged;
+  }, [messages, timelineEvents]);
   // primeira carga da conversa: abre DIRETO na mensagem mais recente (embaixo)
   const initialScrollDoneRef = useRef(false);
   useEffect(() => {
@@ -811,20 +870,24 @@ export function DealWhatsAppChat({
           </div>
         )}
         {error && <p className="text-sm text-red-500 text-center">{(error as Error).message}</p>}
-        {!isLoading && !error && messages.length === 0 && (
+        {!isLoading && !error && chatEntries.length === 0 && (
           <CenterMsg>Nenhuma mensagem ainda. Envie a primeira mensagem 👇</CenterMsg>
         )}
-        {messages.map((m) => (
-          <div
-            key={m.id}
-            ref={el => {
-              if (el) msgRefs.current.set(m.id, el);
-              else msgRefs.current.delete(m.id);
-            }}
-          >
-            <MessageBubble m={m} searchQuery={activeQuery} isCurrentMatch={m.id === currentMatchId} />
-          </div>
-        ))}
+        {chatEntries.map(entry =>
+          entry.kind === 'msg' ? (
+            <div
+              key={entry.m.id}
+              ref={el => {
+                if (el) msgRefs.current.set(entry.m.id, el);
+                else msgRefs.current.delete(entry.m.id);
+              }}
+            >
+              <MessageBubble m={entry.m} searchQuery={activeQuery} isCurrentMatch={entry.m.id === currentMatchId} />
+            </div>
+          ) : (
+            <TimelineEventRow key={`ev-${entry.e.id}`} e={entry.e} />
+          )
+        )}
         <div ref={endRef} />
       </div>
 

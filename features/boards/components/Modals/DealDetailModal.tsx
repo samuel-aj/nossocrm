@@ -11,6 +11,7 @@ import { Activity, CustomFieldDefinition } from '@/types';
 import { useResponsiveMode } from '@/hooks/useResponsiveMode';
 import { DealSheet } from '../DealSheet';
 import { DealWhatsAppChat } from '@/features/whatsapp/DealWhatsAppChat';
+import { buildChatTimelineEvents } from '@/features/whatsapp/chatTimeline';
 import {
   analyzeLead,
   generateEmailDraft,
@@ -392,6 +393,12 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     const stage = dealBoard.stages.find((s) => s.id === deal?.status);
     return stage?.label;
   }, [deal?.status, dealBoard]);
+
+  // Eventos da timeline intercalados DENTRO do chat de WhatsApp (aba)
+  const chatTimelineEvents = useMemo(
+    () => buildChatTimelineEvents(activities, deal?.id, boards),
+    [activities, deal?.id, boards]
+  );
 
   // Filter & sort: open activities first (sorted by date desc), then completed ones below.
   const dealActivities = useMemo(() => {
@@ -1665,6 +1672,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                   <div className="h-full">
                     <DealWhatsAppChat
                       contact={contact}
+                      timelineEvents={chatTimelineEvents}
                       templateContext={{
                         'contato.email': contact?.email || '',
                         'lead.titulo': deal.title,
