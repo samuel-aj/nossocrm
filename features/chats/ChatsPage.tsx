@@ -9,7 +9,6 @@ import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { DealWhatsAppChat } from '@/features/whatsapp/DealWhatsAppChat';
-import { buildChatTimelineEvents } from '@/features/whatsapp/chatTimeline';
 import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
 import { Contact, Deal } from '@/types';
 
@@ -105,7 +104,7 @@ const AvatarCircle: React.FC<{ name: string; src?: string; size?: string }> = ({
 );
 
 export const ChatsPage: React.FC = () => {
-  const { contacts, deals, boards, activities, addContact, addDeal } = useCRM();
+  const { contacts, deals, boards, addContact, addDeal } = useCRM();
   const { profile } = useAuth();
   const { addToast } = useToast();
   const router = useRouter();
@@ -295,12 +294,6 @@ export const ChatsPage: React.FC = () => {
     [boards, selectedDeal]
   );
   const selectedDealStage = selectedDealBoard?.stages.find(s => s.id === selectedDeal?.status) ?? null;
-
-  // Eventos da timeline do lead vinculado, intercalados dentro do chat
-  const chatTimelineEvents = useMemo(
-    () => buildChatTimelineEvents(activities, selectedDeal?.id, boards),
-    [activities, selectedDeal?.id, boards]
-  );
 
   // "Marcar como lida": zera a bolinha sem abrir a conversa (reusa o GET de
   // mensagens, que já faz o reset do contador ao visualizar).
@@ -692,7 +685,6 @@ export const ChatsPage: React.FC = () => {
               <DealWhatsAppChat
                 key={selected.phone}
                 contact={{ id: selected.contactId || selected.phone, name: selected.name, phone: selected.phone }}
-                timelineEvents={chatTimelineEvents}
                 templateContext={{
                   'contato.email': (selected.contactId && contacts.find(c => c.id === selected.contactId)?.email) || '',
                   'lead.titulo': selectedDeal?.title || '',
