@@ -100,7 +100,7 @@ const NavItem = ({
   clickedPath,
   onItemClick,
   badge,
-  dot = false,
+  notif,
   collapsed = false,
 }: {
   to: string;
@@ -110,8 +110,8 @@ const NavItem = ({
   clickedPath?: string;
   onItemClick?: (path: string) => void;
   badge?: string;
-  /** Bolinha discreta de notificação (ex.: mensagens não lidas), sem texto. */
-  dot?: boolean;
+  /** Contador de notificações (ex.: "12", "999+") numa pílula roxa. */
+  notif?: string;
   /** Menu recolhido: o MESMO markup anima o texto pra fora (sem troca de JSX). */
   collapsed?: boolean;
 }) => {
@@ -165,22 +165,26 @@ const NavItem = ({
           aria-hidden="true"
         />
       )}
-      {/* bolinha de notificação: à direita no menu aberto, canto do ícone no recolhido */}
-      {dot && !badge && (
+      {/* contador de notificações: pílula à direita no menu aberto, versão
+          mini no canto do ícone quando recolhido */}
+      {notif && !badge && (
         <span
-          className={`ml-auto h-2 w-2 rounded-full bg-purple-500 shrink-0 transition-opacity duration-300 ${
+          className={`ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-purple-500 text-white text-[10px] font-bold leading-none flex items-center justify-center shrink-0 transition-opacity duration-300 ${
             collapsed ? 'opacity-0' : 'opacity-100'
           }`}
-          aria-hidden="true"
-        />
+        >
+          {notif}
+        </span>
       )}
-      {dot && !badge && (
+      {notif && !badge && (
         <span
-          className={`absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-purple-500 transition-opacity duration-300 ${
+          className={`absolute right-1 top-1 min-w-[16px] h-4 px-1 rounded-full bg-purple-500 text-white text-[9px] font-bold leading-none flex items-center justify-center transition-opacity duration-300 ${
             collapsed ? 'opacity-100' : 'opacity-0'
           }`}
           aria-hidden="true"
-        />
+        >
+          {notif}
+        </span>
       )}
     </Link>
   );
@@ -290,7 +294,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     refetchOnWindowFocus: true,
     staleTime: 15000,
   });
-  const hasUnreadChats = (waConvsQ.data?.data ?? []).some(c => (c.unread_count || 0) > 0);
+  const unreadChatsCount = (waConvsQ.data?.data ?? []).reduce((sum, c) => sum + (c.unread_count || 0), 0);
+  // Contador estilo WhatsApp: acima de 999 vira "999+"
+  const unreadChatsNotif = unreadChatsCount > 0 ? (unreadChatsCount > 999 ? '999+' : String(unreadChatsCount)) : undefined;
   const isAdminRole = profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN;
   // Hydration safety: `isDebugMode()` reads localStorage. On SSR it is always false.
   // Initialize deterministically and sync on mount to avoid hydration mismatch warnings.
@@ -410,11 +416,11 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           {/* GRUPO WhatsApp (recolhível): Chats + Modelos + Conexão */}
           {(() => {
             const waChildren = [
-              { to: '/chats', icon: MessageCircle, label: 'Chats', prefetch: 'chats' as RouteName, dot: hasUnreadChats },
+              { to: '/chats', icon: MessageCircle, label: 'Chats', prefetch: 'chats' as RouteName, notif: unreadChatsNotif },
               ...(isAdminRole
                 ? [
-                    { to: '/modelos', icon: FileText, label: 'Modelos', prefetch: 'modelos' as RouteName, dot: false },
-                    { to: '/conexao-whatsapp', icon: QrCode, label: 'Conexão', prefetch: 'conexao' as RouteName, dot: false },
+                    { to: '/modelos', icon: FileText, label: 'Modelos', prefetch: 'modelos' as RouteName, notif: undefined },
+                    { to: '/conexao-whatsapp', icon: QrCode, label: 'Conexão', prefetch: 'conexao' as RouteName, notif: undefined },
                   ]
                 : []),
             ];
@@ -436,7 +442,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                     prefetch={c.prefetch}
                     clickedPath={clickedPath}
                     onItemClick={setClickedPath}
-                    dot={c.dot}
+                    notif={c.notif}
                     collapsed={sidebarCollapsed}
                   />
                 ))}
