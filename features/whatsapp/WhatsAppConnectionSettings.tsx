@@ -10,7 +10,7 @@
  */
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, ExternalLink, KeyRound, Loader2, MessageCircle, QrCode, Unplug } from 'lucide-react';
+import { CheckCircle2, Copy, ExternalLink, KeyRound, Loader2, MessageCircle, QrCode, Unplug } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 
 interface WaConnectionInfo {
@@ -26,6 +26,8 @@ interface WaConnectionInfo {
 interface ConnResponse {
   connected: boolean;
   connection: WaConnectionInfo | null;
+  /** Só pra admin: URL e verify token do webhook da Meta (modo API oficial) */
+  metaWebhook?: { url: string; verifyToken: string } | null;
 }
 
 interface QrResponse {
@@ -62,6 +64,16 @@ export function WhatsAppConnectionSettings() {
 
   const conn = connQ.data?.connection ?? null;
   const connected = !!connQ.data?.connected;
+  const metaWebhook = connQ.data?.metaWebhook ?? null;
+
+  const copyValue = async (value: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      addToast(`${label} copiado!`, 'success');
+    } catch {
+      addToast('Não consegui copiar. Selecione e copie manualmente.', 'error');
+    }
+  };
   // Modo API oficial da Meta (Cloud API): sem QR/pareamento
   const isBusiness = (conn?.provider || '').toLowerCase() === 'evolution_business';
 
@@ -296,16 +308,62 @@ export function WhatsAppConnectionSettings() {
                   <p className="text-[10px] text-slate-400 mt-1">Necessário no futuro pra templates.</p>
                 </div>
               </div>
+              {/* Passo 3: webhook do recebimento, com os valores prontos pra
+                  colar no painel da Meta (sem isso o envio funciona mas as
+                  respostas dos clientes não chegam no CRM) */}
+              {metaWebhook && (
+                <div className="rounded-xl border border-sky-200/70 dark:border-sky-500/20 bg-white dark:bg-black/20 p-3.5 text-[11px] text-slate-600 dark:text-slate-300 space-y-2.5">
+                  <p className="font-bold text-slate-700 dark:text-slate-200">
+                    3. Webhook (pra receber as respostas dos clientes):
+                  </p>
+                  <p>
+                    No painel do app da Meta, vá em{' '}
+                    <span className="font-semibold">WhatsApp, Configuração</span> e, na seção
+                    Webhook, clique em Editar e cole os dois valores abaixo. Depois de verificar,
+                    clique em Gerenciar e assine o campo{' '}
+                    <span className="font-semibold">messages</span>. Sem esse passo o envio
+                    funciona, mas as respostas não chegam no CRM.
+                  </p>
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase mb-0.5">URL de callback</p>
+                    <div className="flex items-center gap-1.5">
+                      <code className="flex-1 truncate bg-slate-100 dark:bg-white/10 rounded-md px-2 py-1.5 font-mono text-[11px] text-slate-700 dark:text-slate-200">
+                        {metaWebhook.url}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => copyValue(metaWebhook.url, 'URL de callback')}
+                        title="Copiar URL de callback"
+                        className="shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-lg border border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-colors"
+                      >
+                        <Copy size={13} />
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase mb-0.5">Token de verificação</p>
+                    <div className="flex items-center gap-1.5">
+                      <code className="flex-1 truncate bg-slate-100 dark:bg-white/10 rounded-md px-2 py-1.5 font-mono text-[11px] text-slate-700 dark:text-slate-200">
+                        {metaWebhook.verifyToken}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => copyValue(metaWebhook.verifyToken, 'Token de verificação')}
+                        title="Copiar token de verificação"
+                        className="shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-lg border border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-colors"
+                      >
+                        <Copy size={13} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="text-[11px] text-slate-500 dark:text-slate-400 space-y-1 border-t border-sky-200/60 dark:border-sky-500/20 pt-3">
                 <p>
                   ⚠️ <span className="font-semibold">Janela de 24h:</span> pela regra da Meta, fora de 24h
                   após a última mensagem do cliente só é possível enviar templates aprovados.
                   Mensagens livres são recusadas (o CRM mostra a falha no chat).
-                </p>
-                <p>
-                  🔧 <span className="font-semibold">Pré-requisito único:</span> o webhook do app na Meta
-                  precisa apontar pro servidor da agência. A configuração é feita pela equipe do CRM
-                  junto com você na ativação.
                 </p>
               </div>
               <button

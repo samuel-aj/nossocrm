@@ -31,12 +31,27 @@ function mask(conn: WaConnectionRow) {
   };
 }
 
+// Dados do webhook da Meta mostrados pro ADMIN na tela de conexão da API
+// oficial: URL do endpoint da Evolution e o verify token que ela espera
+// (env WA_BUSINESS_TOKEN_WEBHOOK do servidor, espelhada aqui pela env
+// EVOLUTION_META_VERIFY_TOKEN; sem ela, vale o padrão 'evolution').
+function metaWebhookInfo(role: string) {
+  if (!isOrgAdmin(role)) return null;
+  const base = envEvolution().baseUrl.replace(/\/+$/, '').replace(/\/manager$/, '');
+  if (!base) return null;
+  return {
+    url: `${base}/webhook/meta`,
+    verifyToken: process.env.EVOLUTION_META_VERIFY_TOKEN?.trim() || 'evolution',
+  };
+}
+
 export async function GET() {
   const auth = await requireOrgUser();
   if (!auth.ok) return auth.response;
 
+  const metaWebhook = metaWebhookInfo(auth.user.role);
   const conn = await getConnectionByOrg(auth.admin, auth.user.organizationId);
-  if (!conn) return json({ connected: false, connection: null });
+  if (!conn) return json({ connected: false, connection: null, metaWebhook });
 
   let status = conn.status;
   try {
@@ -48,7 +63,7 @@ export async function GET() {
   } catch {
     // Evolution indisponível: mantém o último status salvo
   }
-  return json({ connected: status === 'connected', connection: { ...mask(conn), status } });
+  return json({ connected: status === 'connected', connection: { ...mask(conn), status }, metaWebhook });
 }
 
 export async function POST(req: Request) {
