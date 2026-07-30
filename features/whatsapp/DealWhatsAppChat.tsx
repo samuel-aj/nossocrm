@@ -239,6 +239,16 @@ function MessageBubble({
   isCurrentMatch?: boolean;
 }) {
   const isOut = m.direction === 'out';
+  const failed = m.status === 'failed';
+  // Tooltip da falha: o motivo real devolvido pela Meta/Evolution (truncado),
+  // ou um texto genérico quando o provedor não explicou
+  const failReason = failed
+    ? `Falha no envio. Motivo: ${
+        (m.error || '').trim()
+          ? (m.error as string).trim().slice(0, 300)
+          : 'o provedor não informou o motivo. Verifique a conexão e tente de novo.'
+      }`
+    : undefined;
   const time = (() => {
     const raw = m.wa_timestamp || m.created_at;
     const d = new Date(raw);
@@ -247,10 +257,13 @@ function MessageBubble({
   return (
     <div className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
       <div
+        title={failReason}
         className={`max-w-[78%] rounded-2xl px-3 py-2 text-sm shadow-sm ${
-          isOut
-            ? 'bg-emerald-600 text-white rounded-br-sm'
-            : 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-bl-sm border border-slate-200 dark:border-white/10'
+          failed && isOut
+            ? 'bg-red-600 text-white rounded-br-sm'
+            : isOut
+              ? 'bg-emerald-600 text-white rounded-br-sm'
+              : 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-bl-sm border border-slate-200 dark:border-white/10'
         } ${isCurrentMatch ? 'ring-2 ring-amber-400' : ''}`}
       >
         <MediaContent m={m} />
@@ -270,9 +283,14 @@ function MessageBubble({
         ) : !m.media_type ? (
           <p className="italic opacity-70">[mensagem não suportada]</p>
         ) : null}
+        {failed && (
+          <p className="mt-1 flex items-center gap-1 text-[11px] font-bold text-red-100">
+            <AlertCircle size={12} className="shrink-0" /> Falha no envio. Passe o mouse pra ver o motivo.
+          </p>
+        )}
         <div
           className={`mt-1 flex items-center justify-end gap-1 text-[10px] ${
-            isOut ? 'text-emerald-100' : 'text-slate-400'
+            failed && isOut ? 'text-red-100' : isOut ? 'text-emerald-100' : 'text-slate-400'
           }`}
         >
           <span>{time}</span>
