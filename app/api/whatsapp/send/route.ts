@@ -42,7 +42,14 @@ export async function POST(req: Request) {
   }
 
   const conn = await getConnectionByOrg(auth.admin, auth.user.organizationId);
-  if (!conn) return json({ error: 'Conexão de WhatsApp não configurada' }, 400);
+  // Sem conexão ATIVA não tenta enviar: senão a Evolution devolve um 404 cru
+  // de instância inexistente, que confunde o usuário
+  if (!conn || conn.status !== 'connected') {
+    return json(
+      { error: 'WhatsApp não conectado. Conecte o número do escritório na aba Conexão antes de enviar.' },
+      409
+    );
+  }
 
   const conv = await ensureConversation(auth.admin, auth.user.organizationId, conn.id, to);
   const provider = getProvider(conn);
