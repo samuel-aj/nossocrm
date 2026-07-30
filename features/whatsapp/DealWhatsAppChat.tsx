@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import {
   Send,
@@ -21,6 +22,7 @@ import {
   ChevronUp,
   ChevronDown,
   ClipboardList,
+  Unplug,
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { fillTemplate } from '@/lib/messageTemplates';
@@ -435,6 +437,9 @@ export function DealWhatsAppChat({
   const forceScrollRef = useRef(false); // rola pro fim após envio próprio
 
   const messages = data?.messages ?? [];
+  // Sem conexão ativa (nunca conectou OU desconectou): troca o composer pelo
+  // aviso de conectar, em vez de deixar o envio falhar com erro técnico
+  const notConnected = !!data && (!data.hasConnection || !data.connected);
   // primeira carga da conversa: abre DIRETO na mensagem mais recente (embaixo)
   const initialScrollDoneRef = useRef(false);
   useEffect(() => {
@@ -810,13 +815,7 @@ export function DealWhatsAppChat({
         </div>
       )}
 
-      {/* Aviso de não-conectado */}
-      {data && !data.hasConnection && (
-        <div className="shrink-0 px-4 py-2 text-xs bg-amber-50 dark:bg-amber-500/10 text-amber-800 dark:text-amber-300 border-b border-amber-200/60 dark:border-amber-500/20">
-          WhatsApp ainda não conectado. Um admin pode conectar na aba{' '}
-          <span className="font-semibold">Conexão</span>, no menu WhatsApp.
-        </div>
-      )}
+      {/* O aviso de não-conectado agora fica no lugar do composer, embaixo */}
 
       {/* Mensagens */}
       <div
@@ -846,10 +845,36 @@ export function DealWhatsAppChat({
         <div ref={endRef} />
       </div>
 
+      {/* Sem WhatsApp ativo: aviso claro no LUGAR da caixa de digitação
+          (nem deixa tentar enviar; o botão leva direto pra Conexão) */}
+      {notConnected && (
+        <div className="shrink-0 border-t border-slate-200 dark:border-white/10 p-3 bg-white dark:bg-dark-card">
+          <div className="flex items-center gap-3 rounded-xl border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-900/15 px-4 py-3">
+            <span className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+              <Unplug size={17} />
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-amber-800 dark:text-amber-300">WhatsApp não conectado</p>
+              <p className="text-xs text-amber-700/90 dark:text-amber-400/90">
+                Conecte o número do escritório na aba Conexão pra enviar e receber mensagens por aqui.
+              </p>
+            </div>
+            <Link
+              href="/conexao-whatsapp"
+              className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-white text-xs font-bold transition-colors"
+            >
+              Conectar
+            </Link>
+          </div>
+        </div>
+      )}
+
       {/* Composer */}
       <div
         ref={composerRef}
-        className="shrink-0 border-t border-slate-200 dark:border-white/10 p-3 bg-white dark:bg-dark-card relative"
+        className={`shrink-0 border-t border-slate-200 dark:border-white/10 p-3 bg-white dark:bg-dark-card relative ${
+          notConnected ? 'hidden' : ''
+        }`}
       >
         {send.isError && (
           <p className="mb-1.5 text-xs text-red-500">{(send.error as Error).message}</p>
