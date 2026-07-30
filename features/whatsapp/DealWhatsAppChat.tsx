@@ -287,7 +287,7 @@ function MessageBubble({
         ) : null}
         {failed && (
           <p className="mt-1 flex items-center gap-1 text-[11px] font-bold text-red-100">
-            <AlertCircle size={12} className="shrink-0" /> Falha no envio. Passe o mouse pra ver o motivo.
+            <AlertCircle size={12} className="shrink-0" /> Falha no envio
           </p>
         )}
         <div
