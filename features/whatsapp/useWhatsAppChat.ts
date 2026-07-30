@@ -24,6 +24,8 @@ export interface WaChatMessage {
   wa_timestamp: string | null;
   created_at: string;
   sent_by: string | null;
+  /** Motivo da falha (Meta/Evolution) quando status === 'failed' */
+  error: string | null;
 }
 
 export interface WaChatData {
@@ -133,6 +135,7 @@ export function useWhatsAppChat(phoneE164: string | null) {
         wa_timestamp: null,
         created_at: new Date().toISOString(),
         sent_by: null,
+        error: null,
       };
       qc.setQueryData<WaChatData>(queryKey, old =>
         old
