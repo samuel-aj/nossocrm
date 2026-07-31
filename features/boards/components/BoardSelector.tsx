@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ChevronDown, GripVertical, Plus, Settings, Trash2 } from 'lucide-react';
 import { Board } from '@/types';
 
@@ -43,19 +43,41 @@ export const BoardSelector: React.FC<BoardSelectorProps> = ({
   onReorderBoards,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
-  // Drag & drop nativo (mesmo padrão do reorder de etapas no CreateBoardModal)
+  // Drag & drop nativo com REORDENAÇÃO AO VIVO: enquanto arrasta, a lista
+  // local vai se reorganizando conforme o item passa por cima dos outros;
+  // soltar persiste a ordem (padrão sortable, sem lib externa)
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [localOrder, setLocalOrder] = useState<string[] | null>(null);
   const canReorder = !!onReorderBoards && boards.length > 1;
 
-  const moveBoard = (fromId: string, toId: string) => {
-    if (!onReorderBoards || fromId === toId) return;
-    const ids = boards.map(b => b.id);
-    const from = ids.indexOf(fromId);
-    const to = ids.indexOf(toId);
-    if (from < 0 || to < 0) return;
-    ids.splice(to, 0, ids.splice(from, 1)[0]);
-    onReorderBoards(ids);
+  const displayBoards = useMemo(() => {
+    if (!localOrder) return boards;
+    const byId = new Map(boards.map(b => [b.id, b]));
+    const ordered = localOrder.map(id => byId.get(id)).filter((b): b is Board => !!b);
+    return ordered.length === boards.length ? ordered : boards;
+  }, [boards, localOrder]);
+
+  const dragOverRow = (overId: string) => {
+    if (!draggingId || draggingId === overId) return;
+    setLocalOrder(prev => {
+      const ids = prev ?? boards.map(b => b.id);
+      const from = ids.indexOf(draggingId);
+      const to = ids.indexOf(overId);
+      if (from < 0 || to < 0 || from === to) return prev;
+      const next = [...ids];
+      next.splice(to, 0, next.splice(from, 1)[0]);
+      return next;
+    });
+  };
+
+  // Solta (drop ou dragend): persiste se a ordem mudou e limpa o estado.
+  // Drop e dragend podem ambos disparar; o segundo vira no-op (localOrder null).
+  const finishDrag = () => {
+    if (onReorderBoards && localOrder && localOrder.some((id, i) => boards[i]?.id !== id)) {
+      onReorderBoards(localOrder);
+    }
+    setDraggingId(null);
+    setLocalOrder(null);
   };
 
   return (
@@ -82,34 +104,20 @@ export const BoardSelector: React.FC<BoardSelectorProps> = ({
           <div className="absolute top-full left-0 mt-2 z-50 w-72 bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-xl shadow-xl overflow-hidden">
             {/* Board List */}
             <div className="max-h-80 overflow-y-auto py-1">
-              {boards.map(board => (
+              {displayBoards.map(board => (
                 <div
                   key={board.id}
+                  data-board-row="true"
                   className={`group flex items-center gap-3 py-3 transition-colors cursor-pointer ${
                     canReorder ? 'pl-1.5 pr-4' : 'px-4'
                   } ${
                     board.id === activeBoard.id
                       ? 'bg-primary-50 dark:bg-primary-500/10'
                       : 'hover:bg-slate-50 dark:hover:bg-white/5'
-                  } ${
-                    dragOverId === board.id && draggingId && draggingId !== board.id
-                      ? 'border-t-2 border-primary-400'
-                      : 'border-t-2 border-transparent'
-                  } ${draggingId === board.id ? 'opacity-50' : ''}`}
+                  } ${draggingId === board.id ? 'opacity-40' : ''}`}
                   onClick={() => { onSelectBoard(board.id); setIsOpen(false); }}
-                  onDragOver={canReorder ? (e) => { e.preventDefault(); setDragOverId(board.id); } : undefined}
-                  onDragLeave={canReorder ? () => setDragOverId(cur => (cur === board.id ? null : cur)) : undefined}
-                  onDrop={
-                    canReorder
-                      ? (e) => {
-                          e.preventDefault();
-                          const fromId = e.dataTransfer.getData('text/board-id');
-                          if (fromId) moveBoard(fromId, board.id);
-                          setDraggingId(null);
-                          setDragOverId(null);
-                        }
-                      : undefined
-                  }
+                  onDragOver={canReorder ? (e) => { e.preventDefault(); dragOverRow(board.id); } : undefined}
+                  onDrop={canReorder ? (e) => { e.preventDefault(); finishDrag(); } : undefined}
                 >
                   {canReorder && (
                     <span
@@ -119,9 +127,13 @@ export const BoardSelector: React.FC<BoardSelectorProps> = ({
                         e.stopPropagation();
                         e.dataTransfer.setData('text/board-id', board.id);
                         e.dataTransfer.effectAllowed = 'move';
+                        // Fantasma do arraste = a LINHA inteira da pipeline
+                        const row = (e.currentTarget as HTMLElement).closest('[data-board-row="true"]');
+                        if (row) e.dataTransfer.setDragImage(row as HTMLElement, 24, 20);
                         setDraggingId(board.id);
+                        setLocalOrder(boards.map(b => b.id));
                       }}
-                      onDragEnd={() => { setDraggingId(null); setDragOverId(null); }}
+                      onDragEnd={finishDrag}
                       className="p-1 -mr-1 text-slate-300 dark:text-slate-600 opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing transition-opacity"
                       title="Arrastar pra reordenar"
                     >
