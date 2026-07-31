@@ -14,6 +14,7 @@ interface KanbanHeaderProps {
     onCreateBoard: () => void;
     onEditBoard?: (board: Board) => void;
     onDeleteBoard?: (id: string) => void;
+    onReorderBoards?: (orderedIds: string[]) => void;
     onExportTemplates?: () => void;
     // View
     viewMode: 'kanban' | 'list';
@@ -301,6 +302,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
     onCreateBoard,
     onEditBoard,
     onDeleteBoard,
+    onReorderBoards,
     onExportTemplates,
     viewMode, setViewMode,
     searchTerm, setSearchTerm,
@@ -339,6 +341,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                     onCreateBoard={onCreateBoard}
                     onEditBoard={onEditBoard}
                     onDeleteBoard={onDeleteBoard}
+                    onReorderBoards={onReorderBoards}
                 />
 
                 {/* Edit Board Button */}

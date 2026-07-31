@@ -172,6 +172,44 @@ export const useUpdateBoard = () => {
 };
 
 /**
+ * Hook to reorder boards (drag & drop no menu de pipelines): grava
+ * position = índice e reordena o cache na hora (rollback se falhar).
+ */
+export const useReorderBoards = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (orderedIds: string[]) => {
+      const { error } = await boardsService.reorder(orderedIds);
+      if (error) throw error;
+      return orderedIds;
+    },
+    onMutate: async (orderedIds: string[]) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.boards.all });
+
+      const previousBoards = queryClient.getQueryData<Board[]>(queryKeys.boards.lists());
+
+      queryClient.setQueryData<Board[]>(queryKeys.boards.lists(), (old = []) => {
+        const rank = new Map(orderedIds.map((id, i) => [id, i]));
+        return [...old]
+          .map(b => (rank.has(b.id) ? { ...b, position: rank.get(b.id) } : b))
+          .sort((a, b) => (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER));
+      });
+
+      return { previousBoards };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previousBoards) {
+        queryClient.setQueryData(queryKeys.boards.lists(), context.previousBoards);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.boards.all });
+    },
+  });
+};
+
+/**
  * Hook to delete a board
  */
 export const useDeleteBoard = () => {

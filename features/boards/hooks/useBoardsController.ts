@@ -6,6 +6,7 @@ import {
   useDefaultBoard,
   useCreateBoard,
   useUpdateBoard,
+  useReorderBoards,
   useDeleteBoard,
   useDeleteBoardWithMove,
   useCanDeleteBoard,
@@ -75,6 +76,7 @@ export const useBoardsController = () => {
   const { data: defaultBoard } = useDefaultBoard();
   const createBoardMutation = useCreateBoard();
   const updateBoardMutation = useUpdateBoard();
+  const reorderBoardsMutation = useReorderBoards();
   const deleteBoardMutation = useDeleteBoard();
   const deleteBoardWithMoveMutation = useDeleteBoardWithMove();
 
@@ -1090,6 +1092,12 @@ export const useBoardsController = () => {
     }
   };
 
+  // Drag & drop no menu de pipelines: recebe a lista completa de ids na
+  // nova ordem (o cache reordena na hora; o banco grava position = índice)
+  const handleReorderBoards = (orderedIds: string[]) => {
+    reorderBoardsMutation.mutate(orderedIds);
+  };
+
   const handleDeleteBoard = async (boardId: string) => {
     const board = boards.find(b => b.id === boardId);
     if (!board) return;
@@ -1207,6 +1215,7 @@ export const useBoardsController = () => {
     updateBoardAsync,
     handleEditBoard,
     handleUpdateBoard,
+    handleReorderBoards,
     handleDeleteBoard,
     confirmDeleteBoard,
     boardToDelete,

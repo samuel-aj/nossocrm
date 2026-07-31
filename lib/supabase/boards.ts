@@ -218,6 +218,7 @@ const transformBoard = (db: DbBoard, stages: DbBoardStage[]): Board => {
       .filter(s => s.board_id === db.id)
       .sort((a, b) => a.order - b.order)
       .map(transformStage),
+    position: typeof db.position === 'number' ? db.position : 0,
     createdAt: db.created_at,
   };
 };
@@ -582,6 +583,7 @@ export const boardsService = {
       if (updates.hiddenFieldGroups !== undefined) {
         dbUpdates.hidden_field_groups = updates.hiddenFieldGroups?.length ? updates.hiddenFieldGroups : null;
       }
+      if (updates.position !== undefined) dbUpdates.position = updates.position;
 
 
       if (updates.goal !== undefined) {
@@ -684,6 +686,33 @@ export const boardsService = {
         }
       }
 
+      return { error: null };
+    } catch (e) {
+      return { error: e as Error };
+    }
+  },
+
+  /**
+   * Persiste a nova ordem das pipelines: grava position = índice na lista
+   * recebida (escopado à org, boards fora da lista ficam como estão).
+   */
+  async reorder(orderedIds: string[]): Promise<{ error: Error | null }> {
+    try {
+      if (!supabase) return { error: new Error('Supabase não configurado') };
+      const orgId = await getCurrentOrganizationId();
+      if (!orgId) return { error: new Error('Organização não identificada. Recarregue a página e tente novamente.') };
+
+      const results = await Promise.all(
+        orderedIds.map((boardId, index) =>
+          supabase
+            .from('boards')
+            .update({ position: index, updated_at: new Date().toISOString() })
+            .eq('id', boardId)
+            .eq('organization_id', orgId)
+        )
+      );
+      const failed = results.find(r => r.error);
+      if (failed?.error) return { error: failed.error };
       return { error: null };
     } catch (e) {
       return { error: e as Error };

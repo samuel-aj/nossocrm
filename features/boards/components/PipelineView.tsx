@@ -87,6 +87,7 @@ interface PipelineViewProps {
   updateBoardAsync?: (id: string, updates: Partial<Board>) => Promise<void>;
   handleEditBoard: (board: Board) => void;
   handleUpdateBoard: (board: Omit<Board, 'id' | 'createdAt'>) => void;
+  handleReorderBoards: (orderedIds: string[]) => void;
   handleDeleteBoard: (id: string) => void;
   confirmDeleteBoard: () => void;
   boardToDelete: { id: string; name: string; dealCount: number; targetBoardId?: string } | null;
@@ -193,6 +194,7 @@ interface PipelineViewProps {
   updateBoardAsync,
   handleEditBoard,
   handleUpdateBoard,
+  handleReorderBoards,
   handleDeleteBoard,
   confirmDeleteBoard,
   boardToDelete,
@@ -245,6 +247,7 @@ interface PipelineViewProps {
   updateBoardAsync,
   handleEditBoard,
   handleUpdateBoard,
+  handleReorderBoards,
   handleDeleteBoard,
   confirmDeleteBoard,
   boardToDelete,
@@ -331,6 +334,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   updateBoardAsync,
   handleEditBoard,
   handleUpdateBoard,
+  handleReorderBoards,
   handleDeleteBoard,
   confirmDeleteBoard,
   boardToDelete,
@@ -485,6 +489,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
             onCreateBoard={() => setIsWizardOpen(true)}
             onEditBoard={handleEditBoard}
             onDeleteBoard={handleDeleteBoard}
+            onReorderBoards={handleReorderBoards}
             onExportTemplates={isAdmin ? () => setIsExportModalOpen(true) : undefined}
             viewMode={viewMode}
             setViewMode={setViewMode}

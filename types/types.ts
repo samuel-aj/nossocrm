@@ -345,6 +345,8 @@ export interface Board {
   automationSuggestions?: string[]; // Sugestões de automação da IA
   /** Grupos de campos personalizados OCULTOS no card dos deals deste board (por nome). */
   hiddenFieldGroups?: string[];
+  /** Ordem da pipeline no menu (0 = primeira); reordenável por arrastar. */
+  position?: number;
 
   // AI Strategy Fields
   goal?: BoardGoal;

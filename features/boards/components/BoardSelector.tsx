@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronDown, Plus, Settings, Trash2 } from 'lucide-react';
+import { ChevronDown, GripVertical, Plus, Settings, Trash2 } from 'lucide-react';
 import { Board } from '@/types';
 
 interface BoardSelectorProps {
@@ -9,6 +9,8 @@ interface BoardSelectorProps {
   onCreateBoard: () => void;
   onEditBoard?: (board: Board) => void;
   onDeleteBoard?: (id: string) => void;
+  /** Arrastar pra reordenar as pipelines: recebe TODOS os ids na nova ordem. */
+  onReorderBoards?: (orderedIds: string[]) => void;
 }
 
 /**
@@ -38,8 +40,23 @@ export const BoardSelector: React.FC<BoardSelectorProps> = ({
   onCreateBoard,
   onEditBoard,
   onDeleteBoard,
+  onReorderBoards,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  // Drag & drop nativo (mesmo padrão do reorder de etapas no CreateBoardModal)
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const canReorder = !!onReorderBoards && boards.length > 1;
+
+  const moveBoard = (fromId: string, toId: string) => {
+    if (!onReorderBoards || fromId === toId) return;
+    const ids = boards.map(b => b.id);
+    const from = ids.indexOf(fromId);
+    const to = ids.indexOf(toId);
+    if (from < 0 || to < 0) return;
+    ids.splice(to, 0, ids.splice(from, 1)[0]);
+    onReorderBoards(ids);
+  };
 
   return (
     <div className="relative">
@@ -68,13 +85,49 @@ export const BoardSelector: React.FC<BoardSelectorProps> = ({
               {boards.map(board => (
                 <div
                   key={board.id}
-                  className={`group flex items-center gap-3 px-4 py-3 transition-colors cursor-pointer ${
+                  className={`group flex items-center gap-3 py-3 transition-colors cursor-pointer ${
+                    canReorder ? 'pl-1.5 pr-4' : 'px-4'
+                  } ${
                     board.id === activeBoard.id
                       ? 'bg-primary-50 dark:bg-primary-500/10'
                       : 'hover:bg-slate-50 dark:hover:bg-white/5'
-                  }`}
+                  } ${
+                    dragOverId === board.id && draggingId && draggingId !== board.id
+                      ? 'border-t-2 border-primary-400'
+                      : 'border-t-2 border-transparent'
+                  } ${draggingId === board.id ? 'opacity-50' : ''}`}
                   onClick={() => { onSelectBoard(board.id); setIsOpen(false); }}
+                  onDragOver={canReorder ? (e) => { e.preventDefault(); setDragOverId(board.id); } : undefined}
+                  onDragLeave={canReorder ? () => setDragOverId(cur => (cur === board.id ? null : cur)) : undefined}
+                  onDrop={
+                    canReorder
+                      ? (e) => {
+                          e.preventDefault();
+                          const fromId = e.dataTransfer.getData('text/board-id');
+                          if (fromId) moveBoard(fromId, board.id);
+                          setDraggingId(null);
+                          setDragOverId(null);
+                        }
+                      : undefined
+                  }
                 >
+                  {canReorder && (
+                    <span
+                      draggable
+                      onClick={(e) => e.stopPropagation()}
+                      onDragStart={(e) => {
+                        e.stopPropagation();
+                        e.dataTransfer.setData('text/board-id', board.id);
+                        e.dataTransfer.effectAllowed = 'move';
+                        setDraggingId(board.id);
+                      }}
+                      onDragEnd={() => { setDraggingId(null); setDragOverId(null); }}
+                      className="p-1 -mr-1 text-slate-300 dark:text-slate-600 opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing transition-opacity"
+                      title="Arrastar pra reordenar"
+                    >
+                      <GripVertical size={14} />
+                    </span>
+                  )}
                   <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
                     board.id === activeBoard.id ? 'bg-primary-500' : 'bg-slate-300 dark:bg-slate-600'
                   }`} />
