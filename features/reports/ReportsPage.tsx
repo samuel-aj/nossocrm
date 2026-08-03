@@ -399,9 +399,11 @@ const ReportsPage: React.FC = () => {
               Leads Perdidos
             </h2>
             {(() => {
-              const qualified = lostDeals.filter(d => d.lossCategory === 'qualified' || (!d.lossCategory && d.lossReason));
+              // Sem categoria gravada (perdas antigas) = "Sem classificação";
+              // não dá pra afirmar que era qualificado só por ter motivo
+              const qualified = lostDeals.filter(d => d.lossCategory === 'qualified');
               const disqualified = lostDeals.filter(d => d.lossCategory === 'disqualified');
-              const noCategory = lostDeals.filter(d => !d.lossCategory && !d.lossReason);
+              const noCategory = lostDeals.filter(d => !d.lossCategory);
               return (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between p-3 rounded-lg bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-500/20">
@@ -445,8 +447,10 @@ const ReportsPage: React.FC = () => {
                 const reason = deal.lossReason || 'Não informado';
                 const entry = reasonMap.get(reason) || { count: 0, qualified: 0, disqualified: 0 };
                 entry.count++;
+                // Sem categoria (perda antiga) não pontua em nenhum dos dois:
+                // o motivo fica sem etiqueta em vez de virar QUALIF. por engano
                 if (deal.lossCategory === 'disqualified') entry.disqualified++;
-                else entry.qualified++;
+                else if (deal.lossCategory === 'qualified') entry.qualified++;
                 reasonMap.set(reason, entry);
               }
               const sorted = [...reasonMap.entries()].sort((a, b) => b[1].count - a[1].count);
