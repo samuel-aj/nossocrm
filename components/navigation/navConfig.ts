@@ -14,6 +14,7 @@ import {
   MessageCircle,
   FileText,
   QrCode,
+  Shield,
 } from 'lucide-react';
 
 export type PrimaryNavId = 'inbox' | 'boards' | 'contacts' | 'activities' | 'more';
@@ -43,6 +44,7 @@ export type SecondaryNavId =
   | 'suggestions'
   | 'tutorial'
   | 'settings'
+  | 'admin'
   | 'profile';
 
 export interface SecondaryNavItem {
@@ -54,6 +56,8 @@ export interface SecondaryNavItem {
   badge?: string;
   /** Se true, o item só aparece para admin/super_admin. */
   adminOnly?: boolean;
+  /** Se true, o item só aparece para super_admin. */
+  superAdminOnly?: boolean;
 }
 
 /** Mirrors non-primary destinations available in the desktop sidebar/user menu. */
@@ -66,5 +70,6 @@ export const SECONDARY_NAV: SecondaryNavItem[] = [
   { id: 'settings', label: 'Configurações', href: '/settings', icon: Settings },
   { id: 'suggestions', label: 'Sugestões', href: '/suggestions', icon: Lightbulb },
   { id: 'tutorial', label: 'Tutorial', href: '/tutorial', icon: GraduationCap },
+  { id: 'admin', label: 'Super Admin', href: '/admin', icon: Shield, superAdminOnly: true },
   { id: 'profile', label: 'Perfil', href: '/profile', icon: User },
 ];

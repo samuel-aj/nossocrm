@@ -13,10 +13,13 @@ export interface MoreMenuSheetProps {
 export function MoreMenuSheet({ isOpen, onClose }: MoreMenuSheetProps) {
   const { profile } = useAuth();
   const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
+  const isSuperAdmin = profile?.role === 'super_admin';
   return (
     <ActionSheet isOpen={isOpen} onClose={onClose} title="Mais" description="Acesse outras áreas do CRM">
       <div className="space-y-2">
-        {SECONDARY_NAV.filter((item) => !item.adminOnly || isAdmin).map((item) => {
+        {SECONDARY_NAV.filter(
+          (item) => (!item.adminOnly || isAdmin) && (!item.superAdminOnly || isSuperAdmin)
+        ).map((item) => {
           const Icon = item.icon;
           return (
             <Link
