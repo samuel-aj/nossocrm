@@ -208,6 +208,32 @@ export const useDashboardMetrics = (period: PeriodFilter = 'this_month', boardId
     });
   }, [allDeals, previousDateRange, boardId, ownerId]);
 
+  // FECHADOS no período: filtra pela data de FECHAMENTO (closedAt),
+  // independente de quando o lead foi criado. É o que se espera de
+  // "Ganhos/Perdas deste mês": perder um lead antigo hoje conta HOJE.
+  // Fechamentos antigos sem closedAt usam updatedAt como aproximação.
+  const closedDeals = React.useMemo(() => {
+    return allDeals.filter(deal => {
+      if (!deal.isWon && !deal.isLost) return false;
+      const boardMatch = boardId ? deal.boardId === boardId : true;
+      const ownerMatch = ownerId ? deal.ownerId === ownerId : true;
+      if (!boardMatch || !ownerMatch) return false;
+      const closeDate = new Date(deal.closedAt || deal.updatedAt);
+      return closeDate >= dateRange.start && closeDate <= dateRange.end;
+    });
+  }, [allDeals, dateRange, boardId, ownerId]);
+
+  const previousClosedDeals = React.useMemo(() => {
+    return allDeals.filter(deal => {
+      if (!deal.isWon && !deal.isLost) return false;
+      const boardMatch = boardId ? deal.boardId === boardId : true;
+      const ownerMatch = ownerId ? deal.ownerId === ownerId : true;
+      if (!boardMatch || !ownerMatch) return false;
+      const closeDate = new Date(deal.closedAt || deal.updatedAt);
+      return closeDate >= previousDateRange.start && closeDate <= previousDateRange.end;
+    });
+  }, [allDeals, previousDateRange, boardId, ownerId]);
+
   // Filtrar contacts por período atual
   const contacts = React.useMemo(() => {
     return allContacts.filter(contact => {
@@ -229,22 +255,23 @@ export const useDashboardMetrics = (period: PeriodFilter = 'this_month', boardId
   // Total Value -> Valor total de novos negócios no período
   const totalValue = deals.reduce((acc, deal) => acc + deal.value, 0);
 
-  // Won Deals -> Negócios ganhos que foram criados neste período (Cohort View)
-  // TODO: Em um futuro refactor, talvez o usuário queira "Ganhos neste mês" independente de criação.
-  // Por enquanto, mantemos a consistência com "deals" que é filtrado por criação.
-  const wonDeals = deals.filter(d => d.isWon);
-  const lostDeals = deals.filter(d => d.isLost);
+  // Won/Lost -> FECHADOS no período (pela data de fechamento, closedDeals)
+  const wonDeals = closedDeals.filter(d => d.isWon);
+  const lostDeals = closedDeals.filter(d => d.isLost);
 
   // Pipeline Value -> Valor total em aberto HOJE (Snapshot)
   const pipelineValue = activeSnapshotDeals.reduce((acc, l) => acc + l.value, 0);
 
   const wonRevenue = wonDeals.reduce((acc, l) => acc + l.value, 0);
 
-  // Win Rate do período
-  const winRate = deals.length > 0 ? (wonDeals.length / deals.length) * 100 : 0;
+  // Conversão do COHORT: dos leads CRIADOS no período, % que já foram ganhos
+  // (separado de wonDeals, que é por fechamento; misturar as bases podia
+  // passar de 100%)
+  const cohortWonCount = deals.filter(d => d.isWon).length;
+  const winRate = deals.length > 0 ? (cohortWonCount / deals.length) * 100 : 0;
 
-  // Métricas do período anterior
-  const previousWonDeals = previousDeals.filter(d => d.isWon);
+  // Métricas do período anterior (fechados no período anterior)
+  const previousWonDeals = previousClosedDeals.filter(d => d.isWon);
 
   // Para comparação do Pipeline Value, precisamos do snapshot anterior... 
   // O que é difícil calcular precisamente sem histórico.
@@ -260,8 +287,10 @@ export const useDashboardMetrics = (period: PeriodFilter = 'this_month', boardId
   const currentPipelineValueProxy = activeDealsInPeriod.reduce((acc, l) => acc + l.value, 0);
 
   const previousWonRevenue = previousWonDeals.reduce((acc, l) => acc + l.value, 0);
+  // Conversão do cohort anterior (mesma base da winRate atual)
+  const previousCohortWonCount = previousDeals.filter(d => d.isWon).length;
   const previousWinRate = previousDeals.length > 0
-    ? (previousWonDeals.length / previousDeals.length) * 100
+    ? (previousCohortWonCount / previousDeals.length) * 100
     : 0;
 
   // Calcular variações percentuais
