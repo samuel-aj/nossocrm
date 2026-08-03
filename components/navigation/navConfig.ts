@@ -58,6 +58,8 @@ export interface SecondaryNavItem {
   adminOnly?: boolean;
   /** Se true, o item só aparece para super_admin. */
   superAdminOnly?: boolean;
+  /** Cor própria do ícone (ex.: roxo do Super Admin). */
+  iconClassName?: string;
 }
 
 /** Mirrors non-primary destinations available in the desktop sidebar/user menu. */
@@ -70,6 +72,8 @@ export const SECONDARY_NAV: SecondaryNavItem[] = [
   { id: 'settings', label: 'Configurações', href: '/settings', icon: Settings },
   { id: 'suggestions', label: 'Sugestões', href: '/suggestions', icon: Lightbulb },
   { id: 'tutorial', label: 'Tutorial', href: '/tutorial', icon: GraduationCap },
-  { id: 'admin', label: 'Super Admin', href: '/admin', icon: Shield, superAdminOnly: true },
+  // Fim do menu, nesta ordem: Perfil, Super Admin (roxo) e o Sair (renderizado
+  // pelos componentes logo depois da lista)
   { id: 'profile', label: 'Perfil', href: '/profile', icon: User },
+  { id: 'admin', label: 'Super Admin', href: '/admin', icon: Shield, superAdminOnly: true, iconClassName: 'text-purple-500' },
 ];

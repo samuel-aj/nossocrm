@@ -88,7 +88,7 @@ export function NavigationRail({ onOpenMore }: NavigationRailProps) {
                 title={item.label}
                 aria-label={item.label}
               >
-                <Icon className={cn('h-5 w-5', isActive ? 'text-primary-500' : '')} aria-hidden="true" />
+                <Icon className={cn('h-5 w-5', isActive ? 'text-primary-500' : item.iconClassName ?? '')} aria-hidden="true" />
                 {item.badge && (
                   <span className="absolute right-2.5 top-2 h-2 w-2 rounded-full bg-primary-500" aria-hidden="true" />
                 )}
