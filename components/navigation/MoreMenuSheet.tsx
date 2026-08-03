@@ -1,5 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
+import { LogOut } from 'lucide-react';
 import { ActionSheet } from '@/components/ui/ActionSheet';
 import { cn } from '@/lib/utils/cn';
 import { useAuth } from '@/context/AuthContext';
@@ -11,7 +12,7 @@ export interface MoreMenuSheetProps {
 }
 
 export function MoreMenuSheet({ isOpen, onClose }: MoreMenuSheetProps) {
-  const { profile } = useAuth();
+  const { profile, signOut } = useAuth();
   const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
   const isSuperAdmin = profile?.role === 'super_admin';
   return (
@@ -44,6 +45,25 @@ export function MoreMenuSheet({ isOpen, onClose }: MoreMenuSheetProps) {
             </Link>
           );
         })}
+
+        {/* Sair da conta: a portinha vermelha, sempre por último */}
+        <button
+          type="button"
+          onClick={() => {
+            onClose();
+            signOut();
+          }}
+          className={cn(
+            'w-full flex items-center gap-3 rounded-xl border border-red-200 dark:border-red-500/30',
+            'bg-white dark:bg-dark-card',
+            'px-3 py-3 text-sm font-medium',
+            'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10',
+            'focus-visible-ring'
+          )}
+        >
+          <LogOut className="h-5 w-5" aria-hidden="true" />
+          <span className="font-display tracking-wide">Sair da conta</span>
+        </button>
       </div>
     </ActionSheet>
   );

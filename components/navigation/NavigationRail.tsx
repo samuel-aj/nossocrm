@@ -1,6 +1,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { LogOut } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import { PRIMARY_NAV, SECONDARY_NAV } from './navConfig';
 import { useAuth } from '@/context/AuthContext';
@@ -12,7 +13,7 @@ export interface NavigationRailProps {
 
 export function NavigationRail({ onOpenMore }: NavigationRailProps) {
   const pathname = usePathname();
-  const { profile } = useAuth();
+  const { profile, signOut } = useAuth();
   const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
   const isSuperAdmin = profile?.role === 'super_admin';
   const officeName = profile?.organization_name || 'NossoCRM';
@@ -97,7 +98,18 @@ export function NavigationRail({ onOpenMore }: NavigationRailProps) {
         </div>
       </div>
 
-      <div className="px-3 pb-4" />
+      {/* Sair da conta: a portinha vermelha, sempre no pé do rail */}
+      <div className="px-3 pb-4">
+        <button
+          type="button"
+          onClick={() => signOut()}
+          className="w-full h-12 rounded-xl flex items-center justify-center text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors focus-visible-ring"
+          title="Sair da conta"
+          aria-label="Sair da conta"
+        >
+          <LogOut className="h-5 w-5" aria-hidden="true" />
+        </button>
+      </div>
     </nav>
   );
 }
