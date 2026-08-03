@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Sparkles, Loader2, Send, MessageSquare, LayoutTemplate, AlertCircle, Settings, Plus } from 'lucide-react';
+import { X, Sparkles, Loader2, Send, MessageSquare, LayoutTemplate, AlertCircle, Settings, Plus, Copy } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { BOARD_TEMPLATES, BoardTemplateType } from '@/lib/templates/board-templates';
 import {
@@ -27,9 +27,11 @@ interface BoardCreationWizardProps {
   /** Async update used to set nextBoardId after all boards are created. */
   onUpdateBoardAsync?: (id: string, updates: Partial<Board>) => Promise<void>;
   onOpenCustomModal: () => void;
+  /** Boards existentes da org, pra opção "Clonar um board existente". */
+  boards?: Board[];
 }
 
-type WizardStep = 'select' | 'ai-input' | 'ai-preview' | 'playbook-preview';
+type WizardStep = 'select' | 'clone-select' | 'ai-input' | 'ai-preview' | 'playbook-preview';
 type SelectMode = 'home' | 'browse';
 type SelectBrowseFocus = 'playbooks' | 'templates' | 'community';
 
@@ -119,11 +121,10 @@ export const BoardCreationWizard: React.FC<BoardCreationWizardProps> = ({
   onCreateBoardAsync,
   onUpdateBoardAsync,
   onOpenCustomModal,
+  boards = [],
 }) => {
   const router = useRouter();
-  const [step, setStep] = useState<'select' | 'ai-input' | 'ai-preview' | 'playbook-preview'>(
-    'select'
-  );
+  const [step, setStep] = useState<WizardStep>('select');
   const [selectedPlaybookId, setSelectedPlaybookId] = useState<string | null>(null);
   // Optional journey flags (shown before installing certain journeys)
   const [includeSubscriptionRenewals, setIncludeSubscriptionRenewals] = useState(false);
@@ -323,6 +324,62 @@ export const BoardCreationWizard: React.FC<BoardCreationWizardProps> = ({
         });
     } else {
       // Fallback: fire-and-forget (no progress overlay available)
+      onCreate(payload);
+      onClose();
+      handleReset();
+    }
+  };
+
+  // Clona a ESTRUTURA de um board existente (etapas, ganho/perda, estratégia,
+  // grupos ocultos). Leads NÃO vêm junto; o slug (key) fica vazio por ser único.
+  const handleCloneBoard = (source: Board) => {
+    const idMap = new Map(source.stages.map(s => [s.id, crypto.randomUUID()]));
+    const boardStages: BoardStage[] = source.stages.map(s => ({
+      id: idMap.get(s.id)!,
+      label: s.label,
+      color: s.color,
+      linkedLifecycleStage: s.linkedLifecycleStage,
+    }));
+
+    if (onCreateBoardAsync) {
+      setIsInstalling(true);
+      setInstallProgress({ total: 1, current: 1, currentBoardName: `Cópia de ${source.name}` });
+    }
+
+    const payload: Omit<Board, 'id' | 'createdAt'> = {
+      name: `Cópia de ${source.name}`,
+      description: source.description,
+      template: source.template,
+      linkedLifecycleStage: source.linkedLifecycleStage,
+      nextBoardId: source.nextBoardId,
+      stages: boardStages,
+      isDefault: false,
+      wonStageId: (source.wonStageId ? idMap.get(source.wonStageId) ?? null : null) as any,
+      lostStageId: (source.lostStageId ? idMap.get(source.lostStageId) ?? null : null) as any,
+      wonStayInStage: source.wonStayInStage,
+      lostStayInStage: source.lostStayInStage,
+      defaultProductId: source.defaultProductId,
+      hiddenFieldGroups: source.hiddenFieldGroups,
+      goal: source.goal,
+      agentPersona: source.agentPersona,
+      entryTrigger: source.entryTrigger,
+    };
+
+    if (onCreateBoardAsync) {
+      onCreateBoardAsync(payload)
+        .then(() => {
+          onClose();
+          handleReset();
+        })
+        .catch((err) => {
+          console.error('[BoardCreationWizard] Falha ao clonar board:', err);
+          setError('Erro ao clonar o board.');
+        })
+        .finally(() => {
+          setIsInstalling(false);
+          setInstallProgress(null);
+        });
+    } else {
       onCreate(payload);
       onClose();
       handleReset();
@@ -977,6 +1034,55 @@ export const BoardCreationWizard: React.FC<BoardCreationWizardProps> = ({
           <div
             className={`flex-1 overflow-y-auto custom-scrollbar ${isSelectHome ? 'p-4 sm:p-4' : 'p-4 sm:p-6'} ${isChatMode ? 'bg-slate-100 dark:bg-black/20' : ''}`}
           >
+            {/* Clonar board existente: escolha da origem (clicar já clona) */}
+            {step === 'clone-select' && (
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setStep('select')}
+                    className="px-3 py-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors font-medium"
+                  >
+                    ← Voltar
+                  </button>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                      Qual board você quer clonar?
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      A cópia vem com as etapas e configurações. Os leads não são copiados.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  {boards.map(b => (
+                    <button
+                      key={b.id}
+                      onClick={() => handleCloneBoard(b)}
+                      disabled={isInstalling}
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card hover:border-primary-500/50 dark:hover:border-primary-500/50 transition-all text-left disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-white/5 flex items-center justify-center shrink-0">
+                          <Copy className="w-4 h-4 text-slate-700 dark:text-slate-200" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-semibold text-slate-900 dark:text-white truncate">{b.name}</div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                            {b.stages.length} etapa{b.stages.length === 1 ? '' : 's'}
+                            {b.description ? ` · ${b.description}` : ''}
+                          </div>
+                        </div>
+                        <span className="shrink-0 text-[11px] font-bold text-primary-600 dark:text-primary-400">
+                          Clonar
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {step === 'select' && (
               <div className="space-y-6">
                 {selectMode === 'home' ? (
@@ -1057,6 +1163,27 @@ export const BoardCreationWizard: React.FC<BoardCreationWizardProps> = ({
                           </div>
                         </div>
                       </button>
+
+                      {boards.length > 0 && (
+                        <button
+                          onClick={() => setStep('clone-select')}
+                          className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card hover:border-primary-500/50 dark:hover:border-primary-500/50 transition-all text-left"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-white/5 flex items-center justify-center">
+                              <Copy className="w-4 h-4 text-slate-700 dark:text-slate-200" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-semibold text-slate-900 dark:text-white">
+                                Clonar um board existente
+                              </div>
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                Copia as etapas e configurações pra você só ajustar.
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      )}
 
                       <button
                         onClick={() => {

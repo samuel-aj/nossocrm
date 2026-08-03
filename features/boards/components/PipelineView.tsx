@@ -642,6 +642,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
         onCreateBoardAsync={createBoardAsync}
         onUpdateBoardAsync={updateBoardAsync}
         onOpenCustomModal={() => setIsCreateBoardModalOpen(true)}
+        boards={boards}
       />
 
       <DeleteBoardModal
