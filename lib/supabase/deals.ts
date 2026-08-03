@@ -90,6 +90,8 @@ export interface DbDeal {
   ai_summary: string | null;
   /** Motivo da perda, se aplicável. */
   loss_reason: string | null;
+  /** Lead qualificado ou desqualificado quando perdido ('qualified' | 'disqualified'). */
+  loss_category: string | null;
   /** Tags associadas. */
   tags: string[];
   /** Data da última mudança de estágio. */
@@ -166,6 +168,7 @@ const transformDeal = (db: DbDeal, items: DbDealItem[]): Deal => {
     description: db.description || undefined,
     aiSummary: db.ai_summary || undefined,
     lossReason: db.loss_reason || undefined,
+    lossCategory: (db.loss_category as Deal['lossCategory']) || undefined,
     tags: db.tags || [],
     lastStageChangeDate: db.last_stage_change_date || undefined,
     customFields: db.custom_fields || {},
@@ -221,6 +224,7 @@ const transformDealToDb = (deal: Partial<Deal>): Partial<DbDeal> => {
   if (deal.description !== undefined) db.description = deal.description || null;
   if (deal.aiSummary !== undefined) db.ai_summary = deal.aiSummary || null;
   if (deal.lossReason !== undefined) db.loss_reason = deal.lossReason || null;
+  if (deal.lossCategory !== undefined) db.loss_category = deal.lossCategory || null;
   if (deal.tags !== undefined) db.tags = deal.tags;
   if (deal.lastStageChangeDate !== undefined) db.last_stage_change_date = deal.lastStageChangeDate || null;
   if (deal.customFields !== undefined) db.custom_fields = deal.customFields;

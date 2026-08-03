@@ -9,6 +9,8 @@ export const runtime = 'nodejs';
 
 const MarkLostSchema = z.object({
   loss_reason: z.string().optional(),
+  /** Lead era qualificado ou desqualificado ao perder (relatórios) */
+  loss_category: z.enum(['qualified', 'disqualified']).optional(),
 }).strict();
 
 export async function POST(request: Request, ctx: { params: Promise<{ dealId: string }> }) {
@@ -35,6 +37,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ dealId: st
     updated_at: now,
   };
   if (parsed.data.loss_reason !== undefined) updates.loss_reason = normalizeText(parsed.data.loss_reason);
+  if (parsed.data.loss_category !== undefined) updates.loss_category = parsed.data.loss_category;
 
   const { data, error } = await sb
     .from('deals')

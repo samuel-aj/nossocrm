@@ -465,6 +465,10 @@ export function useRealtimeSync(
                 normalizedDeal.lossReason = newData.loss_reason;
                 delete normalizedDeal.loss_reason;
               }
+              if (newData.loss_category !== undefined) {
+                normalizedDeal.lossCategory = newData.loss_category;
+                delete normalizedDeal.loss_category;
+              }
 
               // Atualizar DEALS_VIEW_KEY (Kanban / useDealsView) E queryKeys.deals.lists()
               // (useDeals / DealsContext). Antes, só o primeiro era atualizado, causando

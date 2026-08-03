@@ -149,7 +149,7 @@ interface PipelineViewProps {
   toggleDealSelection: (dealId: string) => void;
   clearDealSelection: () => void;
   toggleStageSelection: (stageId: string) => void;
-  bulkMoveToStage: (stageId: string, lossReason?: string) => void;
+  bulkMoveToStage: (stageId: string, lossReason?: string, lossCategory?: 'qualified' | 'disqualified') => void;
   bulkEditTags: (mode: 'add' | 'remove', tag: string) => void;
   bulkSetCustomField: (key: string, value: string) => void;
   bulkDeleteOpen: boolean;
@@ -175,7 +175,7 @@ interface PipelineViewProps {
     dealTitle: string;
     stageId: string;
   } | null;
-  handleLossReasonConfirm: (reason: string) => void;
+  handleLossReasonConfirm: (reason: string, category: 'qualified' | 'disqualified') => void;
   handleLossReasonClose: () => void;
   boardCreateOverlay?: { title: string; subtitle?: string } | null;
 }
@@ -838,7 +838,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
       <LossReasonModal
         isOpen={!!bulkLossStageId}
         onClose={() => setBulkLossStageId(null)}
-        onConfirm={(reason) => bulkMoveToStage(bulkLossStageId!, reason)}
+        onConfirm={(reason, category) => bulkMoveToStage(bulkLossStageId!, reason, category)}
         dealTitle={`${selectedDealIds.length} negócio(s)`}
       />
 

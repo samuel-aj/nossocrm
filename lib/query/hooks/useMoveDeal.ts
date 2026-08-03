@@ -23,6 +23,8 @@ interface MoveDealParams {
   dealId: string;
   targetStageId: string;
   lossReason?: string;
+  /** Lead era qualificado ou desqualificado quando foi perdido (relatórios) */
+  lossCategory?: 'qualified' | 'disqualified';
   // Context needed for automations
   deal: Deal | DealView;
   board: Board;
@@ -52,7 +54,7 @@ export const useMoveDeal = () => {
   const queryClient = useQueryClient();
 
   return useMutation<MoveDealResult, Error, MoveDealParams, MoveDealContext>({
-    mutationFn: async ({ dealId, targetStageId, lossReason, deal, board, lifecycleStages, explicitWin, explicitLost }) => {
+    mutationFn: async ({ dealId, targetStageId, lossReason, lossCategory, deal, board, lifecycleStages, explicitWin, explicitLost }) => {
       const targetStage = board.stages.find(s => s.id === targetStageId);
 
       // Determine isWon/isLost based on params OR linkedLifecycleStage
@@ -100,6 +102,7 @@ export const useMoveDeal = () => {
         status: targetStageId,
         lastStageChangeDate: new Date().toISOString(),
         ...(lossReason && { lossReason }),
+        ...(lossCategory && { lossCategory }),
         ...(isWon !== undefined && { isWon }),
         ...(isLost !== undefined && { isLost }),
         ...(closedAt !== undefined && { closedAt: closedAt as string }),

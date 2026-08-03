@@ -681,7 +681,7 @@ export const useBoardsController = () => {
 
   // Mover todos os selecionados p/ uma etapa. Etapa de perda SEM motivo →
   // guarda a etapa e a UI abre o modal de motivo (uma vez p/ todos).
-  const bulkMoveToStage = (stageId: string, lossReason?: string) => {
+  const bulkMoveToStage = (stageId: string, lossReason?: string, lossCategory?: 'qualified' | 'disqualified') => {
     if (!activeBoard) return;
     const targetStage = activeBoard.stages.find(s => s.id === stageId);
     if (targetStage?.linkedLifecycleStage === 'OTHER' && !lossReason) {
@@ -696,6 +696,7 @@ export const useBoardsController = () => {
         dealId,
         targetStageId: stageId,
         ...(lossReason ? { lossReason } : {}),
+        ...(lossCategory ? { lossCategory } : {}),
         deal,
         board: activeBoard,
         lifecycleStages,
@@ -853,8 +854,8 @@ export const useBoardsController = () => {
     setDraggingId(null);
   };
 
-  // Handler for loss reason modal confirmation
-  const handleLossReasonConfirm = (reason: string) => {
+  // Handler for loss reason modal confirmation (motivo + qualificado ou não)
+  const handleLossReasonConfirm = (reason: string, category: 'qualified' | 'disqualified') => {
     if (lossReasonModal && activeBoard) {
       const deal = deals.find(d => d.id === lossReasonModal.dealId);
       if (deal) {
@@ -862,6 +863,7 @@ export const useBoardsController = () => {
           dealId: lossReasonModal.dealId,
           targetStageId: lossReasonModal.stageId,
           lossReason: reason,
+          lossCategory: category,
           deal,
           board: activeBoard,
           lifecycleStages,
