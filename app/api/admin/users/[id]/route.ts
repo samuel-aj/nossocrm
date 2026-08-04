@@ -52,7 +52,9 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
   if (target.organization_id !== me.organization_id) return json({ error: 'Forbidden' }, 403);
 
   // Try to delete auth user first, but don't block if it fails
-  // (orphaned profiles without auth records should still be removable)
+  // (orphaned profiles without auth records should still be removable).
+  // Com as FKs em ON DELETE SET NULL, os registros do usuário (leads,
+  // atividades, contatos...) ficam SEM responsável em vez de bloquear.
   const { error: authDeleteError } = await admin.auth.admin.deleteUser(id);
 
   // Delete profile regardless — if auth deletion failed, the profile may be orphaned
@@ -61,8 +63,17 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
     .delete()
     .eq('id', id);
 
-  if (authDeleteError && profileDeleteError) {
-    return json({ error: `Falha ao remover: ${authDeleteError.message}` }, 500);
+  // Sucesso REAL = o perfil sumiu (o retorno das duas tentativas pode
+  // enganar: o cascade do auth já pode ter levado o perfil junto)
+  const { data: stillThere } = await admin
+    .from('profiles')
+    .select('id')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (stillThere) {
+    const message = profileDeleteError?.message || authDeleteError?.message || 'motivo desconhecido';
+    return json({ error: `Falha ao remover: ${message}` }, 500);
   }
 
   return json({ ok: true });

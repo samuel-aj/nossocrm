@@ -627,7 +627,7 @@ export const UsersPage: React.FC = () => {
                 title={userToDelete?.status === 'pending' ? 'Cancelar Convite' : 'Remover Usuário'}
                 message={userToDelete?.status === 'pending'
                     ? `Tem certeza que deseja cancelar o convite para ${userToDelete?.email}?`
-                    : `Tem certeza que deseja remover ${userToDelete?.email} da equipe?`
+                    : `Tem certeza que deseja remover ${userToDelete?.email} da equipe? Os leads, contatos e atividades dele ficam sem responsável (nada é apagado).`
                 }
                 confirmText={userToDelete?.status === 'pending' ? 'Cancelar Convite' : 'Remover'}
                 cancelText="Voltar"
