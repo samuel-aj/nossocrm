@@ -19,6 +19,26 @@ const AcceptInviteSchema = z
   .strict();
 
 /**
+ * Procura uma conta de login (auth) pelo email. A API admin não tem busca
+ * direta por email, então pagina o listUsers (limite alto o bastante para
+ * a base atual; para na primeira página incompleta).
+ */
+async function findAuthUserByEmail(
+  admin: ReturnType<typeof createStaticAdminClient>,
+  email: string
+) {
+  const target = email.toLowerCase();
+  for (let page = 1; page <= 20; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
+    if (error || !data?.users?.length) return null;
+    const hit = data.users.find((u) => (u.email || '').toLowerCase() === target);
+    if (hit) return hit;
+    if (data.users.length < 200) return null;
+  }
+  return null;
+}
+
+/**
  * Handler HTTP `POST` deste endpoint (Next.js Route Handler).
  *
  * @param {Request} req - Objeto da requisição.
@@ -60,22 +80,55 @@ export async function POST(req: Request) {
     return json({ error: 'Este convite não é válido para este email' }, 400);
   }
 
-  const { data: authData, error: createError } = await admin.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-    user_metadata: {
-      name: name || email.split('@')[0],
-      organization_id: invite.organization_id,
-      role: invite.role,
-    },
-  });
-
-  if (createError) return json({ error: createError.message }, 400);
-
-  const userId = authData.user.id;
-
   const displayName = name || email.split('@')[0];
+  const userMetadata = {
+    name: displayName,
+    organization_id: invite.organization_id,
+    role: invite.role,
+  };
+
+  // Um usuário removido da equipe fica com a conta de login órfã (o perfil
+  // some, o email continua registrado no auth). Criar de novo falharia com
+  // "email já registrado", então: órfã = reaproveita a conta com a senha
+  // nova; com perfil ativo = conflito real, mensagem clara.
+  let userId: string;
+  const existingAuthUser = await findAuthUserByEmail(admin, email);
+
+  if (existingAuthUser) {
+    const { data: existingProfile } = await admin
+      .from('profiles')
+      .select('id')
+      .eq('id', existingAuthUser.id)
+      .maybeSingle();
+
+    if (existingProfile) {
+      return json(
+        { error: 'Este email já está em uso por uma conta ativa. Entre com esse email ou use outro.' },
+        400
+      );
+    }
+
+    const { error: updateError } = await admin.auth.admin.updateUserById(existingAuthUser.id, {
+      password,
+      email_confirm: true,
+      user_metadata: userMetadata,
+    });
+
+    if (updateError) return json({ error: updateError.message }, 400);
+
+    userId = existingAuthUser.id;
+  } else {
+    const { data: authData, error: createError } = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: userMetadata,
+    });
+
+    if (createError) return json({ error: createError.message }, 400);
+
+    userId = authData.user.id;
+  }
 
   const { error: profileError } = await admin
     .from('profiles')
@@ -93,7 +146,11 @@ export async function POST(req: Request) {
     );
 
   if (profileError) {
-    await admin.auth.admin.deleteUser(userId);
+    // Rollback apenas da conta que ESTE fluxo criou; conta reaproveitada
+    // (órfã pré-existente) fica como estava.
+    if (!existingAuthUser) {
+      await admin.auth.admin.deleteUser(userId);
+    }
     return json({ error: profileError.message }, 400);
   }
 
