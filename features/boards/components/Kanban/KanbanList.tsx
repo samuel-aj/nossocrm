@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { DealView, CustomFieldDefinition, BoardStage } from '@/types';
+import { DealView, CustomFieldDefinition, BoardStage, Board } from '@/types';
+import { computeListTabs, ListTabId } from '@/features/boards/utils/listViewTabs';
 import { ActivityStatusIcon } from './ActivityStatusIcon';
 import { OwnerBadge } from './OwnerBadge';
 import { MoveToStageModal } from '../Modals/MoveToStageModal';
@@ -134,6 +135,8 @@ const KanbanListRow = React.memo(function KanbanListRow({
 
 interface KanbanListProps {
   stages: BoardStage[];
+  /** Board ativo: habilita as abas Todos/Qualificados/SQL da lista. */
+  board?: Board;
   filteredDeals: DealView[];
   customFieldDefinitions: CustomFieldDefinition[];
   setSelectedDealId: (id: string | null) => void;
@@ -172,6 +175,7 @@ interface KanbanListProps {
  */
 export const KanbanList: React.FC<KanbanListProps> = ({
   stages,
+  board,
   filteredDeals,
   customFieldDefinitions,
   setSelectedDealId,
@@ -195,6 +199,30 @@ export const KanbanList: React.FC<KanbanListProps> = ({
     () => computeActivityStatusMap(filteredDeals, activities),
     [filteredDeals, activities]
   );
+
+  // Abas da lista (Todos / Qualificados / SQL): presets de filtro + ordenação
+  // por cima dos filtros já aplicados no header.
+  const [activeTab, setActiveTab] = useState<ListTabId>('todos');
+  const listTabs = useMemo(
+    () => (board ? computeListTabs(filteredDeals, board) : null),
+    [board, filteredDeals]
+  );
+  const tabDeals = listTabs ? listTabs[activeTab] : filteredDeals;
+
+  const tabs: Array<{ id: ListTabId; label: string; count: number }> = listTabs
+    ? [
+        { id: 'todos', label: 'Todos', count: listTabs.todos.length },
+        { id: 'qualificados', label: 'Qualificados', count: listTabs.qualificados.length },
+        { id: 'sql', label: 'SQL', count: listTabs.sql.length },
+      ]
+    : [];
+
+  const emptyMessage =
+    activeTab === 'qualificados' && listTabs && !listTabs.qualifiedStage
+      ? 'Este funil não tem uma etapa "Qualificado". Edite o funil e vincule uma etapa ao estágio MQL.'
+      : activeTab === 'sql' && listTabs && listTabs.sqlStages.length === 0
+        ? 'Este funil não tem etapas de venda depois do "Qualificado".'
+        : 'Nenhum negócio nesta visualização no momento.';
 
   // Performance: callbacks estáveis evitam re-render de subcomponentes memoizados.
   const handleRowClick = useCallback(
@@ -222,8 +250,36 @@ export const KanbanList: React.FC<KanbanListProps> = ({
   );
 
   return (
-    <div className="h-full overflow-hidden glass rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
-      <div className="h-full overflow-auto scrollbar-custom">
+    <div className="h-full overflow-hidden glass rounded-xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col">
+      {tabs.length > 0 && (
+        <div className="flex items-center gap-1 px-3 py-2 border-b border-slate-200 dark:border-white/5 overflow-x-auto">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              aria-pressed={activeTab === tab.id}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors focus-visible-ring ${
+                activeTab === tab.id
+                  ? 'bg-primary-600 text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10'
+              }`}
+            >
+              {tab.label}
+              <span
+                className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                  activeTab === tab.id
+                    ? 'bg-white/20 text-white'
+                    : 'bg-slate-200 text-slate-600 dark:bg-white/10 dark:text-slate-300'
+                }`}
+              >
+                {tab.count}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="flex-1 min-h-0 overflow-auto scrollbar-custom">
         <table className="w-full text-left text-sm border-collapse">
           <thead className="bg-slate-50/80 dark:bg-white/5 border-b border-slate-200 dark:border-white/5 sticky top-0 z-10 backdrop-blur-sm">
             <tr>
@@ -255,7 +311,17 @@ export const KanbanList: React.FC<KanbanListProps> = ({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-white/5">
-            {filteredDeals.map((deal) => (
+            {tabDeals.length === 0 && activeTab !== 'todos' ? (
+              <tr>
+                <td
+                  colSpan={6 + customFieldDefinitions.length}
+                  className="px-6 py-10 text-center text-sm text-slate-500 dark:text-slate-400"
+                >
+                  {emptyMessage}
+                </td>
+              </tr>
+            ) : null}
+            {tabDeals.map((deal) => (
               <KanbanListRow
                 key={deal.id}
                 deal={deal}

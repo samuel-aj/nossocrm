@@ -595,6 +595,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
             ) : (
               <KanbanList
                 stages={activeBoard.stages}
+                board={activeBoard}
                 filteredDeals={filteredDeals}
                 customFieldDefinitions={customFieldDefinitions}
                 setSelectedDealId={setSelectedDealId}
