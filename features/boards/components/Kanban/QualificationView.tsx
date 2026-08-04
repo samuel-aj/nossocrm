@@ -101,7 +101,13 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
   ];
 
   const totalColumns = 6 + customFieldDefinitions.length;
+  // Sem etapa Qualificado no funil (ex.: board de pós-venda) a aba SQL não
+  // tem o que mostrar; o aviso fala de leads, não de configuração de etapas.
   const sqlUnavailable = activeTab === 'sql' && !viewData.qualifiedStage;
+  const emptyMessage =
+    activeTab === 'qualificacao'
+      ? 'Nenhum lead em qualificação neste funil no momento.'
+      : 'Nenhum lead qualificado neste funil no momento.';
   // Com o filtro do header em Ganhos/Perdidos, todo deal é descartado por
   // esta view (que só mostra negócios em aberto) — explica em vez de zerar.
   const closedStatusFilter = statusFilter === 'won' || statusFilter === 'lost';
@@ -143,10 +149,9 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
             esta visualização mostra apenas negócios em aberto. Mude o filtro para{' '}
             <span className="font-bold">Em Aberto</span> para ver a Qualificação e o SQL.
           </div>
-        ) : sqlUnavailable ? (
+        ) : sqlUnavailable || groups.length === 0 ? (
           <div className="px-6 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
-            Este funil não tem uma etapa &quot;Qualificado&quot;. Edite o funil e vincule uma
-            etapa ao estágio MQL para separar os leads qualificados aqui.
+            {emptyMessage}
           </div>
         ) : (
           <table className="w-full text-left text-sm border-collapse">
@@ -230,16 +235,6 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                   </React.Fragment>
                 );
               })}
-              {groups.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={totalColumns}
-                    className="px-6 py-10 text-center text-sm text-slate-500 dark:text-slate-400"
-                  >
-                    Nenhuma etapa nesta visualização neste funil.
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
         )}
