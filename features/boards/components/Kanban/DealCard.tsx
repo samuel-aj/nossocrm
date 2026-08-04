@@ -165,6 +165,10 @@ const DealCardComponent: React.FC<DealCardProps> = ({
     if (shownTags.length > 0) {
       parts.push(...shownTags);
     }
+    const hiddenTagCount = deal.tags.length - shownTags.length;
+    if (hiddenTagCount > 0) {
+      parts.push(`e mais ${hiddenTagCount} tag${hiddenTagCount === 1 ? '' : 's'}`);
+    }
 
     // Main content
     parts.push(deal.title);
@@ -285,6 +289,15 @@ const DealCardComponent: React.FC<DealCardProps> = ({
             {tag}
           </span>
         ))}
+        {/* Indicador de tags que não couberam: passar o mouse lista todas */}
+        {deal.tags.length > (isClosed ? 1 : 2) && (
+          <span
+            title={deal.tags.slice(isClosed ? 1 : 2).join(', ')}
+            className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-white/10 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-white/5"
+          >
+            +{deal.tags.length - (isClosed ? 1 : 2)}
+          </span>
+        )}
       </div>
 
       <h4
