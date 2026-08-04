@@ -287,7 +287,7 @@ export const useBoardsController = () => {
   const customFieldDefinitions: CustomFieldDefinition[] = [];
 
   //View State
-  const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
+  const [viewMode, setViewMode] = useState<'kanban' | 'list' | 'quali'>('kanban');
 
   const [isCreateBoardModalOpen, setIsCreateBoardModalOpen] = useState(false);
   const [isWizardOpen, setIsWizardOpen] = useState(false);
@@ -305,11 +305,17 @@ export const useBoardsController = () => {
 
 
 
-  // Initialize filters from URL
+  // Initialize filters from URL — UMA vez por montagem. Sem o ref, o efeito
+  // re-executava a cada mudança de searchParams (ex.: o espelho de ?deal= ao
+  // abrir um card) e forçava viewMode/statusFilter de volta ao valor da URL,
+  // expulsando o usuário da visualização escolhida.
+  const filtersUrlInitDoneRef = useRef(false);
   useEffect(() => {
+    if (filtersUrlInitDoneRef.current) return;
     if (!searchParams) return;
+    filtersUrlInitDoneRef.current = true;
     const viewParam = searchParams.get('view');
-    if (viewParam === 'list' || viewParam === 'kanban') {
+    if (viewParam === 'list' || viewParam === 'kanban' || viewParam === 'quali') {
       setViewMode(viewParam);
     }
 
