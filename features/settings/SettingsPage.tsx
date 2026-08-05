@@ -3,6 +3,7 @@ import { usePathname } from 'next/navigation';
 import { useSettingsController } from './hooks/useSettingsController';
 import { TagsManager } from './components/TagsManager';
 import { InactiveLeadsSettings } from './components/InactiveLeadsSettings';
+import { LossReasonsSettings } from './components/LossReasonsSettings';
 import { CustomFieldsManager } from './components/CustomFieldsManager';
 import { ApiKeysSection } from './components/ApiKeysSection';
 import { WebhooksSection } from './components/WebhooksSection';
@@ -84,6 +85,8 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ hash, isAdmin }) => {
       {isAdmin && (
         <>
           <InactiveLeadsSettings />
+
+          <LossReasonsSettings />
 
           <TagsManager
             availableTags={controller.availableTags}

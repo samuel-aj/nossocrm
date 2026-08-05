@@ -34,18 +34,50 @@ export async function GET() {
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const sb = createStaticAdminClient();
+  // select('*') com leitura opcional: tolera banco ainda sem as colunas de
+  // motivos (ordem deploy x migração), sem derrubar o GET pra todo mundo.
   const { data, error } = await sb
     .from('organization_settings')
-    .select('inactive_leads_enabled')
+    .select('*')
     .eq('organization_id', auth.profile.organization_id)
     .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ inactive_leads_enabled: !!data?.inactive_leads_enabled });
+  const row = (data ?? {}) as Record<string, unknown>;
+  return NextResponse.json({
+    inactive_leads_enabled: !!row.inactive_leads_enabled,
+    // null = organização usa os motivos padrão do sistema
+    loss_reasons_qualified: (row.loss_reasons_qualified as string[] | null | undefined) ?? null,
+    loss_reasons_disqualified: (row.loss_reasons_disqualified as string[] | null | undefined) ?? null,
+  });
 }
 
+/**
+ * Sanitiza uma lista de motivos: tira duplicatas (sem diferenciar
+ * maiúsculas/acentos de caixa) e o rótulo reservado "Outro", que o modal
+ * sempre acrescenta por conta própria.
+ */
+function sanitizeReasons(reasons: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const reason of reasons) {
+    const key = reason.trim().toLowerCase();
+    if (!key || key === 'outro' || seen.has(key)) continue;
+    seen.add(key);
+    result.push(reason.trim());
+  }
+  return result;
+}
+
+// Lista de motivos: até 20 itens de até 80 caracteres; null = voltar ao padrão.
+const LossReasonsSchema = z
+  .union([z.array(z.string().trim().min(1).max(80)).max(20), z.null()])
+  .optional();
+
 const PatchSchema = z.object({
-  inactive_leads_enabled: z.boolean(),
+  inactive_leads_enabled: z.boolean().optional(),
+  loss_reasons_qualified: LossReasonsSchema,
+  loss_reasons_disqualified: LossReasonsSchema,
 }).strict();
 
 export async function PATCH(req: Request) {
@@ -61,17 +93,34 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: 'Invalid payload' }, { status: 422 });
   }
 
+  // Grava só o que veio no payload; lista vazia equivale a voltar ao padrão.
+  const updates: Record<string, unknown> = {};
+  if (parsed.data.inactive_leads_enabled !== undefined) {
+    updates.inactive_leads_enabled = parsed.data.inactive_leads_enabled;
+  }
+  if (parsed.data.loss_reasons_qualified !== undefined) {
+    const clean = sanitizeReasons(parsed.data.loss_reasons_qualified ?? []);
+    updates.loss_reasons_qualified = clean.length > 0 ? clean : null;
+  }
+  if (parsed.data.loss_reasons_disqualified !== undefined) {
+    const clean = sanitizeReasons(parsed.data.loss_reasons_disqualified ?? []);
+    updates.loss_reasons_disqualified = clean.length > 0 ? clean : null;
+  }
+  if (Object.keys(updates).length === 0) {
+    return NextResponse.json({ error: 'Invalid payload' }, { status: 422 });
+  }
+
   const sb = createStaticAdminClient();
   const { error } = await sb
     .from('organization_settings')
     .upsert(
       {
         organization_id: auth.profile.organization_id,
-        inactive_leads_enabled: parsed.data.inactive_leads_enabled,
+        ...updates,
       },
       { onConflict: 'organization_id' }
     );
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ inactive_leads_enabled: parsed.data.inactive_leads_enabled });
+  return NextResponse.json({ ok: true, ...updates });
 }

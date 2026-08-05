@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useId } from 'react';
-import { X, ThumbsDown, DollarSign, Users, Clock, HelpCircle, UserX, ShieldX, CheckCircle2 } from 'lucide-react';
+import { X, ThumbsDown, DollarSign, Users, Clock, HelpCircle, UserX, ShieldX, CheckCircle2, Tag } from 'lucide-react';
 import { FocusTrap, useFocusReturn } from '@/lib/a11y';
+import { useOrgPreferences } from '@/lib/query/hooks/useOrgPreferences';
 
 interface LossReasonModalProps {
   isOpen: boolean;
@@ -9,21 +10,47 @@ interface LossReasonModalProps {
   dealTitle?: string;
 }
 
-const QUALIFIED_REASONS = [
+type ReasonOption = { label: string; icon: React.ElementType; value: string };
+
+const OTHER_OPTION: ReasonOption = { label: 'Outro', icon: HelpCircle, value: '' };
+
+// Motivos padrão do sistema; a organização pode substituir em
+// Configurações > Motivos de perda (organization_settings.loss_reasons_*).
+export const DEFAULT_QUALIFIED_REASONS: ReasonOption[] = [
   { label: 'Preço', icon: DollarSign, value: 'Preço muito alto' },
   { label: 'Concorrência', icon: Users, value: 'Perdeu para concorrente' },
   { label: 'Timing', icon: Clock, value: 'Momento inadequado' },
   { label: 'Desistência', icon: X, value: 'Cliente desistiu' },
-  { label: 'Outro', icon: HelpCircle, value: '' },
 ];
 
-const DISQUALIFIED_REASONS = [
+export const DEFAULT_DISQUALIFIED_REASONS: ReasonOption[] = [
   { label: 'Sem orçamento', icon: DollarSign, value: 'Sem orçamento disponível' },
   { label: 'Sem perfil', icon: UserX, value: 'Fora do perfil ideal' },
   { label: 'Sem interesse', icon: ShieldX, value: 'Sem interesse real' },
   { label: 'Dados inválidos', icon: X, value: 'Dados de contato inválidos' },
-  { label: 'Outro', icon: HelpCircle, value: '' },
 ];
+
+/**
+ * Lista efetiva: motivos da organização (quando configurados) ou padrão.
+ * Defensivo com dados antigos: descarta duplicatas e o rótulo reservado
+ * "Outro" (o servidor também sanitiza ao salvar).
+ */
+function buildReasonOptions(custom: string[] | null, defaults: ReasonOption[]): ReasonOption[] {
+  let base = defaults;
+  if (custom && custom.length > 0) {
+    const seen = new Set<string>();
+    const clean = custom.filter((value) => {
+      const key = value.trim().toLowerCase();
+      if (!key || key === 'outro' || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    if (clean.length > 0) {
+      base = clean.map((value) => ({ label: value, icon: Tag as React.ElementType, value }));
+    }
+  }
+  return [...base, OTHER_OPTION];
+}
 
 type Step = 'category' | 'reason' | 'custom';
 
@@ -40,6 +67,7 @@ export const LossReasonModal: React.FC<LossReasonModalProps> = ({
   const [category, setCategory] = useState<'qualified' | 'disqualified' | null>(null);
   const [reason, setReason] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const { lossReasonsQualified, lossReasonsDisqualified } = useOrgPreferences();
 
   const generatedId = useId();
   const titleId = `loss-reason-title-${generatedId}`;
@@ -91,7 +119,10 @@ export const LossReasonModal: React.FC<LossReasonModalProps> = ({
     onClose();
   };
 
-  const reasons = category === 'disqualified' ? DISQUALIFIED_REASONS : QUALIFIED_REASONS;
+  const reasons =
+    category === 'disqualified'
+      ? buildReasonOptions(lossReasonsDisqualified, DEFAULT_DISQUALIFIED_REASONS)
+      : buildReasonOptions(lossReasonsQualified, DEFAULT_QUALIFIED_REASONS);
 
   const stepTitle = {
     category: 'Tipo de Perda',
@@ -228,8 +259,8 @@ export const LossReasonModal: React.FC<LossReasonModalProps> = ({
                                  hover:border-red-300 dark:hover:border-red-500/50 hover:bg-red-50 dark:hover:bg-red-900/10
                                  transition-all group text-left focus-visible-ring"
                     >
-                      <item.icon className="w-4 h-4 text-slate-400 group-hover:text-red-500 dark:group-hover:text-red-400 transition-colors" aria-hidden="true" />
-                      <span className="text-sm font-medium text-slate-700 dark:text-slate-300 group-hover:text-red-600 dark:group-hover:text-red-400">
+                      <item.icon className="w-4 h-4 shrink-0 text-slate-400 group-hover:text-red-500 dark:group-hover:text-red-400 transition-colors" aria-hidden="true" />
+                      <span className="min-w-0 break-words text-sm font-medium text-slate-700 dark:text-slate-300 group-hover:text-red-600 dark:group-hover:text-red-400">
                         {item.label}
                       </span>
                     </button>
