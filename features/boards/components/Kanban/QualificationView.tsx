@@ -220,7 +220,14 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                 </tr>
               </thead>
             )}
-            <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+            {/* divide-y só na aba Todos: nas agrupadas os filetes entre as
+                linhas cortavam a faixa colorida e criavam uma barra entre o
+                título do grupo e os leads dele. */}
+            <tbody
+              className={
+                activeTab === 'todos' ? 'divide-y divide-slate-100 dark:divide-white/5' : undefined
+              }
+            >
               {activeTab === 'todos' &&
                 filteredDeals.map((deal) => (
                   <KanbanListRow
@@ -238,13 +245,17 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                     onMoveDealToStage={onMoveDealToStage}
                   />
                 ))}
-              {groups.map((group) => {
+              {groups.map((group, groupIndex) => {
                 const isCollapsed = collapsedStageIds.has(group.stage.id);
                 return (
                   <React.Fragment key={group.stage.id}>
                     {/* Filete na cor da etapa liga o cabeçalho do grupo às
                         linhas dele, deixando claro o que pertence a quem. */}
-                    <tr className="bg-slate-50/80 dark:bg-white/[0.04]">
+                    <tr
+                      className={`bg-slate-50/80 dark:bg-white/[0.04] ${
+                        groupIndex > 0 ? 'border-t border-slate-200/70 dark:border-white/10' : ''
+                      }`}
+                    >
                       <td colSpan={totalColumns} className="relative px-4 py-2.5">
                         <span
                           aria-hidden="true"
