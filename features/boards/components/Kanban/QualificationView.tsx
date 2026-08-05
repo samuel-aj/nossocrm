@@ -170,23 +170,28 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
             {emptyMessage}
           </div>
         ) : (
-          <table className="w-full text-left text-sm border-collapse">
+          <table
+            // table-fixed: larguras definidas pelo cabeçalho, não pelo
+            // conteúdo. Sem isso, abrir/fechar um grupo recalculava as
+            // colunas e os títulos "pulavam" para alinhar às linhas.
+            className="w-full table-fixed text-left text-sm border-collapse"
+          >
             <thead className="bg-slate-50/80 dark:bg-white/5 border-b border-slate-200 dark:border-white/5 sticky top-0 z-10 backdrop-blur-sm">
               <tr>
-                <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider w-10"></th>
-                <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider w-24"></th>
+                <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider w-[24%]">
                   Negócio
                 </th>
-                <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider w-[18%]">
                   Empresa
                 </th>
-                <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider w-[14%]">
                   Estágio
                 </th>
-                <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider w-[12%]">
                   Valor
                 </th>
-                <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider w-[16%]">
                   Dono
                 </th>
                 {/* Custom Fields Columns */}
