@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Search, LayoutGrid, Table as TableIcon, ListChecks, User, Tag, X, Settings, Lightbulb, Download, MoreVertical, CheckSquare, Target } from 'lucide-react';
+import { Plus, Search, LayoutGrid, Table as TableIcon, User, Tag, X, Settings, Lightbulb, Download, MoreVertical, CheckSquare, Target } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Board } from '@/types';
 import { BoardSelector } from '../BoardSelector';
@@ -17,8 +17,8 @@ interface KanbanHeaderProps {
     onReorderBoards?: (orderedIds: string[]) => void;
     onExportTemplates?: () => void;
     // View
-    viewMode: 'kanban' | 'list' | 'quali';
-    setViewMode: (mode: 'kanban' | 'list' | 'quali') => void;
+    viewMode: 'kanban' | 'list';
+    setViewMode: (mode: 'kanban' | 'list') => void;
     searchTerm: string;
     setSearchTerm: (term: string) => void;
     ownerFilter: string;
@@ -415,19 +415,11 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                     <button
                         onClick={() => setViewMode('list')}
                         aria-label="Visualização em lista"
+                        title="Lista (Todos / Qualificação / SQL)"
                         aria-pressed={viewMode === 'list'}
                         className={`p-1.5 rounded-md transition-all ${viewMode === 'list' ? 'bg-white dark:bg-slate-700 shadow-sm text-primary-600 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'}`}
                     >
                         <TableIcon size={16} aria-hidden="true" />
-                    </button>
-                    <button
-                        onClick={() => setViewMode('quali')}
-                        aria-label="Visualização Qualificação e SQL"
-                        title="Qualificação / SQL"
-                        aria-pressed={viewMode === 'quali'}
-                        className={`p-1.5 rounded-md transition-all ${viewMode === 'quali' ? 'bg-white dark:bg-slate-700 shadow-sm text-primary-600 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'}`}
-                    >
-                        <ListChecks size={16} aria-hidden="true" />
                     </button>
                 </div>
 
@@ -523,8 +515,8 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                         <div className="absolute right-0 z-50 mt-1 w-52 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1">
                             {!selectionMode ? (
                                 <>
-                                {/* Seleção múltipla não tem UI na view Qualificação/SQL */}
-                                {viewMode !== 'quali' && (
+                                {/* Seleção múltipla só tem UI (checkboxes) no kanban */}
+                                {viewMode === 'kanban' && (
                                 <button
                                     type="button"
                                     onClick={() => { onEnterSelectionMode(); setMoreMenuOpen(false); }}

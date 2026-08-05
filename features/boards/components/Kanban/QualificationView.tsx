@@ -11,6 +11,9 @@ import { useActivities } from '@/lib/query/hooks/useActivitiesQuery';
 
 type QuickAddType = 'CALL' | 'MEETING' | 'EMAIL';
 
+/** Abas da lista: Todos = lista plana clássica; as outras duas agrupadas. */
+type ListTab = 'todos' | QualificationTab;
+
 interface QualificationViewProps {
   board: Board;
   filteredDeals: DealView[];
@@ -26,9 +29,10 @@ interface QualificationViewProps {
 }
 
 /**
- * Visualização "Qualificação / SQL": divide o funil em duas listas
- * agrupadas por etapa (estilo ClickUp), independente da etapa exata:
- * - Qualificação: leads ainda não qualificados (antes da etapa Qualificado)
+ * Visualização em lista do pipeline, com três abas:
+ * - Todos: a lista plana clássica com todos os deals filtrados
+ * - Qualificação: leads ainda não qualificados (antes da etapa Qualificado),
+ *   agrupados por etapa estilo ClickUp
  * - SQL: do Qualificado em diante, mais avançados primeiro
  */
 export const QualificationView: React.FC<QualificationViewProps> = ({
@@ -42,7 +46,7 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
   handleQuickAddActivity,
   onMoveDealToStage,
 }) => {
-  const [activeTab, setActiveTab] = useState<QualificationTab>('qualificacao');
+  const [activeTab, setActiveTab] = useState<ListTab>('todos');
   // Grupos recolhidos (por id da etapa); todos abertos por padrão.
   const [collapsedStageIds, setCollapsedStageIds] = useState<ReadonlySet<string>>(
     () => new Set<string>()
@@ -52,7 +56,16 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
     () => computeQualificationView(filteredDeals, board),
     [filteredDeals, board]
   );
-  const groups = viewData[activeTab];
+  const groups = activeTab === 'todos' ? [] : viewData[activeTab];
+
+  // Aba Todos: label da etapa por deal, como na lista clássica.
+  const stageLabelById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of board.stages || []) {
+      if (s?.id) map.set(s.id, s.label);
+    }
+    return map;
+  }, [board.stages]);
 
   // Activity status per deal, computed from the shared activities cache.
   const { data: activities = [] } = useActivities();
@@ -95,7 +108,8 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
     [handleQuickAddActivity]
   );
 
-  const tabs: Array<{ id: QualificationTab; label: string; count: number }> = [
+  const tabs: Array<{ id: ListTab; label: string; count: number }> = [
+    { id: 'todos', label: 'Todos', count: filteredDeals.length },
     { id: 'qualificacao', label: 'Qualificação', count: viewData.qualificacaoCount },
     { id: 'sql', label: 'SQL', count: viewData.sqlCount },
   ];
@@ -108,9 +122,11 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
     activeTab === 'qualificacao'
       ? 'Nenhum lead em qualificação neste funil no momento.'
       : 'Nenhum lead qualificado neste funil no momento.';
-  // Com o filtro do header em Ganhos/Perdidos, todo deal é descartado por
-  // esta view (que só mostra negócios em aberto) — explica em vez de zerar.
-  const closedStatusFilter = statusFilter === 'won' || statusFilter === 'lost';
+  // Com o filtro do header em Ganhos/Perdidos, todo deal é descartado pelas
+  // abas Qualificação/SQL (que só mostram negócios em aberto) — explica em
+  // vez de zerar. A aba Todos mostra o que o filtro mandar, como sempre.
+  const showClosedFilterNotice =
+    activeTab !== 'todos' && (statusFilter === 'won' || statusFilter === 'lost');
 
   return (
     <div className="h-full overflow-hidden glass rounded-xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col">
@@ -142,14 +158,14 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
       </div>
 
       <div className="flex-1 min-h-0 overflow-auto scrollbar-custom">
-        {closedStatusFilter ? (
+        {showClosedFilterNotice ? (
           <div className="px-6 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
             O filtro de status está em{' '}
             <span className="font-bold">{statusFilter === 'won' ? 'Ganhos' : 'Perdidos'}</span>, e
-            esta visualização mostra apenas negócios em aberto. Mude o filtro para{' '}
+            estas abas mostram apenas negócios em aberto. Mude o filtro para{' '}
             <span className="font-bold">Em Aberto</span> para ver a Qualificação e o SQL.
           </div>
-        ) : sqlUnavailable || groups.length === 0 ? (
+        ) : activeTab !== 'todos' && (sqlUnavailable || groups.length === 0) ? (
           <div className="px-6 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
             {emptyMessage}
           </div>
@@ -185,6 +201,23 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+              {activeTab === 'todos' &&
+                filteredDeals.map((deal) => (
+                  <KanbanListRow
+                    key={deal.id}
+                    deal={deal}
+                    stageLabel={stageLabelById.get(deal.status) || deal.status}
+                    stages={board.stages}
+                    customFieldDefinitions={customFieldDefinitions}
+                    activityStatus={activityStatusMap.get(deal.id) ?? NO_ACTIVITY_STATUS}
+                    isMenuOpen={openActivityMenuId === deal.id}
+                    onSelect={handleRowClick}
+                    onToggleMenu={handleToggleMenu}
+                    onQuickAdd={handleQuickAdd}
+                    onCloseMenu={handleCloseMenu}
+                    onMoveDealToStage={onMoveDealToStage}
+                  />
+                ))}
               {groups.map((group) => {
                 const isCollapsed = collapsedStageIds.has(group.stage.id);
                 return (

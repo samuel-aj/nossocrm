@@ -286,8 +286,8 @@ export const useBoardsController = () => {
   // Custom field definitions (TODO: migrate to query)
   const customFieldDefinitions: CustomFieldDefinition[] = [];
 
-  //View State
-  const [viewMode, setViewMode] = useState<'kanban' | 'list' | 'quali'>('kanban');
+  //View State — 'list' é a lista com abas Todos / Qualificação / SQL.
+  const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
 
   const [isCreateBoardModalOpen, setIsCreateBoardModalOpen] = useState(false);
   const [isWizardOpen, setIsWizardOpen] = useState(false);
@@ -315,8 +315,11 @@ export const useBoardsController = () => {
     if (!searchParams) return;
     filtersUrlInitDoneRef.current = true;
     const viewParam = searchParams.get('view');
-    if (viewParam === 'list' || viewParam === 'kanban' || viewParam === 'quali') {
+    if (viewParam === 'list' || viewParam === 'kanban') {
       setViewMode(viewParam);
+    } else if (viewParam === 'quali') {
+      // Alias antigo da view Qualificação/SQL, hoje unificada na lista.
+      setViewMode('list');
     }
 
     const statusParam = searchParams.get('status');

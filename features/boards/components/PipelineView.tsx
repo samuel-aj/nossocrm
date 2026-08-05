@@ -6,7 +6,6 @@ import { BoardCreationWizard } from './BoardCreationWizard';
 import { KanbanHeader } from './Kanban/KanbanHeader';
 import { BoardStrategyHeader } from './Kanban/BoardStrategyHeader';
 import { KanbanBoard } from './Kanban/KanbanBoard';
-import { KanbanList } from './Kanban/KanbanList';
 import { QualificationView } from './Kanban/QualificationView';
 import { DeleteBoardModal } from './Modals/DeleteBoardModal';
 import { LossReasonModal } from '@/components/ui/LossReasonModal';
@@ -102,8 +101,8 @@ interface PipelineViewProps {
   editingBoard: Board | null;
   setEditingBoard: (board: Board | null) => void;
   // View
-  viewMode: 'kanban' | 'list' | 'quali';
-  setViewMode: (mode: 'kanban' | 'list' | 'quali') => void;
+  viewMode: 'kanban' | 'list';
+  setViewMode: (mode: 'kanban' | 'list') => void;
   searchTerm: string;
   setSearchTerm: (term: string) => void;
   ownerFilter: string;
@@ -515,8 +514,8 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
           />
 
           {/* Barra de ações da seleção múltipla — no TOPO, estilo Kommo.
-              Oculta na view Qualificação/SQL, que não tem UI de seleção. */}
-          {selectionMode && viewMode !== 'quali' && (
+              Só no kanban, a única view com UI de seleção (checkboxes). */}
+          {selectionMode && viewMode === 'kanban' && (
             <div className="flex items-center gap-4 px-4 py-2 mb-4 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50/80 dark:bg-white/5 backdrop-blur-sm">
               <button
                 type="button"
@@ -594,22 +593,11 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                 setLastMouseDownDealId={setLastMouseDownDealId}
                 onMoveDealToStage={handleMoveDealToStage}
               />
-            ) : viewMode === 'quali' ? (
+            ) : (
               <QualificationView
                 board={activeBoard}
                 filteredDeals={filteredDeals}
                 statusFilter={statusFilter}
-                customFieldDefinitions={customFieldDefinitions}
-                setSelectedDealId={setSelectedDealId}
-                openActivityMenuId={openActivityMenuId}
-                setOpenActivityMenuId={setOpenActivityMenuId}
-                handleQuickAddActivity={handleQuickAddActivity}
-                onMoveDealToStage={handleMoveDealToStage}
-              />
-            ) : (
-              <KanbanList
-                stages={activeBoard.stages}
-                filteredDeals={filteredDeals}
                 customFieldDefinitions={customFieldDefinitions}
                 setSelectedDealId={setSelectedDealId}
                 openActivityMenuId={openActivityMenuId}

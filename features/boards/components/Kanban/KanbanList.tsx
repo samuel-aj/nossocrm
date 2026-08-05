@@ -1,11 +1,9 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { DealView, CustomFieldDefinition, BoardStage } from '@/types';
 import { ActivityStatusIcon } from './ActivityStatusIcon';
 import { OwnerBadge } from './OwnerBadge';
 import { MoveToStageModal } from '../Modals/MoveToStageModal';
 import type { DealActivityStatus } from '@/features/boards/utils/dealActivityStatus';
-import { computeActivityStatusMap } from '@/features/boards/utils/dealActivityStatus';
-import { useActivities } from '@/lib/query/hooks/useActivitiesQuery';
 
 // Shared default for cards with no pending activities — same reference on
 // every render so React.memo on KanbanListRow can skip re-renders.
@@ -28,9 +26,9 @@ type KanbanListRowProps = {
 };
 
 /**
+ * Linha da lista de deals (usada pela QualificationView em todas as abas).
  * Performance: tabela pode ter muitas linhas.
  * `React.memo` + `isMenuOpen` por-linha evita re-render em massa ao alternar o menu.
- * Exportada para reuso na visualização Qualificação/SQL (QualificationView).
  */
 export const KanbanListRow = React.memo(function KanbanListRow({
   deal,
@@ -132,149 +130,3 @@ export const KanbanListRow = React.memo(function KanbanListRow({
     </>
   );
 });
-
-interface KanbanListProps {
-  stages: BoardStage[];
-  filteredDeals: DealView[];
-  customFieldDefinitions: CustomFieldDefinition[];
-  setSelectedDealId: (id: string | null) => void;
-  openActivityMenuId: string | null;
-  setOpenActivityMenuId: (id: string | null) => void;
-  handleQuickAddActivity: (
-    dealId: string,
-    type: 'CALL' | 'MEETING' | 'EMAIL',
-    dealTitle: string
-  ) => void;
-  /** Keyboard-accessible handler to move a deal to a new stage */
-  onMoveDealToStage?: (dealId: string, newStageId: string) => void;
-}
-
-/**
- * Componente React `KanbanList`.
- *
- * @param {KanbanListProps} {
-  stages,
-  filteredDeals,
-  customFieldDefinitions,
-  setSelectedDealId,
-  openActivityMenuId,
-  setOpenActivityMenuId,
-  handleQuickAddActivity,
-} - Parâmetro `{
-  stages,
-  filteredDeals,
-  customFieldDefinitions,
-  setSelectedDealId,
-  openActivityMenuId,
-  setOpenActivityMenuId,
-  handleQuickAddActivity,
-}`.
- * @returns {Element} Retorna um valor do tipo `Element`.
- */
-export const KanbanList: React.FC<KanbanListProps> = ({
-  stages,
-  filteredDeals,
-  customFieldDefinitions,
-  setSelectedDealId,
-  openActivityMenuId,
-  setOpenActivityMenuId,
-  handleQuickAddActivity,
-  onMoveDealToStage,
-}) => {
-  // Performance: evitar `find` por linha (O(N*S)) ao renderizar tabela.
-  const stageLabelById = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const s of stages) {
-      if (s?.id) map.set(s.id, s.label);
-    }
-    return map;
-  }, [stages]);
-
-  // Activity status per deal, computed from the shared activities cache.
-  const { data: activities = [] } = useActivities();
-  const activityStatusMap = useMemo(
-    () => computeActivityStatusMap(filteredDeals, activities),
-    [filteredDeals, activities]
-  );
-
-  // Performance: callbacks estáveis evitam re-render de subcomponentes memoizados.
-  const handleRowClick = useCallback(
-    (dealId: string) => {
-      setSelectedDealId(dealId);
-    },
-    [setSelectedDealId]
-  );
-
-  const handleToggleMenu = useCallback(
-    (e: React.MouseEvent, dealId: string) => {
-      e.stopPropagation();
-      setOpenActivityMenuId(openActivityMenuId === dealId ? null : dealId);
-    },
-    [openActivityMenuId, setOpenActivityMenuId]
-  );
-
-  const handleCloseMenu = useCallback(() => setOpenActivityMenuId(null), [setOpenActivityMenuId]);
-
-  const handleQuickAdd = useCallback(
-    (dealId: string, type: QuickAddType, dealTitle: string) => {
-      handleQuickAddActivity(dealId, type, dealTitle);
-    },
-    [handleQuickAddActivity]
-  );
-
-  return (
-    <div className="h-full overflow-hidden glass rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
-      <div className="h-full overflow-auto scrollbar-custom">
-        <table className="w-full text-left text-sm border-collapse">
-          <thead className="bg-slate-50/80 dark:bg-white/5 border-b border-slate-200 dark:border-white/5 sticky top-0 z-10 backdrop-blur-sm">
-            <tr>
-              <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider w-10"></th>
-              <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                Negócio
-              </th>
-              <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                Empresa
-              </th>
-              <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                Estágio
-              </th>
-              <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                Valor
-              </th>
-              <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                Dono
-              </th>
-              {/* Custom Fields Columns */}
-              {customFieldDefinitions.map(field => (
-                <th
-                  key={field.id}
-                  className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right"
-                >
-                  {field.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-white/5">
-            {filteredDeals.map((deal) => (
-              <KanbanListRow
-                key={deal.id}
-                deal={deal}
-                stageLabel={stageLabelById.get(deal.status) || deal.status}
-                stages={stages}
-                customFieldDefinitions={customFieldDefinitions}
-                activityStatus={activityStatusMap.get(deal.id) ?? NO_ACTIVITY_STATUS}
-                isMenuOpen={openActivityMenuId === deal.id}
-                onSelect={handleRowClick}
-                onToggleMenu={handleToggleMenu}
-                onQuickAdd={handleQuickAdd}
-                onCloseMenu={handleCloseMenu}
-                onMoveDealToStage={onMoveDealToStage}
-              />
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-};
