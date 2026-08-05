@@ -18,6 +18,8 @@ type KanbanListRowProps = {
   customFieldDefinitions: CustomFieldDefinition[];
   activityStatus: DealActivityStatus;
   isMenuOpen: boolean;
+  /** Classe bg-* da etapa: filete à esquerda ligando a linha ao grupo dela. */
+  accentColor?: string;
   onSelect: (dealId: string) => void;
   onToggleMenu: (e: React.MouseEvent, dealId: string) => void;
   onQuickAdd: (dealId: string, type: QuickAddType, dealTitle: string) => void;
@@ -37,6 +39,7 @@ export const KanbanListRow = React.memo(function KanbanListRow({
   customFieldDefinitions,
   activityStatus,
   isMenuOpen,
+  accentColor,
   onSelect,
   onToggleMenu,
   onQuickAdd,
@@ -51,7 +54,10 @@ export const KanbanListRow = React.memo(function KanbanListRow({
         onClick={() => onSelect(deal.id)}
         className="hover:bg-slate-50/50 dark:hover:bg-white/5 transition-colors cursor-pointer group"
       >
-        <td className="px-6 py-3 text-center">
+        <td className="relative px-6 py-3 text-center">
+        {accentColor ? (
+          <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-[3px] ${accentColor}`} />
+        ) : null}
         <ActivityStatusIcon
           status={activityStatus}
           dealId={deal.id}

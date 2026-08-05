@@ -171,40 +171,55 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
           </div>
         ) : (
           <table
-            // table-fixed: larguras definidas pelo cabeçalho, não pelo
-            // conteúdo. Sem isso, abrir/fechar um grupo recalculava as
-            // colunas e os títulos "pulavam" para alinhar às linhas.
+            // table-fixed + colgroup: larguras fixas, independentes do
+            // conteúdo e da presença do cabeçalho. Sem isso, abrir/fechar
+            // um grupo recalculava as colunas e os títulos "pulavam".
             className="w-full table-fixed text-left text-sm border-collapse"
           >
-            <thead className="bg-slate-50/80 dark:bg-white/5 border-b border-slate-200 dark:border-white/5 sticky top-0 z-10 backdrop-blur-sm">
-              <tr>
-                <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider w-24"></th>
-                <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider w-[24%]">
-                  Negócio
-                </th>
-                <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider w-[18%]">
-                  Empresa
-                </th>
-                <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider w-[14%]">
-                  Estágio
-                </th>
-                <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider w-[12%]">
-                  Valor
-                </th>
-                <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider w-[16%]">
-                  Dono
-                </th>
-                {/* Custom Fields Columns */}
-                {customFieldDefinitions.map((field) => (
-                  <th
-                    key={field.id}
-                    className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right"
-                  >
-                    {field.label}
+            <colgroup>
+              <col className="w-24" />
+              <col className="w-[24%]" />
+              <col className="w-[18%]" />
+              <col className="w-[14%]" />
+              <col className="w-[12%]" />
+              <col className="w-[16%]" />
+              {customFieldDefinitions.map((field) => (
+                <col key={field.id} />
+              ))}
+            </colgroup>
+            {/* Cabeçalho de colunas só na aba Todos; nas abas agrupadas os
+                grupos ficam colados nas abas e dão o contexto sozinhos. */}
+            {activeTab === 'todos' && (
+              <thead className="bg-slate-50/80 dark:bg-white/5 border-b border-slate-200 dark:border-white/5 sticky top-0 z-10 backdrop-blur-sm">
+                <tr>
+                  <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider"></th>
+                  <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    Negócio
                   </th>
-                ))}
-              </tr>
-            </thead>
+                  <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    Empresa
+                  </th>
+                  <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    Estágio
+                  </th>
+                  <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    Valor
+                  </th>
+                  <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    Dono
+                  </th>
+                  {/* Custom Fields Columns */}
+                  {customFieldDefinitions.map((field) => (
+                    <th
+                      key={field.id}
+                      className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right"
+                    >
+                      {field.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+            )}
             <tbody className="divide-y divide-slate-100 dark:divide-white/5">
               {activeTab === 'todos' &&
                 filteredDeals.map((deal) => (
@@ -227,8 +242,14 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                 const isCollapsed = collapsedStageIds.has(group.stage.id);
                 return (
                   <React.Fragment key={group.stage.id}>
-                    <tr className="bg-slate-50/60 dark:bg-white/[0.03]">
-                      <td colSpan={totalColumns} className="px-4 py-2">
+                    {/* Filete na cor da etapa liga o cabeçalho do grupo às
+                        linhas dele, deixando claro o que pertence a quem. */}
+                    <tr className="bg-slate-50/80 dark:bg-white/[0.04]">
+                      <td colSpan={totalColumns} className="relative px-4 py-2.5">
+                        <span
+                          aria-hidden="true"
+                          className={`absolute inset-y-0 left-0 w-[3px] ${group.stage.color || 'bg-slate-500'}`}
+                        />
                         <button
                           type="button"
                           onClick={() => toggleGroup(group.stage.id)}
@@ -263,6 +284,7 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                           customFieldDefinitions={customFieldDefinitions}
                           activityStatus={activityStatusMap.get(deal.id) ?? NO_ACTIVITY_STATUS}
                           isMenuOpen={openActivityMenuId === deal.id}
+                          accentColor={group.stage.color || 'bg-slate-500'}
                           onSelect={handleRowClick}
                           onToggleMenu={handleToggleMenu}
                           onQuickAdd={handleQuickAdd}
