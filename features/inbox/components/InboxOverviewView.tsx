@@ -50,7 +50,7 @@ const StatCard: React.FC<{
       onClick={onClick}
       className={`w-full text-left rounded-xl border p-4 transition-colors ${toneStyles[tone]} ${onClick ? 'hover:bg-slate-50 dark:hover:bg-white/10' : ''}`}
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start justify-between gap-3 max-md:flex-col">
         <div>
           <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{label}</div>
           {hint ? (
@@ -91,23 +91,23 @@ const SuggestionMiniRow: React.FC<{
   }, [suggestion.data.deal?.id, suggestion.data.contact?.id]);
 
   return (
-    <div className="flex items-center gap-3 py-2 px-3 rounded-lg hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
+    <div className="flex items-center gap-3 py-2 px-3 rounded-lg hover:bg-slate-50 dark:hover:bg-white/5 transition-colors max-md:flex-wrap">
       <div className="shrink-0">{icon}</div>
       <div className="min-w-0 flex-1">
         <div className="text-sm text-slate-800 dark:text-slate-100 truncate">{suggestion.title}</div>
         <div className="text-xs text-slate-500 dark:text-slate-400 truncate">{suggestion.description}</div>
       </div>
-      <div className="shrink-0 flex items-center gap-2">
+      <div className="shrink-0 flex items-center gap-2 max-md:w-full max-md:justify-end">
         <button
           onClick={onAccept}
-          className="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors"
+          className="px-2.5 py-1.5 max-md:py-2 rounded-md text-xs font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors"
         >
           Aplicar
         </button>
         <button
           onClick={() => navigationTarget && router.push(navigationTarget)}
           disabled={!navigationTarget}
-          className="px-2.5 py-1.5 rounded-md text-xs font-semibold border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors disabled:opacity-50"
+          className="px-2.5 py-1.5 max-md:py-2 rounded-md text-xs font-semibold border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors disabled:opacity-50"
         >
           Abrir
         </button>
@@ -185,7 +185,7 @@ export const InboxOverviewView: React.FC<InboxOverviewViewProps> = ({
   return (
     <div className="space-y-6">
       {/* Top CTA */}
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start justify-between gap-3 max-md:flex-col">
         <div>
           <h2 className="text-lg font-bold text-slate-900 dark:text-white">Visão Geral</h2>
           <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -195,7 +195,7 @@ export const InboxOverviewView: React.FC<InboxOverviewViewProps> = ({
         <div className="flex items-center gap-2">
           <button
             onClick={onGoToList}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
+            className="inline-flex items-center gap-2 px-3 py-2 max-md:flex-1 max-md:justify-center rounded-lg border border-slate-200 dark:border-white/10 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
           >
             Ver lista
             <ArrowRight size={16} aria-hidden="true" />
@@ -203,7 +203,7 @@ export const InboxOverviewView: React.FC<InboxOverviewViewProps> = ({
           <button
             onClick={onStartFocus}
             disabled={!canStartFocus}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-primary-600 text-white text-sm font-semibold hover:bg-primary-700 transition-colors disabled:opacity-50"
+            className="inline-flex items-center gap-2 px-3 py-2 max-md:flex-1 max-md:justify-center rounded-lg bg-primary-600 text-white text-sm font-semibold hover:bg-primary-700 transition-colors disabled:opacity-50"
             title={canStartFocus ? 'Começar a executar' : 'Nada pendente'}
           >
             <Target size={16} aria-hidden="true" />
@@ -213,7 +213,7 @@ export const InboxOverviewView: React.FC<InboxOverviewViewProps> = ({
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard
           label="Atrasados"
           value={overdueActivities.length}

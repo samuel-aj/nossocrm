@@ -79,7 +79,7 @@ const SuggestionRow: React.FC<{
   };
 
   return (
-    <div className="group flex items-center gap-3 py-3 px-4 hover:bg-slate-50 dark:hover:bg-white/5 rounded-lg transition-colors">
+    <div className="group flex items-center gap-3 py-3 px-4 hover:bg-slate-50 dark:hover:bg-white/5 rounded-lg transition-colors max-md:flex-wrap">
       <div className="shrink-0">{getIcon()}</div>
 
       {/* Clickable area for navigation */}
@@ -100,10 +100,10 @@ const SuggestionRow: React.FC<{
       )}
 
       {/* Actions */}
-      <div className="shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 max-md:opacity-100 max-md:w-full max-md:justify-end transition-opacity">
         <button
           onClick={onAccept}
-          className="p-1.5 text-slate-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-500/10 rounded-md transition-colors"
+          className="p-1.5 max-md:p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-500/10 rounded-md transition-colors"
           aria-label="Aplicar sugestão"
           title="Aplicar"
         >
@@ -111,7 +111,7 @@ const SuggestionRow: React.FC<{
         </button>
         <button
           onClick={onSnooze}
-          className="p-1.5 text-slate-400 hover:text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-500/10 rounded-md transition-colors"
+          className="p-1.5 max-md:p-2 text-slate-400 hover:text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-500/10 rounded-md transition-colors"
           aria-label="Adiar sugestão"
           title="Adiar"
         >
@@ -119,7 +119,7 @@ const SuggestionRow: React.FC<{
         </button>
         <button
           onClick={onDismiss}
-          className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-md transition-colors"
+          className="p-1.5 max-md:p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-md transition-colors"
           aria-label="Descartar sugestão"
           title="Descartar"
         >
@@ -127,7 +127,7 @@ const SuggestionRow: React.FC<{
         </button>
         <button
           onClick={handleNavigate}
-          className="p-1.5 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-500/10 rounded-md transition-colors"
+          className="p-1.5 max-md:p-2 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-500/10 rounded-md transition-colors"
           aria-label={navigationTarget?.label || 'Abrir'}
           title={navigationTarget?.label || 'Abrir'}
           disabled={!navigationTarget}

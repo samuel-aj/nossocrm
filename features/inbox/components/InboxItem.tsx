@@ -100,7 +100,7 @@ const InboxItemComponent: React.FC<InboxItemProps> = ({
           aria-label="Menu de opções"
           aria-expanded={showMenu}
           aria-haspopup="true"
-          className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+          className="p-1.5 max-md:p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors opacity-0 group-hover:opacity-100 max-md:opacity-100"
         >
           <MoreHorizontal size={18} aria-hidden="true" />
         </button>

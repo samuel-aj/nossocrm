@@ -449,10 +449,10 @@ export const InboxFocusView: React.FC<InboxFocusViewProps> = ({
       )}
 
       {/* Ações */}
-      <div className="flex items-center gap-4 mt-8" role="group" aria-label="Ações">
+      <div className="flex items-center gap-4 mt-8 max-md:flex-col max-md:w-full max-md:px-4 max-md:gap-3 max-md:mt-6" role="group" aria-label="Ações">
         <button
           onClick={onSnooze}
-          className="group flex items-center gap-3 px-6 py-3 rounded-xl bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 transition-all font-medium border border-transparent hover:border-slate-300 dark:hover:border-white/10"
+          className="group flex items-center gap-3 px-6 py-3 max-md:w-full max-md:justify-center rounded-xl bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 transition-all font-medium border border-transparent hover:border-slate-300 dark:hover:border-white/10"
         >
           <Clock size={18} aria-hidden="true" className="text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-200" />
           <span>Adiar</span>
@@ -463,20 +463,20 @@ export const InboxFocusView: React.FC<InboxFocusViewProps> = ({
 
         <button
           onClick={onDone}
-          className="group flex items-center gap-3 px-8 py-4 rounded-xl bg-gradient-to-b from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 hover:scale-[1.02] transition-all duration-300 font-bold text-lg border-t border-white/20 ring-1 ring-emerald-600/50"
+          className="group flex items-center gap-3 px-8 py-4 max-md:w-full max-md:justify-center max-md:order-first rounded-xl bg-gradient-to-b from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 hover:scale-[1.02] transition-all duration-300 font-bold text-lg border-t border-white/20 ring-1 ring-emerald-600/50"
         >
           <div className="p-1 bg-white/20 rounded-full">
             <Check size={20} aria-hidden="true" strokeWidth={3} />
           </div>
           <span className="text-shadow-sm">Feito</span>
-          <kbd className="ml-1 inline-flex h-6 items-center justify-center rounded bg-black/10 px-2 font-sans text-xs text-white/70 font-semibold border border-white/10">
+          <kbd className="ml-1 inline-flex max-md:hidden h-6 items-center justify-center rounded bg-black/10 px-2 font-sans text-xs text-white/70 font-semibold border border-white/10">
             ⏎
           </kbd>
         </button>
 
         <button
           onClick={onSkip}
-          className="group flex items-center gap-3 px-6 py-3 rounded-xl bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 transition-all font-medium border border-transparent hover:border-slate-300 dark:hover:border-white/10"
+          className="group flex items-center gap-3 px-6 py-3 max-md:w-full max-md:justify-center rounded-xl bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 transition-all font-medium border border-transparent hover:border-slate-300 dark:hover:border-white/10"
         >
           <span>Pular</span>
           <kbd className="hidden group-hover:inline-flex h-5 items-center justify-center rounded border border-slate-300 dark:border-white/10 bg-slate-200 dark:bg-white/5 px-1.5 font-mono text-[10px] uppercase text-slate-500 font-bold opacity-0 group-hover:opacity-100 transition-all">

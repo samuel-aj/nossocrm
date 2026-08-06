@@ -417,13 +417,13 @@ export function MessageComposerModal({
                     </div>
                 </div>
 
-                <div className="flex items-center gap-2 justify-end pt-2">
-                    <div className="mr-auto">
+                <div className="flex items-center gap-2 justify-end pt-2 max-md:flex-wrap">
+                    <div className="mr-auto max-md:w-full">
                         <button
                             type="button"
                             onClick={handleRewriteWithAI}
                             disabled={isRewriting}
-                            className="px-3 py-2 rounded-lg text-sm border border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-700 dark:text-slate-300 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="px-3 py-2 max-md:w-full max-md:justify-center rounded-lg text-sm border border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-700 dark:text-slate-300 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                             title="Reescrever com IA usando o contexto do cockpit"
                         >
                             {isRewriting ? (
@@ -437,7 +437,7 @@ export function MessageComposerModal({
                     <button
                         type="button"
                         onClick={onClose}
-                        className="px-4 py-2 rounded-lg text-sm border border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-700 dark:text-slate-300 transition-colors"
+                        className="px-4 py-2 max-md:flex-1 rounded-lg text-sm border border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/5 text-slate-700 dark:text-slate-300 transition-colors"
                     >
                         Cancelar
                     </button>
@@ -447,8 +447,8 @@ export function MessageComposerModal({
                         disabled={!canOpen}
                         className={
                             channel === 'WHATSAPP'
-                                ? 'px-4 py-2 rounded-lg text-sm font-semibold bg-green-500 hover:bg-green-600 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2'
-                                : 'px-4 py-2 rounded-lg text-sm font-semibold bg-cyan-500 hover:bg-cyan-600 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2'
+                                ? 'px-4 py-2 max-md:flex-1 max-md:justify-center rounded-lg text-sm font-semibold bg-green-500 hover:bg-green-600 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2'
+                                : 'px-4 py-2 max-md:flex-1 max-md:justify-center rounded-lg text-sm font-semibold bg-cyan-500 hover:bg-cyan-600 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2'
                         }
                     >
                         <ExternalLink size={16} />

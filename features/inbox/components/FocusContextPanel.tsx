@@ -735,13 +735,13 @@ export const FocusContextPanel: React.FC<FocusContextPanelProps> = ({
                 {/* === HEADER with Pipeline Progress === */}
                 <header className="shrink-0 border-b border-dark-border">
                     {/* Top Row: Title + Board Name (center) + Value */}
-                    <div className="flex items-center justify-between px-6 py-3">
+                    <div className="flex items-center justify-between px-6 py-3 max-md:px-4">
                         <div>
-                            <h1 className="text-lg font-semibold text-white tracking-tight">
+                            <h1 className="text-lg font-semibold text-white tracking-tight max-md:text-base max-md:break-words">
                                 {deal.title} <span className="text-slate-500 font-normal">|</span> <span className="text-slate-400 font-normal">{(deal as any).companyName || 'Empresa'}</span>
                             </h1>
                         </div>
-                        <div className="absolute left-1/2 -translate-x-1/2">
+                        <div className="absolute left-1/2 -translate-x-1/2 max-md:hidden">
                             <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-widest">
                                 {board?.name || 'Board'}
                             </span>
@@ -754,8 +754,8 @@ export const FocusContextPanel: React.FC<FocusContextPanelProps> = ({
                     </div>
 
                     {/* Pipeline Progress - The Star of the Show */}
-                    <div className="px-6 pb-4 pt-1">
-                        <div className="flex items-center">
+                    <div className="px-6 pb-4 pt-1 max-md:px-4 max-md:overflow-x-auto scrollbar-none">
+                        <div className="flex items-center max-md:min-w-[560px]">
                             {board?.stages.map((stage, idx) => {
                                 const isActive = idx === currentIdx;
                                 const isPassed = idx < currentIdx;
@@ -849,11 +849,13 @@ export const FocusContextPanel: React.FC<FocusContextPanelProps> = ({
                     </div>
                 </header>
 
-                {/* === BODY === */}
-                <div className="flex-1 flex min-h-0 overflow-hidden">
+                {/* === BODY ===. Mobile: as 3 colunas fixas empilham e a tela
+                    rola na vertical; antes só um pedaço do aside de 400px
+                    aparecia e o resto era cortado. */}
+                <div className="flex-1 flex min-h-0 overflow-hidden max-md:flex-col max-md:overflow-y-auto">
 
                     {/* LEFT: Contact */}
-                    <aside className="w-[400px] shrink-0 border-r border-white/5 flex flex-col">
+                    <aside className="w-[400px] shrink-0 border-r border-white/5 flex flex-col max-md:w-full max-md:border-r-0 max-md:border-b max-md:border-white/5">
 
                         <div className="p-6 border-b border-white/5">
                             <div className="flex items-center justify-between mb-3">
@@ -1245,10 +1247,10 @@ export const FocusContextPanel: React.FC<FocusContextPanelProps> = ({
                     </aside>
 
                     {/* RIGHT: Split View (Timeline + Workspace) */}
-                    <main className="flex-1 flex min-w-0 bg-slate-900/10">
+                    <main className="flex-1 flex min-w-0 bg-slate-900/10 max-md:flex-col">
 
                         {/* COL 1: Timeline & Interaction (Flexible Width) */}
-                        <div className="flex-1 flex flex-col min-w-0 border-r border-dark-border">
+                        <div className="flex-1 flex flex-col min-w-0 border-r border-dark-border max-md:border-r-0 max-md:min-h-[70vh]">
                             {/* Header - Simple */}
                             <div className="shrink-0 h-12 flex items-center justify-between px-6 border-b border-white/5">
                                 <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
@@ -1488,7 +1490,7 @@ export const FocusContextPanel: React.FC<FocusContextPanelProps> = ({
                         </div>
 
                         {/* COL 2: Workspace (Fixed Width) */}
-                        <div className="w-[400px] flex flex-col min-h-0 bg-slate-900/20 border-l border-white/5 relative">
+                        <div className="w-[400px] max-md:w-full max-md:min-h-[60vh] flex flex-col min-h-0 bg-slate-900/20 border-l border-white/5 max-md:border-l-0 max-md:border-t relative">
                             {/* Workspace Tabs */}
                             <div className="shrink-0 flex items-center px-4 h-14 border-b border-white/5 gap-4">
                                 {['chat', 'notas', 'scripts', 'files'].map((tab) => (
