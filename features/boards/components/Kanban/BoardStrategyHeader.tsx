@@ -125,7 +125,10 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
   };
 
   return (
-    <div className="relative mb-4 group/header z-20">
+    // Mobile: o card de estratégia (Objetivo/Agente/Entrada) comia meia tela
+    // antes do funil; fica oculto, mas o EDITOR (⋮ > Estratégia) segue
+    // aparecendo quando aberto.
+    <div className={`relative mb-4 group/header z-20 ${isEditing ? '' : 'max-md:hidden'}`}>
       {/* Background Glow Effect (Subtle) */}
       <div className="absolute -inset-1 bg-gradient-to-r from-blue-500/5 via-purple-500/5 to-orange-500/5 rounded-xl blur-xl opacity-50 group-hover/header:opacity-100 transition-opacity duration-700"></div>
 

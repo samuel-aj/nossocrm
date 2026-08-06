@@ -758,7 +758,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
               de linha; sem isso, PERDIDO e o X de fechar eram cortados fora
               da tela e o usuário ficava preso dentro do lead. */}
           <div className="bg-slate-50 dark:bg-black/20 border-b border-slate-200 dark:border-white/10 p-6 max-md:p-4 shrink-0">
-            <div className="flex justify-between items-start mb-6 max-md:flex-wrap max-md:gap-y-3">
+            <div className="flex justify-between items-start mb-6 max-md:flex-wrap max-md:gap-y-2 max-md:mb-3">
               <div className="flex-1 mr-8 max-md:mr-0 max-md:basis-full">
                 {isEditingTitle ? (
                   <div className="flex gap-2 mb-1">
