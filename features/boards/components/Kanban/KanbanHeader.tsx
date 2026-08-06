@@ -331,8 +331,10 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
     // "Meus Negócios" já cobre o próprio usuário — evita opção duplicada na lista.
     const assignableOwners = orgUsers.filter((u) => u.id !== profile?.id);
     return (
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 max-md:mb-3 max-md:gap-2 max-md:flex-wrap">
-            <div className="flex items-center gap-4 w-full sm:w-auto flex-wrap max-md:gap-2">
+        // Empilha até md (celular deitado incluso): flex-wrap em coluna
+        // quebrava os itens pro LADO quando faltava altura.
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 max-md:mb-3 max-md:gap-2">
+            <div className="flex items-center gap-4 w-full md:w-auto flex-wrap max-md:gap-2">
                 {/* Board Selector */}
                 <BoardSelector
                     boards={boards}
@@ -423,7 +425,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                     </button>
                 </div>
 
-                <div className="h-8 w-px bg-slate-200 dark:bg-white/10 mx-2 hidden sm:block"></div>
+                <div className="h-8 w-px bg-slate-200 dark:bg-white/10 mx-2 hidden md:block"></div>
                 <div className="relative flex-1 sm:w-64">
                     {/* z-10: o input tem backdrop-blur (cria stacking context) e pintava POR CIMA da lupa */}
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 pointer-events-none" size={16} />
@@ -560,7 +562,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
             </div>
 
             {/* Status como ABAS (só mobile; no desktop continua o select) */}
-            <div className="md:hidden w-full basis-full flex gap-1 bg-slate-100 dark:bg-white/5 p-1 rounded-lg border border-slate-200 dark:border-white/10">
+            <div className="md:hidden w-full flex items-center gap-1 bg-slate-100 dark:bg-white/5 p-1 rounded-lg border border-slate-200 dark:border-white/10">
                 {([
                     ['open', 'Em Aberto'],
                     ['won', 'Ganhos'],
