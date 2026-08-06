@@ -1000,7 +1000,7 @@ export function DealWhatsAppChat({
 
         {recording ? (
           /* Modo gravação de voz */
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 max-md:flex-wrap max-md:gap-y-2">
             <span className="flex items-center gap-2 text-sm text-red-500 font-semibold">
               <span className="h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse" />
               Gravando… {fmtSeconds(recSeconds)}

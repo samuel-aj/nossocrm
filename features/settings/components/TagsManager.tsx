@@ -71,7 +71,7 @@ export const TagsManager: React.FC<TagsManagerProps> = ({
             <span className="text-sm font-medium text-slate-900 dark:text-white">{tag}</span>
             <button
               onClick={() => onRemoveTag(tag)}
-              className="text-slate-400 hover:text-red-500 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors opacity-0 group-hover:opacity-100"
+              className="text-slate-400 hover:text-red-500 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors opacity-0 group-hover:opacity-100 max-md:opacity-100"
               title="Remover tag"
             >
               <X size={14} />

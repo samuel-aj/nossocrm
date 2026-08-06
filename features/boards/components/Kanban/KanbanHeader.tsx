@@ -124,7 +124,7 @@ function CustomFieldFiltersButton({
                 )}
             </button>
             {open && (
-                <div className="absolute z-50 mt-1 w-80 max-h-[28rem] overflow-y-auto scrollbar-custom rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg p-3 space-y-3">
+                <div className="absolute z-50 mt-1 w-80 max-h-[28rem] max-md:fixed max-md:inset-x-3 max-md:top-24 max-md:mt-0 max-md:w-auto max-md:max-h-[calc(100dvh-13rem)] overflow-y-auto scrollbar-custom rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg p-3 space-y-3">
                     <div className="flex items-center justify-between">
                         <p className="text-xs font-bold text-slate-400 uppercase">Filtros</p>
                         {activeCount > 0 && (

@@ -60,7 +60,7 @@ export const ContactsHeader: React.FC<ContactsHeaderProps> = ({
             : 'Organizações onde seus contatos trabalham.'}
         </p>
       </div>
-      <div className="flex gap-3 w-full sm:w-auto">
+      <div className="flex gap-3 w-full sm:w-auto max-md:flex-wrap">
         {viewMode === 'people' && (
           <select
             value={statusFilter}
@@ -77,7 +77,7 @@ export const ContactsHeader: React.FC<ContactsHeaderProps> = ({
             <option value="RISK">Em Risco (Alerta)</option>
           </select>
         )}
-        <div className="relative flex-1 sm:w-72">
+        <div className="relative flex-1 sm:w-72 max-md:basis-full max-md:min-w-0">
           {/* z-10: o input tem backdrop-blur (cria stacking context) e pintava POR CIMA da lupa */}
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 pointer-events-none" size={16} />
           <input

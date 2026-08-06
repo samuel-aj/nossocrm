@@ -99,7 +99,7 @@ const DashboardPage: React.FC = () => {
     // cresce junto e o padding inferior do site continua valendo (nada
     // fica colado no rodapé)
     <div className="flex flex-col min-h-[calc(100vh-7rem)] space-y-4 pb-2">
-      <div className="flex justify-between items-center shrink-0">
+      <div className="flex justify-between items-center shrink-0 max-md:flex-wrap max-md:gap-y-3">
         <div>
           <h1 className="text-3xl font-bold text-slate-900 dark:text-white font-display tracking-tight">
             Visão Geral
@@ -108,7 +108,7 @@ const DashboardPage: React.FC = () => {
             O pulso do seu negócio em tempo real.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 max-md:flex-wrap max-md:w-full">
           <select
             value={selectedBoardId}
             onChange={(e) => setSelectedBoardId(e.target.value)}
@@ -409,7 +409,10 @@ const DashboardPage: React.FC = () => {
               Funil
             </h2>
           </div>
-          <div className="flex-1 min-h-0 relative">
+          {/* max-md:min-h: no mobile o grid empilha e a altura vem do conteúdo;
+              como o gráfico é absolute (altura intrínseca 0), sem o piso o
+              card do Funil colapsava e o gráfico sumia. */}
+          <div className="flex-1 min-h-0 relative max-md:min-h-[280px]">
             <div className="absolute inset-0">
               <ChartWrapper height="100%">
                 <LazyFunnelChart data={funnelData} />

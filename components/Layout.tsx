@@ -53,6 +53,7 @@ import {
   FileText,
   QrCode,
   HelpCircle,
+  X,
 } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
 import { useAuth } from '../context/AuthContext';
@@ -377,7 +378,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   if (!loading && !user) return null;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-surface-bg bg-dots">
+    // max-md:h-dvh: no celular a viewport dinâmica desconta a barra do
+    // navegador; com h-screen (100vh) a base do app ficava escondida.
+    <div className="flex h-screen max-md:h-dvh overflow-hidden bg-surface-bg bg-dots">
       {/* Skip Link for keyboard users */}
       <SkipLink targetId="main-content" />
 
@@ -675,7 +678,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               <button
                 type="button"
                 onClick={() => setIsGlobalAIOpen(!isGlobalAIOpen)}
-                className={`p-2 rounded-full transition-all active:scale-95 focus-visible-ring ${isGlobalAIOpen
+                className={`p-2 max-md:p-3 rounded-full transition-all active:scale-95 focus-visible-ring ${isGlobalAIOpen
                   ? 'text-primary-600 bg-primary-50 dark:text-primary-400 dark:bg-primary-900/20'
                   : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10'
                   }`}
@@ -686,7 +689,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               <button
                 type="button"
                 onClick={toggleDebugMode}
-                className={`p-2 rounded-full transition-all active:scale-95 focus-visible-ring ${debugEnabled
+                className={`p-2 max-md:p-3 rounded-full transition-all active:scale-95 focus-visible-ring ${debugEnabled
                   ? 'text-purple-600 bg-purple-100 dark:text-purple-400 dark:bg-purple-900/30 ring-2 ring-purple-400/50'
                   : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10'
                   }`}
@@ -698,7 +701,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               <button
                 type="button"
                 onClick={toggleDarkMode}
-                className="p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 rounded-full transition-all active:scale-95 focus-visible-ring"
+                className="p-2 max-md:p-3 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 rounded-full transition-all active:scale-95 focus-visible-ring"
               >
                 {darkMode ? <Sun size={20} aria-hidden="true" /> : <Moon size={20} aria-hidden="true" />}
               </button>
@@ -717,15 +720,30 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           </main>
         </div>
 
-        {/* Right Sidebar (AI Assistant) */}
+        {/* Right Sidebar (AI Assistant). No mobile vira overlay de tela cheia
+            com botão próprio de fechar: como coluna do flex, ele engolia a
+            largura toda e escondia o header (junto com o botão que o fecha). */}
         <aside
           aria-label="Assistente de IA"
           aria-hidden={!isGlobalAIOpen}
-          className={`border-l border-[var(--color-border)] bg-surface transition-all duration-300 ease-in-out overflow-hidden flex flex-col ${isGlobalAIOpen ? 'w-96 opacity-100' : 'w-0 opacity-0'}`}
+          // Mobile: SEMPRE fixed (aberto e fechado) — se só o estado aberto
+          // fosse fixed, ao fechar o painel voltava pro fluxo por 300ms e
+          // espremia o conteúdo durante a transição.
+          className={`border-l border-[var(--color-border)] bg-surface transition-all duration-300 ease-in-out overflow-hidden flex flex-col max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-[70] max-md:border-l-0 ${isGlobalAIOpen ? 'w-96 opacity-100 max-md:w-full' : 'w-0 opacity-0 max-md:pointer-events-none'}`}
         >
-          <div className="w-96 h-full">
+          <div className="relative w-96 max-md:w-full h-full">
             {isGlobalAIOpen && (
-              <UIChat />
+              <>
+                <button
+                  type="button"
+                  onClick={() => setIsGlobalAIOpen(false)}
+                  aria-label="Fechar assistente de IA"
+                  className="md:hidden absolute top-2 right-2 z-10 p-3 rounded-full bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 active:scale-95 transition-all focus-visible-ring"
+                >
+                  <X size={20} aria-hidden="true" />
+                </button>
+                <UIChat />
+              </>
             )}
           </div>
         </aside>

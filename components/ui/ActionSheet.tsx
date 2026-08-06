@@ -69,6 +69,10 @@ export function ActionSheet({
                 'bg-white dark:bg-dark-card',
                 'border border-slate-200 dark:border-white/10',
                 'shadow-2xl overflow-hidden',
+                // Mobile: painel em coluna flex pro conteúdo rolar dentro do
+                // max-h; sem isso, itens além de 90dvh eram cortados sem scroll
+                // (ex.: "Sair da conta" no menu Mais de um celular baixo).
+                'max-md:flex max-md:flex-col',
                 // safe area
                 'pb-[var(--app-safe-area-bottom,0px)]',
                 maxHeightClassName || 'max-h-[calc(90dvh-1rem)]'
@@ -103,7 +107,7 @@ export function ActionSheet({
                 </div>
               </div>
 
-              <div className="relative p-4 sm:p-5 overflow-auto">{children}</div>
+              <div className="relative p-4 sm:p-5 overflow-auto max-md:min-h-0 max-md:flex-1">{children}</div>
             </motion.div>
           </motion.div>
         </FocusTrap>

@@ -257,15 +257,16 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
 
   return (
     <div className="max-w-5xl mx-auto">
-      {/* Tabs minimalistas */}
-      <div className="flex items-center gap-1 mb-8 border-b border-slate-200 dark:border-white/10">
+      {/* Tabs minimalistas. Mobile: carrossel horizontal próprio; sem isso as
+          últimas abas estouravam a tela e arrastavam a página inteira. */}
+      <div className="flex items-center gap-1 mb-8 border-b border-slate-200 dark:border-white/10 max-md:overflow-x-auto scrollbar-none">
         {tabs.map((tab) => {
           const isActive = activeTab === tab.id;
           return (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`relative flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${isActive
+              className={`relative flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors shrink-0 whitespace-nowrap ${isActive
                 ? 'text-primary-600 dark:text-primary-400'
                 : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
                 }`}

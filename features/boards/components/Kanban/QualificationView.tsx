@@ -174,7 +174,10 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
             // table-fixed + colgroup: larguras fixas, independentes do
             // conteúdo e da presença do cabeçalho. Sem isso, abrir/fechar
             // um grupo recalculava as colunas e os títulos "pulavam".
-            className="w-full table-fixed text-left text-sm border-collapse"
+            // max-md:min-w-[40rem]: no celular a tabela ganha scroll
+            // horizontal próprio (o wrapper é overflow-auto) em vez de
+            // esmagar as colunas abaixo do próprio padding.
+            className="w-full table-fixed max-md:min-w-[40rem] text-left text-sm border-collapse"
           >
             <colgroup>
               <col className="w-24" />

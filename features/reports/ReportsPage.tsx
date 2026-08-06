@@ -211,9 +211,9 @@ const ReportsPage: React.FC = () => {
   ]);
 
   return (
-    <div className="flex flex-col h-[calc(100vh-7rem)] space-y-4">
+    <div className="flex flex-col h-[calc(100vh-7rem)] max-md:h-auto space-y-4">
       {/* Header com Filtros */}
-      <div className="flex justify-between items-center shrink-0">
+      <div className="flex justify-between items-center shrink-0 max-md:flex-wrap max-md:gap-y-3">
         <div>
           <h1 className="text-3xl font-bold text-slate-900 dark:text-white font-display tracking-tight">
             Relatórios de Performance
@@ -222,7 +222,7 @@ const ReportsPage: React.FC = () => {
             Análise detalhada de vendas e tendências.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 max-md:flex-wrap max-md:w-full">
           <select
             value={selectedBoardId}
             onChange={(e) => setSelectedBoardId(e.target.value)}
@@ -502,7 +502,8 @@ const ReportsPage: React.FC = () => {
               Snapshot Atual
             </span>
           </div>
-          <div className="flex-1 min-h-0 relative">
+          {/* max-md:min-h: gráfico absolute colapsava quando o grid empilha */}
+          <div className="flex-1 min-h-0 relative max-md:min-h-[280px]">
             <div className="absolute inset-0">
               <ChartWrapper height="100%">
                 <LazyStageConversionChart data={stageConversionData} />

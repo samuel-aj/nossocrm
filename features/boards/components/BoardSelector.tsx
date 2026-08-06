@@ -134,7 +134,7 @@ export const BoardSelector: React.FC<BoardSelectorProps> = ({
                         setLocalOrder(boards.map(b => b.id));
                       }}
                       onDragEnd={finishDrag}
-                      className="p-1 -mr-1 text-slate-300 dark:text-slate-600 opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing transition-opacity"
+                      className="p-1 -mr-1 text-slate-300 dark:text-slate-600 opacity-0 group-hover:opacity-100 max-md:opacity-100 cursor-grab active:cursor-grabbing transition-opacity"
                       title="Arrastar pra reordenar"
                     >
                       <GripVertical size={14} />
@@ -159,7 +159,7 @@ export const BoardSelector: React.FC<BoardSelectorProps> = ({
                   </div>
 
                   {/* Action buttons - aparecem no hover */}
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 max-md:opacity-100 transition-opacity">
                     {onEditBoard && (
                       <button
                         type="button"

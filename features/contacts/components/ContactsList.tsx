@@ -293,7 +293,7 @@ export const ContactsList: React.FC<ContactsListProps> = ({
                                         </div>
                                     </td>
                                     <td className="px-6 py-4 text-right">
-                                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 max-md:opacity-100 transition-all">
                                             <button
                                                 onClick={() => openEditModal(contact)}
                                                 className="p-1.5 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-colors"
@@ -422,7 +422,7 @@ export const ContactsList: React.FC<ContactsListProps> = ({
                                         </div>
                                     </td>
                                     <td className="px-6 py-4 text-right">
-                                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 max-md:opacity-100 transition-all">
                                             <button
                                                 onClick={() => openEditCompanyModal?.(company)}
                                                 className="p-1.5 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-colors"

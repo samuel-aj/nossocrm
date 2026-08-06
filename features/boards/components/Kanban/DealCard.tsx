@@ -50,7 +50,7 @@ function CopyButton({ text }: { text: string }) {
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       }}
-      className="p-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+      className="p-0.5 max-md:p-2 max-md:-m-1.5 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
       title="Copiar número"
       aria-label={`Copiar ${text}`}
     >
@@ -227,7 +227,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
             checked={selected}
             onChange={() => onToggleSelect(deal.id)}
             aria-label={`Selecionar ${deal.title}`}
-            className="w-3.5 h-3.5 rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500 cursor-pointer"
+            className="w-3.5 h-3.5 max-md:w-5 max-md:h-5 rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500 cursor-pointer"
           />
         </label>
       )}

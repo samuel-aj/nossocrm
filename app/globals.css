@@ -51,9 +51,12 @@ svg.lucide {
   /* App Shell: sidebar width (used by modals/overlays to avoid covering navigation on desktop) */
   --app-sidebar-width: 0px;
 
-  /* Safe area + app shell sizing */
-  --app-safe-area-bottom: env(safe-area-inset-bottom, 0px);
-  --app-safe-area-top: env(safe-area-inset-top, 0px);
+  /* Safe area + app shell sizing.
+     0px em >= 768px: com o viewport-fit=cover ativado no app/layout.tsx, o
+     env() passaria a valer também em iPad/paisagem (layout tablet/desktop
+     aprovado); a versão env() vive na media query mobile mais abaixo. */
+  --app-safe-area-bottom: 0px;
+  --app-safe-area-top: 0px;
   --app-bottom-nav-height: 0px;
 
   /* Light Mode - Soft Cream (OKLCH) */
@@ -113,6 +116,29 @@ svg.lucide {
 /* Avoid accidental horizontal scroll on small screens (mobile/tablet). */
 html, body {
   overflow-x: hidden;
+}
+
+/* ========================================
+ * Mobile only (< 768px)
+ * ======================================== */
+@media (max-width: 767px) {
+  /* A BottomNav (md:hidden) existe desde o primeiro paint, mas a var só era
+     setada via JS após a hidratação — conteúdo ficava atrás da barra.
+     Safe area só aqui: em >= 768px as vars ficam em 0px como sempre foram. */
+  :root {
+    --app-bottom-nav-height: 56px;
+    --app-safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --app-safe-area-top: env(safe-area-inset-top, 0px);
+  }
+
+  /* iOS Safari dá zoom automático na página ao focar campo com fonte < 16px
+     (e o zoom não desfaz sozinho). 16px em todo campo de formulário no
+     celular elimina o zoom; desktop não é afetado pela media query. */
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
 }
 
 .dark {
@@ -313,6 +339,16 @@ select:not(.appearance-none):not([multiple]):not([size]) {
 
 .dark .scrollbar-custom::-webkit-scrollbar-thumb:hover {
   background: #475569;
+}
+
+/* Scroll sem barra visível (abas horizontais no mobile) */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* ========================================

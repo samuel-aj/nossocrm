@@ -380,7 +380,7 @@ export const UsersPage: React.FC = () => {
                                                 {/* Resend Invite removed as we don't use email invites anymore */}
                                                 <button
                                                     onClick={() => handleDeleteUser(user)}
-                                                    className="opacity-0 group-hover:opacity-100 p-2 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
+                                                    className="opacity-0 group-hover:opacity-100 max-md:opacity-100 p-2 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
                                                     title={user.status === 'pending' ? 'Cancelar convite' : 'Remover usuário'}
                                                 >
                                                     <Trash2 className="h-4 w-4" />
@@ -425,7 +425,7 @@ export const UsersPage: React.FC = () => {
                     }}
                 >
                     <div
-                        className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+                        className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden max-md:max-h-[85dvh] max-md:overflow-y-auto animate-in fade-in zoom-in-95 duration-200"
                         onClick={(e) => e.stopPropagation()}
                     >
                         {/* Modal Header */}

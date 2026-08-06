@@ -546,18 +546,22 @@ export const ChatsPage: React.FC = () => {
                           onClick={e => {
                             e.stopPropagation();
                             const r = e.currentTarget.getBoundingClientRect();
-                            setRowMenu(m => (m?.key === c.key ? null : { key: c.key, x: r.left, y: r.bottom }));
+                            // Clamp: no celular a seta encosta na borda direita
+                            // e o balão de 240px estourava pra fora da tela.
+                            const x = Math.max(8, Math.min(r.left, window.innerWidth - 248));
+                            setRowMenu(m => (m?.key === c.key ? null : { key: c.key, x, y: r.bottom }));
                           }}
                           onKeyDown={e => {
                             if (e.key === 'Enter' || e.key === ' ') {
                               e.preventDefault();
                               e.stopPropagation();
                               const r = e.currentTarget.getBoundingClientRect();
-                              setRowMenu(m => (m?.key === c.key ? null : { key: c.key, x: r.left, y: r.bottom }));
+                              const x = Math.max(8, Math.min(r.left, window.innerWidth - 248));
+                              setRowMenu(m => (m?.key === c.key ? null : { key: c.key, x, y: r.bottom }));
                             }
                           }}
                           className={`text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors ${
-                            rowMenu?.key === c.key ? 'inline-flex' : 'hidden group-hover/row:inline-flex'
+                            rowMenu?.key === c.key ? 'inline-flex' : 'hidden group-hover/row:inline-flex max-md:inline-flex'
                           }`}
                         >
                           <ChevronDown size={16} />

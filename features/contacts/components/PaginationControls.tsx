@@ -120,7 +120,7 @@ export const PaginationControls: React.FC<PaginationControlsProps> = ({
   return (
     <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-4 py-3 border-t border-gray-200 dark:border-dark-border bg-white dark:bg-dark-card">
       {/* Left: Info and page size selector (T024, T026) */}
-      <div className="flex items-center gap-4 text-sm text-gray-600 dark:text-gray-400">
+      <div className="flex items-center gap-4 text-sm text-gray-600 dark:text-gray-400 max-md:flex-wrap max-md:justify-center max-md:gap-2">
         {/* T026: Mostrando X-Y de Z */}
         <span className={isFetching ? 'animate-pulse' : ''}>
           Mostrando {totalCount > 0 ? from : 0}-{to} de {totalCount.toLocaleString('pt-BR')} contatos

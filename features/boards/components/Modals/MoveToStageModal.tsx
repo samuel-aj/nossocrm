@@ -57,6 +57,9 @@ export const MoveToStageModal: React.FC<MoveToStageModalProps> = ({
       title="Mover para Estágio"
       size="sm"
       describedById={headingId}
+      // Mobile: boards com muitos estágios passavam do max-h do painel e os
+      // últimos estágios + Cancelar eram cortados sem scroll.
+      bodyClassName="max-md:min-h-0 max-md:overflow-y-auto"
     >
       <div className="space-y-4">
         {/* Current deal info */}

@@ -219,7 +219,7 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
             }}
         >
             <div
-                className="bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl w-full max-w-md animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto"
+                className="bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl w-full max-w-md animate-in zoom-in-95 duration-200 max-h-[90vh] max-md:max-h-[85dvh] overflow-y-auto"
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="p-5 border-b border-slate-200 dark:border-white/10 flex justify-between items-center sticky top-0 bg-white dark:bg-dark-card z-10">
@@ -336,7 +336,7 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
                                     />
                                 </div>
                                 
-                                <div className="grid grid-cols-2 gap-3">
+                                <div className="grid grid-cols-2 max-md:grid-cols-1 gap-3">
                                     <div className="relative">
                                         <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                                         <input

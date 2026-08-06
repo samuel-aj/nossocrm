@@ -49,7 +49,7 @@ function DragDropZone({
         setOver(false);
         onDropCard(e);
       }}
-      className={`w-56 rounded-xl overflow-hidden border-2 shadow-2xl backdrop-blur-sm transition-all duration-200 ease-out select-none ${
+      className={`w-56 max-md:w-auto rounded-xl overflow-hidden border-2 shadow-2xl backdrop-blur-sm transition-all duration-200 ease-out select-none ${
         over
           ? `scale-110 -translate-y-2 border-solid ${overClass}`
           : 'border-dashed border-slate-300 dark:border-slate-600 bg-white/95 dark:bg-slate-900/90'
@@ -397,7 +397,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   const bulkApplyClass =
     'w-full py-2 rounded-lg bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold transition-colors';
   const selActionClass =
-    'flex items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-primary-600 dark:hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
+    'flex items-center gap-1.5 text-xs font-medium whitespace-nowrap text-slate-600 dark:text-slate-300 hover:text-primary-600 dark:hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
 
   const handleUpdateStage = (updatedStage: BoardStage) => {
     if (!activeBoard) return;
@@ -516,7 +516,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
           {/* Barra de ações da seleção múltipla — no TOPO, estilo Kommo.
               Só no kanban, a única view com UI de seleção (checkboxes). */}
           {selectionMode && viewMode === 'kanban' && (
-            <div className="flex items-center gap-4 px-4 py-2 mb-4 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50/80 dark:bg-white/5 backdrop-blur-sm">
+            <div className="flex items-center gap-4 px-4 py-2 mb-4 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50/80 dark:bg-white/5 backdrop-blur-sm max-md:flex-wrap max-md:gap-x-3 max-md:gap-y-1.5">
               <button
                 type="button"
                 disabled={selectedDealIds.length === 0}
@@ -671,7 +671,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
         const wonStage = activeBoard.stages.find((s) => s.id === activeBoard.wonStageId);
         const lostStage = activeBoard.stages.find((s) => s.id === activeBoard.lostStageId);
         return (
-          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex gap-3">
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex gap-3 max-md:left-2 max-md:right-2 max-md:translate-x-0 max-md:grid max-md:grid-cols-2 max-md:gap-2 max-md:bottom-[calc(var(--app-bottom-nav-height,0px)+var(--app-safe-area-bottom,0px)+0.5rem)]">
             {activeBoard.wonStageId && (
               <DragDropZone
                 onDropCard={(e) => handleDrop(e, activeBoard.wonStageId!)}

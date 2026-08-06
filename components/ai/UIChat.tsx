@@ -547,8 +547,9 @@ export function UIChat({
     // Chat content as JSX (not a component function to preserve input state)
     const chatContent = (
         <>
-            {/* Header */}
-            <div className="flex items-center gap-3 p-4 border-b border-slate-700/50">
+            {/* Header. max-md:pr-14: abre espaço pro X de fechar do overlay
+                mobile (Layout) não cobrir o chip de status. */}
+            <div className="flex items-center gap-3 p-4 max-md:pr-14 border-b border-slate-700/50">
                 <div className="p-2 bg-linear-to-br from-primary-500/20 to-violet-500/20 rounded-xl">
                     <Sparkles className="w-5 h-5 text-primary-400" />
                 </div>
@@ -1211,7 +1212,7 @@ export function UIChat({
             </div>
 
             {/* Input Area */}
-            < form onSubmit={handleSubmit} className="p-3 border-t border-slate-700/50" >
+            < form onSubmit={handleSubmit} className="p-3 max-md:pb-[calc(0.75rem+var(--app-safe-area-bottom,0px))] border-t border-slate-700/50" >
                 {hasPendingApprovals && (
                     <div className="mb-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-100">
                         Você tem {pendingApprovalIds.length} confirmação{pendingApprovalIds.length === 1 ? '' : 'ões'} pendente{pendingApprovalIds.length === 1 ? '' : 's'}. Aprove ou negue acima para continuar.

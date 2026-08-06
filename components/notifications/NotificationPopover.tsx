@@ -73,7 +73,7 @@ export const NotificationPopover = () => {
                 onClick={() => setIsOpen(!isOpen)}
                 aria-expanded={isOpen}
                 aria-label={`Notificações: ${count} novas`}
-                className="p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 rounded-full relative transition-colors focus-visible-ring"
+                className="p-2 max-md:p-3 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 rounded-full relative transition-colors focus-visible-ring"
             >
                 <Bell size={20} aria-hidden="true" />
                 {count > 0 && (
@@ -87,7 +87,7 @@ export const NotificationPopover = () => {
 
             {isOpen && (
                 <div
-                    className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200"
+                    className="absolute right-0 mt-2 w-80 sm:w-96 max-md:fixed max-md:inset-x-3 max-md:top-16 max-md:mt-0 max-md:w-auto bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200"
                     role="dialog"
                     aria-label="Central de Notificações"
                 >

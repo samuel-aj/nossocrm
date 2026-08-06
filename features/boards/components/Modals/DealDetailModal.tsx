@@ -754,10 +754,12 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
             : 'bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-300 ease-out transition-all'
       }
     >
-          {/* HEADER (Stage Bar + Won/Lost) */}
-          <div className="bg-slate-50 dark:bg-black/20 border-b border-slate-200 dark:border-white/10 p-6 shrink-0">
-            <div className="flex justify-between items-start mb-6">
-              <div className="flex-1 mr-8">
+          {/* HEADER (Stage Bar + Won/Lost). No mobile o grupo de ações quebra
+              de linha; sem isso, PERDIDO e o X de fechar eram cortados fora
+              da tela e o usuário ficava preso dentro do lead. */}
+          <div className="bg-slate-50 dark:bg-black/20 border-b border-slate-200 dark:border-white/10 p-6 max-md:p-4 shrink-0">
+            <div className="flex justify-between items-start mb-6 max-md:flex-wrap max-md:gap-y-3">
+              <div className="flex-1 mr-8 max-md:mr-0 max-md:basis-full">
                 {isEditingTitle ? (
                   <div className="flex gap-2 mb-1">
                     <input
@@ -785,7 +787,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                       title="Clique para editar"
                     >
                       {deal.title}
-                      <Pencil size={16} className="opacity-0 group-hover:opacity-50 text-slate-400" />
+                      <Pencil size={16} className="opacity-0 group-hover:opacity-50 max-md:opacity-50 text-slate-400" />
                     </h2>
 
                     {/* TAGS como MARCADORES junto do nome (cor por tag; × no hover) */}
@@ -801,7 +803,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                           <button
                             type="button"
                             onClick={() => removeDealTag(tag)}
-                            className="opacity-0 group-hover:opacity-70 hover:!opacity-100 transition-opacity"
+                            className="opacity-0 group-hover:opacity-70 max-md:opacity-70 hover:!opacity-100 transition-opacity"
                             aria-label={`Remover tag ${tag}`}
                             title="Remover tag"
                           >
@@ -947,7 +949,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                   </div>
                 )}
               </div>
-              <div className="flex gap-3 items-center">
+              <div className="flex gap-3 items-center max-md:flex-wrap max-md:w-full max-md:justify-start">
                 {/* RESPONSÁVEL — bolinha de perfil no topo (clica pra trocar; só admin) */}
                 {(canAssignOwner || deal.ownerId) && (() => {
                   const dealOwner = orgMembers.find(u => u.id === deal.ownerId) ?? null;
@@ -1006,7 +1008,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                       {ownerMenuOpen && (
                         <>
                           <div className="fixed inset-0 z-40" onClick={() => setOwnerMenuOpen(false)} aria-hidden="true" />
-                          <div className="absolute right-0 top-11 z-50 w-60 max-h-72 overflow-y-auto scrollbar-custom bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 p-1.5 animate-in fade-in slide-in-from-top-2 duration-150">
+                          <div className="absolute right-0 max-md:left-0 max-md:right-auto top-11 z-50 w-60 max-h-72 overflow-y-auto scrollbar-custom bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 p-1.5 animate-in fade-in slide-in-from-top-2 duration-150">
                             <p className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Responsável</p>
                             <button
                               type="button"
@@ -1148,7 +1150,9 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                 )}
                 <button
                   onClick={() => setViewMode(v => v === 'modal' ? 'fullscreen' : 'modal')}
-                  className="ml-2 text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+                  // No mobile o card é sempre tela cheia (viewMode é ignorado),
+                  // então o botão não faz nada e só ocupa espaço no header.
+                  className="ml-2 max-md:hidden text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
                   title={viewMode === 'modal' ? 'Tela cheia' : 'Modo modal'}
                 >
                   {viewMode === 'modal' ? <Maximize2 size={20} /> : <Minimize2 size={20} />}
@@ -1490,7 +1494,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                                       Campo vazio
                                     </span>
                                   )}
-                                  <Pencil size={12} className="shrink-0 mt-1 text-slate-400 opacity-0 group-hover/field:opacity-100 transition-opacity" />
+                                  <Pencil size={12} className="shrink-0 mt-1 text-slate-400 opacity-0 group-hover/field:opacity-100 max-md:opacity-100 transition-opacity" />
                                 </button>
                               );
                             })()}
@@ -1617,41 +1621,43 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
 
             {/* Right Content (Tabs & Timeline) */}
             <div className="flex-1 min-h-0 flex flex-col bg-white dark:bg-dark-card">
-              <div className="h-14 border-b border-slate-200 dark:border-white/5 flex items-center px-6 shrink-0">
-                <div className="flex gap-6">
+              {/* Mobile: barra de abas rola na horizontal; sem isso Produtos e
+                  IA Insights eram cortadas e ficavam inacessíveis no celular */}
+              <div className="h-14 border-b border-slate-200 dark:border-white/5 flex items-center px-6 shrink-0 max-md:overflow-x-auto max-md:px-4 scrollbar-none">
+                <div className="flex gap-6 max-md:gap-4">
                   <button
                     onClick={() => setActiveTab('timeline')}
-                    className={`text-sm font-bold h-14 border-b-2 transition-colors ${activeTab === 'timeline' ? 'border-primary-500 text-primary-600 dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
+                    className={`text-sm font-bold h-14 border-b-2 transition-colors shrink-0 whitespace-nowrap ${activeTab === 'timeline' ? 'border-primary-500 text-primary-600 dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
                   >
                     Timeline
                   </button>
                   <button
                     onClick={() => setActiveTab('whatsapp')}
-                    className={`text-sm font-bold h-14 border-b-2 transition-colors flex items-center gap-1.5 ${activeTab === 'whatsapp' ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
+                    className={`text-sm font-bold h-14 border-b-2 transition-colors shrink-0 whitespace-nowrap flex items-center gap-1.5 ${activeTab === 'whatsapp' ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
                   >
                     <MessageCircle size={15} /> WhatsApp
                   </button>
                   <button
                     onClick={() => setActiveTab('activities')}
-                    className={`text-sm font-bold h-14 border-b-2 transition-colors ${activeTab === 'activities' ? 'border-primary-500 text-primary-600 dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
+                    className={`text-sm font-bold h-14 border-b-2 transition-colors shrink-0 whitespace-nowrap ${activeTab === 'activities' ? 'border-primary-500 text-primary-600 dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
                   >
                     Atividades
                   </button>
                   <button
                     onClick={() => setActiveTab('notes')}
-                    className={`text-sm font-bold h-14 border-b-2 transition-colors ${activeTab === 'notes' ? 'border-primary-500 text-primary-600 dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
+                    className={`text-sm font-bold h-14 border-b-2 transition-colors shrink-0 whitespace-nowrap ${activeTab === 'notes' ? 'border-primary-500 text-primary-600 dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
                   >
                     Notas
                   </button>
                   <button
                     onClick={() => setActiveTab('products')}
-                    className={`text-sm font-bold h-14 border-b-2 transition-colors ${activeTab === 'products' ? 'border-primary-500 text-primary-600 dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
+                    className={`text-sm font-bold h-14 border-b-2 transition-colors shrink-0 whitespace-nowrap ${activeTab === 'products' ? 'border-primary-500 text-primary-600 dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
                   >
                     Produtos
                   </button>
                   <button
                     onClick={() => setActiveTab('info')}
-                    className={`text-sm font-bold h-14 border-b-2 transition-colors ${activeTab === 'info' ? 'border-primary-500 text-primary-600 dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
+                    className={`text-sm font-bold h-14 border-b-2 transition-colors shrink-0 whitespace-nowrap ${activeTab === 'info' ? 'border-primary-500 text-primary-600 dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
                   >
                     IA Insights
                   </button>
@@ -1973,7 +1979,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                             </span>
                             <button
                               onClick={() => deleteActivity(note.id)}
-                              className="text-slate-400 hover:text-red-500 p-1 rounded opacity-0 group-hover:opacity-100 transition-all"
+                              className="text-slate-400 hover:text-red-500 p-1 rounded opacity-0 group-hover:opacity-100 max-md:opacity-100 transition-all"
                               title="Excluir nota"
                             >
                               <Trash2 size={14} />
@@ -1991,9 +1997,9 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                       <h3 className="text-sm font-bold text-slate-700 dark:text-white mb-3 flex items-center gap-2">
                         <Package size={16} /> Adicionar Produto/Serviço
                       </h3>
-                      <div className="flex gap-3">
+                      <div className="flex gap-3 max-md:flex-wrap">
                         <select
-                          className="flex-1 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                          className="flex-1 max-md:min-w-0 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                           value={selectedProductId}
                           onChange={e => setSelectedProductId(e.target.value)}
                         >
@@ -2014,7 +2020,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                         <button
                           onClick={handleAddProduct}
                           disabled={!selectedProductId}
-                          className="bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors"
+                          className="bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors max-md:w-full"
                         >
                           Adicionar
                         </button>
@@ -2078,7 +2084,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                       )}
                     </div>
 
-                    <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/5 rounded-xl overflow-hidden">
+                    <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/5 rounded-xl overflow-hidden max-md:overflow-x-auto">
                       <table className="w-full text-left text-sm">
                         <thead className="bg-slate-50 dark:bg-black/20 border-b border-slate-200 dark:border-white/5 text-slate-500 dark:text-slate-400 font-medium">
                           <tr>
