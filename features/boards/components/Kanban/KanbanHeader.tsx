@@ -331,8 +331,8 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
     // "Meus Negócios" já cobre o próprio usuário — evita opção duplicada na lista.
     const assignableOwners = orgUsers.filter((u) => u.id !== profile?.id);
     return (
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-            <div className="flex items-center gap-4 w-full sm:w-auto flex-wrap">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 max-md:mb-3 max-md:gap-2 max-md:flex-wrap">
+            <div className="flex items-center gap-4 w-full sm:w-auto flex-wrap max-md:gap-2">
                 {/* Board Selector */}
                 <BoardSelector
                     boards={boards}
@@ -348,18 +348,18 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                 {onEditBoard && (
                     <button
                         onClick={() => onEditBoard(activeBoard)}
-                        className="p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors"
+                        className="p-2 max-md:p-1 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors"
                         title="Configurações do Board"
                     >
-                        <Settings size={20} />
+                        <Settings size={20} className="max-md:w-[18px] max-md:h-[18px]" />
                     </button>
                 )}
 
-                {/* Export Template Button */}
+                {/* Export Template Button (tarefa de desktop; some no celular) */}
                 {onExportTemplates && (
                     <button
                         onClick={onExportTemplates}
-                        className="p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors"
+                        className="p-2 max-md:hidden text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors"
                         title="Exportar template (comunidade)"
                     >
                         <Download size={20} />
@@ -432,10 +432,11 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                         placeholder="Filtrar negócios ou empresas..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm"
+                        className="w-full pl-10 pr-4 py-2 max-md:py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm"
                     />
                 </div>
-                <div className="relative">
+                {/* Status: select só no desktop; no mobile vira as abas abaixo */}
+                <div className="relative max-md:hidden">
                     <select
                         value={statusFilter}
                         onChange={(e) => setStatusFilter(e.target.value as any)}
@@ -460,7 +461,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                         value={ownerFilter}
                         onChange={(e) => setOwnerFilter(e.target.value)}
                         aria-label="Filtrar negócios por proprietário"
-                        className="pl-3 pr-8 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm appearance-none cursor-pointer"
+                        className="pl-3 pr-8 py-2 max-md:py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm appearance-none cursor-pointer"
                     >
                         <option value="all">Todos os Donos</option>
                         <option value="mine">Meus Negócios</option>
@@ -552,10 +553,32 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                 </div>
                 <button
                     onClick={onNewDeal}
-                    className="bg-primary-700 hover:bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-primary-700/20"
+                    className="bg-primary-700 hover:bg-primary-600 text-white px-4 py-2 max-md:py-1.5 max-md:flex-1 max-md:justify-center rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-primary-700/20"
                 >
                     <Plus size={18} aria-hidden="true" /> Novo Negócio
                 </button>
+            </div>
+
+            {/* Status como ABAS (só mobile; no desktop continua o select) */}
+            <div className="md:hidden w-full basis-full flex gap-1 bg-slate-100 dark:bg-white/5 p-1 rounded-lg border border-slate-200 dark:border-white/10">
+                {([
+                    ['open', 'Em Aberto'],
+                    ['won', 'Ganhos'],
+                    ['lost', 'Perdidos'],
+                    ['all', 'Todos'],
+                ] as const).map(([value, label]) => (
+                    <button
+                        key={value}
+                        type="button"
+                        onClick={() => setStatusFilter(value)}
+                        aria-pressed={statusFilter === value}
+                        className={`flex-1 py-1.5 rounded-md text-xs font-bold whitespace-nowrap transition-colors ${statusFilter === value
+                            ? 'bg-white dark:bg-slate-700 shadow-sm text-primary-600 dark:text-white'
+                            : 'text-slate-500 dark:text-slate-400'}`}
+                    >
+                        {label}
+                    </button>
+                ))}
             </div>
         </div>
     );

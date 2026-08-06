@@ -678,7 +678,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               <button
                 type="button"
                 onClick={() => setIsGlobalAIOpen(!isGlobalAIOpen)}
-                className={`p-2 max-md:p-3 rounded-full transition-all active:scale-95 focus-visible-ring ${isGlobalAIOpen
+                className={`p-2 max-md:p-1.5 rounded-full transition-all active:scale-95 focus-visible-ring ${isGlobalAIOpen
                   ? 'text-primary-600 bg-primary-50 dark:text-primary-400 dark:bg-primary-900/20'
                   : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10'
                   }`}
@@ -689,7 +689,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               <button
                 type="button"
                 onClick={toggleDebugMode}
-                className={`p-2 max-md:p-3 rounded-full transition-all active:scale-95 focus-visible-ring ${debugEnabled
+                className={`p-2 max-md:p-1.5 rounded-full transition-all active:scale-95 focus-visible-ring ${debugEnabled
                   ? 'text-purple-600 bg-purple-100 dark:text-purple-400 dark:bg-purple-900/30 ring-2 ring-purple-400/50'
                   : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10'
                   }`}
@@ -701,7 +701,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               <button
                 type="button"
                 onClick={toggleDarkMode}
-                className="p-2 max-md:p-3 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 rounded-full transition-all active:scale-95 focus-visible-ring"
+                className="p-2 max-md:p-1.5 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 rounded-full transition-all active:scale-95 focus-visible-ring"
               >
                 {darkMode ? <Sun size={20} aria-hidden="true" /> : <Moon size={20} aria-hidden="true" />}
               </button>

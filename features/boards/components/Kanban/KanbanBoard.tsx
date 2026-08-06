@@ -248,7 +248,9 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   };
 
   return (
-    <div className="flex gap-4 h-full overflow-x-auto pb-2 w-full">
+    // Mobile: uma coluna INTEIRA por vez, com snap (desliza etapa a etapa
+    // com uma lasca da próxima aparecendo); antes as colunas ficavam cortadas.
+    <div className="flex gap-4 h-full overflow-x-auto pb-2 w-full max-md:snap-x max-md:snap-mandatory max-md:gap-3">
       {stages.map(stage => {
         const stageDeals = dealsByStageId.map.get(stage.id) ?? [];
         const stageValue = dealsByStageId.totals.get(stage.id) ?? 0;
@@ -273,7 +275,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
             }}
             onDragEnter={() => setDragOverStage(stage.id)}
             onDragLeave={() => setDragOverStage(null)}
-            className={`min-w-[20rem] flex-1 flex flex-col rounded-xl border-2 overflow-visible h-full max-h-full transition-all duration-200
+            className={`min-w-[20rem] max-md:min-w-[calc(100vw-5.5rem)] max-md:flex-none max-md:snap-center flex-1 flex flex-col rounded-xl border-2 overflow-visible h-full max-h-full transition-all duration-200
                             ${isOver
                 ? `${dropHighlightClasses(stage.color)} scale-[1.02]`
                 : 'border-slate-200/50 dark:border-white/10 glass'
@@ -384,7 +386,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
             const dealId = e.dataTransfer.getData('dealId');
             if (dealId) onMarkInactive(dealId);
           }}
-          className="min-w-[20rem] flex-1 flex flex-col rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 overflow-visible h-full max-h-full glass"
+          className="min-w-[20rem] max-md:min-w-[calc(100vw-5.5rem)] max-md:flex-none max-md:snap-center flex-1 flex flex-col rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 overflow-visible h-full max-h-full glass"
         >
           <div className="h-1.5 w-full bg-slate-400"></div>
           <div className="p-3 border-b border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/5 shrink-0">

@@ -73,7 +73,7 @@ export const NotificationPopover = () => {
                 onClick={() => setIsOpen(!isOpen)}
                 aria-expanded={isOpen}
                 aria-label={`Notificações: ${count} novas`}
-                className="p-2 max-md:p-3 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 rounded-full relative transition-colors focus-visible-ring"
+                className="p-2 max-md:p-1.5 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 rounded-full relative transition-colors focus-visible-ring"
             >
                 <Bell size={20} aria-hidden="true" />
                 {count > 0 && (

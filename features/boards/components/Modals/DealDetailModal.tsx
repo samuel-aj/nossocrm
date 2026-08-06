@@ -1120,7 +1120,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                         }
                         onClose();
                       }}
-                      className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold text-sm shadow-sm flex items-center gap-2"
+                      className="px-4 py-2 max-md:px-3 max-md:py-1.5 max-md:text-xs bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold text-sm shadow-sm flex items-center gap-2"
                     >
                       <ThumbsUp size={16} /> GANHO
                     </button>
@@ -1142,7 +1142,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                         setLossReasonOrigin('button');
                         setShowLossReasonModal(true);
                       }}
-                      className="px-4 py-2 bg-transparent border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg font-bold text-sm shadow-sm flex items-center gap-2"
+                      className="px-4 py-2 max-md:px-3 max-md:py-1.5 max-md:text-xs bg-transparent border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg font-bold text-sm shadow-sm flex items-center gap-2"
                     >
                       <ThumbsDown size={16} /> PERDIDO
                     </button>
@@ -1162,13 +1162,13 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                   className="ml-2 text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
                   title="Excluir Negócio"
                 >
-                  <Trash2 size={24} />
+                  <Trash2 size={24} className="max-md:w-5 max-md:h-5" />
                 </button>
                 <button
                   onClick={onClose}
                   className="ml-2 text-slate-400 hover:text-slate-600 dark:hover:text-white"
                 >
-                  <X size={24} />
+                  <X size={24} className="max-md:w-5 max-md:h-5" />
                 </button>
               </div>
             </div>
