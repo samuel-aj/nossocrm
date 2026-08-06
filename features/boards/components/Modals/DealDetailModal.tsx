@@ -265,6 +265,9 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const [tagMenuOpen, setTagMenuOpen] = useState(false);
   // Padrão: abre em tela cheia; o botão no topo alterna pro modo pequeno.
   const [viewMode, setViewMode] = useState<'modal' | 'fullscreen'>('fullscreen');
+  // Celular: a coluna de dados (Empresa/Contato/UTMs/Detalhes) fica recolhida
+  // por padrão pra Timeline/WhatsApp aparecerem logo; no desktop é sempre aberta.
+  const [mobileInfoOpen, setMobileInfoOpen] = useState(false);
 
   const normalizeTag = (value: string) => value.trim().replace(/\s+/g, ' ');
   const tagsLower = useMemo(() => new Set((deal?.tags || []).map(t => t.toLowerCase())), [deal?.tags]);
@@ -757,9 +760,9 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
           {/* HEADER (Stage Bar + Won/Lost). No mobile o grupo de ações quebra
               de linha; sem isso, PERDIDO e o X de fechar eram cortados fora
               da tela e o usuário ficava preso dentro do lead. */}
-          <div className="bg-slate-50 dark:bg-black/20 border-b border-slate-200 dark:border-white/10 p-6 max-md:p-4 shrink-0">
+          <div className="relative bg-slate-50 dark:bg-black/20 border-b border-slate-200 dark:border-white/10 p-6 max-md:p-4 shrink-0">
             <div className="flex justify-between items-start mb-6 max-md:flex-wrap max-md:gap-y-2 max-md:mb-3">
-              <div className="flex-1 mr-8 max-md:mr-0 max-md:basis-full">
+              <div className="flex-1 mr-8 max-md:mr-0 max-md:basis-full max-md:pr-20">
                 {isEditingTitle ? (
                   <div className="flex gap-2 mb-1">
                     <input
@@ -1157,16 +1160,18 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                 >
                   {viewMode === 'modal' ? <Maximize2 size={20} /> : <Minimize2 size={20} />}
                 </button>
+                {/* Celular: lixeira e X ancorados no canto superior direito
+                    (na linha do título) em vez de ocuparem uma linha própria */}
                 <button
                   onClick={() => setDeleteId(deal.id)}
-                  className="ml-2 text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                  className="ml-2 max-md:absolute max-md:top-4 max-md:right-12 max-md:ml-0 max-md:p-1 text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
                   title="Excluir Negócio"
                 >
                   <Trash2 size={24} className="max-md:w-5 max-md:h-5" />
                 </button>
                 <button
                   onClick={onClose}
-                  className="ml-2 text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                  className="ml-2 max-md:absolute max-md:top-4 max-md:right-3 max-md:ml-0 max-md:p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white"
                 >
                   <X size={24} className="max-md:w-5 max-md:h-5" />
                 </button>
@@ -1206,10 +1211,26 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
 
           <div className="flex-1 flex flex-col md:flex-row overflow-hidden min-h-0">
             {/* Left Sidebar (Static Info + Custom Fields) */}
-            <div className="w-full md:w-1/3 border-b md:border-b-0 md:border-r border-slate-200 dark:border-white/5 p-4 sm:p-6 overflow-y-auto overflow-x-hidden scrollbar-custom bg-white dark:bg-dark-card max-h-[38vh] md:max-h-none">
+            <div className={`w-full md:w-1/3 border-b md:border-b-0 md:border-r border-slate-200 dark:border-white/5 p-4 sm:p-6 overflow-y-auto overflow-x-hidden scrollbar-custom bg-white dark:bg-dark-card md:max-h-none ${mobileInfoOpen ? 'max-h-[38vh]' : 'max-md:max-h-none max-md:overflow-visible max-md:py-3 max-h-[38vh]'}`}>
+              {/* Celular: cabeçalho que abre/fecha os dados do lead */}
+              <button
+                type="button"
+                onClick={() => setMobileInfoOpen(o => !o)}
+                aria-expanded={mobileInfoOpen}
+                className="md:hidden w-full flex items-center justify-between text-left focus-visible-ring rounded-md"
+              >
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Dados do lead
+                </span>
+                <ChevronDown
+                  size={16}
+                  aria-hidden="true"
+                  className={`text-slate-400 transition-transform ${mobileInfoOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
               {/* space-y-4: 16px entre seções = mesmo pt-4 após cada divisória →
                   cabeçalhos centralizados (16/16) em TODAS as faixas da lateral */}
-              <div className="space-y-4">
+              <div className={`space-y-4 ${mobileInfoOpen ? 'max-md:mt-4' : 'max-md:hidden'}`}>
                 {/* Banner Inativos: quanto tempo falta pro lead sair (devolução automática) */}
                 {deal.inactiveAt && (() => {
                   const daysLeft = Math.max(
