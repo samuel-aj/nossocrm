@@ -1,6 +1,6 @@
 import React from 'react';
 import { ContactStage } from '@/types';
-import { Users, UserCheck, Handshake, Crown, Archive, ChevronRight } from 'lucide-react';
+import { Users, UserCheck, Handshake, Crown, Archive } from 'lucide-react';
 
 interface StageCounts {
   LEAD: number;
@@ -148,10 +148,8 @@ export const ContactsStageTabs: React.FC<ContactsStageTabs> = ({
     {hasMoreRight && (
       <div
         aria-hidden="true"
-        className="md:hidden pointer-events-none absolute inset-y-0 right-0 flex items-center justify-end w-12 bg-gradient-to-l from-surface-bg via-surface-bg/60 to-transparent"
-      >
-        <ChevronRight size={16} className="text-slate-400" />
-      </div>
+        className="md:hidden pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-surface-bg to-transparent"
+      />
     )}
     </div>
   );
