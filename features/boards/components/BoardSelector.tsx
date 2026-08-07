@@ -88,7 +88,7 @@ export const BoardSelector: React.FC<BoardSelectorProps> = ({
       >
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-primary-500" />
-          <span className="font-medium text-slate-900 dark:text-white">
+          <span className="font-medium text-slate-900 dark:text-white max-md:max-w-[9.5rem] max-md:truncate">
             {activeBoard.name}
           </span>
         </div>

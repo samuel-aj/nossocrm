@@ -109,7 +109,7 @@ function CustomFieldFiltersButton({
                 type="button"
                 onClick={() => setOpen((o) => !o)}
                 aria-expanded={open}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-colors backdrop-blur-sm ${activeCount > 0
+                className={`flex items-center gap-2 px-3 py-2 max-md:px-2.5 max-md:py-1.5 rounded-lg border text-sm transition-colors backdrop-blur-sm ${activeCount > 0
                     ? 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
                     : 'border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10'
                     }`}
@@ -444,7 +444,8 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                 </div>
 
                 <div className="h-8 w-px bg-slate-200 dark:bg-white/10 mx-2 hidden md:block"></div>
-                <div className="relative flex-1 sm:w-64">
+                {/* Celular: busca em linha própria (basis-full quebra a linha) */}
+                <div className="relative flex-1 sm:w-64 max-md:basis-full">
                     {/* z-10: o input tem backdrop-blur (cria stacking context) e pintava POR CIMA da lupa */}
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 pointer-events-none" size={16} />
                     <input
@@ -515,12 +516,14 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                     </div>
                 </div>
 
-                <div className="relative">
+                {/* Celular: o select de dono é o item flexível da linha (encolhe
+                    pra caber junto do status e do Filtros) */}
+                <div className="relative max-md:flex-1 max-md:min-w-0">
                     <select
                         value={ownerFilter}
                         onChange={(e) => setOwnerFilter(e.target.value)}
                         aria-label="Filtrar negócios por proprietário"
-                        className="pl-3 pr-8 py-2 max-md:py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm appearance-none cursor-pointer"
+                        className="pl-3 pr-8 py-2 max-md:py-1.5 max-md:pl-2 max-md:pr-6 max-md:w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm appearance-none cursor-pointer"
                     >
                         <option value="all">Todos os Donos</option>
                         <option value="mine">Meus Negócios</option>
