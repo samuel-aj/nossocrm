@@ -7,7 +7,7 @@ import { computeActivityStatusMap } from '@/features/boards/utils/dealActivitySt
 import { useActivities } from '@/lib/query/hooks/useActivitiesQuery';
 
 import { useCRM } from '@/context/CRMContext';
-import { Archive, Hourglass, Undo2, UserX } from 'lucide-react';
+import { Archive, Hourglass, Undo2, UserX, ChevronLeft, ChevronRight } from 'lucide-react';
 
 // Shared immutable default so every card without pending activities reuses
 // the same reference — React.memo on DealCard can then bail out on re-renders.
@@ -253,7 +253,6 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   // lado; tocar num chip pula direto pra etapa. Visual apenas, sem mudar
   // nenhuma funcionalidade do board.
   const boardScrollRef = React.useRef<HTMLDivElement>(null);
-  const stageStripRef = React.useRef<HTMLDivElement>(null);
   const [mobileStageIndex, setMobileStageIndex] = useState(0);
 
   const mobileColumns = useMemo(() => {
@@ -287,44 +286,29 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
     el.scrollTo({ left: index * step, behavior: 'smooth' });
   }, []);
 
-  // Mantém o chip da etapa visível centralizado na faixa conforme desliza.
-  React.useEffect(() => {
-    const strip = stageStripRef.current;
-    const chip = strip?.children[mobileStageIndex] as HTMLElement | undefined;
-    if (strip && chip) {
-      strip.scrollTo({
-        left: chip.offsetLeft - strip.clientWidth / 2 + chip.offsetWidth / 2,
-        behavior: 'smooth',
-      });
-    }
-  }, [mobileStageIndex]);
-
   return (
     // Wrapper: no desktop é display:contents (invisível pro layout); no
     // celular vira coluna pra acomodar a faixa de etapas acima do board.
     <div className="md:contents max-md:h-full max-md:flex max-md:flex-col">
-      {/* Faixa indicadora de etapas — só celular */}
-      <div className="md:hidden shrink-0 mb-2">
-        <div
-          ref={stageStripRef}
-          className="relative flex items-center gap-1.5 overflow-x-auto scrollbar-none pb-1"
-        >
-          {mobileColumns.map((col, index) => (
-            <button
-              key={col.id}
-              type="button"
-              onClick={() => handleJumpToStage(index)}
-              aria-current={index === mobileStageIndex ? 'true' : undefined}
-              className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-bold whitespace-nowrap transition-colors ${index === mobileStageIndex
-                ? 'border-primary-300 dark:border-primary-500/50 bg-primary-50 dark:bg-primary-500/10 text-primary-700 dark:text-primary-300'
-                : 'border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400'}`}
-            >
-              <span className={`w-1.5 h-1.5 rounded-full ${col.color}`} aria-hidden="true" />
-              {col.label}
-              <span className="text-[10px] font-bold opacity-70">{col.count}</span>
-            </button>
-          ))}
-        </div>
+      {/* Bolinhas de paginação (estilo carrossel) — só celular. A ativa fica
+          alongada na cor da etapa; tocar numa bolinha pula pra etapa. */}
+      <div className="md:hidden shrink-0 mb-1 flex items-center justify-center gap-0.5">
+        {mobileColumns.map((col, index) => (
+          <button
+            key={col.id}
+            type="button"
+            onClick={() => handleJumpToStage(index)}
+            aria-label={`${col.label} (${col.count})`}
+            aria-current={index === mobileStageIndex ? 'true' : undefined}
+            className="p-1"
+          >
+            <span
+              className={`block h-1.5 rounded-full transition-all duration-200 ${index === mobileStageIndex
+                ? `w-5 ${col.color}`
+                : 'w-1.5 bg-slate-300 dark:bg-white/20'}`}
+            />
+          </button>
+        ))}
       </div>
 
     {/* Mobile: uma coluna INTEIRA por vez, com snap (desliza etapa a etapa
@@ -334,7 +318,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
       onScroll={handleBoardScroll}
       className="flex gap-4 h-full overflow-x-auto pb-2 w-full max-md:snap-x max-md:snap-mandatory max-md:gap-3 max-md:h-auto max-md:flex-1 max-md:min-h-0"
     >
-      {stages.map(stage => {
+      {stages.map((stage, stageIndex) => {
         const stageDeals = dealsByStageId.map.get(stage.id) ?? [];
         const stageValue = dealsByStageId.totals.get(stage.id) ?? 0;
         const isOver = dragOverStage === stage.id && draggingId !== null;
@@ -372,6 +356,17 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
             >
               <div className="flex justify-between items-center mb-1">
                 <span className="flex items-center gap-2 font-bold text-slate-700 dark:text-slate-200 font-display text-sm tracking-wide uppercase">
+                  {/* Celular: setinha pra etapa anterior, presa ao cabeçalho */}
+                  {stageIndex > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => handleJumpToStage(stageIndex - 1)}
+                      aria-label="Etapa anterior"
+                      className="md:hidden -ml-1 p-0.5 text-slate-400 active:text-slate-600 dark:active:text-slate-200"
+                    >
+                      <ChevronLeft size={16} aria-hidden="true" />
+                    </button>
+                  )}
                   {/* Seleciona/deseleciona todos os leads visíveis desta etapa (só no modo seleção) */}
                   {selectionMode && (
                     <input
@@ -385,8 +380,21 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                   )}
                   {stage.label}
                 </span>
-                <span className="text-xs font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded text-slate-600 dark:text-slate-300">
-                  {stageDeals.length}
+                <span className="flex items-center gap-1">
+                  <span className="text-xs font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded text-slate-600 dark:text-slate-300">
+                    {stageDeals.length}
+                  </span>
+                  {/* Celular: setinha pra próxima etapa */}
+                  {stageIndex < mobileColumns.length - 1 && (
+                    <button
+                      type="button"
+                      onClick={() => handleJumpToStage(stageIndex + 1)}
+                      aria-label="Próxima etapa"
+                      className="md:hidden -mr-1 p-0.5 text-slate-400 active:text-slate-600 dark:active:text-slate-200"
+                    >
+                      <ChevronRight size={16} aria-hidden="true" />
+                    </button>
+                  )}
                 </span>
               </div>
 
