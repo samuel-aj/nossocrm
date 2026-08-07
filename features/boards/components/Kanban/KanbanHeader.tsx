@@ -116,7 +116,7 @@ function CustomFieldFiltersButton({
                 title="Filtrar por tag, campos personalizados e UTMs"
             >
                 <Tag size={14} />
-                Filtros
+                <span className="max-md:hidden">Filtros</span>
                 {activeCount > 0 && (
                     <span className="ml-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-primary-600 text-white text-[11px] font-bold flex items-center justify-center">
                         {activeCount}
@@ -351,7 +351,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
     return (
         // Empilha até md (celular deitado incluso): flex-wrap em coluna
         // quebrava os itens pro LADO quando faltava altura.
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 max-md:mb-3 max-md:gap-2">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 max-md:mb-3 max-md:gap-2 max-md:relative">
             <div className="flex items-center gap-4 w-full md:w-auto flex-wrap max-md:gap-2">
                 {/* Board Selector */}
                 <BoardSelector
@@ -368,7 +368,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                 {onEditBoard && (
                     <button
                         onClick={() => onEditBoard(activeBoard)}
-                        className="p-2 max-md:p-1 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors"
+                        className="p-2 max-md:hidden text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors"
                         title="Configurações do Board"
                     >
                         <Settings size={20} className="max-md:w-[18px] max-md:h-[18px]" />
@@ -422,8 +422,9 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                     </Popover>
                 )}
 
-                {/* VIEW TOGGLE */}
-                <div className="flex bg-slate-100 dark:bg-white/5 p-1 rounded-lg border border-slate-200 dark:border-white/10">
+                {/* VIEW TOGGLE. max-md:mr-16 reserva o canto direito da linha
+                    pro ⋮ e pro botão + (posicionados de forma absoluta) */}
+                <div className="flex bg-slate-100 dark:bg-white/5 p-1 rounded-lg border border-slate-200 dark:border-white/10 max-md:mr-16">
                     <button
                         onClick={() => setViewMode('kanban')}
                         aria-label="Visualização em quadro Kanban"
@@ -558,7 +559,9 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                 )}
             </div>
 
-            <div className="flex gap-3">
+            {/* Celular: este bloco ancora no canto superior direito (o toggle
+                reserva o espaço com mr-16) e o Novo Negócio vira botão "+" */}
+            <div className="flex gap-3 max-md:absolute max-md:top-0 max-md:right-0 max-md:gap-1.5">
                 {/* ⋮ mais opções (ex.: Selecionar vários) */}
                 <div ref={moreMenuRef} className="relative">
                     <button
@@ -567,7 +570,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                         aria-expanded={moreMenuOpen}
                         aria-label="Mais opções"
                         title="Mais opções"
-                        className={`p-2 rounded-lg border text-sm transition-colors ${selectionMode
+                        className={`p-2 max-md:p-1.5 rounded-lg border text-sm transition-colors ${selectionMode
                             ? 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
                             : 'border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/10'
                             }`}
@@ -615,9 +618,17 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                 </div>
                 <button
                     onClick={onNewDeal}
-                    className="bg-primary-700 hover:bg-primary-600 text-white px-4 py-2 max-md:py-1.5 max-md:flex-1 max-md:justify-center rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-primary-700/20"
+                    className="max-md:hidden bg-primary-700 hover:bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-primary-700/20"
                 >
                     <Plus size={18} aria-hidden="true" /> Novo Negócio
+                </button>
+                <button
+                    onClick={onNewDeal}
+                    aria-label="Novo negócio"
+                    title="Novo negócio"
+                    className="md:hidden p-1.5 rounded-lg bg-primary-700 hover:bg-primary-600 text-white shadow-lg shadow-primary-700/20 active:scale-95 transition-all"
+                >
+                    <Plus size={20} aria-hidden="true" />
                 </button>
             </div>
 
