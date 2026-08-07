@@ -105,9 +105,11 @@ export const StageProgressBar: React.FC<StageProgressBarProps> = ({
                                         </button>
 
                                         {index < stages.length - 1 && (
+                                            // Celular: conector curto entre os chips mantém a ideia
+                                            // de sequência ligada mesmo com as etapas quebrando linha
                                             <span
                                                 aria-hidden="true"
-                                                className={`h-px w-7 max-md:hidden ${connectorClass}`}
+                                                className={`h-px w-7 max-md:w-2.5 max-md:shrink-0 ${connectorClass}`}
                                             />
                                         )}
                                     </React.Fragment>
