@@ -1,6 +1,6 @@
 import React from 'react';
 import { ContactStage } from '@/types';
-import { Users, UserCheck, Handshake, Crown, Archive } from 'lucide-react';
+import { Users, UserCheck, Handshake, Crown, Archive, ChevronRight } from 'lucide-react';
 
 interface StageCounts {
   LEAD: number;
@@ -75,8 +75,26 @@ export const ContactsStageTabs: React.FC<ContactsStageTabs> = ({
 }) => {
   const total = counts.LEAD + counts.MQL + counts.PROSPECT + counts.CUSTOMER + (counts.OTHER || 0);
 
+  // Celular: dica visual de que a faixa desliza (degradê + seta na borda
+  // direita, que some quando chega no fim da rolagem).
+  const stripRef = React.useRef<HTMLDivElement>(null);
+  const [hasMoreRight, setHasMoreRight] = React.useState(false);
+  const updateScrollHint = React.useCallback(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    setHasMoreRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 8);
+  }, []);
+  React.useEffect(() => {
+    updateScrollHint();
+  }, [updateScrollHint, total]);
+
   return (
-    <div className="flex items-center gap-2 flex-wrap max-md:flex-nowrap max-md:overflow-x-auto scrollbar-none max-md:gap-1.5 max-md:pb-1">
+    <div className="relative">
+    <div
+      ref={stripRef}
+      onScroll={updateScrollHint}
+      className="flex items-center gap-2 flex-wrap max-md:flex-nowrap max-md:overflow-x-auto scrollbar-none max-md:gap-1.5 max-md:pb-1"
+    >
       {/* All */}
       <button
         onClick={() => onStageChange('ALL')}
@@ -126,6 +144,15 @@ export const ContactsStageTabs: React.FC<ContactsStageTabs> = ({
           </button>
         );
       })}
+    </div>
+    {hasMoreRight && (
+      <div
+        aria-hidden="true"
+        className="md:hidden pointer-events-none absolute inset-y-0 right-0 flex items-center justify-end w-12 bg-gradient-to-l from-surface-bg via-surface-bg/60 to-transparent"
+      >
+        <ChevronRight size={16} className="text-slate-400" />
+      </div>
+    )}
     </div>
   );
 };
