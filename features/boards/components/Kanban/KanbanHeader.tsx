@@ -424,7 +424,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
 
                 {/* VIEW TOGGLE. max-md:mr-16 reserva o canto direito da linha
                     pro ⋮ e pro botão + (posicionados de forma absoluta) */}
-                <div className="flex bg-slate-100 dark:bg-white/5 p-1 rounded-lg border border-slate-200 dark:border-white/10 max-md:mr-16">
+                <div className="flex bg-slate-100 dark:bg-white/5 p-1 rounded-lg border border-slate-200 dark:border-white/10 max-md:mr-[5.25rem]">
                     <button
                         onClick={() => setViewMode('kanban')}
                         aria-label="Visualização em quadro Kanban"
@@ -570,7 +570,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                         aria-expanded={moreMenuOpen}
                         aria-label="Mais opções"
                         title="Mais opções"
-                        className={`p-2 max-md:p-1.5 rounded-lg border text-sm transition-colors ${selectionMode
+                        className={`p-2 max-md:p-0 max-md:h-[38px] max-md:w-[38px] max-md:flex max-md:items-center max-md:justify-center rounded-lg border text-sm transition-colors ${selectionMode
                             ? 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
                             : 'border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/10'
                             }`}
@@ -626,7 +626,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                     onClick={onNewDeal}
                     aria-label="Novo negócio"
                     title="Novo negócio"
-                    className="md:hidden p-1.5 rounded-lg bg-primary-700 hover:bg-primary-600 text-white shadow-lg shadow-primary-700/20 active:scale-95 transition-all"
+                    className="md:hidden h-[38px] w-[38px] flex items-center justify-center rounded-lg bg-primary-700 hover:bg-primary-600 text-white shadow-lg shadow-primary-700/20 active:scale-95 transition-all"
                 >
                     <Plus size={20} aria-hidden="true" />
                 </button>
