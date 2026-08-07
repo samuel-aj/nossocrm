@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Search, LayoutGrid, Table as TableIcon, User, Tag, X, Settings, Lightbulb, Download, MoreVertical, CheckSquare, Target } from 'lucide-react';
+import { Plus, Search, LayoutGrid, Table as TableIcon, User, Tag, X, Settings, Lightbulb, Download, MoreVertical, CheckSquare, Target, ChevronDown } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Board } from '@/types';
 import { BoardSelector } from '../BoardSelector';
@@ -328,6 +328,24 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
         document.addEventListener('mousedown', handler);
         return () => document.removeEventListener('mousedown', handler);
     }, [moreMenuOpen]);
+    // Menu de status no celular (o select fica só no desktop)
+    const [statusMenuOpen, setStatusMenuOpen] = React.useState(false);
+    const statusMenuRef = React.useRef<HTMLDivElement>(null);
+    React.useEffect(() => {
+        if (!statusMenuOpen) return;
+        const handler = (e: MouseEvent) => {
+            if (statusMenuRef.current && !statusMenuRef.current.contains(e.target as Node)) setStatusMenuOpen(false);
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, [statusMenuOpen]);
+    const statusOptions: Array<{ value: 'open' | 'won' | 'lost' | 'all'; label: string; dot: string }> = [
+        { value: 'open', label: 'Em Aberto', dot: 'bg-blue-500' },
+        { value: 'won', label: 'Ganhos', dot: 'bg-green-500' },
+        { value: 'lost', label: 'Perdidos', dot: 'bg-red-500' },
+        { value: 'all', label: 'Todos', dot: 'bg-slate-400' },
+    ];
+    const currentStatus = statusOptions.find((o) => o.value === statusFilter) ?? statusOptions[0];
     // "Meus Negócios" já cobre o próprio usuário — evita opção duplicada na lista.
     const assignableOwners = orgUsers.filter((u) => u.id !== profile?.id);
     return (
@@ -437,7 +455,46 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                         className="w-full pl-10 pr-4 py-2 max-md:py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm"
                     />
                 </div>
-                {/* Status: select só no desktop; no mobile vira as abas abaixo */}
+                {/* Status no celular: botão que abre um menuzinho de opções */}
+                <div ref={statusMenuRef} className="relative md:hidden">
+                    <button
+                        type="button"
+                        onClick={() => setStatusMenuOpen((o) => !o)}
+                        aria-expanded={statusMenuOpen}
+                        aria-label="Filtrar por status"
+                        className="flex items-center gap-2 pl-3 pr-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm text-slate-700 dark:text-slate-200 backdrop-blur-sm"
+                    >
+                        <span className={`w-2 h-2 rounded-full ${currentStatus.dot}`} aria-hidden="true" />
+                        {currentStatus.label}
+                        <ChevronDown
+                            size={14}
+                            aria-hidden="true"
+                            className={`text-slate-400 transition-transform ${statusMenuOpen ? 'rotate-180' : ''}`}
+                        />
+                    </button>
+                    {statusMenuOpen && (
+                        <div className="absolute left-0 z-50 mt-1 w-44 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1">
+                            {statusOptions.map((option) => (
+                                <button
+                                    key={option.value}
+                                    type="button"
+                                    onClick={() => {
+                                        setStatusFilter(option.value);
+                                        setStatusMenuOpen(false);
+                                    }}
+                                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-colors hover:bg-slate-50 dark:hover:bg-white/5 ${statusFilter === option.value
+                                        ? 'font-bold text-primary-600 dark:text-primary-400'
+                                        : 'text-slate-700 dark:text-slate-200'}`}
+                                >
+                                    <span className={`w-2 h-2 rounded-full ${option.dot}`} aria-hidden="true" />
+                                    {option.label}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* Status: select só no desktop */}
                 <div className="relative max-md:hidden">
                     <select
                         value={statusFilter}
@@ -561,27 +618,6 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                 </button>
             </div>
 
-            {/* Status como ABAS (só mobile; no desktop continua o select) */}
-            <div className="md:hidden w-full flex items-center gap-1 bg-slate-100 dark:bg-white/5 p-1 rounded-lg border border-slate-200 dark:border-white/10">
-                {([
-                    ['open', 'Em Aberto'],
-                    ['won', 'Ganhos'],
-                    ['lost', 'Perdidos'],
-                    ['all', 'Todos'],
-                ] as const).map(([value, label]) => (
-                    <button
-                        key={value}
-                        type="button"
-                        onClick={() => setStatusFilter(value)}
-                        aria-pressed={statusFilter === value}
-                        className={`flex-1 py-1.5 rounded-md text-xs font-bold whitespace-nowrap transition-colors ${statusFilter === value
-                            ? 'bg-white dark:bg-slate-700 shadow-sm text-primary-600 dark:text-white'
-                            : 'text-slate-500 dark:text-slate-400'}`}
-                    >
-                        {label}
-                    </button>
-                ))}
-            </div>
         </div>
     );
 };
