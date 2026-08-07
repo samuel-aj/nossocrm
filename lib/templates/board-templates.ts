@@ -60,14 +60,19 @@ export const BOARD_TEMPLATES: Record<BoardTemplateType, BoardTemplate> = {
 
   SALES: {
     name: 'Pipeline de Vendas',
-    description: 'MQL até fechamento ou perda',
+    description: 'Do novo lead até fechamento ou perda',
     emoji: '💰',
-    linkedLifecycleStage: 'MQL',
+    linkedLifecycleStage: 'LEAD',
     tags: ['Vendas', 'CRM', 'Fechamento'],
+    // Ganho e Perdido ficam ocultos no filtro padrão "Em Aberto" do kanban
+    // (aparecem ao filtrar por Ganhos/Perdidos/Todos), como nos boards dos
+    // clientes; a coluna Inativos é a preferência da organização.
     stages: [
-      { label: 'Descoberta', color: 'bg-blue-500', linkedLifecycleStage: 'MQL' },
-      { label: 'Proposta', color: 'bg-purple-500', linkedLifecycleStage: 'PROSPECT' },
-      { label: 'Negociação', color: 'bg-orange-500', linkedLifecycleStage: 'PROSPECT' },
+      { label: 'Novo lead', color: 'bg-blue-500', linkedLifecycleStage: 'LEAD' },
+      { label: 'Em qualificação', color: 'bg-yellow-500', linkedLifecycleStage: 'LEAD' },
+      { label: 'Qualificado', color: 'bg-orange-500', linkedLifecycleStage: 'MQL' },
+      { label: 'Reunião feita', color: 'bg-purple-500', linkedLifecycleStage: 'PROSPECT' },
+      { label: 'Contrato', color: 'bg-indigo-500', linkedLifecycleStage: 'PROSPECT' },
       { label: 'Ganho', color: 'bg-green-500', linkedLifecycleStage: 'CUSTOMER' },
       { label: 'Perdido', color: 'bg-red-500', linkedLifecycleStage: 'OTHER' },
     ],
@@ -85,7 +90,7 @@ export const BOARD_TEMPLATES: Record<BoardTemplateType, BoardTemplate> = {
       targetValue: '50000',
       type: 'currency',
     },
-    entryTrigger: 'Leads qualificados (MQL) vindos da Pré-venda.',
+    entryTrigger: 'Novos leads captados (formulário, anúncios, WhatsApp) até o fechamento.',
   },
 
   ONBOARDING: {
