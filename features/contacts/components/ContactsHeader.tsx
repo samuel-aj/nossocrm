@@ -49,9 +49,9 @@ export const ContactsHeader: React.FC<ContactsHeaderProps> = ({
   openImportExportModal,
 }) => {
   return (
-    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 max-md:gap-3">
       <div>
-        <h1 className="text-3xl font-bold text-slate-900 dark:text-white font-display tracking-tight">
+        <h1 className="text-3xl max-md:text-2xl font-bold text-slate-900 dark:text-white font-display tracking-tight">
           {viewMode === 'people' ? 'Contatos (Pessoas)' : 'Empresas (Contas)'}
         </h1>
         <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
@@ -60,7 +60,7 @@ export const ContactsHeader: React.FC<ContactsHeaderProps> = ({
             : 'Organizações onde seus contatos trabalham.'}
         </p>
       </div>
-      <div className="flex gap-3 w-full sm:w-auto max-md:flex-wrap">
+      <div className="flex gap-3 w-full sm:w-auto max-md:flex-wrap max-md:gap-2">
         {viewMode === 'people' && (
           <select
             value={statusFilter}
@@ -68,7 +68,7 @@ export const ContactsHeader: React.FC<ContactsHeaderProps> = ({
               setStatusFilter(e.target.value as 'ALL' | 'ACTIVE' | 'INACTIVE' | 'CHURNED' | 'RISK')
             }
             aria-label="Filtrar por status"
-            className="pl-3 pr-8 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm appearance-none cursor-pointer"
+            className="pl-3 pr-8 py-2 max-md:flex-1 max-md:min-w-0 max-md:pl-2 max-md:pr-6 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm appearance-none cursor-pointer"
           >
             <option value="ALL">Todos os Status</option>
             <option value="ACTIVE">Ativos</option>
@@ -77,7 +77,7 @@ export const ContactsHeader: React.FC<ContactsHeaderProps> = ({
             <option value="RISK">Em Risco (Alerta)</option>
           </select>
         )}
-        <div className="relative flex-1 sm:w-72 max-md:basis-full max-md:min-w-0">
+        <div className="relative flex-1 sm:w-72 max-md:basis-full max-md:min-w-0 max-md:order-first">
           {/* z-10: o input tem backdrop-blur (cria stacking context) e pintava POR CIMA da lupa */}
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 pointer-events-none" size={16} />
           <input
@@ -110,9 +110,18 @@ export const ContactsHeader: React.FC<ContactsHeaderProps> = ({
         )}
         <button
           onClick={openCreateModal}
-          className="bg-primary-600 hover:bg-primary-500 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-primary-600/20"
+          className="max-md:hidden bg-primary-600 hover:bg-primary-500 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-primary-600/20"
         >
           <Plus size={18} /> {viewMode === 'people' ? 'Novo Contato' : 'Nova Empresa'}
+        </button>
+        {/* Celular: criar vira o botão "+" compacto, no padrão do board */}
+        <button
+          onClick={openCreateModal}
+          aria-label={viewMode === 'people' ? 'Novo contato' : 'Nova empresa'}
+          title={viewMode === 'people' ? 'Novo contato' : 'Nova empresa'}
+          className="md:hidden h-[38px] w-[38px] flex items-center justify-center rounded-lg bg-primary-600 hover:bg-primary-500 text-white shadow-lg shadow-primary-600/20 active:scale-95 transition-all"
+        >
+          <Plus size={20} aria-hidden="true" />
         </button>
       </div>
     </div>
