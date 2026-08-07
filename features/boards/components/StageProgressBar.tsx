@@ -49,9 +49,11 @@ export const StageProgressBar: React.FC<StageProgressBarProps> = ({
         // - Still clickable to change stage
         return (
             <div className={`w-full ${className ?? ''}`}>
+                {/* Celular: as etapas quebram linha (todas visíveis de uma vez,
+                    sem conectores nem scroll escondido); desktop igual. */}
                 <div className="overflow-x-auto">
-                    <div className="min-w-max py-1">
-                        <div className="flex items-center gap-2">
+                    <div className="min-w-max max-md:min-w-0 py-1">
+                        <div className="flex items-center gap-2 max-md:flex-wrap max-md:gap-1.5">
                             {stages.map((stage, index) => {
                                 const isCurrent = currentStatus === stage.id;
                                 const isPast = index < currentIndex;
@@ -91,7 +93,7 @@ export const StageProgressBar: React.FC<StageProgressBarProps> = ({
                                             onClick={() => onStageClick(stage.id)}
                                             aria-current={isCurrent ? 'step' : undefined}
                                             // "Invisible" affordance: clickable but not a chip.
-                                            className={`group inline-flex items-center gap-2 rounded-md px-2 py-1 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary-500/40 ${isCurrent ? 'bg-primary-50 dark:bg-primary-500/10' : ''}`}
+                                            className={`group inline-flex items-center gap-2 max-md:gap-1.5 rounded-md px-2 py-1 max-md:border max-md:border-slate-200 max-md:dark:border-white/10 max-md:rounded-full outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary-500/40 ${isCurrent ? 'bg-primary-50 dark:bg-primary-500/10 max-md:border-primary-300 max-md:dark:border-primary-500/40' : ''}`}
                                             title={stage.label}
                                         >
                                             <span className={`rounded-full ${dotClass}`} />
@@ -105,7 +107,7 @@ export const StageProgressBar: React.FC<StageProgressBarProps> = ({
                                         {index < stages.length - 1 && (
                                             <span
                                                 aria-hidden="true"
-                                                className={`h-px w-7 ${connectorClass}`}
+                                                className={`h-px w-7 max-md:hidden ${connectorClass}`}
                                             />
                                         )}
                                     </React.Fragment>
