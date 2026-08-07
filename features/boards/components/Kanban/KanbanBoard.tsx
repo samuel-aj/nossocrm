@@ -247,10 +247,93 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
     setMoveToStageModal(null);
   };
 
+  // ===== Indicador de etapas (SÓ celular) =====
+  // Padrão dos CRMs mobile: faixa de chips acima do board mostrando todas as
+  // etapas, com a visível destacada — deixa claro que dá pra deslizar pro
+  // lado; tocar num chip pula direto pra etapa. Visual apenas, sem mudar
+  // nenhuma funcionalidade do board.
+  const boardScrollRef = React.useRef<HTMLDivElement>(null);
+  const stageStripRef = React.useRef<HTMLDivElement>(null);
+  const [mobileStageIndex, setMobileStageIndex] = useState(0);
+
+  const mobileColumns = useMemo(() => {
+    const cols = stages.map((s) => ({
+      id: s.id,
+      label: s.label,
+      color: s.color || 'bg-slate-400',
+      count: (dealsByStageId.map.get(s.id) ?? []).length,
+    }));
+    if (inactiveEnabled) {
+      cols.push({ id: '__inactive__', label: 'Inativos', color: 'bg-amber-500', count: inactiveDeals.length });
+    }
+    return cols;
+  }, [stages, dealsByStageId, inactiveEnabled, inactiveDeals.length]);
+
+  const handleBoardScroll = useCallback(() => {
+    if (typeof window === 'undefined' || window.innerWidth >= 768) return;
+    const el = boardScrollRef.current;
+    if (!el || el.children.length === 0) return;
+    const first = el.children[0] as HTMLElement;
+    const step = first.offsetWidth + 12; // gap-3 do mobile
+    const idx = Math.max(0, Math.min(Math.round(el.scrollLeft / step), el.children.length - 1));
+    setMobileStageIndex((prev) => (prev === idx ? prev : idx));
+  }, []);
+
+  const handleJumpToStage = useCallback((index: number) => {
+    const el = boardScrollRef.current;
+    if (!el || el.children.length === 0) return;
+    const first = el.children[0] as HTMLElement;
+    const step = first.offsetWidth + 12;
+    el.scrollTo({ left: index * step, behavior: 'smooth' });
+  }, []);
+
+  // Mantém o chip da etapa visível centralizado na faixa conforme desliza.
+  React.useEffect(() => {
+    const strip = stageStripRef.current;
+    const chip = strip?.children[mobileStageIndex] as HTMLElement | undefined;
+    if (strip && chip) {
+      strip.scrollTo({
+        left: chip.offsetLeft - strip.clientWidth / 2 + chip.offsetWidth / 2,
+        behavior: 'smooth',
+      });
+    }
+  }, [mobileStageIndex]);
+
   return (
-    // Mobile: uma coluna INTEIRA por vez, com snap (desliza etapa a etapa
-    // com uma lasca da próxima aparecendo); antes as colunas ficavam cortadas.
-    <div className="flex gap-4 h-full overflow-x-auto pb-2 w-full max-md:snap-x max-md:snap-mandatory max-md:gap-3">
+    // Wrapper: no desktop é display:contents (invisível pro layout); no
+    // celular vira coluna pra acomodar a faixa de etapas acima do board.
+    <div className="md:contents max-md:h-full max-md:flex max-md:flex-col">
+      {/* Faixa indicadora de etapas — só celular */}
+      <div className="md:hidden shrink-0 mb-2">
+        <div
+          ref={stageStripRef}
+          className="relative flex items-center gap-1.5 overflow-x-auto scrollbar-none pb-1"
+        >
+          {mobileColumns.map((col, index) => (
+            <button
+              key={col.id}
+              type="button"
+              onClick={() => handleJumpToStage(index)}
+              aria-current={index === mobileStageIndex ? 'true' : undefined}
+              className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-bold whitespace-nowrap transition-colors ${index === mobileStageIndex
+                ? 'border-primary-300 dark:border-primary-500/50 bg-primary-50 dark:bg-primary-500/10 text-primary-700 dark:text-primary-300'
+                : 'border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400'}`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${col.color}`} aria-hidden="true" />
+              {col.label}
+              <span className="text-[10px] font-bold opacity-70">{col.count}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+    {/* Mobile: uma coluna INTEIRA por vez, com snap (desliza etapa a etapa
+        com uma lasca da próxima aparecendo); antes as colunas ficavam cortadas. */}
+    <div
+      ref={boardScrollRef}
+      onScroll={handleBoardScroll}
+      className="flex gap-4 h-full overflow-x-auto pb-2 w-full max-md:snap-x max-md:snap-mandatory max-md:gap-3 max-md:h-auto max-md:flex-1 max-md:min-h-0"
+    >
       {stages.map(stage => {
         const stageDeals = dealsByStageId.map.get(stage.id) ?? [];
         const stageValue = dealsByStageId.totals.get(stage.id) ?? 0;
@@ -478,6 +561,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
           currentStageId={moveToStageModal.currentStageId}
         />
       )}
+    </div>
     </div>
   );
 };
