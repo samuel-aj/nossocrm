@@ -343,7 +343,7 @@ const NavGroup = ({
  */
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const { darkMode, toggleDarkMode } = useTheme();
-  const { isGlobalAIOpen, setIsGlobalAIOpen, sidebarCollapsed, setSidebarCollapsed, boards: crmBoards } = useCRM();
+  const { isGlobalAIOpen, setIsGlobalAIOpen, sidebarCollapsed, setSidebarCollapsed, boards: crmBoards, loading: crmLoading } = useCRM();
   const { user, loading, profile, signOut } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
@@ -571,8 +571,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 // Rótulo navega pro último funil usado; a setinha abre a lista
                 headerHref="/boards"
               >
-                {/* Sem fallback: enquanto os boards carregam (ou não existem),
-                    o grupo fica vazio — o rótulo "Boards" já navega sozinho */}
                 {crmBoards.map((b) => (
                   <BoardNavItem
                     key={b.id}
@@ -582,6 +580,21 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                     onSelect={handleSelectBoardFromMenu}
                   />
                 ))}
+                {/* Enquanto os boards carregam, o grupo abre com esqueletos
+                    (os outros grupos têm itens fixos e sempre mostram algo) */}
+                {crmBoards.length === 0 && crmLoading &&
+                  [0, 1, 2].map((i) => (
+                    <div
+                      key={i}
+                      aria-hidden="true"
+                      className={`flex items-center py-3 rounded-lg ${sidebarCollapsed ? 'px-[13px]' : 'px-4 gap-3'}`}
+                    >
+                      <span className="shrink-0 w-5 h-5 rounded-md bg-slate-200 dark:bg-white/10 animate-pulse" />
+                      {!sidebarCollapsed && (
+                        <span className="h-3 flex-1 max-w-[7rem] rounded bg-slate-200 dark:bg-white/10 animate-pulse" />
+                      )}
+                    </div>
+                  ))}
               </NavGroup>
             );
           })()}
