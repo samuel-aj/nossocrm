@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase/client'
 import { Building2, Loader2, ChevronRight } from 'lucide-react'
 import { UserRole } from '@/types/constants'
+import { announceOrgSwitch, pinTabOrg } from '@/lib/tabOrg'
 
 // /select-org NÃO está envolto pelo AuthProvider (que vive só em
 // app/(protected)/layout.tsx e app/(admin)/admin/layout.tsx). Por isso
@@ -68,12 +69,20 @@ export default function SelectOrgPage() {
 
       if (validOrgs.length === 1) {
         // Single org — switch silently and go to dashboard (full reload p/ remontar AuthProvider).
-        await fetch('/api/switch-org', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ organizationId: validOrgs[0].organization_id }),
-        })
+        try {
+          const res = await fetch('/api/switch-org', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ organizationId: validOrgs[0].organization_id }),
+          })
+          if (res.ok) {
+            pinTabOrg(validOrgs[0].organization_id, validOrgs[0].organizations?.name)
+            announceOrgSwitch(validOrgs[0].organization_id, validOrgs[0].organizations?.name)
+          }
+        } catch {
+          // segue pro dashboard mesmo assim; o guard re-marca no load
+        }
         window.location.href = '/dashboard'
         return
       }
@@ -89,12 +98,19 @@ export default function SelectOrgPage() {
   const handleSelect = async (orgId: string) => {
     setSwitching(orgId)
     try {
-      await fetch('/api/switch-org', {
+      const res = await fetch('/api/switch-org', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ organizationId: orgId }),
       })
+      if (!res.ok) {
+        setSwitching(null)
+        return
+      }
+      const picked = orgs.find(o => o.organization_id === orgId)
+      pinTabOrg(orgId, picked?.organizations?.name)
+      announceOrgSwitch(orgId, picked?.organizations?.name)
       // Full reload p/ remontar AuthProvider com a org nova já no profile.
       window.location.href = '/dashboard'
     } catch {

@@ -31,6 +31,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { queryClient } from '@/lib/query';
+import { clearTabOrg } from '@/lib/tabOrg';
 import type { OrganizationId } from '../types';
 
 /**
@@ -209,6 +210,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 // transientes deixava telas (ex.: Kanban) vazias até F5.
                 if (event === 'SIGNED_OUT') {
                     queryClient.clear();
+                    // A marcação de org é da SESSÃO do usuário; sem limpar, o
+                    // pin do usuário anterior vira falso conflito no próximo
+                    // login nesta mesma aba.
+                    clearTabOrg();
                 }
                 setProfile(null);
                 setLoading(false);
@@ -224,6 +229,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // vazem para a sessão seguinte (próximo login sem hard reload mostraria
         // listas/contadores da sessão anterior até o staleTime expirar).
         queryClient.clear();
+        clearTabOrg();
         setProfile(null);
         setUser(null);
         setSession(null);

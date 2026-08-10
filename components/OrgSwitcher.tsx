@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Check, ChevronsUpDown, Search, Loader2 } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
+import { announceOrgSwitch, pinTabOrg } from '@/lib/tabOrg';
 
 interface OrgSummary {
   id: string;
@@ -85,13 +86,10 @@ export function OrgSwitcher({
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error((json as { error?: string }).error || 'Falha ao trocar de organização');
-      // Marca ESTA aba como pertencendo à nova org (o guard de abas não
-      // deve reclamar aqui, só nas outras abas).
-      try {
-        sessionStorage.setItem('crm_tab_org', JSON.stringify({ id: org.id, name: org.name }));
-      } catch {
-        // sem sessionStorage: segue
-      }
+      // Marca ESTA aba como pertencendo à nova org e avisa as outras abas
+      // ANTES de navegar (enquanto o documento ainda está vivo).
+      pinTabOrg(org.id, org.name);
+      announceOrgSwitch(org.id, org.name);
       // Recarga completa: limpa todos os caches (boards, deals...) da org anterior
       window.location.assign('/dashboard');
     } catch (e) {
