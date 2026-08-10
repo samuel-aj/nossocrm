@@ -181,12 +181,12 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
           >
             <colgroup>
               <col className="w-24" />
-              <col className="w-[16%]" />
-              <col className="w-[15%]" />
               <col className="w-[13%]" />
-              <col className="w-[12%]" />
               <col className="w-[15%]" />
+              <col className="w-[14%]" />
               <col className="w-[13%]" />
+              <col className="w-[15%]" />
+              <col className="w-[14%]" />
               {customFieldDefinitions.map((field) => (
                 <col key={field.id} />
               ))}
