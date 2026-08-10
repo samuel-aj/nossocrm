@@ -571,27 +571,17 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 // Rótulo navega pro último funil usado; a setinha abre a lista
                 headerHref="/boards"
               >
-                {crmBoards.length > 0 ? (
-                  crmBoards.map((b) => (
-                    <BoardNavItem
-                      key={b.id}
-                      board={b}
-                      active={boardsActive && activeBoardId === b.id}
-                      collapsed={sidebarCollapsed}
-                      onSelect={handleSelectBoardFromMenu}
-                    />
-                  ))
-                ) : (
-                  <NavItem
-                    to="/boards"
-                    icon={KanbanSquare}
-                    label="Abrir boards"
-                    prefetch="boards"
-                    clickedPath={clickedPath}
-                    onItemClick={setClickedPath}
+                {/* Sem fallback: enquanto os boards carregam (ou não existem),
+                    o grupo fica vazio — o rótulo "Boards" já navega sozinho */}
+                {crmBoards.map((b) => (
+                  <BoardNavItem
+                    key={b.id}
+                    board={b}
+                    active={boardsActive && activeBoardId === b.id}
                     collapsed={sidebarCollapsed}
+                    onSelect={handleSelectBoardFromMenu}
                   />
-                )}
+                ))}
               </NavGroup>
             );
           })()}
