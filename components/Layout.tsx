@@ -252,6 +252,7 @@ const NavGroup = ({
   onToggle,
   childActive,
   collapsed,
+  headerHref,
   children,
 }: {
   label: string;
@@ -261,21 +262,49 @@ const NavGroup = ({
   /** Alguma rota do grupo está ativa (tinge o cabeçalho quando fechado). */
   childActive: boolean;
   collapsed: boolean;
+  /** Com href, o rótulo NAVEGA e só a setinha abre/fecha o grupo. */
+  headerHref?: string;
   children: React.ReactNode;
 }) => {
   if (collapsed) return <>{children}</>;
 
+  const headerClasses = `w-full flex items-center rounded-lg text-sm font-medium transition-colors ${
+    childActive && !open
+      ? 'text-primary-600 dark:text-primary-400'
+      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white'
+  }`;
+
   return (
     <div>
+      {headerHref ? (
+        <div className={headerClasses}>
+          <Link
+            href={headerHref}
+            className="flex items-center flex-1 min-w-0 px-4 py-3 gap-3 rounded-lg focus-visible-ring"
+          >
+            <Icon size={20} className={`shrink-0 ${childActive ? 'text-primary-500' : ''}`} aria-hidden="true" />
+            <span className="font-display tracking-wide flex-1 text-left">{label}</span>
+          </Link>
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={open}
+            aria-label={open ? `Recolher ${label}` : `Expandir ${label}`}
+            className="shrink-0 p-2 mr-2 rounded-md hover:bg-slate-200/60 dark:hover:bg-white/10 transition-colors focus-visible-ring"
+          >
+            <ChevronDown
+              size={15}
+              className={`transition-transform duration-300 ${open ? 'rotate-180' : ''}`}
+              aria-hidden="true"
+            />
+          </button>
+        </div>
+      ) : (
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className={`w-full flex items-center px-4 py-3 gap-3 rounded-lg text-sm font-medium transition-colors focus-visible-ring ${
-          childActive && !open
-            ? 'text-primary-600 dark:text-primary-400'
-            : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white'
-        }`}
+        className={`${headerClasses} px-4 py-3 gap-3 focus-visible-ring`}
       >
         <Icon size={20} className={`shrink-0 ${childActive ? 'text-primary-500' : ''}`} aria-hidden="true" />
         <span className="font-display tracking-wide flex-1 text-left">{label}</span>
@@ -285,6 +314,7 @@ const NavGroup = ({
           aria-hidden="true"
         />
       </button>
+      )}
       <div
         className={`grid transition-[grid-template-rows,opacity] duration-300 ease-in-out ${
           open ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
@@ -538,6 +568,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 onToggle={() => toggleNavGroup('boards')}
                 childActive={boardsActive}
                 collapsed={sidebarCollapsed}
+                // Rótulo navega pro último funil usado; a setinha abre a lista
+                headerHref="/boards"
               >
                 {crmBoards.length > 0 ? (
                   crmBoards.map((b) => (
