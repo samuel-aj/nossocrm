@@ -192,6 +192,55 @@ const NavItem = ({
 };
 
 /**
+ * Item de pipeline dentro do grupo Boards: navega pra /boards já com a
+ * pipeline escolhida como ativa (mesma chave persistida do controller).
+ * Ícone = quadradinho com a inicial do funil (distinguível no menu compacto).
+ */
+const BoardNavItem = ({
+  board,
+  active,
+  collapsed,
+  onSelect,
+}: {
+  board: { id: string; name: string };
+  active: boolean;
+  collapsed: boolean;
+  onSelect: (boardId: string) => void;
+}) => (
+  <Link
+    href="/boards"
+    onClick={() => onSelect(board.id)}
+    onMouseEnter={() => prefetchRoute('boards')}
+    onFocus={() => prefetchRoute('boards')}
+    title={collapsed ? board.name : undefined}
+    className={`relative flex items-center py-3 rounded-lg text-sm font-medium focus-visible-ring overflow-hidden
+    transition-[padding,gap,background-color,color,border-color] duration-300 ease-in-out
+    ${collapsed ? 'px-[13px] gap-0' : 'px-4 gap-3'}
+    ${active
+      ? 'bg-primary-500/10 text-primary-600 dark:text-primary-400 border border-primary-200 dark:border-primary-900/50'
+      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white'
+    }`}
+  >
+    <span
+      className={`shrink-0 w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold uppercase ${active
+        ? 'bg-primary-500/20 text-primary-600 dark:text-primary-300'
+        : 'bg-slate-200 dark:bg-white/10 text-slate-500 dark:text-slate-400'
+      }`}
+      aria-hidden="true"
+    >
+      {(board.name || '?').charAt(0)}
+    </span>
+    <span
+      className={`font-display tracking-wide whitespace-nowrap overflow-hidden truncate transition-[max-width,opacity,transform] duration-300 ease-in-out ${
+        collapsed ? 'max-w-0 opacity-0 -translate-x-2' : 'max-w-[9rem] opacity-100 translate-x-0'
+      }`}
+    >
+      {board.name}
+    </span>
+  </Link>
+);
+
+/**
  * Grupo recolhível do menu lateral (ex.: WhatsApp, Ajuda). No menu compacto
  * os itens do grupo aparecem direto (só ícones), sem o cabeçalho. No menu
  * expandido, abre e fecha com animação de altura (grid-rows 0fr↔1fr) + fade.
@@ -264,7 +313,7 @@ const NavGroup = ({
  */
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const { darkMode, toggleDarkMode } = useTheme();
-  const { isGlobalAIOpen, setIsGlobalAIOpen, sidebarCollapsed, setSidebarCollapsed } = useCRM();
+  const { isGlobalAIOpen, setIsGlobalAIOpen, sidebarCollapsed, setSidebarCollapsed, boards: crmBoards } = useCRM();
   const { user, loading, profile, signOut } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
@@ -276,10 +325,24 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const officeInitials = officeName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase() || 'AJ';
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
-  // Grupos recolhíveis do menu (WhatsApp e Ajuda): sanfona com no máximo UM
-  // aberto por vez, fechados por padrão; a escolha persiste.
-  const [openNavGroup, setOpenNavGroup] = usePersistedState<'whatsapp' | 'ajuda' | null>('nav_open_group', null);
-  const toggleNavGroup = (g: 'whatsapp' | 'ajuda') => setOpenNavGroup(cur => (cur === g ? null : g));
+  // Grupos recolhíveis do menu (WhatsApp, Boards e Ajuda): sanfona com no
+  // máximo UM aberto por vez, fechados por padrão; a escolha persiste.
+  const [openNavGroup, setOpenNavGroup] = usePersistedState<'whatsapp' | 'boards' | 'ajuda' | null>('nav_open_group', null);
+  const toggleNavGroup = (g: 'whatsapp' | 'boards' | 'ajuda') => setOpenNavGroup(cur => (cur === g ? null : g));
+
+  // Pipeline ativa (mesma chave persistida do useBoardsController; o
+  // usePersistedState sincroniza as instâncias na mesma aba via evento).
+  // Permite o grupo Boards do menu abrir direto numa pipeline específica.
+  const [activeBoardId, setActiveBoardId] = usePersistedState<string | null>(
+    'crm_active_board_id',
+    null
+  );
+  const handleSelectBoardFromMenu = React.useCallback(
+    (boardId: string) => {
+      setActiveBoardId(boardId);
+    },
+    [setActiveBoardId]
+  );
 
   // Bolinha de não lidas no item Chats: mesma queryKey da página de chats
   // (na página o polling de 10s assume; aqui um ritmo mais leve basta).
@@ -453,9 +516,55 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             );
           })()}
 
+          <NavItem
+            to="/dashboard"
+            icon={LayoutDashboard}
+            label="Visão Geral"
+            prefetch="dashboard"
+            clickedPath={clickedPath}
+            onItemClick={setClickedPath}
+            collapsed={sidebarCollapsed}
+          />
+
+          {/* GRUPO Boards (recolhível): as pipelines da organização, pra
+              entrar direto num funil específico */}
+          {(() => {
+            const boardsActive = pathname === '/boards' || pathname === '/pipeline';
+            return (
+              <NavGroup
+                label="Boards"
+                icon={KanbanSquare}
+                open={openNavGroup === 'boards'}
+                onToggle={() => toggleNavGroup('boards')}
+                childActive={boardsActive}
+                collapsed={sidebarCollapsed}
+              >
+                {crmBoards.length > 0 ? (
+                  crmBoards.map((b) => (
+                    <BoardNavItem
+                      key={b.id}
+                      board={b}
+                      active={boardsActive && activeBoardId === b.id}
+                      collapsed={sidebarCollapsed}
+                      onSelect={handleSelectBoardFromMenu}
+                    />
+                  ))
+                ) : (
+                  <NavItem
+                    to="/boards"
+                    icon={KanbanSquare}
+                    label="Abrir boards"
+                    prefetch="boards"
+                    clickedPath={clickedPath}
+                    onItemClick={setClickedPath}
+                    collapsed={sidebarCollapsed}
+                  />
+                )}
+              </NavGroup>
+            );
+          })()}
+
           {[
-            { to: '/dashboard', icon: LayoutDashboard, label: 'Visão Geral', prefetch: 'dashboard' as const },
-            { to: '/boards', icon: KanbanSquare, label: 'Boards', prefetch: 'boards' as const },
             { to: '/contacts', icon: Users, label: 'Contatos', prefetch: 'contacts' as const },
             { to: '/activities', icon: CheckSquare, label: 'Atividades', prefetch: 'activities' as const },
             { to: '/reports', icon: BarChart3, label: 'Relatórios', prefetch: 'reports' as const },
