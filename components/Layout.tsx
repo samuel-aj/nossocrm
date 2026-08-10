@@ -72,6 +72,8 @@ import { BottomNav, MoreMenuSheet, NavigationRail } from '@/components/navigatio
 import { UIChat } from './ai/UIChat';
 
 import { NotificationPopover } from './notifications/NotificationPopover';
+import { OrgSwitcher } from './OrgSwitcher';
+import { OrgTabGuard } from './OrgTabGuard';
 
 /**
  * Props do componente Layout
@@ -392,6 +394,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   // Contador estilo WhatsApp: acima de 999 vira "999+"
   const unreadChatsNotif = unreadChatsCount > 0 ? (unreadChatsCount > 999 ? '999+' : String(unreadChatsCount)) : undefined;
   const isAdminRole = profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN;
+  const isSuperAdmin = profile?.role === UserRole.SUPER_ADMIN;
   // Hydration safety: `isDebugMode()` reads localStorage. On SSR it is always false.
   // Initialize deterministically and sync on mount to avoid hydration mismatch warnings.
   const [debugEnabled, setDebugEnabled] = useState(false);
@@ -488,14 +491,14 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         aria-label="Menu principal"
       >
         <div className="h-16 flex items-center border-b border-[var(--color-border-subtle)] px-5">
-          <div className={`flex items-center min-w-0 transition-[gap] duration-300 ease-in-out ${sidebarCollapsed ? 'gap-0' : 'gap-3'}`}>
-            <div className="w-9 h-9 bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-lg shadow-primary-500/20 shrink-0" aria-hidden="true">
-              {officeInitials}
-            </div>
-            <span className={`text-sm font-bold font-display tracking-tight text-slate-900 dark:text-white truncate overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-in-out ${sidebarCollapsed ? 'max-w-0 opacity-0 -translate-x-2' : 'max-w-[9rem] flex-1 min-w-0 opacity-100 translate-x-0'}`}>
-              {officeName}
-            </span>
-          </div>
+          {/* Card da org; para super admin vira o seletor de organizações */}
+          <OrgSwitcher
+            collapsed={sidebarCollapsed}
+            officeName={officeName}
+            officeInitials={officeInitials}
+            isSuperAdmin={isSuperAdmin}
+            currentOrgId={profile?.organization_id ?? null}
+          />
         </div>
 
         <nav className="flex-1 p-4 space-y-2 flex flex-col overflow-y-auto" aria-label="Navegação do sistema">
@@ -896,6 +899,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       {/* Mobile app shell */}
       <BottomNav onOpenMore={() => setIsMoreOpen(true)} />
       <MoreMenuSheet isOpen={isMoreOpen} onClose={() => setIsMoreOpen(false)} />
+
+      {/* Aviso quando OUTRA aba troca a org da sessão (evita mexer nos dados
+          da organização errada sem perceber) */}
+      <OrgTabGuard />
     </div>
   );
 };
