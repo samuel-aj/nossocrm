@@ -112,6 +112,8 @@ interface PipelineViewProps {
   customFieldLogic: 'AND' | 'OR';
   setCustomFieldLogic: (l: 'AND' | 'OR') => void;
   customFieldOptions: Array<{ key: string; label: string; kind: 'select' | 'text'; options: string[] }>;
+  dateRange: { start: string; end: string };
+  setDateRange: (r: { start: string; end: string }) => void;
   tagFilter: string;
   setTagFilter: (v: string) => void;
   tagOptions: string[];
@@ -298,6 +300,8 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   customFieldLogic,
   setCustomFieldLogic,
   customFieldOptions,
+  dateRange,
+  setDateRange,
   tagFilter,
   setTagFilter,
   tagOptions,
@@ -505,6 +509,8 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
             tagFilter={tagFilter}
             setTagFilter={setTagFilter}
             tagOptions={tagOptions}
+            dateRange={dateRange}
+            setDateRange={setDateRange}
             statusFilter={statusFilter}
             setStatusFilter={setStatusFilter}
             selectionMode={selectionMode}

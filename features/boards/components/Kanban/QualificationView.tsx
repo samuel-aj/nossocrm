@@ -114,7 +114,7 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
     { id: 'sql', label: 'SQL', count: viewData.sqlCount },
   ];
 
-  const totalColumns = 6 + customFieldDefinitions.length;
+  const totalColumns = 7 + customFieldDefinitions.length;
   // Sem etapa Qualificado no funil (ex.: board de pós-venda) a aba SQL não
   // tem o que mostrar; o aviso fala de leads, não de configuração de etapas.
   const sqlUnavailable = activeTab === 'sql' && !viewData.qualifiedStage;
@@ -177,15 +177,16 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
             // max-md:min-w-[40rem]: no celular a tabela ganha scroll
             // horizontal próprio (o wrapper é overflow-auto) em vez de
             // esmagar as colunas abaixo do próprio padding.
-            className="w-full table-fixed max-md:min-w-[40rem] text-left text-sm border-collapse"
+            className="w-full table-fixed max-md:min-w-[50rem] text-left text-sm border-collapse"
           >
             <colgroup>
               <col className="w-24" />
-              <col className="w-[24%]" />
-              <col className="w-[18%]" />
-              <col className="w-[14%]" />
+              <col className="w-[20%]" />
+              <col className="w-[15%]" />
               <col className="w-[12%]" />
-              <col className="w-[16%]" />
+              <col className="w-[10%]" />
+              <col className="w-[14%]" />
+              <col className="w-[13%]" />
               {customFieldDefinitions.map((field) => (
                 <col key={field.id} />
               ))}
@@ -210,6 +211,9 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                   </th>
                   <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                     Dono
+                  </th>
+                  <th className="px-3 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                    Criado em
                   </th>
                   {/* Custom Fields Columns */}
                   {customFieldDefinitions.map((field) => (

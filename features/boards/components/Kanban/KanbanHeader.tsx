@@ -31,6 +31,8 @@ interface KanbanHeaderProps {
     tagFilter: string;
     setTagFilter: (v: string) => void;
     tagOptions: string[];
+    dateRange: { start: string; end: string };
+    setDateRange: (r: { start: string; end: string }) => void;
     statusFilter: 'open' | 'won' | 'lost' | 'all';
     setStatusFilter: (filter: 'open' | 'won' | 'lost' | 'all') => void;
     onNewDeal: () => void;
@@ -64,6 +66,8 @@ function CustomFieldFiltersButton({
     tagFilter,
     onTagFilterChange,
     tagOptions,
+    dateRange,
+    onDateRangeChange,
 }: {
     conditions: CfCondition[];
     onConditionsChange: (c: CfCondition[]) => void;
@@ -73,6 +77,8 @@ function CustomFieldFiltersButton({
     tagFilter: string;
     onTagFilterChange: (v: string) => void;
     tagOptions: string[];
+    dateRange: { start: string; end: string };
+    onDateRangeChange: (r: { start: string; end: string }) => void;
 }) {
     const [open, setOpen] = React.useState(false);
     const containerRef = React.useRef<HTMLDivElement>(null);
@@ -89,7 +95,8 @@ function CustomFieldFiltersButton({
     const activeConditions = conditions.filter(
         (c) => c.field && (c.operator === 'empty' || c.operator === 'not_empty' || c.value.trim() !== '')
     );
-    const activeCount = activeConditions.length + (tagFilter ? 1 : 0);
+    const dateActive = Boolean(dateRange.start || dateRange.end);
+    const activeCount = activeConditions.length + (tagFilter ? 1 : 0) + (dateActive ? 1 : 0);
 
     const updateCondition = (id: string, patch: Partial<CfCondition>) =>
         onConditionsChange(conditions.map((c) => (c.id === id ? { ...c, ...patch } : c)));
@@ -133,6 +140,7 @@ function CustomFieldFiltersButton({
                                 onClick={() => {
                                     onConditionsChange([]);
                                     onTagFilterChange('');
+                                    onDateRangeChange({ start: '', end: '' });
                                 }}
                                 className="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
                             >
@@ -156,6 +164,44 @@ function CustomFieldFiltersButton({
                             </select>
                         </div>
                     )}
+                    <div className="space-y-2">
+                        <p className="text-[11px] font-bold text-slate-400 uppercase border-b border-slate-100 dark:border-white/10 pb-1">
+                            Data de criação
+                        </p>
+                        <div className="flex items-center gap-2">
+                            <label className="flex-1 min-w-0 space-y-0.5">
+                                <span className="block text-[11px] text-slate-500 dark:text-slate-400">De</span>
+                                <input
+                                    type="date"
+                                    value={dateRange.start}
+                                    max={dateRange.end || undefined}
+                                    onChange={(e) => onDateRangeChange({ ...dateRange, start: e.target.value })}
+                                    aria-label="Criado a partir de"
+                                    className={`${inputClass} w-full`}
+                                />
+                            </label>
+                            <label className="flex-1 min-w-0 space-y-0.5">
+                                <span className="block text-[11px] text-slate-500 dark:text-slate-400">Até</span>
+                                <input
+                                    type="date"
+                                    value={dateRange.end}
+                                    min={dateRange.start || undefined}
+                                    onChange={(e) => onDateRangeChange({ ...dateRange, end: e.target.value })}
+                                    aria-label="Criado até"
+                                    className={`${inputClass} w-full`}
+                                />
+                            </label>
+                        </div>
+                        {dateActive && (
+                            <button
+                                type="button"
+                                onClick={() => onDateRangeChange({ start: '', end: '' })}
+                                className="text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                            >
+                                Limpar datas
+                            </button>
+                        )}
+                    </div>
                     {options.length > 0 && (
                         <div className="space-y-2">
                             <p className="text-[11px] font-bold text-slate-400 uppercase border-b border-slate-100 dark:border-white/10 pb-1">
@@ -310,6 +356,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
     statusFilter, setStatusFilter,
     customFieldConditions, setCustomFieldConditions, customFieldLogic, setCustomFieldLogic, customFieldOptions,
     tagFilter, setTagFilter, tagOptions,
+    dateRange, setDateRange,
     selectionMode, onEnterSelectionMode, onExitSelectionMode,
     onNewDeal
 }) => {
@@ -544,19 +591,21 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                     <User className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
                 </div>
 
-                {/* Filtros: tag (select) + construtor de condições por campo/UTM */}
-                {(customFieldOptions.length > 0 || tagOptions.length > 0) && (
-                    <CustomFieldFiltersButton
-                        conditions={customFieldConditions}
-                        onConditionsChange={setCustomFieldConditions}
-                        logic={customFieldLogic}
-                        onLogicChange={setCustomFieldLogic}
-                        options={customFieldOptions}
-                        tagFilter={tagFilter}
-                        onTagFilterChange={setTagFilter}
-                        tagOptions={tagOptions}
-                    />
-                )}
+                {/* Filtros: tag (select) + data de criação + construtor de
+                    condições por campo/UTM. Sempre visível: a data existe em
+                    qualquer board, mesmo sem tags/campos configurados. */}
+                <CustomFieldFiltersButton
+                    conditions={customFieldConditions}
+                    onConditionsChange={setCustomFieldConditions}
+                    logic={customFieldLogic}
+                    onLogicChange={setCustomFieldLogic}
+                    options={customFieldOptions}
+                    tagFilter={tagFilter}
+                    onTagFilterChange={setTagFilter}
+                    tagOptions={tagOptions}
+                    dateRange={dateRange}
+                    onDateRangeChange={setDateRange}
+                />
             </div>
 
             {/* Celular: este bloco ancora no canto superior direito (o toggle

@@ -11,6 +11,17 @@ export const NO_ACTIVITY_STATUS: DealActivityStatus = { kind: 'none', daysFromTo
 
 type QuickAddType = 'CALL' | 'MEETING' | 'EMAIL';
 
+/** Data de criação em partes (fuso local): empilhadas na célula, cabem na
+ *  coluna estreita sem vazar por cima das colunas vizinhas (table-fixed). */
+const formatCreatedParts = (iso: string): { date: string; time: string } | null => {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  return {
+    date: d.toLocaleDateString('pt-BR'),
+    time: d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+  };
+};
+
 type KanbanListRowProps = {
   deal: DealView;
   stageLabel: string;
@@ -47,6 +58,7 @@ export const KanbanListRow = React.memo(function KanbanListRow({
   onMoveDealToStage,
 }: KanbanListRowProps) {
   const [moveToStageOpen, setMoveToStageOpen] = useState(false);
+  const created = formatCreatedParts(deal.createdAt);
 
   return (
     <>
@@ -111,6 +123,16 @@ export const KanbanListRow = React.memo(function KanbanListRow({
           <div className="flex items-center gap-2">
             <OwnerBadge ownerId={deal.ownerId} showName />
           </div>
+        </td>
+        <td className="px-3 py-3 text-slate-500 dark:text-slate-400 text-xs">
+          {created ? (
+            <>
+              <span className="block whitespace-nowrap">{created.date}</span>
+              <span className="block whitespace-nowrap">{created.time}</span>
+            </>
+          ) : (
+            '-'
+          )}
         </td>
         {/* Custom Fields Cells */}
         {customFieldDefinitions.map((field) => (

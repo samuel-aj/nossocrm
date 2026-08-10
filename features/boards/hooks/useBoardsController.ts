@@ -487,6 +487,19 @@ export const useBoardsController = () => {
     );
     const tagTerm = tagFilter.trim().toLowerCase();
 
+    // Filtro por data de criação. 'YYYY-MM-DD' + hora explícita: parseia no
+    // fuso LOCAL do usuário (new Date('YYYY-MM-DD') seria meia-noite UTC, 21h
+    // do dia anterior no Brasil, e pegaria leads da noite errada).
+    // Datas digitadas à mão chegam parciais (ano 0002 no meio da digitação)
+    // ou invertidas; limites sem sentido são ignorados pra não zerar o board.
+    const plausibleDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && s >= '1900-01-01';
+    const startOk = plausibleDate(dateRange.start);
+    const endOk =
+      plausibleDate(dateRange.end) && (!startOk || dateRange.end >= dateRange.start);
+    const createdStart = startOk ? new Date(`${dateRange.start}T00:00:00`) : null;
+    const createdEnd = endOk ? new Date(`${dateRange.end}T23:59:59.999`) : null;
+    const dateFilterActive = Boolean(createdStart || createdEnd);
+
     return deals.filter(l => {
       // Com a etapa Inativos LIGADA: leads guardados (inactive_at) e leads de
       // contato INATIVO saem do funil normal — ficam na coluna Inativos
@@ -540,13 +553,11 @@ export const useBoardsController = () => {
       }
 
       let matchesDate = true;
-      if (dateRange.start) {
-        matchesDate = matchesDate && new Date(l.createdAt) >= new Date(dateRange.start);
+      if (createdStart) {
+        matchesDate = matchesDate && new Date(l.createdAt) >= createdStart;
       }
-      if (dateRange.end) {
-        const endDate = new Date(dateRange.end);
-        endDate.setHours(23, 59, 59, 999);
-        matchesDate = matchesDate && new Date(l.createdAt) <= endDate;
+      if (createdEnd) {
+        matchesDate = matchesDate && new Date(l.createdAt) <= createdEnd;
       }
 
       // Status Filter Logic
@@ -559,8 +570,12 @@ export const useBoardsController = () => {
         matchesStatus = l.isLost;
       }
 
+      // Higiene da visão padrão: ganhos/perdidos parados há 30+ dias saem de
+      // "Em Aberto"/"Todos". Com filtro de data ATIVO o usuário pediu um
+      // período explícito (ex.: retrato de maio), então o corte não se aplica
+      // — senão os ganhos/perdidos antigos sumiriam do próprio período pedido.
       let matchesRecent = true;
-      if (statusFilter === 'open' || statusFilter === 'all') {
+      if (!dateFilterActive && (statusFilter === 'open' || statusFilter === 'all')) {
         if (l.isWon || l.isLost) {
           const lastUpdate = new Date(l.updatedAt);
           if (lastUpdate < cutoffDate) {
