@@ -94,6 +94,19 @@ export const useBoardsController = () => {
   // boards[0] quando defaultBoard está ausente.
   useEffect(() => {
     if (!activeBoardId) {
+      // CORRIDA DA HIDRATAÇÃO: o usePersistedState restaura o board salvo só
+      // DEPOIS da montagem, mas com o cache de boards quente (sair da aba e
+      // voltar) este efeito rodava antes e sobrescrevia a escolha do usuário
+      // com o board padrão. Se há um valor salvo, aguarda a restauração; se o
+      // board salvo não existir mais, o bloco abaixo corrige pro padrão.
+      try {
+        if (typeof window !== 'undefined') {
+          const persisted = localStorage.getItem('crm_active_board_id');
+          if (persisted && persisted !== 'null') return;
+        }
+      } catch {
+        // sem localStorage: segue com o fallback normal
+      }
       if (defaultBoard?.id) {
         setActiveBoardId(defaultBoard.id);
       } else if (boards.length > 0) {

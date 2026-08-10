@@ -32,9 +32,18 @@ export const usePersistedState = <T>(key: string, initialValue: T): [T, React.Di
   // Track if we dispatched the event ourselves to avoid re-applying our own update
   const isSelf = useRef(false);
 
+  // Pula a PRIMEIRA gravação (a da montagem): ela escrevia o valor inicial
+  // por cima do que estava salvo, antes de a hidratação acima aplicar o valor
+  // real — quem lesse o localStorage nesse instante via o default, não o salvo.
+  const firstPersist = useRef(true);
+
   // Persist to localStorage and notify other hook instances in the same tab
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    if (firstPersist.current) {
+      firstPersist.current = false;
+      return;
+    }
     try {
       localStorage.setItem(key, JSON.stringify(state));
       isSelf.current = true;
