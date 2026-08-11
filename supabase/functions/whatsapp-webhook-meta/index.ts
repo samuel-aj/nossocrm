@@ -266,9 +266,25 @@ Deno.serve(async (req) => {
         const id = st?.id;
         const status = statusMap[String(st?.status ?? "").toLowerCase()];
         if (!id || !status) continue;
+        // Recibo de FALHA vem com o motivo (errors[]): persiste no registro da
+        // mensagem pro chat mostrar POR QUE não entregou (ex.: fora da janela
+        // de 24h, portfólio restrito), e loga pra diagnóstico.
+        let errText: string | null = null;
+        if (status === "failed" && Array.isArray(st?.errors) && st.errors.length > 0) {
+          errText = st.errors
+            // deno-lint-ignore no-explicit-any
+            .map((e: any) =>
+              [e?.code, e?.title, e?.message !== e?.title ? e?.message : null, e?.error_data?.details]
+                .filter(Boolean)
+                .join(" — ")
+            )
+            .join(" | ")
+            .slice(0, 800);
+          console.error("[wa-webhook-meta] status failed:", id, errText);
+        }
         await supabase
           .from("wa_messages")
-          .update({ status })
+          .update({ status, ...(errText ? { error: errText } : {}) })
           .eq("organization_id", orgId)
           .eq("evolution_message_id", id)
           .in("status", lowerThan[status] ?? []);
