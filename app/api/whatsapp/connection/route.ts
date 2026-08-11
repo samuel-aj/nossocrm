@@ -69,6 +69,18 @@ export async function GET() {
   const metaWebhook = metaWebhookInfo(auth.user.role, conn);
   if (!conn) return json({ connected: false, connection: null, metaWebhook });
 
+  // Só pra ADMIN e só no modo API oficial: as credenciais salvas, pra tela de
+  // edição abrir preenchida (o admin foi quem cadastrou o token — poder rever
+  // o que está salvo é parte de operar a conexão).
+  const metaCredentials =
+    isOrgAdmin(auth.user.role) && isBusinessConnection(conn)
+      ? {
+          token: conn.instance_token,
+          phoneNumberId: conn.meta_phone_number_id,
+          wabaId: conn.meta_waba_id,
+        }
+      : null;
+
   let status = conn.status;
   try {
     const live = await getProvider(conn).getConnectionState();
@@ -79,7 +91,12 @@ export async function GET() {
   } catch {
     // Evolution indisponível: mantém o último status salvo
   }
-  return json({ connected: status === 'connected', connection: { ...mask(conn), status }, metaWebhook });
+  return json({
+    connected: status === 'connected',
+    connection: { ...mask(conn), status },
+    metaWebhook,
+    metaCredentials,
+  });
 }
 
 export async function POST(req: Request) {

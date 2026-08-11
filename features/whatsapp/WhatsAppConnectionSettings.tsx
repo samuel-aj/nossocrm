@@ -28,6 +28,8 @@ interface ConnResponse {
   connection: WaConnectionInfo | null;
   /** Só pra admin: URL e verify token do webhook da Meta (modo API oficial) */
   metaWebhook?: { url: string; verifyToken: string } | null;
+  /** Só pra admin (modo API oficial): credenciais salvas, pra edição abrir preenchida */
+  metaCredentials?: { token: string | null; phoneNumberId: string | null; wabaId: string | null } | null;
 }
 
 interface QrResponse {
@@ -92,6 +94,19 @@ export function WhatsAppConnectionSettings() {
   const [bizToken, setBizToken] = useState('');
   const [bizNumberId, setBizNumberId] = useState('');
   const [bizWabaId, setBizWabaId] = useState('');
+
+  // Abre o form da API oficial PREENCHIDO com o que está salvo (admin quer
+  // ver/conferir o token, Phone Number ID e WABA ID atuais). Fechar só fecha.
+  const metaCreds = connQ.data?.metaCredentials ?? null;
+  const toggleBizForm = () => {
+    const opening = !bizOpen;
+    if (opening && metaCreds) {
+      setBizToken(metaCreds.token ?? '');
+      setBizNumberId(metaCreds.phoneNumberId ?? '');
+      setBizWabaId(metaCreds.wabaId ?? '');
+    }
+    setBizOpen(opening);
+  };
 
   const qrQ = useQuery<QrResponse>({
     queryKey: ['waConnectionQr'],
@@ -394,7 +409,7 @@ export function WhatsAppConnectionSettings() {
               </p>
               <button
                 type="button"
-                onClick={() => setBizOpen(o => !o)}
+                onClick={toggleBizForm}
                 className="mt-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors"
               >
                 <KeyRound size={16} />
@@ -503,7 +518,7 @@ export function WhatsAppConnectionSettings() {
                 {isBusiness && (
                   <button
                     type="button"
-                    onClick={() => setBizOpen(o => !o)}
+                    onClick={toggleBizForm}
                     className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-sky-200 dark:border-sky-500/30 text-sky-700 dark:text-sky-300 text-xs font-bold hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-colors"
                   >
                     <KeyRound size={14} /> {bizOpen ? 'Fechar edição' : 'Editar conexão'}
