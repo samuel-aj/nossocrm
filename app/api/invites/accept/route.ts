@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { findAuthUserByEmail } from '@/lib/supabase/authUsers';
+import { countOrgMembers } from '@/lib/supabase/orgMembers';
 
 function json<T>(body: T, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -81,12 +82,10 @@ export async function POST(req: Request) {
 
   // Limite de usuários da organização (checado aqui porque é o convite que
   // materializa a conta; links podem ter sido gerados antes do limite lotar).
-  const [{ data: orgLimits }, { count: memberCount }] = await Promise.all([
+  // Conta membros = perfis ativos aqui + vínculos multi-org (igual à lista).
+  const [{ data: orgLimits }, memberCount] = await Promise.all([
     admin.from('organizations').select('max_users').eq('id', invite.organization_id).single(),
-    admin
-      .from('profiles')
-      .select('id', { count: 'exact', head: true })
-      .eq('organization_id', invite.organization_id),
+    countOrgMembers(admin, invite.organization_id),
   ]);
 
   // Um usuário removido da equipe fica com a conta de login órfã (o perfil

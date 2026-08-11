@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { findAuthUserByEmail } from '@/lib/supabase/authUsers';
+import { countOrgMembers } from '@/lib/supabase/orgMembers';
 import { UserRole } from '@/types/constants';
 
 function json<T>(body: T, status = 200): Response {
@@ -103,14 +104,12 @@ export async function POST(req: Request) {
   if (admin && email) {
     // Limite de usuários da org: o modo email materializa uma conta, então
     // conta pra vaga igual ao "login pronto" e ao convite por link no aceite.
-    const [{ data: orgLimits }, { count: memberCount }] = await Promise.all([
+    // Conta membros = perfis ativos aqui + vínculos multi-org (igual à lista).
+    const [{ data: orgLimits }, memberCount] = await Promise.all([
       admin.from('organizations').select('max_users').eq('id', me.organization_id).single(),
-      admin
-        .from('profiles')
-        .select('id', { count: 'exact', head: true })
-        .eq('organization_id', me.organization_id),
+      countOrgMembers(admin, me.organization_id),
     ]);
-    if (orgLimits?.max_users && (memberCount ?? 0) >= orgLimits.max_users) {
+    if (orgLimits?.max_users && memberCount >= orgLimits.max_users) {
       return json(
         { error: `Limite de ${orgLimits.max_users} usuário(s) da organização atingido. Fale com o suporte pra aumentar.` },
         400

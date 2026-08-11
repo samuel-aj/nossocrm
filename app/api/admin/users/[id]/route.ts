@@ -49,7 +49,6 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
 
   if (targetError) return json({ error: targetError.message }, 500);
   if (!target) return json({ error: 'User not found' }, 404);
-  if (target.organization_id !== me.organization_id) return json({ error: 'Forbidden' }, 403);
 
   // Usuário multi-org: remover daqui NÃO pode apagar a conta inteira (ele
   // continua nas outras organizações). Remove só o vínculo com ESTA org e,
@@ -63,9 +62,21 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
   if (membershipsError) {
     return json({ error: `Falha ao verificar organizações do usuário: ${membershipsError.message}` }, 500);
   }
+
+  // Autorização: o alvo precisa PERTENCER a esta org — org ativa aqui OU vínculo
+  // aqui (membro multi-org com a org ativa em outro lugar). Sem isso, 403.
+  const hasMembershipHere = (memberships || []).some((m) => m.organization_id === me.organization_id);
+  const isMemberHere = target.organization_id === me.organization_id || hasMembershipHere;
+  if (!isMemberHere) return json({ error: 'Forbidden' }, 403);
+
   const otherOrgs = (memberships || []).filter((m) => m.organization_id !== me.organization_id);
 
-  if (otherOrgs.length > 0) {
+  // Remover só o vínculo (sem apagar a conta) quando o usuário AINDA tem onde
+  // ficar depois: outro vínculo OU a org ativa dele é outra que não esta.
+  // Só apaga a conta inteira quando esta org é o ÚNICO lugar dele.
+  const stillHasHome = otherOrgs.length > 0 || target.organization_id !== me.organization_id;
+
+  if (stillHasHome) {
     const { error: membershipError } = await admin
       .from('user_organizations')
       .delete()
@@ -73,7 +84,9 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
       .eq('organization_id', me.organization_id);
     if (membershipError) return json({ error: `Falha ao remover: ${membershipError.message}` }, 500);
 
-    if (target.organization_id === me.organization_id) {
+    // Só precisa mover a org ativa se ELA era esta org (senão o usuário
+    // continua na org ativa dele, intacto).
+    if (target.organization_id === me.organization_id && otherOrgs.length > 0) {
       const next = otherOrgs[0];
       const updates: Record<string, unknown> = {
         organization_id: next.organization_id,

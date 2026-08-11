@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { findAuthUserByEmail } from '@/lib/supabase/authUsers';
+import { countOrgMembers } from '@/lib/supabase/orgMembers';
 import { UserRole } from '@/types/constants';
 
 function json<T>(body: T, status = 200): Response {
@@ -33,27 +34,71 @@ export async function GET() {
   if (meError || !me?.organization_id) return json({ error: 'Profile not found' }, 404);
   if (me.role !== UserRole.ADMIN && me.role !== UserRole.SUPER_ADMIN) return json({ error: 'Forbidden' }, 403);
 
-  // Performance: evita payload grande em organizações com muitos usuários.
-  const { data: profiles, error } = await supabase
-    .from('profiles')
-    .select('id, email, role, organization_id, created_at, first_name, last_name, nickname')
-    .eq('organization_id', me.organization_id)
-    .limit(200)
-    .order('created_at', { ascending: false });
+  const admin = createStaticAdminClient();
+  const orgId = me.organization_id;
 
-  if (error) return json({ error: error.message }, 500);
+  // Membros da org = UNIÃO de quem tem a org ATIVA aqui (profiles) com quem tem
+  // um VÍNCULO aqui (user_organizations), pra também mostrar membros multi-org
+  // que estão com a org ativa em outro lugar. user_organizations precisa do
+  // admin client: a RLS só deixa o usuário ver os próprios vínculos.
+  const [membershipsRes, profilesRes] = await Promise.all([
+    admin.from('user_organizations').select('user_id, role').eq('organization_id', orgId),
+    admin
+      .from('profiles')
+      .select('id, email, role, organization_id, created_at, first_name, last_name, nickname')
+      .eq('organization_id', orgId)
+      .limit(500),
+  ]);
+  if (membershipsRes.error) return json({ error: membershipsRes.error.message }, 500);
+  if (profilesRes.error) return json({ error: profilesRes.error.message }, 500);
 
-  const users = (profiles || []).map((p) => ({
-    id: p.id,
-    email: p.email,
-    role: p.role,
-    organization_id: p.organization_id,
-    created_at: p.created_at,
-    first_name: p.first_name ?? null,
-    last_name: p.last_name ?? null,
-    nickname: p.nickname ?? null,
-    status: 'active' as const,
-  }));
+  const membershipRoleByUser = new Map<string, string | null>();
+  for (const m of membershipsRes.data || []) membershipRoleByUser.set(m.user_id, m.role ?? null);
+
+  const profileById = new Map<string, Record<string, unknown>>();
+  for (const p of profilesRes.data || []) profileById.set(p.id, p);
+
+  const ids = new Set<string>();
+  for (const p of profilesRes.data || []) ids.add(p.id);
+  for (const m of membershipsRes.data || []) if (m.user_id) ids.add(m.user_id);
+
+  // Detalhes de perfil dos membros cuja org ativa é OUTRA (não vieram acima).
+  const missingIds = [...ids].filter((uid) => !profileById.has(uid));
+  if (missingIds.length > 0) {
+    const { data: extra, error: extraErr } = await admin
+      .from('profiles')
+      .select('id, email, role, organization_id, created_at, first_name, last_name, nickname')
+      .in('id', missingIds);
+    if (extraErr) return json({ error: extraErr.message }, 500);
+    for (const p of extra || []) profileById.set(p.id, p);
+  }
+
+  const users = [...ids]
+    .map((uid) => {
+      const p = profileById.get(uid) as
+        | { email?: string; role?: string; created_at?: string; first_name?: string | null; last_name?: string | null; nickname?: string | null }
+        | undefined;
+      if (!p) return null; // vínculo sem perfil (anomalia): não exibe linha em branco
+      // Papel exibido = papel NESTA org (vínculo); fallback pro papel do perfil.
+      const role = membershipRoleByUser.get(uid) ?? p.role ?? UserRole.VENDEDOR;
+      return {
+        id: uid,
+        email: p.email ?? null,
+        role,
+        organization_id: orgId,
+        created_at: p.created_at ?? null,
+        first_name: p.first_name ?? null,
+        last_name: p.last_name ?? null,
+        nickname: p.nickname ?? null,
+        status: 'active' as const,
+      };
+    })
+    .filter((u): u is NonNullable<typeof u> => u !== null)
+    .sort((a, b) => {
+      const ta = a.created_at ? Date.parse(a.created_at) : 0;
+      const tb = b.created_at ? Date.parse(b.created_at) : 0;
+      return tb - ta;
+    });
 
   return json({ users });
 }
@@ -106,19 +151,21 @@ export async function POST(req: Request) {
 
   const admin = createStaticAdminClient();
 
-  // Limite de usuários da organização (mesmo número exibido no Super Admin).
-  const [{ data: org }, { count: memberCount }] = await Promise.all([
-    admin.from('organizations').select('max_users').eq('id', me.organization_id).single(),
-    admin
-      .from('profiles')
-      .select('id', { count: 'exact', head: true })
-      .eq('organization_id', me.organization_id),
-  ]);
-  if (org?.max_users && (memberCount ?? 0) >= org.max_users) {
-    return json(
-      { error: `Limite de ${org.max_users} usuário(s) da organização atingido. Fale com o suporte pra aumentar.` },
-      400
-    );
+  // Limite de usuários da organização (conta membros = perfis ativos aqui +
+  // vínculos multi-org, igual à lista da tela de Usuários).
+  const { data: org } = await admin
+    .from('organizations')
+    .select('max_users')
+    .eq('id', me.organization_id)
+    .single();
+  if (org?.max_users) {
+    const memberCount = await countOrgMembers(admin, me.organization_id);
+    if (memberCount >= org.max_users) {
+      return json(
+        { error: `Limite de ${org.max_users} usuário(s) da organização atingido. Fale com o suporte pra aumentar.` },
+        400
+      );
+    }
   }
 
   const userMetadata = { name: displayName, organization_id: me.organization_id, role };
