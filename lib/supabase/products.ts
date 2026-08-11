@@ -14,30 +14,45 @@ import { sanitizeUUID } from './utils';
  * Recalcula o valor total (soma de preço×quantidade dos itens) de vários deals
  * de uma vez: leitura em lote + escrita em paralelo por blocos. Evita centenas
  * de idas ao servidor em série quando um produto muito usado muda de preço.
+ *
+ * Importante: só grava o valor de deals cujo total foi REALMENTE computado a
+ * partir de uma leitura bem-sucedida. Se um bloco de leitura falhar (rede/5xx),
+ * aqueles deals ficam de fora e mantêm o valor atual — nunca são sobrescritos
+ * para R$0 por engano. Retorna quantos deals tiveram o valor atualizado.
  */
-async function recalcDealsValues(dealIds: string[]): Promise<void> {
-  if (!supabase || dealIds.length === 0) return;
+async function recalcDealsValues(dealIds: string[]): Promise<number> {
+  if (!supabase || dealIds.length === 0) return 0;
   const READ = 100;
   const totals = new Map<string, number>();
+  const computed = new Set<string>();
   for (let i = 0; i < dealIds.length; i += READ) {
     const chunk = dealIds.slice(i, i + READ);
-    const { data: items } = await supabase
+    const { data: items, error } = await supabase
       .from('deal_items')
       .select('deal_id, price, quantity')
       .in('deal_id', chunk);
-    for (const it of items || []) {
-      const cur = totals.get(it.deal_id) || 0;
-      totals.set(it.deal_id, cur + Number(it.price) * Number(it.quantity));
+    // Bloco falhou: NÃO marca como computado (evita gravar 0 num lead real).
+    if (error || !items) continue;
+    for (const id of chunk) {
+      if (!totals.has(id)) totals.set(id, 0);
+      computed.add(id);
+    }
+    for (const it of items) {
+      totals.set(it.deal_id, (totals.get(it.deal_id) || 0) + Number(it.price) * Number(it.quantity));
     }
   }
+  const idsToWrite = [...computed];
   const now = new Date().toISOString();
   const WRITE = 25;
-  for (let i = 0; i < dealIds.length; i += WRITE) {
-    const chunk = dealIds.slice(i, i + WRITE);
-    await Promise.all(
+  let written = 0;
+  for (let i = 0; i < idsToWrite.length; i += WRITE) {
+    const chunk = idsToWrite.slice(i, i + WRITE);
+    const res = await Promise.all(
       chunk.map((id) => supabase!.from('deals').update({ value: totals.get(id) || 0, updated_at: now }).eq('id', id))
     );
+    written += res.filter((r) => !r.error).length;
   }
+  return written;
 }
 
 // =============================================================================
@@ -234,8 +249,8 @@ export const productsService = {
 
         if (!itemsError && updatedItems && updatedItems.length > 0) {
           const dealIds = Array.from(new Set(updatedItems.map((i) => i.deal_id).filter(Boolean))) as string[];
-          await recalcDealsValues(dealIds);
-          retro = { items: updatedItems.length, deals: dealIds.length };
+          const dealsUpdated = await recalcDealsValues(dealIds);
+          retro = { items: updatedItems.length, deals: dealsUpdated };
         }
       }
 
