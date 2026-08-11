@@ -19,6 +19,8 @@ export const ProductsCatalogManager: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Aviso pós-salvar: quantos leads tiveram o valor atualizado retroativamente
+  const [retroInfo, setRetroInfo] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const copyId = async (id: string) => {
@@ -144,6 +146,7 @@ export const ProductsCatalogManager: React.FC = () => {
 
     setLoading(true);
     setError(null);
+    setRetroInfo(null);
     const res = await productsService.update(editingId, {
       name,
       price,
@@ -154,6 +157,11 @@ export const ProductsCatalogManager: React.FC = () => {
       setError(res.error.message);
       setLoading(false);
       return;
+    }
+    if (res.retro && res.retro.deals > 0) {
+      setRetroInfo(
+        `Valor aplicado também a ${res.retro.deals} lead(s) que já tinham este produto (itens com o preço padrão antigo ou zerados).`
+      );
     }
     await load();
     cancelEdit();
@@ -192,6 +200,11 @@ export const ProductsCatalogManager: React.FC = () => {
         {error && (
           <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-200">
             {error}
+          </div>
+        )}
+        {retroInfo && (
+          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-900/20 dark:text-emerald-200">
+            {retroInfo}
           </div>
         )}
 

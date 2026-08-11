@@ -9,6 +9,7 @@
 import { supabase } from './client';
 import { Product } from '@/types';
 import { sanitizeUUID } from './utils';
+import { dealsService } from './deals';
 
 // =============================================================================
 // Organization inference (client-side, RLS-safe)
@@ -143,9 +144,26 @@ export const productsService = {
     }
   },
 
-  async update(id: string, updates: Partial<{ name: string; price: number; sku?: string; description?: string; active: boolean }>): Promise<{ error: Error | null }> {
+  async update(
+    id: string,
+    updates: Partial<{ name: string; price: number; sku?: string; description?: string; active: boolean }>
+  ): Promise<{ error: Error | null; retro?: { items: number; deals: number } }> {
     try {
       if (!supabase) return { error: new Error('Supabase não configurado') };
+
+      const productId = sanitizeUUID(id);
+
+      // Preço antigo ANTES de salvar: é ele que identifica os itens de leads
+      // que apenas herdaram o padrão do produto (não foram negociados à mão).
+      let oldPrice: number | null = null;
+      if (updates.price !== undefined) {
+        const { data: current } = await supabase
+          .from('products')
+          .select('price')
+          .eq('id', productId)
+          .single();
+        oldPrice = Number(current?.price ?? 0);
+      }
 
       const payload: Record<string, unknown> = {};
       if (updates.name !== undefined) payload.name = updates.name;
@@ -158,9 +176,48 @@ export const productsService = {
       const { error } = await supabase
         .from('products')
         .update(payload)
-        .eq('id', sanitizeUUID(id));
+        .eq('id', productId);
 
-      return { error: error ?? null };
+      if (error) return { error };
+
+      // Retroativo: propaga o preço salvo pros itens de leads deste produto
+      // que estão com o preço padrão antigo OU zerados (produto que ficou um
+      // tempo sem valor). Preço negociado à mão (diferente do padrão antigo)
+      // não é tocado. Roda mesmo com o preço "igual" pra permitir corrigir
+      // leads zerados só re-salvando o produto.
+      let retro: { items: number; deals: number } | undefined;
+      if (updates.price !== undefined && oldPrice !== null && Number.isFinite(oldPrice)) {
+        const newPrice = Number(updates.price);
+        // Escopo explícito por organização: a RLS de deal_items é permissiva
+        // (USING true), então filtramos pela org atual além do product_id.
+        const orgId = await getCurrentOrganizationId();
+        let staleQuery = supabase
+          .from('deal_items')
+          .select('id, deal_id')
+          .eq('product_id', productId)
+          .or(`price.eq.${oldPrice},price.eq.0`)
+          .neq('price', newPrice);
+        if (orgId) staleQuery = staleQuery.eq('organization_id', orgId);
+        const { data: staleItems } = await staleQuery;
+
+        const items = staleItems || [];
+        if (items.length > 0) {
+          const { error: itemsError } = await supabase
+            .from('deal_items')
+            .update({ price: newPrice })
+            .in('id', items.map((i) => i.id));
+
+          if (!itemsError) {
+            const dealIds = Array.from(new Set(items.map((i) => i.deal_id).filter(Boolean)));
+            for (const dealId of dealIds) {
+              await dealsService.recalculateDealValue(dealId);
+            }
+            retro = { items: items.length, deals: dealIds.length };
+          }
+        }
+      }
+
+      return { error: null, retro };
     } catch (e) {
       return { error: e as Error };
     }
