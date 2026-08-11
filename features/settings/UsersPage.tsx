@@ -54,6 +54,10 @@ export const UsersPage: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [newUserRole, setNewUserRole] = useState<string>(UserRole.VENDEDOR);
+    // Como convidar: link copiável, convite por email, ou login pronto (email+senha)
+    const [inviteMode, setInviteMode] = useState<'link' | 'email' | 'login'>('link');
+    const [inviteEmail, setInviteEmail] = useState('');
+    const [newLoginPassword, setNewLoginPassword] = useState('');
     const [sendingInvites, setSendingInvites] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [actionLoading, setActionLoading] = useState<string | null>(null); // id do usuário em ação
@@ -123,6 +127,9 @@ export const UsersPage: React.FC = () => {
         setError(null);
         setNewUserRole(UserRole.VENDEDOR);
         setExpirationDays(7);
+        setInviteMode('link');
+        setInviteEmail('');
+        setNewLoginPassword('');
     }, []);
 
     useEffect(() => {
@@ -186,6 +193,91 @@ export const UsersPage: React.FC = () => {
             addToast('Novo link gerado!', 'success');
         } catch (err: any) {
             setError(err.message || 'Erro ao gerar link');
+        } finally {
+            setSendingInvites(false);
+        }
+    };
+
+    const handleSendEmailInvite = async () => {
+        const email = inviteEmail.trim().toLowerCase();
+        if (!isValidEmail(email)) {
+            setError('Informe um email válido');
+            return;
+        }
+        setSendingInvites(true);
+        setError(null);
+        try {
+            const expiresAt = expirationDays
+                ? new Date(Date.now() + expirationDays * 24 * 60 * 60 * 1000).toISOString()
+                : null;
+
+            const res = await fetch('/api/admin/invites', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({
+                    role: newUserRole,
+                    expiresAt,
+                    email,
+                    sendEmail: true,
+                }),
+            });
+
+            const data = await res.json().catch(() => null);
+            if (!res.ok) {
+                throw new Error(data?.error || `Erro ao enviar convite (HTTP ${res.status})`);
+            }
+
+            await fetchActiveInvites();
+            if (data?.emailSent) {
+                addToast(`Convite enviado para ${email}`, 'success');
+                setInviteEmail('');
+            } else {
+                // Convite criado mas o email falhou: o link fica na lista pra copiar.
+                setError(data?.emailError || 'Convite criado, mas o email não foi enviado. Copie o link e envie direto.');
+            }
+        } catch (err: any) {
+            setError(err.message || 'Erro ao enviar convite');
+        } finally {
+            setSendingInvites(false);
+        }
+    };
+
+    const handleCreateLogin = async () => {
+        const email = inviteEmail.trim().toLowerCase();
+        if (!isValidEmail(email)) {
+            setError('Informe um email válido');
+            return;
+        }
+        if (newLoginPassword.length < 6) {
+            setError('A senha precisa ter pelo menos 6 caracteres');
+            return;
+        }
+        setSendingInvites(true);
+        setError(null);
+        try {
+            const res = await fetch('/api/admin/users', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({
+                    email,
+                    password: newLoginPassword,
+                    role: newUserRole,
+                }),
+            });
+
+            const data = await res.json().catch(() => null);
+            if (!res.ok) {
+                throw new Error(data?.error || `Erro ao criar login (HTTP ${res.status})`);
+            }
+
+            addToast(`Login criado para ${email}. Passe o email e a senha pra pessoa.`, 'success');
+            setInviteEmail('');
+            setNewLoginPassword('');
+            await fetchUsers();
+        } catch (err: any) {
+            setError(err.message || 'Erro ao criar login');
         } finally {
             setSendingInvites(false);
         }
@@ -436,10 +528,10 @@ export const UsersPage: React.FC = () => {
                                 </div>
                                 <div>
                                     <h2 className="text-xl font-bold text-slate-900 dark:text-white font-display">
-                                        Gerar Convite
+                                        Convidar
                                     </h2>
                                     <p className="text-sm text-slate-500 dark:text-slate-400">
-                                        Crie links de acesso para sua equipe
+                                        Link, convite por email ou login pronto
                                     </p>
                                 </div>
                             </div>
@@ -472,7 +564,7 @@ export const UsersPage: React.FC = () => {
                                                         </span>
                                                     </div>
                                                     <code className="block text-xs text-slate-600 dark:text-slate-300 truncate">
-                                                        ...{invite.token.slice(-8)}
+                                                        {invite.email ? invite.email : `...${invite.token.slice(-8)}`}
                                                     </code>
                                                 </div>
                                                 <div className="flex items-center gap-1">
@@ -504,6 +596,77 @@ export const UsersPage: React.FC = () => {
                             </div>
 
                             <div className="space-y-5 border-t border-slate-100 dark:border-white/5 pt-5">
+                                {/* Como convidar */}
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">
+                                        Como convidar
+                                    </label>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        {([
+                                            { id: 'link', label: 'Link', hint: 'Gera um link pra você enviar' },
+                                            { id: 'email', label: 'Por email', hint: 'Envia o convite pro email da pessoa' },
+                                            { id: 'login', label: 'Login pronto', hint: 'Você define email e senha e passa pra pessoa' },
+                                        ] as const).map((opt) => (
+                                            <button
+                                                key={opt.id}
+                                                type="button"
+                                                onClick={() => { setInviteMode(opt.id); setError(null); }}
+                                                title={opt.hint}
+                                                className={`py-2 px-2 rounded-lg text-sm font-medium border transition-all ${inviteMode === opt.id
+                                                    ? 'bg-slate-800 text-white border-slate-800 dark:bg-white dark:text-slate-900 dark:border-white'
+                                                    : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                                                    }`}
+                                            >
+                                                {opt.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                                        {inviteMode === 'link' && 'Gera um link de acesso pra você copiar e enviar como quiser.'}
+                                        {inviteMode === 'email' && 'A pessoa recebe um email com o link do convite e define a própria senha.'}
+                                        {inviteMode === 'login' && 'A conta já nasce pronta: você escolhe o email e a senha e só passa o login pra pessoa.'}
+                                    </p>
+                                </div>
+
+                                {/* Email (convite por email e login pronto) */}
+                                {inviteMode !== 'link' && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                                            Email da pessoa
+                                        </label>
+                                        <div className="relative">
+                                            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                                            <input
+                                                type="email"
+                                                value={inviteEmail}
+                                                onChange={(e) => setInviteEmail(e.target.value)}
+                                                placeholder="cliente@empresa.com"
+                                                className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Senha (só login pronto) */}
+                                {inviteMode === 'login' && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                                            Senha da pessoa
+                                        </label>
+                                        <div className="relative">
+                                            <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                                            <input
+                                                type="text"
+                                                value={newLoginPassword}
+                                                onChange={(e) => setNewLoginPassword(e.target.value)}
+                                                placeholder="Mínimo 6 caracteres"
+                                                autoComplete="off"
+                                                className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
                                 {/* Role Selection */}
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">
@@ -549,7 +712,8 @@ export const UsersPage: React.FC = () => {
                                     </div>
                                 </div>
 
-                                {/* Expiration Selection */}
+                                {/* Expiration Selection (login pronto não expira) */}
+                                {inviteMode !== 'login' && (
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">
                                         Expiração
@@ -574,6 +738,7 @@ export const UsersPage: React.FC = () => {
                                         ))}
                                     </div>
                                 </div>
+                                )}
 
                                 {/* Error Message */}
                                 {error && (
@@ -597,19 +762,35 @@ export const UsersPage: React.FC = () => {
                                 </button>
 
                                 <button
-                                    onClick={handleGenerateLink}
+                                    onClick={
+                                        inviteMode === 'link'
+                                            ? handleGenerateLink
+                                            : inviteMode === 'email'
+                                                ? handleSendEmailInvite
+                                                : handleCreateLogin
+                                    }
                                     disabled={sendingInvites}
                                     className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium text-white bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-primary-600/25 transition-all"
                                 >
                                     {sendingInvites ? (
                                         <>
                                             <Loader2 className="animate-spin h-4 w-4" />
-                                            Gerando...
+                                            {inviteMode === 'link' ? 'Gerando...' : inviteMode === 'email' ? 'Enviando...' : 'Criando...'}
                                         </>
-                                    ) : (
+                                    ) : inviteMode === 'link' ? (
                                         <>
                                             <Link className="h-4 w-4" />
                                             Gerar Link
+                                        </>
+                                    ) : inviteMode === 'email' ? (
+                                        <>
+                                            <Mail className="h-4 w-4" />
+                                            Enviar Convite
+                                        </>
+                                    ) : (
+                                        <>
+                                            <UserPlus className="h-4 w-4" />
+                                            Criar Login
                                         </>
                                     )}
                                 </button>

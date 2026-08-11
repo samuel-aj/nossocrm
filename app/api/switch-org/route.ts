@@ -55,21 +55,32 @@ export async function POST(req: Request) {
   if (!org) return json({ error: 'Organization not found' }, 404);
 
   // Check access: super_admin can access any org, others need user_organizations entry
+  let membershipRole: string | null = null;
   if (profile.role !== UserRole.SUPER_ADMIN) {
     const { data: membership } = await admin
       .from('user_organizations')
-      .select('id')
+      .select('id, role')
       .eq('user_id', profile.id)
       .eq('organization_id', organizationId)
       .single();
 
     if (!membership) return json({ error: 'Acesso negado a esta organização' }, 403);
+    membershipRole = membership.role ?? null;
   }
 
-  // Update user's active organization
+  // Update user's active organization. O papel acompanha o vínculo da org de
+  // destino (a mesma pessoa pode ser admin numa org e vendedor noutra);
+  // super_admin nunca é rebaixado.
+  const updates: Record<string, unknown> = {
+    organization_id: organizationId,
+    updated_at: new Date().toISOString(),
+  };
+  if (profile.role !== UserRole.SUPER_ADMIN && membershipRole) {
+    updates.role = membershipRole;
+  }
   const { error } = await admin
     .from('profiles')
-    .update({ organization_id: organizationId, updated_at: new Date().toISOString() })
+    .update(updates)
     .eq('id', profile.id);
 
   if (error) return json({ error: error.message }, 500);

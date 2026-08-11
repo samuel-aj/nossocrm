@@ -204,7 +204,13 @@ export default function AdminPage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      addToast(`Organização "${formData.companyName}" criada com sucesso!`, 'success')
+      if (data?.admin?.existing) {
+        addToast(`Organização "${formData.companyName}" criada! A conta ${data.admin.email} já existia e ganhou acesso a ela (a senha atual continua valendo).`, 'success')
+      } else if (!data?.admin) {
+        addToast(`Organização "${formData.companyName}" criada sem usuários. Adicione alguém quando quiser.`, 'success')
+      } else {
+        addToast(`Organização "${formData.companyName}" criada com sucesso!`, 'success')
+      }
       setShowCreateForm(false)
       setFormData({ companyName: '', adminEmail: '', adminPassword: '', adminName: '', maxUsers: 1 })
       fetchOrganizations()
@@ -447,26 +453,27 @@ export default function AdminPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Email do Admin</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Email do Admin (opcional)</label>
                   <input
-                    required
                     type="email"
                     value={formData.adminEmail}
                     onChange={e => setFormData(p => ({ ...p, adminEmail: e.target.value }))}
                     placeholder="admin@empresa.com"
                     className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2.5 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
                   />
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Vazio: a organização é criada sem usuários. Email já cadastrado: a conta existente ganha acesso a esta organização (a senha dela não muda).
+                  </p>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Senha Inicial</label>
                     <input
-                      required
                       type="password"
                       minLength={6}
                       value={formData.adminPassword}
                       onChange={e => setFormData(p => ({ ...p, adminPassword: e.target.value }))}
-                      placeholder="Min. 6 caracteres"
+                      placeholder="Só pra conta nova"
                       className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2.5 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
                     />
                   </div>

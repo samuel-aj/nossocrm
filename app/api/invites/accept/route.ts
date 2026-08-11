@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+import { findAuthUserByEmail } from '@/lib/supabase/authUsers';
 
 function json<T>(body: T, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -17,26 +18,6 @@ const AcceptInviteSchema = z
     name: z.string().min(1).max(200).optional(),
   })
   .strict();
-
-/**
- * Procura uma conta de login (auth) pelo email. A API admin não tem busca
- * direta por email, então pagina o listUsers (limite alto o bastante para
- * a base atual; para na primeira página incompleta).
- */
-async function findAuthUserByEmail(
-  admin: ReturnType<typeof createStaticAdminClient>,
-  email: string
-) {
-  const target = email.toLowerCase();
-  for (let page = 1; page <= 20; page++) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
-    if (error || !data?.users?.length) return null;
-    const hit = data.users.find((u) => (u.email || '').toLowerCase() === target);
-    if (hit) return hit;
-    if (data.users.length < 200) return null;
-  }
-  return null;
-}
 
 /**
  * Handler HTTP `POST` deste endpoint (Next.js Route Handler).
@@ -58,25 +39,36 @@ export async function POST(req: Request) {
 
   const admin = createStaticAdminClient();
 
+  const nowIso = new Date().toISOString();
+
+  // Reivindicação ATÔMICA do convite: marca used_at só se ainda estiver nulo,
+  // num único statement. Se duas pessoas usarem o MESMO link ao mesmo tempo,
+  // só uma "ganha"; a outra recebe "já utilizado". Qualquer rejeição ou erro
+  // daqui pra frente LIBERA o convite (used_at = null) pra pessoa certa poder
+  // tentar de novo.
   const { data: invite, error: inviteError } = await admin
     .from('organization_invites')
-    // Performance: fetch only what we need (keeps payload small and avoids extra parsing).
-    .select('id, token, email, role, expires_at, used_at, organization_id')
+    .update({ used_at: nowIso })
     .eq('token', token)
     .is('used_at', null)
+    .select('id, token, email, role, expires_at, used_at, organization_id')
     .single();
 
   if (inviteError || !invite) {
     return json({ error: 'Convite inválido ou já foi utilizado' }, 400);
   }
 
-  // Performance: avoid multiple Date allocations.
-  const nowIso = new Date().toISOString();
+  const releaseInvite = async () => {
+    await admin.from('organization_invites').update({ used_at: null }).eq('id', invite.id);
+  };
+
   if (invite.expires_at && Date.parse(invite.expires_at) < Date.now()) {
+    await releaseInvite();
     return json({ error: 'Convite expirado' }, 400);
   }
 
   if (invite.email && invite.email.toLowerCase() !== email.toLowerCase()) {
+    await releaseInvite();
     return json({ error: 'Este convite não é válido para este email' }, 400);
   }
 
@@ -87,23 +79,55 @@ export async function POST(req: Request) {
     role: invite.role,
   };
 
+  // Limite de usuários da organização (checado aqui porque é o convite que
+  // materializa a conta; links podem ter sido gerados antes do limite lotar).
+  const [{ data: orgLimits }, { count: memberCount }] = await Promise.all([
+    admin.from('organizations').select('max_users').eq('id', invite.organization_id).single(),
+    admin
+      .from('profiles')
+      .select('id', { count: 'exact', head: true })
+      .eq('organization_id', invite.organization_id),
+  ]);
+
   // Um usuário removido da equipe fica com a conta de login órfã (o perfil
   // some, o email continua registrado no auth). Criar de novo falharia com
   // "email já registrado", então: órfã = reaproveita a conta com a senha
-  // nova; com perfil ativo = conflito real, mensagem clara.
+  // nova; com perfil ativo = conflito real, mensagem clara. Exceção: conta
+  // criada pelo convite POR EMAIL desta mesma org (inviteUserByEmail, nunca
+  // logou; o trigger já criou o perfil na org) também é reaproveitada.
   let userId: string;
+  let profileAlreadyInOrg = false;
   const existingAuthUser = await findAuthUserByEmail(admin, email);
 
   if (existingAuthUser) {
     const { data: existingProfile } = await admin
       .from('profiles')
-      .select('id')
+      .select('id, organization_id')
       .eq('id', existingAuthUser.id)
       .maybeSingle();
 
-    if (existingProfile) {
+    const isPendingInviteHere = Boolean(
+      existingAuthUser.invited_at &&
+        !existingAuthUser.last_sign_in_at &&
+        existingProfile?.organization_id === invite.organization_id
+    );
+
+    if (existingProfile && !isPendingInviteHere) {
+      await releaseInvite();
       return json(
         { error: 'Este email já está em uso por uma conta ativa. Entre com esse email ou use outro.' },
+        400
+      );
+    }
+
+    profileAlreadyInOrg = isPendingInviteHere;
+
+    // Convite pendente já tem perfil contado no limite; os demais casos
+    // adicionam +1 pessoa à org.
+    if (!profileAlreadyInOrg && orgLimits?.max_users && (memberCount ?? 0) >= orgLimits.max_users) {
+      await releaseInvite();
+      return json(
+        { error: `A organização atingiu o limite de ${orgLimits.max_users} usuário(s). Fale com quem te convidou.` },
         400
       );
     }
@@ -114,10 +138,21 @@ export async function POST(req: Request) {
       user_metadata: userMetadata,
     });
 
-    if (updateError) return json({ error: updateError.message }, 400);
+    if (updateError) {
+      await releaseInvite();
+      return json({ error: updateError.message }, 400);
+    }
 
     userId = existingAuthUser.id;
   } else {
+    if (orgLimits?.max_users && (memberCount ?? 0) >= orgLimits.max_users) {
+      await releaseInvite();
+      return json(
+        { error: `A organização atingiu o limite de ${orgLimits.max_users} usuário(s). Fale com quem te convidou.` },
+        400
+      );
+    }
+
     const { data: authData, error: createError } = await admin.auth.admin.createUser({
       email,
       password,
@@ -125,7 +160,10 @@ export async function POST(req: Request) {
       user_metadata: userMetadata,
     });
 
-    if (createError) return json({ error: createError.message }, 400);
+    if (createError) {
+      await releaseInvite();
+      return json({ error: createError.message }, 400);
+    }
 
     userId = authData.user.id;
   }
@@ -147,10 +185,11 @@ export async function POST(req: Request) {
 
   if (profileError) {
     // Rollback apenas da conta que ESTE fluxo criou; conta reaproveitada
-    // (órfã pré-existente) fica como estava.
+    // (órfã pré-existente) fica como estava. Libera o convite pra nova tentativa.
     if (!existingAuthUser) {
       await admin.auth.admin.deleteUser(userId);
     }
+    await releaseInvite();
     return json({ error: profileError.message }, 400);
   }
 
@@ -166,10 +205,6 @@ export async function POST(req: Request) {
       { onConflict: 'user_id,organization_id' }
     );
 
-  await admin
-    .from('organization_invites')
-    .update({ used_at: nowIso })
-    .eq('id', invite.id);
-
+  // O convite já foi consumido atomicamente lá no começo (used_at = nowIso).
   return json({ ok: true, user: { id: userId, email } });
 }

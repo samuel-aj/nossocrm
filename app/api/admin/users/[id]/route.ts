@@ -43,13 +43,52 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
 
   const { data: target, error: targetError } = await supabase
     .from('profiles')
-    .select('id, email, organization_id')
+    .select('id, email, organization_id, role')
     .eq('id', id)
     .maybeSingle();
 
   if (targetError) return json({ error: targetError.message }, 500);
   if (!target) return json({ error: 'User not found' }, 404);
   if (target.organization_id !== me.organization_id) return json({ error: 'Forbidden' }, 403);
+
+  // Usuário multi-org: remover daqui NÃO pode apagar a conta inteira (ele
+  // continua nas outras organizações). Remove só o vínculo com ESTA org e,
+  // se ela era a org ativa dele, move a sessão pra outra org que ele tem.
+  const { data: memberships, error: membershipsError } = await admin
+    .from('user_organizations')
+    .select('organization_id, role')
+    .eq('user_id', id);
+  // Caminho destrutivo e irreversível: se não conseguimos LER os vínculos, NÃO
+  // dá pra concluir que é a última org — abortar em vez de apagar a conta toda.
+  if (membershipsError) {
+    return json({ error: `Falha ao verificar organizações do usuário: ${membershipsError.message}` }, 500);
+  }
+  const otherOrgs = (memberships || []).filter((m) => m.organization_id !== me.organization_id);
+
+  if (otherOrgs.length > 0) {
+    const { error: membershipError } = await admin
+      .from('user_organizations')
+      .delete()
+      .eq('user_id', id)
+      .eq('organization_id', me.organization_id);
+    if (membershipError) return json({ error: `Falha ao remover: ${membershipError.message}` }, 500);
+
+    if (target.organization_id === me.organization_id) {
+      const next = otherOrgs[0];
+      const updates: Record<string, unknown> = {
+        organization_id: next.organization_id,
+        updated_at: new Date().toISOString(),
+      };
+      // Papel acompanha o vínculo da org de destino (super_admin não rebaixa)
+      if (target.role !== UserRole.SUPER_ADMIN && next.role) {
+        updates.role = next.role;
+      }
+      const { error: moveError } = await admin.from('profiles').update(updates).eq('id', id);
+      if (moveError) return json({ error: `Falha ao remover: ${moveError.message}` }, 500);
+    }
+
+    return json({ ok: true, removedMembershipOnly: true });
+  }
 
   // Try to delete auth user first, but don't block if it fails
   // (orphaned profiles without auth records should still be removable).
