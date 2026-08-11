@@ -98,3 +98,11 @@ enabled = false
 # portanto desabilitamos a verificação de JWT.
 [functions.webhook-in]
 verify_jwt = false
+
+# Webhook do WhatsApp via Evolution (a Evolution faz POST aqui).
+[functions.whatsapp-webhook]
+verify_jwt = false
+
+# Webhook do WhatsApp DIRETO na Meta (a Meta faz GET de verificação + POST aqui).
+[functions.whatsapp-webhook-meta]
+verify_jwt = false

@@ -17,6 +17,9 @@ export interface WaConnectionRow {
   status: string;
   webhook_secret: string;
   last_connected_at: string | null;
+  /** Só meta_cloud: phone_number_id e WABA id da Meta. */
+  meta_phone_number_id: string | null;
+  meta_waba_id: string | null;
 }
 
 export interface WaConversationRow {
@@ -67,18 +70,31 @@ export async function getConnectionByInstance(
 export async function upsertConnection(
   admin: SupabaseClient,
   orgId: string,
-  input: { instanceName: string; token?: string | null; baseUrl?: string | null; provider?: string }
+  input: {
+    instanceName: string;
+    token?: string | null;
+    baseUrl?: string | null;
+    provider?: string;
+    /** Só meta_cloud: phone_number_id e WABA id da Meta. */
+    phoneNumberId?: string | null;
+    wabaId?: string | null;
+  }
 ): Promise<WaConnectionRow> {
   const { data, error } = await admin
     .from('wa_connections')
     .upsert(
       {
         organization_id: orgId,
-        // 'evolution' = Baileys/QR (padrão); 'evolution_business' = API oficial da Meta
+        // 'evolution' = Baileys/QR (padrão); 'evolution_business' = API oficial
+        // via Evolution; 'meta_cloud' = Cloud API DIRETO na Meta.
         provider: input.provider ?? 'evolution',
         instance_name: input.instanceName,
         instance_token: input.token ?? null,
         base_url: input.baseUrl ?? null,
+        // Só troca as colunas da Meta quando explicitamente informadas (evita
+        // zerar o phone_number_id de uma conexão meta_cloud num upsert de QR).
+        ...(input.phoneNumberId !== undefined ? { meta_phone_number_id: input.phoneNumberId } : {}),
+        ...(input.wabaId !== undefined ? { meta_waba_id: input.wabaId } : {}),
       },
       { onConflict: 'organization_id' }
     )

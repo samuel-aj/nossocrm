@@ -75,7 +75,9 @@ export function WhatsAppConnectionSettings() {
     }
   };
   // Modo API oficial da Meta (Cloud API): sem QR/pareamento
-  const isBusiness = (conn?.provider || '').toLowerCase() === 'evolution_business';
+  // "API oficial" cobre os dois backends: via Evolution (evolution_business) e
+  // DIRETO na Meta (meta_cloud). A UI trata os dois igual (sem QR, credenciais).
+  const isBusiness = ['evolution_business', 'meta_cloud'].includes((conn?.provider || '').toLowerCase());
 
   // O QR só abre depois que o usuário ESCOLHE esse modo no seletor — mesmo
   // que já exista uma conexão QR desconectada de antes (senão o seletor
@@ -108,13 +110,14 @@ export function WhatsAppConnectionSettings() {
     onSuccess: (_data, payload) => {
       qc.invalidateQueries({ queryKey: ['waConnection'] });
       qc.invalidateQueries({ queryKey: ['waConnectionQr'] });
-      if ((payload as { mode?: string }).mode === 'business') {
+      const mode = (payload as { mode?: string }).mode;
+      if (mode === 'business' || mode === 'meta_cloud') {
         setBizOpen(false);
         setBizToken('');
         setBizNumberId('');
         setBizWabaId('');
         setQrFlowActive(false);
-        addToast('WhatsApp API oficial conectado! Envio e recebimento ativos.', 'success');
+        addToast('WhatsApp API oficial conectado! Configure o webhook e pronto.', 'success');
       } else {
         setQrFlowActive(true);
         addToast('Instância criada. Escaneie o QR pra conectar o número.', 'success');
@@ -298,7 +301,9 @@ export function WhatsAppConnectionSettings() {
         type="button"
         onClick={() =>
           createMut.mutate({
-            mode: 'business',
+            // Modo DIRETO na Meta (sem Evolution). Envio/recebimento falam
+            // direto com a Cloud API; o webhook aponta pro próprio CRM.
+            mode: 'meta_cloud',
             metaToken: bizToken.trim(),
             metaNumberId: bizNumberId.trim(),
             metaBusinessId: bizWabaId.trim() || undefined,

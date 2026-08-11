@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { getConnectionByOrg } from '@/lib/whatsapp/service';
-import { isBusinessConnection } from '@/lib/whatsapp';
+import { isEvolutionBusinessConnection } from '@/lib/whatsapp';
 import { listMetaTemplates } from '@/lib/whatsapp/templates';
 
 export const runtime = 'nodejs';
@@ -31,7 +31,7 @@ export async function POST(req: Request) {
 
   const sb = createStaticAdminClient();
   const conn = await getConnectionByOrg(sb, profile.organization_id);
-  if (!conn || !isBusinessConnection(conn) || conn.status !== 'connected') {
+  if (!conn || !isEvolutionBusinessConnection(conn) || conn.status !== 'connected') {
     return NextResponse.json(
       { error: 'Conecte o WhatsApp API oficial pra sincronizar os modelos com a Meta' },
       { status: 400 }

@@ -11,7 +11,13 @@ import {
   updateConnectionStatus,
   type WaConnectionRow,
 } from '@/lib/whatsapp/service';
-import { envEvolution, getProvider, isBusinessConnection } from '@/lib/whatsapp';
+import {
+  envEvolution,
+  getProvider,
+  isBusinessConnection,
+  isEvolutionBusinessConnection,
+  isMetaCloudConnection,
+} from '@/lib/whatsapp';
 import {
   deleteEvolutionInstance,
   ensureEvolutionInstance,
@@ -31,12 +37,22 @@ function mask(conn: WaConnectionRow) {
   };
 }
 
-// Dados do webhook da Meta mostrados pro ADMIN na tela de conexão da API
-// oficial: URL do endpoint da Evolution e o verify token que ela espera
-// (env WA_BUSINESS_TOKEN_WEBHOOK do servidor, espelhada aqui pela env
-// EVOLUTION_META_VERIFY_TOKEN; sem ela, vale o padrão 'evolution').
-function metaWebhookInfo(role: string) {
+// Dados do webhook da Meta mostrados pro ADMIN na tela de conexão da API oficial.
+// - meta_cloud (DIRETO): a URL é do PRÓPRIO CRM (Edge Function whatsapp-webhook-meta)
+//   com o webhook_secret da conexão no path; o verify token = o mesmo secret.
+// - evolution_business (via Evolution): a URL é do endpoint /webhook/meta da
+//   Evolution e o verify token vem da env EVOLUTION_META_VERIFY_TOKEN (padrão
+//   'evolution').
+function metaWebhookInfo(role: string, conn: WaConnectionRow | null) {
   if (!isOrgAdmin(role)) return null;
+  if (conn && isMetaCloudConnection(conn)) {
+    const supabase = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '');
+    if (!supabase) return null;
+    return {
+      url: `${supabase}/functions/v1/whatsapp-webhook-meta/${conn.webhook_secret}`,
+      verifyToken: conn.webhook_secret,
+    };
+  }
   const base = envEvolution().baseUrl.replace(/\/+$/, '').replace(/\/manager$/, '');
   if (!base) return null;
   return {
@@ -49,8 +65,8 @@ export async function GET() {
   const auth = await requireOrgUser();
   if (!auth.ok) return auth.response;
 
-  const metaWebhook = metaWebhookInfo(auth.user.role);
   const conn = await getConnectionByOrg(auth.admin, auth.user.organizationId);
+  const metaWebhook = metaWebhookInfo(auth.user.role, conn);
   if (!conn) return json({ connected: false, connection: null, metaWebhook });
 
   let status = conn.status;
@@ -91,13 +107,36 @@ export async function POST(req: Request) {
   let token = body.token?.trim() || null;
   let baseUrl = body.baseUrl?.trim() || null;
   let provider: string | undefined;
+  // Só preenchidos no modo meta_cloud (undefined = não mexer nas colunas Meta).
+  let metaPhoneNumberId: string | null | undefined;
+  let metaWabaId: string | null | undefined;
   // Conexão anterior da org (capturada ANTES do upsert): numa troca de modo
   // o nome da instância muda e a antiga precisa ser derrubada na Evolution,
   // senão ela segue viva emitindo webhooks que o CRM passa a descartar.
   const previous = await getConnectionByOrg(auth.admin, auth.user.organizationId);
   let managedSwitch = false;
 
-  if (body.mode === 'business') {
+  if (body.mode === 'meta_cloud') {
+    managedSwitch = true;
+    // MODO DIRETO (Cloud API da Meta, SEM Evolution): conexão por credenciais.
+    // Não cria instância em lugar nenhum — só valida e salva token + phone_number_id.
+    // O webhook é registrado MANUALMENTE pelo admin no painel da Meta (a URL do
+    // CRM aparece na tela de conexão). O erro de token só aparece no envio.
+    const metaToken = (body.metaToken || '').trim();
+    const metaNumberId = (body.metaNumberId || '').trim().replace(/\D/g, '');
+    const wabaId = (body.metaBusinessId || '').trim().replace(/\D/g, '');
+    if (!metaToken || !metaNumberId) {
+      return json({ error: 'Token permanente e Phone Number ID da Meta são obrigatórios' }, 400);
+    }
+    // Nome sintético por org (satisfaz NOT NULL/UNIQUE); sufixo _cloud não
+    // colide com a instância QR (_) nem com a business via Evolution (_api).
+    instanceName = `${instanceNameForOrg(auth.user.organizationId)}_cloud`;
+    token = metaToken;
+    baseUrl = null;
+    provider = 'meta_cloud';
+    metaPhoneNumberId = metaNumberId;
+    metaWabaId = wabaId || null;
+  } else if (body.mode === 'business') {
     managedSwitch = true;
     // MODO API OFICIAL (Meta Cloud API via Evolution): conexão por credenciais,
     // sem QR. A instância nasce "open"; erro de token só aparece no envio.
@@ -147,19 +186,31 @@ export async function POST(req: Request) {
       token,
       baseUrl,
       provider,
+      phoneNumberId: metaPhoneNumberId,
+      wabaId: metaWabaId,
     });
   } catch (e) {
     return json({ error: `Falha ao salvar conexão: ${(e as Error).message}` }, 400);
   }
 
   // Aponta o webhook da instância pro ambiente atual (recebimento de mensagens).
-  await registerWebhook(conn);
+  // No modo direto (meta_cloud) NÃO há instância na Evolution pra apontar — o
+  // webhook é configurado pelo admin no painel da Meta (URL do CRM).
+  if (!isMetaCloudConnection(conn)) {
+    await registerWebhook(conn);
+  }
 
-  // Troca de modo gerenciada (QR <-> API oficial): derruba a instância
-  // anterior na Evolution DEPOIS do novo vínculo estar salvo. Se ela ficasse
-  // viva, seguiria emitindo webhooks com um instance_name que não casa mais
-  // com a conexão da org e as mensagens seriam descartadas em silêncio.
-  if (managedSwitch && previous?.instance_name && previous.instance_name !== conn.instance_name) {
+  // Troca de modo gerenciada: derruba a instância anterior na Evolution DEPOIS
+  // do novo vínculo estar salvo. Se ela ficasse viva, seguiria emitindo webhooks
+  // com um instance_name que não casa mais com a conexão e as mensagens seriam
+  // descartadas em silêncio. Só faz sentido quando a conexão anterior VIVIA na
+  // Evolution (meta_cloud não tem instância lá).
+  if (
+    managedSwitch &&
+    previous?.instance_name &&
+    previous.instance_name !== conn.instance_name &&
+    !isMetaCloudConnection(previous)
+  ) {
     try {
       await getProvider(previous).logout();
     } catch {
@@ -194,9 +245,26 @@ export async function DELETE() {
   const conn = await getConnectionByOrg(auth.admin, auth.user.organizationId);
   if (!conn) return json({ error: 'Conexão não configurada' }, 404);
 
-  if (isBusinessConnection(conn)) {
-    // API oficial: apaga a instância na Evolution (purga o token da Meta) e
-    // limpa o token salvo — reconectar exige informar as credenciais de novo.
+  if (isMetaCloudConnection(conn)) {
+    // Modo direto: não há instância na Evolution. Só limpa as credenciais —
+    // reconectar exige informar token + phone_number_id de novo.
+    await auth.admin
+      .from('wa_connections')
+      .update({
+        status: 'disconnected',
+        phone_number: null,
+        profile_name: null,
+        instance_token: null,
+        meta_phone_number_id: null,
+        meta_waba_id: null,
+      })
+      .eq('id', conn.id);
+    return json({ ok: true });
+  }
+
+  if (isEvolutionBusinessConnection(conn)) {
+    // API oficial via Evolution: apaga a instância na Evolution (purga o token
+    // da Meta) e limpa o token salvo — reconectar exige as credenciais de novo.
     await deleteEvolutionInstance(conn.instance_name);
     await auth.admin
       .from('wa_connections')

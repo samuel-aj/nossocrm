@@ -15,6 +15,8 @@ export interface ProviderConfig {
   instanceName: string;
   /** apikey/token usado no header das chamadas (token da instância ou global) */
   token: string;
+  /** Só meta_cloud: phone_number_id da Meta (destino do POST /{id}/messages). */
+  phoneNumberId?: string | null;
 }
 
 export interface SendTextInput {
