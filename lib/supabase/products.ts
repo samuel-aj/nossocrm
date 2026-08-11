@@ -9,7 +9,36 @@
 import { supabase } from './client';
 import { Product } from '@/types';
 import { sanitizeUUID } from './utils';
-import { dealsService } from './deals';
+
+/**
+ * Recalcula o valor total (soma de preço×quantidade dos itens) de vários deals
+ * de uma vez: leitura em lote + escrita em paralelo por blocos. Evita centenas
+ * de idas ao servidor em série quando um produto muito usado muda de preço.
+ */
+async function recalcDealsValues(dealIds: string[]): Promise<void> {
+  if (!supabase || dealIds.length === 0) return;
+  const READ = 100;
+  const totals = new Map<string, number>();
+  for (let i = 0; i < dealIds.length; i += READ) {
+    const chunk = dealIds.slice(i, i + READ);
+    const { data: items } = await supabase
+      .from('deal_items')
+      .select('deal_id, price, quantity')
+      .in('deal_id', chunk);
+    for (const it of items || []) {
+      const cur = totals.get(it.deal_id) || 0;
+      totals.set(it.deal_id, cur + Number(it.price) * Number(it.quantity));
+    }
+  }
+  const now = new Date().toISOString();
+  const WRITE = 25;
+  for (let i = 0; i < dealIds.length; i += WRITE) {
+    const chunk = dealIds.slice(i, i + WRITE);
+    await Promise.all(
+      chunk.map((id) => supabase!.from('deals').update({ value: totals.get(id) || 0, updated_at: now }).eq('id', id))
+    );
+  }
+}
 
 // =============================================================================
 // Organization inference (client-side, RLS-safe)
@@ -191,29 +220,22 @@ export const productsService = {
         // Escopo explícito por organização: a RLS de deal_items é permissiva
         // (USING true), então filtramos pela org atual além do product_id.
         const orgId = await getCurrentOrganizationId();
-        let staleQuery = supabase
+        // Atualiza EM UMA TACADA (por condição, sem lista de ids) os itens que
+        // herdaram o padrão antigo OU estão zerados, e recebe de volta os
+        // deal_ids afetados pra recalcular o total de cada lead.
+        let upd = supabase
           .from('deal_items')
-          .select('id, deal_id')
+          .update({ price: newPrice })
           .eq('product_id', productId)
           .or(`price.eq.${oldPrice},price.eq.0`)
           .neq('price', newPrice);
-        if (orgId) staleQuery = staleQuery.eq('organization_id', orgId);
-        const { data: staleItems } = await staleQuery;
+        if (orgId) upd = upd.eq('organization_id', orgId);
+        const { data: updatedItems, error: itemsError } = await upd.select('deal_id');
 
-        const items = staleItems || [];
-        if (items.length > 0) {
-          const { error: itemsError } = await supabase
-            .from('deal_items')
-            .update({ price: newPrice })
-            .in('id', items.map((i) => i.id));
-
-          if (!itemsError) {
-            const dealIds = Array.from(new Set(items.map((i) => i.deal_id).filter(Boolean)));
-            for (const dealId of dealIds) {
-              await dealsService.recalculateDealValue(dealId);
-            }
-            retro = { items: items.length, deals: dealIds.length };
-          }
+        if (!itemsError && updatedItems && updatedItems.length > 0) {
+          const dealIds = Array.from(new Set(updatedItems.map((i) => i.deal_id).filter(Boolean))) as string[];
+          await recalcDealsValues(dealIds);
+          retro = { items: updatedItems.length, deals: dealIds.length };
         }
       }
 
