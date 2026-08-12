@@ -84,7 +84,9 @@ export async function GET() {
           phoneNumberId: conn.meta_phone_number_id,
           wabaId: conn.meta_waba_id,
           appId: conn.meta_app_id,
-          appSecret: conn.meta_app_secret,
+          // A chave em si NUNCA vai pro navegador: só o fato de existir
+          // (a UI mostra bolinhas; deixar como está mantém a salva).
+          appSecretSet: Boolean(conn.meta_app_secret),
         }
       : null;
 
