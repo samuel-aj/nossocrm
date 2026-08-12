@@ -140,11 +140,16 @@ function extractContent(m: any): {
     }
     case "reaction":
     case "system":
+      // Reação/evento de protocolo: não é "mensagem", não gera bolha.
+      return { skip: true };
     case "unsupported":
+      // Enquete, evento e afins: a Cloud API não entrega o conteúdo, mas a
+      // mensagem EXISTE — melhor uma bolha avisando do que sumir em silêncio.
+      return { text: "⚠️ O contato enviou um conteúdo que a API do WhatsApp não entrega (ex.: enquete ou evento). Abra o WhatsApp do número pra ver." };
     case "order":
-      return { skip: true };
+      return { text: "🛒 O contato enviou um pedido de catálogo (não suportado aqui)." };
     default:
-      return { skip: true };
+      return { text: `[mensagem do tipo "${type}" não suportada]` };
   }
 }
 
