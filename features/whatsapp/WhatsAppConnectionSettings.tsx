@@ -94,6 +94,10 @@ export function WhatsAppConnectionSettings() {
   const [bizToken, setBizToken] = useState('');
   const [bizNumberId, setBizNumberId] = useState('');
   const [bizWabaId, setBizWabaId] = useState('');
+  // Opcionais: com App ID + Chave Secreta o CRM configura o webhook do app
+  // sozinho (zero passos no painel da Meta).
+  const [bizAppId, setBizAppId] = useState('');
+  const [bizAppSecret, setBizAppSecret] = useState('');
 
   // Abre o form da API oficial PREENCHIDO com o que está salvo (admin quer
   // ver/conferir o token, Phone Number ID e WABA ID atuais). Fechar só fecha.
@@ -118,11 +122,20 @@ export function WhatsAppConnectionSettings() {
 
   const createMut = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
-      fetchJson<{ connection: WaConnectionInfo }>('/api/whatsapp/connection', {
+      fetchJson<{
+        connection: WaConnectionInfo;
+        metaSetup?: {
+          displayPhoneNumber?: string;
+          idsCorrigidos?: boolean;
+          recebimentoOk?: boolean;
+          overrideError?: string;
+          appWebhookError?: string;
+        } | null;
+      }>('/api/whatsapp/connection', {
         method: 'POST',
         body: JSON.stringify(payload),
       }),
-    onSuccess: (_data, payload) => {
+    onSuccess: (data, payload) => {
       qc.invalidateQueries({ queryKey: ['waConnection'] });
       qc.invalidateQueries({ queryKey: ['waConnectionQr'] });
       const mode = (payload as { mode?: string }).mode;
@@ -131,8 +144,23 @@ export function WhatsAppConnectionSettings() {
         setBizToken('');
         setBizNumberId('');
         setBizWabaId('');
+        setBizAppId('');
+        setBizAppSecret('');
         setQrFlowActive(false);
-        addToast('WhatsApp API oficial conectado! Configure o webhook e pronto.', 'success');
+        const setup = data.metaSetup;
+        if (setup?.recebimentoOk) {
+          addToast(
+            `Conectado (${setup.displayPhoneNumber || 'número validado'})! Envio e recebimento configurados automaticamente.${setup.idsCorrigidos ? ' Os IDs vieram trocados e foram corrigidos.' : ''}`,
+            'success'
+          );
+        } else if (setup) {
+          addToast(
+            `Conectado (${setup.displayPhoneNumber || 'número validado'}), mas o recebimento automático não concluiu: ${setup.overrideError || setup.appWebhookError || 'informe App ID + Chave Secreta do App e conecte de novo, ou configure o webhook no painel (valores na tela).'}`,
+            'error'
+          );
+        } else {
+          addToast('WhatsApp API oficial conectado! Configure o webhook e pronto.', 'success');
+        }
       } else {
         setQrFlowActive(true);
         addToast('Instância criada. Escaneie o QR pra conectar o número.', 'success');
@@ -254,6 +282,32 @@ export function WhatsAppConnectionSettings() {
           <p className="text-[10px] text-slate-400 mt-1">Necessário no futuro pra templates.</p>
         </div>
       </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">App ID (recomendado)</label>
+          <input
+            type="text"
+            value={bizAppId}
+            onChange={e => setBizAppId(e.target.value)}
+            placeholder="ID do app no painel da Meta"
+            className="w-full bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-sky-500 font-mono"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Chave Secreta do App (recomendado)</label>
+          <input
+            type="password"
+            value={bizAppSecret}
+            onChange={e => setBizAppSecret(e.target.value)}
+            placeholder="Configurações do app, Básico"
+            className="w-full bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-sky-500 font-mono"
+          />
+          <p className="text-[10px] text-slate-400 mt-1">
+            Com App ID + Chave Secreta, o CRM configura o webhook e liga o recebimento sozinho
+            (nada manual no painel). A chave é usada só na conexão, não fica salva.
+          </p>
+        </div>
+      </div>
       {/* Passo 3: webhook do recebimento, com os valores prontos pra
           colar no painel da Meta (sem isso o envio funciona mas as
           respostas dos clientes não chegam no CRM). Os valores são POR
@@ -262,10 +316,11 @@ export function WhatsAppConnectionSettings() {
         <div className="rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-3.5 text-[11px] text-slate-600 dark:text-slate-300">
           <p className="font-bold text-slate-700 dark:text-slate-200 mb-1">3. Webhook (pra receber as respostas):</p>
           <p>
-            Depois de clicar em Conectar, a <span className="font-semibold">URL de callback</span> e o{' '}
-            <span className="font-semibold">token de verificação</span> desta organização aparecem aqui,
-            prontos pra colar no painel do app da Meta (WhatsApp, Configuração, Webhook) e assinar o campo{' '}
-            <span className="font-semibold">messages</span>.
+            Preenchendo <span className="font-semibold">App ID + Chave Secreta</span> acima, o CRM
+            configura o webhook <span className="font-semibold">sozinho</span> ao conectar — nada
+            manual. Sem a chave, a URL de callback e o token de verificação aparecem aqui depois
+            de conectar, pra colar no painel do app (WhatsApp, Configuração, Webhook, campo{' '}
+            <span className="font-semibold">messages</span>).
           </p>
         </div>
       )}
@@ -329,11 +384,13 @@ export function WhatsAppConnectionSettings() {
         onClick={() =>
           createMut.mutate({
             // Modo DIRETO na Meta (sem Evolution). Envio/recebimento falam
-            // direto com a Cloud API; o webhook aponta pro próprio CRM.
+            // direto com a Cloud API; o setup do webhook é AUTOMÁTICO.
             mode: 'meta_cloud',
             metaToken: bizToken.trim(),
             metaNumberId: bizNumberId.trim(),
             metaBusinessId: bizWabaId.trim() || undefined,
+            metaAppId: bizAppId.trim() || undefined,
+            metaAppSecret: bizAppSecret.trim() || undefined,
           })
         }
         disabled={createMut.isPending || !bizToken.trim() || !bizNumberId.trim()}

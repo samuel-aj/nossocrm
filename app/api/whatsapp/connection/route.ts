@@ -24,6 +24,7 @@ import {
   instanceNameForOrg,
   registerWebhook,
 } from '@/lib/whatsapp/admin';
+import { setupMetaWebhooks, validateMetaCredentials } from '@/lib/whatsapp/metaCloudSetup';
 
 function mask(conn: WaConnectionRow) {
   return {
@@ -117,6 +118,8 @@ export async function POST(req: Request) {
     metaToken?: string;
     metaNumberId?: string;
     metaBusinessId?: string;
+    metaAppId?: string;
+    metaAppSecret?: string;
   };
   try {
     body = await req.json();
@@ -137,26 +140,51 @@ export async function POST(req: Request) {
   const previous = await getConnectionByOrg(auth.admin, auth.user.organizationId);
   let managedSwitch = false;
 
+  // Resultado do setup automático do meta_cloud (devolvido pra UI no fim).
+  let metaSetup: {
+    displayPhoneNumber?: string;
+    verifiedName?: string;
+    idsCorrigidos?: boolean;
+    appWebhook?: string;
+    appWebhookError?: string;
+    subscribed?: boolean;
+    override?: boolean;
+    overrideError?: string;
+    recebimentoOk?: boolean;
+  } | null = null;
+
   if (body.mode === 'meta_cloud') {
     managedSwitch = true;
-    // MODO DIRETO (Cloud API da Meta, SEM Evolution): conexão por credenciais.
-    // Não cria instância em lugar nenhum — só valida e salva token + phone_number_id.
-    // O webhook é registrado MANUALMENTE pelo admin no painel da Meta (a URL do
-    // CRM aparece na tela de conexão). O erro de token só aparece no envio.
+    // MODO DIRETO (Cloud API da Meta, SEM Evolution): conexão por credenciais,
+    // com setup AUTOMÁTICO: valida token/IDs (corrige IDs trocados), configura
+    // o webhook e assina a WABA com callback exclusivo pro CRM. Nada manual.
     const metaToken = (body.metaToken || '').trim();
     const metaNumberId = (body.metaNumberId || '').trim().replace(/\D/g, '');
     const wabaId = (body.metaBusinessId || '').trim().replace(/\D/g, '');
     if (!metaToken || !metaNumberId) {
       return json({ error: 'Token permanente e Phone Number ID da Meta são obrigatórios' }, 400);
     }
+
+    // Valida ANTES de salvar: token com acesso + IDs na ordem certa (a tela
+    // "Contas do WhatsApp" da BM mostra o WABA id — erro clássico de troca).
+    const check = await validateMetaCredentials(metaToken, metaNumberId, wabaId);
+    if (!check.ok || !check.phoneNumberId) {
+      return json({ error: check.error || 'Credenciais da Meta inválidas' }, 400);
+    }
+
     // Nome sintético por org (satisfaz NOT NULL/UNIQUE); sufixo _cloud não
     // colide com a instância QR (_) nem com a business via Evolution (_api).
     instanceName = `${instanceNameForOrg(auth.user.organizationId)}_cloud`;
     token = metaToken;
     baseUrl = null;
     provider = 'meta_cloud';
-    metaPhoneNumberId = metaNumberId;
-    metaWabaId = wabaId || null;
+    metaPhoneNumberId = check.phoneNumberId;
+    metaWabaId = check.wabaId || null;
+    metaSetup = {
+      displayPhoneNumber: check.displayPhoneNumber,
+      verifiedName: check.verifiedName,
+      idsCorrigidos: Boolean(check.swapped),
+    };
   } else if (body.mode === 'business') {
     managedSwitch = true;
     // MODO API OFICIAL (Meta Cloud API via Evolution): conexão por credenciais,
@@ -214,11 +242,41 @@ export async function POST(req: Request) {
     return json({ error: `Falha ao salvar conexão: ${(e as Error).message}` }, 400);
   }
 
-  // Aponta o webhook da instância pro ambiente atual (recebimento de mensagens).
-  // No modo direto (meta_cloud) NÃO há instância na Evolution pra apontar — o
-  // webhook é configurado pelo admin no painel da Meta (URL do CRM).
+  // Recebimento: Evolution aponta o webhook da instância; meta_cloud faz o
+  // setup AUTOMÁTICO na Meta (webhook do app se tiver App Secret, assinatura
+  // na WABA e callback exclusivo pro CRM).
   if (!isMetaCloudConnection(conn)) {
     await registerWebhook(conn);
+  } else if (body.mode === 'meta_cloud' && metaSetup) {
+    const supabaseBase = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '');
+    const callbackUrl = `${supabaseBase}/functions/v1/whatsapp-webhook-meta/${conn.webhook_secret}`;
+    const hooks = await setupMetaWebhooks({
+      token: (body.metaToken || '').trim(),
+      wabaId: conn.meta_waba_id || '',
+      appId: body.metaAppId?.trim() || null,
+      appSecret: body.metaAppSecret?.trim() || null,
+      callbackUrl,
+      verifyToken: conn.webhook_secret,
+    });
+    metaSetup = {
+      ...metaSetup,
+      appWebhook: hooks.appWebhook,
+      appWebhookError: hooks.appWebhookError,
+      subscribed: hooks.subscribed,
+      override: hooks.override,
+      overrideError: hooks.overrideError,
+      // Recebimento garantido quando o callback exclusivo entrou OU quando o
+      // webhook do app foi configurado agora apontando pro CRM.
+      recebimentoOk: hooks.override || hooks.appWebhook === 'ok',
+    };
+    // Já valida e grava o número na conexão (sem esperar o 1º evento).
+    await updateConnectionStatus(auth.admin, conn.id, {
+      status: 'connected',
+      phone_number: metaSetup.displayPhoneNumber
+        ? `+${metaSetup.displayPhoneNumber.replace(/\D/g, '')}`
+        : undefined,
+      profile_name: metaSetup.verifiedName ?? undefined,
+    });
   }
 
   // Troca de modo gerenciada: derruba a instância anterior na Evolution DEPOIS
@@ -255,7 +313,7 @@ export async function POST(req: Request) {
   } catch {
     // segue com o status salvo
   }
-  return json({ connection: { ...mask(conn), status } });
+  return json({ connection: { ...mask(conn), status }, metaSetup });
 }
 
 export async function DELETE() {
