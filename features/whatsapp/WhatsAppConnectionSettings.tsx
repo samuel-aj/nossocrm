@@ -32,8 +32,9 @@ interface ConnResponse {
     phoneNumberId: string | null;
     wabaId: string | null;
     appId?: string | null;
-    /** A chave em si nunca vem pro navegador: só se existe salva */
+    /** A chave em si nunca vem pro navegador: só se existe salva e o tamanho */
     appSecretSet?: boolean;
+    appSecretLength?: number;
   } | null;
 }
 
@@ -93,9 +94,9 @@ export function WhatsAppConnectionSettings() {
   // sozinho (zero passos no painel da Meta).
   const [bizAppId, setBizAppId] = useState('');
   const [bizAppSecret, setBizAppSecret] = useState('');
-  // Chave salva no servidor: o campo abre com bolinhas SEM a chave real vir
-  // pro navegador. Enviar o sentinela intacto = manter a salva.
-  const SECRET_SENTINEL = '••••••••••••••••';
+  // Chave salva no servidor: o campo abre com bolinhas (1 por caractere) SEM
+  // a chave real vir pro navegador. Sentinela intacto = manter a salva.
+  const isSecretSentinel = (v: string) => /^•+$/.test(v.trim());
 
   // Abre o form da API oficial PREENCHIDO com o que está salvo (admin quer
   // ver/conferir o token, Phone Number ID e WABA ID atuais). Fechar só fecha.
@@ -107,7 +108,7 @@ export function WhatsAppConnectionSettings() {
       setBizNumberId(metaCreds.phoneNumberId ?? '');
       setBizWabaId(metaCreds.wabaId ?? '');
       setBizAppId(metaCreds.appId ?? '');
-      setBizAppSecret(metaCreds.appSecretSet ? SECRET_SENTINEL : '');
+      setBizAppSecret(metaCreds.appSecretSet ? '•'.repeat(metaCreds.appSecretLength || 16) : '');
     }
     setBizOpen(opening);
   };
@@ -329,7 +330,7 @@ export function WhatsAppConnectionSettings() {
             metaAppId: bizAppId.trim() || undefined,
             // sentinela intacto = não reenviar (o servidor mantém a chave salva)
             metaAppSecret:
-              bizAppSecret.trim() && bizAppSecret.trim() !== SECRET_SENTINEL
+              bizAppSecret.trim() && !isSecretSentinel(bizAppSecret)
                 ? bizAppSecret.trim()
                 : undefined,
           })
