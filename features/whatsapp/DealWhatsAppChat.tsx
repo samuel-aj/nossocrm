@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   Send,
   MessageCircle,
@@ -26,6 +26,7 @@ import {
   Pause,
   Trash2,
   Info,
+  Play,
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { fillTemplate } from '@/lib/messageTemplates';
@@ -155,6 +156,182 @@ function fileNameFromUrl(url: string): string {
   }
 }
 
+/** Balão de áudio custom (estilo dos CRMs de chat): play/pausa redondo,
+ *  barra de progresso arrastável, tempos e botão "T" que transcreve o áudio
+ *  com a IA da organização (resultado cacheado no banco, transcreve 1x). */
+function AudioBubble({ m }: { m: WaChatMessage }) {
+  const isOut = m.direction === 'out';
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef(false);
+  const [playing, setPlaying] = useState(false);
+  const [current, setCurrent] = useState(0);
+  const [duration, setDuration] = useState<number | null>(null);
+  const [showText, setShowText] = useState(true);
+
+  const transcribeMut = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/whatsapp/transcribe', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ messageId: m.id }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { transcription?: string; error?: string };
+      if (!res.ok || !json.transcription) throw new Error(json.error || 'Falha ao transcrever');
+      return json.transcription;
+    },
+    onSuccess: () => setShowText(true),
+  });
+
+  // transcrição persistida (polling hidrata) ou recém-gerada nesta sessão
+  const text = m.transcription || transcribeMut.data || null;
+
+  // MediaRecorder às vezes entrega duration=Infinity até tocar inteiro —
+  // só habilita a barra quando o número é real
+  const syncDuration = () => {
+    const el = audioRef.current;
+    if (el && isFinite(el.duration) && el.duration > 0) setDuration(el.duration);
+  };
+
+  const seekFromPointer = (clientX: number) => {
+    const el = audioRef.current;
+    const track = trackRef.current;
+    if (!el || !track || !duration) return;
+    const rect = track.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    el.currentTime = ratio * duration;
+    setCurrent(ratio * duration);
+  };
+
+  const toggle = () => {
+    const el = audioRef.current;
+    if (!el) return;
+    if (el.paused) void el.play();
+    else el.pause();
+  };
+
+  const pct = duration ? Math.min(100, (current / duration) * 100) : 0;
+  const btn = isOut
+    ? 'bg-white/25 hover:bg-white/35 text-white'
+    : 'bg-slate-200 hover:bg-slate-300 text-slate-700 dark:bg-white/10 dark:hover:bg-white/20 dark:text-white';
+
+  return (
+    <div className="w-64 max-w-full">
+      <audio
+        ref={audioRef}
+        src={m.media_url ?? undefined}
+        preload="metadata"
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEmptied={() => setPlaying(false)} // src renovado (URL assinada) aborta sem 'pause'
+        onEnded={() => {
+          const el = audioRef.current;
+          if (el) el.currentTime = 0; // volta pro início, como no WhatsApp
+          setCurrent(0);
+        }}
+        onTimeUpdate={e => {
+          if (!draggingRef.current) setCurrent((e.target as HTMLAudioElement).currentTime);
+        }}
+        onLoadedMetadata={syncDuration}
+        onDurationChange={syncDuration}
+      />
+      <div className="flex items-center gap-2.5">
+        <button
+          type="button"
+          onClick={toggle}
+          className={`shrink-0 h-9 w-9 rounded-full inline-flex items-center justify-center transition-colors ${btn}`}
+          aria-label={playing ? 'Pausar' : 'Ouvir áudio'}
+        >
+          {playing ? <Pause size={16} /> : <Play size={16} className="ml-0.5" />}
+        </button>
+        <div
+          ref={trackRef}
+          role="slider"
+          tabIndex={0}
+          aria-label="Posição do áudio"
+          aria-valuemin={0}
+          aria-valuemax={Math.floor(duration ?? 0)}
+          aria-valuenow={Math.floor(current)}
+          className="relative flex-1 h-5 cursor-pointer touch-none rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-400"
+          onPointerDown={e => {
+            draggingRef.current = true;
+            e.currentTarget.setPointerCapture?.(e.pointerId);
+            seekFromPointer(e.clientX);
+          }}
+          onPointerMove={e => {
+            if (draggingRef.current) seekFromPointer(e.clientX);
+          }}
+          onPointerUp={() => {
+            draggingRef.current = false;
+          }}
+          onPointerCancel={() => {
+            draggingRef.current = false;
+          }}
+          onKeyDown={e => {
+            const el = audioRef.current;
+            if (!el || !duration) return;
+            if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+              e.preventDefault();
+              const next =
+                e.key === 'ArrowRight'
+                  ? Math.min(duration, el.currentTime + 5)
+                  : Math.max(0, el.currentTime - 5);
+              el.currentTime = next;
+              setCurrent(next);
+            }
+          }}
+        >
+          <div
+            className={`absolute top-1/2 -translate-y-1/2 left-0 right-0 h-1 rounded-full ${
+              isOut ? 'bg-white/30' : 'bg-slate-300 dark:bg-white/20'
+            }`}
+          />
+          <div
+            className={`absolute top-1/2 -translate-y-1/2 left-0 h-1 rounded-full ${
+              isOut ? 'bg-white' : 'bg-emerald-500'
+            }`}
+            style={{ width: `${pct}%` }}
+          />
+          <div
+            className={`absolute top-1/2 -translate-y-1/2 h-3 w-3 rounded-full shadow ${
+              isOut ? 'bg-white' : 'bg-emerald-500'
+            }`}
+            style={{ left: `calc(${pct}% - 6px)` }}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            if (text) setShowText(s => !s);
+            else if (!transcribeMut.isPending) transcribeMut.mutate();
+          }}
+          disabled={transcribeMut.isPending}
+          className={`shrink-0 h-8 w-8 rounded-full inline-flex items-center justify-center text-[13px] font-bold transition-colors disabled:opacity-60 ${btn}`}
+          aria-label="Transcrever áudio"
+          title={text ? 'Mostrar/ocultar transcrição' : 'Transcrever áudio'}
+        >
+          {transcribeMut.isPending ? <Loader2 size={14} className="animate-spin" /> : 'T'}
+        </button>
+      </div>
+      <div
+        className={`mt-0.5 flex items-center justify-between pl-[46px] pr-[42px] text-[10px] tabular-nums ${
+          isOut ? 'text-emerald-100' : 'text-slate-400'
+        }`}
+      >
+        <span>{fmtSeconds(Math.floor(current))}</span>
+        <span>{duration ? fmtSeconds(Math.floor(duration)) : '--:--'}</span>
+      </div>
+      {transcribeMut.isError && (
+        <p className={`mt-1 text-[11px] ${isOut ? 'text-red-200' : 'text-red-500'}`}>
+          {(transcribeMut.error as Error).message}
+        </p>
+      )}
+      {text && showText && <p className="mt-1.5 whitespace-pre-wrap break-words text-sm">{text}</p>}
+    </div>
+  );
+}
+
 function MediaContent({ m }: { m: WaChatMessage }) {
   if (!m.media_type) return null;
 
@@ -225,7 +402,7 @@ function MediaContent({ m }: { m: WaChatMessage }) {
         </div>
       );
     case 'audio':
-      return <audio controls src={m.media_url} className="max-w-[240px]" preload="metadata" />;
+      return <AudioBubble m={m} />;
     case 'document':
       return (
         <a
