@@ -50,6 +50,13 @@ export function useWhatsAppChat(phoneE164: string | null) {
   // pausa o polling durante um envio: um refetch no meio apagaria a bolha otimista
   const sendingRef = useRef(false);
 
+  // URLs de mídia ESTÁVEIS entre polls: a API assina uma URL NOVA a cada
+  // consulta (a cada 4s) — se o src trocar, o <video>/<img> recarrega do zero
+  // toda hora. Fixamos a primeira URL vista de cada mensagem enquanto a
+  // assinatura vale (50min de 1h), depois renovamos.
+  const mediaUrlCacheRef = useRef<Map<string, { url: string; ts: number }>>(new Map());
+  const MEDIA_URL_FRESH_MS = 50 * 60 * 1000;
+
   const query = useQuery<WaChatData>({
     queryKey,
     queryFn: async () => {
@@ -59,7 +66,19 @@ export function useWhatsAppChat(phoneE164: string | null) {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error((json as { error?: string }).error || 'Falha ao carregar a conversa');
-      return json as WaChatData;
+      const data = json as WaChatData;
+      const cache = mediaUrlCacheRef.current;
+      const now = Date.now();
+      data.messages = (data.messages || []).map(m => {
+        if (!m.media_url) return m;
+        const hit = cache.get(m.id);
+        if (hit && now - hit.ts < MEDIA_URL_FRESH_MS) {
+          return m.media_url === hit.url ? m : { ...m, media_url: hit.url };
+        }
+        cache.set(m.id, { url: m.media_url, ts: now });
+        return m;
+      });
+      return data;
     },
     enabled: !!phoneE164,
     refetchInterval: () => (!phoneE164 || sendingRef.current ? false : 4000),

@@ -211,7 +211,15 @@ function MediaContent({ m }: { m: WaChatMessage }) {
         <img src={m.media_url} alt="Figurinha" className="h-28 w-28 object-contain" />
       );
     case 'video':
-      return <video controls src={m.media_url} className="rounded-lg max-h-64 max-w-full" preload="metadata" />;
+      // Caixa de ALTURA FIXA: o <video> sem metadata nasce 300x150 (paisagem)
+      // e "pulava" pro formato real ao carregar, mexendo o layout inteiro.
+      // Com a altura travada, vídeo vertical ocupa o mesmo alto desde o
+      // primeiro frame e só a largura acomoda (uma vez, dentro da bolha).
+      return (
+        <div className="h-64 w-fit max-w-full rounded-lg overflow-hidden bg-slate-950/70 flex items-center justify-center">
+          <video controls src={m.media_url} className="h-full max-w-full object-contain" preload="metadata" />
+        </div>
+      );
     case 'audio':
       return <audio controls src={m.media_url} className="max-w-[240px]" preload="metadata" />;
     case 'document':
