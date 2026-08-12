@@ -6,7 +6,7 @@
  * re-registra o webhook e tenta o QR de novo — o usuário nem percebe.
  */
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
-import { getConnectionByOrg, upsertConnection } from '@/lib/whatsapp/service';
+import { getConnectionsByOrg, upsertConnection } from '@/lib/whatsapp/service';
 import { getProvider, isBusinessConnection } from '@/lib/whatsapp';
 import { ensureEvolutionInstance, registerWebhook } from '@/lib/whatsapp/admin';
 
@@ -14,13 +14,16 @@ export async function GET() {
   const auth = await requireOrgUser();
   if (!auth.ok) return auth.response;
 
-  let conn = await getConnectionByOrg(auth.admin, auth.user.organizationId);
-  if (!conn) return json({ error: 'Conexão não configurada' }, 400);
-
-  // API oficial da Meta não tem pareamento: nunca gera QR (e o self-healing
-  // abaixo recriaria a instância como Baileys — jamais rebaixar uma business).
-  if (isBusinessConnection(conn)) {
-    return json({ error: 'Conexão via API oficial não usa QR code' }, 400);
+  // Multi-número: mira a conexão QR (Baileys) da org — a "padrão" pode ser
+  // uma API oficial, que nunca gera QR (e o self-healing recriaria a
+  // instância como Baileys — jamais rebaixar uma business).
+  const all = await getConnectionsByOrg(auth.admin, auth.user.organizationId);
+  let conn = all.find(c => !isBusinessConnection(c)) ?? null;
+  if (!conn) {
+    return json(
+      { error: all.length ? 'Conexão via API oficial não usa QR code' : 'Conexão não configurada' },
+      400
+    );
   }
 
   try {

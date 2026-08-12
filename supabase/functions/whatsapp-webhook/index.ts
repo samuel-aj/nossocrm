@@ -297,7 +297,14 @@ Deno.serve(async (req) => {
       brPhoneVariants(prevPhone).includes(ownerPhone) ||
       brPhoneVariants(ownerPhone).includes(prevPhone);
     if (!samePhone) {
-      await supabase.from("wa_conversations").delete().eq("organization_id", orgId);
+      // MULTI-NÚMERO: apaga SÓ as conversas DESTA conexão (+ as legadas sem
+      // connection_id, que nasceram na era de 1 conexão por org). As conversas
+      // dos OUTROS números (ex.: API oficial) ficam intactas.
+      await supabase
+        .from("wa_conversations")
+        .delete()
+        .eq("organization_id", orgId)
+        .or(`connection_id.eq.${conn.id},connection_id.is.null`);
     }
 
     await supabase

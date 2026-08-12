@@ -46,13 +46,42 @@ export interface WaMessageRow {
   created_at: string;
 }
 
+/** TODAS as conexões da org (multi-número), da mais antiga pra mais nova. */
+export async function getConnectionsByOrg(
+  admin: SupabaseClient,
+  orgId: string
+): Promise<WaConnectionRow[]> {
+  const { data } = await admin
+    .from('wa_connections')
+    .select('*')
+    .eq('organization_id', orgId)
+    .order('created_at', { ascending: true });
+  return (data ?? []) as WaConnectionRow[];
+}
+
+/**
+ * Conexão PADRÃO da org: a primeira CONECTADA (ou a mais antiga, se nenhuma).
+ * Mantém o contrato antigo de "a conexão da org" pros call sites que não
+ * lidam com multi-número — quem escolhe o número passa connectionId.
+ */
 export async function getConnectionByOrg(
   admin: SupabaseClient,
   orgId: string
 ): Promise<WaConnectionRow | null> {
+  const all = await getConnectionsByOrg(admin, orgId);
+  return all.find(c => c.status === 'connected') ?? all[0] ?? null;
+}
+
+/** Uma conexão específica, SEMPRE validada contra a org (nunca cross-tenant). */
+export async function getConnectionByIdForOrg(
+  admin: SupabaseClient,
+  orgId: string,
+  connectionId: string
+): Promise<WaConnectionRow | null> {
   const { data } = await admin
     .from('wa_connections')
     .select('*')
+    .eq('id', connectionId)
     .eq('organization_id', orgId)
     .maybeSingle();
   return (data as WaConnectionRow) ?? null;
@@ -86,6 +115,19 @@ export async function upsertConnection(
     appSecret?: string | null;
   }
 ): Promise<WaConnectionRow> {
+  // Segurança multi-tenant: com o upsert chaveado em instance_name, um nome
+  // que já pertence a OUTRA org jamais pode ser "assumido" (o update trocaria
+  // o dono da linha). Nomes gerenciados derivam da org e nunca colidem; isso
+  // barra só o caminho manual/malicioso.
+  const { data: existing } = await admin
+    .from('wa_connections')
+    .select('id, organization_id')
+    .eq('instance_name', input.instanceName)
+    .maybeSingle();
+  if (existing && existing.organization_id !== orgId) {
+    throw new Error('Este nome de instância já está em uso por outra organização');
+  }
+
   const { data, error } = await admin
     .from('wa_connections')
     .upsert(
@@ -104,7 +146,10 @@ export async function upsertConnection(
         ...(input.appId !== undefined ? { meta_app_id: input.appId } : {}),
         ...(input.appSecret !== undefined ? { meta_app_secret: input.appSecret } : {}),
       },
-      { onConflict: 'organization_id' }
+      // MULTI-NÚMERO: a chave do upsert é o nome da instância (único global,
+      // derivado da org + número). Mesmo nome = atualiza; nome novo = OUTRA
+      // conexão da org, sem tocar nas demais.
+      { onConflict: 'instance_name' }
     )
     .select('*')
     .single();

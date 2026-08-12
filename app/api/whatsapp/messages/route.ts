@@ -4,7 +4,7 @@
  * Usado pelo chat dentro do card do lead.
  */
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
-import { getConnectionByOrg } from '@/lib/whatsapp/service';
+import { getConnectionsByOrg } from '@/lib/whatsapp/service';
 import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
 
 export async function GET(req: Request) {
@@ -14,7 +14,18 @@ export async function GET(req: Request) {
   const phone = normalizePhoneE164(new URL(req.url).searchParams.get('phone') || '');
   if (!phone) return json({ error: 'phone é obrigatório' }, 400);
 
-  const conn = await getConnectionByOrg(auth.admin, auth.user.organizationId);
+  // Multi-número: a conexão "padrão" (1ª conectada) mantém o contrato antigo;
+  // senders lista TODOS os números conectados pro seletor de envio do chat.
+  const all = await getConnectionsByOrg(auth.admin, auth.user.organizationId);
+  const conn = all.find(c => c.status === 'connected') ?? all[0] ?? null;
+  const senders = all
+    .filter(c => c.status === 'connected')
+    .map(c => ({
+      id: c.id,
+      provider: c.provider,
+      phoneNumber: c.phone_number,
+      profileName: c.profile_name,
+    }));
 
   // WhatsApp DESCONECTADO => conversas ficam OCULTAS (guardadas no banco;
   // reconectar o mesmo número traz de volta). Nada é exibido nem marcado
@@ -24,6 +35,7 @@ export async function GET(req: Request) {
       connected: false,
       hasConnection: !!conn,
       provider: conn?.provider ?? null,
+      senders,
       conversation: null,
       messages: [],
     });
@@ -83,6 +95,7 @@ export async function GET(req: Request) {
     connected: conn?.status === 'connected',
     hasConnection: !!conn,
     provider: conn?.provider ?? null,
+    senders,
     conversation: conv ?? null,
     messages,
   });

@@ -7,6 +7,8 @@
 import { requireOrgUser, isOrgAdmin, json } from '@/lib/whatsapp/api';
 import {
   getConnectionByOrg,
+  getConnectionsByOrg,
+  getConnectionByIdForOrg,
   upsertConnection,
   updateConnectionStatus,
   type WaConnectionRow,
@@ -70,42 +72,62 @@ export async function GET() {
   const auth = await requireOrgUser();
   if (!auth.ok) return auth.response;
 
-  const conn = await getConnectionByOrg(auth.admin, auth.user.organizationId);
-  const metaWebhook = metaWebhookInfo(auth.user.role, conn);
-  if (!conn) return json({ connected: false, connection: null, metaWebhook });
+  const conns = await getConnectionsByOrg(auth.admin, auth.user.organizationId);
+  if (conns.length === 0) {
+    return json({ connected: false, connection: null, metaWebhook: null, connections: [] });
+  }
+
+  // Status ao vivo POR conexão (meta_cloud é checagem local; Evolution é rede,
+  // em paralelo e com fallback pro status salvo).
+  const withStatus = await Promise.all(
+    conns.map(async c => {
+      let status = c.status;
+      try {
+        const live = await getProvider(c).getConnectionState();
+        if (live !== c.status) {
+          await updateConnectionStatus(auth.admin, c.id, { status: live });
+          status = live;
+        }
+      } catch {
+        // provedor indisponível: mantém o último status salvo
+      }
+      return { conn: c, status };
+    })
+  );
 
   // Só pra ADMIN e só no modo API oficial: as credenciais salvas, pra tela de
   // edição abrir preenchida (o admin foi quem cadastrou o token — poder rever
   // o que está salvo é parte de operar a conexão).
-  const metaCredentials =
-    isOrgAdmin(auth.user.role) && isBusinessConnection(conn)
+  const admin = isOrgAdmin(auth.user.role);
+  const credsOf = (c: WaConnectionRow) =>
+    admin && isBusinessConnection(c)
       ? {
-          token: conn.instance_token,
-          phoneNumberId: conn.meta_phone_number_id,
-          wabaId: conn.meta_waba_id,
-          appId: conn.meta_app_id,
+          token: c.instance_token,
+          phoneNumberId: c.meta_phone_number_id,
+          wabaId: c.meta_waba_id,
+          appId: c.meta_app_id,
           // A chave em si NUNCA vai pro navegador: só o fato de existir e o
           // tamanho (a UI mostra 1 bolinha por caractere; intacto = mantém).
-          appSecretSet: Boolean(conn.meta_app_secret),
-          appSecretLength: conn.meta_app_secret?.length ?? 0,
+          appSecretSet: Boolean(c.meta_app_secret),
+          appSecretLength: c.meta_app_secret?.length ?? 0,
         }
       : null;
 
-  let status = conn.status;
-  try {
-    const live = await getProvider(conn).getConnectionState();
-    if (live !== conn.status) {
-      await updateConnectionStatus(auth.admin, conn.id, { status: live });
-      status = live;
-    }
-  } catch {
-    // Evolution indisponível: mantém o último status salvo
-  }
+  const connections = withStatus.map(({ conn: c, status }) => ({
+    ...mask(c),
+    status,
+    metaCredentials: credsOf(c),
+  }));
+
+  // Conexão PADRÃO (compat com a UI antiga): primeira conectada, senão a mais antiga
+  const def = withStatus.find(w => w.status === 'connected') ?? withStatus[0];
+
   return json({
-    connected: status === 'connected',
-    connection: { ...mask(conn), status },
-    metaWebhook,
-    metaCredentials,
+    connected: withStatus.some(w => w.status === 'connected'),
+    connection: { ...mask(def.conn), status: def.status },
+    metaWebhook: metaWebhookInfo(auth.user.role, def.conn),
+    metaCredentials: credsOf(def.conn),
+    connections,
   });
 }
 
@@ -125,6 +147,9 @@ export async function POST(req: Request) {
     metaBusinessId?: string;
     metaAppId?: string;
     metaAppSecret?: string;
+    /** Multi-número: qual conexão o form está EDITANDO (atualiza a linha certa
+     *  mesmo quando o Phone Number ID muda; omitido = número novo) */
+    editingConnectionId?: string;
   };
   try {
     body = await req.json();
@@ -161,7 +186,8 @@ export async function POST(req: Request) {
   } | null = null;
 
   if (body.mode === 'meta_cloud') {
-    managedSwitch = true;
+    // MULTI-NÚMERO: conectar um número da API oficial é ADITIVO — nunca mexe
+    // nas outras conexões da org (managedSwitch fica false de propósito).
     // MODO DIRETO (Cloud API da Meta, SEM Evolution): conexão por credenciais,
     // com setup AUTOMÁTICO: valida token/IDs (corrige IDs trocados), configura
     // o webhook e assina a WABA com callback exclusivo pro CRM. Nada manual.
@@ -179,9 +205,32 @@ export async function POST(req: Request) {
       return json({ error: check.error || 'Credenciais da Meta inválidas' }, 400);
     }
 
-    // Nome sintético por org (satisfaz NOT NULL/UNIQUE); sufixo _cloud não
-    // colide com a instância QR (_) nem com a business via Evolution (_api).
-    instanceName = `${instanceNameForOrg(auth.user.organizationId)}_cloud`;
+    // Nome sintético (satisfaz NOT NULL/UNIQUE e é a chave do upsert): mesma
+    // org + mesmo phone_number_id = EDIÇÃO da conexão existente; número novo
+    // = conexão nova com sufixo do número. O 1º número mantém o sufixo _cloud
+    // puro (compat com as conexões criadas antes do multi-número).
+    const metaConns = (previous ? await getConnectionsByOrg(auth.admin, auth.user.organizationId) : []).filter(
+      isMetaCloudConnection
+    );
+    const samePhone = metaConns.find(c => c.meta_phone_number_id === check.phoneNumberId);
+    // Form de EDIÇÃO aponta a linha exata (permite trocar o Phone Number ID
+    // sem criar uma segunda conexão). Se o número digitado já é de OUTRA
+    // linha da org, a dedup por número vence (atualiza aquela linha).
+    const editingId = (body.editingConnectionId || '').trim();
+    const editing = editingId ? metaConns.find(c => c.id === editingId) ?? null : null;
+    // Desconectar LIMPA as credenciais da linha (meta_phone_number_id vira
+    // null): reconectar reaproveita essa "vaga" em vez de criar linha zumbi.
+    const emptySlot = metaConns.find(c => !c.meta_phone_number_id && c.status !== 'connected');
+    const base = instanceNameForOrg(auth.user.organizationId);
+    // Nome de linha NOVA leva sufixo aleatório: nomes derivados do número já
+    // causaram colisão (vaga reusada guarda outro número sob o nome antigo).
+    instanceName =
+      samePhone?.instance_name ??
+      editing?.instance_name ??
+      emptySlot?.instance_name ??
+      (metaConns.length === 0
+        ? `${base}_cloud`
+        : `${base}_cloud_${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`);
     token = metaToken;
     baseUrl = null;
     provider = 'meta_cloud';
@@ -294,29 +343,33 @@ export async function POST(req: Request) {
     });
   }
 
-  // Troca de modo gerenciada: derruba a instância anterior na Evolution DEPOIS
-  // do novo vínculo estar salvo. Se ela ficasse viva, seguiria emitindo webhooks
-  // com um instance_name que não casa mais com a conexão e as mensagens seriam
-  // descartadas em silêncio. Só faz sentido quando a conexão anterior VIVIA na
-  // Evolution (meta_cloud não tem instância lá).
-  if (
-    managedSwitch &&
-    previous?.instance_name &&
-    previous.instance_name !== conn.instance_name &&
-    !isMetaCloudConnection(previous)
-  ) {
-    try {
-      await getProvider(previous).logout();
-    } catch {
-      // best-effort: a sessão pode nem existir mais
-    }
-    // O delete usa a apikey/servidor GLOBAL: só roda quando a conexão antiga
-    // morava nesse servidor (vínculo manual pra outro servidor fica de fora,
-    // senão apagaria uma instância homônima de outro tenant de lá).
+  // Troca de modo gerenciada (QR/business): derruba as instâncias evolution
+  // ANTERIORES da org DEPOIS do novo vínculo estar salvo — senão seguiriam
+  // vivas emitindo webhooks duplicados. Alvo EXPLÍCITO (linhas evolution que
+  // não são a nova): a conexão "padrão" da org pode ser uma meta_cloud sem
+  // relação com a troca. meta_cloud nunca entra aqui (conectar número da API
+  // é ADITIVO, managedSwitch=false).
+  if (managedSwitch) {
+    const others = (await getConnectionsByOrg(auth.admin, auth.user.organizationId)).filter(
+      c => !isMetaCloudConnection(c) && c.instance_name !== conn.instance_name
+    );
     const normalize = (u: string) => u.replace(/\/+$/, '').replace(/\/manager$/, '');
-    const prevBase = normalize(previous.base_url || '');
-    if (!prevBase || prevBase === normalize(envEvolution().baseUrl)) {
-      await deleteEvolutionInstance(previous.instance_name);
+    for (const old of others) {
+      try {
+        await getProvider(old).logout();
+      } catch {
+        // best-effort: a sessão pode nem existir mais
+      }
+      // O delete usa a apikey/servidor GLOBAL: só roda quando a conexão antiga
+      // morava nesse servidor (vínculo manual pra outro servidor fica de fora,
+      // senão apagaria uma instância homônima de outro tenant de lá).
+      const prevBase = normalize(old.base_url || '');
+      if (!prevBase || prevBase === normalize(envEvolution().baseUrl)) {
+        await deleteEvolutionInstance(old.instance_name);
+      }
+      // a linha não é mais sobrescrita pelo upsert — marca desconectada pra
+      // não ficar "conectada" zumbi na lista
+      await updateConnectionStatus(auth.admin, old.id, { status: 'disconnected' });
     }
   }
 
@@ -331,12 +384,17 @@ export async function POST(req: Request) {
   return json({ connection: { ...mask(conn), status }, metaSetup });
 }
 
-export async function DELETE() {
+export async function DELETE(req: Request) {
   const auth = await requireOrgUser();
   if (!auth.ok) return auth.response;
   if (!isOrgAdmin(auth.user.role)) return json({ error: 'Forbidden' }, 403);
 
-  const conn = await getConnectionByOrg(auth.admin, auth.user.organizationId);
+  // Multi-número: ?id=<connectionId> desconecta UMA conexão específica;
+  // sem id, cai na conexão padrão (compat com a UI antiga de 1 número).
+  const targetId = (new URL(req.url).searchParams.get('id') || '').trim();
+  const conn = targetId
+    ? await getConnectionByIdForOrg(auth.admin, auth.user.organizationId, targetId)
+    : await getConnectionByOrg(auth.admin, auth.user.organizationId);
   if (!conn) return json({ error: 'Conexão não configurada' }, 404);
 
   if (isMetaCloudConnection(conn)) {

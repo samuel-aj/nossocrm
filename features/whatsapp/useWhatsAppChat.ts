@@ -30,11 +30,21 @@ export interface WaChatMessage {
   transcription: string | null;
 }
 
+/** Número conectado disponível pra ENVIAR (multi-número). */
+export interface WaSender {
+  id: string;
+  provider: string;
+  phoneNumber: string | null;
+  profileName: string | null;
+}
+
 export interface WaChatData {
   connected: boolean;
   hasConnection: boolean;
   /** Provedor da conexão ('evolution' | 'evolution_business' | 'meta_cloud') — decide fallback de áudio */
   provider: string | null;
+  /** Todos os números CONECTADOS da org (seletor de envio do chat) */
+  senders: WaSender[];
   conversation: { id: string; wa_phone: string; wa_name: string | null; contact_id: string | null } | null;
   messages: WaChatMessage[];
 }
@@ -46,6 +56,8 @@ export interface SendChatPayload {
   file?: File | Blob;
   fileName?: string;
   kind?: WaMediaKind;
+  /** Multi-número: qual conexão envia (omitido = a padrão da org) */
+  connectionId?: string;
 }
 
 export function useWhatsAppChat(phoneE164: string | null) {
@@ -132,7 +144,12 @@ export function useWhatsAppChat(phoneE164: string | null) {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ to: phoneE164, text: p.text || '', media }),
+        body: JSON.stringify({
+          to: phoneE164,
+          text: p.text || '',
+          media,
+          ...(p.connectionId ? { connectionId: p.connectionId } : {}),
+        }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error((json as { error?: string }).error || 'Falha ao enviar');
@@ -164,7 +181,7 @@ export function useWhatsAppChat(phoneE164: string | null) {
       qc.setQueryData<WaChatData>(queryKey, old =>
         old
           ? { ...old, messages: [...old.messages, temp] }
-          : { connected: true, hasConnection: true, provider: null, conversation: null, messages: [temp] }
+          : { connected: true, hasConnection: true, provider: null, senders: [], conversation: null, messages: [temp] }
       );
       return { previous };
     },

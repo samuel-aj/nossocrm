@@ -10,7 +10,12 @@
  * Geramos uma URL assinada curta e passamos pra Evolution baixar de lá.
  */
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
-import { getConnectionByOrg, ensureConversation, recordOutboundMessage } from '@/lib/whatsapp/service';
+import {
+  getConnectionByOrg,
+  getConnectionByIdForOrg,
+  ensureConversation,
+  recordOutboundMessage,
+} from '@/lib/whatsapp/service';
 import { getProvider, type OutboundMediaKind } from '@/lib/whatsapp';
 import { normalizePhoneE164 } from '@/lib/phone';
 
@@ -23,6 +28,8 @@ export async function POST(req: Request) {
   let body: {
     to?: string;
     text?: string;
+    /** Multi-número: qual conexão envia (omitido = a padrão da org) */
+    connectionId?: string;
     media?: { path?: string; kind?: string; mimeType?: string; fileName?: string };
   };
   try {
@@ -41,12 +48,24 @@ export async function POST(req: Request) {
     return json({ error: 'media.path e media.kind (image|video|document|audio|sticker) são obrigatórios' }, 400);
   }
 
-  const conn = await getConnectionByOrg(auth.admin, auth.user.organizationId);
+  // Multi-número: com connectionId envia pelo número ESCOLHIDO (validado
+  // contra a org); sem, cai na conexão padrão (compat).
+  const connectionId = (body.connectionId || '').trim();
+  const conn = connectionId
+    ? await getConnectionByIdForOrg(auth.admin, auth.user.organizationId, connectionId)
+    : await getConnectionByOrg(auth.admin, auth.user.organizationId);
+  if (connectionId && !conn) {
+    return json({ error: 'Número selecionado não encontrado. Atualize a página e tente de novo.' }, 404);
+  }
   // Sem conexão ATIVA não tenta enviar: senão a Evolution devolve um 404 cru
   // de instância inexistente, que confunde o usuário
   if (!conn || conn.status !== 'connected') {
     return json(
-      { error: 'WhatsApp não conectado. Conecte o número do escritório na aba Conexão antes de enviar.' },
+      {
+        error: connectionId
+          ? 'O número selecionado está desconectado. Escolha outro número ou reconecte na aba Conexão.'
+          : 'WhatsApp não conectado. Conecte o número do escritório na aba Conexão antes de enviar.',
+      },
       409
     );
   }

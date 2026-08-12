@@ -30,7 +30,7 @@ import {
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { fillTemplate } from '@/lib/messageTemplates';
-import { useWhatsAppChat, type WaChatMessage, type WaMediaKind } from './useWhatsAppChat';
+import { useWhatsAppChat, type WaChatMessage, type WaMediaKind, type WaSender } from './useWhatsAppChat';
 import { transcodeToMp3 } from './audioTranscode';
 
 const TIME_FMT = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -676,6 +676,13 @@ export function DealWhatsAppChat({
   // conversão MP3 em andamento entre o "Enviar áudio" e o send.mutate: trava
   // o Mic (que aparece no MESMO lugar do botão) contra duplo clique
   const [preparingVoice, setPreparingVoice] = useState(false);
+  // MULTI-NÚMERO: qual conexão ENVIA as mensagens deste usuário. Persistido
+  // no navegador; validado contra os números conectados a cada render.
+  const [senderId, setSenderId] = useState<string | null>(() =>
+    typeof window !== 'undefined' ? window.localStorage.getItem('wa-sender-connection') : null
+  );
+  const [senderMenuOpen, setSenderMenuOpen] = useState(false);
+  const senderMenuRef = useRef<HTMLDivElement>(null);
   // Pesquisa de mensagens (estilo WhatsApp): barra + navegação entre matches
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -701,6 +708,14 @@ export function DealWhatsAppChat({
   const forceScrollRef = useRef(false); // rola pro fim após envio próprio
 
   const messages = data?.messages ?? [];
+  // Números conectados + o remetente ATIVO (escolhido ou o padrão). O ref
+  // espelha pro onstop do gravador (roda fora do render) enviar pelo certo.
+  const senders = data?.senders ?? [];
+  const activeSender = senders.find(s => s.id === senderId) ?? senders[0] ?? null;
+  const senderRef = useRef<WaSender | null>(null);
+  useEffect(() => {
+    senderRef.current = activeSender;
+  }, [activeSender]);
   // Sem conexão ativa (nunca conectou OU desconectou): troca o composer pelo
   // aviso de conectar, em vez de deixar o envio falhar com erro técnico
   const notConnected = !!data && (!data.hasConnection || !data.connected);
@@ -740,8 +755,28 @@ export function DealWhatsAppChat({
     voiceNoteUrlRef.current = voiceNote?.url ?? null;
   }, [voiceNote]);
   useEffect(() => {
-    providerRef.current = data?.provider ?? null;
-  }, [data?.provider]);
+    // provider do número que VAI enviar (guarda do áudio cru por formato)
+    providerRef.current = activeSender?.provider ?? data?.provider ?? null;
+  }, [activeSender?.provider, data?.provider]);
+
+  // menu do número: fecha com clique/toque fora e Escape
+  useEffect(() => {
+    if (!senderMenuOpen) return;
+    const onDown = (e: Event) => {
+      if (senderMenuRef.current && !senderMenuRef.current.contains(e.target as Node)) {
+        setSenderMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSenderMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [senderMenuOpen]);
 
   // Trocou de contato/telefone SEM remontar (host sem key, ex.: modal do
   // lead): gravação e prévia pertencem à conversa ANTERIOR — descarta pra
@@ -913,7 +948,7 @@ export function DealWhatsAppChat({
         clearAttachment();
         forceScrollRef.current = true;
         send.mutate(
-          { text: t, file, kind, fileName },
+          { text: t, file, kind, fileName, connectionId: senderRef.current?.id },
           {
             onSettled: releaseGate,
             onError: () => {
@@ -935,10 +970,13 @@ export function DealWhatsAppChat({
       } else {
         setText('');
         forceScrollRef.current = true;
-        send.mutate(t, {
-          onSettled: releaseGate,
-          onError: () => setText(curr => curr || t),
-        });
+        send.mutate(
+          { text: t, connectionId: senderRef.current?.id },
+          {
+            onSettled: releaseGate,
+            onError: () => setText(curr => curr || t),
+          }
+        );
       }
     } catch {
       releaseGate();
@@ -993,7 +1031,7 @@ export function DealWhatsAppChat({
       const fileName = `voz_${Date.now()}.${ext}`;
       forceScrollRef.current = true;
       send.mutate(
-        { file: blob, kind: 'audio', fileName },
+        { file: blob, kind: 'audio', fileName, connectionId: senderRef.current?.id },
         {
           onError: () => {
             // não perde a gravação: vira anexo pro usuário reenviar
@@ -1157,6 +1195,63 @@ export function DealWhatsAppChat({
         <div className="ml-auto flex items-center gap-2">
           {data && !data.connected && (
             <span className="text-[11px] text-amber-600 dark:text-amber-400">WhatsApp desconectado</span>
+          )}
+          {/* MULTI-NÚMERO: escolhe por qual número conectado as mensagens saem.
+              Também aparece com 1 número quando o ESCOLHIDO caiu e o envio
+              passou pro reserva — troca de remetente nunca é silenciosa. */}
+          {(senders.length > 1 || (!!senderId && !!activeSender && senderId !== activeSender.id)) &&
+            activeSender && (
+            <div ref={senderMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setSenderMenuOpen(o => !o)}
+                aria-expanded={senderMenuOpen}
+                className="h-8 max-w-[180px] px-2.5 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-white/10 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
+                title="Número que envia as mensagens"
+              >
+                <MessageCircle size={13} className="shrink-0 text-emerald-500" />
+                <span className="truncate">
+                  {activeSender.phoneNumber || activeSender.profileName || 'Número'}
+                </span>
+                <ChevronDown size={13} className="shrink-0" />
+              </button>
+              {senderMenuOpen && (
+                <div className="absolute right-0 top-full mt-1 z-20 w-64 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card p-1.5 shadow-lg">
+                  <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Enviar pelo número
+                  </p>
+                  {senders.map(s => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => {
+                        setSenderId(s.id);
+                        try {
+                          window.localStorage.setItem('wa-sender-connection', s.id);
+                        } catch {
+                          // navegação anônima sem storage: só não persiste
+                        }
+                        setSenderMenuOpen(false);
+                      }}
+                      className="w-full flex items-center gap-2 text-left px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
+                    >
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">
+                          {s.profileName || s.phoneNumber || 'Número'}
+                        </span>
+                        <span className="block text-xs text-slate-500 dark:text-slate-400 truncate">
+                          {s.phoneNumber || ''}
+                          {s.provider === 'evolution' ? ' · QR' : ' · API oficial'}
+                        </span>
+                      </span>
+                      {activeSender.id === s.id && (
+                        <Check size={15} className="text-emerald-500 shrink-0" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
           <button
             type="button"

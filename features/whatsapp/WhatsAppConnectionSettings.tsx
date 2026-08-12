@@ -3,10 +3,10 @@
 /**
  * Página Conexão (grupo WhatsApp do menu lateral).
  *
- * Conecta o WhatsApp DESTA organização (1 número por org): o admin clica em
- * "Conectar", o servidor cria a instância da org na Evolution e a tela mostra
- * o QR ao vivo (auto-renovado) até o número ser pareado. Super admin vê sempre
- * a conexão da organização ATIVA — cada cliente tem a sua.
+ * Conecta o WhatsApp DESTA organização. MULTI-NÚMERO: a org pode ter VÁRIAS
+ * conexões da API oficial (cada número da Meta vira uma conexão; o chat deixa
+ * escolher por qual número enviar). QR (Baileys) segue 1 por org. Super admin
+ * vê sempre as conexões da organização ATIVA — cada cliente tem as suas.
  */
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -23,19 +23,25 @@ interface WaConnectionInfo {
   status: 'disconnected' | 'connecting' | 'connected' | string;
 }
 
+/** Só pra admin (modo API oficial): credenciais salvas, pra edição abrir preenchida.
+ *  A chave secreta em si nunca vem pro navegador: só se existe salva e o tamanho. */
+interface MetaCreds {
+  token: string | null;
+  phoneNumberId: string | null;
+  wabaId: string | null;
+  appId?: string | null;
+  appSecretSet?: boolean;
+  appSecretLength?: number;
+}
+
+type ConnWithCreds = WaConnectionInfo & { metaCredentials?: MetaCreds | null };
+
 interface ConnResponse {
   connected: boolean;
   connection: WaConnectionInfo | null;
-  /** Só pra admin (modo API oficial): credenciais salvas, pra edição abrir preenchida */
-  metaCredentials?: {
-    token: string | null;
-    phoneNumberId: string | null;
-    wabaId: string | null;
-    appId?: string | null;
-    /** A chave em si nunca vem pro navegador: só se existe salva e o tamanho */
-    appSecretSet?: boolean;
-    appSecretLength?: number;
-  } | null;
+  metaCredentials?: MetaCreds | null;
+  /** MULTI-NÚMERO: todas as conexões da org (a de cima é a "padrão") */
+  connections?: ConnWithCreds[];
 }
 
 interface QrResponse {
@@ -59,7 +65,8 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 export function WhatsAppConnectionSettings() {
   const qc = useQueryClient();
   const { addToast } = useToast();
-  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  // MULTI-NÚMERO: a confirmação de desconectar é POR conexão (guarda o id)
+  const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
 
   const connQ = useQuery<ConnResponse>({
     queryKey: ['waConnection'],
@@ -72,16 +79,25 @@ export function WhatsAppConnectionSettings() {
 
   const conn = connQ.data?.connection ?? null;
   const connected = !!connQ.data?.connected;
+  // MULTI-NÚMERO: todas as conexões da org (fallback pro shape antigo)
+  const conns: ConnWithCreds[] =
+    connQ.data?.connections ??
+    (conn ? [{ ...conn, metaCredentials: connQ.data?.metaCredentials ?? null }] : []);
   // Modo API oficial da Meta (Cloud API): sem QR/pareamento
   // "API oficial" cobre os dois backends: via Evolution (evolution_business) e
   // DIRETO na Meta (meta_cloud). A UI trata os dois igual (sem QR, credenciais).
-  const isBusiness = ['evolution_business', 'meta_cloud'].includes((conn?.provider || '').toLowerCase());
+  const isBusinessProvider = (p?: string | null) =>
+    ['evolution_business', 'meta_cloud'].includes((p || '').toLowerCase());
+  const isBusiness = isBusinessProvider(conn?.provider);
+  // MULTI-NÚMERO: o fluxo do QR mira a linha EVOLUTION da org — a conexão
+  // "padrão" pode ser uma meta_cloud (que nunca gera QR) e travaria a tela.
+  const qrConn = conns.find(c => !isBusinessProvider(c.provider)) ?? null;
 
   // O QR só abre depois que o usuário ESCOLHE esse modo no seletor — mesmo
   // que já exista uma conexão QR desconectada de antes (senão o seletor
   // nunca apareceria pra quem já conectou alguma vez).
   const [qrFlowActive, setQrFlowActive] = useState(false);
-  const waitingScan = !!conn && !connected && !isBusiness && qrFlowActive;
+  const waitingScan = !!qrConn && !connected && qrConn.status !== 'connected' && qrFlowActive;
   // Desconectado (com ou sem conexão anterior) = seletor de modo na tela
   const showChooser = !connQ.isLoading && !connected && !waitingScan;
 
@@ -98,19 +114,36 @@ export function WhatsAppConnectionSettings() {
   // a chave real vir pro navegador. Sentinela intacto = manter a salva.
   const isSecretSentinel = (v: string) => /^•+$/.test(v.trim());
 
-  // Abre o form da API oficial PREENCHIDO com o que está salvo (admin quer
-  // ver/conferir o token, Phone Number ID e WABA ID atuais). Fechar só fecha.
+  // Qual conexão o form da API oficial está EDITANDO (null = número NOVO).
+  const [editingConnId, setEditingConnId] = useState<string | null>(null);
+
+  // Abre o form PREENCHIDO com as credenciais da conexão alvo (admin quer
+  // ver/conferir o que está salvo) ou VAZIO pra conectar outro número.
+  const openBizFormFor = (target: ConnWithCreds | null) => {
+    const creds = target?.metaCredentials ?? null;
+    setBizToken(creds?.token ?? '');
+    setBizNumberId(creds?.phoneNumberId ?? '');
+    setBizWabaId(creds?.wabaId ?? '');
+    setBizAppId(creds?.appId ?? '');
+    setBizAppSecret(creds?.appSecretSet ? '•'.repeat(creds.appSecretLength || 16) : '');
+    setEditingConnId(target?.id ?? null);
+    setBizOpen(true);
+  };
+  const closeBizForm = () => {
+    setBizOpen(false);
+    setEditingConnId(null);
+  };
+  // Botão do seletor de modo (org sem conexão ativa): abre prefilled com a
+  // conexão padrão (reconexão de business desconectada) ou vazio.
   const metaCreds = connQ.data?.metaCredentials ?? null;
   const toggleBizForm = () => {
-    const opening = !bizOpen;
-    if (opening && metaCreds) {
-      setBizToken(metaCreds.token ?? '');
-      setBizNumberId(metaCreds.phoneNumberId ?? '');
-      setBizWabaId(metaCreds.wabaId ?? '');
-      setBizAppId(metaCreds.appId ?? '');
-      setBizAppSecret(metaCreds.appSecretSet ? '•'.repeat(metaCreds.appSecretLength || 16) : '');
+    if (bizOpen) {
+      closeBizForm();
+      return;
     }
-    setBizOpen(opening);
+    const defaultRow = conns.find(c => c.id === conn?.id) ?? null;
+    openBizFormFor(defaultRow?.metaCredentials ? defaultRow : metaCreds ? { ...(conn as WaConnectionInfo), metaCredentials: metaCreds } : null);
+    setEditingConnId(null);
   };
 
   const qrQ = useQuery<QrResponse>({
@@ -142,6 +175,7 @@ export function WhatsAppConnectionSettings() {
       const mode = (payload as { mode?: string }).mode;
       if (mode === 'business' || mode === 'meta_cloud') {
         setBizOpen(false);
+        setEditingConnId(null);
         setBizToken('');
         setBizNumberId('');
         setBizWabaId('');
@@ -170,10 +204,10 @@ export function WhatsAppConnectionSettings() {
     onError: e => addToast((e as Error).message, 'error'),
   });
 
-  // Entra no fluxo do QR: reaproveita a instância existente da org (a rota do
-  // QR tem self-healing) ou cria uma nova quando não há / quando era business.
+  // Entra no fluxo do QR: reaproveita a instância evolution existente da org
+  // (a rota do QR tem self-healing) ou cria uma nova quando ainda não há.
   const startQrFlow = () => {
-    if (conn && !isBusiness) {
+    if (qrConn) {
       setQrFlowActive(true);
       qc.invalidateQueries({ queryKey: ['waConnectionQr'] });
       return;
@@ -182,29 +216,36 @@ export function WhatsAppConnectionSettings() {
   };
 
   const disconnectMut = useMutation({
-    mutationFn: () => fetchJson<{ ok: boolean }>('/api/whatsapp/connection', { method: 'DELETE' }),
+    // MULTI-NÚMERO: desconecta UMA conexão específica pelo id
+    mutationFn: (id: string) =>
+      fetchJson<{ ok: boolean }>(`/api/whatsapp/connection?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
     onSuccess: () => {
-      setConfirmDisconnect(false);
+      setConfirmDisconnect(null);
       qc.invalidateQueries({ queryKey: ['waConnection'] });
       qc.invalidateQueries({ queryKey: ['waConnectionQr'] });
       addToast('Número desconectado.', 'success');
     },
     onError: e => {
-      setConfirmDisconnect(false);
+      setConfirmDisconnect(null);
       addToast((e as Error).message, 'error');
     },
   });
 
-  // Conectado via API oficial: o mesmo form vira "edição" (o POST recria a
-  // instância com as credenciais novas por baixo, sem derrubar as conversas)
-  const isEditingBiz = connected && isBusiness;
+  // Form aberto EDITANDO uma conexão existente (senão é conexão de número novo)
+  const isEditingBiz = bizOpen && editingConnId !== null;
 
   // Form de credenciais da Meta, compartilhado entre o seletor de modo
   // (primeira conexão) e o painel de conectado (edição)
   const bizCredentialsForm = (
     <div className="rounded-2xl border border-sky-200 dark:border-sky-500/25 bg-sky-50/50 dark:bg-sky-900/10 p-5 space-y-3">
       <p className="text-sm font-bold text-slate-900 dark:text-white">
-        {isEditingBiz ? 'Editar conexão da API oficial' : 'Credenciais da Meta (Cloud API)'}
+        {isEditingBiz
+          ? 'Editar conexão da API oficial'
+          : connected
+            ? 'Conectar outro número (API oficial)'
+            : 'Credenciais da Meta (Cloud API)'}
       </p>
       {isEditingBiz && (
         <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -324,6 +365,9 @@ export function WhatsAppConnectionSettings() {
             // Modo DIRETO na Meta (sem Evolution). Envio/recebimento falam
             // direto com a Cloud API; o setup do webhook é AUTOMÁTICO.
             mode: 'meta_cloud',
+            // edição aponta a linha exata (trocar o Phone Number ID atualiza
+            // a MESMA conexão em vez de criar uma segunda)
+            editingConnectionId: editingConnId || undefined,
             metaToken: bizToken.trim(),
             metaNumberId: bizNumberId.trim(),
             metaBusinessId: bizWabaId.trim() || undefined,
@@ -491,64 +535,112 @@ export function WhatsAppConnectionSettings() {
         </div>
       )}
 
-      {/* Conectado: dados do número + editar (API oficial) + desconectar */}
-      {connected && conn && (
+      {/* Conectado: UMA linha por conexão (multi-número) + conectar outro */}
+      {connected && conns.length > 0 && (
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-            <div className="flex-1 rounded-xl border border-emerald-200 dark:border-emerald-500/25 bg-emerald-50 dark:bg-emerald-900/15 p-4">
-              <p className="text-sm font-bold text-emerald-800 dark:text-emerald-300">
-                {conn.profileName || (isBusiness ? 'WhatsApp API oficial (Meta)' : 'WhatsApp conectado')}
-              </p>
-              <p className="text-sm text-emerald-700 dark:text-emerald-200">
-                {isBusiness
-                  ? 'Conectado via Cloud API da Meta, sem QR. Envio e recebimento ativos.'
-                  : conn.phoneNumber || 'Número conectado e pronto pra uso nos cards dos leads.'}
-              </p>
-            </div>
-            {confirmDisconnect ? (
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => disconnectMut.mutate()}
-                  disabled={disconnectMut.isPending}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-colors disabled:opacity-60"
-                >
-                  {disconnectMut.isPending ? <Loader2 size={14} className="animate-spin" /> : <Unplug size={14} />}
-                  Confirmar desconexão
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirmDisconnect(false)}
-                  className="text-xs font-bold text-slate-500 hover:underline"
-                >
-                  Cancelar
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                {isBusiness && (
-                  <button
-                    type="button"
-                    onClick={toggleBizForm}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-sky-200 dark:border-sky-500/30 text-sky-700 dark:text-sky-300 text-xs font-bold hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-colors"
+          <div className="space-y-3">
+            {conns.map(c => {
+              const rowBiz = isBusinessProvider(c.provider);
+              // Só meta_cloud é editável pelo form (o legado evolution_business
+              // guarda o apikey da Evolution como token — prefill seria errado
+              // e salvar converteria o modo por baixo dos panos)
+              const rowEditable = (c.provider || '').toLowerCase() === 'meta_cloud';
+              const rowOn = c.status === 'connected';
+              return (
+                <div key={c.id} className="flex flex-col sm:flex-row sm:items-center gap-4">
+                  <div
+                    className={`flex-1 rounded-xl border p-4 ${
+                      rowOn
+                        ? 'border-emerald-200 dark:border-emerald-500/25 bg-emerald-50 dark:bg-emerald-900/15'
+                        : 'border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5'
+                    }`}
                   >
-                    <KeyRound size={14} /> {bizOpen ? 'Fechar edição' : 'Editar conexão'}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setConfirmDisconnect(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-200 dark:border-red-500/30 text-red-600 dark:text-red-400 text-xs font-bold hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
-                >
-                  <Unplug size={14} /> Desconectar número
-                </button>
-              </div>
-            )}
+                    <p
+                      className={`text-sm font-bold ${
+                        rowOn
+                          ? 'text-emerald-800 dark:text-emerald-300'
+                          : 'text-slate-700 dark:text-slate-300'
+                      }`}
+                    >
+                      {c.profileName || (rowBiz ? 'WhatsApp API oficial (Meta)' : 'WhatsApp (QR)')}
+                      {!rowOn && ' · desconectado'}
+                    </p>
+                    <p
+                      className={`text-sm ${
+                        rowOn
+                          ? 'text-emerald-700 dark:text-emerald-200'
+                          : 'text-slate-500 dark:text-slate-400'
+                      }`}
+                    >
+                      {c.phoneNumber ? `${c.phoneNumber} · ` : ''}
+                      {rowBiz ? 'API oficial da Meta, sem QR' : 'Conectado via QR Code'}
+                    </p>
+                  </div>
+                  {confirmDisconnect === c.id ? (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => disconnectMut.mutate(c.id)}
+                        disabled={disconnectMut.isPending}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-colors disabled:opacity-60"
+                      >
+                        {disconnectMut.isPending ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <Unplug size={14} />
+                        )}
+                        Confirmar desconexão
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDisconnect(null)}
+                        className="text-xs font-bold text-slate-500 hover:underline"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      {rowEditable && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            bizOpen && editingConnId === c.id ? closeBizForm() : openBizFormFor(c)
+                          }
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-sky-200 dark:border-sky-500/30 text-sky-700 dark:text-sky-300 text-xs font-bold hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-colors"
+                        >
+                          <KeyRound size={14} />
+                          {bizOpen && editingConnId === c.id ? 'Fechar edição' : 'Editar conexão'}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDisconnect(c.id)}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-200 dark:border-red-500/30 text-red-600 dark:text-red-400 text-xs font-bold hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                      >
+                        <Unplug size={14} /> Desconectar
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
-          {/* Edição das credenciais com a conexão ATIVA: o mesmo form; salvar
-              recria a instância por baixo sem derrubar as conversas */}
-          {isBusiness && bizOpen && bizCredentialsForm}
+          {/* MULTI-NÚMERO: conectar mais um número da API oficial */}
+          {!bizOpen && (
+            <button
+              type="button"
+              onClick={() => openBizFormFor(null)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors"
+            >
+              <KeyRound size={15} /> Conectar outro número (API oficial)
+            </button>
+          )}
+
+          {/* Edição/novo número: o mesmo form; salvar cria ou atualiza a
+              conexão daquele número sem derrubar as demais */}
+          {bizOpen && bizCredentialsForm}
         </div>
       )}
     </div>
