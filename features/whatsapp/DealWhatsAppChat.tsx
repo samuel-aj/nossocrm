@@ -27,6 +27,7 @@ import {
 import { normalizePhoneE164 } from '@/lib/phone';
 import { fillTemplate } from '@/lib/messageTemplates';
 import { useWhatsAppChat, type WaChatMessage, type WaMediaKind } from './useWhatsAppChat';
+import { isMetaFriendlyAudio, transcodeToMp3 } from './audioTranscode';
 
 const TIME_FMT = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
@@ -671,13 +672,13 @@ export function DealWhatsAppChat({
         stream.getTracks().forEach(tr => tr.stop());
         return;
       }
-      // Ordem importa: a Cloud API da Meta SÓ aceita ogg/opus, mp4/aac, mpeg
-      // e amr — webm é RECUSADO (erro 131053). Na Evolution qualquer formato
-      // servia (ela transcodificava); no modo direto o formato é o final.
-      // ogg/opus primeiro (Firefox; vira mensagem de VOZ no WhatsApp), depois
-      // mp4/aac (Chrome/Edge/Safari); webm fica de último recurso.
-      const mime = ['audio/ogg;codecs=opus', 'audio/mp4', 'audio/webm;codecs=opus'].find(t =>
-        MediaRecorder.isTypeSupported(t)
+      // Ordem importa: a Cloud API da Meta SÓ aceita ogg/opus, mp4/AAC, mpeg
+      // e amr. Firefox grava ogg/opus (aceito, vira mensagem de VOZ); Safari
+      // grava mp4/AAC (aceito). O Chrome/Edge grava opus em webm OU em mp4 —
+      // os DOIS são recusados no processamento da Meta (131053) — então a
+      // gravação dele é CONVERTIDA pra MP3 no navegador antes do envio.
+      const mime = ['audio/ogg;codecs=opus', 'audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/webm;codecs=opus'].find(
+        t => MediaRecorder.isTypeSupported(t)
       ) ?? '';
       const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
       chunksRef.current = [];
@@ -685,15 +686,24 @@ export function DealWhatsAppChat({
       rec.ondataavailable = e => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
-      rec.onstop = () => {
+      rec.onstop = async () => {
         stream.getTracks().forEach(tr => tr.stop());
-        const blob = new Blob(chunksRef.current, { type: rec.mimeType || 'audio/webm' });
+        let blob = new Blob(chunksRef.current, { type: rec.mimeType || 'audio/webm' });
         if (!cancelRecRef.current && blob.size > 0) {
-          const ext = (rec.mimeType || '').includes('mp4')
+          let ext = (rec.mimeType || '').includes('mp4')
             ? 'm4a'
             : (rec.mimeType || '').includes('ogg')
               ? 'ogg'
               : 'webm';
+          if (!isMetaFriendlyAudio(blob.type)) {
+            try {
+              blob = await transcodeToMp3(blob);
+              ext = 'mp3';
+            } catch {
+              // conversão falhou: envia como gravado (a bolha mostra o motivo
+              // se a Meta recusar; na Evolution segue funcionando)
+            }
+          }
           const fileName = `voz_${Date.now()}.${ext}`;
           forceScrollRef.current = true;
           send.mutate(
