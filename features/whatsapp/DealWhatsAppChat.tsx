@@ -27,7 +27,7 @@ import {
 import { normalizePhoneE164 } from '@/lib/phone';
 import { fillTemplate } from '@/lib/messageTemplates';
 import { useWhatsAppChat, type WaChatMessage, type WaMediaKind } from './useWhatsAppChat';
-import { isMetaFriendlyAudio, transcodeToMp3 } from './audioTranscode';
+import { transcodeToMp3 } from './audioTranscode';
 
 const TIME_FMT = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
@@ -695,7 +695,12 @@ export function DealWhatsAppChat({
             : (rec.mimeType || '').includes('ogg')
               ? 'ogg'
               : 'webm';
-          if (!isMetaFriendlyAudio(blob.type)) {
+          // Só o ogg/opus (Firefox) vai como gravado — todo o resto vira MP3.
+          // Motivo: o navegador DECLARA um formato e entrega outro por dentro
+          // (Chrome gravou "mp4 AAC" com opus dentro; a Meta processa e recusa
+          // como octet-stream). MP3 gerado por nós é garantido em qualquer
+          // provedor. isMetaFriendlyAudio fica pra anexos de arquivo.
+          if (!(rec.mimeType || '').toLowerCase().includes('ogg')) {
             try {
               blob = await transcodeToMp3(blob);
               ext = 'mp3';

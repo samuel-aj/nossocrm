@@ -31,6 +31,11 @@ interface MetaSendResponse {
   error?: { message?: string; code?: number; error_data?: { details?: string } };
 }
 
+interface MetaMediaUploadResponse {
+  id?: string;
+  error?: { message?: string; error_data?: { details?: string } };
+}
+
 export class MetaCloudProvider implements WhatsAppProvider {
   readonly instanceName: string;
   private readonly token: string;
@@ -93,37 +98,88 @@ export class MetaCloudProvider implements WhatsAppProvider {
     });
   }
 
+  /**
+   * Sobe a mídia pra Meta (POST /{phone_number_id}/media) e devolve o media id.
+   * MUITO mais confiável que mandar link: a Meta valida o ARQUIVO na hora e
+   * devolve o motivo exato se recusar (formato, tamanho...), em vez de baixar
+   * o link depois, "adivinhar" o tipo e falhar em silêncio no recibo.
+   */
+  private async uploadMedia(input: SendMediaInput): Promise<{ id?: string; error?: string }> {
+    let dl: Response;
+    try {
+      dl = await fetch(input.media, { cache: 'no-store' });
+    } catch (e) {
+      return { error: `Falha ao ler a mídia do storage: ${(e as Error).message}` };
+    }
+    if (!dl.ok) return { error: `Falha ao ler a mídia do storage (HTTP ${dl.status})` };
+    const bytes = await dl.arrayBuffer();
+
+    // Content-type LIMPO (sem ";codecs=..." — a Meta rejeita parâmetros).
+    const contentType = (input.mimeType || dl.headers.get('content-type') || 'application/octet-stream')
+      .split(';')[0]
+      .trim();
+
+    const form = new FormData();
+    form.append('messaging_product', 'whatsapp');
+    form.append('type', contentType);
+    form.append('file', new Blob([bytes], { type: contentType }), input.fileName || 'arquivo');
+
+    let res: Response;
+    try {
+      res = await fetch(
+        `https://graph.facebook.com/${this.graphVersion}/${encodeURIComponent(this.phoneNumberId)}/media`,
+        { method: 'POST', headers: { Authorization: `Bearer ${this.token}` }, body: form, cache: 'no-store' }
+      );
+    } catch (e) {
+      return { error: `Falha de rede ao subir a mídia pra Meta: ${(e as Error).message}` };
+    }
+    let data: MetaMediaUploadResponse | null = null;
+    try {
+      data = (await res.json()) as MetaMediaUploadResponse;
+    } catch {
+      data = null;
+    }
+    if (!res.ok || !data?.id) {
+      const err = data?.error;
+      return { error: err?.error_data?.details || err?.message || `Meta recusou a mídia (HTTP ${res.status})` };
+    }
+    return { id: data.id };
+  }
+
   async sendMedia(input: SendMediaInput): Promise<SendResult> {
     const to = toWhatsAppPhone(input.to);
     if (!to) return { ok: false, error: 'Telefone inválido' };
-    // A Cloud API baixa a mídia da URL informada (a URL assinada do bucket
-    // wa-media é acessível por link enquanto vale). Só imagem/vídeo/documento
-    // aceitam legenda; áudio e figurinha não.
-    const link = input.media;
+
+    // Upload primeiro (validação imediata) e envio por media ID — sem depender
+    // da Meta baixar link. Só imagem/vídeo/documento aceitam legenda.
+    const up = await this.uploadMedia(input);
+    if (!up.id) return { ok: false, error: up.error || 'Falha ao subir a mídia pra Meta' };
+    const id = up.id;
+
     let media: Record<string, unknown>;
     switch (input.kind) {
       case 'audio':
-        media = { type: 'audio', audio: { link } };
+        media = { type: 'audio', audio: { id } };
         break;
       case 'sticker':
-        media = { type: 'sticker', sticker: { link } };
+        media = { type: 'sticker', sticker: { id } };
         break;
       case 'document':
         media = {
           type: 'document',
           document: {
-            link,
+            id,
             ...(input.caption ? { caption: input.caption } : {}),
             ...(input.fileName ? { filename: input.fileName } : {}),
           },
         };
         break;
       case 'video':
-        media = { type: 'video', video: { link, ...(input.caption ? { caption: input.caption } : {}) } };
+        media = { type: 'video', video: { id, ...(input.caption ? { caption: input.caption } : {}) } };
         break;
       case 'image':
       default:
-        media = { type: 'image', image: { link, ...(input.caption ? { caption: input.caption } : {}) } };
+        media = { type: 'image', image: { id, ...(input.caption ? { caption: input.caption } : {}) } };
         break;
     }
     return this.send({ recipient_type: 'individual', to, ...media });
