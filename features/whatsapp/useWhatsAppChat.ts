@@ -31,6 +31,8 @@ export interface WaChatMessage {
 export interface WaChatData {
   connected: boolean;
   hasConnection: boolean;
+  /** Provedor da conexão ('evolution' | 'evolution_business' | 'meta_cloud') — decide fallback de áudio */
+  provider: string | null;
   conversation: { id: string; wa_phone: string; wa_name: string | null; contact_id: string | null } | null;
   messages: WaChatMessage[];
 }
@@ -159,7 +161,7 @@ export function useWhatsAppChat(phoneE164: string | null) {
       qc.setQueryData<WaChatData>(queryKey, old =>
         old
           ? { ...old, messages: [...old.messages, temp] }
-          : { connected: true, hasConnection: true, conversation: null, messages: [temp] }
+          : { connected: true, hasConnection: true, provider: null, conversation: null, messages: [temp] }
       );
       return { previous };
     },

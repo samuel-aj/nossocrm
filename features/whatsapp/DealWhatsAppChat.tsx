@@ -705,8 +705,27 @@ export function DealWhatsAppChat({
               blob = await transcodeToMp3(blob);
               ext = 'mp3';
             } catch {
-              // conversão falhou: envia como gravado (a bolha mostra o motivo
-              // se a Meta recusar; na Evolution segue funcionando)
+              // Conversão falhou (decodificação/wasm indisponível neste
+              // navegador). Na API oficial da Meta o formato gravado seria
+              // RECUSADO na certa — então NÃO envia: guarda a gravação como
+              // anexo e avisa. Na Evolution segue como gravado (funciona).
+              if (data?.provider === 'meta_cloud') {
+                const fileName = `voz_${Date.now()}.${ext}`;
+                setAttachment(curr =>
+                  curr
+                    ? curr
+                    : {
+                        file: new File([blob], fileName, { type: blob.type }),
+                        kind: 'audio',
+                        previewUrl: null,
+                        asSticker: false,
+                      }
+                );
+                setMicError(
+                  'Não deu pra preparar o áudio neste navegador. Atualize a página (Ctrl+Shift+R) e tente de novo.'
+                );
+                return;
+              }
             }
           }
           const fileName = `voz_${Date.now()}.${ext}`;

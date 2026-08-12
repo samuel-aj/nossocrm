@@ -119,6 +119,16 @@ export class MetaCloudProvider implements WhatsAppProvider {
       .split(';')[0]
       .trim();
 
+    // Áudio webm = gravação crua do Chrome, que a Meta recusa na certa. Só
+    // chega aqui se o navegador estiver numa versão ANTIGA do CRM (sem o
+    // conversor de MP3) — corta antes de subir, com instrução clara.
+    if (input.kind === 'audio' && /webm/i.test(contentType)) {
+      return {
+        error:
+          'o áudio saiu no formato webm, que o WhatsApp recusa. A página do CRM está numa versão antiga: atualize com Ctrl+Shift+R e grave de novo.',
+      };
+    }
+
     const form = new FormData();
     form.append('messaging_product', 'whatsapp');
     form.append('type', contentType);

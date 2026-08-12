@@ -23,6 +23,7 @@ export async function GET(req: Request) {
     return json({
       connected: false,
       hasConnection: !!conn,
+      provider: conn?.provider ?? null,
       conversation: null,
       messages: [],
     });
@@ -81,6 +82,7 @@ export async function GET(req: Request) {
   return json({
     connected: conn?.status === 'connected',
     hasConnection: !!conn,
+    provider: conn?.provider ?? null,
     conversation: conv ?? null,
     messages,
   });
