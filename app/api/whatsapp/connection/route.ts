@@ -83,6 +83,8 @@ export async function GET() {
           token: conn.instance_token,
           phoneNumberId: conn.meta_phone_number_id,
           wabaId: conn.meta_waba_id,
+          appId: conn.meta_app_id,
+          appSecret: conn.meta_app_secret,
         }
       : null;
 
@@ -134,6 +136,8 @@ export async function POST(req: Request) {
   // Só preenchidos no modo meta_cloud (undefined = não mexer nas colunas Meta).
   let metaPhoneNumberId: string | null | undefined;
   let metaWabaId: string | null | undefined;
+  let metaAppId: string | null | undefined;
+  let metaAppSecret: string | null | undefined;
   // Conexão anterior da org (capturada ANTES do upsert): numa troca de modo
   // o nome da instância muda e a antiga precisa ser derrubada na Evolution,
   // senão ela segue viva emitindo webhooks que o CRM passa a descartar.
@@ -180,6 +184,10 @@ export async function POST(req: Request) {
     provider = 'meta_cloud';
     metaPhoneNumberId = check.phoneNumberId;
     metaWabaId = check.wabaId || null;
+    // App ID/Chave Secreta ficam SALVOS (edição abre preenchida; reconectar
+    // reusa). Campo vazio no form = undefined = mantém o que já está salvo.
+    metaAppId = body.metaAppId?.trim() || undefined;
+    metaAppSecret = body.metaAppSecret?.trim() || undefined;
     metaSetup = {
       displayPhoneNumber: check.displayPhoneNumber,
       verifiedName: check.verifiedName,
@@ -237,6 +245,8 @@ export async function POST(req: Request) {
       provider,
       phoneNumberId: metaPhoneNumberId,
       wabaId: metaWabaId,
+      appId: metaAppId,
+      appSecret: metaAppSecret,
     });
   } catch (e) {
     return json({ error: `Falha ao salvar conexão: ${(e as Error).message}` }, 400);
@@ -253,8 +263,10 @@ export async function POST(req: Request) {
     const hooks = await setupMetaWebhooks({
       token: (body.metaToken || '').trim(),
       wabaId: conn.meta_waba_id || '',
-      appId: body.metaAppId?.trim() || null,
-      appSecret: body.metaAppSecret?.trim() || null,
+      // conn pós-upsert: valores recém-enviados OU os já salvos (reconexão
+      // sem redigitar App ID/Chave Secreta continua com webhook automático)
+      appId: conn.meta_app_id || null,
+      appSecret: conn.meta_app_secret || null,
       callbackUrl,
       verifyToken: conn.webhook_secret,
     });
@@ -336,6 +348,8 @@ export async function DELETE() {
         instance_token: null,
         meta_phone_number_id: null,
         meta_waba_id: null,
+        meta_app_id: null,
+        meta_app_secret: null,
       })
       .eq('id', conn.id);
     return json({ ok: true });

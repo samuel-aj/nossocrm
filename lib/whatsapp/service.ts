@@ -20,6 +20,9 @@ export interface WaConnectionRow {
   /** Só meta_cloud: phone_number_id e WABA id da Meta. */
   meta_phone_number_id: string | null;
   meta_waba_id: string | null;
+  /** Só meta_cloud: App ID + Chave Secreta do app (edição preenchida/reuso). */
+  meta_app_id: string | null;
+  meta_app_secret: string | null;
 }
 
 export interface WaConversationRow {
@@ -78,6 +81,9 @@ export async function upsertConnection(
     /** Só meta_cloud: phone_number_id e WABA id da Meta. */
     phoneNumberId?: string | null;
     wabaId?: string | null;
+    /** Só meta_cloud: App ID + Chave Secreta (undefined = não mexer no salvo). */
+    appId?: string | null;
+    appSecret?: string | null;
   }
 ): Promise<WaConnectionRow> {
   const { data, error } = await admin
@@ -95,6 +101,8 @@ export async function upsertConnection(
         // zerar o phone_number_id de uma conexão meta_cloud num upsert de QR).
         ...(input.phoneNumberId !== undefined ? { meta_phone_number_id: input.phoneNumberId } : {}),
         ...(input.wabaId !== undefined ? { meta_waba_id: input.wabaId } : {}),
+        ...(input.appId !== undefined ? { meta_app_id: input.appId } : {}),
+        ...(input.appSecret !== undefined ? { meta_app_secret: input.appSecret } : {}),
       },
       { onConflict: 'organization_id' }
     )

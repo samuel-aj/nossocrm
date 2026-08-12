@@ -10,7 +10,7 @@
  */
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Copy, ExternalLink, KeyRound, Loader2, MessageCircle, QrCode, Unplug } from 'lucide-react';
+import { CheckCircle2, ExternalLink, KeyRound, Loader2, MessageCircle, QrCode, Unplug } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 
 interface WaConnectionInfo {
@@ -26,10 +26,14 @@ interface WaConnectionInfo {
 interface ConnResponse {
   connected: boolean;
   connection: WaConnectionInfo | null;
-  /** Só pra admin: URL e verify token do webhook da Meta (modo API oficial) */
-  metaWebhook?: { url: string; verifyToken: string } | null;
   /** Só pra admin (modo API oficial): credenciais salvas, pra edição abrir preenchida */
-  metaCredentials?: { token: string | null; phoneNumberId: string | null; wabaId: string | null } | null;
+  metaCredentials?: {
+    token: string | null;
+    phoneNumberId: string | null;
+    wabaId: string | null;
+    appId?: string | null;
+    appSecret?: string | null;
+  } | null;
 }
 
 interface QrResponse {
@@ -66,16 +70,6 @@ export function WhatsAppConnectionSettings() {
 
   const conn = connQ.data?.connection ?? null;
   const connected = !!connQ.data?.connected;
-  const metaWebhook = connQ.data?.metaWebhook ?? null;
-
-  const copyValue = async (value: string, label: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      addToast(`${label} copiado!`, 'success');
-    } catch {
-      addToast('Não consegui copiar. Selecione e copie manualmente.', 'error');
-    }
-  };
   // Modo API oficial da Meta (Cloud API): sem QR/pareamento
   // "API oficial" cobre os dois backends: via Evolution (evolution_business) e
   // DIRETO na Meta (meta_cloud). A UI trata os dois igual (sem QR, credenciais).
@@ -108,6 +102,8 @@ export function WhatsAppConnectionSettings() {
       setBizToken(metaCreds.token ?? '');
       setBizNumberId(metaCreds.phoneNumberId ?? '');
       setBizWabaId(metaCreds.wabaId ?? '');
+      setBizAppId(metaCreds.appId ?? '');
+      setBizAppSecret(metaCreds.appSecret ?? '');
     }
     setBizOpen(opening);
   };
@@ -155,11 +151,11 @@ export function WhatsAppConnectionSettings() {
           );
         } else if (setup) {
           addToast(
-            `Conectado (${setup.displayPhoneNumber || 'número validado'}), mas o recebimento automático não concluiu: ${setup.overrideError || setup.appWebhookError || 'informe App ID + Chave Secreta do App e conecte de novo, ou configure o webhook no painel (valores na tela).'}`,
+            `Conectado (${setup.displayPhoneNumber || 'número validado'}), mas o recebimento automático não concluiu: ${setup.overrideError || setup.appWebhookError || 'informe App ID + Chave Secreta do App e conecte de novo.'}`,
             'error'
           );
         } else {
-          addToast('WhatsApp API oficial conectado! Configure o webhook e pronto.', 'success');
+          addToast('WhatsApp API oficial conectado!', 'success');
         }
       } else {
         setQrFlowActive(true);
@@ -304,73 +300,10 @@ export function WhatsAppConnectionSettings() {
           />
           <p className="text-[10px] text-slate-400 mt-1">
             Com App ID + Chave Secreta, o CRM configura o webhook e liga o recebimento sozinho
-            (nada manual no painel). A chave é usada só na conexão, não fica salva.
+            (nada manual no painel da Meta). Ficam salvos na conexão e aparecem na edição.
           </p>
         </div>
       </div>
-      {/* Passo 3: webhook do recebimento, com os valores prontos pra
-          colar no painel da Meta (sem isso o envio funciona mas as
-          respostas dos clientes não chegam no CRM). Os valores são POR
-          CONEXÃO (o secret nasce ao conectar) — antes disso, orienta. */}
-      {!metaWebhook && (
-        <div className="rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-3.5 text-[11px] text-slate-600 dark:text-slate-300">
-          <p className="font-bold text-slate-700 dark:text-slate-200 mb-1">3. Webhook (pra receber as respostas):</p>
-          <p>
-            Preenchendo <span className="font-semibold">App ID + Chave Secreta</span> acima, o CRM
-            configura o webhook <span className="font-semibold">sozinho</span> ao conectar — nada
-            manual. Sem a chave, a URL de callback e o token de verificação aparecem aqui depois
-            de conectar, pra colar no painel do app (WhatsApp, Configuração, Webhook, campo{' '}
-            <span className="font-semibold">messages</span>).
-          </p>
-        </div>
-      )}
-      {metaWebhook && (
-        <div className="rounded-xl border border-sky-200/70 dark:border-sky-500/20 bg-white dark:bg-black/20 p-3.5 text-[11px] text-slate-600 dark:text-slate-300 space-y-2.5">
-          <p className="font-bold text-slate-700 dark:text-slate-200">
-            3. Webhook (pra receber as respostas dos clientes):
-          </p>
-          <p>
-            No painel do app da Meta, vá em{' '}
-            <span className="font-semibold">WhatsApp, Configuração</span> e, na seção
-            Webhook, clique em Editar e cole os dois valores abaixo. Depois de verificar,
-            clique em Gerenciar e assine o campo{' '}
-            <span className="font-semibold">messages</span>. Sem esse passo o envio
-            funciona, mas as respostas não chegam no CRM.
-          </p>
-          <div>
-            <p className="text-[10px] font-bold text-slate-500 uppercase mb-0.5">URL de callback</p>
-            <div className="flex items-center gap-1.5">
-              <code className="flex-1 truncate bg-slate-100 dark:bg-white/10 rounded-md px-2 py-1.5 font-mono text-[11px] text-slate-700 dark:text-slate-200">
-                {metaWebhook.url}
-              </code>
-              <button
-                type="button"
-                onClick={() => copyValue(metaWebhook.url, 'URL de callback')}
-                title="Copiar URL de callback"
-                className="shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-lg border border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-colors"
-              >
-                <Copy size={13} />
-              </button>
-            </div>
-          </div>
-          <div>
-            <p className="text-[10px] font-bold text-slate-500 uppercase mb-0.5">Token de verificação</p>
-            <div className="flex items-center gap-1.5">
-              <code className="flex-1 truncate bg-slate-100 dark:bg-white/10 rounded-md px-2 py-1.5 font-mono text-[11px] text-slate-700 dark:text-slate-200">
-                {metaWebhook.verifyToken}
-              </code>
-              <button
-                type="button"
-                onClick={() => copyValue(metaWebhook.verifyToken, 'Token de verificação')}
-                title="Copiar token de verificação"
-                className="shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-lg border border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-colors"
-              >
-                <Copy size={13} />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <div className="text-[11px] text-slate-500 dark:text-slate-400 space-y-1 border-t border-sky-200/60 dark:border-sky-500/20 pt-3">
         <p>
