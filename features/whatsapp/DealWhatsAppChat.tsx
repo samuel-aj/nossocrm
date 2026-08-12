@@ -663,11 +663,14 @@ export function DealWhatsAppChat({
         stream.getTracks().forEach(tr => tr.stop());
         return;
       }
-      const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/mp4')
-          ? 'audio/mp4'
-          : '';
+      // Ordem importa: a Cloud API da Meta SÓ aceita ogg/opus, mp4/aac, mpeg
+      // e amr — webm é RECUSADO (erro 131053). Na Evolution qualquer formato
+      // servia (ela transcodificava); no modo direto o formato é o final.
+      // ogg/opus primeiro (Firefox; vira mensagem de VOZ no WhatsApp), depois
+      // mp4/aac (Chrome/Edge/Safari); webm fica de último recurso.
+      const mime = ['audio/ogg;codecs=opus', 'audio/mp4', 'audio/webm;codecs=opus'].find(t =>
+        MediaRecorder.isTypeSupported(t)
+      ) ?? '';
       const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
       chunksRef.current = [];
       cancelRecRef.current = false;
@@ -678,7 +681,11 @@ export function DealWhatsAppChat({
         stream.getTracks().forEach(tr => tr.stop());
         const blob = new Blob(chunksRef.current, { type: rec.mimeType || 'audio/webm' });
         if (!cancelRecRef.current && blob.size > 0) {
-          const ext = (rec.mimeType || '').includes('mp4') ? 'm4a' : 'webm';
+          const ext = (rec.mimeType || '').includes('mp4')
+            ? 'm4a'
+            : (rec.mimeType || '').includes('ogg')
+              ? 'ogg'
+              : 'webm';
           const fileName = `voz_${Date.now()}.${ext}`;
           forceScrollRef.current = true;
           send.mutate(
