@@ -38,14 +38,18 @@ function mask(conn: WaConnectionRow) {
 }
 
 // Dados do webhook da Meta mostrados pro ADMIN na tela de conexão da API oficial.
+// SÓ existem quando a org TEM uma conexão de API oficial (a URL do CRM leva o
+// webhook_secret da conexão — sem conexão, não há o que mostrar; a UI orienta
+// a conectar primeiro).
 // - meta_cloud (DIRETO): a URL é do PRÓPRIO CRM (Edge Function whatsapp-webhook-meta)
 //   com o webhook_secret da conexão no path; o verify token = o mesmo secret.
-// - evolution_business (via Evolution): a URL é do endpoint /webhook/meta da
-//   Evolution e o verify token vem da env EVOLUTION_META_VERIFY_TOKEN (padrão
-//   'evolution').
+// - evolution_business (legado via Evolution): a URL é do endpoint /webhook/meta
+//   da Evolution e o verify token vem da env EVOLUTION_META_VERIFY_TOKEN
+//   (padrão 'evolution').
 function metaWebhookInfo(role: string, conn: WaConnectionRow | null) {
   if (!isOrgAdmin(role)) return null;
-  if (conn && isMetaCloudConnection(conn)) {
+  if (!conn || !isBusinessConnection(conn)) return null;
+  if (isMetaCloudConnection(conn)) {
     const supabase = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '');
     if (!supabase) return null;
     return {

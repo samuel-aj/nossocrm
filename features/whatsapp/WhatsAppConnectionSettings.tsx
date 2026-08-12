@@ -256,7 +256,19 @@ export function WhatsAppConnectionSettings() {
       </div>
       {/* Passo 3: webhook do recebimento, com os valores prontos pra
           colar no painel da Meta (sem isso o envio funciona mas as
-          respostas dos clientes não chegam no CRM) */}
+          respostas dos clientes não chegam no CRM). Os valores são POR
+          CONEXÃO (o secret nasce ao conectar) — antes disso, orienta. */}
+      {!metaWebhook && (
+        <div className="rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-3.5 text-[11px] text-slate-600 dark:text-slate-300">
+          <p className="font-bold text-slate-700 dark:text-slate-200 mb-1">3. Webhook (pra receber as respostas):</p>
+          <p>
+            Depois de clicar em Conectar, a <span className="font-semibold">URL de callback</span> e o{' '}
+            <span className="font-semibold">token de verificação</span> desta organização aparecem aqui,
+            prontos pra colar no painel do app da Meta (WhatsApp, Configuração, Webhook) e assinar o campo{' '}
+            <span className="font-semibold">messages</span>.
+          </p>
+        </div>
+      )}
       {metaWebhook && (
         <div className="rounded-xl border border-sky-200/70 dark:border-sky-500/20 bg-white dark:bg-black/20 p-3.5 text-[11px] text-slate-600 dark:text-slate-300 space-y-2.5">
           <p className="font-bold text-slate-700 dark:text-slate-200">
