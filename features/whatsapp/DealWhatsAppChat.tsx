@@ -23,6 +23,9 @@ import {
   ChevronDown,
   ClipboardList,
   Unplug,
+  Pause,
+  Trash2,
+  Info,
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { fillTemplate } from '@/lib/messageTemplates';
@@ -240,6 +243,76 @@ function MediaContent({ m }: { m: WaChatMessage }) {
   }
 }
 
+/** Selo "Erro" da mensagem que falhou: pill vermelha + cartão com o motivo
+ *  (hover no desktop, toque no celular), no estilo dos CRMs de chat. */
+function FailBadge({ reason }: { reason: string }) {
+  const [open, setOpen] = useState(false);
+  // cartão abre pra CIMA por padrão; perto do topo da lista (1ª mensagem
+  // falhada) o overflow do scroll cortaria — aí abre pra BAIXO
+  const [below, setBelow] = useState(false);
+  const rootRef = useRef<HTMLSpanElement>(null);
+
+  // fecha com toque/clique fora e Escape (hover só existe no desktop)
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: Event) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  // sempre ABRE (nunca alterna): no toque, o mouseenter sintético + click
+  // chegam juntos e um toggle abriria e fecharia na mesma batida
+  const show = () => {
+    const el = rootRef.current;
+    const scroller = el?.closest('.overflow-y-auto');
+    if (el && scroller) {
+      const room = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+      setBelow(room < 200);
+    }
+    setOpen(true);
+  };
+
+  return (
+    <span
+      ref={rootRef}
+      className="relative inline-flex"
+      onMouseEnter={show}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        onClick={show}
+        aria-expanded={open}
+        className="inline-flex items-center gap-1 rounded-full bg-red-500 px-1.5 py-px text-[10px] font-bold uppercase tracking-wide text-white shadow-sm"
+        aria-label="Ver motivo da falha"
+      >
+        <Info size={10} strokeWidth={2.5} /> Erro
+      </button>
+      {open && (
+        <span
+          className={`absolute right-0 z-20 w-72 max-w-[70vw] whitespace-normal rounded-xl border border-red-400 bg-white p-3 text-left text-xs font-normal normal-case tracking-normal leading-relaxed text-slate-700 shadow-xl dark:border-red-500/70 dark:bg-slate-900 dark:text-slate-200 ${
+            below ? 'top-full mt-2' : 'bottom-full mb-2'
+          }`}
+        >
+          <span className="block font-semibold text-red-600 dark:text-red-400">
+            Não conseguimos enviar sua mensagem.
+          </span>
+          <span className="mt-1 block">{reason}</span>
+        </span>
+      )}
+    </span>
+  );
+}
+
 function MessageBubble({
   m,
   searchQuery = '',
@@ -251,15 +324,13 @@ function MessageBubble({
 }) {
   const isOut = m.direction === 'out';
   const failed = m.status === 'failed';
-  // Tooltip da falha: o motivo real devolvido pela Meta/Evolution (truncado),
-  // ou um texto genérico quando o provedor não explicou
+  // Motivo real devolvido pela Meta/Evolution (truncado), ou um texto
+  // genérico quando o provedor não explicou — vai no cartão do selo "Erro"
   const failReason = failed
-    ? `Falha no envio. Motivo: ${
-        (m.error || '').trim()
-          ? (m.error as string).trim().slice(0, 300)
-          : 'o provedor não informou o motivo. Verifique a conexão e tente de novo.'
-      }`
-    : undefined;
+    ? (m.error || '').trim()
+      ? (m.error as string).trim().slice(0, 300)
+      : 'O provedor não informou o motivo. Verifique a conexão e tente de novo.'
+    : null;
   const time = (() => {
     const raw = m.wa_timestamp || m.created_at;
     const d = new Date(raw);
@@ -268,14 +339,11 @@ function MessageBubble({
   return (
     <div className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
       <div
-        title={failReason}
         className={`max-w-[78%] rounded-2xl px-3 py-2 text-sm shadow-sm ${
-          failed && isOut
-            ? 'bg-red-600 text-white rounded-br-sm'
-            : isOut
-              ? 'bg-emerald-600 text-white rounded-br-sm'
-              : 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-bl-sm border border-slate-200 dark:border-white/10'
-        } ${isCurrentMatch ? 'ring-2 ring-amber-400' : ''}`}
+          isOut
+            ? 'bg-emerald-600 text-white rounded-br-sm'
+            : 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-bl-sm border border-slate-200 dark:border-white/10'
+        } ${failed ? 'ring-1 ring-red-400/80' : ''} ${isCurrentMatch ? 'ring-2 ring-amber-400' : ''}`}
       >
         <MediaContent m={m} />
         {m.body && m.media_type !== 'contact' ? (
@@ -294,16 +362,12 @@ function MessageBubble({
         ) : !m.media_type ? (
           <p className="italic opacity-70">[mensagem não suportada]</p>
         ) : null}
-        {failed && (
-          <p className="mt-1 flex items-center gap-1 text-[11px] font-bold text-red-100">
-            <AlertCircle size={12} className="shrink-0" /> Falha no envio
-          </p>
-        )}
         <div
-          className={`mt-1 flex items-center justify-end gap-1 text-[10px] ${
-            failed && isOut ? 'text-red-100' : isOut ? 'text-emerald-100' : 'text-slate-400'
+          className={`mt-1 flex items-center justify-end gap-1.5 text-[10px] ${
+            isOut ? 'text-emerald-100' : 'text-slate-400'
           }`}
         >
+          {failReason && <FailBadge reason={failReason} />}
           <span>{time}</span>
           {isOut && (
             <span
@@ -425,6 +489,16 @@ export function DealWhatsAppChat({
   const [recording, setRecording] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
   const [micError, setMicError] = useState<string | null>(null);
+  // Gravação PAUSADA virando prévia: o usuário ouve antes de enviar/descartar
+  const [voiceNote, setVoiceNote] = useState<{
+    blob: Blob;
+    mime: string;
+    url: string;
+    seconds: number;
+  } | null>(null);
+  // conversão MP3 em andamento entre o "Enviar áudio" e o send.mutate: trava
+  // o Mic (que aparece no MESMO lugar do botão) contra duplo clique
+  const [preparingVoice, setPreparingVoice] = useState(false);
   // Pesquisa de mensagens (estilo WhatsApp): barra + navegação entre matches
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -435,8 +509,12 @@ export function DealWhatsAppChat({
   const composerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const cancelRecRef = useRef(false);
+  // Flags POR SESSÃO de gravação (objeto novo a cada startRecording): o
+  // onstop de um recorder antigo nunca lê flags/chunks da sessão seguinte
+  const recSessionRef = useRef<{ cancel: boolean; pause: boolean } | null>(null);
+  const recSecondsRef = useRef(0); // espelho síncrono do timer (o onstop lê fora do render)
+  const voiceNoteUrlRef = useRef<string | null>(null); // p/ revogar blob URL da prévia no unmount
+  const providerRef = useRef<string | null>(null); // provider ATUAL (o onstop roda fora do render)
   const timerRef = useRef<number | null>(null);
   // guards SÍNCRONOS (state só atualiza no próximo render):
   const sendGateRef = useRef(false); // evita envio duplo durante awaits do onSend
@@ -481,6 +559,40 @@ export function DealWhatsAppChat({
   useEffect(() => {
     previewUrlRef.current = attachment?.previewUrl ?? null;
   }, [attachment]);
+  useEffect(() => {
+    voiceNoteUrlRef.current = voiceNote?.url ?? null;
+  }, [voiceNote]);
+  useEffect(() => {
+    providerRef.current = data?.provider ?? null;
+  }, [data?.provider]);
+
+  // Trocou de contato/telefone SEM remontar (host sem key, ex.: modal do
+  // lead): gravação e prévia pertencem à conversa ANTERIOR — descarta pra
+  // nunca enviar o áudio de um contato pro número de outro
+  useEffect(() => {
+    const rec = recorderRef.current;
+    if (rec && rec.state !== 'inactive') {
+      const session = recSessionRef.current;
+      if (session) {
+        session.cancel = true;
+        session.pause = false;
+      }
+      try {
+        rec.stop();
+      } catch {
+        // já parado
+      }
+      setRecording(false);
+      if (timerRef.current) {
+        window.clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    }
+    setVoiceNote(v => {
+      if (v) URL.revokeObjectURL(v.url);
+      return null;
+    });
+  }, [phone]);
 
   // ==== Pesquisa de mensagens ====
   const activeQuery = searchOpen ? searchQuery.trim() : '';
@@ -553,12 +665,13 @@ export function DealWhatsAppChat({
       disposedRef.current = true;
       if (timerRef.current) window.clearInterval(timerRef.current);
       try {
-        cancelRecRef.current = true;
+        if (recSessionRef.current) recSessionRef.current.cancel = true;
         recorderRef.current?.stop();
       } catch {
         // já parado
       }
       if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+      if (voiceNoteUrlRef.current) URL.revokeObjectURL(voiceNoteUrlRef.current);
     };
   }, []);
 
@@ -657,14 +770,83 @@ export function DealWhatsAppChat({
     setAttachMenuOpen(false);
   };
 
+  /** Prepara (conversão pra MP3) e envia uma gravação de voz — usado tanto
+   *  pelo "Enviar áudio" direto quanto pela prévia pausada. */
+  const sendVoiceBlob = async (recorded: Blob, recMime: string) => {
+    setPreparingVoice(true);
+    try {
+      let blob = recorded;
+      const lower = (recMime || '').toLowerCase();
+      let ext = lower.includes('mp4') ? 'm4a' : lower.includes('ogg') ? 'ogg' : 'webm';
+      // Só o ogg/opus (Firefox) vai como gravado — todo o resto vira MP3.
+      // Motivo: o navegador DECLARA um formato e entrega outro por dentro
+      // (Chrome gravou "mp4 AAC" com opus dentro; a Meta processa e recusa
+      // como octet-stream). MP3 gerado por nós é garantido em qualquer
+      // provedor. isMetaFriendlyAudio fica pra anexos de arquivo.
+      if (!lower.includes('ogg')) {
+        try {
+          blob = await transcodeToMp3(blob);
+          ext = 'mp3';
+        } catch {
+          // Conversão falhou (decodificação/wasm indisponível neste
+          // navegador). Só manda o formato CRU quando temos CERTEZA que a
+          // conexão é Evolution (lá funciona); na Meta — ou com o provider
+          // ainda não carregado — seria RECUSADO na certa: guarda a
+          // gravação como anexo e avisa.
+          const prov = providerRef.current;
+          if (prov !== 'evolution' && prov !== 'evolution_business') {
+            const fileName = `voz_${Date.now()}.${ext}`;
+            setAttachment(curr =>
+              curr
+                ? curr
+                : {
+                    file: new File([recorded], fileName, { type: recorded.type }),
+                    kind: 'audio',
+                    previewUrl: null,
+                    asSticker: false,
+                  }
+            );
+            setMicError(
+              'Não deu pra preparar o áudio neste navegador. Atualize a página (Ctrl+Shift+R) e tente de novo.'
+            );
+            return;
+          }
+        }
+      }
+      const fileName = `voz_${Date.now()}.${ext}`;
+      forceScrollRef.current = true;
+      send.mutate(
+        { file: blob, kind: 'audio', fileName },
+        {
+          onError: () => {
+            // não perde a gravação: vira anexo pro usuário reenviar
+            setAttachment(curr =>
+              curr
+                ? curr
+                : {
+                    file: new File([blob], fileName, { type: blob.type }),
+                    kind: 'audio',
+                    previewUrl: null,
+                    asSticker: false,
+                  }
+            );
+          },
+        }
+      );
+    } finally {
+      setPreparingVoice(false);
+    }
+  };
+
   const startRecording = async () => {
     // reentrância: um 2º clique no mic durante o prompt de permissão criaria
     // outro stream/recorder e o 1º ficaria gravando pra sempre
-    if (recStartingRef.current || recording) return;
+    if (recStartingRef.current || recording || preparingVoice) return;
     recStartingRef.current = true;
     setMicError(null);
     setEmojiOpen(false);
     setAttachMenuOpen(false);
+    setTemplatesOpen(false);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       // usuário fechou o card enquanto o prompt estava aberto: solta o mic
@@ -681,80 +863,56 @@ export function DealWhatsAppChat({
         t => MediaRecorder.isTypeSupported(t)
       ) ?? '';
       const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
-      chunksRef.current = [];
-      cancelRecRef.current = false;
+      // sessão NOVA por gravação: chunks e flags são DESTE recorder — o
+      // onstop de um recorder antigo não corrompe a gravação seguinte
+      const session = { cancel: false, pause: false };
+      recSessionRef.current = session;
+      const chunks: Blob[] = [];
       rec.ondataavailable = e => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
+        if (e.data.size > 0) chunks.push(e.data);
       };
       rec.onstop = async () => {
         stream.getTracks().forEach(tr => tr.stop());
-        let blob = new Blob(chunksRef.current, { type: rec.mimeType || 'audio/webm' });
-        if (!cancelRecRef.current && blob.size > 0) {
-          let ext = (rec.mimeType || '').includes('mp4')
-            ? 'm4a'
-            : (rec.mimeType || '').includes('ogg')
-              ? 'ogg'
-              : 'webm';
-          // Só o ogg/opus (Firefox) vai como gravado — todo o resto vira MP3.
-          // Motivo: o navegador DECLARA um formato e entrega outro por dentro
-          // (Chrome gravou "mp4 AAC" com opus dentro; a Meta processa e recusa
-          // como octet-stream). MP3 gerado por nós é garantido em qualquer
-          // provedor. isMetaFriendlyAudio fica pra anexos de arquivo.
-          if (!(rec.mimeType || '').toLowerCase().includes('ogg')) {
-            try {
-              blob = await transcodeToMp3(blob);
-              ext = 'mp3';
-            } catch {
-              // Conversão falhou (decodificação/wasm indisponível neste
-              // navegador). Na API oficial da Meta o formato gravado seria
-              // RECUSADO na certa — então NÃO envia: guarda a gravação como
-              // anexo e avisa. Na Evolution segue como gravado (funciona).
-              if (data?.provider === 'meta_cloud') {
-                const fileName = `voz_${Date.now()}.${ext}`;
-                setAttachment(curr =>
-                  curr
-                    ? curr
-                    : {
-                        file: new File([blob], fileName, { type: blob.type }),
-                        kind: 'audio',
-                        previewUrl: null,
-                        asSticker: false,
-                      }
-                );
-                setMicError(
-                  'Não deu pra preparar o áudio neste navegador. Atualize a página (Ctrl+Shift+R) e tente de novo.'
-                );
-                return;
-              }
-            }
+        if (session.cancel) return;
+        const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+        if (session.pause) {
+          // "Pausar": não envia — vira PRÉVIA pro usuário ouvir e decidir.
+          // O recorder é PARADO de verdade (não pause()): só o arquivo
+          // finalizado toca de forma confiável em todo container (mp4/webm).
+          if (disposedRef.current) return;
+          setRecording(false); // o painel "Gravando" segurou até a prévia ficar pronta
+          if (blob.size === 0) {
+            setMicError('Gravação muito curta. Tente de novo.');
+            return;
           }
-          const fileName = `voz_${Date.now()}.${ext}`;
-          forceScrollRef.current = true;
-          send.mutate(
-            { file: blob, kind: 'audio', fileName },
-            {
-              onError: () => {
-                // não perde a gravação: vira anexo pro usuário reenviar
-                setAttachment(curr =>
-                  curr
-                    ? curr
-                    : {
-                        file: new File([blob], fileName, { type: blob.type }),
-                        kind: 'audio',
-                        previewUrl: null,
-                        asSticker: false,
-                      }
-                );
-              },
-            }
-          );
+          const url = URL.createObjectURL(blob);
+          voiceNoteUrlRef.current = url; // síncrono: unmount antes do commit ainda revoga
+          setVoiceNote(v => {
+            if (v) URL.revokeObjectURL(v.url);
+            return {
+              blob,
+              mime: rec.mimeType || 'audio/webm',
+              url,
+              seconds: Math.max(1, recSecondsRef.current),
+            };
+          });
+          return;
         }
+        if (blob.size === 0) {
+          setPreparingVoice(false);
+          return;
+        }
+        await sendVoiceBlob(blob, rec.mimeType || 'audio/webm');
       };
       recorderRef.current = rec;
       rec.start();
       setRecording(true);
       setRecSeconds(0);
-      timerRef.current = window.setInterval(() => setRecSeconds(s => s + 1), 1000);
+      recSecondsRef.current = 0;
+      timerRef.current = window.setInterval(() => {
+        recSecondsRef.current += 1;
+        setRecSeconds(recSecondsRef.current);
+      }, 1000);
     } catch {
       setMicError('Não foi possível acessar o microfone. Verifique a permissão do navegador.');
     } finally {
@@ -762,18 +920,48 @@ export function DealWhatsAppChat({
     }
   };
 
-  const stopRecording = (cancel: boolean) => {
-    cancelRecRef.current = cancel;
+  const stopRecording = (mode: 'cancel' | 'send' | 'pause') => {
+    const session = recSessionRef.current;
+    if (mode === 'pause' && session?.pause) return; // 2º clique no Pausar: já finalizando
+    if (session) {
+      session.cancel = mode === 'cancel';
+      session.pause = mode === 'pause';
+    }
+    let willStop = false;
     try {
-      recorderRef.current?.stop();
+      const rec = recorderRef.current;
+      if (rec && rec.state !== 'inactive') {
+        rec.stop();
+        willStop = true;
+      }
     } catch {
       // já parado
     }
-    setRecording(false);
+    // "Pausar" MANTÉM o painel de gravação até o onstop entregar a prévia:
+    // o recorder finaliza async e, se o composer voltasse nesse vão, um
+    // clique no Mic começaria outra gravação por cima da pausada.
+    if (mode !== 'pause' || !willStop) setRecording(false);
+    // "Enviar" já trava o Mic aqui (o onstop/conversão vem async depois)
+    if (mode === 'send' && willStop) setPreparingVoice(true);
     if (timerRef.current) {
       window.clearInterval(timerRef.current);
       timerRef.current = null;
     }
+  };
+
+  const discardVoiceNote = () => {
+    setVoiceNote(v => {
+      if (v) URL.revokeObjectURL(v.url);
+      return null;
+    });
+  };
+
+  const sendVoiceNote = () => {
+    const v = voiceNote;
+    if (!v || send.isPending || preparingVoice) return;
+    setVoiceNote(null);
+    URL.revokeObjectURL(v.url);
+    void sendVoiceBlob(v.blob, v.mime);
   };
 
   return (
@@ -1057,17 +1245,58 @@ export function DealWhatsAppChat({
             <div className="flex-1" />
             <button
               type="button"
-              onClick={() => stopRecording(true)}
+              onClick={() => stopRecording('cancel')}
               className="h-10 px-3 inline-flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-white/10 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10"
             >
               <X size={16} /> Cancelar
             </button>
             <button
               type="button"
-              onClick={() => stopRecording(false)}
+              onClick={() => stopRecording('pause')}
+              className="h-10 px-3 inline-flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-white/10 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10"
+              title="Pausar e ouvir antes de enviar"
+            >
+              <Pause size={16} /> Pausar
+            </button>
+            <button
+              type="button"
+              onClick={() => stopRecording('send')}
               className="h-10 px-4 inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold"
             >
               <Send size={16} /> Enviar áudio
+            </button>
+          </div>
+        ) : voiceNote ? (
+          /* Prévia da gravação pausada: ouve antes de enviar ou descartar */
+          <div className="flex items-center gap-3 max-md:flex-wrap max-md:gap-y-2">
+            <button
+              type="button"
+              onClick={discardVoiceNote}
+              className="shrink-0 h-10 w-10 inline-flex items-center justify-center rounded-xl border border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-300 hover:text-red-500 hover:bg-slate-100 dark:hover:bg-white/10"
+              aria-label="Descartar gravação"
+              title="Descartar gravação"
+            >
+              <Trash2 size={17} />
+            </button>
+            <audio
+              controls
+              src={voiceNote.url}
+              className="flex-1 min-w-0 h-10 max-md:order-first max-md:basis-full"
+              preload="metadata"
+            />
+            <span className="shrink-0 text-xs text-slate-400 tabular-nums">{fmtSeconds(voiceNote.seconds)}</span>
+            <button
+              type="button"
+              onClick={sendVoiceNote}
+              disabled={send.isPending || preparingVoice}
+              className="shrink-0 h-10 px-4 inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-bold"
+            >
+              {send.isPending || preparingVoice ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <Send size={16} />
+              )}{' '}
+              Enviar áudio
             </button>
           </div>
         ) : (
@@ -1149,12 +1378,12 @@ export function DealWhatsAppChat({
               <button
                 type="button"
                 onClick={startRecording}
-                disabled={send.isPending}
+                disabled={send.isPending || preparingVoice}
                 className="shrink-0 h-10 w-10 inline-flex items-center justify-center rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-colors"
                 aria-label="Gravar áudio"
                 title="Gravar mensagem de voz"
               >
-                <Mic size={18} />
+                {preparingVoice ? <Loader2 size={18} className="animate-spin" /> : <Mic size={18} />}
               </button>
             ) : (
               <button
