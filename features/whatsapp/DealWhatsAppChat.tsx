@@ -165,6 +165,8 @@ function AudioBubble({ m, contactName }: { m: WaChatMessage; contactName?: strin
   const audioRef = useRef<HTMLAudioElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
+  const primedRef = useRef(false);
+  const primingRef = useRef(false);
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState<number | null>(null);
@@ -176,7 +178,7 @@ function AudioBubble({ m, contactName }: { m: WaChatMessage; contactName?: strin
     if (!playing) return;
     let raf = requestAnimationFrame(function tick() {
       const el = audioRef.current;
-      if (el && !draggingRef.current) setCurrent(el.currentTime);
+      if (el && !draggingRef.current && !primingRef.current) setCurrent(el.currentTime);
       raf = requestAnimationFrame(tick);
     });
     return () => cancelAnimationFrame(raf);
@@ -192,6 +194,29 @@ function AudioBubble({ m, contactName }: { m: WaChatMessage; contactName?: strin
   const syncDuration = () => {
     const el = audioRef.current;
     if (el && isFinite(el.duration) && el.duration > 0) setDuration(el.duration);
+  };
+
+  // Áudio gravado (MediaRecorder/mp3 sem header de duração) chega com a
+  // duração inflada ou Infinity nos metadados — a bolinha corre sobre uma
+  // duração falsa e o som acaba antes dela chegar no fim. Um seek "pro
+  // infinito" força o navegador a escanear o arquivo e corrigir pra duração
+  // real (dispara durationchange → syncDuration), depois volta pro início.
+  const primeDuration = () => {
+    const el = audioRef.current;
+    if (!el || primedRef.current) return;
+    primedRef.current = true;
+    primingRef.current = true;
+    let finished = false;
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      el.removeEventListener('seeked', done);
+      el.currentTime = 0;
+      primingRef.current = false;
+    };
+    el.addEventListener('seeked', done);
+    window.setTimeout(done, 3000); // fallback se 'seeked' não vier
+    el.currentTime = 1e10;
   };
 
   const seekFromPointer = (clientX: number) => {
@@ -235,18 +260,23 @@ function AudioBubble({ m, contactName }: { m: WaChatMessage; contactName?: strin
         preload="metadata"
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
-        onEmptied={() => setPlaying(false)} // src renovado (URL assinada) aborta sem 'pause'
+        onEmptied={() => {
+          setPlaying(false); // src renovado (URL assinada) aborta sem 'pause'
+          primedRef.current = false; // src novo precisa primar a duração de novo
+          primingRef.current = false;
+        }}
         onEnded={() => {
           const el = audioRef.current;
           if (el) el.currentTime = 0; // volta pro início, como no WhatsApp
           setCurrent(0);
         }}
         onTimeUpdate={e => {
-          if (!draggingRef.current) setCurrent((e.target as HTMLAudioElement).currentTime);
+          if (!draggingRef.current && !primingRef.current) setCurrent((e.target as HTMLAudioElement).currentTime);
         }}
         onLoadedMetadata={e => {
           syncDuration();
           (e.target as HTMLAudioElement).playbackRate = rate;
+          primeDuration();
         }}
         onDurationChange={syncDuration}
       />
