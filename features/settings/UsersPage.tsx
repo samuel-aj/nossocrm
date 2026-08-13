@@ -228,6 +228,13 @@ export const UsersPage: React.FC = () => {
                 throw new Error(data?.error || `Erro ao enviar convite (HTTP ${res.status})`);
             }
 
+            if (data?.addedExisting) {
+                // Conta já existia: entrou direto na org, sem convite nem email.
+                addToast(`${email} já tinha conta no CRM e foi adicionado à organização. É só trocar de organização no seletor.`, 'success');
+                setInviteEmail('');
+                await fetchUsers();
+                return;
+            }
             await fetchActiveInvites();
             if (data?.emailSent) {
                 addToast(`Convite enviado para ${email}`, 'success');
@@ -272,7 +279,11 @@ export const UsersPage: React.FC = () => {
                 throw new Error(data?.error || `Erro ao criar login (HTTP ${res.status})`);
             }
 
-            addToast(`Login criado para ${email}. Passe o email e a senha pra pessoa.`, 'success');
+            if (data?.existing) {
+                addToast(`${email} já tinha conta no CRM e foi adicionado à organização com a senha que já usava (a senha digitada foi ignorada).`, 'success');
+            } else {
+                addToast(`Login criado para ${email}. Passe o email e a senha pra pessoa.`, 'success');
+            }
             setInviteEmail('');
             setNewLoginPassword('');
             await fetchUsers();
@@ -623,8 +634,8 @@ export const UsersPage: React.FC = () => {
                                     </div>
                                     <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                                         {inviteMode === 'link' && 'Gera um link de acesso pra você copiar e enviar como quiser.'}
-                                        {inviteMode === 'email' && 'A pessoa recebe um email com o link do convite e define a própria senha.'}
-                                        {inviteMode === 'login' && 'A conta já nasce pronta: você escolhe o email e a senha e só passa o login pra pessoa.'}
+                                        {inviteMode === 'email' && 'A pessoa recebe um email com o link do convite e define a própria senha. Email que já tem conta no CRM entra direto na organização, sem email.'}
+                                        {inviteMode === 'login' && 'A conta já nasce pronta: você escolhe o email e a senha e só passa o login pra pessoa. Email que já tem conta entra na organização com a senha que já usa.'}
                                     </p>
                                 </div>
 

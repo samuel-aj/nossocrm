@@ -176,18 +176,40 @@ export async function POST(req: Request) {
   if (existingAuthUser) {
     const { data: existingProfile } = await admin
       .from('profiles')
-      .select('id')
+      .select('id, organization_id')
       .eq('id', existingAuthUser.id)
       .maybeSingle();
 
-    if (existingProfile) {
-      return json(
-        { error: 'Este email já tem uma conta ativa no CRM. Use o convite (link ou email) ou outro email.' },
-        400
+    // Convite pendente DESTA org (nunca logou): pode receber a senha nova.
+    const isPendingHere = Boolean(
+      existingAuthUser.invited_at &&
+        !existingAuthUser.last_sign_in_at &&
+        existingProfile?.organization_id === me.organization_id
+    );
+
+    if (existingProfile && !isPendingHere) {
+      // Conta já existente: adiciona à organização SEM tocar na senha (a
+      // informada é ignorada; a atual continua valendo) — um email pode
+      // estar em várias orgs. A org nova aparece no seletor da pessoa.
+      const { data: existingLink } = await admin
+        .from('user_organizations')
+        .select('user_id')
+        .eq('user_id', existingAuthUser.id)
+        .eq('organization_id', me.organization_id)
+        .maybeSingle();
+      if (existingLink || existingProfile.organization_id === me.organization_id) {
+        return json({ error: 'Este email já é membro desta organização.' }, 400);
+      }
+      const { error: linkError } = await admin.from('user_organizations').upsert(
+        { user_id: existingAuthUser.id, organization_id: me.organization_id, role },
+        { onConflict: 'user_id,organization_id' }
       );
+      if (linkError) return json({ error: linkError.message }, 400);
+      return json({ ok: true, existing: true, user: { id: existingAuthUser.id, email, role } }, 201);
     }
 
-    // Login órfão (sobra de exclusão): reaproveita com a senha nova.
+    // Login órfão (sobra de exclusão) ou convite pendente desta org:
+    // reaproveita com a senha nova.
     const { error: updateError } = await admin.auth.admin.updateUserById(existingAuthUser.id, {
       password,
       email_confirm: true,

@@ -134,10 +134,29 @@ export async function POST(req: Request) {
           existingProfile?.organization_id === me.organization_id
       );
       if (existingProfile && !isPendingHere) {
-        return json(
-          { error: 'Este email já tem uma conta no CRM. Gere um link de convite e envie direto pra pessoa, ou use outro email.' },
-          400
+        // Conta já existente: em vez de bloquear, ADICIONA a conta a esta
+        // organização — um email pode estar em várias orgs (mesmo comportamento
+        // da criação de org pelo superadmin). Não vai email: a pessoa já tem
+        // login e senha; a org nova aparece no seletor de organizações dela.
+        const { data: existingLink } = await admin
+          .from('user_organizations')
+          .select('user_id')
+          .eq('user_id', existingAuthUser.id)
+          .eq('organization_id', me.organization_id)
+          .maybeSingle();
+        if (existingLink || existingProfile.organization_id === me.organization_id) {
+          return json({ error: 'Este email já é membro desta organização.' }, 400);
+        }
+        const { error: linkError } = await admin.from('user_organizations').upsert(
+          {
+            user_id: existingAuthUser.id,
+            organization_id: me.organization_id,
+            role: parsed.data.role as Role,
+          },
+          { onConflict: 'user_id,organization_id' }
         );
+        if (linkError) return json({ error: linkError.message }, 500);
+        return json({ addedExisting: true, member: { id: existingAuthUser.id, email } }, 201);
       }
       staleAuthUserId = existingAuthUser.id;
     }
