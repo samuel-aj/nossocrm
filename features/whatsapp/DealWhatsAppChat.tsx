@@ -239,45 +239,6 @@ function AudioBubble({ m, contactName }: { m: WaChatMessage; contactName?: strin
         onDurationChange={syncDuration}
       />
       <div className="flex items-center gap-2.5">
-        {/* Slot avatar ↔ velocidade: foto/inicial do contato antes do play;
-            tocando, vira o botão de velocidade com crossfade suave */}
-        <div className="relative h-10 w-10 shrink-0">
-          <span
-            aria-hidden={started}
-            className={`absolute inset-0 rounded-full flex items-center justify-center transition-all duration-300 ${
-              started ? 'opacity-0 scale-75 pointer-events-none' : 'opacity-100 scale-100'
-            } ${
-              isOut
-                ? 'bg-white/25 text-white'
-                : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
-            }`}
-          >
-            {!isOut && initial ? (
-              <span className="text-base font-bold">{initial}</span>
-            ) : (
-              <User size={18} />
-            )}
-            <span
-              className={`absolute -bottom-1 -right-1 h-4 w-4 rounded-full flex items-center justify-center ${
-                isOut ? 'bg-emerald-800 text-emerald-100' : 'bg-emerald-500 text-white'
-              }`}
-            >
-              <Mic size={10} />
-            </span>
-          </span>
-          <button
-            type="button"
-            onClick={cycleRate}
-            tabIndex={started ? 0 : -1}
-            className={`absolute inset-0 rounded-full flex items-center justify-center text-[11px] font-bold transition-all duration-300 ${
-              started ? 'opacity-100 scale-100' : 'opacity-0 scale-75 pointer-events-none'
-            } ${btn}`}
-            aria-label={`Velocidade do áudio: ${rate}x`}
-            title="Mudar a velocidade"
-          >
-            {rate}x
-          </button>
-        </div>
         <button
           type="button"
           onClick={toggle}
@@ -341,14 +302,62 @@ function AudioBubble({ m, contactName }: { m: WaChatMessage; contactName?: strin
             style={{ left: `calc(${pct}% - 6px)` }}
           />
         </div>
+        {/* Slot avatar ↔ velocidade, do LADO DIREITO da barra: foto/inicial
+            do contato antes do play; tocando, vira o botão de velocidade
+            com crossfade suave */}
+        <div className="relative h-10 w-10 shrink-0">
+          <span
+            aria-hidden={started}
+            className={`absolute inset-0 rounded-full flex items-center justify-center transition-all duration-300 ${
+              started ? 'opacity-0 scale-75 pointer-events-none' : 'opacity-100 scale-100'
+            } ${
+              isOut
+                ? 'bg-white/25 text-white'
+                : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+            }`}
+          >
+            {!isOut && initial ? (
+              <span className="text-base font-bold">{initial}</span>
+            ) : (
+              <User size={18} />
+            )}
+            <span
+              className={`absolute -bottom-1 -right-1 h-4 w-4 rounded-full flex items-center justify-center ${
+                isOut ? 'bg-emerald-800 text-emerald-100' : 'bg-emerald-500 text-white'
+              }`}
+            >
+              <Mic size={10} />
+            </span>
+          </span>
+          <button
+            type="button"
+            onClick={cycleRate}
+            tabIndex={started ? 0 : -1}
+            className={`absolute inset-0 rounded-full flex items-center justify-center text-[11px] font-bold transition-all duration-300 ${
+              started ? 'opacity-100 scale-100' : 'opacity-0 scale-75 pointer-events-none'
+            } ${btn}`}
+            aria-label={`Velocidade do áudio: ${rate}x`}
+            title="Mudar a velocidade"
+          >
+            {rate}x
+          </button>
+        </div>
       </div>
+      {/* Só UM tempo, à esquerda (estilo WhatsApp): a DURAÇÃO parado, o tempo
+          decorrido tocando. O horário da mensagem sobe pra esta mesma linha,
+          à direita (o footer do balão usa -mt no modo áudio). */}
       <div
-        className={`mt-0.5 flex items-center justify-between pl-[96px] pr-1 text-[10px] tabular-nums ${
+        className={`mt-0.5 h-4 flex items-center pl-[46px] text-[9px] tabular-nums ${
           isOut ? 'text-emerald-100' : 'text-slate-400'
         }`}
       >
-        <span>{fmtSeconds(Math.floor(current))}</span>
-        <span>{duration ? fmtSeconds(Math.floor(duration)) : '--:--'}</span>
+        <span>
+          {started
+            ? fmtSeconds(Math.floor(current))
+            : duration
+              ? fmtSeconds(Math.floor(duration))
+              : '--:--'}
+        </span>
       </div>
     </div>
   );
@@ -564,9 +573,11 @@ function MessageBubble({
           <p className="italic opacity-70">[mensagem não suportada]</p>
         ) : null}
         <div
-          className={`mt-1 flex items-center justify-end gap-1.5 text-[10px] ${
-            isOut ? 'text-emerald-100' : 'text-slate-400'
-          }`}
+          className={`flex items-center justify-end gap-1.5 ${
+            // áudio: o horário SOBE pra linha da duração (à direita dela) e
+            // fica um tico maior que o texto da duração
+            m.media_type === 'audio' ? '-mt-4 h-4 text-[11px]' : 'mt-1 text-[10px]'
+          } ${isOut ? 'text-emerald-100' : 'text-slate-400'}`}
         >
           {failReason && <FailBadge reason={failReason} />}
           <span>{time}</span>
