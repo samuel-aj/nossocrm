@@ -575,9 +575,9 @@ function MessageBubble({
         <div
           className={`flex items-center justify-end gap-1.5 ${
             // áudio: o horário SOBE pra linha da duração (à direita dela) e
-            // fica um tico maior que o texto da duração; -13px (não -16px)
-            // pra dar 3px de respiro abaixo da foto do contato
-            m.media_type === 'audio' ? '-mt-[13px] h-4 text-[11px]' : 'mt-1 text-[10px]'
+            // fica um tico maior que o texto da duração; -10px (não -16px)
+            // pra dar 6px de respiro abaixo da foto do contato
+            m.media_type === 'audio' ? '-mt-[10px] h-4 text-[11px]' : 'mt-1 text-[10px]'
           } ${isOut ? 'text-emerald-100' : 'text-slate-400'}`}
         >
           {failReason && <FailBadge reason={failReason} />}
