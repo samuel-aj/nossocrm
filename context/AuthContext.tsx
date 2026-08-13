@@ -190,14 +190,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         organization_name: (pinnedOrg as { name?: string } | null)?.name ?? pinned.name,
                     });
                 } else {
-                    const { data: link } = await sb
+                    const { data: link, error: linkError } = await sb
                         .from('user_organizations')
                         .select('role, organizations(name)')
                         .eq('user_id', base.id)
                         .eq('organization_id', pinned.id)
                         .maybeSingle();
-                    if (!link) {
-                        // Vínculo sumiu (removido da org): volta pra org do perfil.
+                    if (linkError) {
+                        // Falha TRANSITÓRIA (rede/refresh de token): NUNCA abandonar
+                        // o pin — abandonar fazia a aba "seguir" a troca de org feita
+                        // em outra aba. Mantém a org da aba com o que se sabe; a
+                        // próxima fetchProfile (próximo evento) corrige os detalhes.
+                        setProfile({
+                            ...base,
+                            organization_id: pinned.id as OrganizationId,
+                            organization_name: pinned.name,
+                        });
+                    } else if (!link) {
+                        // Consulta OK e SEM vínculo: removido da org de verdade —
+                        // só então volta pra org do perfil.
                         pinTabOrg(base.organization_id, base.organization_name);
                         setProfile(base);
                     } else {
