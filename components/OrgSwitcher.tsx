@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Check, ChevronsUpDown, Search, Loader2 } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 import { announceOrgSwitch, pinTabOrg } from '@/lib/tabOrg';
+import { supabase } from '@/lib/supabase/client';
 
 interface OrgSummary {
   id: string;
@@ -17,14 +18,16 @@ interface OrgSwitcherProps {
   collapsed: boolean;
   officeName: string;
   officeInitials: string;
-  /** Só super admin vê o dropdown; os demais veem o card estático de sempre. */
+  /** Super admin vê TODAS as orgs no dropdown; usuário comum com mais de uma
+   *  org (user_organizations) vê as DELE; quem só tem uma vê o card estático. */
   isSuperAdmin: boolean;
   currentOrgId: string | null;
 }
 
 /**
- * Card da organização no topo do menu. Para super admin vira um seletor:
- * clica, busca e troca de organização sem passar pela página do Super Admin.
+ * Card da organização no topo do menu. Para super admin (todas as orgs) e
+ * para membros de várias organizações (as orgs deles) vira um seletor:
+ * clica, busca e troca de organização sem sair da tela.
  * A troca é de SESSÃO (organization_id do perfil no servidor) e recarrega o
  * app pra zerar os caches da organização anterior.
  */
@@ -66,19 +69,50 @@ export function OrgSwitcher({
     refetchOnWindowFocus: false,
   });
 
+  // Orgs do PRÓPRIO usuário (multi-org): a RLS de user_organizations deixa
+  // cada um ver só os próprios vínculos — mesma consulta da tela /select-org.
+  // Carrega já na montagem: é ela que decide se o card vira dropdown.
+  const myOrgsQ = useQuery<OrgSummary[]>({
+    queryKey: ['myOrgsSwitcher'],
+    queryFn: async () => {
+      if (!supabase) return [];
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return [];
+      const { data } = await supabase
+        .from('user_organizations')
+        .select('organization_id, organizations(name)')
+        .eq('user_id', user.id);
+      return (data ?? [])
+        .map((r) => ({
+          id: r.organization_id as string,
+          name: (r.organizations as unknown as { name: string } | null)?.name || 'Organização',
+        }))
+        .filter((o) => !!o.id);
+    },
+    enabled: !isSuperAdmin,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+  const isMultiOrg = !isSuperAdmin && (myOrgsQ.data?.length ?? 0) > 1;
+  const canSwitch = isSuperAdmin || isMultiOrg;
+
   const filteredOrgs = useMemo(() => {
-    const orgs = orgsQ.data?.organizations ?? [];
+    const orgs = isSuperAdmin ? orgsQ.data?.organizations ?? [] : myOrgsQ.data ?? [];
     const term = search.trim().toLowerCase();
     const list = term ? orgs.filter((o) => o.name.toLowerCase().includes(term)) : orgs;
     // Ordena por nome pra facilitar achar
     return [...list].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
-  }, [orgsQ.data, search]);
+  }, [isSuperAdmin, orgsQ.data, myOrgsQ.data, search]);
 
   const handleSwitch = async (org: OrgSummary) => {
     if (org.id === currentOrgId || switchingId) return;
     setSwitchingId(org.id);
     try {
-      const res = await fetch('/api/superadmin/switch-org', {
+      // Super admin usa a rota dele (com auditoria); membro comum usa a rota
+      // que valida o vínculo em user_organizations.
+      const res = await fetch(isSuperAdmin ? '/api/superadmin/switch-org' : '/api/switch-org', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         credentials: 'include',
@@ -113,13 +147,13 @@ export function OrgSwitcher({
       >
         {officeName}
       </span>
-      {isSuperAdmin && !collapsed && (
+      {canSwitch && !collapsed && (
         <ChevronsUpDown size={14} className="shrink-0 text-slate-400" aria-hidden="true" />
       )}
     </div>
   );
 
-  if (!isSuperAdmin) return card;
+  if (!canSwitch) return card;
 
   return (
     <div ref={rootRef} className="relative min-w-0 flex-1">
@@ -151,17 +185,17 @@ export function OrgSwitcher({
             </div>
           </div>
           <div className="max-h-72 overflow-y-auto scrollbar-custom py-1">
-            {orgsQ.isLoading && (
+            {(isSuperAdmin ? orgsQ.isLoading : myOrgsQ.isLoading) && (
               <div className="px-3 py-4 text-sm text-slate-500 flex items-center gap-2">
                 <Loader2 size={14} className="animate-spin" /> Carregando organizações...
               </div>
             )}
-            {orgsQ.isError && (
+            {isSuperAdmin && orgsQ.isError && (
               <div className="px-3 py-4 text-sm text-red-500">
                 {(orgsQ.error as Error).message}
               </div>
             )}
-            {!orgsQ.isLoading && filteredOrgs.length === 0 && !orgsQ.isError && (
+            {!(isSuperAdmin ? orgsQ.isLoading : myOrgsQ.isLoading) && filteredOrgs.length === 0 && !orgsQ.isError && (
               <div className="px-3 py-4 text-sm text-slate-500 italic">Nenhuma organização encontrada.</div>
             )}
             {filteredOrgs.map((org) => {

@@ -3,6 +3,7 @@ import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { findAuthUserByEmail } from '@/lib/supabase/authUsers';
 import { countOrgMembers } from '@/lib/supabase/orgMembers';
+import { sendOrgAddedEmail } from '@/lib/email/orgAddedEmail';
 import { UserRole } from '@/types/constants';
 
 function json<T>(body: T, status = 200): Response {
@@ -205,7 +206,20 @@ export async function POST(req: Request) {
         { onConflict: 'user_id,organization_id' }
       );
       if (linkError) return json({ error: linkError.message }, 400);
-      return json({ ok: true, existing: true, user: { id: existingAuthUser.id, email, role } }, 201);
+      // Avisa por email (via n8n): "você foi adicionado à org X" + acesso.
+      const { data: orgRow } = await admin
+        .from('organizations')
+        .select('name')
+        .eq('id', me.organization_id)
+        .single();
+      const origin = req.headers.get('origin') || new URL(req.url).origin;
+      const emailSent = await sendOrgAddedEmail({
+        email,
+        orgName: orgRow?.name || 'sua nova organização',
+        role,
+        appUrl: origin,
+      });
+      return json({ ok: true, existing: true, emailSent, user: { id: existingAuthUser.id, email, role } }, 201);
     }
 
     // Login órfão (sobra de exclusão) ou convite pendente desta org:

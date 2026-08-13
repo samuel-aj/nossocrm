@@ -229,8 +229,13 @@ export const UsersPage: React.FC = () => {
             }
 
             if (data?.addedExisting) {
-                // Conta já existia: entrou direto na org, sem convite nem email.
-                addToast(`${email} já tinha conta no CRM e foi adicionado à organização. É só trocar de organização no seletor.`, 'success');
+                // Conta já existia: entrou direto na org (aviso vai por email via n8n).
+                addToast(
+                    data?.emailSent
+                        ? `${email} já tinha conta no CRM: foi adicionado à organização e avisado por email.`
+                        : `${email} já tinha conta no CRM e foi adicionado à organização (o email de aviso falhou, avise a pessoa).`,
+                    'success'
+                );
                 setInviteEmail('');
                 await fetchUsers();
                 return;
@@ -280,7 +285,12 @@ export const UsersPage: React.FC = () => {
             }
 
             if (data?.existing) {
-                addToast(`${email} já tinha conta no CRM e foi adicionado à organização com a senha que já usava (a senha digitada foi ignorada).`, 'success');
+                addToast(
+                    data?.emailSent
+                        ? `${email} já tinha conta no CRM: foi adicionado à organização com a senha que já usava e avisado por email.`
+                        : `${email} já tinha conta no CRM e foi adicionado à organização com a senha que já usava (a senha digitada foi ignorada).`,
+                    'success'
+                );
             } else {
                 addToast(`Login criado para ${email}. Passe o email e a senha pra pessoa.`, 'success');
             }
