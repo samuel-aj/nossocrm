@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import {
   Send,
   MessageCircle,
@@ -27,6 +27,7 @@ import {
   Trash2,
   Info,
   Play,
+  User,
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { fillTemplate } from '@/lib/messageTemplates';
@@ -156,10 +157,10 @@ function fileNameFromUrl(url: string): string {
   }
 }
 
-/** Balão de áudio custom (estilo dos CRMs de chat): play/pausa redondo,
- *  barra de progresso arrastável, tempos e botão "T" que transcreve o áudio
- *  com a IA da organização (resultado cacheado no banco, transcreve 1x). */
-function AudioBubble({ m }: { m: WaChatMessage }) {
+/** Balão de áudio estilo WhatsApp: FOTO do contato antes do play; quando o
+ *  áudio toca, o avatar dá lugar (transição suave) ao seletor de velocidade
+ *  que cicla 1x → 1.5x → 2x → 1x. */
+function AudioBubble({ m, contactName }: { m: WaChatMessage; contactName?: string }) {
   const isOut = m.direction === 'out';
   const audioRef = useRef<HTMLAudioElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -167,25 +168,12 @@ function AudioBubble({ m }: { m: WaChatMessage }) {
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState<number | null>(null);
-  const [showText, setShowText] = useState(true);
+  const [rate, setRate] = useState<1 | 1.5 | 2>(1);
 
-  const transcribeMut = useMutation({
-    mutationFn: async () => {
-      const res = await fetch('/api/whatsapp/transcribe', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ messageId: m.id }),
-      });
-      const json = (await res.json().catch(() => ({}))) as { transcription?: string; error?: string };
-      if (!res.ok || !json.transcription) throw new Error(json.error || 'Falha ao transcrever');
-      return json.transcription;
-    },
-    onSuccess: () => setShowText(true),
-  });
-
-  // transcrição persistida (polling hidrata) ou recém-gerada nesta sessão
-  const text = m.transcription || transcribeMut.data || null;
+  // "começou" = tocando ou parado no meio; no fim (currentTime volta a 0) o
+  // avatar reaparece, como no WhatsApp
+  const started = playing || current > 0;
+  const initial = (contactName || '').trim().charAt(0).toUpperCase();
 
   // MediaRecorder às vezes entrega duration=Infinity até tocar inteiro —
   // só habilita a barra quando o número é real
@@ -207,8 +195,19 @@ function AudioBubble({ m }: { m: WaChatMessage }) {
   const toggle = () => {
     const el = audioRef.current;
     if (!el) return;
-    if (el.paused) void el.play();
-    else el.pause();
+    if (el.paused) {
+      el.playbackRate = rate; // o elemento perde o rate quando o src renova
+      void el.play();
+    } else {
+      el.pause();
+    }
+  };
+
+  const cycleRate = () => {
+    const next = rate === 1 ? 1.5 : rate === 1.5 ? 2 : 1;
+    setRate(next as 1 | 1.5 | 2);
+    const el = audioRef.current;
+    if (el) el.playbackRate = next;
   };
 
   const pct = duration ? Math.min(100, (current / duration) * 100) : 0;
@@ -233,10 +232,52 @@ function AudioBubble({ m }: { m: WaChatMessage }) {
         onTimeUpdate={e => {
           if (!draggingRef.current) setCurrent((e.target as HTMLAudioElement).currentTime);
         }}
-        onLoadedMetadata={syncDuration}
+        onLoadedMetadata={e => {
+          syncDuration();
+          (e.target as HTMLAudioElement).playbackRate = rate;
+        }}
         onDurationChange={syncDuration}
       />
       <div className="flex items-center gap-2.5">
+        {/* Slot avatar ↔ velocidade: foto/inicial do contato antes do play;
+            tocando, vira o botão de velocidade com crossfade suave */}
+        <div className="relative h-10 w-10 shrink-0">
+          <span
+            aria-hidden={started}
+            className={`absolute inset-0 rounded-full flex items-center justify-center transition-all duration-300 ${
+              started ? 'opacity-0 scale-75 pointer-events-none' : 'opacity-100 scale-100'
+            } ${
+              isOut
+                ? 'bg-white/25 text-white'
+                : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+            }`}
+          >
+            {!isOut && initial ? (
+              <span className="text-base font-bold">{initial}</span>
+            ) : (
+              <User size={18} />
+            )}
+            <span
+              className={`absolute -bottom-1 -right-1 h-4 w-4 rounded-full flex items-center justify-center ${
+                isOut ? 'bg-emerald-800 text-emerald-100' : 'bg-emerald-500 text-white'
+              }`}
+            >
+              <Mic size={10} />
+            </span>
+          </span>
+          <button
+            type="button"
+            onClick={cycleRate}
+            tabIndex={started ? 0 : -1}
+            className={`absolute inset-0 rounded-full flex items-center justify-center text-[11px] font-bold transition-all duration-300 ${
+              started ? 'opacity-100 scale-100' : 'opacity-0 scale-75 pointer-events-none'
+            } ${btn}`}
+            aria-label={`Velocidade do áudio: ${rate}x`}
+            title="Mudar a velocidade"
+          >
+            {rate}x
+          </button>
+        </div>
         <button
           type="button"
           onClick={toggle}
@@ -300,39 +341,20 @@ function AudioBubble({ m }: { m: WaChatMessage }) {
             style={{ left: `calc(${pct}% - 6px)` }}
           />
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            if (text) setShowText(s => !s);
-            else if (!transcribeMut.isPending) transcribeMut.mutate();
-          }}
-          disabled={transcribeMut.isPending}
-          className={`shrink-0 h-8 w-8 rounded-full inline-flex items-center justify-center text-[13px] font-bold transition-colors disabled:opacity-60 ${btn}`}
-          aria-label="Transcrever áudio"
-          title={text ? 'Mostrar/ocultar transcrição' : 'Transcrever áudio'}
-        >
-          {transcribeMut.isPending ? <Loader2 size={14} className="animate-spin" /> : 'T'}
-        </button>
       </div>
       <div
-        className={`mt-0.5 flex items-center justify-between pl-[46px] pr-[42px] text-[10px] tabular-nums ${
+        className={`mt-0.5 flex items-center justify-between pl-[96px] pr-1 text-[10px] tabular-nums ${
           isOut ? 'text-emerald-100' : 'text-slate-400'
         }`}
       >
         <span>{fmtSeconds(Math.floor(current))}</span>
         <span>{duration ? fmtSeconds(Math.floor(duration)) : '--:--'}</span>
       </div>
-      {transcribeMut.isError && (
-        <p className={`mt-1 text-[11px] ${isOut ? 'text-red-200' : 'text-red-500'}`}>
-          {(transcribeMut.error as Error).message}
-        </p>
-      )}
-      {text && showText && <p className="mt-1.5 whitespace-pre-wrap break-words text-sm">{text}</p>}
     </div>
   );
 }
 
-function MediaContent({ m }: { m: WaChatMessage }) {
+function MediaContent({ m, contactName }: { m: WaChatMessage; contactName?: string }) {
   if (!m.media_type) return null;
 
   // Cartão de contato compartilhado (estilo WhatsApp): avatar + nome + telefone
@@ -402,7 +424,7 @@ function MediaContent({ m }: { m: WaChatMessage }) {
         </div>
       );
     case 'audio':
-      return <AudioBubble m={m} />;
+      return <AudioBubble m={m} contactName={contactName} />;
     case 'document':
       return (
         <a
@@ -494,10 +516,12 @@ function MessageBubble({
   m,
   searchQuery = '',
   isCurrentMatch = false,
+  contactName,
 }: {
   m: WaChatMessage;
   searchQuery?: string;
   isCurrentMatch?: boolean;
+  contactName?: string;
 }) {
   const isOut = m.direction === 'out';
   const failed = m.status === 'failed';
@@ -522,7 +546,7 @@ function MessageBubble({
             : 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-bl-sm border border-slate-200 dark:border-white/10'
         } ${failed ? 'ring-1 ring-red-400/80' : ''} ${isCurrentMatch ? 'ring-2 ring-amber-400' : ''}`}
       >
-        <MediaContent m={m} />
+        <MediaContent m={m} contactName={contactName} />
         {m.body && m.media_type !== 'contact' ? (
           searchQuery ? (
             <HighlightedText
@@ -1348,7 +1372,12 @@ export function DealWhatsAppChat({
               else msgRefs.current.delete(m.id);
             }}
           >
-            <MessageBubble m={m} searchQuery={activeQuery} isCurrentMatch={m.id === currentMatchId} />
+            <MessageBubble
+              m={m}
+              searchQuery={activeQuery}
+              isCurrentMatch={m.id === currentMatchId}
+              contactName={contact.name || data?.conversation?.wa_name || undefined}
+            />
           </div>
         ))}
         <div ref={endRef} />
