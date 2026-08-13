@@ -170,6 +170,18 @@ function AudioBubble({ m, contactName }: { m: WaChatMessage; contactName?: strin
   const [duration, setDuration] = useState<number | null>(null);
   const [rate, setRate] = useState<1 | 1.5 | 2>(1);
 
+  // 'timeupdate' só dispara ~4x/s, o que faz a bolinha andar em saltos;
+  // enquanto toca, lê a posição a cada frame pra ela deslizar suave
+  useEffect(() => {
+    if (!playing) return;
+    let raf = requestAnimationFrame(function tick() {
+      const el = audioRef.current;
+      if (el && !draggingRef.current) setCurrent(el.currentTime);
+      raf = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [playing]);
+
   // "começou" = tocando ou parado no meio; no fim (currentTime volta a 0) o
   // avatar reaparece, como no WhatsApp
   const started = playing || current > 0;
