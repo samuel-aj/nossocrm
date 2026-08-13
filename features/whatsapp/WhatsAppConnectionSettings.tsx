@@ -67,13 +67,16 @@ export function WhatsAppConnectionSettings() {
   const { addToast } = useToast();
   // MULTI-NÚMERO: a confirmação de desconectar é POR conexão (guarda o id)
   const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
+  // HUB: qual linha QR está sendo PAREADA agora (null = nenhum QR aberto).
+  // Substitui o antigo boolean: com várias linhas QR, o painel precisa saber
+  // exatamente qual conexão está esperando o scan.
+  const [qrTargetId, setQrTargetId] = useState<string | null>(null);
 
   const connQ = useQuery<ConnResponse>({
     queryKey: ['waConnection'],
     queryFn: () => fetchJson<ConnResponse>('/api/whatsapp/connection'),
-    // aguardando pareamento: checa rápido; conectado/sem conexão: devagar
-    refetchInterval: q =>
-      q.state.data?.connection && !q.state.data.connected ? 4000 : 30000,
+    // aguardando pareamento de um QR: checa rápido; senão devagar
+    refetchInterval: () => (qrTargetId ? 4000 : 30000),
     refetchOnWindowFocus: true,
   });
 
@@ -89,15 +92,23 @@ export function WhatsAppConnectionSettings() {
   const isBusinessProvider = (p?: string | null) =>
     ['evolution_business', 'meta_cloud'].includes((p || '').toLowerCase());
   const isBusiness = isBusinessProvider(conn?.provider);
-  // MULTI-NÚMERO: o fluxo do QR mira a linha EVOLUTION da org — a conexão
-  // "padrão" pode ser uma meta_cloud (que nunca gera QR) e travaria a tela.
-  const qrConn = conns.find(c => !isBusinessProvider(c.provider)) ?? null;
+  // HUB: primeira linha QR (Baileys) da org — usada pelo seletor de modo da
+  // org sem nada conectado (re-pareamento sem criar linha nova).
+  const firstQrConn = conns.find(c => !isBusinessProvider(c.provider)) ?? null;
 
-  // O QR só abre depois que o usuário ESCOLHE esse modo no seletor — mesmo
-  // que já exista uma conexão QR desconectada de antes (senão o seletor
-  // nunca apareceria pra quem já conectou alguma vez).
-  const [qrFlowActive, setQrFlowActive] = useState(false);
-  const waitingScan = !!qrConn && !connected && qrConn.status !== 'connected' && qrFlowActive;
+  // Painel do QR aberto = há uma linha-alvo pareando. Logo após o POST criar
+  // a linha, o refetch pode ainda não tê-la trazido: considera "pareando".
+  const qrTarget = qrTargetId ? conns.find(c => c.id === qrTargetId) ?? null : null;
+  const waitingScan = !!qrTargetId && (qrTarget?.status ?? 'connecting') !== 'connected';
+
+  // Pareou: fecha o painel e avisa (a linha vira mais um cartão do hub)
+  React.useEffect(() => {
+    if (qrTargetId && qrTarget?.status === 'connected') {
+      setQrTargetId(null);
+      addToast(`Número ${qrTarget.phoneNumber || ''} conectado via QR!`.replace('  ', ' '), 'success');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- addToast é estável (context)
+  }, [qrTargetId, qrTarget?.status, qrTarget?.phoneNumber]);
   // Desconectado (com ou sem conexão anterior) = seletor de modo na tela
   const showChooser = !connQ.isLoading && !connected && !waitingScan;
 
@@ -147,8 +158,11 @@ export function WhatsAppConnectionSettings() {
   };
 
   const qrQ = useQuery<QrResponse>({
-    queryKey: ['waConnectionQr'],
-    queryFn: () => fetchJson<QrResponse>('/api/whatsapp/connection/qr'),
+    queryKey: ['waConnectionQr', qrTargetId],
+    queryFn: () =>
+      fetchJson<QrResponse>(
+        `/api/whatsapp/connection/qr${qrTargetId ? `?id=${encodeURIComponent(qrTargetId)}` : ''}`
+      ),
     enabled: waitingScan,
     // o QR da Evolution expira (~40s): renova sozinho antes disso
     refetchInterval: waitingScan ? 25000 : false,
@@ -181,7 +195,7 @@ export function WhatsAppConnectionSettings() {
         setBizWabaId('');
         setBizAppId('');
         setBizAppSecret('');
-        setQrFlowActive(false);
+        setQrTargetId(null);
         const setup = data.metaSetup;
         if (setup?.recebimentoOk) {
           addToast(
@@ -197,22 +211,28 @@ export function WhatsAppConnectionSettings() {
           addToast('WhatsApp API oficial conectado!', 'success');
         }
       } else {
-        setQrFlowActive(true);
+        // QR: abre o painel de pareamento mirando a linha recém-criada/reusada
+        setQrTargetId(data.connection?.id ?? null);
         addToast('Instância criada. Escaneie o QR pra conectar o número.', 'success');
       }
     },
     onError: e => addToast((e as Error).message, 'error'),
   });
 
-  // Entra no fluxo do QR: reaproveita a instância evolution existente da org
-  // (a rota do QR tem self-healing) ou cria uma nova quando ainda não há.
+  // Entra no fluxo do QR (seletor de modo, org sem nada conectado): reaproveita
+  // a linha evolution existente (a rota do QR tem self-healing) ou cria a 1ª.
   const startQrFlow = () => {
-    if (qrConn) {
-      setQrFlowActive(true);
+    if (firstQrConn) {
+      setQrTargetId(firstQrConn.id);
       qc.invalidateQueries({ queryKey: ['waConnectionQr'] });
       return;
     }
     createMut.mutate({ autoCreate: true });
+  };
+
+  // HUB: conecta MAIS um número via QR (linha nova, sem mexer nas existentes)
+  const addQrNumber = () => {
+    createMut.mutate({ autoCreate: true, newNumber: true });
   };
 
   const disconnectMut = useMutation({
@@ -398,7 +418,12 @@ export function WhatsAppConnectionSettings() {
         <h2 className="text-lg font-bold text-slate-900 dark:text-white">WhatsApp</h2>
         {connected && (
           <span className="ml-auto inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
-            <CheckCircle2 size={13} /> Conectado{isBusiness ? ' · API oficial' : ''}
+            <CheckCircle2 size={13} /> Conectado
+            {conns.filter(c => c.status === 'connected').length > 1
+              ? ` · ${conns.filter(c => c.status === 'connected').length} números`
+              : isBusiness
+                ? ' · API oficial'
+                : ''}
           </span>
         )}
         {waitingScan && (
@@ -525,10 +550,10 @@ export function WhatsAppConnectionSettings() {
               </button>
               <button
                 type="button"
-                onClick={() => setQrFlowActive(false)}
+                onClick={() => setQrTargetId(null)}
                 className="text-xs font-bold text-slate-500 dark:text-slate-400 hover:underline"
               >
-                ← Escolher outro modo
+                ← Fechar o QR
               </button>
             </div>
           </div>
@@ -601,6 +626,18 @@ export function WhatsAppConnectionSettings() {
                     </div>
                   ) : (
                     <div className="flex items-center gap-2">
+                      {!rowBiz && !rowOn && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setQrTargetId(c.id);
+                            qc.invalidateQueries({ queryKey: ['waConnectionQr'] });
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors"
+                        >
+                          <QrCode size={14} /> Reconectar (QR)
+                        </button>
+                      )}
                       {rowEditable && (
                         <button
                           type="button"
@@ -627,15 +664,31 @@ export function WhatsAppConnectionSettings() {
             })}
           </div>
 
-          {/* MULTI-NÚMERO: conectar mais um número da API oficial */}
+          {/* HUB: adicionar mais números, de QUALQUER tipo — QR e API oficial
+              convivem em qualquer quantidade */}
           {!bizOpen && (
-            <button
-              type="button"
-              onClick={() => openBizFormFor(null)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors"
-            >
-              <KeyRound size={15} /> Conectar outro número (API oficial)
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={addQrNumber}
+                disabled={createMut.isPending}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-emerald-300 dark:border-emerald-500/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 text-sm font-bold transition-colors disabled:opacity-60"
+              >
+                {createMut.isPending ? (
+                  <Loader2 size={15} className="animate-spin" />
+                ) : (
+                  <QrCode size={15} />
+                )}
+                Conectar número via QR Code
+              </button>
+              <button
+                type="button"
+                onClick={() => openBizFormFor(null)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors"
+              >
+                <KeyRound size={15} /> Conectar número API oficial
+              </button>
+            </div>
           )}
 
           {/* Edição/novo número: o mesmo form; salvar cria ou atualiza a

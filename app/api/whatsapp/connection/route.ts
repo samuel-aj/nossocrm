@@ -150,6 +150,8 @@ export async function POST(req: Request) {
     /** Multi-número: qual conexão o form está EDITANDO (atualiza a linha certa
      *  mesmo quando o Phone Number ID muda; omitido = número novo) */
     editingConnectionId?: string;
+    /** Hub: com autoCreate, força criar OUTRA linha QR (não reusa a existente) */
+    newNumber?: boolean;
   };
   try {
     body = await req.json();
@@ -166,11 +168,10 @@ export async function POST(req: Request) {
   let metaWabaId: string | null | undefined;
   let metaAppId: string | null | undefined;
   let metaAppSecret: string | null | undefined;
-  // Conexão anterior da org (capturada ANTES do upsert): numa troca de modo
-  // o nome da instância muda e a antiga precisa ser derrubada na Evolution,
-  // senão ela segue viva emitindo webhooks que o CRM passa a descartar.
-  const previous = await getConnectionByOrg(auth.admin, auth.user.organizationId);
-  let managedSwitch = false;
+  // HUB multi-número: TODA conexão é ADITIVA (QR e API oficial convivem em
+  // qualquer quantidade); nada é derrubado implicitamente — só o Desconectar
+  // explícito de cada linha. Lista atual da org guia nomes/reuso de vagas.
+  const existing = await getConnectionsByOrg(auth.admin, auth.user.organizationId);
 
   // Resultado do setup automático do meta_cloud (devolvido pra UI no fim).
   let metaSetup: {
@@ -209,9 +210,7 @@ export async function POST(req: Request) {
     // org + mesmo phone_number_id = EDIÇÃO da conexão existente; número novo
     // = conexão nova com sufixo do número. O 1º número mantém o sufixo _cloud
     // puro (compat com as conexões criadas antes do multi-número).
-    const metaConns = (previous ? await getConnectionsByOrg(auth.admin, auth.user.organizationId) : []).filter(
-      isMetaCloudConnection
-    );
+    const metaConns = existing.filter(isMetaCloudConnection);
     const samePhone = metaConns.find(c => c.meta_phone_number_id === check.phoneNumberId);
     // Form de EDIÇÃO aponta a linha exata (permite trocar o Phone Number ID
     // sem criar uma segunda conexão). Se o número digitado já é de OUTRA
@@ -246,7 +245,6 @@ export async function POST(req: Request) {
       idsCorrigidos: Boolean(check.swapped),
     };
   } else if (body.mode === 'business') {
-    managedSwitch = true;
     // MODO API OFICIAL (Meta Cloud API via Evolution): conexão por credenciais,
     // sem QR. A instância nasce "open"; erro de token só aparece no envio.
     const metaToken = (body.metaToken || '').trim();
@@ -272,10 +270,16 @@ export async function POST(req: Request) {
       return json({ error: `Falha ao criar a instância business: ${(e as Error).message}` }, 502);
     }
   } else if (body.autoCreate) {
-    managedSwitch = true;
     // Fluxo da UI: cria a instância DESTA org na Evolution automaticamente,
     // sem o admin do cliente precisar saber nome/token/servidor.
-    instanceName = instanceNameForOrg(auth.user.organizationId);
+    // HUB: QR também é multi. newNumber=true força OUTRA linha (sufixo
+    // aleatório); sem a flag, reusa a linha QR existente (re-pareamento) ou
+    // cria a primeira com o nome base (compat com as instâncias antigas).
+    const qrRows = existing.filter(c => !isBusinessConnection(c));
+    const base = instanceNameForOrg(auth.user.organizationId);
+    instanceName = body.newNumber
+      ? `${base}_qr_${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`
+      : qrRows[0]?.instance_name ?? base;
     try {
       const created = await ensureEvolutionInstance(instanceName);
       token = created.token;
@@ -343,35 +347,9 @@ export async function POST(req: Request) {
     });
   }
 
-  // Troca de modo gerenciada (QR/business): derruba as instâncias evolution
-  // ANTERIORES da org DEPOIS do novo vínculo estar salvo — senão seguiriam
-  // vivas emitindo webhooks duplicados. Alvo EXPLÍCITO (linhas evolution que
-  // não são a nova): a conexão "padrão" da org pode ser uma meta_cloud sem
-  // relação com a troca. meta_cloud nunca entra aqui (conectar número da API
-  // é ADITIVO, managedSwitch=false).
-  if (managedSwitch) {
-    const others = (await getConnectionsByOrg(auth.admin, auth.user.organizationId)).filter(
-      c => !isMetaCloudConnection(c) && c.instance_name !== conn.instance_name
-    );
-    const normalize = (u: string) => u.replace(/\/+$/, '').replace(/\/manager$/, '');
-    for (const old of others) {
-      try {
-        await getProvider(old).logout();
-      } catch {
-        // best-effort: a sessão pode nem existir mais
-      }
-      // O delete usa a apikey/servidor GLOBAL: só roda quando a conexão antiga
-      // morava nesse servidor (vínculo manual pra outro servidor fica de fora,
-      // senão apagaria uma instância homônima de outro tenant de lá).
-      const prevBase = normalize(old.base_url || '');
-      if (!prevBase || prevBase === normalize(envEvolution().baseUrl)) {
-        await deleteEvolutionInstance(old.instance_name);
-      }
-      // a linha não é mais sobrescrita pelo upsert — marca desconectada pra
-      // não ficar "conectada" zumbi na lista
-      await updateConnectionStatus(auth.admin, old.id, { status: 'disconnected' });
-    }
-  }
+  // HUB: nenhuma outra conexão é derrubada implicitamente ao conectar — QR e
+  // API oficial convivem em qualquer quantidade; limpeza só pelo Desconectar
+  // explícito de cada linha (DELETE ?id=).
 
   let status = conn.status;
   try {

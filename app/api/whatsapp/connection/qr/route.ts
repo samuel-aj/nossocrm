@@ -10,15 +10,22 @@ import { getConnectionsByOrg, upsertConnection } from '@/lib/whatsapp/service';
 import { getProvider, isBusinessConnection } from '@/lib/whatsapp';
 import { ensureEvolutionInstance, registerWebhook } from '@/lib/whatsapp/admin';
 
-export async function GET() {
+export async function GET(req: Request) {
   const auth = await requireOrgUser();
   if (!auth.ok) return auth.response;
 
-  // Multi-número: mira a conexão QR (Baileys) da org — a "padrão" pode ser
-  // uma API oficial, que nunca gera QR (e o self-healing recriaria a
-  // instância como Baileys — jamais rebaixar uma business).
+  // HUB multi-número: ?id=<connectionId> pareia UMA linha QR específica (a
+  // org pode ter várias). Sem id, cai na primeira linha QR (compat). Nunca
+  // mira uma API oficial: não tem QR e o self-healing recriaria a instância
+  // como Baileys — jamais rebaixar uma business.
+  const targetId = (new URL(req.url).searchParams.get('id') || '').trim();
   const all = await getConnectionsByOrg(auth.admin, auth.user.organizationId);
-  let conn = all.find(c => !isBusinessConnection(c)) ?? null;
+  let conn = targetId
+    ? all.find(c => c.id === targetId) ?? null
+    : all.find(c => !isBusinessConnection(c)) ?? null;
+  if (conn && isBusinessConnection(conn)) {
+    return json({ error: 'Conexão via API oficial não usa QR code' }, 400);
+  }
   if (!conn) {
     return json(
       { error: all.length ? 'Conexão via API oficial não usa QR code' : 'Conexão não configurada' },
