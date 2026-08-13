@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+import { withTabOrg } from '@/lib/supabase/tabOrgScope';
 import { UserRole } from '@/types/constants';
 
 function json<T>(body: T, status = 200): Response {
@@ -32,12 +33,17 @@ export async function GET(_req: Request, ctx: { params: Promise<{ key: string }>
     .single();
 
   if (meError || !me?.organization_id) return json({ error: 'Profile not found' }, 404);
-  if (me.role !== UserRole.ADMIN && me.role !== UserRole.SUPER_ADMIN) return json({ error: 'Forbidden' }, 403);
+
+  // ORG POR ABA: honra o header x-org-id validado (ver lib/supabase/tabOrgScope)
+  const scoped = await withTabOrg({ id: user.id, role: me.role, organization_id: me.organization_id });
+  if (!scoped) return json({ error: 'Acesso negado a esta organização' }, 403);
+
+  if (scoped.role !== UserRole.ADMIN && scoped.role !== UserRole.SUPER_ADMIN) return json({ error: 'Forbidden' }, 403);
 
   const { data, error } = await supabase
     .from('ai_prompt_templates')
     .select('key, content, version, is_active, created_at, updated_at, created_by')
-    .eq('organization_id', me.organization_id)
+    .eq('organization_id', scoped.organization_id)
     .eq('key', key)
     .order('version', { ascending: false })
     .limit(20);
@@ -73,12 +79,17 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ key: string 
     .single();
 
   if (meError || !me?.organization_id) return json({ error: 'Profile not found' }, 404);
-  if (me.role !== UserRole.ADMIN && me.role !== UserRole.SUPER_ADMIN) return json({ error: 'Forbidden' }, 403);
+
+  // ORG POR ABA: honra o header x-org-id validado (ver lib/supabase/tabOrgScope)
+  const scoped = await withTabOrg({ id: user.id, role: me.role, organization_id: me.organization_id });
+  if (!scoped) return json({ error: 'Acesso negado a esta organização' }, 403);
+
+  if (scoped.role !== UserRole.ADMIN && scoped.role !== UserRole.SUPER_ADMIN) return json({ error: 'Forbidden' }, 403);
 
   const { error } = await supabase
     .from('ai_prompt_templates')
     .update({ is_active: false, updated_at: new Date().toISOString() })
-    .eq('organization_id', me.organization_id)
+    .eq('organization_id', scoped.organization_id)
     .eq('key', key)
     .eq('is_active', true);
 

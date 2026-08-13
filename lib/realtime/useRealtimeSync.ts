@@ -13,6 +13,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { queryKeys, DEALS_VIEW_KEY } from '@/lib/query/queryKeys';
+import { readTabOrg } from '@/lib/tabOrg';
 import type { Activity, Deal, DealItem, DealView } from '@/types';
 
 // Translate a Realtime `activities` payload row (snake_case, no joins) into
@@ -171,6 +172,17 @@ export function useRealtimeSync(
           if (DEBUG_REALTIME) {
             console.log(`[Realtime] ${table} ${payload.eventType}:`, payload);
           }
+
+          // ORG POR ABA: com a RLS por membership, quem tem mais de uma org
+          // recebe eventos de TODAS elas neste canal. Ignora o que não é da
+          // org DESTA aba (DELETE só carrega o id, sem organization_id —
+          // passa adiante; remover um id que não está no cache é inócuo).
+          const evRow = (payload.eventType === 'DELETE' ? payload.old : payload.new) as
+            | Record<string, unknown>
+            | null;
+          const evOrg = typeof evRow?.organization_id === 'string' ? (evRow.organization_id as string) : null;
+          const tabOrgId = readTabOrg()?.id ?? null;
+          if (evOrg && tabOrgId && evOrg !== tabOrgId) return;
 
           // Call custom callback (if provided)
           onchangeRef.current?.(payload);

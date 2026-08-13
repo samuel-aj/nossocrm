@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+import { withTabOrg } from '@/lib/supabase/tabOrgScope';
 import { UserRole } from '@/types/constants';
 
 function json<T>(body: T, status = 200): Response {
@@ -50,10 +51,16 @@ export async function GET() {
     return json({ error: 'Profile not found' }, 404);
   }
 
+  // ORG POR ABA: honra o header x-org-id validado (ver lib/supabase/tabOrgScope)
+  const scoped = await withTabOrg({ id: user.id, role: profile.role, organization_id: profile.organization_id });
+  if (!scoped) {
+    return json({ error: 'Acesso negado a esta organização' }, 403);
+  }
+
   const { data: orgSettings, error: orgError } = await supabase
     .from('organization_settings')
     .select('ai_enabled, ai_provider, ai_model, ai_google_key, ai_openai_key, ai_anthropic_key')
-    .eq('organization_id', profile.organization_id)
+    .eq('organization_id', scoped.organization_id)
     .maybeSingle();
 
   if (orgError) {
@@ -63,7 +70,7 @@ export async function GET() {
   const aiEnabled = typeof orgSettings?.ai_enabled === 'boolean' ? orgSettings.ai_enabled : true;
 
   // Security: members should NOT receive raw API keys.
-  if (profile.role !== UserRole.ADMIN && profile.role !== UserRole.SUPER_ADMIN) {
+  if (scoped.role !== UserRole.ADMIN && scoped.role !== UserRole.SUPER_ADMIN) {
     return json({
       aiEnabled,
       aiProvider: (orgSettings?.ai_provider || 'google') as Provider,
@@ -129,7 +136,13 @@ export async function POST(req: Request) {
     return json({ error: 'Profile not found' }, 404);
   }
 
-  if (profile.role !== UserRole.ADMIN && profile.role !== UserRole.SUPER_ADMIN) {
+  // ORG POR ABA: honra o header x-org-id validado (ver lib/supabase/tabOrgScope)
+  const scoped = await withTabOrg({ id: user.id, role: profile.role, organization_id: profile.organization_id });
+  if (!scoped) {
+    return json({ error: 'Acesso negado a esta organização' }, 403);
+  }
+
+  if (scoped.role !== UserRole.ADMIN && scoped.role !== UserRole.SUPER_ADMIN) {
     return json({ error: 'Forbidden' }, 403);
   }
 
@@ -152,7 +165,7 @@ export async function POST(req: Request) {
   };
 
   const dbUpdates: Record<string, unknown> = {
-    organization_id: profile.organization_id,
+    organization_id: scoped.organization_id,
     updated_at: new Date().toISOString(),
   };
 

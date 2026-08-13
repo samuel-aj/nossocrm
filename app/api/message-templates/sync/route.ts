@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+import { withTabOrg } from '@/lib/supabase/tabOrgScope';
 import { getConnectionByOrg } from '@/lib/whatsapp/service';
 import { isEvolutionBusinessConnection } from '@/lib/whatsapp';
 import { listMetaTemplates } from '@/lib/whatsapp/templates';
@@ -25,12 +26,15 @@ export async function POST(req: Request) {
     .eq('id', user.id)
     .single();
   if (!profile?.organization_id) return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
-  if (profile.role !== 'admin' && profile.role !== 'super_admin') {
+  // ORG POR ABA: honra o header x-org-id validado (ver lib/supabase/tabOrgScope)
+  const scoped = await withTabOrg({ id: user.id, role: profile.role, organization_id: profile.organization_id });
+  if (!scoped) return NextResponse.json({ error: 'Acesso negado a esta organização' }, { status: 403 });
+  if (scoped.role !== 'admin' && scoped.role !== 'super_admin') {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   const sb = createStaticAdminClient();
-  const conn = await getConnectionByOrg(sb, profile.organization_id);
+  const conn = await getConnectionByOrg(sb, scoped.organization_id);
   if (!conn || !isEvolutionBusinessConnection(conn) || conn.status !== 'connected') {
     return NextResponse.json(
       { error: 'Conecte o WhatsApp API oficial pra sincronizar os modelos com a Meta' },
@@ -46,7 +50,7 @@ export async function POST(req: Request) {
   const { data: rows } = await sb
     .from('message_templates')
     .select('id, meta_name, language')
-    .eq('organization_id', profile.organization_id)
+    .eq('organization_id', scoped.organization_id)
     .eq('type', 'whatsapp_api');
   const existing = rows ?? [];
   const now = new Date().toISOString();
@@ -78,7 +82,7 @@ export async function POST(req: Request) {
     // do meta_name; em conflito de nome, ganha um sufixo)
     const readable = t.name.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
     const baseRow = {
-      organization_id: profile.organization_id,
+      organization_id: scoped.organization_id,
       type: 'whatsapp_api',
       category: safeCategory,
       language: t.language || 'pt_BR',

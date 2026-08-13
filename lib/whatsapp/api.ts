@@ -9,6 +9,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { createStaticAdminClient } from '@/lib/supabase/staticAdminClient';
+import { withTabOrg } from '@/lib/supabase/tabOrgScope';
 import { UserRole } from '@/types/constants';
 
 export function json<T>(body: T, status = 200): Response {
@@ -45,9 +46,17 @@ export async function requireOrgUser(): Promise<RequireOrgResult> {
   if (error || !me?.organization_id) {
     return { ok: false, response: json({ error: 'Profile not found' }, 404) };
   }
+
+  // ORG POR ABA: honra o header x-org-id (validado contra user_organizations)
+  // pra aba operar na org fixada nela, não na org "ativa" do perfil.
+  const scoped = await withTabOrg({ id: me.id, role: me.role, organization_id: me.organization_id });
+  if (!scoped) {
+    return { ok: false, response: json({ error: 'Acesso negado a esta organização' }, 403) };
+  }
+
   return {
     ok: true,
-    user: { id: me.id, role: me.role, organizationId: me.organization_id },
+    user: { id: scoped.id, role: scoped.role, organizationId: scoped.organization_id },
     admin: createStaticAdminClient(),
   };
 }

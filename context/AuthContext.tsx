@@ -31,8 +31,13 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { queryClient } from '@/lib/query';
-import { clearTabOrg } from '@/lib/tabOrg';
+import { clearTabOrg, pinTabOrg, readTabOrg } from '@/lib/tabOrg';
+import { installTabOrgFetch } from '@/lib/tabOrgFetch';
 import type { OrganizationId } from '../types';
+
+// Instala (uma vez por aba) o injetor do header x-org-id nos fetches de /api —
+// precisa acontecer ANTES de qualquer query, por isso no load do módulo.
+installTabOrgFetch();
 
 /**
  * Perfil do usuário no sistema
@@ -157,11 +162,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 console.error('Error fetching profile:', error);
             } else {
                 const org = (data as any)?.organizations as { name: string } | null;
-                setProfile({
+                const base = {
                     ...data,
                     organization_name: org?.name ?? null,
                     organizations: undefined,
-                } as Profile);
+                } as Profile;
+
+                // ORG POR ABA: se esta aba está fixada em OUTRA org (sessionStorage),
+                // o perfil exposto pro app reflete a org DA ABA (id, nome e papel do
+                // vínculo), não a org "ativa" da sessão — assim duas abas convivem
+                // em orgs diferentes. Pin inválido (perdeu o vínculo) é descartado.
+                const pinned = readTabOrg();
+                if (!pinned && base.organization_id) {
+                    pinTabOrg(base.organization_id, base.organization_name);
+                    setProfile(base);
+                } else if (!pinned || pinned.id === base.organization_id) {
+                    setProfile(base);
+                } else if (base.role === 'super_admin') {
+                    const { data: pinnedOrg } = await sb
+                        .from('organizations')
+                        .select('name')
+                        .eq('id', pinned.id)
+                        .maybeSingle();
+                    setProfile({
+                        ...base,
+                        organization_id: pinned.id as OrganizationId,
+                        organization_name: (pinnedOrg as { name?: string } | null)?.name ?? pinned.name,
+                    });
+                } else {
+                    const { data: link } = await sb
+                        .from('user_organizations')
+                        .select('role, organizations(name)')
+                        .eq('user_id', base.id)
+                        .eq('organization_id', pinned.id)
+                        .maybeSingle();
+                    if (!link) {
+                        // Vínculo sumiu (removido da org): volta pra org do perfil.
+                        pinTabOrg(base.organization_id, base.organization_name);
+                        setProfile(base);
+                    } else {
+                        const linkOrg = (link as any)?.organizations as { name?: string } | null;
+                        setProfile({
+                            ...base,
+                            organization_id: pinned.id as OrganizationId,
+                            organization_name: linkOrg?.name || pinned.name,
+                            role: ((link as { role?: string }).role as Profile['role']) || base.role,
+                        });
+                    }
+                }
             }
         } finally {
             setLoading(false);

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { isValidUUID } from '@/lib/supabase/utils';
+import { withTabOrg } from '@/lib/supabase/tabOrgScope';
 
 export const runtime = 'nodejs';
 
@@ -23,7 +24,10 @@ async function getAuthedProfile() {
   if (error || !profile?.organization_id) {
     return { error: 'Profile not found' as const, status: 404 };
   }
-  return { profile };
+  // ORG POR ABA: honra o header x-org-id validado (ver lib/supabase/tabOrgScope)
+  const scoped = await withTabOrg({ id: user.id, role: profile.role, organization_id: profile.organization_id });
+  if (!scoped) return { error: 'Acesso negado a esta organização' as const, status: 403 };
+  return { profile: { ...profile, organization_id: scoped.organization_id, role: scoped.role } };
 }
 
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {

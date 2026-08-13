@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Check, ChevronsUpDown, Search, Loader2 } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
-import { announceOrgSwitch, pinTabOrg } from '@/lib/tabOrg';
+import { pinTabOrg } from '@/lib/tabOrg';
 import { supabase } from '@/lib/supabase/client';
 
 interface OrgSummary {
@@ -120,10 +120,10 @@ export function OrgSwitcher({
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error((json as { error?: string }).error || 'Falha ao trocar de organização');
-      // Marca ESTA aba como pertencendo à nova org e avisa as outras abas
-      // ANTES de navegar (enquanto o documento ainda está vivo).
+      // Marca SÓ ESTA aba como pertencendo à nova org — as outras abas
+      // continuam nas orgs delas (org por aba). O POST acima só muda a org
+      // PADRÃO de abas novas (profiles.organization_id).
       pinTabOrg(org.id, org.name);
-      announceOrgSwitch(org.id, org.name);
       // Recarga completa: limpa todos os caches (boards, deals...) da org anterior
       window.location.assign('/dashboard');
     } catch (e) {

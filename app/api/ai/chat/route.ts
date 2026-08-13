@@ -6,6 +6,7 @@ import { createCRMAgent } from '@/lib/ai/crmAgent';
 import { createClient } from '@/lib/supabase/server';
 import type { CRMCallOptions } from '@/types/ai';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+import { withTabOrg } from '@/lib/supabase/tabOrgScope';
 import { isAIFeatureEnabled } from '@/lib/ai/features/server';
 import { AIProvider as AIProviderConst } from '@/types/constants';
 
@@ -130,11 +131,17 @@ export async function POST(req: Request) {
         );
     }
 
+    // ORG POR ABA: honra o header x-org-id validado (ver lib/supabase/tabOrgScope)
+    const scoped = await withTabOrg({ id: user.id, role: (profile as any)?.role, organization_id: organizationId });
+    if (!scoped) {
+        return new Response('Acesso negado a esta organização', { status: 403 });
+    }
+
     // 3. Get AI settings (org-wide: organization_settings é a fonte de verdade)
     const { data: orgSettings } = await supabase
         .from('organization_settings')
         .select('ai_enabled, ai_provider, ai_model, ai_google_key, ai_openai_key, ai_anthropic_key')
-        .eq('organization_id', organizationId)
+        .eq('organization_id', scoped.organization_id)
         .maybeSingle();
 
     const aiEnabled = typeof (orgSettings as any)?.ai_enabled === 'boolean' ? (orgSettings as any).ai_enabled : true;
@@ -145,7 +152,7 @@ export async function POST(req: Request) {
         );
     }
 
-    const chatEnabled = await isAIFeatureEnabled(supabase as any, organizationId, 'ai_chat_agent');
+    const chatEnabled = await isAIFeatureEnabled(supabase as any, scoped.organization_id, 'ai_chat_agent');
     if (!chatEnabled) {
         return new Response(
             'Função de IA desativada: Chat do agente (Pilot).',
@@ -176,7 +183,7 @@ export async function POST(req: Request) {
 
     // 5. Build type-safe context for agent
     const context: CRMCallOptions = {
-        organizationId,
+        organizationId: scoped.organization_id,
         boardId: asOptionalString(rawContext.boardId),
         dealId: asOptionalString(rawContext.dealId),
         contactId: asOptionalString(rawContext.contactId),
@@ -191,7 +198,7 @@ export async function POST(req: Request) {
         cockpitSnapshot: asOptionalCockpitSnapshot((rawContext as any)?.cockpitSnapshot),
         userId: user.id,
         userName: profile?.nickname || profile?.first_name || user.email,
-        userRole: (profile as any)?.role,
+        userRole: scoped.role,
     };
 
     const rawContextSummary = {

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { withTabOrg } from '@/lib/supabase/tabOrgScope';
 import { stringifyCsv, withUtf8Bom, type CsvDelimiter } from '@/lib/utils/csv';
 
 type SortBy = 'name' | 'created_at' | 'updated_at' | 'stage';
@@ -41,6 +42,22 @@ export async function GET(req: Request) {
 
     const supabase = await createClient();
 
+    // ORG POR ABA: escopo explícito. Com a RLS por membership o usuário
+    // enxerga TODAS as orgs dele; sem este filtro o export misturaria
+    // organizações. Honra o header x-org-id validado (tabOrgScope).
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const { data: me } = await supabase
+      .from('profiles')
+      .select('id, role, organization_id')
+      .eq('id', user.id)
+      .single();
+    if (!me?.organization_id) return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+    const scoped = await withTabOrg(me);
+    if (!scoped) return NextResponse.json({ error: 'Acesso negado a esta organização' }, { status: 403 });
+
     const chunkSize = 1000;
     let page = 0;
     let allContacts: Array<any> = [];
@@ -56,6 +73,7 @@ export async function GET(req: Request) {
         .select(
           'id,name,email,phone,role,notes,status,stage,created_at,updated_at,client_company_id,last_purchase_date'
         )
+        .eq('organization_id', scoped.organization_id)
         .is('deleted_at', null);
 
       if (search) {
@@ -104,6 +122,7 @@ export async function GET(req: Request) {
         const { data: companies, error: companiesError } = await supabase
           .from('crm_companies')
           .select('id,name')
+          .eq('organization_id', scoped.organization_id)
           .in('id', ids)
           .is('deleted_at', null);
 
