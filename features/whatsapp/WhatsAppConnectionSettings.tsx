@@ -109,8 +109,10 @@ export function WhatsAppConnectionSettings() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- addToast é estável (context)
   }, [qrTargetId, qrTarget?.status, qrTarget?.phoneNumber]);
-  // Desconectado (com ou sem conexão anterior) = seletor de modo na tela
-  const showChooser = !connQ.isLoading && !connected && !waitingScan;
+  // HUB: o seletor de modo (2 cartões grandes) só existe pra org SEM nenhuma
+  // conexão criada; com 1+, a lista de cartões + botões de adicionar assume
+  // (linha desconectada tem Reconectar/Editar no próprio cartão).
+  const showChooser = !connQ.isLoading && conns.length === 0 && !waitingScan;
 
   // Form do modo API oficial
   const [bizOpen, setBizOpen] = useState(false);
@@ -378,33 +380,103 @@ export function WhatsAppConnectionSettings() {
           Mensagens livres são recusadas (o CRM mostra a falha no chat).
         </p>
       </div>
-      <button
-        type="button"
-        onClick={() =>
-          createMut.mutate({
-            // Modo DIRETO na Meta (sem Evolution). Envio/recebimento falam
-            // direto com a Cloud API; o setup do webhook é AUTOMÁTICO.
-            mode: 'meta_cloud',
-            // edição aponta a linha exata (trocar o Phone Number ID atualiza
-            // a MESMA conexão em vez de criar uma segunda)
-            editingConnectionId: editingConnId || undefined,
-            metaToken: bizToken.trim(),
-            metaNumberId: bizNumberId.trim(),
-            metaBusinessId: bizWabaId.trim() || undefined,
-            metaAppId: bizAppId.trim() || undefined,
-            // sentinela intacto = não reenviar (o servidor mantém a chave salva)
-            metaAppSecret:
-              bizAppSecret.trim() && !isSecretSentinel(bizAppSecret)
-                ? bizAppSecret.trim()
-                : undefined,
-          })
-        }
-        disabled={createMut.isPending || !bizToken.trim() || !bizNumberId.trim()}
-        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-      >
-        {createMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <KeyRound size={16} />}
-        {isEditingBiz ? 'Salvar novas credenciais' : 'Conectar API oficial'}
-      </button>
+      <div className="flex flex-wrap items-center gap-4">
+        <button
+          type="button"
+          onClick={() =>
+            createMut.mutate({
+              // Modo DIRETO na Meta (sem Evolution). Envio/recebimento falam
+              // direto com a Cloud API; o setup do webhook é AUTOMÁTICO.
+              mode: 'meta_cloud',
+              // edição aponta a linha exata (trocar o Phone Number ID atualiza
+              // a MESMA conexão em vez de criar uma segunda)
+              editingConnectionId: editingConnId || undefined,
+              metaToken: bizToken.trim(),
+              metaNumberId: bizNumberId.trim(),
+              metaBusinessId: bizWabaId.trim() || undefined,
+              metaAppId: bizAppId.trim() || undefined,
+              // sentinela intacto = não reenviar (o servidor mantém a chave salva)
+              metaAppSecret:
+                bizAppSecret.trim() && !isSecretSentinel(bizAppSecret)
+                  ? bizAppSecret.trim()
+                  : undefined,
+            })
+          }
+          disabled={createMut.isPending || !bizToken.trim() || !bizNumberId.trim()}
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {createMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <KeyRound size={16} />}
+          {isEditingBiz ? 'Salvar novas credenciais' : 'Conectar API oficial'}
+        </button>
+        <button
+          type="button"
+          onClick={closeBizForm}
+          className="text-sm font-bold text-slate-500 dark:text-slate-400 hover:underline"
+        >
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+
+  // Painel do QR ao vivo — renderiza DENTRO do cartão da conexão que está
+  // pareando (ou num cartão avulso enquanto a linha recém-criada não chega
+  // no refetch da lista).
+  const qrPanel = (
+    <div className="flex flex-col md:flex-row items-center gap-6">
+      <div className="shrink-0 rounded-2xl border border-slate-200 dark:border-white/10 p-3 bg-white">
+        {qrQ.data?.qrBase64 ? (
+          // eslint-disable-next-line @next/next/no-img-element -- QR é data URI dinâmico; next/image não otimiza data URIs
+          <img
+            src={qrQ.data.qrBase64}
+            alt="QR Code para conectar o WhatsApp"
+            width={232}
+            height={232}
+            // a Evolution gera o QR colorido (azul) — força módulos PRETOS
+            // mantendo o fundo branco, independente da cor que vier
+            className="grayscale contrast-[500%]"
+          />
+        ) : (
+          <div className="w-[232px] h-[232px] flex flex-col items-center justify-center gap-2 text-slate-400">
+            <Loader2 className="animate-spin" size={22} />
+            <span className="text-xs">
+              {qrQ.isError ? 'Falha ao gerar o QR. Tentando de novo…' : 'Gerando QR…'}
+            </span>
+          </div>
+        )}
+      </div>
+      <div className="text-sm text-slate-600 dark:text-slate-300 space-y-2">
+        <p className="font-bold text-slate-900 dark:text-white">Conecte o número neste cartão:</p>
+        <ol className="list-decimal list-inside space-y-1">
+          <li>Abra o WhatsApp no celular do número que vai atender</li>
+          <li>
+            Toque em <span className="font-semibold">⋮ (Menu) → Aparelhos conectados</span>
+          </li>
+          <li>
+            Toque em <span className="font-semibold">Conectar um aparelho</span> e escaneie o QR
+          </li>
+        </ol>
+        <p className="text-xs text-slate-400">
+          O QR se renova sozinho a cada 25s. Assim que o número parear, o cartão vira
+          &quot;Conectado&quot; automaticamente.
+        </p>
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => qrQ.refetch()}
+            className="text-xs font-bold text-primary-600 dark:text-primary-400 hover:underline"
+          >
+            Gerar novo QR agora
+          </button>
+          <button
+            type="button"
+            onClick={() => setQrTargetId(null)}
+            className="text-xs font-bold text-slate-500 dark:text-slate-400 hover:underline"
+          >
+            ← Fechar o QR
+          </button>
+        </div>
+      </div>
     </div>
   );
 
@@ -426,11 +498,7 @@ export function WhatsAppConnectionSettings() {
                 : ''}
           </span>
         )}
-        {waitingScan && (
-          <span className="ml-auto inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full bg-amber-100 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300">
-            <Loader2 size={13} className="animate-spin" /> Aguardando conexão
-          </span>
-        )}
+        {/* o "Aguardando QR" agora vive no selo do próprio cartão do número */}
       </div>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">
         Conecte o <span className="font-semibold">WhatsApp do seu escritório</span> pra atender seus
@@ -444,15 +512,9 @@ export function WhatsAppConnectionSettings() {
         </div>
       )}
 
-      {/* Seletor de modo: QR Code (Baileys) ou API oficial da Meta (Cloud API) */}
+      {/* Seletor de modo (org sem NENHUMA conexão): QR Code ou API oficial */}
       {showChooser && (
         <div className="space-y-4">
-          {conn && isBusiness && !connected && (
-            <p className="text-xs text-amber-600 dark:text-amber-400">
-              A conexão via API oficial foi desconectada. Reconecte informando as credenciais da
-              Meta novamente, ou conecte via QR Code.
-            </p>
-          )}
           {/* Ritmo interno dos cards: ícone 12px, título 6px, texto e botão
               ancorado embaixo com respiro consistente nos dois cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -503,65 +565,16 @@ export function WhatsAppConnectionSettings() {
         </div>
       )}
 
-      {/* Conexão criada, número ainda não pareado: QR ao vivo */}
-      {waitingScan && (
-        <div className="flex flex-col md:flex-row items-center gap-6">
-          <div className="shrink-0 rounded-2xl border border-slate-200 dark:border-white/10 p-3 bg-white">
-            {qrQ.data?.qrBase64 ? (
-              // eslint-disable-next-line @next/next/no-img-element -- QR é data URI dinâmico; next/image não otimiza data URIs
-              <img
-                src={qrQ.data.qrBase64}
-                alt="QR Code para conectar o WhatsApp"
-                width={232}
-                height={232}
-                // a Evolution gera o QR colorido (azul) — força módulos PRETOS
-                // mantendo o fundo branco, independente da cor que vier
-                className="grayscale contrast-[500%]"
-              />
-            ) : (
-              <div className="w-[232px] h-[232px] flex flex-col items-center justify-center gap-2 text-slate-400">
-                <Loader2 className="animate-spin" size={22} />
-                <span className="text-xs">{qrQ.isError ? 'Falha ao gerar o QR. Tentando de novo…' : 'Gerando QR…'}</span>
-              </div>
-            )}
-          </div>
-          <div className="text-sm text-slate-600 dark:text-slate-300 space-y-2">
-            <p className="font-bold text-slate-900 dark:text-white">Conecte o número do seu escritório:</p>
-            <ol className="list-decimal list-inside space-y-1">
-              <li>Abra o WhatsApp no celular do número que vai atender</li>
-              <li>
-                Toque em <span className="font-semibold">⋮ (Menu) → Aparelhos conectados</span>
-              </li>
-              <li>
-                Toque em <span className="font-semibold">Conectar um aparelho</span> e escaneie o QR
-              </li>
-            </ol>
-            <p className="text-xs text-slate-400">
-              O QR se renova sozinho a cada 25s. Assim que o número parear, esta tela atualiza pra
-              &quot;Conectado&quot; automaticamente.
-            </p>
-            <div className="flex items-center gap-4">
-              <button
-                type="button"
-                onClick={() => qrQ.refetch()}
-                className="text-xs font-bold text-primary-600 dark:text-primary-400 hover:underline"
-              >
-                Gerar novo QR agora
-              </button>
-              <button
-                type="button"
-                onClick={() => setQrTargetId(null)}
-                className="text-xs font-bold text-slate-500 dark:text-slate-400 hover:underline"
-              >
-                ← Fechar o QR
-              </button>
-            </div>
-          </div>
+      {/* QR de uma linha recém-criada que ainda não apareceu na lista */}
+      {waitingScan && !qrTarget && (
+        <div className="mb-4 rounded-2xl border border-emerald-200 dark:border-emerald-500/25 p-4">
+          {qrPanel}
         </div>
       )}
 
-      {/* Conectado: UMA linha por conexão (multi-número) + conectar outro */}
-      {connected && conns.length > 0 && (
+      {/* HUB: um CARTÃO por número; QR de pareamento e edição de credenciais
+          abrem DENTRO do cartão do próprio número */}
+      {conns.length > 0 && (
         <div className="space-y-4">
           <div className="space-y-3">
             {conns.map(c => {
@@ -571,92 +584,116 @@ export function WhatsAppConnectionSettings() {
               // e salvar converteria o modo por baixo dos panos)
               const rowEditable = (c.provider || '').toLowerCase() === 'meta_cloud';
               const rowOn = c.status === 'connected';
+              const rowPairing = qrTargetId === c.id && !rowOn;
+              const rowEditing = bizOpen && editingConnId === c.id;
               return (
-                <div key={c.id} className="flex flex-col sm:flex-row sm:items-center gap-4">
-                  <div
-                    className={`flex-1 rounded-xl border p-4 ${
-                      rowOn
-                        ? 'border-emerald-200 dark:border-emerald-500/25 bg-emerald-50 dark:bg-emerald-900/15'
-                        : 'border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5'
-                    }`}
-                  >
-                    <p
-                      className={`text-sm font-bold ${
-                        rowOn
-                          ? 'text-emerald-800 dark:text-emerald-300'
-                          : 'text-slate-700 dark:text-slate-300'
+                <div
+                  key={c.id}
+                  className="rounded-2xl border border-slate-200 dark:border-white/10 overflow-hidden"
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-4">
+                    <span
+                      className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                        rowBiz
+                          ? 'bg-sky-100 text-sky-600 dark:bg-sky-900/40 dark:text-sky-400'
+                          : 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400'
                       }`}
                     >
-                      {c.profileName || (rowBiz ? 'WhatsApp API oficial (Meta)' : 'WhatsApp (QR)')}
-                      {!rowOn && ' · desconectado'}
-                    </p>
-                    <p
-                      className={`text-sm ${
-                        rowOn
-                          ? 'text-emerald-700 dark:text-emerald-200'
-                          : 'text-slate-500 dark:text-slate-400'
-                      }`}
-                    >
-                      {c.phoneNumber ? `${c.phoneNumber} · ` : ''}
-                      {rowBiz ? 'API oficial da Meta, sem QR' : 'Conectado via QR Code'}
-                    </p>
-                  </div>
-                  {confirmDisconnect === c.id ? (
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => disconnectMut.mutate(c.id)}
-                        disabled={disconnectMut.isPending}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-colors disabled:opacity-60"
-                      >
-                        {disconnectMut.isPending ? (
-                          <Loader2 size={14} className="animate-spin" />
+                      {rowBiz ? <KeyRound size={18} /> : <QrCode size={18} />}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                          {c.profileName || (rowBiz ? 'WhatsApp API oficial' : 'WhatsApp via QR Code')}
+                        </p>
+                        {rowOn ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+                            <CheckCircle2 size={11} /> Conectado
+                          </span>
+                        ) : rowPairing ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300">
+                            <Loader2 size={11} className="animate-spin" /> Aguardando QR
+                          </span>
                         ) : (
-                          <Unplug size={14} />
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400">
+                            <Unplug size={11} /> Desconectado
+                          </span>
                         )}
-                        Confirmar desconexão
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setConfirmDisconnect(null)}
-                        className="text-xs font-bold text-slate-500 hover:underline"
-                      >
-                        Cancelar
-                      </button>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                        {c.phoneNumber ||
+                          (rowBiz ? 'Número da Meta (Cloud API)' : 'Número pareado pelo celular')}
+                        {' · '}
+                        {rowBiz ? 'API oficial da Meta' : 'QR Code'}
+                      </p>
                     </div>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      {!rowBiz && !rowOn && (
+                    {confirmDisconnect === c.id ? (
+                      <div className="flex items-center gap-2 shrink-0">
                         <button
                           type="button"
-                          onClick={() => {
-                            setQrTargetId(c.id);
-                            qc.invalidateQueries({ queryKey: ['waConnectionQr'] });
-                          }}
-                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors"
+                          onClick={() => disconnectMut.mutate(c.id)}
+                          disabled={disconnectMut.isPending}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-colors disabled:opacity-60"
                         >
-                          <QrCode size={14} /> Reconectar (QR)
+                          {disconnectMut.isPending ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Unplug size={14} />
+                          )}
+                          Confirmar desconexão
                         </button>
-                      )}
-                      {rowEditable && (
                         <button
                           type="button"
-                          onClick={() =>
-                            bizOpen && editingConnId === c.id ? closeBizForm() : openBizFormFor(c)
-                          }
-                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-sky-200 dark:border-sky-500/30 text-sky-700 dark:text-sky-300 text-xs font-bold hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-colors"
+                          onClick={() => setConfirmDisconnect(null)}
+                          className="text-xs font-bold text-slate-500 hover:underline"
                         >
-                          <KeyRound size={14} />
-                          {bizOpen && editingConnId === c.id ? 'Fechar edição' : 'Editar conexão'}
+                          Cancelar
                         </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => setConfirmDisconnect(c.id)}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-200 dark:border-red-500/30 text-red-600 dark:text-red-400 text-xs font-bold hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
-                      >
-                        <Unplug size={14} /> Desconectar
-                      </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 shrink-0">
+                        {!rowBiz && !rowOn && !rowPairing && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setQrTargetId(c.id);
+                              qc.invalidateQueries({ queryKey: ['waConnectionQr'] });
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors"
+                          >
+                            <QrCode size={14} /> Reconectar (QR)
+                          </button>
+                        )}
+                        {rowEditable && (
+                          <button
+                            type="button"
+                            onClick={() => (rowEditing ? closeBizForm() : openBizFormFor(c))}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-sky-200 dark:border-sky-500/30 text-sky-700 dark:text-sky-300 text-xs font-bold hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-colors"
+                          >
+                            <KeyRound size={14} />
+                            {rowEditing ? 'Fechar edição' : 'Editar conexão'}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDisconnect(c.id)}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-200 dark:border-red-500/30 text-red-600 dark:text-red-400 text-xs font-bold hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                        >
+                          <Unplug size={14} /> Desconectar
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {/* QR de pareamento DESTE número, dentro do cartão dele */}
+                  {rowPairing && (
+                    <div className="border-t border-slate-200 dark:border-white/10 bg-slate-50/60 dark:bg-black/10 p-4">
+                      {qrPanel}
+                    </div>
+                  )}
+                  {/* Edição das credenciais DESTE número, dentro do cartão dele */}
+                  {rowEditing && (
+                    <div className="border-t border-slate-200 dark:border-white/10 bg-sky-50/40 dark:bg-sky-900/10 p-4">
+                      {bizCredentialsForm}
                     </div>
                   )}
                 </div>
@@ -665,35 +702,42 @@ export function WhatsAppConnectionSettings() {
           </div>
 
           {/* HUB: adicionar mais números, de QUALQUER tipo — QR e API oficial
-              convivem em qualquer quantidade */}
-          {!bizOpen && (
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={addQrNumber}
-                disabled={createMut.isPending}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-emerald-300 dark:border-emerald-500/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 text-sm font-bold transition-colors disabled:opacity-60"
-              >
-                {createMut.isPending ? (
-                  <Loader2 size={15} className="animate-spin" />
-                ) : (
-                  <QrCode size={15} />
-                )}
-                Conectar número via QR Code
-              </button>
-              <button
-                type="button"
-                onClick={() => openBizFormFor(null)}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors"
-              >
-                <KeyRound size={15} /> Conectar número API oficial
-              </button>
-            </div>
-          )}
+              convivem em qualquer quantidade. Os botões ficam SEMPRE visíveis:
+              com o form da API aberto, o dela vira "Fechar" e o do QR fecha o
+              form antes de abrir o QR (dá pra trocar de ideia a qualquer hora). */}
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                closeBizForm();
+                addQrNumber();
+              }}
+              disabled={createMut.isPending}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-emerald-300 dark:border-emerald-500/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 text-sm font-bold transition-colors disabled:opacity-60"
+            >
+              {createMut.isPending ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : (
+                <QrCode size={15} />
+              )}
+              Conectar número via QR Code
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                bizOpen && editingConnId === null ? closeBizForm() : openBizFormFor(null)
+              }
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors"
+            >
+              <KeyRound size={15} />
+              {bizOpen && editingConnId === null
+                ? 'Fechar formulário'
+                : 'Conectar número API oficial'}
+            </button>
+          </div>
 
-          {/* Edição/novo número: o mesmo form; salvar cria ou atualiza a
-              conexão daquele número sem derrubar as demais */}
-          {bizOpen && bizCredentialsForm}
+          {/* Form de NÚMERO NOVO (a edição renderiza dentro do cartão da linha) */}
+          {bizOpen && editingConnId === null && bizCredentialsForm}
         </div>
       )}
     </div>
