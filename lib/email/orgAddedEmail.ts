@@ -13,6 +13,9 @@ export async function sendOrgAddedEmail(payload: {
   orgName: string;
   role: string;
   appUrl: string;
+  /** Só quando a senha é CONHECIDA (Login pronto de conta nova): o email sai
+   *  com email+senha. Sem ela, o email diz que a senha é a de sempre. */
+  password?: string;
 }): Promise<boolean> {
   try {
     const res = await fetch(WEBHOOK_URL, {

@@ -272,5 +272,21 @@ export async function POST(req: Request) {
     { onConflict: 'user_id,organization_id' }
   );
 
-  return json({ ok: true, user: { id: userId, email, role } }, 201);
+  // Login pronto: envia o acesso por email COM a senha (aqui ela é conhecida,
+  // foi o admin quem definiu). Falha de email não desfaz a criação.
+  const { data: orgRow } = await admin
+    .from('organizations')
+    .select('name')
+    .eq('id', me.organization_id)
+    .single();
+  const origin = req.headers.get('origin') || new URL(req.url).origin;
+  const emailSent = await sendOrgAddedEmail({
+    email,
+    orgName: orgRow?.name || 'sua organização',
+    role,
+    appUrl: origin,
+    password,
+  });
+
+  return json({ ok: true, emailSent, user: { id: userId, email, role } }, 201);
 }

@@ -292,7 +292,12 @@ export const UsersPage: React.FC = () => {
                     'success'
                 );
             } else {
-                addToast(`Login criado para ${email}. Passe o email e a senha pra pessoa.`, 'success');
+                addToast(
+                    data?.emailSent
+                        ? `Login criado e o acesso (email e senha) foi enviado por email para ${email}.`
+                        : `Login criado para ${email}, mas o email não foi enviado. Passe o email e a senha pra pessoa.`,
+                    'success'
+                );
             }
             setInviteEmail('');
             setNewLoginPassword('');
@@ -645,7 +650,7 @@ export const UsersPage: React.FC = () => {
                                     <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                                         {inviteMode === 'link' && 'Gera um link de acesso pra você copiar e enviar como quiser.'}
                                         {inviteMode === 'email' && 'A pessoa recebe um email com o link do convite e define a própria senha. Email que já tem conta no CRM entra direto na organização, sem email.'}
-                                        {inviteMode === 'login' && 'A conta já nasce pronta: você escolhe o email e a senha e só passa o login pra pessoa. Email que já tem conta entra na organização com a senha que já usa.'}
+                                        {inviteMode === 'login' && 'A conta já nasce pronta: você escolhe o email e a senha, e o acesso completo (com a senha) vai por email pra pessoa. Email que já tem conta entra na organização com a senha que já usa.'}
                                     </p>
                                 </div>
 
