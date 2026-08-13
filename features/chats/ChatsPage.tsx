@@ -33,6 +33,9 @@ type ConvRow = {
 
 type ChatTarget = { phone: string; name: string; contactId: string | null };
 
+/** Filtro da lista, estilo WhatsApp: tudo | só não lidas | só quem tem conversa */
+type ChatFilter = 'all' | 'unread' | 'convs';
+
 type ChatListItem = ChatTarget & {
   key: string;
   /** null = número sem contato no CRM (conversa nova chegando no WhatsApp) */
@@ -111,6 +114,7 @@ export const ChatsPage: React.FC = () => {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<ChatTarget | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [filter, setFilter] = useState<ChatFilter>('all');
   // Menu da setinha (⌄) em cada conversa — estilo WhatsApp. Guarda a POSIÇÃO
   // da seta: o balão é `fixed` com a borda esquerda alinhada nela (pode
   // avançar por cima da área do chat, sem ser cortado pela lista).
@@ -204,6 +208,13 @@ export const ChatsPage: React.FC = () => {
     return m;
   }, [convsQ.data]);
 
+  // Quantas CONVERSAS têm mensagem não lida (número no chip "Não lidas",
+  // igual ao WhatsApp: conta conversas, não mensagens)
+  const unreadChats = useMemo(
+    () => Array.from(convByKey.values()).filter(c => c.unread > 0).length,
+    [convByKey]
+  );
+
   // LISTA ÚNICA: contatos do CRM com telefone + conversas NOVAS de números
   // sem contato (chegando no WhatsApp desde a conexão — histórico antigo do
   // celular nunca é importado). Quem tem conversa fica no topo por recência;
@@ -268,12 +279,19 @@ export const ChatsPage: React.FC = () => {
         )
       : items;
 
-    return filtered.sort((a, b) => {
+    const byTab =
+      filter === 'unread'
+        ? filtered.filter(c => c.unread > 0)
+        : filter === 'convs'
+          ? filtered.filter(c => c.hasConv)
+          : filtered;
+
+    return byTab.sort((a, b) => {
       if (a.hasConv && b.hasConv) return (b.lastAt || '').localeCompare(a.lastAt || '');
       if (a.hasConv !== b.hasConv) return a.hasConv ? -1 : 1;
       return a.name.localeCompare(b.name, 'pt-BR');
     });
-  }, [contacts, convByKey, searchQuery]);
+  }, [contacts, convByKey, searchQuery, filter]);
 
   const openChat = (target: ChatTarget) => setSelected(target);
   const selectedKey = selected ? phoneKey(selected.phone) : null;
@@ -481,6 +499,36 @@ export const ChatsPage: React.FC = () => {
             )}
           </div>
 
+          {/* Filtros da lista, chips estilo WhatsApp: Tudo / Não lidas N / Conversas */}
+          <div className="flex items-center gap-1.5 mt-2.5 overflow-x-auto">
+            {(
+              [
+                { id: 'all', label: 'Tudo', title: 'Todas as conversas e contatos' },
+                { id: 'unread', label: 'Não lidas', title: 'Só conversas com mensagem não lida' },
+                { id: 'convs', label: 'Conversas', title: 'Só quem já trocou mensagem' },
+              ] as const
+            ).map(f => {
+              const active = filter === f.id;
+              return (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setFilter(f.id)}
+                  aria-pressed={active}
+                  title={f.title}
+                  className={`shrink-0 inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold border transition-colors ${
+                    active
+                      ? 'bg-emerald-100 dark:bg-emerald-900/40 border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                      : 'bg-slate-100 dark:bg-white/5 border-transparent text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10'
+                  }`}
+                >
+                  {f.label}
+                  {f.id === 'unread' && unreadChats > 0 && <span>{unreadChats > 99 ? '99+' : unreadChats}</span>}
+                </button>
+              );
+            })}
+          </div>
+
         </div>
 
         {/* Lista única: contatos do CRM — com conversa em cima, resto A→Z */}
@@ -489,7 +537,13 @@ export const ChatsPage: React.FC = () => {
             <div className="text-center py-10 px-6 text-slate-400">
               <Users size={28} className="mx-auto mb-2 opacity-40" />
               <p className="text-sm">
-                {searchQuery ? 'Nenhum contato encontrado.' : 'Nenhum contato com telefone no CRM.'}
+                {searchQuery
+                  ? 'Nenhum contato encontrado.'
+                  : filter === 'unread'
+                    ? 'Nenhuma conversa não lida. Tudo em dia!'
+                    : filter === 'convs'
+                      ? 'Nenhuma conversa ainda.'
+                      : 'Nenhum contato com telefone no CRM.'}
               </p>
             </div>
           )}
