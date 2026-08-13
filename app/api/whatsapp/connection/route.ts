@@ -369,11 +369,35 @@ export async function DELETE(req: Request) {
 
   // Multi-número: ?id=<connectionId> desconecta UMA conexão específica;
   // sem id, cai na conexão padrão (compat com a UI antiga de 1 número).
-  const targetId = (new URL(req.url).searchParams.get('id') || '').trim();
+  // ?purge=true EXCLUI a conexão da lista de vez (linha some do hub).
+  const url = new URL(req.url);
+  const targetId = (url.searchParams.get('id') || '').trim();
+  const purge = url.searchParams.get('purge') === 'true';
   const conn = targetId
     ? await getConnectionByIdForOrg(auth.admin, auth.user.organizationId, targetId)
     : await getConnectionByOrg(auth.admin, auth.user.organizationId);
   if (!conn) return json({ error: 'Conexão não configurada' }, 404);
+
+  if (purge) {
+    // EXCLUIR: derruba a instância na Evolution (quando houver) e apaga a
+    // LINHA. O histórico de conversas fica (FK é SET NULL) — excluir a
+    // conexão nunca apaga mensagens.
+    if (!isMetaCloudConnection(conn)) {
+      try {
+        await getProvider(conn).logout();
+      } catch {
+        // best-effort: a sessão pode nem existir mais
+      }
+      const normalize = (u: string) => u.replace(/\/+$/, '').replace(/\/manager$/, '');
+      const base = normalize(conn.base_url || '');
+      if (!base || base === normalize(envEvolution().baseUrl)) {
+        await deleteEvolutionInstance(conn.instance_name);
+      }
+    }
+    const { error } = await auth.admin.from('wa_connections').delete().eq('id', conn.id);
+    if (error) return json({ error: `Falha ao excluir a conexão: ${error.message}` }, 500);
+    return json({ ok: true });
+  }
 
   if (isMetaCloudConnection(conn)) {
     // Modo direto: não há instância na Evolution. Só limpa as credenciais —

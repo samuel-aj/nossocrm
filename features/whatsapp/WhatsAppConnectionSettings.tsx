@@ -10,7 +10,7 @@
  */
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, ExternalLink, KeyRound, Loader2, MessageCircle, QrCode, Unplug } from 'lucide-react';
+import { CheckCircle2, ExternalLink, KeyRound, Loader2, MessageCircle, QrCode, Trash2, Unplug } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 
 interface WaConnectionInfo {
@@ -213,8 +213,21 @@ export function WhatsAppConnectionSettings() {
           addToast('WhatsApp API oficial conectado!', 'success');
         }
       } else {
-        // QR: abre o painel de pareamento mirando a linha recém-criada/reusada
-        setQrTargetId(data.connection?.id ?? null);
+        // QR: injeta a linha recém-criada DIRETO no cache da lista — assim o
+        // painel do QR já nasce dentro do cartão certo, sem "pular" do topo
+        // pro lugar enquanto o refetch não chega.
+        const created = data.connection;
+        if (created?.id) {
+          qc.setQueryData<ConnResponse>(['waConnection'], old =>
+            old && !(old.connections ?? []).some(x => x.id === created.id)
+              ? {
+                  ...old,
+                  connections: [...(old.connections ?? []), { ...created, metaCredentials: null }],
+                }
+              : old
+          );
+        }
+        setQrTargetId(created?.id ?? null);
         addToast('Instância criada. Escaneie o QR pra conectar o número.', 'success');
       }
     },
@@ -238,16 +251,18 @@ export function WhatsAppConnectionSettings() {
   };
 
   const disconnectMut = useMutation({
-    // MULTI-NÚMERO: desconecta UMA conexão específica pelo id
-    mutationFn: (id: string) =>
-      fetchJson<{ ok: boolean }>(`/api/whatsapp/connection?id=${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-      }),
-    onSuccess: () => {
+    // MULTI-NÚMERO: desconecta (ou EXCLUI, purge) UMA conexão pelo id
+    mutationFn: ({ id, purge }: { id: string; purge?: boolean }) =>
+      fetchJson<{ ok: boolean }>(
+        `/api/whatsapp/connection?id=${encodeURIComponent(id)}${purge ? '&purge=true' : ''}`,
+        { method: 'DELETE' }
+      ),
+    onSuccess: (_data, vars) => {
       setConfirmDisconnect(null);
+      if (vars.purge && qrTargetId === vars.id) setQrTargetId(null);
       qc.invalidateQueries({ queryKey: ['waConnection'] });
       qc.invalidateQueries({ queryKey: ['waConnectionQr'] });
-      addToast('Número desconectado.', 'success');
+      addToast(vars.purge ? 'Conexão excluída.' : 'Número desconectado.', 'success');
     },
     onError: e => {
       setConfirmDisconnect(null);
@@ -565,13 +580,6 @@ export function WhatsAppConnectionSettings() {
         </div>
       )}
 
-      {/* QR de uma linha recém-criada que ainda não apareceu na lista */}
-      {waitingScan && !qrTarget && (
-        <div className="mb-4 rounded-2xl border border-emerald-200 dark:border-emerald-500/25 p-4">
-          {qrPanel}
-        </div>
-      )}
-
       {/* HUB: um CARTÃO por número; QR de pareamento e edição de credenciais
           abrem DENTRO do cartão do próprio número */}
       {conns.length > 0 && (
@@ -631,16 +639,18 @@ export function WhatsAppConnectionSettings() {
                       <div className="flex items-center gap-2 shrink-0">
                         <button
                           type="button"
-                          onClick={() => disconnectMut.mutate(c.id)}
+                          onClick={() => disconnectMut.mutate({ id: c.id, purge: !rowOn })}
                           disabled={disconnectMut.isPending}
                           className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-colors disabled:opacity-60"
                         >
                           {disconnectMut.isPending ? (
                             <Loader2 size={14} className="animate-spin" />
-                          ) : (
+                          ) : rowOn ? (
                             <Unplug size={14} />
+                          ) : (
+                            <Trash2 size={14} />
                           )}
-                          Confirmar desconexão
+                          {rowOn ? 'Confirmar desconexão' : 'Confirmar exclusão'}
                         </button>
                         <button
                           type="button"
@@ -679,7 +689,15 @@ export function WhatsAppConnectionSettings() {
                           onClick={() => setConfirmDisconnect(c.id)}
                           className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-200 dark:border-red-500/30 text-red-600 dark:text-red-400 text-xs font-bold hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
                         >
-                          <Unplug size={14} /> Desconectar
+                          {rowOn ? (
+                            <>
+                              <Unplug size={14} /> Desconectar
+                            </>
+                          ) : (
+                            <>
+                              <Trash2 size={14} /> Excluir
+                            </>
+                          )}
                         </button>
                       </div>
                     )}
@@ -700,6 +718,14 @@ export function WhatsAppConnectionSettings() {
               );
             })}
           </div>
+
+          {/* Fallback raríssimo: pareando uma linha que não está na lista
+              (o cache otimista normalmente já a injetou no cartão acima) */}
+          {waitingScan && !qrTarget && (
+            <div className="rounded-2xl border border-emerald-200 dark:border-emerald-500/25 p-4">
+              {qrPanel}
+            </div>
+          )}
 
           {/* HUB: adicionar mais números, de QUALQUER tipo — QR e API oficial
               convivem em qualquer quantidade. Os botões ficam SEMPRE visíveis:
