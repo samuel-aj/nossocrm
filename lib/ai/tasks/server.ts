@@ -2,6 +2,7 @@ import 'server-only';
 
 import { createClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+import { withTabOrg } from '@/lib/supabase/tabOrgScope';
 import { getModel, type AIProvider } from '@/lib/ai/config';
 import { AIProvider as AIProviderConst } from '@/types/constants';
 
@@ -76,7 +77,7 @@ export async function requireAITaskContext(req: Request): Promise<AITaskContext>
 
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .select('organization_id')
+    .select('organization_id, role')
     .eq('id', user.id)
     .single();
 
@@ -84,7 +85,17 @@ export async function requireAITaskContext(req: Request): Promise<AITaskContext>
     throw new AITaskHttpError(404, 'PROFILE_NOT_FOUND', 'Profile not found');
   }
 
-  const organizationId = profile.organization_id as string;
+  // ORG POR ABA: honra o header x-org-id (validado) — ver lib/supabase/tabOrgScope.
+  const scoped = await withTabOrg({
+    id: user.id,
+    role: (profile as { role?: string }).role || '',
+    organization_id: profile.organization_id as string,
+  });
+  if (!scoped) {
+    throw new AITaskHttpError(403, 'ORG_ACCESS_DENIED', 'Acesso negado a esta organização');
+  }
+
+  const organizationId = scoped.organization_id;
 
   const { data: orgSettings, error: orgError } = await supabase
     .from('organization_settings')

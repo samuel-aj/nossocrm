@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useToast } from '@/context/ToastContext'
 import { UserRole } from '@/types/constants'
-import { announceOrgSwitch, pinTabOrg } from '@/lib/tabOrg'
+import { pinTabOrg } from '@/lib/tabOrg'
 import {
   Building2,
   Plus,
@@ -284,11 +284,9 @@ export default function AdminPage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      // Marca ESTA aba como pertencendo à nova org (senão o OrgTabGuard
-      // entende a troca como vinda de outra aba e avisa à toa) e anuncia a
-      // troca às outras abas ANTES de navegar.
+      // Marca SÓ ESTA aba como pertencendo à org escolhida (org por aba:
+      // as outras abas continuam nas orgs delas).
       pinTabOrg(org.id, org.name)
-      announceOrgSwitch(org.id, org.name)
       // Full reload p/ remontar o AuthProvider de `(protected)` do zero.
       // Tentativa anterior com router.refresh + router.push fazia soft nav
       // entre route groups `(admin)` → `(protected)`, com comportamento

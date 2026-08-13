@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
+import { withTabOrg } from '@/lib/supabase/tabOrgScope';
 import { detectCsvDelimiter, parseCsv, type CsvDelimiter } from '@/lib/utils/csv';
 import { normalizePhoneE164 } from '@/lib/phone';
 
@@ -185,10 +186,28 @@ export async function POST(req: Request) {
 
     const supabase = await createClient();
 
+    // ORG POR ABA: escopo explícito. Com a RLS por membership o usuário
+    // enxerga TODAS as orgs dele, então tanto a leitura quanto os inserts
+    // precisam apontar pra org DA ABA (header x-org-id validado).
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const { data: me } = await supabase
+      .from('profiles')
+      .select('id, role, organization_id')
+      .eq('id', user.id)
+      .single();
+    if (!me?.organization_id) return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+    const scoped = await withTabOrg(me);
+    if (!scoped) return NextResponse.json({ error: 'Acesso negado a esta organização' }, { status: 403 });
+    const orgId = scoped.organization_id;
+
     // Companies: preload and optionally create missing ones
     const { data: companies, error: companiesError } = await supabase
       .from('crm_companies')
       .select('id,name')
+      .eq('organization_id', orgId)
       .is('deleted_at', null);
 
     if (companiesError) {
@@ -211,7 +230,7 @@ export async function POST(req: Request) {
     }
 
     if (createCompanies && missingCompanies.size) {
-      const payload = Array.from(missingCompanies).map(name => ({ name }));
+      const payload = Array.from(missingCompanies).map(name => ({ name, organization_id: orgId }));
       const { data: createdCompanies, error: createCompaniesError } = await supabase
         .from('crm_companies')
         .insert(payload)
@@ -242,6 +261,7 @@ export async function POST(req: Request) {
         const { data: existing, error: existingError } = await supabase
           .from('contacts')
           .select('id,email')
+          .eq('organization_id', orgId)
           .in('email', chunk)
           .is('deleted_at', null);
 
@@ -287,6 +307,7 @@ export async function POST(req: Request) {
       const companyId = companyName ? companyIdByName.get(normalizeHeader(companyName)) : undefined;
 
       const base = {
+        organization_id: orgId,
         name: p.data.name || '',
         email: p.data.email || null,
         phone: phoneE164 || null,

@@ -18,37 +18,10 @@ import { sanitizeUUID } from './utils';
 import { sortActivitiesSmart } from '@/lib/utils/activitySort';
 
 // =============================================================================
-// Organization inference (client-side, RLS-safe)
+// Organization inference: centralizada em ./orgId (org POR ABA + fallback perfil)
 // =============================================================================
-let cachedOrgId: string | null = null;
-let cachedOrgUserId: string | null = null;
-
-export function invalidateOrgCache() {
-  cachedOrgId = null;
-  cachedOrgUserId = null;
-}
-
-async function getCurrentOrganizationId(): Promise<string | null> {
-  if (!supabase) return null;
-
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
-
-  if (cachedOrgUserId === user.id && cachedOrgId) return cachedOrgId;
-
-  const { data: profile, error } = await supabase
-    .from('profiles')
-    .select('organization_id')
-    .eq('id', user.id)
-    .single();
-
-  if (error) return null;
-
-  const orgId = sanitizeUUID((profile as any)?.organization_id);
-  cachedOrgUserId = user.id;
-  cachedOrgId = orgId;
-  return orgId;
-}
+import { getCurrentOrganizationId, invalidateOrgCache } from './orgId';
+export { invalidateOrgCache };
 
 // ============================================
 // ACTIVITIES SERVICE

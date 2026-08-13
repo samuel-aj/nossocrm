@@ -73,7 +73,6 @@ import { UIChat } from './ai/UIChat';
 
 import { NotificationPopover } from './notifications/NotificationPopover';
 import { OrgSwitcher } from './OrgSwitcher';
-import { OrgTabGuard } from './OrgTabGuard';
 
 /**
  * Props do componente Layout
@@ -900,9 +899,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       <BottomNav onOpenMore={() => setIsMoreOpen(true)} />
       <MoreMenuSheet isOpen={isMoreOpen} onClose={() => setIsMoreOpen(false)} />
 
-      {/* Aviso quando OUTRA aba troca a org da sessão (evita mexer nos dados
-          da organização errada sem perceber) */}
-      <OrgTabGuard />
     </div>
   );
 };

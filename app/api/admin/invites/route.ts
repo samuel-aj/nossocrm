@@ -5,6 +5,7 @@ import { findAuthUserByEmail } from '@/lib/supabase/authUsers';
 import { countOrgMembers } from '@/lib/supabase/orgMembers';
 import { sendOrgAddedEmail } from '@/lib/email/orgAddedEmail';
 import { UserRole } from '@/types/constants';
+import { withTabOrg } from '@/lib/supabase/tabOrgScope';
 
 function json<T>(body: T, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -45,13 +46,16 @@ export async function GET() {
     .single();
 
   if (meError || !me?.organization_id) return json({ error: 'Profile not found' }, 404);
-  if (me.role !== UserRole.ADMIN && me.role !== UserRole.SUPER_ADMIN) return json({ error: 'Forbidden' }, 403);
+  // ORG POR ABA: honra o header x-org-id validado (ver lib/supabase/tabOrgScope)
+  const scoped = await withTabOrg({ id: user.id, role: me.role, organization_id: me.organization_id });
+  if (!scoped) return json({ error: 'Acesso negado a esta organização' }, 403);
+  if (scoped.role !== UserRole.ADMIN && scoped.role !== UserRole.SUPER_ADMIN) return json({ error: 'Forbidden' }, 403);
 
   // Return only active (not used) invites, and let UI decide how to show expiration.
   const { data: invites, error } = await supabase
     .from('organization_invites')
     .select('id, token, role, email, created_at, expires_at, used_at, created_by')
-    .eq('organization_id', me.organization_id)
+    .eq('organization_id', scoped.organization_id)
     .is('used_at', null)
     .limit(200)
     .order('created_at', { ascending: false });
@@ -85,7 +89,10 @@ export async function POST(req: Request) {
     .single();
 
   if (meError || !me?.organization_id) return json({ error: 'Profile not found' }, 404);
-  if (me.role !== UserRole.ADMIN && me.role !== UserRole.SUPER_ADMIN) return json({ error: 'Forbidden' }, 403);
+  // ORG POR ABA: honra o header x-org-id validado (ver lib/supabase/tabOrgScope)
+  const scoped = await withTabOrg({ id: user.id, role: me.role, organization_id: me.organization_id });
+  if (!scoped) return json({ error: 'Acesso negado a esta organização' }, 403);
+  if (scoped.role !== UserRole.ADMIN && scoped.role !== UserRole.SUPER_ADMIN) return json({ error: 'Forbidden' }, 403);
 
   const raw = await req.json().catch(() => null);
   const parsed = CreateInviteSchema.safeParse(raw);
@@ -107,8 +114,8 @@ export async function POST(req: Request) {
     // conta pra vaga igual ao "login pronto" e ao convite por link no aceite.
     // Conta membros = perfis ativos aqui + vínculos multi-org (igual à lista).
     const [{ data: orgLimits }, memberCount] = await Promise.all([
-      admin.from('organizations').select('max_users').eq('id', me.organization_id).single(),
-      countOrgMembers(admin, me.organization_id),
+      admin.from('organizations').select('max_users').eq('id', scoped.organization_id).single(),
+      countOrgMembers(admin, scoped.organization_id),
     ]);
     if (orgLimits?.max_users && memberCount >= orgLimits.max_users) {
       return json(
@@ -132,7 +139,7 @@ export async function POST(req: Request) {
       const isPendingHere = Boolean(
         existingAuthUser.invited_at &&
           !existingAuthUser.last_sign_in_at &&
-          existingProfile?.organization_id === me.organization_id
+          existingProfile?.organization_id === scoped.organization_id
       );
       if (existingProfile && !isPendingHere) {
         // Conta já existente: em vez de bloquear, ADICIONA a conta a esta
@@ -143,15 +150,15 @@ export async function POST(req: Request) {
           .from('user_organizations')
           .select('user_id')
           .eq('user_id', existingAuthUser.id)
-          .eq('organization_id', me.organization_id)
+          .eq('organization_id', scoped.organization_id)
           .maybeSingle();
-        if (existingLink || existingProfile.organization_id === me.organization_id) {
+        if (existingLink || existingProfile.organization_id === scoped.organization_id) {
           return json({ error: 'Este email já é membro desta organização.' }, 400);
         }
         const { error: linkError } = await admin.from('user_organizations').upsert(
           {
             user_id: existingAuthUser.id,
-            organization_id: me.organization_id,
+            organization_id: scoped.organization_id,
             role: parsed.data.role as Role,
           },
           { onConflict: 'user_id,organization_id' }
@@ -161,7 +168,7 @@ export async function POST(req: Request) {
         const { data: orgRow } = await admin
           .from('organizations')
           .select('name')
-          .eq('id', me.organization_id)
+          .eq('id', scoped.organization_id)
           .single();
         const origin = req.headers.get('origin') || new URL(req.url).origin;
         const emailSent = await sendOrgAddedEmail({
@@ -179,7 +186,7 @@ export async function POST(req: Request) {
   const { data: invite, error } = await supabase
     .from('organization_invites')
     .insert({
-      organization_id: me.organization_id,
+      organization_id: scoped.organization_id,
       role: parsed.data.role as Role,
       email,
       expires_at: expiresAt,
@@ -212,7 +219,7 @@ export async function POST(req: Request) {
         redirectTo: `${origin}/join?token=${invite.token}`,
         data: {
           name: email.split('@')[0],
-          organization_id: me.organization_id,
+          organization_id: scoped.organization_id,
           role: parsed.data.role,
         },
       });
