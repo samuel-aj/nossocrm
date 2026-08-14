@@ -187,6 +187,18 @@ export const useDashboardMetrics = (period: PeriodFilter = 'this_month', boardId
     });
   }, [allDeals, dateRange, boardId, ownerId]);
 
+  // SNAPSHOT COMPLETO do board (inclui ganhos/perdidos): usado pelo Funil.
+  // Sem os fechados, as etapas finais "Ganho"/"Perdido" ficariam sempre
+  // zeradas no gráfico (deal fechado sai do snapshot ativo, mas continua
+  // parado na etapa final do board).
+  const snapshotDeals = React.useMemo(() => {
+    return allDeals.filter(deal => {
+      const boardMatch = boardId ? deal.boardId === boardId : true;
+      const ownerMatch = ownerId ? deal.ownerId === ownerId : true;
+      return boardMatch && ownerMatch;
+    });
+  }, [allDeals, boardId, ownerId]);
+
   // Filtrar deals ATIVOS no Board atual - SNAPSHOT (O que está no funil HOJE, independente de data)
   const activeSnapshotDeals = React.useMemo(() => {
     return allDeals.filter(deal => {
@@ -337,14 +349,14 @@ export const useDashboardMetrics = (period: PeriodFilter = 'this_month', boardId
       ];
     }
 
-    // Usar dados de SNAPSHOT (activeSnapshotDeals)
-    // Mostra tudo que está no funil AGORA, independente de quando foi criado.
+    // Usar o SNAPSHOT COMPLETO (com ganhos/perdidos): mostra tudo que está
+    // no funil AGORA, incluindo as etapas finais, independente de quando foi criado.
     return stages.map(stage => ({
       name: stage.label,
-      count: activeSnapshotDeals.filter(d => d.status === stage.id).length,
+      count: snapshotDeals.filter(d => d.status === stage.id).length,
       fill: COLOR_MAP[stage.color] || '#3b82f6', // Fallback to blue
     }));
-  }, [activeSnapshotDeals, defaultBoard, boards, boardId]);
+  }, [snapshotDeals, defaultBoard, boards, boardId]);
 
   // Mock Trend Data
   // Real Trend Data (Last 6 Months)
