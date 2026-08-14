@@ -478,9 +478,6 @@ export const useBoardsController = () => {
 
   // Filtering Logic
   const filteredDeals = useMemo(() => {
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - 30);
-
     // Condições completas: vazio/preenchido não precisam de valor; contém/igual sim.
     const activeCfConditions = customFieldConditions.filter(
       (c) => c.field && (c.operator === 'empty' || c.operator === 'not_empty' || c.value.trim() !== '')
@@ -570,24 +567,14 @@ export const useBoardsController = () => {
         matchesStatus = l.isLost;
       }
 
-      // Higiene da visão padrão: ganhos/perdidos parados há 30+ dias saem de
-      // "Em Aberto"/"Todos". Com filtro de data ATIVO o usuário pediu um
-      // período explícito (ex.: retrato de maio), então o corte não se aplica
-      // — senão os ganhos/perdidos antigos sumiriam do próprio período pedido.
-      let matchesRecent = true;
-      if (!dateFilterActive && (statusFilter === 'open' || statusFilter === 'all')) {
-        if (l.isWon || l.isLost) {
-          const lastUpdate = new Date(l.updatedAt);
-          if (lastUpdate < cutoffDate) {
-            matchesRecent = false;
-          }
-        }
-      }
+      // Sem corte de "higiene" por idade: ganhos/perdidos aparecem SEMPRE em
+      // "Todos", pra coluna bater com os filtros "Ganhos"/"Perdidos" (o corte
+      // de 30 dias fazia a coluna Perdido mostrar 2 e o filtro mostrar 4).
 
       // Filtro por TAG selecionada (case-insensitive, match exato da tag)
       const matchesTag = !tagTerm || (l.tags || []).some((t: string) => String(t).toLowerCase() === tagTerm);
 
-      return matchesSearch && matchesOwner && matchesCustomField && matchesTag && matchesDate && matchesStatus && matchesRecent;
+      return matchesSearch && matchesOwner && matchesCustomField && matchesTag && matchesDate && matchesStatus;
     }).map(deal => {
       // Enrich owner info if it matches current user
       if (deal.ownerId === profile?.id || deal.ownerId === (profile as any)?.user_id) { // Fallback for some profile types
