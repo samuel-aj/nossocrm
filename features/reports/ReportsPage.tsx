@@ -211,7 +211,9 @@ const ReportsPage: React.FC = () => {
   ]);
 
   return (
-    <div className="flex flex-col h-[calc(100vh-7rem)] max-md:h-auto space-y-4">
+    // pb-6: respiro na base — sem ele os últimos cards colavam na borda
+    // inferior da página (o container tem altura fixa no desktop)
+    <div className="flex flex-col h-[calc(100vh-7rem)] max-md:h-auto space-y-4 pb-6">
       {/* Header com Filtros */}
       <div className="flex justify-between items-center shrink-0 max-md:flex-wrap max-md:gap-y-3">
         <div>
