@@ -223,6 +223,55 @@ const ReportsPage: React.FC = () => {
     return items;
   }, [selectedBoard, boards, allCrmDeals, selectedOwnerId]);
 
+  // Taxas do funil (mesma base do gráfico de conversão, snapshot do board):
+  // Qualificação = chegaram à etapa "Qualificado" ÷ total que entrou no funil;
+  // Conversão = ganhos ÷ qualificados. Board sem etapa "Qualificado" cai no
+  // fallback ganhos ÷ total.
+  const funnelRates = useMemo(() => {
+    const convBoard = selectedBoard || boards[0];
+    const stages = convBoard?.stages || [];
+    const boardDeals = allCrmDeals.filter(
+      d => d.boardId === convBoard?.id && (!selectedOwnerId || d.ownerId === selectedOwnerId)
+    );
+    const total = boardDeals.length;
+    const wonCount = boardDeals.filter(d => d.isWon).length;
+
+    const isWonStage = (label: string) => /^(ganh|won|vendid)/i.test(label.trim());
+    const isLostStage = (label: string) => /^(perdid|lost)/i.test(label.trim());
+    const midStages = stages.filter(s => !isWonStage(s.label) && !isLostStage(s.label));
+    // "Qualificado(a/s)" — o ^ evita casar com "Em qualificação"
+    const qIdx = midStages.findIndex(s => /^qualificad/i.test(s.label.trim()));
+
+    let qualified: number | null = null;
+    if (qIdx >= 0) {
+      const openByStage = new Map<string, number>();
+      for (const d of boardDeals) {
+        if (d.isWon || d.isLost) continue;
+        openByStage.set(d.status, (openByStage.get(d.status) || 0) + 1);
+      }
+      // qualificados = chegaram à etapa Qualificado (abertos dela em diante + ganhos)
+      let acc = wonCount;
+      for (let i = midStages.length - 1; i >= qIdx; i--) {
+        acc += openByStage.get(midStages[i].id) || 0;
+      }
+      qualified = acc;
+    }
+
+    return {
+      total,
+      wonCount,
+      qualified,
+      hasQualifiedStage: qIdx >= 0,
+      qualificationRate: qualified !== null && total > 0 ? (qualified / total) * 100 : null,
+      conversionRate:
+        qualified !== null && qualified > 0
+          ? (wonCount / qualified) * 100
+          : total > 0
+            ? (wonCount / total) * 100
+            : null,
+    };
+  }, [selectedBoard, boards, allCrmDeals, selectedOwnerId]);
+
   const generatedBy = useMemo(() => {
     if (profile?.first_name && profile?.last_name) return `${profile.first_name} ${profile.last_name}`;
     return profile?.first_name || profile?.email || 'Usuário';
@@ -411,7 +460,7 @@ const ReportsPage: React.FC = () => {
       )}
 
       {/* KPI Cards Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 shrink-0">
         {/* Pipeline Value - FEATURE #2 */}
         <div className="glass p-4 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
           <div className="flex items-center gap-2 mb-2">
@@ -426,17 +475,39 @@ const ReportsPage: React.FC = () => {
           </p>
         </div>
 
-        {/* Win Rate */}
+        {/* Taxa de Qualificação = qualificados ÷ total de leads do funil */}
         <div className="glass p-4 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
           <div className="flex items-center gap-2 mb-2">
             <div className="p-2 rounded-lg bg-emerald-500/10">
               <Target className="text-emerald-500" size={18} />
             </div>
-            <span className="text-xs text-slate-500">Win Rate</span>
+            <span className="text-xs text-slate-500">Taxa de Qualificação</span>
           </div>
-          <p className="text-2xl font-bold text-slate-900 dark:text-white">{actualWinRate.toFixed(1)}%</p>
-          <p className={`text-xs ${changes.winRate >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
-            {changes.winRate >= 0 ? '+' : ''}{changes.winRate.toFixed(1)}% {COMPARISON_LABELS[period]}
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">
+            {funnelRates.qualificationRate !== null ? `${funnelRates.qualificationRate.toFixed(1)}%` : '--'}
+          </p>
+          <p className="text-xs text-slate-500">
+            {funnelRates.hasQualifiedStage
+              ? `${funnelRates.qualified} qualificados de ${funnelRates.total} leads`
+              : 'Board sem etapa "Qualificado"'}
+          </p>
+        </div>
+
+        {/* Taxa de Conversão = ganhos ÷ qualificados */}
+        <div className="glass p-4 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="p-2 rounded-lg bg-teal-500/10">
+              <TrendingUp className="text-teal-500" size={18} />
+            </div>
+            <span className="text-xs text-slate-500">Taxa de Conversão</span>
+          </div>
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">
+            {funnelRates.conversionRate !== null ? `${funnelRates.conversionRate.toFixed(1)}%` : '--'}
+          </p>
+          <p className="text-xs text-slate-500">
+            {funnelRates.hasQualifiedStage
+              ? `${funnelRates.wonCount} ganhos de ${funnelRates.qualified} qualificados`
+              : `${funnelRates.wonCount} ganhos de ${funnelRates.total} leads`}
           </p>
         </div>
 
