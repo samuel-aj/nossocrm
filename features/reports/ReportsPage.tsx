@@ -9,6 +9,13 @@ import { generateReportPDF } from './utils/generateReportPDF';
 import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
 
+// Etapa de GANHO por NOME: padrão do produto "fechou contrato = Ganho" —
+// cobre Ganho/Won/Vendido, Contrato Assinado, Protocolado, Concluído, Novo
+// Cliente (levantado dos boards reais de todas as orgs em 2026-08-17).
+const WON_LABEL_RE = /^(ganh|won|vendid|protocolad|conclu[ií]d|novo cliente)|assinad/i;
+// Etapa de PERDA por nome (o vínculo de ciclo "OTHER" também conta)
+const LOST_LABEL_RE = /^(perdid|lost|desqualificad)/i;
+
 // Cor do estágio (classe Tailwind gravada no board) → cor hex pro gráfico
 const STAGE_COLOR_MAP: Record<string, string> = {
   'bg-blue-500': '#3b82f6',
@@ -174,13 +181,15 @@ const ReportsPage: React.FC = () => {
     if (stages.length === 0) return [];
 
     // Etapas FINAIS são resultado, não passagem — saem do funil e viram a
-    // barra final. GANHO = nome clássico OU etapa vinculada ao ciclo
-    // "CUSTOMER" (ex.: "Protocolado" no Pós venda, que é a mesma coisa que
-    // Ganho). PERDA = nome clássico OU ciclo "OTHER" (semântica do Kanban).
+    // barra final. GANHO = nome de fechamento (WON_LABEL_RE) OU a ÚNICA
+    // etapa do board vinculada ao ciclo "CUSTOMER" (pipeline clássico);
+    // boards de pós-venda têm VÁRIAS etapas CUSTOMER, aí só o nome decide.
+    const customerStages = stages.filter(s => s.linkedLifecycleStage === 'CUSTOMER');
+    const soleCustomerId = customerStages.length === 1 ? customerStages[0].id : null;
     const isWonStage = (s: (typeof stages)[number]) =>
-      s.linkedLifecycleStage === 'CUSTOMER' || /^(ganh|won|vendid)/i.test(s.label.trim());
+      WON_LABEL_RE.test(s.label.trim()) || s.id === soleCustomerId;
     const isLostStage = (s: (typeof stages)[number]) =>
-      s.linkedLifecycleStage === 'OTHER' || /^(perdid|lost)/i.test(s.label.trim());
+      s.linkedLifecycleStage === 'OTHER' || LOST_LABEL_RE.test(s.label.trim());
     const midStages = stages.filter(s => !isWonStage(s) && !isLostStage(s));
     if (midStages.length === 0) return [];
     const wonStage = stages.find(isWonStage);
@@ -245,12 +254,14 @@ const ReportsPage: React.FC = () => {
     );
     const total = boardDeals.length;
 
-    // Mesmos critérios do gráfico: etapa de ganho por nome OU ciclo CUSTOMER
-    // (ex.: "Protocolado"), etapa de perda por nome OU ciclo OTHER
+    // Mesmos critérios do gráfico: ganho por nome de fechamento OU única
+    // etapa CUSTOMER do board; perda por nome OU ciclo OTHER
+    const customerStages = stages.filter(s => s.linkedLifecycleStage === 'CUSTOMER');
+    const soleCustomerId = customerStages.length === 1 ? customerStages[0].id : null;
     const isWonStage = (s: (typeof stages)[number]) =>
-      s.linkedLifecycleStage === 'CUSTOMER' || /^(ganh|won|vendid)/i.test(s.label.trim());
+      WON_LABEL_RE.test(s.label.trim()) || s.id === soleCustomerId;
     const isLostStage = (s: (typeof stages)[number]) =>
-      s.linkedLifecycleStage === 'OTHER' || /^(perdid|lost)/i.test(s.label.trim());
+      s.linkedLifecycleStage === 'OTHER' || LOST_LABEL_RE.test(s.label.trim());
     const midStages = stages.filter(s => !isWonStage(s) && !isLostStage(s));
     const wonStageIds = new Set(stages.filter(isWonStage).map(s => s.id));
     const wonCount = boardDeals.filter(d => d.isWon || (!d.isLost && wonStageIds.has(d.status))).length;
