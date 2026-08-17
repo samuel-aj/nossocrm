@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import { Rubik } from 'next/font/google'
 import './globals.css'
 import { ServiceWorkerRegister } from '@/components/pwa/ServiceWorkerRegister'
+import { ChunkErrorReload } from '@/components/pwa/ChunkErrorReload'
 import { InstallBanner } from '@/components/pwa/InstallBanner'
 import RootProviders from './providers'
 
@@ -29,6 +30,7 @@ export default function RootLayout({
     <html lang="pt-BR" className="dark" suppressHydrationWarning>
       <body className={`${rubik.variable} font-sans antialiased bg-[var(--color-bg)] text-[var(--color-text-primary)]`}>
         <ServiceWorkerRegister />
+        <ChunkErrorReload />
         <InstallBanner />
         <RootProviders>{children}</RootProviders>
       </body>
