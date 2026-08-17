@@ -568,6 +568,12 @@ const ReportsPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Espaçador REAL depois do último bloco: quando o conteúdo transborda
+          a altura fixa do container, padding no root não aparece (fica no
+          limite nominal da caixa, não abaixo do conteúdo transbordado) —
+          este elemento garante a margem inferior em qualquer cenário */}
+      <div className="shrink-0 h-2" aria-hidden="true" />
     </div>
   );
 };
