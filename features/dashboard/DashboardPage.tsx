@@ -401,7 +401,10 @@ const DashboardPage: React.FC = () => {
       </div>
 
       {/* Auto-Resize Bottom Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 min-h-[300px]">
+      {/* gap-4 (e não gap-6): mesma calha das fileiras de cima — com gap
+          diferente as colunas não alinham e o Funil ficava mais estreito
+          que o card acima dele */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 flex-1 min-h-[300px]">
         {/* Funnel */}
         <div className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col h-full">
           <div className="flex justify-between items-center mb-2 shrink-0">
