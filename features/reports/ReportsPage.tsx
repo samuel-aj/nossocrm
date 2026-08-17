@@ -473,10 +473,10 @@ const ReportsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Loss Analysis */}
-      {lostDeals.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Loss by Category */}
+      {/* Fileira: Leads Perdidos + Conversão por Etapa lado a lado */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Loss by Category */}
+        {lostDeals.length > 0 && (
           <div className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
             <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2 mb-4">
               <ThumbsDown className="text-red-500" size={20} />
@@ -518,38 +518,15 @@ const ReportsPage: React.FC = () => {
               );
             })()}
           </div>
+        )}
 
-          {/* Motivos de Perda: perdas QUALIFICADAS (+ antigas sem categoria,
-              que nasceram antes da classificação existir) */}
-          <div className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2 mb-4">
-              <CheckCircle2 className="text-orange-500" size={20} />
-              Motivos de Perda
-            </h2>
-            {renderLossReasons(
-              lostDeals.filter(d => d.lossCategory !== 'disqualified'),
-              'bg-orange-500'
-            )}
-          </div>
-
-          {/* Desqualificação: perdas DESQUALIFICADAS (lead fora do perfil) */}
-          <div className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2 mb-4">
-              <UserX className="text-red-500" size={20} />
-              Desqualificação
-            </h2>
-            {renderLossReasons(
-              lostDeals.filter(d => d.lossCategory === 'disqualified'),
-              'bg-red-500'
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Bottom Grid - Charts & Leaderboard */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 flex-1 min-h-[250px]">
-        {/* Stage Conversion Chart */}
-        <div className="lg:col-span-2 glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col h-full">
+        {/* Conversão por Etapa: ao lado de Leads Perdidos (ocupa a fileira
+            inteira quando não há perdas pra mostrar) */}
+        <div
+          className={`glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col min-h-[320px] ${
+            lostDeals.length > 0 ? 'lg:col-span-2' : 'lg:col-span-3'
+          }`}
+        >
           <div className="flex justify-between items-center mb-2 shrink-0">
             <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display">
               Conversão por Etapa
@@ -567,9 +544,45 @@ const ReportsPage: React.FC = () => {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Fileira de baixo: Motivos de Perda + Desqualificação (+ Top Vendedores) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 flex-1 min-h-[250px]">
+        {/* Motivos de Perda: perdas QUALIFICADAS (+ antigas sem categoria,
+            que nasceram antes da classificação existir) */}
+        {lostDeals.length > 0 && (
+          <div className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2 mb-4">
+              <CheckCircle2 className="text-orange-500" size={20} />
+              Motivos de Perda
+            </h2>
+            {renderLossReasons(
+              lostDeals.filter(d => d.lossCategory !== 'disqualified'),
+              'bg-orange-500'
+            )}
+          </div>
+        )}
+
+        {/* Desqualificação: perdas DESQUALIFICADAS (lead fora do perfil) */}
+        {lostDeals.length > 0 && (
+          <div className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2 mb-4">
+              <UserX className="text-red-500" size={20} />
+              Desqualificação
+            </h2>
+            {renderLossReasons(
+              lostDeals.filter(d => d.lossCategory === 'disqualified'),
+              'bg-red-500'
+            )}
+          </div>
+        )}
 
         {/* Leaderboard - FEATURE #3 (Top Performers) */}
-        <div className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col h-full overflow-hidden">
+        <div
+          className={`glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col h-full overflow-hidden ${
+            lostDeals.length > 0 ? '' : 'lg:col-span-3'
+          }`}
+        >
           <div className="flex justify-between items-center mb-3 shrink-0">
             <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2">
               <Trophy className="text-amber-500" size={20} />
