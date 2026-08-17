@@ -210,6 +210,40 @@ const ReportsPage: React.FC = () => {
     wonRevenue,
   ]);
 
+  // Ranking de motivos (barra + contagem) usado pelos cards "Motivos de
+  // Perda" e "Desqualificação" — cada card recebe só as perdas da sua
+  // categoria, então aqui não há mais etiqueta misturando os dois mundos.
+  const renderLossReasons = (dealsSubset: typeof lostDeals, barClass: string) => {
+    const map = new Map<string, number>();
+    for (const d of dealsSubset) {
+      const reason = d.lossReason || 'Não informado';
+      map.set(reason, (map.get(reason) || 0) + 1);
+    }
+    const sorted = [...map.entries()].sort((a, b) => b[1] - a[1]);
+    const maxCount = sorted[0]?.[1] || 1;
+    if (sorted.length === 0) {
+      return <p className="text-sm text-slate-500 italic text-center py-4">Nenhum motivo registrado.</p>;
+    }
+    return (
+      <div className="space-y-2">
+        {sorted.map(([reason, count]) => (
+          <div key={reason}>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-sm text-slate-700 dark:text-slate-300 truncate">{reason}</span>
+              <span className="text-sm font-bold text-slate-900 dark:text-white ml-2 shrink-0">{count}</span>
+            </div>
+            <div className="w-full bg-slate-100 dark:bg-white/5 rounded-full h-2">
+              <div
+                className={`${barClass} h-2 rounded-full transition-all`}
+                style={{ width: `${(count / maxCount) * 100}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   return (
     // pb-6: respiro na base — sem ele os últimos cards colavam na borda
     // inferior da página (o container tem altura fixa no desktop)
@@ -437,57 +471,29 @@ const ReportsPage: React.FC = () => {
             })()}
           </div>
 
-          {/* Top Loss Reasons */}
-          <div className="lg:col-span-2 glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display mb-4">
-              Motivos de Perda / Desqualificação
+          {/* Motivos de Perda: perdas QUALIFICADAS (+ antigas sem categoria,
+              que nasceram antes da classificação existir) */}
+          <div className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2 mb-4">
+              <CheckCircle2 className="text-orange-500" size={20} />
+              Motivos de Perda
             </h2>
-            {(() => {
-              // Group all reasons with category info
-              const reasonMap = new Map<string, { count: number; qualified: number; disqualified: number }>();
-              for (const deal of lostDeals) {
-                const reason = deal.lossReason || 'Não informado';
-                const entry = reasonMap.get(reason) || { count: 0, qualified: 0, disqualified: 0 };
-                entry.count++;
-                // Sem categoria (perda antiga) não pontua em nenhum dos dois:
-                // o motivo fica sem etiqueta em vez de virar QUALIF. por engano
-                if (deal.lossCategory === 'disqualified') entry.disqualified++;
-                else if (deal.lossCategory === 'qualified') entry.qualified++;
-                reasonMap.set(reason, entry);
-              }
-              const sorted = [...reasonMap.entries()].sort((a, b) => b[1].count - a[1].count);
-              const maxCount = sorted[0]?.[1].count || 1;
+            {renderLossReasons(
+              lostDeals.filter(d => d.lossCategory !== 'disqualified'),
+              'bg-orange-500'
+            )}
+          </div>
 
-              return (
-                <div className="space-y-2">
-                  {sorted.map(([reason, data]) => (
-                    <div key={reason} className="group">
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="text-sm text-slate-700 dark:text-slate-300 truncate">{reason}</span>
-                          {data.disqualified > 0 && data.qualified === 0 && (
-                            <span className="text-[10px] px-1.5 py-0.5 bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 rounded font-bold shrink-0">DESQUAL.</span>
-                          )}
-                          {data.qualified > 0 && data.disqualified === 0 && (
-                            <span className="text-[10px] px-1.5 py-0.5 bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400 rounded font-bold shrink-0">QUALIF.</span>
-                          )}
-                        </div>
-                        <span className="text-sm font-bold text-slate-900 dark:text-white ml-2 shrink-0">{data.count}</span>
-                      </div>
-                      <div className="w-full bg-slate-100 dark:bg-white/5 rounded-full h-2">
-                        <div
-                          className="bg-red-500 h-2 rounded-full transition-all"
-                          style={{ width: `${(data.count / maxCount) * 100}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                  {sorted.length === 0 && (
-                    <p className="text-sm text-slate-500 italic text-center py-4">Nenhum motivo registrado.</p>
-                  )}
-                </div>
-              );
-            })()}
+          {/* Desqualificação: perdas DESQUALIFICADAS (lead fora do perfil) */}
+          <div className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2 mb-4">
+              <UserX className="text-red-500" size={20} />
+              Desqualificação
+            </h2>
+            {renderLossReasons(
+              lostDeals.filter(d => d.lossCategory === 'disqualified'),
+              'bg-red-500'
+            )}
           </div>
         </div>
       )}
