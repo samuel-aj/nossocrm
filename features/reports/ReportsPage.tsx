@@ -173,27 +173,35 @@ const ReportsPage: React.FC = () => {
     const stages = convBoard?.stages || [];
     if (stages.length === 0) return [];
 
-    // Etapas FINAIS (Ganho/Perdido) são resultado, não passagem — saem do
-    // funil de conversão; o fechamento vira a barra final "Ganho".
-    const isWonStage = (label: string) => /^(ganh|won|vendid)/i.test(label.trim());
-    const isLostStage = (label: string) => /^(perdid|lost)/i.test(label.trim());
-    const midStages = stages.filter(s => !isWonStage(s.label) && !isLostStage(s.label));
+    // Etapas FINAIS são resultado, não passagem — saem do funil e viram a
+    // barra final. GANHO = nome clássico OU etapa vinculada ao ciclo
+    // "CUSTOMER" (ex.: "Protocolado" no Pós venda, que é a mesma coisa que
+    // Ganho). PERDA = nome clássico OU ciclo "OTHER" (semântica do Kanban).
+    const isWonStage = (s: (typeof stages)[number]) =>
+      s.linkedLifecycleStage === 'CUSTOMER' || /^(ganh|won|vendid)/i.test(s.label.trim());
+    const isLostStage = (s: (typeof stages)[number]) =>
+      s.linkedLifecycleStage === 'OTHER' || /^(perdid|lost)/i.test(s.label.trim());
+    const midStages = stages.filter(s => !isWonStage(s) && !isLostStage(s));
     if (midStages.length === 0) return [];
+    const wonStage = stages.find(isWonStage);
+    const wonStageIds = new Set(stages.filter(isWonStage).map(s => s.id));
 
     const boardDeals = allCrmDeals.filter(
       d => d.boardId === convBoard.id && (!selectedOwnerId || d.ownerId === selectedOwnerId)
     );
-    const wonCount = boardDeals.filter(d => d.isWon).length;
+    // "Completaram o funil" = flag de ganho OU parados numa etapa de ganho
+    // (ex.: cliente em Protocolado ainda sem a flag marcada)
+    const completed = boardDeals.filter(d => d.isWon || (!d.isLost && wonStageIds.has(d.status))).length;
     const lostCount = boardDeals.filter(d => d.isLost && !d.isWon).length;
     const openByStage = new Map<string, number>();
     for (const d of boardDeals) {
-      if (d.isWon || d.isLost) continue;
+      if (d.isWon || d.isLost || wonStageIds.has(d.status)) continue;
       openByStage.set(d.status, (openByStage.get(d.status) || 0) + 1);
     }
 
-    // chegaram(i) = abertos da etapa i em diante + ganhos; 1ª etapa inclui os perdidos
+    // chegaram(i) = abertos da etapa i em diante + completados; 1ª etapa inclui os perdidos
     const reached: number[] = new Array(midStages.length).fill(0);
-    let acc = wonCount;
+    let acc = completed;
     for (let i = midStages.length - 1; i >= 0; i--) {
       acc += openByStage.get(midStages[i].id) || 0;
       reached[i] = acc;
@@ -202,7 +210,7 @@ const ReportsPage: React.FC = () => {
 
     const items = midStages.map((s, i) => {
       const isLastMid = i === midStages.length - 1;
-      const next = isLastMid ? wonCount : reached[i + 1];
+      const next = isLastMid ? completed : reached[i + 1];
       return {
         name: s.label,
         count: reached[i],
@@ -213,10 +221,12 @@ const ReportsPage: React.FC = () => {
     });
 
     items.push({
-      name: 'Ganho',
-      count: wonCount,
+      // A barra final usa o nome da PRÓPRIA etapa de ganho do board
+      // ("Protocolado", "Ganho"...) pra não parecer duas coisas diferentes
+      name: wonStage?.label || 'Ganho',
+      count: completed,
       fill: '#22c55e',
-      conversionRate: reached[0] > 0 ? (wonCount / reached[0]) * 100 : 0,
+      conversionRate: reached[0] > 0 ? (completed / reached[0]) * 100 : 0,
       conversionLabel: 'do total',
     });
 
@@ -234,11 +244,16 @@ const ReportsPage: React.FC = () => {
       d => d.boardId === convBoard?.id && (!selectedOwnerId || d.ownerId === selectedOwnerId)
     );
     const total = boardDeals.length;
-    const wonCount = boardDeals.filter(d => d.isWon).length;
 
-    const isWonStage = (label: string) => /^(ganh|won|vendid)/i.test(label.trim());
-    const isLostStage = (label: string) => /^(perdid|lost)/i.test(label.trim());
-    const midStages = stages.filter(s => !isWonStage(s.label) && !isLostStage(s.label));
+    // Mesmos critérios do gráfico: etapa de ganho por nome OU ciclo CUSTOMER
+    // (ex.: "Protocolado"), etapa de perda por nome OU ciclo OTHER
+    const isWonStage = (s: (typeof stages)[number]) =>
+      s.linkedLifecycleStage === 'CUSTOMER' || /^(ganh|won|vendid)/i.test(s.label.trim());
+    const isLostStage = (s: (typeof stages)[number]) =>
+      s.linkedLifecycleStage === 'OTHER' || /^(perdid|lost)/i.test(s.label.trim());
+    const midStages = stages.filter(s => !isWonStage(s) && !isLostStage(s));
+    const wonStageIds = new Set(stages.filter(isWonStage).map(s => s.id));
+    const wonCount = boardDeals.filter(d => d.isWon || (!d.isLost && wonStageIds.has(d.status))).length;
     // "Qualificado(a/s)" — o ^ evita casar com "Em qualificação"
     const qIdx = midStages.findIndex(s => /^qualificad/i.test(s.label.trim()));
 
@@ -246,7 +261,7 @@ const ReportsPage: React.FC = () => {
     if (qIdx >= 0) {
       const openByStage = new Map<string, number>();
       for (const d of boardDeals) {
-        if (d.isWon || d.isLost) continue;
+        if (d.isWon || d.isLost || wonStageIds.has(d.status)) continue;
         openByStage.set(d.status, (openByStage.get(d.status) || 0) + 1);
       }
       // qualificados = chegaram à etapa Qualificado (abertos dela em diante + ganhos)
