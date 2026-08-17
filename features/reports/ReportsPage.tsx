@@ -9,6 +9,20 @@ import { generateReportPDF } from './utils/generateReportPDF';
 import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
 
+// Cor do estágio (classe Tailwind gravada no board) → cor hex pro gráfico
+const STAGE_COLOR_MAP: Record<string, string> = {
+  'bg-blue-500': '#3b82f6',
+  'bg-green-500': '#22c55e',
+  'bg-yellow-500': '#eab308',
+  'bg-orange-500': '#f97316',
+  'bg-red-500': '#ef4444',
+  'bg-purple-500': '#a855f7',
+  'bg-pink-500': '#ec4899',
+  'bg-indigo-500': '#6366f1',
+  'bg-teal-500': '#14b8a6',
+  'bg-slate-500': '#64748b',
+};
+
 /**
  * Componente React `ReportsPage`.
  * @returns {Element} Retorna um valor do tipo `Element`.
@@ -147,33 +161,67 @@ const ReportsPage: React.FC = () => {
     return `R$ ${value.toLocaleString('pt-BR')}`;
   }, []);
 
-  // Dados de conversão por etapa (funil acumulativo)
-  // Cada etapa conta os deals que estão nela + todos que já avançaram além dela + ganhos
+  // Conversão por etapa (snapshot do board), com a semântica "quantos
+  // CHEGARAM até aqui": barra = leads que alcançaram a etapa; % = dos que
+  // chegaram, quantos avançaram pra seguinte (na última, quantos fecharam).
+  // Ganhos contam como tendo passado por TODAS as etapas; perdidos contam só
+  // na PRIMEIRA (entraram no funil; até onde avançaram não fica registrado).
+  // Antes, os perdidos — por morarem na última coluna do board — contavam
+  // como se tivessem chegado em tudo, e o gráfico dava ~100% em toda etapa.
   const stageConversionData = useMemo(() => {
-    const wonCount = wonDeals.length;
+    const convBoard = selectedBoard || boards[0];
+    const stages = convBoard?.stages || [];
+    if (stages.length === 0) return [];
 
-    const accumulated = funnelData.map((stage, i) => {
-      // Soma dos deals nesta etapa + todas posteriores + ganhos (que já saíram do funil)
-      let reachedCount = wonCount;
-      for (let j = i; j < funnelData.length; j++) {
-        reachedCount += funnelData[j].count;
-      }
-      return { ...stage, count: reachedCount };
-    });
+    // Etapas FINAIS (Ganho/Perdido) são resultado, não passagem — saem do
+    // funil de conversão; o fechamento vira a barra final "Ganho".
+    const isWonStage = (label: string) => /^(ganh|won|vendid)/i.test(label.trim());
+    const isLostStage = (label: string) => /^(perdid|lost)/i.test(label.trim());
+    const midStages = stages.filter(s => !isWonStage(s.label) && !isLostStage(s.label));
+    if (midStages.length === 0) return [];
 
-    return accumulated.map((stage, i) => {
-      const isLast = i === accumulated.length - 1;
+    const boardDeals = allCrmDeals.filter(
+      d => d.boardId === convBoard.id && (!selectedOwnerId || d.ownerId === selectedOwnerId)
+    );
+    const wonCount = boardDeals.filter(d => d.isWon).length;
+    const lostCount = boardDeals.filter(d => d.isLost && !d.isWon).length;
+    const openByStage = new Map<string, number>();
+    for (const d of boardDeals) {
+      if (d.isWon || d.isLost) continue;
+      openByStage.set(d.status, (openByStage.get(d.status) || 0) + 1);
+    }
+
+    // chegaram(i) = abertos da etapa i em diante + ganhos; 1ª etapa inclui os perdidos
+    const reached: number[] = new Array(midStages.length).fill(0);
+    let acc = wonCount;
+    for (let i = midStages.length - 1; i >= 0; i--) {
+      acc += openByStage.get(midStages[i].id) || 0;
+      reached[i] = acc;
+    }
+    reached[0] += lostCount;
+
+    const items = midStages.map((s, i) => {
+      const isLastMid = i === midStages.length - 1;
+      const next = isLastMid ? wonCount : reached[i + 1];
       return {
-        ...stage,
-        conversionRate: !isLast && stage.count > 0
-          ? (accumulated[i + 1].count / stage.count) * 100
-          : stage.count > 0
-            ? (wonCount / stage.count) * 100
-            : 0,
-        conversionLabel: isLast ? 'fecham' : 'avançam',
+        name: s.label,
+        count: reached[i],
+        fill: STAGE_COLOR_MAP[s.color] || '#3b82f6',
+        conversionRate: reached[i] > 0 ? (next / reached[i]) * 100 : 0,
+        conversionLabel: isLastMid ? 'fecham' : 'avançam',
       };
     });
-  }, [funnelData, wonDeals.length]);
+
+    items.push({
+      name: 'Ganho',
+      count: wonCount,
+      fill: '#22c55e',
+      conversionRate: reached[0] > 0 ? (wonCount / reached[0]) * 100 : 0,
+      conversionLabel: 'do total',
+    });
+
+    return items;
+  }, [selectedBoard, boards, allCrmDeals, selectedOwnerId]);
 
   const generatedBy = useMemo(() => {
     if (profile?.first_name && profile?.last_name) return `${profile.first_name} ${profile.last_name}`;
