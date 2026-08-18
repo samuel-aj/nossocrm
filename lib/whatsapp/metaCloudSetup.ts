@@ -137,6 +137,58 @@ export async function validateMetaCredentials(
   };
 }
 
+/**
+ * Diagnóstico: o que a Meta REALMENTE tem configurado para esta conexão.
+ * Serve pra responder "por que a mensagem que mandei do celular não apareceu?"
+ * sem precisar abrir o painel da Meta. Não devolve token nem segredo.
+ */
+export async function inspectMetaWebhooks(input: {
+  token: string;
+  wabaId: string;
+  appId?: string | null;
+  appSecret?: string | null;
+}): Promise<{
+  camposAssinadosNoApp: string[] | null;
+  ecosAssinados: boolean | null;
+  callbackDoApp: string | null;
+  appAssinadoNaWaba: boolean | null;
+  erro?: string;
+}> {
+  const out: {
+    camposAssinadosNoApp: string[] | null;
+    ecosAssinados: boolean | null;
+    callbackDoApp: string | null;
+    appAssinadoNaWaba: boolean | null;
+    erro?: string;
+  } = { camposAssinadosNoApp: null, ecosAssinados: null, callbackDoApp: null, appAssinadoNaWaba: null };
+
+  if (input.appId && input.appSecret) {
+    const appToken = `${input.appId.trim()}|${input.appSecret.trim()}`;
+    const r = await graph<{
+      data?: Array<{ object?: string; callback_url?: string; fields?: Array<{ name?: string } | string> }>;
+    }>('GET', `/${encodeURIComponent(input.appId.trim())}/subscriptions`, { access_token: appToken });
+    if (r.ok) {
+      const waba = (r.data?.data ?? []).find(s => s.object === 'whatsapp_business_account');
+      const campos = (waba?.fields ?? []).map(f => (typeof f === 'string' ? f : f?.name ?? '')).filter(Boolean);
+      out.camposAssinadosNoApp = campos;
+      out.ecosAssinados = campos.includes('message_echoes');
+      out.callbackDoApp = waba?.callback_url ?? null;
+    } else {
+      out.erro = r.error || `HTTP ${r.status}`;
+    }
+  }
+
+  const sub = await graph<{ data?: Array<{ whatsapp_business_api_data?: { id?: string } }> }>(
+    'GET',
+    `/${encodeURIComponent(input.wabaId)}/subscribed_apps`,
+    { access_token: input.token }
+  );
+  if (sub.ok) out.appAssinadoNaWaba = (sub.data?.data ?? []).length > 0;
+  else if (!out.erro) out.erro = sub.error || `HTTP ${sub.status}`;
+
+  return out;
+}
+
 export interface WebhookSetupResult {
   /** Webhook do APP configurado (exige App ID + App Secret). */
   appWebhook: 'ok' | 'skipped' | 'failed';

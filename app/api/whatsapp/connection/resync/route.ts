@@ -10,8 +10,58 @@
 import { requireOrgUser, isOrgAdmin, json } from '@/lib/whatsapp/api';
 import { getConnectionsByOrg } from '@/lib/whatsapp/service';
 import { isMetaCloudConnection } from '@/lib/whatsapp';
-import { setupMetaWebhooks } from '@/lib/whatsapp/metaCloudSetup';
+import { setupMetaWebhooks, inspectMetaWebhooks } from '@/lib/whatsapp/metaCloudSetup';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+
+/**
+ * GET — diagnóstico: mostra o que a Meta tem configurado hoje para cada
+ * conexão da organização (campos assinados, se os "ecos" estão ligados e para
+ * onde vai o webhook). Abra no navegador logado como admin.
+ */
+export async function GET() {
+  const auth = await requireOrgUser();
+  if (!auth.ok) return auth.response;
+  if (!isOrgAdmin(auth.user.role)) return json({ error: 'Forbidden' }, 403);
+
+  const conns = (await getConnectionsByOrg(auth.admin, auth.user.organizationId)) ?? [];
+  const metas = conns.filter(isMetaCloudConnection);
+  const supabaseBase = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '');
+
+  const diagnostico: Array<Record<string, unknown>> = [];
+  for (const c of metas) {
+    const esperado = `${supabaseBase}/functions/v1/whatsapp-webhook-meta/${c.webhook_secret}`;
+    if (!c.instance_token || !c.meta_waba_id) {
+      diagnostico.push({ numero: c.phone_number, problema: 'conexão sem token/WABA salvos' });
+      continue;
+    }
+    const info = await inspectMetaWebhooks({
+      token: c.instance_token,
+      wabaId: c.meta_waba_id,
+      appId: c.meta_app_id,
+      appSecret: c.meta_app_secret,
+    });
+    diagnostico.push({
+      numero: c.phone_number,
+      mensagens_enviadas_por_fora_ligadas: info.ecosAssinados,
+      campos_assinados: info.camposAssinadosNoApp,
+      app_assinado_na_conta: info.appAssinadoNaWaba,
+      webhook_aponta_para: info.callbackDoApp,
+      webhook_esperado: esperado,
+      webhook_correto: info.callbackDoApp ? info.callbackDoApp === esperado : null,
+      erro: info.erro ?? null,
+      tem_chave_secreta_do_app: Boolean(c.meta_app_secret),
+    });
+  }
+
+  return json({
+    organizacao: auth.user.organizationId,
+    conexoes_meta: diagnostico,
+    dica:
+      diagnostico.length === 0
+        ? 'Esta organização não tem conexão pela API oficial da Meta — as mensagens enviadas por fora dependem só da conexão por QR Code.'
+        : 'Se "mensagens_enviadas_por_fora_ligadas" estiver false ou null, clique em Reconfigurar webhook na Meta na tela de Conexão.',
+  });
+}
 
 export async function POST(req: Request) {
   if (!isAllowedOrigin(req)) return json({ error: 'Forbidden' }, 403);
