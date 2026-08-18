@@ -12,9 +12,13 @@
  * - GET  = verificação da Meta (hub.mode/hub.verify_token/hub.challenge).
  * - POST = eventos: entry[].changes[].value.{messages,statuses,contacts,metadata}.
  *
- * Formato da Cloud API != Evolution: telefones vêm como wa_id (dígitos), mídia
- * vem por media-id (baixa via Graph), e a Meta NÃO ecoa as mensagens que NÓS
- * enviamos (só inbound + status), então não há dedup de eco aqui.
+ * Formato da Cloud API != Evolution: telefones vêm como wa_id (dígitos) e a
+ * mídia vem por media-id (baixa via Graph).
+ *
+ * ECOS: com o campo `message_echoes` assinado, a Meta também avisa o que ESTE
+ * número enviou fora do CRM (celular, WhatsApp Web, outra ferramenta). Esses
+ * eventos entram como mensagem enviada (direction "out"); a dedup por
+ * evolution_message_id evita duplicar o que o próprio CRM já gravou ao enviar.
  */
 import { createClient } from "npm:@supabase/supabase-js@2";
 

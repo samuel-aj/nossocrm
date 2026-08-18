@@ -393,7 +393,7 @@ Deno.serve(async (req) => {
           .in("phone", variants)
           .limit(1)
           .maybeSingle();
-        const { data: created } = await supabase
+        const { data: created, error: convErr } = await supabase
           .from("wa_conversations")
           .insert({
             organization_id: orgId,
@@ -404,7 +404,22 @@ Deno.serve(async (req) => {
           })
           .select("id")
           .single();
-        convId = created?.id ?? null;
+        if (created?.id) {
+          convId = created.id;
+        } else if (convErr) {
+          // Corrida: duas mensagens do mesmo número chegando juntas — a outra
+          // entrega já criou a conversa (viola uq_wa_conversations_org_phone).
+          // Sem esta releitura a mensagem era DESCARTADA em silêncio.
+          const { data: again } = await supabase
+            .from("wa_conversations")
+            .select("id")
+            .eq("organization_id", orgId)
+            .in("wa_phone", variants)
+            .limit(1)
+            .maybeSingle();
+          convId = again?.id ?? null;
+          if (!convId) console.error("[wa-webhook] conversa nao criada:", convErr.message);
+        }
       }
       if (!convId) continue;
 

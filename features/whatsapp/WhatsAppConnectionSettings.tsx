@@ -127,6 +127,36 @@ export function WhatsAppConnectionSettings() {
   // a chave real vir pro navegador. Sentinela intacto = manter a salva.
   const isSecretSentinel = (v: string) => /^•+$/.test(v.trim());
 
+  // Reaplica a assinatura do webhook na Meta usando as credenciais JÁ SALVAS.
+  // Serve quando a Meta precisa passar a avisar algo novo — foi o caso do campo
+  // que traz as mensagens enviadas pelo celular/WhatsApp Web/outra ferramenta.
+  const [resyncing, setResyncing] = useState(false);
+  const resyncMetaWebhook = async () => {
+    setResyncing(true);
+    try {
+      const r = await fetchJson<{
+        ok: boolean;
+        resultados?: Array<{ phone?: string | null; ok: boolean; erro?: string | null }>;
+      }>('/api/whatsapp/connection/resync', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+      const falhas = (r.resultados ?? []).filter(x => !x.ok);
+      if (r.ok && falhas.length === 0) {
+        addToast('Webhook reconfigurado. Mensagens enviadas por fora passam a aparecer no chat.', 'success');
+      } else if (r.ok) {
+        addToast(`Reconfigurado, mas ${falhas.length} número(s) falharam: ${falhas[0]?.erro ?? ''}`, 'warning');
+      } else {
+        addToast(`Não deu pra reconfigurar: ${falhas[0]?.erro ?? 'erro desconhecido'}`, 'error');
+      }
+    } catch (e) {
+      addToast(`Erro ao reconfigurar: ${(e as Error).message}`, 'error');
+    } finally {
+      setResyncing(false);
+    }
+  };
+
   // Qual conexão o form da API oficial está EDITANDO (null = número NOVO).
   const [editingConnId, setEditingConnId] = useState<string | null>(null);
 
@@ -394,6 +424,19 @@ export function WhatsAppConnectionSettings() {
           após a última mensagem do cliente só é possível enviar templates aprovados.
           Mensagens livres são recusadas (o CRM mostra a falha no chat).
         </p>
+        <div className="flex items-center gap-3 flex-wrap pt-2">
+          <button
+            type="button"
+            onClick={() => void resyncMetaWebhook()}
+            disabled={resyncing}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold border border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-500/10 disabled:opacity-60 transition-colors"
+          >
+            {resyncing ? 'Reconfigurando...' : 'Reconfigurar webhook na Meta'}
+          </button>
+          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+            Use se as mensagens enviadas pelo celular ou por outra plataforma não estiverem aparecendo no chat.
+          </span>
+        </div>
       </div>
       <div className="flex flex-wrap items-center gap-4">
         <button
