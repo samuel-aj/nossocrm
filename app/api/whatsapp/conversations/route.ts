@@ -4,16 +4,20 @@ import { getConnectionByOrg } from '@/lib/whatsapp/service';
 export const runtime = 'nodejs';
 
 /**
- * GET /api/whatsapp/conversations
+ * GET /api/whatsapp/conversations[?connectionId=...]
  * Lista as conversas de WhatsApp da organização (inbox da página Chats),
  * ordenadas da mais recente para a mais antiga. Mesmo padrão das demais
  * rotas wa_*: sessão autentica, service role lê filtrando por organization_id.
+ *
+ * connectionId restringe às conversas de UM número conectado (org com mais de
+ * um número). O escopo por organization_id já impede id de outra org: com um
+ * connectionId alheio a interseção é vazia, não há vazamento.
  *
  * WhatsApp DESCONECTADO => lista vazia: as conversas ficam guardadas mas não
  * aparecem (reconectar o MESMO número traz de volta; número diferente apaga
  * — ver connection.update na edge function whatsapp-webhook).
  */
-export async function GET() {
+export async function GET(req: Request) {
   const auth = await requireOrgUser();
   if (!auth.ok) return auth.response;
 
@@ -22,10 +26,14 @@ export async function GET() {
     return json({ data: [] });
   }
 
-  const { data, error } = await auth.admin
+  const connectionId = new URL(req.url).searchParams.get('connectionId');
+
+  let q = auth.admin
     .from('wa_conversations')
-    .select('id, wa_phone, wa_name, contact_id, deal_id, last_message_at, last_message_preview, unread_count')
-    .eq('organization_id', auth.user.organizationId)
+    .select('id, connection_id, wa_phone, wa_name, contact_id, deal_id, last_message_at, last_message_preview, unread_count')
+    .eq('organization_id', auth.user.organizationId);
+  if (connectionId) q = q.eq('connection_id', connectionId);
+  const { data, error } = await q
     .order('last_message_at', { ascending: false, nullsFirst: false })
     .limit(500);
 

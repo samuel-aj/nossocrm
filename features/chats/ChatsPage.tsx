@@ -153,19 +153,23 @@ export const ChatsPage: React.FC = () => {
   const [leadStageId, setLeadStageId] = useState('');
   const [leadBusy, setLeadBusy] = useState(false);
 
-  const convsQ = useQuery<{ data: ConvRow[] }>({
-    queryKey: ['waConversations'],
-    queryFn: async () => {
-      const res = await fetch('/api/whatsapp/conversations', { credentials: 'include' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
-    },
-    refetchInterval: 10000,
-    refetchOnWindowFocus: true,
-    staleTime: 5000,
+  // Número conectado escolhido pra ver os chats ('all' = todos). Persiste por
+  // ABA (sessionStorage), casando com o modelo de org por aba: aba em outra
+  // org não herda o filtro desta, e o reset abaixo não apaga escolha alheia.
+  const [connFilter, setConnFilter] = useState<string>(() => {
+    if (typeof window === 'undefined') return 'all';
+    return window.sessionStorage.getItem('wa-chats-connection') || 'all';
   });
+  const [connMenuOpen, setConnMenuOpen] = useState(false);
 
-  const connQ = useQuery<{ connected: boolean }>({
+  type ConnRow = {
+    id: string;
+    provider: string;
+    phoneNumber: string | null;
+    profileName: string | null;
+    status: string;
+  };
+  const connQ = useQuery<{ connected: boolean; connections?: ConnRow[] }>({
     queryKey: ['waConnection'],
     queryFn: async () => {
       const res = await fetch('/api/whatsapp/connection', { credentials: 'include' });
@@ -176,6 +180,68 @@ export const ChatsPage: React.FC = () => {
     refetchOnWindowFocus: true,
   });
   const connected = !!connQ.data?.connected;
+  const connsList = connQ.data?.connections ?? [];
+
+  // Filtro EFETIVO: só vale depois que as conexões chegam, se a escolhida
+  // existe E a org tem 2+ números (com 1 número o menu nem aparece; um filtro
+  // ativo ali seria invisível e esconderia conversas antigas sem connection_id).
+  // Antes disso, 'all' — a lista nunca abre vazia por filtro fantasma.
+  const effectiveConn =
+    connsList.length > 1 && connsList.some(c => c.id === connFilter) ? connFilter : 'all';
+
+  const convsQ = useQuery<{ data: ConvRow[] }>({
+    // Com 'all' a queryKey volta a ser a MESMA do badge do menu lateral
+    // (Layout.tsx): um cache só, sem busca duplicada nem contagem defasada.
+    queryKey: effectiveConn === 'all' ? ['waConversations'] : ['waConversations', effectiveConn],
+    queryFn: async () => {
+      const url =
+        effectiveConn === 'all'
+          ? '/api/whatsapp/conversations'
+          : `/api/whatsapp/conversations?connectionId=${encodeURIComponent(effectiveConn)}`;
+      const res = await fetch(url, { credentials: 'include' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    },
+    refetchInterval: 10000,
+    refetchOnWindowFocus: true,
+    staleTime: 5000,
+  });
+
+  // Conexão salva não vale mais nesta org (trocou de org na aba, número
+  // removido, org voltou a ter 1 número): limpa o estado e o storage da aba.
+  useEffect(() => {
+    if (connFilter === 'all' || !connQ.data) return;
+    if (connsList.length < 2 || !connsList.some(c => c.id === connFilter)) {
+      setConnFilter('all');
+      if (typeof window !== 'undefined') window.sessionStorage.removeItem('wa-chats-connection');
+    }
+  }, [connQ.data, connsList, connFilter]);
+
+  const pickConn = (id: string) => {
+    setConnFilter(id);
+    setConnMenuOpen(false);
+    if (typeof window !== 'undefined') {
+      if (id === 'all') window.sessionStorage.removeItem('wa-chats-connection');
+      else window.sessionStorage.setItem('wa-chats-connection', id);
+    }
+  };
+
+  // Fecha o menu de números ao clicar fora ou apertar Esc
+  useEffect(() => {
+    if (!connMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!(e.target as Element | null)?.closest?.('[data-conn-menu]')) setConnMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setConnMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [connMenuOpen]);
 
   // Conversas indexadas pela chave canônica do telefone (une as grafias
   // com/sem nono dígito BR): prévia/hora da mais recente, não lidas somadas.
@@ -454,17 +520,82 @@ export const ChatsPage: React.FC = () => {
               Chats
             </h1>
             <span className="flex items-center gap-1.5">
-              <span
-                className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-1 rounded-full ${
-                  connected
-                    ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400'
-                    : 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400'
-                }`}
-                title={connected ? 'WhatsApp conectado' : 'WhatsApp desconectado. Conecte na aba Conexão, no menu WhatsApp'}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                {connected ? 'Conectado' : 'Desconectado'}
-              </span>
+              {connsList.length > 1 ? (
+                /* Mais de um número conectado: o selo vira um menu que filtra
+                   a lista de conversas pelo número escolhido. */
+                <span className="relative" data-conn-menu>
+                  <button
+                    type="button"
+                    onClick={() => setConnMenuOpen(o => !o)}
+                    aria-expanded={connMenuOpen}
+                    title="Escolher de qual número ver os chats"
+                    className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-1 rounded-full transition-colors ${
+                      connected
+                        ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/40'
+                        : 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/40'
+                    }`}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                    {connFilter === 'all'
+                      ? 'Todos os números'
+                      : connsList.find(c => c.id === connFilter)?.phoneNumber ||
+                        connsList.find(c => c.id === connFilter)?.profileName ||
+                        'Número'}
+                    <ChevronDown size={12} className={`transition-transform ${connMenuOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {connMenuOpen && (
+                    <div className="absolute right-0 top-full mt-1.5 z-40 min-w-[230px] rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card shadow-xl p-1.5">
+                      <button
+                        type="button"
+                        onClick={() => pickConn('all')}
+                        className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-xs font-semibold transition-colors ${
+                          connFilter === 'all'
+                            ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
+                            : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'
+                        }`}
+                      >
+                        Todos os números
+                      </button>
+                      {connsList.map(c => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => pickConn(c.id)}
+                          className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-xs transition-colors ${
+                            connFilter === c.id
+                              ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
+                              : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'
+                          }`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 shrink-0 rounded-full ${
+                              c.status === 'connected' ? 'bg-emerald-500' : 'bg-amber-500'
+                            }`}
+                          />
+                          <span className="min-w-0">
+                            <span className="block font-semibold truncate">{c.phoneNumber || 'Sem número'}</span>
+                            {c.profileName && (
+                              <span className="block text-[10px] text-slate-400 truncate">{c.profileName}</span>
+                            )}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </span>
+              ) : (
+                <span
+                  className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-1 rounded-full ${
+                    connected
+                      ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400'
+                  }`}
+                  title={connected ? 'WhatsApp conectado' : 'WhatsApp desconectado. Conecte na aba Conexão, no menu WhatsApp'}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                  {connected ? 'Conectado' : 'Desconectado'}
+                </span>
+              )}
               <button
                 type="button"
                 onClick={() => openNewContactModal()}
