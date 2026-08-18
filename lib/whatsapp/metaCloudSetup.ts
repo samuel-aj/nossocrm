@@ -171,7 +171,10 @@ export async function setupMetaWebhooks(input: {
       object: 'whatsapp_business_account',
       callback_url: input.callbackUrl,
       verify_token: input.verifyToken,
-      fields: 'messages',
+      // message_echoes traz o que este número enviou POR FORA do CRM (celular,
+      // WhatsApp Web, outra ferramenta). Sem assinar esse campo a Meta nunca
+      // avisa, e essas mensagens não aparecem no chat.
+      fields: 'messages,message_echoes',
       access_token: appToken,
     });
     result.appWebhook = r.ok ? 'ok' : 'failed';

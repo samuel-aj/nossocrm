@@ -295,25 +295,34 @@ Deno.serve(async (req) => {
           .in("status", lowerThan[status] ?? []);
       }
 
-      // --- Mensagens recebidas ---
+      // --- Mensagens recebidas + ECOS (o que ESTE número enviou por fora) ---
       const contacts = Array.isArray(value?.contacts) ? value.contacts : [];
       const nameByWaId: Record<string, string> = {};
       for (const c of contacts) {
         if (c?.wa_id) nameByWaId[String(c.wa_id)] = c?.profile?.name ?? "";
       }
 
-      const messages = Array.isArray(value?.messages) ? value.messages : [];
-      for (const m of messages) {
+      // message_echoes = mensagens que ESTE número enviou em outro lugar
+      // (celular, WhatsApp Web, outra ferramenta). Mesmo formato de `messages`,
+      // mas o interlocutor está em `to` em vez de `from` — por isso a marca
+      // `isEcho`, que inverte direção e telefones na hora de gravar.
+      const echoes = Array.isArray(value?.message_echoes) ? value.message_echoes : [];
+      // deno-lint-ignore no-explicit-any
+      const inbound = (Array.isArray(value?.messages) ? value.messages : []).map((m: any) => ({ m, isEcho: false }));
+      // deno-lint-ignore no-explicit-any
+      const outbound = echoes.map((m: any) => ({ m, isEcho: true }));
+      for (const { m, isEcho } of [...inbound, ...outbound]) {
         if (!m) continue;
         const providerId = m.id;
-        const phone = waIdToE164(m.from);
+        // No eco quem interessa é o destinatário (`to`); na recebida, o remetente.
+        const phone = waIdToE164(isEcho ? m.to : m.from);
         if (!providerId || !phone) continue;
 
         const { text, mediaType, mediaId, mediaMime, fileName, skip } = extractContent(m);
         if (skip) continue;
         const tsNum = typeof m.timestamp === "string" ? parseInt(m.timestamp, 10) : m.timestamp;
         const waTs = tsNum ? new Date(tsNum * 1000).toISOString() : new Date().toISOString();
-        const pushName = nameByWaId[String(m.from)] || null;
+        const pushName = isEcho ? null : nameByWaId[String(m.from)] || null;
 
         // conversa (casa contato pelo telefone, testando variantes BR do 9)
         const variants = brPhoneVariants(phone);
@@ -395,15 +404,15 @@ Deno.serve(async (req) => {
         const { error: insErr } = await supabase.from("wa_messages").insert({
           organization_id: orgId,
           conversation_id: convId,
-          direction: "in",
-          status: "received",
+          direction: isEcho ? "out" : "in",
+          status: isEcho ? "sent" : "received",
           body: text ?? null,
           media_type: mediaType ?? null,
           media_mime: mediaMimeFinal,
           media_url: mediaPath,
           evolution_message_id: providerId,
-          from_phone: phone,
-          to_phone: null,
+          from_phone: isEcho ? null : phone,
+          to_phone: isEcho ? phone : null,
           wa_timestamp: waTs,
         });
         const dup = insErr && String(insErr.message).toLowerCase().includes("duplicate");
@@ -419,7 +428,13 @@ Deno.serve(async (req) => {
           .update({ last_message_at: waTs, last_message_preview: preview })
           .eq("id", convId);
 
-        await supabase.rpc("wa_increment_unread", { p_conversation_id: convId });
+        // Eco é mensagem NOSSA: não conta como não lida (e, se a pessoa
+        // respondeu pelo celular, zera o contador — ela já viu a conversa).
+        if (isEcho) {
+          await supabase.from("wa_conversations").update({ unread_count: 0 }).eq("id", convId);
+        } else {
+          await supabase.rpc("wa_increment_unread", { p_conversation_id: convId });
+        }
       }
     }
   }
