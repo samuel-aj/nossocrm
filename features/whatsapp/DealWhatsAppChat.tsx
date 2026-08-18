@@ -704,13 +704,18 @@ interface Attachment {
 export function DealWhatsAppChat({
   contact,
   templateContext,
+  connectionId = null,
 }: {
   contact: { id: string; name?: string | null; phone?: string | null } | null;
   /** Valores extras pras variáveis dos modelos (lead.titulo, escritorio.nome...) */
   templateContext?: Record<string, string>;
+  /** Conversa PRESA a um número conectado (página Chats com conversas por
+   * número): só as mensagens dele, e o envio sai por ele — o seletor de
+   * remetente some. null = visão unificada do contato (card do lead). */
+  connectionId?: string | null;
 }) {
   const phone = useMemo(() => normalizePhoneE164(contact?.phone || ''), [contact?.phone]);
-  const { data, isLoading, error, send } = useWhatsAppChat(phone || null);
+  const { data, isLoading, error, send } = useWhatsAppChat(phone || null, connectionId);
   const [text, setText] = useState('');
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -789,14 +794,24 @@ export function DealWhatsAppChat({
   // Números conectados + o remetente ATIVO (escolhido ou o padrão). O ref
   // espelha pro onstop do gravador (roda fora do render) enviar pelo certo.
   const senders = data?.senders ?? [];
-  const activeSender = senders.find(s => s.id === senderId) ?? senders[0] ?? null;
+  // Conversa presa a um número: o remetente é ELE, sem escolha nem fallback
+  // pra outro número (se ele desconectar, o composer avisa em vez de enviar
+  // pelo número errado).
+  const activeSender = connectionId
+    ? senders.find(s => s.id === connectionId) ?? null
+    : senders.find(s => s.id === senderId) ?? senders[0] ?? null;
   const senderRef = useRef<WaSender | null>(null);
   useEffect(() => {
     senderRef.current = activeSender;
   }, [activeSender]);
   // Sem conexão ativa (nunca conectou OU desconectou): troca o composer pelo
   // aviso de conectar, em vez de deixar o envio falhar com erro técnico
-  const notConnected = !!data && (!data.hasConnection || !data.connected);
+  const notConnected =
+    !!data &&
+    (!data.hasConnection ||
+      !data.connected ||
+      // conversa presa a um número que caiu: avisa em vez de enviar por outro
+      (!!connectionId && !senders.some(s => s.id === connectionId)));
   // primeira carga da conversa: abre DIRETO na mensagem mais recente (embaixo)
   const initialScrollDoneRef = useRef(false);
   useEffect(() => {
@@ -1026,7 +1041,7 @@ export function DealWhatsAppChat({
         clearAttachment();
         forceScrollRef.current = true;
         send.mutate(
-          { text: t, file, kind, fileName, connectionId: senderRef.current?.id },
+          { text: t, file, kind, fileName, connectionId: connectionId ?? senderRef.current?.id },
           {
             onSettled: releaseGate,
             onError: () => {
@@ -1049,7 +1064,7 @@ export function DealWhatsAppChat({
         setText('');
         forceScrollRef.current = true;
         send.mutate(
-          { text: t, connectionId: senderRef.current?.id },
+          { text: t, connectionId: connectionId ?? senderRef.current?.id },
           {
             onSettled: releaseGate,
             onError: () => setText(curr => curr || t),
@@ -1109,7 +1124,7 @@ export function DealWhatsAppChat({
       const fileName = `voz_${Date.now()}.${ext}`;
       forceScrollRef.current = true;
       send.mutate(
-        { file: blob, kind: 'audio', fileName, connectionId: senderRef.current?.id },
+        { file: blob, kind: 'audio', fileName, connectionId: connectionId ?? senderRef.current?.id },
         {
           onError: () => {
             // não perde a gravação: vira anexo pro usuário reenviar
@@ -1277,7 +1292,8 @@ export function DealWhatsAppChat({
           {/* MULTI-NÚMERO: escolhe por qual número conectado as mensagens saem.
               Também aparece com 1 número quando o ESCOLHIDO caiu e o envio
               passou pro reserva — troca de remetente nunca é silenciosa. */}
-          {(senders.length > 1 || (!!senderId && !!activeSender && senderId !== activeSender.id)) &&
+          {!connectionId &&
+            (senders.length > 1 || (!!senderId && !!activeSender && senderId !== activeSender.id)) &&
             activeSender && (
             <div ref={senderMenuRef} className="relative">
               <button

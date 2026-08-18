@@ -1,7 +1,12 @@
 /**
- * GET /api/whatsapp/messages?phone=<telefone>
+ * GET /api/whatsapp/messages?phone=<telefone>[&connectionId=...]
  * Retorna a conversa de WhatsApp daquele telefone (na org) + as mensagens.
  * Usado pelo chat dentro do card do lead.
+ *
+ * connectionId restringe a UM número conectado (página Chats com conversas
+ * separadas por número): só a conversa e as mensagens daquele número, e só
+ * elas são marcadas como lidas. Sem o parâmetro, visão unificada do contato
+ * (card do lead).
  */
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { getConnectionsByOrg } from '@/lib/whatsapp/service';
@@ -11,8 +16,10 @@ export async function GET(req: Request) {
   const auth = await requireOrgUser();
   if (!auth.ok) return auth.response;
 
-  const phone = normalizePhoneE164(new URL(req.url).searchParams.get('phone') || '');
+  const url = new URL(req.url);
+  const phone = normalizePhoneE164(url.searchParams.get('phone') || '');
   if (!phone) return json({ error: 'phone é obrigatório' }, 400);
+  const connectionId = url.searchParams.get('connectionId');
 
   // Multi-número: a conexão "padrão" (1ª conectada) mantém o contrato antigo;
   // senders lista TODOS os números conectados pro seletor de envio do chat.
@@ -45,11 +52,15 @@ export async function GET(req: Request) {
   // celular, criando conversa em outra grafia do MESMO número. Busca as duas
   // e junta as mensagens.
   const variants = brPhoneVariants(phone);
-  const { data: convList } = await auth.admin
+  let convQ = auth.admin
     .from('wa_conversations')
     .select('id, wa_phone, wa_name, contact_id, last_message_at, unread_count')
     .eq('organization_id', auth.user.organizationId)
     .in('wa_phone', variants.length ? variants : [phone]);
+  // 'none' = só a conversa órfã (sem número conectado); ausente = unificada
+  if (connectionId === 'none') convQ = convQ.is('connection_id', null);
+  else if (connectionId) convQ = convQ.eq('connection_id', connectionId);
+  const { data: convList } = await convQ;
 
   const convs = (convList ?? []) as Array<{ id: string; contact_id: string | null }>;
   const conv = convs.find(c => c.contact_id) ?? convs[0] ?? null;

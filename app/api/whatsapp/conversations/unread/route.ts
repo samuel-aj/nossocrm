@@ -15,17 +15,24 @@ export async function POST(req: Request) {
   const auth = await requireOrgUser();
   if (!auth.ok) return auth.response;
 
-  const body = (await req.json().catch(() => null)) as { phone?: string } | null;
+  const body = (await req.json().catch(() => null)) as {
+    phone?: string;
+    connectionId?: string | null;
+  } | null;
   const phone = normalizePhoneE164(body?.phone || '');
   if (!phone) return json({ error: 'phone é obrigatório' }, 400);
 
   const variants = brPhoneVariants(phone);
-  const { error } = await auth.admin
+  let q = auth.admin
     .from('wa_conversations')
     .update({ unread_count: 1 })
     .eq('organization_id', auth.user.organizationId)
-    .in('wa_phone', variants.length ? variants : [phone])
-    .or('unread_count.is.null,unread_count.eq.0');
+    .in('wa_phone', variants.length ? variants : [phone]);
+  // Conversas separadas por número: marca só a do número da linha clicada.
+  // 'none' = linha órfã (conexão excluída): só a conversa sem número.
+  if (body?.connectionId === 'none') q = q.is('connection_id', null);
+  else if (body?.connectionId) q = q.eq('connection_id', body.connectionId);
+  const { error } = await q.or('unread_count.is.null,unread_count.eq.0');
 
   if (error) return json({ error: error.message }, 500);
   return json({ ok: true });

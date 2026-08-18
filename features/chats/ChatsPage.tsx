@@ -22,6 +22,7 @@ import { Contact, Deal } from '@/types';
 
 type ConvRow = {
   id: string;
+  connection_id: string | null;
   wa_phone: string;
   wa_name: string | null;
   contact_id: string | null;
@@ -31,13 +32,31 @@ type ConvRow = {
   unread_count: number | null;
 };
 
-type ChatTarget = { phone: string; name: string; contactId: string | null };
+type ConvInfo = {
+  connectionId: string | null;
+  phone: string;
+  contactId: string | null;
+  waName: string;
+  lastAt: string | null;
+  preview: string;
+  unread: number;
+};
+
+type ChatTarget = {
+  phone: string;
+  name: string;
+  contactId: string | null;
+  /** Conversa presa a um número conectado (null = visão unificada) */
+  connectionId?: string | null;
+};
 
 /** Filtro da lista, estilo WhatsApp: tudo | só não lidas | só quem tem conversa */
 type ChatFilter = 'all' | 'unread' | 'convs';
 
 type ChatListItem = ChatTarget & {
   key: string;
+  /** Número conectado desta conversa (null = contato ainda sem conversa) */
+  connectionId: string | null;
   /** null = número sem contato no CRM (conversa nova chegando no WhatsApp) */
   contact: Contact | null;
   hasConv: boolean;
@@ -243,14 +262,15 @@ export const ChatsPage: React.FC = () => {
     };
   }, [connMenuOpen]);
 
-  // Conversas indexadas pela chave canônica do telefone (une as grafias
-  // com/sem nono dígito BR): prévia/hora da mais recente, não lidas somadas.
+  // Conversas indexadas por (número conectado + telefone canônico): cada
+  // número é um "WhatsApp" próprio — o mesmo cliente em dois números vira DUAS
+  // linhas. Só as grafias com/sem nono dígito do MESMO número se fundem.
   const convByKey = useMemo(() => {
-    type ConvInfo = { phone: string; contactId: string | null; waName: string; lastAt: string | null; preview: string; unread: number };
     const m = new Map<string, ConvInfo>();
     for (const r of convsQ.data?.data ?? []) {
-      const key = phoneKey(r.wa_phone);
+      const key = `${r.connection_id ?? 'none'}#${phoneKey(r.wa_phone)}`;
       const item: ConvInfo = {
+        connectionId: r.connection_id ?? null,
         phone: r.wa_phone,
         contactId: r.contact_id,
         waName: (r.wa_name || '').trim(),
@@ -273,6 +293,20 @@ export const ChatsPage: React.FC = () => {
     }
     return m;
   }, [convsQ.data]);
+
+  // As mesmas conversas agrupadas por telefone (contato do CRM não tem número
+  // conectado; o casamento contato<->conversas é por telefone).
+  const convsByPhone = useMemo(() => {
+    const m = new Map<string, ConvInfo[]>();
+    for (const c of convByKey.values()) {
+      const key = phoneKey(c.phone);
+      const list = m.get(key) ?? [];
+      list.push(c);
+      m.set(key, list);
+    }
+    for (const list of m.values()) list.sort((a, b) => (b.lastAt || '').localeCompare(a.lastAt || ''));
+    return m;
+  }, [convByKey]);
 
   // Quantas CONVERSAS têm mensagem não lida (número no chip "Não lidas",
   // igual ao WhatsApp: conta conversas, não mensagens)
@@ -297,7 +331,7 @@ export const ChatsPage: React.FC = () => {
         contactByKey.set(key, c);
         continue;
       }
-      const linkedId = convByKey.get(key)?.contactId;
+      const linkedId = (convsByPhone.get(key) ?? []).find(cv => cv.contactId)?.contactId;
       if (linkedId === c.id && linkedId !== prev.id) {
         contactByKey.set(key, c);
         continue;
@@ -306,36 +340,58 @@ export const ChatsPage: React.FC = () => {
       if ((c.createdAt || '') < (prev.createdAt || '')) contactByKey.set(key, c);
     }
 
-    const items: ChatListItem[] = Array.from(contactByKey.entries()).map(([key, c]) => {
-      const conv = convByKey.get(key);
-      return {
-        key,
-        phone: conv?.phone || c.phone,
-        name: c.name,
-        contactId: c.id,
-        contact: c,
-        hasConv: !!conv,
-        lastAt: conv?.lastAt ?? null,
-        preview: conv?.preview ?? '',
-        unread: conv?.unread ?? 0,
-      };
-    });
+    const items: ChatListItem[] = [];
+    for (const [key, c] of contactByKey.entries()) {
+      const convs = convsByPhone.get(key) ?? [];
+      if (convs.length === 0) {
+        items.push({
+          key,
+          connectionId: null,
+          phone: c.phone,
+          name: c.name,
+          contactId: c.id,
+          contact: c,
+          hasConv: false,
+          lastAt: null,
+          preview: '',
+          unread: 0,
+        });
+        continue;
+      }
+      for (const conv of convs) {
+        items.push({
+          key: `${conv.connectionId ?? 'none'}#${key}`,
+          connectionId: conv.connectionId,
+          phone: conv.phone,
+          name: c.name,
+          contactId: c.id,
+          contact: c,
+          hasConv: true,
+          lastAt: conv.lastAt,
+          preview: conv.preview,
+          unread: conv.unread,
+        });
+      }
+    }
 
     // Conversas de números SEM contato no CRM: aparecem também (nome do
     // WhatsApp ou o número) — dá pra responder e criar contato/lead dali.
-    for (const [key, conv] of convByKey.entries()) {
+    for (const [key, convs] of convsByPhone.entries()) {
       if (contactByKey.has(key)) continue;
-      items.push({
-        key,
-        phone: conv.phone,
-        name: conv.waName || conv.phone,
-        contactId: null,
-        contact: null,
-        hasConv: true,
-        lastAt: conv.lastAt,
-        preview: conv.preview,
-        unread: conv.unread,
-      });
+      for (const conv of convs) {
+        items.push({
+          key: `${conv.connectionId ?? 'none'}#${key}`,
+          connectionId: conv.connectionId,
+          phone: conv.phone,
+          name: conv.waName || conv.phone,
+          contactId: null,
+          contact: null,
+          hasConv: true,
+          lastAt: conv.lastAt,
+          preview: conv.preview,
+          unread: conv.unread,
+        });
+      }
     }
 
     const q = norm(searchQuery.trim());
@@ -357,10 +413,12 @@ export const ChatsPage: React.FC = () => {
       if (a.hasConv !== b.hasConv) return a.hasConv ? -1 : 1;
       return a.name.localeCompare(b.name, 'pt-BR');
     });
-  }, [contacts, convByKey, searchQuery, filter]);
+  }, [contacts, convsByPhone, searchQuery, filter]);
 
   const openChat = (target: ChatTarget) => setSelected(target);
-  const selectedKey = selected ? phoneKey(selected.phone) : null;
+  const selectedKey = selected
+    ? `${selected.connectionId ?? 'none'}#${phoneKey(selected.phone)}`
+    : null;
 
   // Lead do contato selecionado: prefere um deal ABERTO (nem ganho nem
   // perdido); entre vários, o mais recente. null = "Criar lead" disponível.
@@ -381,9 +439,12 @@ export const ChatsPage: React.FC = () => {
 
   // "Marcar como lida": zera a bolinha sem abrir a conversa (reusa o GET de
   // mensagens, que já faz o reset do contador ao visualizar).
-  const handleMarkRead = async (phone: string) => {
+  const handleMarkRead = async (phone: string, connectionId: string | null) => {
     try {
-      const res = await fetch(`/api/whatsapp/messages?phone=${encodeURIComponent(phone)}`, { credentials: 'include' });
+      const url =
+        `/api/whatsapp/messages?phone=${encodeURIComponent(phone)}` +
+        (connectionId ? `&connectionId=${encodeURIComponent(connectionId)}` : '');
+      const res = await fetch(url, { credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await queryClient.invalidateQueries({ queryKey: ['waConversations'] });
       addToast('Conversa marcada como lida.', 'success');
@@ -395,16 +456,21 @@ export const ChatsPage: React.FC = () => {
   // "Marcar como não lida" (igual WhatsApp): arma a bolinha na lista. Se a
   // conversa estiver ABERTA, fecha — senão o próprio polling de leitura
   // zeraria o marcador em seguida. 100% interno: nada vai pro WhatsApp.
-  const handleMarkUnread = async (phone: string) => {
+  const handleMarkUnread = async (phone: string, connectionId: string | null) => {
     try {
       const res = await fetch('/api/whatsapp/conversations/unread', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ phone }),
+        body: JSON.stringify({ phone, connectionId }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      if (selected && phoneKey(selected.phone) === phoneKey(phone)) setSelected(null);
+      if (
+        selected &&
+        phoneKey(selected.phone) === phoneKey(phone) &&
+        (selected.connectionId ?? null) === connectionId
+      )
+        setSelected(null);
       await queryClient.invalidateQueries({ queryKey: ['waConversations'] });
       addToast('Conversa marcada como não lida.', 'success');
     } catch {
@@ -679,14 +745,24 @@ export const ChatsPage: React.FC = () => {
             </div>
           )}
           {chatList.map(c => {
-            const active = selectedKey === phoneKey(c.phone);
+            // mesma herança do openChat: linha sem conversa sob filtro de
+            // número acende quando o chat pinado nesse número está aberto
+            const rowConnId = c.connectionId ?? (effectiveConn !== 'all' ? effectiveConn : null);
+            const active = selectedKey === `${rowConnId ?? 'none'}#${phoneKey(c.phone)}`;
             return (
               // wrapper relative: o botão "marcar como não lida" é IRMÃO da
               // linha (botão dentro de botão é HTML inválido), aparece no hover
               <div key={c.key} className="relative group/row">
               <button
                 type="button"
-                onClick={() => openChat({ phone: c.phone, name: c.name, contactId: c.contactId })}
+                onClick={() =>
+                  openChat({
+                    phone: c.phone,
+                    name: c.name,
+                    contactId: c.contactId,
+                    connectionId: c.connectionId ?? (effectiveConn !== 'all' ? effectiveConn : null),
+                  })
+                }
                 className={`w-full flex items-center gap-3 px-4 py-3 text-left border-b border-slate-50 dark:border-white/5 transition-colors ${
                   active ? 'bg-emerald-50 dark:bg-emerald-900/15' : 'hover:bg-slate-50 dark:hover:bg-white/5'
                 }`}
@@ -699,6 +775,14 @@ export const ChatsPage: React.FC = () => {
                       {!c.contact && (
                         <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
                           sem contato
+                        </span>
+                      )}
+                      {connsList.length > 1 && effectiveConn === 'all' && c.connectionId && (
+                        <span
+                          className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400"
+                          title={`Conversa do número ${connsList.find(x => x.id === c.connectionId)?.phoneNumber || ''}`}
+                        >
+                          {(connsList.find(x => x.id === c.connectionId)?.phoneNumber || 'número').replace('+55', '')}
                         </span>
                       )}
                     </span>
@@ -771,7 +855,7 @@ export const ChatsPage: React.FC = () => {
                       onClick={e => {
                         e.stopPropagation();
                         setRowMenu(null);
-                        void handleMarkRead(c.phone);
+                        void handleMarkRead(c.phone, c.connectionId ?? (c.hasConv ? 'none' : null));
                       }}
                       className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
                     >
@@ -784,7 +868,7 @@ export const ChatsPage: React.FC = () => {
                       onClick={e => {
                         e.stopPropagation();
                         setRowMenu(null);
-                        void handleMarkUnread(c.phone);
+                        void handleMarkUnread(c.phone, c.connectionId ?? (c.hasConv ? 'none' : null));
                       }}
                       className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
                     >
@@ -872,7 +956,8 @@ export const ChatsPage: React.FC = () => {
             <div className="flex-1 min-h-0">
               {/* key={phone} garante reset total do composer/busca ao trocar de conversa */}
               <DealWhatsAppChat
-                key={selected.phone}
+                key={`${selected.phone}|${selected.connectionId ?? 'all'}`}
+                connectionId={selected.connectionId ?? null}
                 contact={{ id: selected.contactId || selected.phone, name: selected.name, phone: selected.phone }}
                 templateContext={{
                   'contato.email': (selected.contactId && contacts.find(c => c.id === selected.contactId)?.email) || '',

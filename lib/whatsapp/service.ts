@@ -188,7 +188,12 @@ export async function matchContactByPhone(
   return (data as { id?: string } | null)?.id ?? null;
 }
 
-/** Acha a conversa por telefone na org (variantes BR), ou cria uma nova (casando contato). */
+/**
+ * Acha a conversa por telefone NA CONEXÃO (variantes BR), ou cria uma nova
+ * (casando contato). Cada número conectado é um "WhatsApp" próprio: a conversa
+ * do mesmo cliente em outro número é OUTRA conversa. Órfãs (connection_id
+ * NULL, era pré multi-número) são reivindicadas na primeira mensagem.
+ */
 export async function ensureConversation(
   admin: SupabaseClient,
   orgId: string,
@@ -197,15 +202,41 @@ export async function ensureConversation(
   waName?: string | null
 ): Promise<WaConversationRow> {
   const variants = brPhoneVariants(waPhone);
-  const { data: existingList } = await admin
+  const phones = variants.length ? variants : [waPhone];
+
+  let scoped = admin
     .from('wa_conversations')
     .select('*')
     .eq('organization_id', orgId)
-    .in('wa_phone', variants.length ? variants : [waPhone]);
+    .in('wa_phone', phones);
+  scoped = connectionId ? scoped.eq('connection_id', connectionId) : scoped.is('connection_id', null);
+  const { data: existingList } = await scoped;
   // se houver conversa nas duas variantes, prefere a que já está ligada a um contato
   const existing =
     (existingList ?? []).find(c => (c as WaConversationRow).contact_id) ?? (existingList ?? [])[0];
   if (existing) return existing as WaConversationRow;
+
+  // Reivindica uma conversa órfã antes de criar outra (preferindo a LIGADA
+  // a contato — é a que carrega o histórico certo)
+  if (connectionId) {
+    const { data: orfas } = await admin
+      .from('wa_conversations')
+      .select('id, contact_id')
+      .eq('organization_id', orgId)
+      .is('connection_id', null)
+      .in('wa_phone', phones);
+    const orfa = (orfas ?? []).find(o => o.contact_id) ?? (orfas ?? [])[0];
+    if (orfa?.id) {
+      const { data: claimed } = await admin
+        .from('wa_conversations')
+        .update({ connection_id: connectionId })
+        .eq('id', orfa.id)
+        .is('connection_id', null)
+        .select('*')
+        .maybeSingle();
+      if (claimed) return claimed as WaConversationRow;
+    }
+  }
 
   const contactId = await matchContactByPhone(admin, orgId, waPhone);
   const { data, error } = await admin
@@ -220,14 +251,29 @@ export async function ensureConversation(
     .select('*')
     .single();
   if (error) {
-    // corrida com outra inserção (constraint org+phone): relê
-    const { data: againList } = await admin
+    // Corrida com outra inserção — ou a trava antiga org+telefone ainda ativa
+    // no banco (migração pendente): relê por conexão e cai na conversa única.
+    let againQ = admin
       .from('wa_conversations')
       .select('*')
       .eq('organization_id', orgId)
-      .in('wa_phone', variants.length ? variants : [waPhone]);
+      .in('wa_phone', phones);
+    againQ = connectionId ? againQ.eq('connection_id', connectionId) : againQ;
+    const { data: againList } = await againQ;
     const again = (againList ?? [])[0];
     if (again) return again as WaConversationRow;
+    // Trava ANTIGA (org+telefone) ainda no banco: cai na conversa única da
+    // org (comportamento antigo até a migração rodar). Fora desse caso, não —
+    // gravar na conversa de OUTRO número esconderia a mensagem do chat preso.
+    if (String(error.message).includes('uq_wa_conversations_org_phone')) {
+      const { data: qualquerList } = await admin
+        .from('wa_conversations')
+        .select('*')
+        .eq('organization_id', orgId)
+        .in('wa_phone', phones);
+      const qualquer = (qualquerList ?? [])[0];
+      if (qualquer) return qualquer as WaConversationRow;
+    }
     throw new Error(error.message);
   }
   return data as WaConversationRow;

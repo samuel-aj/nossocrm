@@ -328,18 +328,45 @@ Deno.serve(async (req) => {
         const waTs = tsNum ? new Date(tsNum * 1000).toISOString() : new Date().toISOString();
         const pushName = isEcho ? null : nameByWaId[String(m.from)] || null;
 
-        // conversa (casa contato pelo telefone, testando variantes BR do 9)
+        // Conversa POR NÚMERO CONECTADO (cada número é um "WhatsApp" próprio):
+        // 1) conversa desta conexão; 2) reivindica uma órfã (connection_id
+        // NULL, era pré multi-número ou conexão excluída); 3) cria; 4) se o
+        // insert conflitar, relê — primeiro por conexão e, enquanto a trava
+        // antiga (org+telefone) existir no banco, cai na conversa única da org
+        // (comportamento antigo até a migração rodar).
         const variants = brPhoneVariants(phone);
         let convId: string | null = null;
         const { data: convList } = await supabase
           .from("wa_conversations")
           .select("id, contact_id")
           .eq("organization_id", orgId)
+          .eq("connection_id", conn.id)
           .in("wa_phone", variants);
         const conv = (convList ?? []).find((c) => c.contact_id) ?? (convList ?? [])[0];
         if (conv) {
           convId = conv.id;
-        } else {
+        }
+        if (!convId) {
+          const { data: orfas } = await supabase
+            .from("wa_conversations")
+            .select("id, contact_id")
+            .eq("organization_id", orgId)
+            .is("connection_id", null)
+            .in("wa_phone", variants);
+          // preferir a órfã LIGADA a contato (carrega o histórico certo)
+          const orfa = (orfas ?? []).find((o) => o.contact_id) ?? (orfas ?? [])[0];
+          if (orfa?.id) {
+            const { data: claimed } = await supabase
+              .from("wa_conversations")
+              .update({ connection_id: conn.id })
+              .eq("id", orfa.id)
+              .is("connection_id", null)
+              .select("id")
+              .maybeSingle();
+            if (claimed?.id) convId = claimed.id;
+          }
+        }
+        if (!convId) {
           const { data: contact } = await supabase
             .from("contacts")
             .select("id")
@@ -361,16 +388,29 @@ Deno.serve(async (req) => {
           if (created?.id) {
             convId = created.id;
           } else if (convErr) {
-            // Corrida: outra entrega concorrente da Meta já criou a conversa
-            // (viola uq_wa_conversations_org_phone). Relê em vez de descartar.
+            // Corrida com outra entrega, ou trava antiga org+telefone ainda
+            // ativa. Relê por conexão; senão, usa a conversa única da org.
             const { data: again } = await supabase
               .from("wa_conversations")
               .select("id")
               .eq("organization_id", orgId)
+              .eq("connection_id", conn.id)
               .in("wa_phone", variants)
               .limit(1)
               .maybeSingle();
             convId = again?.id ?? null;
+            if (!convId && String(convErr.message).includes("uq_wa_conversations_org_phone")) {
+              // Trava ANTIGA (org+telefone) ainda no banco: cai na conversa
+              // única da org (comportamento antigo até a migração rodar).
+              const { data: qualquer } = await supabase
+                .from("wa_conversations")
+                .select("id")
+                .eq("organization_id", orgId)
+                .in("wa_phone", variants)
+                .limit(1)
+                .maybeSingle();
+              convId = qualquer?.id ?? null;
+            }
           }
         }
         if (!convId) continue;

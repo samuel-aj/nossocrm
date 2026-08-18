@@ -60,9 +60,13 @@ export interface SendChatPayload {
   connectionId?: string;
 }
 
-export function useWhatsAppChat(phoneE164: string | null) {
+/**
+ * connectionId restringe o chat a UM número conectado (conversas separadas por
+ * número na página Chats). null/omitido = visão unificada do contato.
+ */
+export function useWhatsAppChat(phoneE164: string | null, connectionId?: string | null) {
   const qc = useQueryClient();
-  const queryKey = ['waChat', phoneE164] as const;
+  const queryKey = ['waChat', phoneE164, connectionId ?? 'all'] as const;
   // pausa o polling durante um envio: um refetch no meio apagaria a bolha otimista
   const sendingRef = useRef(false);
 
@@ -76,7 +80,10 @@ export function useWhatsAppChat(phoneE164: string | null) {
   const query = useQuery<WaChatData>({
     queryKey,
     queryFn: async () => {
-      const res = await fetch(`/api/whatsapp/messages?phone=${encodeURIComponent(phoneE164!)}`, {
+      const url =
+        `/api/whatsapp/messages?phone=${encodeURIComponent(phoneE164!)}` +
+        (connectionId ? `&connectionId=${encodeURIComponent(connectionId)}` : '');
+      const res = await fetch(url, {
         credentials: 'include',
         headers: { accept: 'application/json' },
       });
