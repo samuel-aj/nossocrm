@@ -14,10 +14,11 @@ import { UserRole } from '@/types/constants';
 import { AICenterSettings } from './AICenterSettings';
 
 import { UsersPage } from './UsersPage';
+import { LeadDistributionSettings } from './LeadDistributionSettings';
 import { useAuth } from '@/context/AuthContext';
-import { Settings as SettingsIcon, Users, Database, Sparkles, Plug, Package } from 'lucide-react';
+import { Settings as SettingsIcon, Users, Database, Sparkles, Plug, Package, Shuffle } from 'lucide-react';
 
-type SettingsTab = 'general' | 'products' | 'integrations' | 'ai' | 'data' | 'users';
+type SettingsTab = 'general' | 'products' | 'integrations' | 'ai' | 'data' | 'users' | 'distribution';
 
 interface GeneralSettingsProps {
   hash?: string;
@@ -223,6 +224,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
       setActiveTab('data');
     } else if (pathname?.includes('/settings/users')) {
       setActiveTab('users');
+    } else if (pathname?.includes('/settings/distribuicao')) {
+      setActiveTab('distribution');
     } else {
       setActiveTab('general');
     }
@@ -236,6 +239,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
     { id: 'ai' as SettingsTab, name: 'Central de I.A', icon: Sparkles },
     { id: 'data' as SettingsTab, name: 'Dados', icon: Database },
     ...(isAdminOrSuper ? [{ id: 'users' as SettingsTab, name: 'Equipe', icon: Users }] : []),
+    ...(isAdminOrSuper ? [{ id: 'distribution' as SettingsTab, name: 'Distribuição', icon: Shuffle }] : []),
   ];
 
   const renderContent = () => {
@@ -250,6 +254,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
         return <DataStorageSettings />;
       case 'users':
         return <UsersPage />;
+      case 'distribution':
+        return <LeadDistributionSettings />;
       default:
         return <GeneralSettings hash={hash} isAdmin={isAdminOrSuper} />;
     }
