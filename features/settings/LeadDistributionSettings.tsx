@@ -257,7 +257,7 @@ export const LeadDistributionSettings: React.FC = () => {
               Incluir os leads criados dentro do CRM sem responsável
             </h3>
             <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">
-              Com esta opção ligada, o lead criado no Kanban, no chat ou na conversão de contato também entra no rodízio. Desligada, quem cria fica com o lead.
+              Ligada, o lead criado à mão também entra no rodízio. Desligada, quem cria fica com ele.
             </p>
           </div>
           <label className="relative inline-flex items-center cursor-pointer shrink-0">
