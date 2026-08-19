@@ -310,7 +310,13 @@ Deno.serve(async (req) => {
       // (celular, WhatsApp Web, outra ferramenta). Mesmo formato de `messages`,
       // mas o interlocutor está em `to` em vez de `from` — por isso a marca
       // `isEcho`, que inverte direção e telefones na hora de gravar.
-      const echoes = Array.isArray(value?.message_echoes) ? value.message_echoes : [];
+      // A Meta entrega os ecos em value.message_echoes; por robustez, aceita
+      // também value.smb_message_echoes (nome do CAMPO assinado pros envios
+      // feitos pelo app do WhatsApp Business no celular).
+      const echoes = [
+        ...(Array.isArray(value?.message_echoes) ? value.message_echoes : []),
+        ...(Array.isArray(value?.smb_message_echoes) ? value.smb_message_echoes : []),
+      ];
       // deno-lint-ignore no-explicit-any
       const inbound = (Array.isArray(value?.messages) ? value.messages : []).map((m: any) => ({ m, isEcho: false }));
       // deno-lint-ignore no-explicit-any

@@ -171,7 +171,7 @@ export async function inspectMetaWebhooks(input: {
       const waba = (r.data?.data ?? []).find(s => s.object === 'whatsapp_business_account');
       const campos = (waba?.fields ?? []).map(f => (typeof f === 'string' ? f : f?.name ?? '')).filter(Boolean);
       out.camposAssinadosNoApp = campos;
-      out.ecosAssinados = campos.includes('message_echoes');
+      out.ecosAssinados = campos.includes('smb_message_echoes') || campos.includes('message_echoes');
       out.callbackDoApp = waba?.callback_url ?? null;
     } else {
       out.erro = r.error || `HTTP ${r.status}`;
@@ -219,18 +219,38 @@ export async function setupMetaWebhooks(input: {
   //    verifica o callback na hora (nosso GET responde o challenge).
   if (input.appId && input.appSecret) {
     const appToken = `${input.appId.trim()}|${input.appSecret.trim()}`;
-    const r = await graph('POST', `/${encodeURIComponent(input.appId.trim())}/subscriptions`, {
-      object: 'whatsapp_business_account',
-      callback_url: input.callbackUrl,
-      verify_token: input.verifyToken,
-      // message_echoes traz o que este número enviou POR FORA do CRM (celular,
-      // WhatsApp Web, outra ferramenta). Sem assinar esse campo a Meta nunca
-      // avisa, e essas mensagens não aparecem no chat.
-      fields: 'messages,message_echoes',
-      access_token: appToken,
-    });
-    result.appWebhook = r.ok ? 'ok' : 'failed';
-    if (!r.ok) result.appWebhookError = r.error || `HTTP ${r.status}`;
+    // Ecos = o que este número enviou POR FORA do CRM. Dois campos na Meta:
+    // smb_message_echoes (enviado pelo APP do WhatsApp Business no celular,
+    // números em coexistência) e message_echoes (enviado via Cloud API).
+    // Sem assinar, a Meta nunca avisa e a mensagem não aparece no chat.
+    // Se a Meta recusar um campo de eco (varia por tipo de conta/versão),
+    // tenta conjuntos menores — a assinatura nunca falha por inteiro.
+    const conjuntos = [
+      'messages,message_echoes,smb_message_echoes',
+      'messages,message_echoes',
+      'messages',
+    ];
+    let ultimoErro: string | undefined;
+    for (const fields of conjuntos) {
+      const r = await graph('POST', `/${encodeURIComponent(input.appId.trim())}/subscriptions`, {
+        object: 'whatsapp_business_account',
+        callback_url: input.callbackUrl,
+        verify_token: input.verifyToken,
+        fields,
+        access_token: appToken,
+      });
+      if (r.ok) {
+        result.appWebhook = 'ok';
+        // conseguiu, mas SEM todos os ecos: registra pro admin saber
+        if (fields !== conjuntos[0]) {
+          result.appWebhookError = `Meta aceitou só os campos: ${fields} (${ultimoErro ?? 'campo de eco recusado'})`;
+        }
+        break;
+      }
+      ultimoErro = r.error || `HTTP ${r.status}`;
+      result.appWebhook = 'failed';
+      result.appWebhookError = ultimoErro;
+    }
   }
 
   // 2. Assina o app na WABA (idempotente).
