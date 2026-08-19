@@ -154,7 +154,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             const { data, error } = await sb
                 .from('profiles')
-                .select('*, organizations(name)')
+                .select('*, organizations!profiles_organization_id_fkey(name)')
                 .eq('id', userId)
                 .single();
 
@@ -192,7 +192,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 } else {
                     const { data: link, error: linkError } = await sb
                         .from('user_organizations')
-                        .select('role, organizations(name)')
+                        .select('role, organizations!user_organizations_organization_id_fkey(name)')
                         .eq('user_id', base.id)
                         .eq('organization_id', pinned.id)
                         .maybeSingle();

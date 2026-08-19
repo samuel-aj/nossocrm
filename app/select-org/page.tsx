@@ -53,7 +53,7 @@ export default function SelectOrgPage() {
       // Fetch user's organizations
       const { data: memberships } = await supabase
         .from('user_organizations')
-        .select('organization_id, role, organizations(name)')
+        .select('organization_id, role, organizations!user_organizations_organization_id_fkey(name)')
         .eq('user_id', user.id)
 
       const validOrgs = (memberships || []).filter(m => m.organizations).map(m => ({
