@@ -72,13 +72,37 @@ CREATE INDEX IF NOT EXISTS lead_distribution_org_idx
 
 -- Matriz pessoa × board. Linha AUSENTE = participa (mesma semântica do painel
 -- de origem: só o desmarcado vira registro).
+--
+-- ATENÇÃO (incidente 19/08): a chave é PRÓPRIA (id), NUNCA composta pelas FKs.
+-- Com PK composta o PostgREST trata a tabela como PONTE profiles↔organizations
+-- ↔boards e passa a rejeitar por ambiguidade (PGRST201) todo embed sem hint
+-- entre essas tabelas, derrubando o carregamento de perfil do app inteiro.
 CREATE TABLE IF NOT EXISTS public.lead_distribution_boards (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
   user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   board_id uuid NOT NULL REFERENCES public.boards(id) ON DELETE CASCADE,
   active boolean NOT NULL DEFAULT true,
-  PRIMARY KEY (organization_id, user_id, board_id)
+  CONSTRAINT uq_lead_distribution_boards UNIQUE (organization_id, user_id, board_id)
 );
+
+-- Converte uma instalação antiga (PK composta) pro formato de chave própria.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_schema='public' AND table_name='lead_distribution_boards'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_schema='public' AND table_name='lead_distribution_boards' AND column_name='id'
+  ) THEN
+    ALTER TABLE public.lead_distribution_boards DROP CONSTRAINT lead_distribution_boards_pkey;
+    ALTER TABLE public.lead_distribution_boards ADD COLUMN id uuid NOT NULL DEFAULT gen_random_uuid();
+    ALTER TABLE public.lead_distribution_boards ADD PRIMARY KEY (id);
+    ALTER TABLE public.lead_distribution_boards
+      ADD CONSTRAINT uq_lead_distribution_boards UNIQUE (organization_id, user_id, board_id);
+  END IF;
+END $$;
 
 -- Contagem do trigger: recebidos por responsável na janela de 30 dias
 CREATE INDEX IF NOT EXISTS deals_org_owner_created_idx
