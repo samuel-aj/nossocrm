@@ -10,7 +10,7 @@
  */
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, ExternalLink, KeyRound, Loader2, MessageCircle, QrCode, Trash2, Unplug } from 'lucide-react';
+import { CheckCircle2, ExternalLink, KeyRound, Loader2, MessageCircle, QrCode, RefreshCw, Trash2, Unplug } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 
 interface WaConnectionInfo {
@@ -107,7 +107,6 @@ export function WhatsAppConnectionSettings() {
       setQrTargetId(null);
       addToast(`Número ${qrTarget.phoneNumber || ''} conectado via QR!`.replace('  ', ' '), 'success');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- addToast é estável (context)
   }, [qrTargetId, qrTarget?.status, qrTarget?.phoneNumber]);
   // HUB: o seletor de modo (2 cartões grandes) só existe pra org SEM nenhuma
   // conexão criada; com 1+, a lista de cartões + botões de adicionar assume
@@ -130,9 +129,9 @@ export function WhatsAppConnectionSettings() {
   // Reaplica a assinatura do webhook na Meta usando as credenciais JÁ SALVAS.
   // Serve quando a Meta precisa passar a avisar algo novo — foi o caso do campo
   // que traz as mensagens enviadas pelo celular/WhatsApp Web/outra ferramenta.
-  const [resyncing, setResyncing] = useState(false);
-  const resyncMetaWebhook = async () => {
-    setResyncing(true);
+  const [resyncingId, setResyncingId] = useState<string | null>(null);
+  const resyncMetaWebhook = async (connectionId?: string) => {
+    setResyncingId(connectionId ?? 'all');
     try {
       const r = await fetchJson<{
         ok: boolean;
@@ -140,7 +139,7 @@ export function WhatsAppConnectionSettings() {
       }>('/api/whatsapp/connection/resync', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: '{}',
+        body: JSON.stringify(connectionId ? { connectionId } : {}),
       });
       const falhas = (r.resultados ?? []).filter(x => !x.ok);
       if (r.ok && falhas.length === 0) {
@@ -153,7 +152,7 @@ export function WhatsAppConnectionSettings() {
     } catch (e) {
       addToast(`Erro ao reconfigurar: ${(e as Error).message}`, 'error');
     } finally {
-      setResyncing(false);
+      setResyncingId(null);
     }
   };
 
@@ -424,19 +423,6 @@ export function WhatsAppConnectionSettings() {
           após a última mensagem do cliente só é possível enviar templates aprovados.
           Mensagens livres são recusadas (o CRM mostra a falha no chat).
         </p>
-        <div className="flex items-center gap-3 flex-wrap pt-2">
-          <button
-            type="button"
-            onClick={() => void resyncMetaWebhook()}
-            disabled={resyncing}
-            className="px-3 py-1.5 rounded-lg text-xs font-bold border border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-500/10 disabled:opacity-60 transition-colors"
-          >
-            {resyncing ? 'Reconfigurando...' : 'Reconfigurar webhook na Meta'}
-          </button>
-          <span className="text-[11px] text-slate-500 dark:text-slate-400">
-            Use se as mensagens enviadas pelo celular ou por outra plataforma não estiverem aparecendo no chat.
-          </span>
-        </div>
       </div>
       <div className="flex flex-wrap items-center gap-4">
         <button
@@ -704,7 +690,7 @@ export function WhatsAppConnectionSettings() {
                         </button>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-2 shrink-0 flex-wrap">
                         {!rowBiz && !rowOn && !rowPairing && (
                           <button
                             type="button"
@@ -715,6 +701,22 @@ export function WhatsAppConnectionSettings() {
                             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors"
                           >
                             <QrCode size={14} /> Reconectar (QR)
+                          </button>
+                        )}
+                        {rowEditable && rowOn && (
+                          <button
+                            type="button"
+                            onClick={() => void resyncMetaWebhook(c.id)}
+                            disabled={resyncingId !== null}
+                            title="Reconfigura o webhook deste número na Meta — use se as mensagens enviadas pelo celular ou por outra plataforma (ex.: Kommo) não estiverem aparecendo no chat"
+                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-sky-200 dark:border-sky-500/30 text-sky-700 dark:text-sky-300 text-xs font-bold hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-colors disabled:opacity-60"
+                          >
+                            {resyncingId === c.id ? (
+                              <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                              <RefreshCw size={14} />
+                            )}
+                            Reconfigurar webhook
                           </button>
                         )}
                         {rowEditable && (
