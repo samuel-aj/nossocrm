@@ -33,6 +33,10 @@ export async function GET(req: Request) {
       phoneNumber: c.phone_number,
       profileName: c.profile_name,
     }));
+  // Rótulos de TODOS os números da org (inclui desconectados): as divisórias
+  // por número do chat precisam nomear também conexões que já caíram.
+  const numbers: Record<string, { phoneNumber: string | null; profileName: string | null }> = {};
+  for (const c of all) numbers[c.id] = { phoneNumber: c.phone_number, profileName: c.profile_name };
 
   // WhatsApp DESCONECTADO => conversas ficam OCULTAS (guardadas no banco;
   // reconectar o mesmo número traz de volta). Nada é exibido nem marcado
@@ -43,6 +47,7 @@ export async function GET(req: Request) {
       hasConnection: !!conn,
       provider: conn?.provider ?? null,
       senders,
+      numbers,
       conversation: null,
       messages: [],
     });
@@ -54,7 +59,7 @@ export async function GET(req: Request) {
   const variants = brPhoneVariants(phone);
   let convQ = auth.admin
     .from('wa_conversations')
-    .select('id, wa_phone, wa_name, contact_id, last_message_at, unread_count')
+    .select('id, connection_id, wa_phone, wa_name, contact_id, last_message_at, unread_count')
     .eq('organization_id', auth.user.organizationId)
     .in('wa_phone', variants.length ? variants : [phone]);
   // 'none' = só a conversa órfã (sem número conectado); ausente = unificada
@@ -62,7 +67,8 @@ export async function GET(req: Request) {
   else if (connectionId) convQ = convQ.eq('connection_id', connectionId);
   const { data: convList } = await convQ;
 
-  const convs = (convList ?? []) as Array<{ id: string; contact_id: string | null }>;
+  const convs = (convList ?? []) as Array<{ id: string; connection_id: string | null; contact_id: string | null }>;
+  const connByConv = new Map(convs.map(c => [c.id, c.connection_id]));
   const conv = convs.find(c => c.contact_id) ?? convs[0] ?? null;
 
   let messages: unknown[] = [];
@@ -72,12 +78,17 @@ export async function GET(req: Request) {
     const { data } = await auth.admin
       .from('wa_messages')
       .select(
-        'id, direction, status, body, media_type, media_mime, media_url, from_phone, to_phone, wa_timestamp, created_at, sent_by, error, transcription'
+        'id, conversation_id, direction, status, body, media_type, media_mime, media_url, from_phone, to_phone, wa_timestamp, created_at, sent_by, error, transcription'
       )
       .in('conversation_id', convs.map(c => c.id))
       .order('created_at', { ascending: false })
       .limit(300);
     const rows = ((data || []) as Array<Record<string, unknown>>).reverse();
+    // Anota de QUAL número cada mensagem veio (divisórias por número no chat)
+    for (const r of rows) {
+      r.connection_id = connByConv.get(r.conversation_id as string) ?? null;
+      delete r.conversation_id;
+    }
 
     // media_url guarda o CAMINHO no bucket privado wa-media — assina URLs de
     // leitura (1h) pro chat exibir imagem/vídeo/áudio/documento.
@@ -107,6 +118,7 @@ export async function GET(req: Request) {
     hasConnection: !!conn,
     provider: conn?.provider ?? null,
     senders,
+    numbers,
     conversation: conv ?? null,
     messages,
   });

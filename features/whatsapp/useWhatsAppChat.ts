@@ -28,6 +28,8 @@ export interface WaChatMessage {
   error: string | null;
   /** Transcrição do áudio (gerada por IA sob demanda, cacheada no banco) */
   transcription: string | null;
+  /** De qual número conectado a mensagem veio (divisórias por número) */
+  connection_id?: string | null;
 }
 
 /** Número conectado disponível pra ENVIAR (multi-número). */
@@ -46,6 +48,8 @@ export interface WaChatData {
   /** Todos os números CONECTADOS da org (seletor de envio do chat) */
   senders: WaSender[];
   conversation: { id: string; wa_phone: string; wa_name: string | null; contact_id: string | null } | null;
+  /** Rótulo de TODOS os números da org (inclui desconectados), por id */
+  numbers?: Record<string, { phoneNumber: string | null; profileName: string | null }>;
   messages: WaChatMessage[];
 }
 
@@ -184,6 +188,8 @@ export function useWhatsAppChat(phoneE164: string | null, connectionId?: string 
         sent_by: null,
         error: null,
         transcription: null,
+        // bolha otimista já nasce no número certo (divisória não pisca)
+        connection_id: p.connectionId ?? connectionId ?? null,
       };
       qc.setQueryData<WaChatData>(queryKey, old =>
         old

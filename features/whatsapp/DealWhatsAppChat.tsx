@@ -804,6 +804,21 @@ export function DealWhatsAppChat({
   useEffect(() => {
     senderRef.current = activeSender;
   }, [activeSender]);
+
+  // Divisórias por número na visão unificada: rótulo de cada número da org
+  // (inclui desconectados/removidos) e flag pra dividir só quando a conversa
+  // realmente passou por 2+ números.
+  const numbersById = data?.numbers ?? {};
+  const connLabel = (id: string | null | undefined): string => {
+    const n = id ? numbersById[id] : undefined;
+    if (n) return n.phoneNumber || n.profileName || 'Número';
+    return 'número removido';
+  };
+  const showConnDividers = useMemo(() => {
+    if (connectionId) return false; // chat preso a um número: tudo é dele
+    const distintos = new Set(messages.map(m => m.connection_id ?? null));
+    return distintos.size > 1;
+  }, [connectionId, messages]);
   // Sem conexão ativa (nunca conectou OU desconectou): troca o composer pelo
   // aviso de conectar, em vez de deixar o envio falhar com erro técnico
   const notConnected =
@@ -1289,64 +1304,6 @@ export function DealWhatsAppChat({
           {data && !data.connected && (
             <span className="text-[11px] text-amber-600 dark:text-amber-400">WhatsApp desconectado</span>
           )}
-          {/* MULTI-NÚMERO: escolhe por qual número conectado as mensagens saem.
-              Também aparece com 1 número quando o ESCOLHIDO caiu e o envio
-              passou pro reserva — troca de remetente nunca é silenciosa. */}
-          {!connectionId &&
-            (senders.length > 1 || (!!senderId && !!activeSender && senderId !== activeSender.id)) &&
-            activeSender && (
-            <div ref={senderMenuRef} className="relative">
-              <button
-                type="button"
-                onClick={() => setSenderMenuOpen(o => !o)}
-                aria-expanded={senderMenuOpen}
-                className="h-8 max-w-[180px] px-2.5 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-white/10 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
-                title="Número que envia as mensagens"
-              >
-                <MessageCircle size={13} className="shrink-0 text-emerald-500" />
-                <span className="truncate">
-                  {activeSender.phoneNumber || activeSender.profileName || 'Número'}
-                </span>
-                <ChevronDown size={13} className="shrink-0" />
-              </button>
-              {senderMenuOpen && (
-                <div className="absolute right-0 top-full mt-1 z-20 w-64 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card p-1.5 shadow-lg">
-                  <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    Enviar pelo número
-                  </p>
-                  {senders.map(s => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => {
-                        setSenderId(s.id);
-                        try {
-                          window.localStorage.setItem('wa-sender-connection', s.id);
-                        } catch {
-                          // navegação anônima sem storage: só não persiste
-                        }
-                        setSenderMenuOpen(false);
-                      }}
-                      className="w-full flex items-center gap-2 text-left px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
-                    >
-                      <span className="flex-1 min-w-0">
-                        <span className="block text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">
-                          {s.profileName || s.phoneNumber || 'Número'}
-                        </span>
-                        <span className="block text-xs text-slate-500 dark:text-slate-400 truncate">
-                          {s.phoneNumber || ''}
-                          {s.provider === 'evolution' ? ' · QR' : ' · API oficial'}
-                        </span>
-                      </span>
-                      {activeSender.id === s.id && (
-                        <Check size={15} className="text-emerald-500 shrink-0" />
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
           <button
             type="button"
             onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
@@ -1434,7 +1391,7 @@ export function DealWhatsAppChat({
         {!isLoading && !error && messages.length === 0 && (
           <CenterMsg>Nenhuma mensagem ainda. Envie a primeira mensagem 👇</CenterMsg>
         )}
-        {messages.map((m) => (
+        {messages.map((m, i) => (
           <div
             key={m.id}
             ref={el => {
@@ -1442,6 +1399,17 @@ export function DealWhatsAppChat({
               else msgRefs.current.delete(m.id);
             }}
           >
+            {showConnDividers &&
+              (i === 0 || (messages[i - 1].connection_id ?? null) !== (m.connection_id ?? null)) && (
+                <div className="flex items-center gap-2 pt-2 pb-1 select-none">
+                  <span className="flex-1 h-px bg-slate-200 dark:bg-white/10" />
+                  <span className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-1 rounded-full bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-300 border border-sky-200/70 dark:border-sky-500/20">
+                    <MessageCircle size={11} />
+                    via {connLabel(m.connection_id)}
+                  </span>
+                  <span className="flex-1 h-px bg-slate-200 dark:bg-white/10" />
+                </div>
+              )}
             <MessageBubble
               m={m}
               searchQuery={activeQuery}
@@ -1603,6 +1571,79 @@ export function DealWhatsAppChat({
                 {e}
               </button>
             ))}
+          </div>
+        )}
+
+        {/* Por QUAL número esta mensagem sai — colado no campo de texto pra
+            não restar dúvida. Preso a um número (página Chats): rótulo fixo;
+            visão unificada com 2+ números: seletor (menu abre pra cima). */}
+        {activeSender &&
+          (connectionId ||
+            senders.length > 1 ||
+            (!!senderId && senderId !== activeSender.id)) && (
+          <div className="flex items-center gap-1.5 pb-1.5 px-0.5">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Enviando por
+            </span>
+            {connectionId ? (
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400">
+                <MessageCircle size={11} />
+                {activeSender.phoneNumber || activeSender.profileName || 'Número'}
+              </span>
+            ) : (
+              <div ref={senderMenuRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setSenderMenuOpen(o => !o)}
+                  aria-expanded={senderMenuOpen}
+                  className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors"
+                  title="Trocar o número que envia"
+                >
+                  <MessageCircle size={11} />
+                  {activeSender.phoneNumber || activeSender.profileName || 'Número'}
+                  <ChevronDown
+                    size={12}
+                    className={`transition-transform ${senderMenuOpen ? 'rotate-180' : ''}`}
+                  />
+                </button>
+                {senderMenuOpen && (
+                  <div className="absolute left-0 bottom-full mb-1.5 z-20 w-64 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card p-1.5 shadow-lg">
+                    <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Enviar pelo número
+                    </p>
+                    {senders.map(s => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => {
+                          setSenderId(s.id);
+                          try {
+                            window.localStorage.setItem('wa-sender-connection', s.id);
+                          } catch {
+                            // navegação anônima sem storage: só não persiste
+                          }
+                          setSenderMenuOpen(false);
+                        }}
+                        className="w-full flex items-center gap-2 text-left px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
+                      >
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">
+                            {s.profileName || s.phoneNumber || 'Número'}
+                          </span>
+                          <span className="block text-xs text-slate-500 dark:text-slate-400 truncate">
+                            {s.phoneNumber || ''}
+                            {s.provider === 'evolution' ? ' · QR' : ' · API oficial'}
+                          </span>
+                        </span>
+                        {activeSender.id === s.id && (
+                          <Check size={15} className="text-emerald-500 shrink-0" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
