@@ -14,10 +14,11 @@ import { UserRole } from '@/types/constants';
 import { AICenterSettings } from './AICenterSettings';
 
 import { UsersPage } from './UsersPage';
+import { LeadDistributionSettings } from './LeadDistributionSettings';
 import { useAuth } from '@/context/AuthContext';
-import { Settings as SettingsIcon, Users, Database, Sparkles, Plug, Package } from 'lucide-react';
+import { Settings as SettingsIcon, Users, Database, Sparkles, Plug, Package, Shuffle } from 'lucide-react';
 
-type SettingsTab = 'general' | 'products' | 'integrations' | 'ai' | 'data' | 'users';
+type SettingsTab = 'general' | 'products' | 'integrations' | 'ai' | 'data' | 'users' | 'distribution';
 
 interface GeneralSettingsProps {
   hash?: string;
@@ -223,6 +224,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
       setActiveTab('data');
     } else if (pathname?.includes('/settings/users')) {
       setActiveTab('users');
+    } else if (pathname?.includes('/settings/distribuicao')) {
+      setActiveTab('distribution');
     } else {
       setActiveTab('general');
     }
@@ -231,11 +234,14 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
   const isAdminOrSuper = profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN;
   const tabs = [
     { id: 'general' as SettingsTab, name: 'Geral', icon: SettingsIcon },
+    // Distribuição logo no começo: como última aba ela caía fora da área
+    // visível da fileira (que rola na horizontal) e ninguém achava.
+    ...(isAdminOrSuper ? [{ id: 'distribution' as SettingsTab, name: 'Distribuição', icon: Shuffle }] : []),
+    ...(isAdminOrSuper ? [{ id: 'users' as SettingsTab, name: 'Equipe', icon: Users }] : []),
     ...(isAdminOrSuper ? [{ id: 'products' as SettingsTab, name: 'Produtos/Serviços', icon: Package }] : []),
     ...(isAdminOrSuper ? [{ id: 'integrations' as SettingsTab, name: 'Integrações', icon: Plug }] : []),
     { id: 'ai' as SettingsTab, name: 'Central de I.A', icon: Sparkles },
     { id: 'data' as SettingsTab, name: 'Dados', icon: Database },
-    ...(isAdminOrSuper ? [{ id: 'users' as SettingsTab, name: 'Equipe', icon: Users }] : []),
   ];
 
   const renderContent = () => {
@@ -250,6 +256,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
         return <DataStorageSettings />;
       case 'users':
         return <UsersPage />;
+      case 'distribution':
+        return <LeadDistributionSettings />;
       default:
         return <GeneralSettings hash={hash} isAdmin={isAdminOrSuper} />;
     }
@@ -259,7 +267,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
     <div className="max-w-5xl mx-auto">
       {/* Tabs minimalistas. Mobile: carrossel horizontal próprio; sem isso as
           últimas abas estouravam a tela e arrastavam a página inteira. */}
-      <div className="flex items-center gap-1 mb-8 border-b border-slate-200 dark:border-white/10 max-md:overflow-x-auto scrollbar-none">
+      <div className="flex items-center gap-1 mb-8 border-b border-slate-200 dark:border-white/10 md:flex-wrap max-md:overflow-x-auto scrollbar-none">
         {tabs.map((tab) => {
           const isActive = activeTab === tab.id;
           return (
