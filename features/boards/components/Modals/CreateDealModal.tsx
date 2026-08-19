@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
 import { Deal, Board, Contact, Company, Product } from '@/types';
-import { X, Building2, User, Mail, Phone, AlertCircle, Loader2, Package } from 'lucide-react';
+import { X, Building2, User, Mail, Phone, AlertCircle, Loader2, Package, Shuffle } from 'lucide-react';
 import { DebugFillButton } from '@/components/debug/DebugFillButton';
 import { fakeDeal, fakeContact, fakeCompany } from '@/lib/debug';
 import { ContactSearchCombobox } from '@/components/ui/ContactSearchCombobox';
@@ -32,6 +32,26 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
     // Prioriza props sobre contexto (permite que o Kanban passe o board correto)
     const activeBoard = propActiveBoard || contextActiveBoard;
     const activeBoardId = propActiveBoardId || contextActiveBoardId;
+
+    // Rodízio ligado E incluindo criação manual: o lead nasce SEM responsável
+    // e o banco escolhe pela distribuição (aba Distribuição). Fora disso, o
+    // criador vira o dono, como sempre foi.
+    const [rodizioAtivo, setRodizioAtivo] = useState(false);
+    React.useEffect(() => {
+        if (!isOpen) return;
+        let vivo = true;
+        (async () => {
+            try {
+                const res = await fetch('/api/settings/lead-distribution', { credentials: 'include' });
+                if (!res.ok) return;
+                const j = (await res.json()) as { enabled?: boolean; manual?: boolean };
+                if (vivo) setRodizioAtivo(!!j.enabled && !!j.manual);
+            } catch {
+                // sem rede: mantém o padrão (criador vira o dono)
+            }
+        })();
+        return () => { vivo = false; };
+    }, [isOpen]);
 
     // Estado para contato/empresa selecionados
     const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
@@ -152,7 +172,8 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
                 companyId: selectedCompany?.id || '',
                 contactId: selectedContact?.id || '',
                 boardId: activeBoardId || activeBoard.id,
-                ownerId: user?.id || '',
+                // '' vira NULL no insert -> o gatilho do banco atribui pelo rodízio
+                ownerId: rodizioAtivo ? '' : (user?.id || ''),
                 value: dealValue,
                 items: dealItems,
                 status: firstStage.id,
@@ -161,10 +182,9 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
                 probability: 10,
                 priority: 'medium',
                 tags: ['Novo'],
-                owner: {
-                    name: ownerName,
-                    avatar: profile?.avatar_url || ''
-                },
+                owner: rodizioAtivo
+                    ? { name: 'Distribuição automática', avatar: '' }
+                    : { name: ownerName, avatar: profile?.avatar_url || '' },
                 customFields: {},
                 isWon: false,
                 isLost: false,
@@ -405,6 +425,13 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
                             </div>
                         </div>
                     </div>
+
+                    {rodizioAtivo && (
+                        <div className="flex items-center gap-2 p-3 bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800 rounded-lg text-xs text-sky-700 dark:text-sky-300">
+                            <Shuffle size={14} className="flex-shrink-0" />
+                            <span>O responsável será definido pela <b>distribuição automática</b> assim que o lead for criado.</span>
+                        </div>
+                    )}
 
                     {/* Mensagem de erro */}
                     {error && (
