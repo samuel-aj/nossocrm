@@ -82,7 +82,7 @@ export function OrgSwitcher({
       if (!user) return [];
       const { data } = await supabase
         .from('user_organizations')
-        .select('organization_id, organizations(name)')
+        .select('organization_id, organizations!user_organizations_organization_id_fkey(name)')
         .eq('user_id', user.id);
       return (data ?? [])
         .map((r) => ({

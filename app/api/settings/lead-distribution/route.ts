@@ -91,12 +91,26 @@ async function listMembers(admin: ReturnType<typeof createStaticAdminClient>, or
   return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const a = await auth();
   if (!a.ok) return a.response;
   const { scoped } = a;
   const admin = createStaticAdminClient();
   const orgId = scoped.organization_id;
+
+  // Modo LEVE (?light=1): só os interruptores, pro modal de criação de lead
+  // saber se o rodízio cobre criação manual — sem carregar membros/leads.
+  if (new URL(req.url).searchParams.get('light')) {
+    const { data } = await admin
+      .from('organization_settings')
+      .select('lead_distribution_enabled, lead_distribution_manual')
+      .eq('organization_id', orgId)
+      .maybeSingle();
+    return json({
+      enabled: Boolean(data?.lead_distribution_enabled),
+      manual: Boolean(data?.lead_distribution_manual),
+    });
+  }
 
   try {
     const startOfDay = new Date();
@@ -128,7 +142,12 @@ export async function GET() {
         .limit(5000),
     ]);
 
-    if (rowsRes.error) return json({ error: rowsRes.error.message }, 500);
+    // Falha em QUALQUER leitura vira erro claro (sem vazar mensagem do banco)
+    const falha = settingsRes.error || rowsRes.error || matrixRes.error || boardsRes.error || dealsRes.error;
+    if (falha) {
+      console.error('[lead-distribution GET]', falha.message);
+      return json({ error: 'Não foi possível carregar a distribuição. Tente de novo em instantes.' }, 500);
+    }
 
     const cfgByUser = new Map<string, { weight: number; active: boolean }>();
     for (const r of rowsRes.data || []) {
@@ -245,27 +264,49 @@ export async function POST(req: Request) {
     await admin.from('lead_distribution').delete().eq('organization_id', orgId).in('user_id', remover);
   }
 
-  // Matriz por board: regrava só as exceções (desligados)
-  const del = await admin.from('lead_distribution_boards').delete().eq('organization_id', orgId);
-  if (del.error) return json({ error: del.error.message }, 500);
-
+  // Matriz por board: sincroniza as exceções SEM janela destrutiva (nada de
+  // delete-tudo-depois-insere: se o insert falhasse, as exceções sumiam e todo
+  // mundo voltava a receber de todos os boards). Upsert do estado novo e
+  // remoção por id só do que deixou de existir.
+  const orgBoards = new Set(
+    ((await admin.from('boards').select('id').eq('organization_id', orgId)).data || []).map(
+      b => b.id as string
+    )
+  );
   const offRows = matrixOff
     .map(k => {
       const [userId, boardId] = k.split('_');
       return { userId, boardId };
     })
-    .filter(r => r.userId && r.boardId && members.has(r.userId));
+    // só gente da org E board da org (board alheio seria dado sujo inerte)
+    .filter(r => r.userId && r.boardId && members.has(r.userId) && orgBoards.has(r.boardId));
 
   if (offRows.length) {
-    const ins = await admin.from('lead_distribution_boards').insert(
+    const up = await admin.from('lead_distribution_boards').upsert(
       offRows.map(r => ({
         organization_id: orgId,
         user_id: r.userId,
         board_id: r.boardId,
         active: false,
-      }))
+      })),
+      { onConflict: 'organization_id,user_id,board_id' }
     );
-    if (ins.error) return json({ error: ins.error.message }, 500);
+    if (up.error) {
+      console.error('[lead-distribution POST matriz]', up.error.message);
+      return json({ error: 'Não foi possível salvar as exceções por board.' }, 500);
+    }
+  }
+
+  const chaveNova = new Set(offRows.map(r => `${r.userId}_${r.boardId}`));
+  const { data: atuais } = await admin
+    .from('lead_distribution_boards')
+    .select('id, user_id, board_id')
+    .eq('organization_id', orgId);
+  const sobras = (atuais || [])
+    .filter(r => !chaveNova.has(`${r.user_id}_${r.board_id}`))
+    .map(r => r.id as string);
+  if (sobras.length) {
+    await admin.from('lead_distribution_boards').delete().in('id', sobras);
   }
 
   const settings = await admin.from('organization_settings').upsert(

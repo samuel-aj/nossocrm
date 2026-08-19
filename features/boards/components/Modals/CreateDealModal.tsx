@@ -42,7 +42,7 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
         let vivo = true;
         (async () => {
             try {
-                const res = await fetch('/api/settings/lead-distribution', { credentials: 'include' });
+                const res = await fetch('/api/settings/lead-distribution?light=1', { credentials: 'include' });
                 if (!res.ok) return;
                 const j = (await res.json()) as { enabled?: boolean; manual?: boolean };
                 if (vivo) setRodizioAtivo(!!j.enabled && !!j.manual);
