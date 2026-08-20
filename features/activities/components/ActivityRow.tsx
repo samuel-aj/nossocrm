@@ -93,9 +93,11 @@ const ActivityRowComponent: React.FC<ActivityRowProps> = ({
     const formatTitle = (title: string) => {
         if (title.includes('Moveu para')) {
             const status = title.replace('Moveu para ', '');
+            // Quem moveu: gravado no user da atividade ('Sistema' = automação)
+            const quem = activity.user?.name && activity.user.name !== 'Sistema' ? activity.user.name : null;
             return (
                 <span>
-                    Movido para <span className="font-bold text-slate-700 dark:text-slate-200">{translateStatus(status)}</span>
+                    {quem ? `${quem} moveu` : 'Movido'} para <span className="font-bold text-slate-700 dark:text-slate-200">{translateStatus(status)}</span>
                 </span>
             );
         }

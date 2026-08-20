@@ -278,6 +278,22 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     };
   }, [boardMenuOpen]);
 
+  // Toda mudança relevante do lead vira uma entrada na Timeline, com autor.
+  const autorAtual = profile?.nickname || profile?.first_name || 'Usuário';
+  const logAlteracao = (titulo: string, descricao?: string) => {
+    if (!deal) return;
+    void addActivity({
+      dealId: deal.id,
+      dealTitle: deal.title,
+      type: 'STATUS_CHANGE',
+      title: titulo,
+      description: descricao,
+      date: new Date().toISOString(),
+      completed: true,
+      user: { name: autorAtual, avatar: profile?.avatar_url || '' },
+    } as Parameters<typeof addActivity>[0]);
+  };
+
   const moveToBoardStage = (targetBoard: (typeof boards)[number], stage: { id: string; label: string }) => {
     if (!deal) return;
     setBoardMenuOpen(false);
@@ -290,16 +306,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
       isLost: false,
       lastStageChangeDate: new Date().toISOString(),
     });
-    void addActivity({
-      dealId: deal.id,
-      dealTitle: deal.title,
-      type: 'STATUS_CHANGE',
-      title: `Movido para o board ${targetBoard.name}`,
-      description: `Etapa de destino: ${stage.label}`,
-      date: new Date().toISOString(),
-      completed: true,
-      user: { name: profile?.nickname || profile?.first_name || 'Usuário', avatar: profile?.avatar_url || '' },
-    } as Parameters<typeof addActivity>[0]);
+    logAlteracao(`${autorAtual} moveu o lead para o board ${targetBoard.name}`, `Etapa de destino: ${stage.label}`);
     addToast(`Lead movido para ${targetBoard.name} (${stage.label})`, 'success');
   };
   const [pendingLostStageId, setPendingLostStageId] = useState<string | null>(null);
@@ -503,6 +510,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
 
     const current = deal.tags || [];
     const nextTags = [...current, next];
+    logAlteracao(`${autorAtual} adicionou a etiqueta "${next}"`);
     updateDeal(deal.id, { tags: nextTags });
 
     // Keep global tag list in sync via CRMContext
@@ -516,6 +524,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const removeDealTag = (tag: string) => {
     const current = deal.tags || [];
     const nextTags = current.filter(t => t !== tag);
+    logAlteracao(`${autorAtual} removeu a etiqueta "${tag}"`);
     updateDeal(deal.id, { tags: nextTags });
   };
 
@@ -690,16 +699,24 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
 
   const saveTitle = () => {
     if (editTitle) {
+      if (editTitle !== deal.title) {
+        logAlteracao(`${autorAtual} renomeou o lead`, `De "${deal.title}" para "${editTitle}"`);
+      }
       updateDeal(deal.id, { title: editTitle });
       setIsEditingTitle(false);
     }
   };
 
+  const fmtBRL = (v: number) => `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
   const saveValue = () => {
-    if (editValue) {
-      updateDeal(deal.id, { value: Number(editValue) });
-      setIsEditingValue(false);
+    const novo = Number(editValue);
+    if (editValue !== '' && Number.isFinite(novo) && novo >= 0) {
+      if (novo !== deal.value) {
+        logAlteracao(`${autorAtual} alterou o valor do lead`, `De ${fmtBRL(deal.value)} para ${fmtBRL(novo)}`);
+      }
+      updateDeal(deal.id, { value: novo });
     }
+    setIsEditingValue(false);
   };
 
   const isEmptyCustomFieldValue = (
@@ -768,6 +785,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
 
     const current = deal.customFields?.[field.key] ?? null;
     if (current !== (nextValue ?? null)) {
+      logAlteracao(`${autorAtual} alterou o campo ${field.label}`);
       updateDeal(deal.id, { customFields: { ...(deal.customFields || {}), [field.key]: nextValue } });
     }
     return true;
@@ -967,29 +985,35 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                   </div>
                 )}
 
-                {isEditingValue ? (
-                  <div className="flex gap-2 items-center">
-                    <span className="text-lg font-mono font-bold text-slate-500">$</span>
-                    <input
-                      autoFocus
-                      type="number"
-                      className="text-lg font-mono font-bold text-primary-600 dark:text-primary-400 bg-white dark:bg-black/20 border border-slate-300 dark:border-slate-600 rounded px-2 py-1 w-32 outline-none focus:ring-2 focus:ring-primary-500"
-                      value={editValue}
-                      onChange={e => setEditValue(e.target.value)}
-                      onBlur={saveValue}
-                      onKeyDown={e => e.key === 'Enter' && saveValue()}
-                    />
-                    <button onClick={saveValue} className="text-green-500 hover:text-green-400">
-                      <Check size={20} />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex flex-col">
-                    {deal.items && deal.items.length > 0 && (
-                      <span className="text-xs text-slate-500 dark:text-slate-400 mb-0.5">
-                        {deal.items.map(i => i.name).join(', ')}
-                      </span>
-                    )}
+                {/* Valor: editar TROCA só a linha do número por um input da MESMA
+                    altura (borda embaixo, sem caixa) — nada de empurrar o layout.
+                    Enter/clicar fora salva; Esc cancela. */}
+                <div className="flex flex-col">
+                  {deal.items && deal.items.length > 0 && (
+                    <span className="text-xs text-slate-500 dark:text-slate-400 mb-0.5">
+                      {deal.items.map(i => i.name).join(', ')}
+                    </span>
+                  )}
+                  {isEditingValue ? (
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-lg font-mono font-bold text-primary-600 dark:text-primary-400">R$</span>
+                      <input
+                        autoFocus
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        step="0.01"
+                        className="text-lg font-mono font-bold leading-normal text-primary-600 dark:text-primary-400 bg-transparent border-0 border-b-2 border-primary-400 focus:border-primary-500 w-32 p-0 outline-none focus:ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                        value={editValue}
+                        onChange={e => setEditValue(e.target.value)}
+                        onBlur={saveValue}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') saveValue();
+                          if (e.key === 'Escape') setIsEditingValue(false);
+                        }}
+                      />
+                    </div>
+                  ) : (
                     <p
                       onClick={() => {
                         setEditValue(deal.value.toString());
@@ -1000,8 +1024,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                     >
                       R$ {deal.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                     </p>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
               <div className="flex gap-3 items-center max-md:flex-wrap max-md:w-full max-md:justify-start">
                 {/* RESPONSÁVEL — bolinha de perfil no topo (clica pra trocar; só admin) */}
@@ -1067,6 +1091,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                             <button
                               type="button"
                               onClick={() => {
+                                if (deal.ownerId) logAlteracao(`${autorAtual} removeu o responsável do lead`);
                                 updateDeal(deal.id, { ownerId: '' });
                                 setOwnerMenuOpen(false);
                               }}
@@ -1090,6 +1115,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                                   key={u.id}
                                   type="button"
                                   onClick={() => {
+                                    if (deal.ownerId !== u.id) logAlteracao(`${autorAtual} definiu ${u.name} como responsável`);
                                     updateDeal(deal.id, { ownerId: u.id });
                                     setOwnerMenuOpen(false);
                                   }}

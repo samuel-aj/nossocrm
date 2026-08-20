@@ -18,6 +18,7 @@ import { boardsService } from '@/lib/supabase/boards'; // Added
 import { activitiesService } from '@/lib/supabase/activities';
 import { contactsService } from '@/lib/supabase/contacts';
 import type { Deal, DealView, Board, Activity } from '@/types';
+import { useAuth } from '@/context/AuthContext';
 
 interface MoveDealParams {
   dealId: string;
@@ -52,6 +53,13 @@ interface MoveDealContext {
  */
 export const useMoveDeal = () => {
   const queryClient = useQueryClient();
+  // Autor do movimento: vai na atividade ("Fulano moveu para X"). 'Sistema'
+  // fica reservado para automações (LinkedStage, NextBoard).
+  const { profile } = useAuth();
+  const autor = {
+    name: profile?.nickname || profile?.first_name || 'Sistema',
+    avatar: profile?.avatar_url || '',
+  };
 
   return useMutation<MoveDealResult, Error, MoveDealParams, MoveDealContext>({
     mutationFn: async ({ dealId, targetStageId, lossReason, lossCategory, deal, board, lifecycleStages, explicitWin, explicitLost }) => {
@@ -124,7 +132,7 @@ export const useMoveDeal = () => {
         description: lossReason ? `Motivo da perda: ${lossReason}` : undefined,
         date: new Date().toISOString(),
         completed: true,
-        user: { name: 'Sistema', avatar: '' },
+        user: autor,
       } as Omit<Activity, 'id' | 'createdAt'>).catch(console.error);
 
       // 3. LinkedStage: Update contact stage when moving to linked column
