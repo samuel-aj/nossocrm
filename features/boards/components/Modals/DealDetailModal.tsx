@@ -312,7 +312,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
       isLost: false,
       lastStageChangeDate: new Date().toISOString(),
     });
-    logAlteracao(`${autorAtual} moveu o lead para o board ${targetBoard.name}`, `Etapa de destino: ${stage.label}`);
+    logAlteracao(`${autorAtual} moveu o lead para o board ${targetBoard.name}, etapa ${stage.label}`);
     addToast(`Lead movido para ${targetBoard.name} (${stage.label})`, 'success');
   };
   const [pendingLostStageId, setPendingLostStageId] = useState<string | null>(null);
@@ -706,7 +706,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const saveTitle = () => {
     if (editTitle) {
       if (editTitle !== deal.title) {
-        logAlteracao(`${autorAtual} renomeou o lead`, `De "${deal.title}" para "${editTitle}"`);
+        logAlteracao(`${autorAtual} renomeou o lead para "${editTitle}"`, `Antes: "${deal.title}"`);
       }
       updateDeal(deal.id, { title: editTitle });
       setIsEditingTitle(false);
@@ -718,7 +718,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     const novo = Number(editValue);
     if (editValue !== '' && Number.isFinite(novo) && novo >= 0) {
       if (novo !== deal.value) {
-        logAlteracao(`${autorAtual} alterou o valor do lead`, `De ${fmtBRL(deal.value)} para ${fmtBRL(novo)}`);
+        logAlteracao(`${autorAtual} alterou o valor do lead de ${fmtBRL(deal.value)} para ${fmtBRL(novo)}`);
       }
       updateDeal(deal.id, { value: novo });
     }
@@ -791,7 +791,11 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
 
     const current = deal.customFields?.[field.key] ?? null;
     if (current !== (nextValue ?? null)) {
-      logAlteracao(`${autorAtual} alterou o campo ${field.label}`);
+      logAlteracao(
+        nextValue === null || nextValue === ''
+          ? `${autorAtual} limpou o campo ${field.label}`
+          : `${autorAtual} alterou ${field.label} para "${String(nextValue)}"`
+      );
       updateDeal(deal.id, { customFields: { ...(deal.customFields || {}), [field.key]: nextValue } });
     }
     return true;
@@ -1097,7 +1101,10 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                             <button
                               type="button"
                               onClick={() => {
-                                if (deal.ownerId) logAlteracao(`${autorAtual} removeu o responsável do lead`);
+                                if (deal.ownerId) {
+                                  const antigo = orgMembers.find(m => m.id === deal.ownerId)?.name;
+                                  logAlteracao(`${autorAtual} removeu ${antigo ? `${antigo} de responsável` : 'o responsável'} do lead`);
+                                }
                                 updateDeal(deal.id, { ownerId: '' });
                                 setOwnerMenuOpen(false);
                               }}
@@ -1866,6 +1873,10 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                         onBlur={() => {
                           const next = descriptionDraft;
                           if (next !== (deal.description ?? '')) {
+                            logAlteracao(
+                              `${autorAtual} atualizou a descrição do lead`,
+                              next ? (next.length > 120 ? `${next.slice(0, 120)}…` : next) : 'Descrição removida'
+                            );
                             updateDeal(deal.id, { description: next });
                           }
                         }}
