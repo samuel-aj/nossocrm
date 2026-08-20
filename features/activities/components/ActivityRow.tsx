@@ -101,7 +101,14 @@ const ActivityRowComponent: React.FC<ActivityRowProps> = ({
                 </span>
             );
         }
-        if (title === 'Negócio Criado') return 'Negócio criado';
+        if (title === 'Negócio Criado') {
+            const criador = activity.user?.name && !['Sistema', 'Eu'].includes(activity.user.name) ? activity.user.name : null;
+            return criador ? (
+                <span>
+                    Negócio criado por <span className="font-bold text-slate-700 dark:text-slate-200">{criador}</span>
+                </span>
+            ) : 'Negócio criado';
+        }
         return title;
     };
 

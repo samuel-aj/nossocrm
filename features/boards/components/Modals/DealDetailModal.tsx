@@ -472,6 +472,15 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     });
   }, [activities, deal]);
 
+  // Quem criou o lead: vem da atividade de criação (integrações não geram)
+  const quemCriou = useMemo(() => {
+    const criacao = dealActivities.find(
+      a => a.title === 'Negócio Criado' || a.title.includes('converteu o contato em lead')
+    );
+    const nome = criacao?.user?.name;
+    return nome && !['Sistema', 'Eu'].includes(nome) ? nome : null;
+  }, [dealActivities]);
+
   // Notes-only view for the Notas tab
   const dealNotes = useMemo(() => {
     return dealActivities.filter((a) => a.type === 'NOTE');
@@ -2016,6 +2025,12 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                           <span className="font-semibold text-slate-700 dark:text-slate-200">
                             {PT_BR_DATETIME_FORMATTER.format(new Date(deal.createdAt))}
                           </span>
+                          {quemCriou && (
+                            <>
+                              {' '}por{' '}
+                              <span className="font-semibold text-slate-700 dark:text-slate-200">{quemCriou}</span>
+                            </>
+                          )}
                         </span>
                       </div>
                     </div>
@@ -2114,6 +2129,12 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                           <span className="font-semibold text-slate-700 dark:text-slate-200">
                             {PT_BR_DATETIME_FORMATTER.format(new Date(deal.createdAt))}
                           </span>
+                          {quemCriou && (
+                            <>
+                              {' '}por{' '}
+                              <span className="font-semibold text-slate-700 dark:text-slate-200">{quemCriou}</span>
+                            </>
+                          )}
                         </span>
                       </div>
                     </div>

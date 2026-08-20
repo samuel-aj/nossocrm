@@ -662,19 +662,26 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     }
 
     if (createdDeal) {
+      const autorNome =
+        profile?.nickname ||
+        profile?.display_name ||
+        profile?.name ||
+        profile?.first_name ||
+        (profile?.email || user?.email || '').split('@')[0] ||
+        'Usuário';
       await addActivity({
         dealId: createdDeal.id,
         dealTitle: createdDeal.title,
         type: 'STATUS_CHANGE',
         title: 'Negócio Criado',
         date: new Date().toISOString(),
-        user: { name: 'Eu', avatar: 'https://i.pravatar.cc/150?u=me' },
+        user: { name: autorNome, avatar: profile?.avatar_url || '' },
         completed: true,
       });
     }
 
     return createdDeal;
-  }, [companies, contacts, activeBoard, addCompany, addContact, addDealState, addActivity, queryClient]);
+  }, [companies, contacts, activeBoard, addCompany, addContact, addDealState, addActivity, queryClient, profile, user]);
 
   // moveDeal foi removido - use useMoveDeal de @/lib/query/hooks
   // O hook unificado trata: detecção won/lost, atividades, LinkedStage, etc.
@@ -716,19 +723,26 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       const createdDeal = await addDealState(newDeal);
 
       if (createdDeal) {
+        const autorNome =
+          profile?.nickname ||
+          profile?.display_name ||
+          profile?.name ||
+          profile?.first_name ||
+          (profile?.email || user?.email || '').split('@')[0] ||
+          'Usuário';
         await addActivity({
           dealId: createdDeal.id,
           dealTitle: createdDeal.title,
           type: 'STATUS_CHANGE',
-          title: 'Convertido de Contato',
+          title: `${autorNome} converteu o contato em lead`,
           description: `Contato ${contact.name} convertido em oportunidade.`,
           date: new Date().toISOString(),
-          user: { name: 'Sistema', avatar: '' },
+          user: { name: autorNome, avatar: profile?.avatar_url || '' },
           completed: true,
         });
       }
     }
-  }, [contacts, companies, activeBoard, activeBoardId, addCompany, addDealState, addActivity]);
+  }, [contacts, companies, activeBoard, activeBoardId, addCompany, addDealState, addActivity, profile, user]);
 
   const convertLead = useCallback(async (leadId: string) => {
     const lead = leads.find(l => l.id === leadId);
