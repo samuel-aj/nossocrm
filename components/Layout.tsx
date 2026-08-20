@@ -357,8 +357,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const officeInitials = officeName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase() || 'AJ';
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   // Âncora do menu do perfil: o menu renderiza num PORTAL (document.body)
-  // porque a sidebar vive em z-20 e qualquer modal (z-50, ex.: card do lead)
-  // cobriria um dropdown renderizado dentro dela.
+  // porque a sidebar vive em z-20 e os modais cobririam um dropdown de
+  // dentro dela — o card do lead aberto completo chega a z-[9999].
   const userMenuAnchorRef = useRef<HTMLButtonElement | null>(null);
   // Posição capturada no CLIQUE (ler ref durante o render é proibido)
   const [userMenuPos, setUserMenuPos] = useState<{ left: number; bottom: number } | null>(null);
@@ -753,12 +753,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             {isUserMenuOpen && typeof document !== 'undefined' && createPortal(
               <>
                 <div
-                  className="fixed inset-0 z-[75]"
+                  className="fixed inset-0 z-[10000]"
                   onClick={() => setIsUserMenuOpen(false)}
                   aria-hidden="true"
                 />
                 <div
-                  className="fixed z-[80] w-56 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-150"
+                  className="fixed z-[10001] w-56 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-150"
                   style={{ left: userMenuPos?.left ?? 16, bottom: userMenuPos?.bottom ?? 88 }}
                 >
                   <div className="p-1">
