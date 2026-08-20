@@ -1230,8 +1230,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
             </div>
 
             {dealBoard ? (
-              <div>
-                <div className="mt-3 flex items-center gap-2" data-board-menu>
+              <div className="mt-3 flex items-center gap-3 max-md:flex-wrap">
+                <div className="shrink-0" data-board-menu>
                   <div className="relative">
                     <button
                       type="button"
@@ -1294,6 +1294,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                     )}
                   </div>
                 </div>
+                <div className="flex-1 min-w-0">
                 <StageProgressBar
                 stages={dealBoard.stages}
                 currentStatus={deal.status}
@@ -1317,6 +1318,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                   }
                 }}
               />
+                </div>
               </div>
             ) : (
               <div className="mt-4 rounded-lg border border-slate-200/60 bg-slate-50 px-4 py-3 text-xs text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
