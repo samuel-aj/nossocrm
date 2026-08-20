@@ -152,6 +152,8 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
             const firstStage = activeBoard.stages[0];
 
             const ownerName = profile?.nickname ||
+                profile?.display_name ||
+                profile?.name ||
                 profile?.first_name ||
                 (profile?.email || user?.email || '').split('@')[0] ||
                 'Eu';

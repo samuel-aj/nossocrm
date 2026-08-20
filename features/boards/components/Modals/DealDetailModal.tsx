@@ -279,7 +279,13 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   }, [boardMenuOpen]);
 
   // Toda mudança relevante do lead vira uma entrada na Timeline, com autor.
-  const autorAtual = profile?.nickname || profile?.first_name || 'Usuário';
+  const autorAtual =
+    profile?.nickname ||
+    profile?.display_name ||
+    profile?.name ||
+    profile?.first_name ||
+    (profile?.email || '').split('@')[0] ||
+    'Usuário';
   const logAlteracao = (titulo: string, descricao?: string) => {
     if (!deal) return;
     void addActivity({

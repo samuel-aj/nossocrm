@@ -60,6 +60,9 @@ interface Profile {
     organization_id: OrganizationId;
     organization_name?: string | null;
     role: 'super_admin' | 'admin' | 'vendedor';
+    /** Nome exibido (colunas reais do banco: name/display_name preenchidos; first_name/nickname costumam ser nulos) */
+    name?: string | null;
+    display_name?: string | null;
     first_name?: string | null;
     last_name?: string | null;
     nickname?: string | null;

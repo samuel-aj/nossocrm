@@ -57,7 +57,13 @@ export const useMoveDeal = () => {
   // fica reservado para automações (LinkedStage, NextBoard).
   const { profile } = useAuth();
   const autor = {
-    name: profile?.nickname || profile?.first_name || 'Sistema',
+    name:
+      profile?.nickname ||
+      profile?.display_name ||
+      profile?.name ||
+      profile?.first_name ||
+      (profile?.email || '').split('@')[0] ||
+      'Sistema',
     avatar: profile?.avatar_url || '',
   };
 
