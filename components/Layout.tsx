@@ -24,7 +24,8 @@
  * ```
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -355,6 +356,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const officeName = profile?.organization_name || 'NossoCRM';
   const officeInitials = officeName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase() || 'AJ';
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  // Âncora do menu do perfil: o menu renderiza num PORTAL (document.body)
+  // porque a sidebar vive em z-20 e qualquer modal (z-50, ex.: card do lead)
+  // cobriria um dropdown renderizado dentro dela.
+  const userMenuAnchorRef = useRef<HTMLButtonElement | null>(null);
+  // Posição capturada no CLIQUE (ler ref durante o render é proibido)
+  const [userMenuPos, setUserMenuPos] = useState<{ left: number; bottom: number } | null>(null);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   // Grupos recolhíveis do menu (WhatsApp, Boards e Ajuda): sanfona com no
   // máximo UM aberto por vez, fechados por padrão; a escolha persiste.
@@ -691,7 +698,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
             {/* User Card - Clickable */}
             <button
-              onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+              ref={userMenuAnchorRef}
+              onClick={() => {
+                const r = userMenuAnchorRef.current?.getBoundingClientRect();
+                setUserMenuPos(r ? { left: r.left, bottom: window.innerHeight - r.top + 8 } : null);
+                setIsUserMenuOpen(!isUserMenuOpen);
+              }}
               className={`flex items-center rounded-xl bg-slate-50/50 dark:bg-white/5 border border-slate-100 dark:border-white/5 hover:bg-slate-100 dark:hover:bg-white/10 transition-all duration-300 ease-in-out group focus-visible-ring ${sidebarCollapsed ? 'gap-0 p-0 w-10 h-10 justify-center mx-auto' : 'gap-3 w-full p-3'
                 }`}
             >
@@ -737,16 +749,17 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               </svg>
             </button>
 
-            {/* Dropdown Menu */}
-            {isUserMenuOpen && (
+            {/* Dropdown Menu — portal: fica acima de qualquer modal */}
+            {isUserMenuOpen && typeof document !== 'undefined' && createPortal(
               <>
                 <div
-                  className="fixed inset-0 z-40"
+                  className="fixed inset-0 z-[75]"
                   onClick={() => setIsUserMenuOpen(false)}
                   aria-hidden="true"
                 />
                 <div
-                  className={`absolute bottom-full mb-2 z-50 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-150 ${sidebarCollapsed ? 'left-0 w-48' : 'left-0 right-0'}`}
+                  className="fixed z-[80] w-56 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-150"
+                  style={{ left: userMenuPos?.left ?? 16, bottom: userMenuPos?.bottom ?? 88 }}
                 >
                   <div className="p-1">
                     <Link
@@ -779,7 +792,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                     </button>
                   </div>
                 </div>
-              </>
+              </>,
+              document.body
             )}
           </div>
 
