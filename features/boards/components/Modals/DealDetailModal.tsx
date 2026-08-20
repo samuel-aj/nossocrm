@@ -42,7 +42,7 @@ import {
   Copy,
   ExternalLink,
   MessageCircle,
-  ChevronDown,
+  ChevronDown, ChevronLeft, ChevronRight, KanbanSquare,
   Archive,
   Undo2,
 } from 'lucide-react';
@@ -251,6 +251,57 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
 
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [showLossReasonModal, setShowLossReasonModal] = useState(false);
+
+  // Mover o lead pra OUTRO board direto do card: menu no chip do board (acima
+  // da régua de etapas) lista os demais boards e as etapas do escolhido.
+  const [boardMenuOpen, setBoardMenuOpen] = useState(false);
+  const [boardPick, setBoardPick] = useState<(typeof boards)[number] | null>(null);
+  useEffect(() => {
+    if (!boardMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!(e.target as Element | null)?.closest?.('[data-board-menu]')) {
+        setBoardMenuOpen(false);
+        setBoardPick(null);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setBoardMenuOpen(false);
+        setBoardPick(null);
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [boardMenuOpen]);
+
+  const moveToBoardStage = (targetBoard: (typeof boards)[number], stage: { id: string; label: string }) => {
+    if (!deal) return;
+    setBoardMenuOpen(false);
+    setBoardPick(null);
+    updateDeal(deal.id, {
+      boardId: targetBoard.id,
+      status: stage.id,
+      // Mudou de funil = recomeça a jornada nele; ganho/perda do board antigo não acompanham
+      isWon: false,
+      isLost: false,
+      lastStageChangeDate: new Date().toISOString(),
+    });
+    void addActivity({
+      dealId: deal.id,
+      dealTitle: deal.title,
+      type: 'STATUS_CHANGE',
+      title: `Movido para o board ${targetBoard.name}`,
+      description: `Etapa de destino: ${stage.label}`,
+      date: new Date().toISOString(),
+      completed: true,
+      user: { name: profile?.nickname || profile?.first_name || 'Usuário', avatar: profile?.avatar_url || '' },
+    } as Parameters<typeof addActivity>[0]);
+    addToast(`Lead movido para ${targetBoard.name} (${stage.label})`, 'success');
+  };
   const [pendingLostStageId, setPendingLostStageId] = useState<string | null>(null);
   const [lossReasonOrigin, setLossReasonOrigin] = useState<'button' | 'stage'>('button');
   // Edição INLINE de campos personalizados: clicar no valor edita na hora
@@ -373,7 +424,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     setQuickActivityDesc('');
     setShowQuickActivity(true);
     onScheduleHintConsumed?.();
-  }, [isOpen, dealId, scheduleHint]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isOpen, dealId, scheduleHint]);
 
   // UX: preselect board's default product when opening the Products tab (non-invasive).
   useEffect(() => {
@@ -1179,7 +1230,71 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
             </div>
 
             {dealBoard ? (
-              <StageProgressBar
+              <div>
+                <div className="mt-3 flex items-center gap-2" data-board-menu>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBoardMenuOpen(o => !o);
+                        setBoardPick(null);
+                      }}
+                      aria-expanded={boardMenuOpen}
+                      title="Board deste lead. Clique para mover para outro board"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/15 transition-colors"
+                    >
+                      <KanbanSquare size={12} />
+                      <span className="max-w-[180px] truncate">{dealBoard.name}</span>
+                      <ChevronDown size={12} className={`transition-transform ${boardMenuOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                    {boardMenuOpen && (
+                      <div className="absolute left-0 top-full mt-1.5 z-40 min-w-[240px] max-h-[300px] overflow-y-auto rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card shadow-xl p-1.5">
+                        {!boardPick ? (
+                          <>
+                            <p className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                              Mover para outro board
+                            </p>
+                            {boards.filter(b => b.id !== dealBoard.id).map(b => (
+                              <button
+                                key={b.id}
+                                type="button"
+                                onClick={() => setBoardPick(b)}
+                                className="w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
+                              >
+                                <span className="truncate">{b.name}</span>
+                                <ChevronRight size={13} className="shrink-0 text-slate-400" />
+                              </button>
+                            ))}
+                            {boards.filter(b => b.id !== dealBoard.id).length === 0 && (
+                              <p className="px-2.5 py-2 text-xs text-slate-400">Não há outros boards nesta organização.</p>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setBoardPick(null)}
+                              className="w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-left text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
+                            >
+                              <ChevronLeft size={13} /> {boardPick.name}: escolha a etapa
+                            </button>
+                            {boardPick.stages.map(st => (
+                              <button
+                                key={st.id}
+                                type="button"
+                                onClick={() => moveToBoardStage(boardPick, st)}
+                                className="w-full px-2.5 py-2 rounded-lg text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors"
+                              >
+                                {st.label}
+                              </button>
+                            ))}
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <StageProgressBar
                 stages={dealBoard.stages}
                 currentStatus={deal.status}
                 variant="timeline"
@@ -1202,6 +1317,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                   }
                 }}
               />
+              </div>
             ) : (
               <div className="mt-4 rounded-lg border border-slate-200/60 bg-slate-50 px-4 py-3 text-xs text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
                 Board não encontrado para este negócio. Algumas ações (mover estágio) podem ficar indisponíveis.
