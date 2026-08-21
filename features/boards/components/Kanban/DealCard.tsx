@@ -3,6 +3,24 @@ import { DealView, CustomFieldDefinition } from '@/types';
 import { Phone, Copy, Check, Hourglass, Trophy, XCircle, Package, UserX } from 'lucide-react';
 import { ActivityStatusIcon } from './ActivityStatusIcon';
 import { OwnerBadge } from './OwnerBadge';
+
+/** Chegada do lead no card: "Hoje - 14:32", "Ontem - 09:15" ou "12/08 - 18:40". */
+function rotuloChegada(iso: string): string {
+  const d = new Date(iso);
+  const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const dia = new Date(d);
+  dia.setHours(0, 0, 0, 0);
+  const diffDias = Math.round((hoje.getTime() - dia.getTime()) / 86400000);
+  const data =
+    diffDias === 0
+      ? 'Hoje'
+      : diffDias === 1
+        ? 'Ontem'
+        : d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  return `${data} - ${hora}`;
+}
 import type { DealActivityStatus } from '@/features/boards/utils/dealActivityStatus';
 import { priorityAriaLabelPtBr } from '@/lib/utils/priority';
 
@@ -270,8 +288,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
             className="order-last ml-auto text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap tabular-nums"
             title={`Lead chegou em ${new Date(deal.createdAt).toLocaleDateString('pt-BR')} às ${new Date(deal.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`}
           >
-            {new Date(deal.createdAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}{' '}
-            {new Date(deal.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+            {rotuloChegada(deal.createdAt)}
           </span>
         )}
         {/* Won/Lost status badge */}
