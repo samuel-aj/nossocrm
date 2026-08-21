@@ -1,6 +1,8 @@
+
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { traduzErroWhatsApp } from '@/lib/whatsapp/metaErrorsPtBr';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -578,9 +580,14 @@ function MessageBubble({
   const failed = m.status === 'failed';
   // Motivo real devolvido pela Meta/Evolution (truncado), ou um texto
   // genérico quando o provedor não explicou — vai no cartão do selo "Erro"
+  // Erro do provedor traduzido pra pt-BR (o texto cru da Meta é técnico e em
+  // inglês); o código fica junto, pequeno, pra facilitar suporte.
   const failReason = failed
     ? (m.error || '').trim()
-      ? (m.error as string).trim().slice(0, 300)
+      ? (() => {
+          const { explicacao, codigo } = traduzErroWhatsApp((m.error as string).trim());
+          return codigo ? `${explicacao} (código ${codigo})` : explicacao;
+        })()
       : 'O provedor não informou o motivo. Verifique a conexão e tente de novo.'
     : null;
   const time = (() => {
