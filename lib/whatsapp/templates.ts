@@ -49,8 +49,14 @@ export interface MetaTemplateInfo {
 }
 
 /** Cria o template na Meta (WABA da conexão business). */
+const GRAPH_TPL = () => `https://graph.facebook.com/${(process.env.META_GRAPH_VERSION || 'v21.0').trim()}`;
+
+/** Conexão DIRETA na Meta (meta_cloud): templates vivem na WABA, via Graph. */
+const isMetaCloudTpl = (conn: { provider?: string | null }) =>
+  String(conn.provider ?? '').toLowerCase() === 'meta_cloud';
+
 export async function createMetaTemplate(
-  conn: Pick<WaConnectionRow, 'base_url' | 'instance_token' | 'instance_name'>,
+  conn: Pick<WaConnectionRow, 'base_url' | 'instance_token' | 'instance_name' | 'provider' | 'meta_waba_id'>,
   input: { name: string; category: 'UTILITY' | 'MARKETING'; language: string; bodyText: string; examples: string[] }
 ): Promise<{ ok: boolean; error?: string }> {
   const components: Record<string, unknown>[] = [
@@ -61,6 +67,32 @@ export async function createMetaTemplate(
       ...(input.examples.length > 0 ? { example: { body_text: [input.examples] } } : {}),
     },
   ];
+
+  // meta_cloud: cria direto na WABA pela Graph API (sem Evolution no meio)
+  if (isMetaCloudTpl(conn)) {
+    if (!conn.meta_waba_id || !conn.instance_token) {
+      return { ok: false, error: 'Conexão da Meta sem WABA/token salvos. Reconecte na aba Conexão.' };
+    }
+    const res = await fetch(`${GRAPH_TPL()}/${encodeURIComponent(conn.meta_waba_id)}/message_templates`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${conn.instance_token}` },
+      body: JSON.stringify({
+        name: input.name,
+        category: input.category,
+        language: input.language,
+        components,
+      }),
+      cache: 'no-store',
+    });
+    const j = (await res.json().catch(() => ({}))) as {
+      error?: { message?: string; error_user_msg?: string };
+    };
+    if (!res.ok || j.error) {
+      return { ok: false, error: j.error?.error_user_msg || j.error?.message || `Meta respondeu ${res.status}` };
+    }
+    return { ok: true };
+  }
+
   const { ok, status, data } = await evoInstanceCall<Record<string, unknown>>(
     conn,
     'POST',
@@ -79,8 +111,41 @@ export async function createMetaTemplate(
 
 /** Lista os templates existentes na Meta (pra sincronizar com o CRM). */
 export async function listMetaTemplates(
-  conn: Pick<WaConnectionRow, 'base_url' | 'instance_token' | 'instance_name'>
+  conn: Pick<WaConnectionRow, 'base_url' | 'instance_token' | 'instance_name' | 'provider' | 'meta_waba_id'>
 ): Promise<{ ok: boolean; templates: MetaTemplateInfo[]; error?: string }> {
+  // meta_cloud: lista direto da WABA pela Graph API
+  if (isMetaCloudTpl(conn)) {
+    if (!conn.meta_waba_id || !conn.instance_token) {
+      return { ok: false, templates: [], error: 'Conexão da Meta sem WABA/token salvos.' };
+    }
+    const res = await fetch(
+      `${GRAPH_TPL()}/${encodeURIComponent(conn.meta_waba_id)}/message_templates?fields=id,name,status,category,language,components&limit=200`,
+      { headers: { authorization: `Bearer ${conn.instance_token}` }, cache: 'no-store' }
+    );
+    const j = (await res.json().catch(() => ({}))) as {
+      data?: Record<string, unknown>[];
+      error?: { message?: string };
+    };
+    if (!res.ok || j.error) {
+      return { ok: false, templates: [], error: j.error?.message || `Meta respondeu ${res.status}` };
+    }
+    const templates: MetaTemplateInfo[] = [];
+    for (const t of j.data ?? []) {
+      if (!t || typeof t !== 'object') continue;
+      const comps = Array.isArray(t.components) ? (t.components as Record<string, unknown>[]) : [];
+      const bodyComp = comps.find(c => String(c?.type ?? '').toUpperCase() === 'BODY');
+      templates.push({
+        metaId: t.id != null ? String(t.id) : null,
+        name: String(t.name ?? ''),
+        status: t.status != null ? String(t.status).toUpperCase() : null,
+        category: t.category != null ? String(t.category).toUpperCase() : null,
+        language: t.language != null ? String(t.language) : null,
+        bodyText: bodyComp?.text != null ? String(bodyComp.text) : null,
+      });
+    }
+    return { ok: true, templates };
+  }
+
   const { ok, status, data } = await evoInstanceCall<unknown>(
     conn,
     'GET',

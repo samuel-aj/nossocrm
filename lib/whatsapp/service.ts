@@ -157,6 +157,25 @@ export async function upsertConnection(
   return data as WaConnectionRow;
 }
 
+/**
+ * Conexão de API OFICIAL da org pra recursos da Meta (templates etc.):
+ * prefere meta_cloud conectada, depois evolution_business conectada. A
+ * conexão "padrão" (getConnectionByOrg) pode ser a de QR — e a org pode ter
+ * as duas ao mesmo tempo (multi-número).
+ */
+export async function getBusinessConnectionByOrg(
+  admin: SupabaseClient,
+  orgId: string
+): Promise<WaConnectionRow | null> {
+  const all = await getConnectionsByOrg(admin, orgId);
+  const conectadas = all.filter(c => c.status === 'connected');
+  return (
+    conectadas.find(c => String(c.provider).toLowerCase() === 'meta_cloud') ??
+    conectadas.find(c => String(c.provider).toLowerCase() === 'evolution_business') ??
+    null
+  );
+}
+
 export async function updateConnectionStatus(
   admin: SupabaseClient,
   id: string,

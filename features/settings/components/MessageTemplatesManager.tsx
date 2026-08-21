@@ -80,6 +80,7 @@ export function MessageTemplatesManager() {
   const connQ = useQuery<{
     connected: boolean;
     connection: { provider: string | null; status: string; phoneNumber: string | null; profileName: string | null } | null;
+    connections?: Array<{ provider: string | null; status: string }>;
   }>({
     queryKey: ['waConnection'],
     queryFn: () => fetchJson('/api/whatsapp/connection'),
@@ -87,7 +88,12 @@ export function MessageTemplatesManager() {
     refetchOnWindowFocus: true,
   });
   const connReady = !!connQ.data;
-  const apiConnected = !!connQ.data?.connected && connQ.data?.connection?.provider === 'evolution_business';
+  // API oficial = QUALQUER conexão meta_cloud/evolution_business conectada da
+  // org (multi-número: a conexão padrão pode ser a de QR e existir API junto)
+  const listaConns = connQ.data?.connections ?? (connQ.data?.connection ? [connQ.data.connection] : []);
+  const apiConnected = listaConns.some(
+    c => c.status === 'connected' && ['meta_cloud', 'evolution_business'].includes(String(c.provider ?? '').toLowerCase())
+  );
   const qrConnected = !!connQ.data?.connected && !apiConnected;
   // Trava o formulário da aba API enquanto o escritório não conectar a API oficial
   const apiLocked = tab === 'whatsapp_api' && connReady && !apiConnected;

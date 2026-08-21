@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { withTabOrg } from '@/lib/supabase/tabOrgScope';
-import { getConnectionByOrg } from '@/lib/whatsapp/service';
+import { getBusinessConnectionByOrg } from '@/lib/whatsapp/service';
 import { isEvolutionBusinessConnection } from '@/lib/whatsapp';
 import { createMetaTemplate } from '@/lib/whatsapp/templates';
 import { toMetaBody, toMetaName } from '@/lib/messageTemplates';
@@ -97,8 +97,8 @@ export async function POST(req: Request) {
   let metaName: string | null = null;
   let metaStatus: string | null = null;
   if (parsed.data.type === 'whatsapp_api') {
-    const conn = await getConnectionByOrg(sb, auth.profile.organization_id);
-    if (!conn || !isEvolutionBusinessConnection(conn) || conn.status !== 'connected') {
+    const conn = await getBusinessConnectionByOrg(sb, auth.profile.organization_id);
+    if (!conn) {
       return NextResponse.json(
         { error: 'Conecte o WhatsApp API oficial (aba Conexão, no menu WhatsApp) antes de criar modelos da API' },
         { status: 400 }
