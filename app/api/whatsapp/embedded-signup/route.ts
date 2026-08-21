@@ -53,7 +53,10 @@ async function resolveEsConfig(admin: SupabaseClient) {
       .order('last_connected_at', { ascending: false, nullsFirst: false })
       .limit(1)
       .maybeSingle();
-    appId = appId || String(data?.meta_app_id ?? '').trim();
+    // O app FIXADO vale por si só (a conexão que o fornecia pode ter sido
+    // excluída): sem linha correspondente, o id continua sendo o fixado e a
+    // secret vem de platform_config (bloco abaixo).
+    appId = appId || String(data?.meta_app_id ?? '').trim() || appFixado;
     appSecret = appSecret || String(data?.meta_app_secret ?? '').trim();
   }
 
