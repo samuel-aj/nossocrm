@@ -655,6 +655,63 @@ export function WhatsAppConnectionSettings() {
     </div>
   );
 
+  // Bloco de ativação do Cadastro Embutido (super_admin): renderiza tanto no
+  // seletor de modos (org sem conexão) quanto no HUB (org com conexões).
+  const esAtivacaoBloco = (
+    <>
+      {!esQ.data?.configured && (esQ.data?.temAppSalvo || esQ.data?.faltaSecret) && profile?.role === 'super_admin' && (
+                <div className="mb-2 rounded-xl border border-dashed border-sky-300 dark:border-sky-500/40 p-3 text-left">
+                  <p className="text-[11px] font-bold text-sky-700 dark:text-sky-300 mb-1.5">
+                    Ativar conexão com o Facebook (1 passo)
+                  </p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-2 leading-relaxed">
+                    No painel da Meta, crie uma Configuration do modelo WhatsApp Embedded Signup em{' '}
+                    <a
+                      className="underline font-semibold"
+                      href={`https://developers.facebook.com/apps/${esQ.data?.appId ?? ''}/fb-login-for-business/configurations/`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Facebook Login for Business, Configurations
+                    </a>{' '}
+                    e cole o ID dela aqui:
+                  </p>
+                  <div className="flex flex-col gap-2">
+                    {!esQ.data?.configId && (
+                      <input
+                        type="text"
+                        value={esConfigIdDraft}
+                        onChange={e => setEsConfigIdDraft(e.target.value)}
+                        placeholder="Configuration ID"
+                        className="w-full bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-sky-500 font-mono"
+                      />
+                    )}
+                    {esQ.data?.faltaSecret && (
+                      <input
+                        type="password"
+                        value={esSecretDraft}
+                        onChange={e => setEsSecretDraft(e.target.value)}
+                        placeholder="Chave Secreta do app (Configurações > Básico > Mostrar)"
+                        className="w-full bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-sky-500 font-mono"
+                      />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => void salvarEsConfigId()}
+                      disabled={esSavingCfg}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white transition-colors disabled:opacity-60"
+                    >
+                      {esSavingCfg ? 'Salvando...' : 'Ativar'}
+                    </button>
+                  </div>
+                </div>
+              )}
+    </>
+  );
+
+
   return (
     <div className="bg-white dark:bg-dark-card rounded-2xl border border-slate-200 dark:border-white/10 p-6">
       {/* mesmos 12px: título→texto e texto→conteúdo */}
@@ -724,55 +781,7 @@ export function WhatsAppConnectionSettings() {
                 Número registrado na Meta, sem QR, 100% estável e sem risco de bloqueio. Requer
                 conta na Meta Business e tem cobrança por conversa.
               </p>
-              {!esQ.data?.configured && (esQ.data?.temAppSalvo || esQ.data?.faltaSecret) && profile?.role === 'super_admin' && (
-                <div className="mb-2 rounded-xl border border-dashed border-sky-300 dark:border-sky-500/40 p-3 text-left">
-                  <p className="text-[11px] font-bold text-sky-700 dark:text-sky-300 mb-1.5">
-                    Ativar conexão com o Facebook (1 passo)
-                  </p>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-2 leading-relaxed">
-                    No painel da Meta, crie uma Configuration do modelo WhatsApp Embedded Signup em{' '}
-                    <a
-                      className="underline font-semibold"
-                      href={`https://developers.facebook.com/apps/${esQ.data?.appId ?? ''}/fb-login-for-business/configurations/`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Facebook Login for Business, Configurations
-                    </a>{' '}
-                    e cole o ID dela aqui:
-                  </p>
-                  <div className="flex flex-col gap-2">
-                    {!esQ.data?.configId && (
-                      <input
-                        type="text"
-                        value={esConfigIdDraft}
-                        onChange={e => setEsConfigIdDraft(e.target.value)}
-                        placeholder="Configuration ID"
-                        className="w-full bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-sky-500 font-mono"
-                      />
-                    )}
-                    {esQ.data?.faltaSecret && (
-                      <input
-                        type="password"
-                        value={esSecretDraft}
-                        onChange={e => setEsSecretDraft(e.target.value)}
-                        placeholder="Chave Secreta do app (Configurações > Básico > Mostrar)"
-                        className="w-full bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-sky-500 font-mono"
-                      />
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 mt-2">
-                    <button
-                      type="button"
-                      onClick={() => void salvarEsConfigId()}
-                      disabled={esSavingCfg}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white transition-colors disabled:opacity-60"
-                    >
-                      {esSavingCfg ? 'Salvando...' : 'Ativar'}
-                    </button>
-                  </div>
-                </div>
-              )}
+              {esAtivacaoBloco}
               {esQ.data?.configured && (
                 <button
                   type="button"
@@ -967,6 +976,7 @@ export function WhatsAppConnectionSettings() {
               convivem em qualquer quantidade. Os botões ficam SEMPRE visíveis:
               com o form da API aberto, o dela vira "Fechar" e o do QR fecha o
               form antes de abrir o QR (dá pra trocar de ideia a qualquer hora). */}
+          {esAtivacaoBloco}
           <div className="flex flex-wrap items-center gap-3">
             {esQ.data?.configured && (
               <button
