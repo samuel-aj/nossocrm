@@ -368,9 +368,10 @@ const ReportsPage: React.FC = () => {
   };
 
   return (
-    // pb-6: respiro na base — sem ele os últimos cards colavam na borda
-    // inferior da página (o container tem altura fixa no desktop)
-    <div className="flex flex-col h-[calc(100vh-7rem)] max-md:h-auto space-y-4 pb-6">
+    // min-h (não h fixo!) + pb-10: com altura FIXA, o conteúdo que passava do
+    // cálculo transbordava POR CIMA do padding e os últimos cards colavam na
+    // borda. Com min-h a página cresce junto do conteúdo e o respiro aparece.
+    <div className="flex flex-col min-h-[calc(100vh-7rem)] max-md:min-h-0 space-y-4 pb-10">
       {/* Header com Filtros */}
       <div className="flex justify-between items-center shrink-0 max-md:flex-wrap max-md:gap-y-3">
         <div>
