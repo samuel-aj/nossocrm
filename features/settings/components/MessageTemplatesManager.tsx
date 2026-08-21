@@ -20,6 +20,8 @@ type TemplateType = 'general' | 'whatsapp_api';
 type TemplateCategory = 'UTILITY' | 'MARKETING';
 
 interface MessageTemplate {
+  /** Número (conexão) dono do modelo na Meta; null = legado pré multi-número */
+  connectionId?: string | null;
   id: string;
   name: string;
   type: TemplateType;
@@ -80,7 +82,7 @@ export function MessageTemplatesManager() {
   const connQ = useQuery<{
     connected: boolean;
     connection: { provider: string | null; status: string; phoneNumber: string | null; profileName: string | null } | null;
-    connections?: Array<{ provider: string | null; status: string }>;
+    connections?: Array<{ id: string; provider: string | null; status: string; phoneNumber: string | null; profileName: string | null }>;
   }>({
     queryKey: ['waConnection'],
     queryFn: () => fetchJson('/api/whatsapp/connection'),
@@ -94,12 +96,24 @@ export function MessageTemplatesManager() {
   const apiConnected = listaConns.some(
     c => c.status === 'connected' && ['meta_cloud', 'evolution_business'].includes(String(c.provider ?? '').toLowerCase())
   );
+  // Números de API oficial da org (cada um tem SEUS modelos na Meta)
+  const apiConns = (connQ.data?.connections ?? []).filter(
+    c => c.status === 'connected' && ['meta_cloud', 'evolution_business'].includes(String(c.provider ?? '').toLowerCase())
+  );
+  const [selConnId, setSelConnId] = useState<string | null>(null);
+  const connSelecionada = apiConns.find(c => c.id === selConnId) ?? apiConns[0] ?? null;
+  const selConnEfetiva = connSelecionada?.id ?? null;
   const qrConnected = !!connQ.data?.connected && !apiConnected;
   // Trava o formulário da aba API enquanto o escritório não conectar a API oficial
   const apiLocked = tab === 'whatsapp_api' && connReady && !apiConnected;
   const templates = useMemo(() => listQ.data?.data ?? [], [listQ.data]);
   const generalTemplates = templates.filter(t => t.type === 'general');
-  const apiTemplates = templates.filter(t => t.type === 'whatsapp_api');
+  // Modelos do número escolhido + legados sem número (adotados no 1º Sincronizar)
+  const apiTemplates = templates.filter(
+    t =>
+      t.type === 'whatsapp_api' &&
+      (apiConns.length < 2 || !selConnEfetiva || t.connectionId === selConnEfetiva || t.connectionId == null)
+  );
 
   const resetForm = () => {
     setEditingId(null);
@@ -124,6 +138,7 @@ export function MessageTemplatesManager() {
         category: tab === 'whatsapp_api' ? category : null,
         language,
         body,
+        ...(tab === 'whatsapp_api' && selConnEfetiva ? { connectionId: selConnEfetiva } : {}),
       };
       return editingId
         ? fetchJson(`/api/message-templates/${encodeURIComponent(editingId)}`, {
@@ -165,7 +180,7 @@ export function MessageTemplatesManager() {
     mutationFn: () =>
       fetchJson<{ updated: number; imported: number; total_meta: number }>(
         '/api/message-templates/sync',
-        { method: 'POST', body: JSON.stringify({}) }
+        { method: 'POST', body: JSON.stringify(selConnEfetiva ? { connectionId: selConnEfetiva } : {}) }
       ),
     onSuccess: r => {
       qc.invalidateQueries({ queryKey: ['messageTemplates'] });
@@ -553,6 +568,29 @@ export function MessageTemplatesManager() {
         </div>
       ) : (
         <div className="space-y-2">
+          {apiConns.length > 1 && (
+            <div className="flex items-center gap-1.5 flex-wrap pb-1">
+              {apiConns.map(c => {
+                const ativo = c.id === selConnEfetiva;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setSelConnId(c.id)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border transition-colors ${
+                      ativo
+                        ? 'bg-sky-100 dark:bg-sky-900/40 border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300'
+                        : 'bg-slate-100 dark:bg-white/5 border-transparent text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10'
+                    }`}
+                    title={c.profileName || undefined}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${ativo ? 'bg-sky-500' : 'bg-slate-400'}`} />
+                    {c.phoneNumber || c.profileName || 'Número'}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <div className="flex items-center justify-between gap-2">
             <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300 flex items-center gap-1.5">
               <KeyRound size={12} className="text-sky-500" />

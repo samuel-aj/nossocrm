@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { withTabOrg } from '@/lib/supabase/tabOrgScope';
-import { getBusinessConnectionByOrg } from '@/lib/whatsapp/service';
+import { getBusinessConnectionByOrg, getConnectionByIdForOrg } from '@/lib/whatsapp/service';
 import { isEvolutionBusinessConnection } from '@/lib/whatsapp';
 import { createMetaTemplate } from '@/lib/whatsapp/templates';
 import { toMetaBody, toMetaName } from '@/lib/messageTemplates';
@@ -19,6 +19,8 @@ const CreateSchema = z
     category: z.enum(['UTILITY', 'MARKETING']).nullable().optional(),
     language: z.string().min(2).max(10).optional(),
     body: z.string().min(1).max(4000),
+    /** Org com mais de um número de API: em qual conexão criar o modelo */
+    connectionId: z.string().uuid().optional(),
   })
   .strict()
   .refine(v => v.type !== 'whatsapp_api' || !!v.category, {
@@ -57,6 +59,7 @@ function mapRow(row: any) {
     body: row.body as string,
     meta_name: (row.meta_name ?? null) as string | null,
     meta_status: (row.meta_status ?? null) as string | null,
+    connectionId: (row.connection_id ?? null) as string | null,
     created_at: row.created_at as string | null,
   };
 }
@@ -68,7 +71,7 @@ export async function GET() {
   const sb = createStaticAdminClient();
   const { data, error } = await sb
     .from('message_templates')
-    .select('id,name,type,category,language,body,meta_name,meta_status,created_at')
+    .select('id,name,type,category,language,body,meta_name,meta_status,connection_id,created_at')
     .eq('organization_id', auth.profile.organization_id)
     .order('created_at', { ascending: true });
 
@@ -96,14 +99,18 @@ export async function POST(req: Request) {
   // aprovação da Meta chegar (botão Sincronizar atualiza).
   let metaName: string | null = null;
   let metaStatus: string | null = null;
+  let connIdUsada: string | null = null;
   if (parsed.data.type === 'whatsapp_api') {
-    const conn = await getBusinessConnectionByOrg(sb, auth.profile.organization_id);
-    if (!conn) {
+    const conn = parsed.data.connectionId
+      ? await getConnectionByIdForOrg(sb, auth.profile.organization_id, parsed.data.connectionId)
+      : await getBusinessConnectionByOrg(sb, auth.profile.organization_id);
+    if (!conn || !['meta_cloud', 'evolution_business'].includes(String(conn.provider).toLowerCase()) || conn.status !== 'connected') {
       return NextResponse.json(
         { error: 'Conecte o WhatsApp API oficial (aba Conexão, no menu WhatsApp) antes de criar modelos da API' },
         { status: 400 }
       );
     }
+    connIdUsada = conn.id;
     metaName = toMetaName(parsed.data.name);
     const meta = toMetaBody(parsed.data.body);
     const created = await createMetaTemplate(conn, {
@@ -131,8 +138,9 @@ export async function POST(req: Request) {
       meta_name: metaName,
       meta_status: metaStatus,
       ...(metaName ? { synced_at: new Date().toISOString() } : {}),
+      ...(parsed.data.type === 'whatsapp_api' && connIdUsada ? { connection_id: connIdUsada } : {}),
     })
-    .select('id,name,type,category,language,body,meta_name,meta_status,created_at')
+    .select('id,name,type,category,language,body,meta_name,meta_status,connection_id,created_at')
     .single();
 
   if (error) {

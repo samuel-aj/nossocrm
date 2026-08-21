@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { withTabOrg } from '@/lib/supabase/tabOrgScope';
-import { getBusinessConnectionByOrg } from '@/lib/whatsapp/service';
+import { getBusinessConnectionByOrg, getConnectionByIdForOrg } from '@/lib/whatsapp/service';
 import { isEvolutionBusinessConnection } from '@/lib/whatsapp';
 import { listMetaTemplates } from '@/lib/whatsapp/templates';
 
@@ -34,8 +34,11 @@ export async function POST(req: Request) {
   }
 
   const sb = createStaticAdminClient();
-  const conn = await getBusinessConnectionByOrg(sb, scoped.organization_id);
-  if (!conn) {
+  const body = (await req.json().catch(() => ({}))) as { connectionId?: string };
+  const conn = body?.connectionId
+    ? await getConnectionByIdForOrg(sb, scoped.organization_id, body.connectionId)
+    : await getBusinessConnectionByOrg(sb, scoped.organization_id);
+  if (!conn || !['meta_cloud', 'evolution_business'].includes(String(conn.provider).toLowerCase()) || conn.status !== 'connected') {
     return NextResponse.json(
       { error: 'Conecte o WhatsApp API oficial pra sincronizar os modelos com a Meta' },
       { status: 400 }
@@ -49,10 +52,12 @@ export async function POST(req: Request) {
 
   const { data: rows } = await sb
     .from('message_templates')
-    .select('id, meta_name, language')
+    .select('id, meta_name, language, connection_id')
     .eq('organization_id', scoped.organization_id)
     .eq('type', 'whatsapp_api');
-  const existing = rows ?? [];
+  // Só os modelos DESTA conexão + os legados sem conexão (que serão adotados
+  // por ela no update). Modelos de OUTRO número ficam intocados.
+  const existing = (rows ?? []).filter(r => r.connection_id === conn.id || r.connection_id == null);
   const now = new Date().toISOString();
 
   let updated = 0;
@@ -70,6 +75,7 @@ export async function POST(req: Request) {
         .update({
           meta_status: t.status,
           ...(safeCategory ? { category: safeCategory } : {}),
+          connection_id: conn.id,
           synced_at: now,
           updated_at: now,
         })
@@ -83,6 +89,7 @@ export async function POST(req: Request) {
     const readable = t.name.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
     const baseRow = {
       organization_id: scoped.organization_id,
+      connection_id: conn.id,
       type: 'whatsapp_api',
       category: safeCategory,
       language: t.language || 'pt_BR',
