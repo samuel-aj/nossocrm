@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { TrendingUp, Clock, Target, DollarSign, Trophy, Users, Download, Settings, ThumbsDown, UserX, CheckCircle2 } from 'lucide-react';
-import { useDashboardMetrics, PeriodFilter, COMPARISON_LABELS } from '../dashboard/hooks/useDashboardMetrics';
+import { getDateRange, useDashboardMetrics, PeriodFilter, COMPARISON_LABELS } from '../dashboard/hooks/useDashboardMetrics';
 import { PeriodFilterSelect } from '@/components/filters/PeriodFilterSelect';
 import { LazyStageConversionChart, ChartWrapper } from '@/components/charts';
 import { generateReportPDF } from './utils/generateReportPDF';
@@ -55,6 +55,10 @@ const ReportsPage: React.FC = () => {
       setSelectedBoardId(defaultBoardId);
     }
   }, [defaultBoardId, selectedBoardId]);
+  // No primeiro paint selectedBoardId ainda é '' (o efeito só roda depois):
+  // usar o default direto evita um frame com métricas agregadas de TODOS os
+  // boards (e PDF exportado nesse instante sairia errado).
+  const boardIdEfetivo = selectedBoardId || defaultBoardId;
 
   // Lista de vendedores únicos para o filtro
   const ownersList = useMemo(() => {
@@ -69,8 +73,8 @@ const ReportsPage: React.FC = () => {
 
   // Pegar o board selecionado para acessar a meta
   const selectedBoard = useMemo(() => {
-    return boards.find(b => b.id === selectedBoardId);
-  }, [boards, selectedBoardId]);
+    return boards.find(b => b.id === boardIdEfetivo);
+  }, [boards, boardIdEfetivo]);
 
   const {
     avgSalesCycle,
@@ -87,7 +91,7 @@ const ReportsPage: React.FC = () => {
     deals,
     changes,
     funnelData,
-  } = useDashboardMetrics(period, selectedBoardId, selectedOwnerId || undefined);
+  } = useDashboardMetrics(period, boardIdEfetivo, selectedOwnerId || undefined);
 
   // Extrair meta do board selecionado
   const boardGoal = selectedBoard?.goal;
@@ -240,7 +244,7 @@ const ReportsPage: React.FC = () => {
     });
 
     return items;
-  }, [selectedBoard, boards, allCrmDeals, selectedOwnerId]);
+  }, [selectedBoard, boards, allCrmDeals, selectedOwnerId, period]);
 
   // Taxas do funil (mesma base do gráfico de conversão, snapshot do board):
   // Qualificação = chegaram à etapa "Qualificado" ÷ total que entrou no funil;
@@ -249,9 +253,16 @@ const ReportsPage: React.FC = () => {
   const funnelRates = useMemo(() => {
     const convBoard = selectedBoard || boards[0];
     const stages = convBoard?.stages || [];
-    const boardDeals = allCrmDeals.filter(
-      d => d.boardId === convBoard?.id && (!selectedOwnerId || d.ownerId === selectedOwnerId)
-    );
+    // COORTE DO PERÍODO: leads CRIADOS na janela selecionada (este mês, mês
+    // passado...). Antes era o snapshot do histórico inteiro e o filtro de
+    // período não mudava nada nestes cards.
+    const janela = getDateRange(period);
+    const boardDeals = allCrmDeals.filter(d => {
+      if (d.boardId !== convBoard?.id) return false;
+      if (selectedOwnerId && d.ownerId !== selectedOwnerId) return false;
+      const criado = new Date(d.createdAt);
+      return criado >= janela.start && criado <= janela.end;
+    });
     const total = boardDeals.length;
 
     // Mesmos critérios do gráfico: ganho por nome de fechamento OU única
@@ -296,7 +307,7 @@ const ReportsPage: React.FC = () => {
             ? (wonCount / total) * 100
             : null,
     };
-  }, [selectedBoard, boards, allCrmDeals, selectedOwnerId]);
+  }, [selectedBoard, boards, allCrmDeals, selectedOwnerId, period]);
 
   const generatedBy = useMemo(() => {
     if (profile?.first_name && profile?.last_name) return `${profile.first_name} ${profile.last_name}`;

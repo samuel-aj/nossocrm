@@ -55,7 +55,7 @@ interface DateRange {
 /**
  * Calcula o range de datas baseado no filtro de período
  */
-function getDateRange(period: PeriodFilter): DateRange {
+export function getDateRange(period: PeriodFilter): DateRange {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const endOfToday = new Date(today.getTime() + 24 * 60 * 60 * 1000 - 1);
@@ -95,7 +95,7 @@ function getDateRange(period: PeriodFilter): DateRange {
 
     case 'last_month': {
       const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+      const end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
       return { start, end };
     }
 
@@ -112,7 +112,7 @@ function getDateRange(period: PeriodFilter): DateRange {
       const lastQuarterStart = (currentQuarter - 1 + 4) % 4;
       const year = currentQuarter === 0 ? now.getFullYear() - 1 : now.getFullYear();
       const start = new Date(year, lastQuarterStart * 3, 1);
-      const end = new Date(year, lastQuarterStart * 3 + 3, 0, 23, 59, 59);
+      const end = new Date(year, lastQuarterStart * 3 + 3, 0, 23, 59, 59, 999);
       return { start, end };
     }
 
@@ -124,7 +124,7 @@ function getDateRange(period: PeriodFilter): DateRange {
 
     case 'last_year': {
       const start = new Date(now.getFullYear() - 1, 0, 1);
-      const end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59);
+      const end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
       return { start, end };
     }
 
@@ -367,8 +367,8 @@ export const useDashboardMetrics = (period: PeriodFilter = 'this_month', boardId
      */
     const revenueByMonthKey = new Map<string, number>();
     for (const deal of wonDeals) {
-      if (!deal.updatedAt) continue;
-      const dt = new Date(deal.updatedAt);
+      if (!deal.closedAt && !deal.updatedAt) continue;
+      const dt = new Date(deal.closedAt || deal.updatedAt);
       const key = `${dt.getMonth()}-${dt.getFullYear()}`;
       revenueByMonthKey.set(key, (revenueByMonthKey.get(key) ?? 0) + deal.value);
     }
@@ -439,7 +439,7 @@ export const useDashboardMetrics = (period: PeriodFilter = 'this_month', boardId
   const riskyCount = stagnantDealsCount; // Using stagnant as risk indicator
 
   // Sales Cycle Metrics
-  const wonDealsWithDates = wonDeals.filter(d => d.createdAt && d.updatedAt);
+  const wonDealsWithDates = wonDeals.filter(d => d.createdAt && (d.closedAt || d.updatedAt));
   /**
    * Performance: compute avg/min/max in one pass (avoid allocating `salesCycles` array + spreading).
    */
@@ -449,7 +449,9 @@ export const useDashboardMetrics = (period: PeriodFilter = 'this_month', boardId
   let slowestDeal = 0;
   for (const d of wonDealsWithDates) {
     const createdTs = Date.parse(d.createdAt);
-    const closedTs = Date.parse(d.updatedAt);
+    // closedAt é a data real do fechamento; updatedAt só pra deals antigos sem
+    // closedAt (editar uma tag depois não pode inflar o ciclo de vendas)
+    const closedTs = Date.parse(d.closedAt || d.updatedAt);
     const days = Math.floor((closedTs - createdTs) / (1000 * 60 * 60 * 24));
     if (!Number.isFinite(days)) continue;
     salesCycleCount += 1;

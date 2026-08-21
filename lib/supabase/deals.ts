@@ -241,7 +241,7 @@ export const dealsService = {
       if (!orgId) return { data: null, error: new Error('Organização não encontrada') };
 
       const [dealsResult, itemsResult] = await Promise.all([
-        supabase.from('deals').select('*').eq('organization_id', orgId).order('created_at', { ascending: false }),
+        supabase.from('deals').select('*').eq('organization_id', orgId).is('deleted_at', null).order('created_at', { ascending: false }),
         supabase.from('deal_items').select('*').eq('organization_id', orgId),
       ]);
 
