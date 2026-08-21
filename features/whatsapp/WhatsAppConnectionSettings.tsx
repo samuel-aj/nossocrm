@@ -8,7 +8,7 @@
  * escolher por qual número enviar). QR (Baileys) segue 1 por org. Super admin
  * vê sempre as conexões da organização ATIVA — cada cliente tem as suas.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, ExternalLink, KeyRound, Loader2, MessageCircle, QrCode, RefreshCw, Trash2, Unplug } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
@@ -125,6 +125,110 @@ export function WhatsAppConnectionSettings() {
   // Chave salva no servidor: o campo abre com bolinhas (1 por caractere) SEM
   // a chave real vir pro navegador. Sentinela intacto = manter a salva.
   const isSecretSentinel = (v: string) => /^•+$/.test(v.trim());
+
+  // ===== Cadastro Embutido da Meta (conexão estilo Kommo) =====
+  // O admin clica, loga na Meta, escolhe conta e número; o postMessage do
+  // fluxo entrega waba_id/phone_number_id e o FB.login entrega o code — o
+  // servidor troca pelo token e monta a conexão inteira sozinho.
+  const esQ = useQuery<{ configured: boolean; appId: string | null; configId: string | null; graphVersion: string }>({
+    queryKey: ['waEmbeddedSignupCfg'],
+    queryFn: () => fetchJson('/api/whatsapp/embedded-signup'),
+    staleTime: 5 * 60_000,
+  });
+  const [esBusy, setEsBusy] = useState(false);
+  const esAssets = useRef<{ wabaId?: string; phoneNumberId?: string }>({});
+
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (!String(e.origin).endsWith('facebook.com')) return;
+      try {
+        const data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
+        if (data?.type !== 'WA_EMBEDDED_SIGNUP') return;
+        const d = data?.data ?? {};
+        if (d.waba_id) esAssets.current.wabaId = String(d.waba_id);
+        if (d.phone_number_id) esAssets.current.phoneNumberId = String(d.phone_number_id);
+      } catch {
+        /* mensagens de outros widgets da Meta: ignora */
+      }
+    };
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
+
+  const carregarSdkFb = (appId: string, version: string) =>
+    new Promise<void>((resolve, reject) => {
+      const w = window as unknown as { FB?: { init: (o: object) => void } };
+      if (w.FB) return resolve();
+      const js = document.createElement('script');
+      js.src = 'https://connect.facebook.net/pt_BR/sdk.js';
+      js.async = true;
+      js.onload = () => {
+        try {
+          (window as unknown as { FB: { init: (o: object) => void } }).FB.init({
+            appId,
+            autoLogAppEvents: true,
+            xfbml: false,
+            version,
+          });
+          resolve();
+        } catch (e) {
+          reject(e as Error);
+        }
+      };
+      js.onerror = () => reject(new Error('Não foi possível carregar o SDK do Facebook (bloqueador de anúncios?).'));
+      document.body.appendChild(js);
+    });
+
+  const conectarComFacebook = async () => {
+    const cfg = esQ.data;
+    if (!cfg?.configured || !cfg.appId || !cfg.configId) return;
+    setEsBusy(true);
+    esAssets.current = {};
+    try {
+      await carregarSdkFb(cfg.appId, cfg.graphVersion);
+      const FB = (window as unknown as { FB: { login: (cb: (r: unknown) => void, o: object) => void } }).FB;
+      FB.login(
+        (resp: unknown) => {
+          void (async () => {
+            try {
+              const code = (resp as { authResponse?: { code?: string } })?.authResponse?.code;
+              const { wabaId, phoneNumberId } = esAssets.current;
+              if (!code) {
+                addToast('Conexão cancelada na Meta.', 'warning');
+                return;
+              }
+              if (!wabaId || !phoneNumberId) {
+                addToast('A Meta não devolveu a conta/número escolhidos. Tente de novo.', 'error');
+                return;
+              }
+              const r = await fetchJson<{ ok: boolean; numero?: string | null; recebimentoOk?: boolean; avisoWebhook?: string | null }>(
+                '/api/whatsapp/embedded-signup',
+                { method: 'POST', body: JSON.stringify({ code, wabaId, phoneNumberId }) }
+              );
+              qc.invalidateQueries({ queryKey: ['waConnection'] });
+              addToast(
+                `Número ${r.numero || ''} conectado! ${r.recebimentoOk ? 'Envio e recebimento prontos.' : `Atenção: ${r.avisoWebhook || 'recebimento pendente'}`}`.trim(),
+                r.recebimentoOk ? 'success' : 'warning'
+              );
+            } catch (e) {
+              addToast(`Erro ao concluir a conexão: ${(e as Error).message}`, 'error');
+            } finally {
+              setEsBusy(false);
+            }
+          })();
+        },
+        {
+          config_id: cfg.configId,
+          response_type: 'code',
+          override_default_response_type: true,
+          extras: { setup: {}, sessionInfoVersion: '3' },
+        }
+      );
+    } catch (e) {
+      addToast((e as Error).message, 'error');
+      setEsBusy(false);
+    }
+  };
 
   // Reaplica a assinatura do webhook na Meta usando as credenciais JÁ SALVAS.
   // Serve quando a Meta precisa passar a avisar algo novo — foi o caso do campo
@@ -593,13 +697,24 @@ export function WhatsAppConnectionSettings() {
                 Número registrado na Meta, sem QR, 100% estável e sem risco de bloqueio. Requer
                 conta na Meta Business e tem cobrança por conversa.
               </p>
+              {esQ.data?.configured && (
+                <button
+                  type="button"
+                  onClick={() => void conectarComFacebook()}
+                  disabled={esBusy}
+                  className="mt-auto mb-2 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#1877F2] hover:bg-[#166FE5] text-white text-sm font-bold transition-colors disabled:opacity-60"
+                >
+                  {esBusy ? <Loader2 size={16} className="animate-spin" /> : <ExternalLink size={16} />}
+                  Conectar com o Facebook
+                </button>
+              )}
               <button
                 type="button"
                 onClick={toggleBizForm}
-                className="mt-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors"
+                className={`${esQ.data?.configured ? '' : 'mt-auto '}inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors`}
               >
                 <KeyRound size={16} />
-                {bizOpen ? 'Fechar configuração' : 'Configurar API oficial'}
+                {bizOpen ? 'Fechar configuração' : esQ.data?.configured ? 'Configurar manualmente' : 'Configurar API oficial'}
               </button>
             </div>
           </div>
