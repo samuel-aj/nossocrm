@@ -156,7 +156,7 @@ export function WhatsAppConnectionSettings() {
       setEsConfigIdDraft('');
       setEsSecretDraft('');
       await qc.invalidateQueries({ queryKey: ['waEmbeddedSignupCfg'] });
-      addToast('Cadastro embutido ativado! O botão Conectar com o Facebook já está disponível.', 'success');
+      addToast('Pronto! A conexão WhatsApp API já está disponível em todas as organizações.', 'success');
     } catch (e) {
       addToast(`Erro ao salvar: ${(e as Error).message}`, 'error');
     } finally {
@@ -782,25 +782,27 @@ export function WhatsAppConnectionSettings() {
                 conta na Meta Business e tem cobrança por conversa.
               </p>
               {esAtivacaoBloco}
-              {esQ.data?.configured && (
+              {esQ.data?.configured ? (
                 <button
                   type="button"
                   onClick={() => void conectarComFacebook()}
                   disabled={esBusy}
-                  className="mt-auto mb-2 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#1877F2] hover:bg-[#166FE5] text-white text-sm font-bold transition-colors disabled:opacity-60"
+                  className="mt-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-sm font-bold shadow-lg shadow-sky-600/20 transition-colors disabled:opacity-60"
                 >
-                  {esBusy ? <Loader2 size={16} className="animate-spin" /> : <ExternalLink size={16} />}
-                  Conectar com o Facebook
+                  {esBusy ? <Loader2 size={16} className="animate-spin" /> : <KeyRound size={16} />}
+                  Conectar WhatsApp API
+                </button>
+              ) : (
+                /* Plataforma sem Cadastro Embutido ativado: caminho manual de reserva */
+                <button
+                  type="button"
+                  onClick={toggleBizForm}
+                  className="mt-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors"
+                >
+                  <KeyRound size={16} />
+                  {bizOpen ? 'Fechar configuração' : 'Configurar API oficial'}
                 </button>
               )}
-              <button
-                type="button"
-                onClick={toggleBizForm}
-                className={`${esQ.data?.configured ? '' : 'mt-auto '}inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors`}
-              >
-                <KeyRound size={16} />
-                {bizOpen ? 'Fechar configuração' : esQ.data?.configured ? 'Configurar manualmente' : 'Configurar API oficial'}
-              </button>
             </div>
           </div>
 
@@ -978,17 +980,6 @@ export function WhatsAppConnectionSettings() {
               form antes de abrir o QR (dá pra trocar de ideia a qualquer hora). */}
           {esAtivacaoBloco}
           <div className="flex flex-wrap items-center gap-3">
-            {esQ.data?.configured && (
-              <button
-                type="button"
-                onClick={() => void conectarComFacebook()}
-                disabled={esBusy}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#1877F2] hover:bg-[#166FE5] text-white text-sm font-bold transition-colors disabled:opacity-60"
-              >
-                {esBusy ? <Loader2 size={16} className="animate-spin" /> : <ExternalLink size={16} />}
-                Conectar com o Facebook
-              </button>
-            )}
             <button
               type="button"
               onClick={() => {
@@ -1005,18 +996,30 @@ export function WhatsAppConnectionSettings() {
               )}
               Conectar número via QR Code
             </button>
-            <button
-              type="button"
-              onClick={() =>
-                bizOpen && editingConnId === null ? closeBizForm() : openBizFormFor(null)
-              }
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors"
-            >
-              <KeyRound size={15} />
-              {bizOpen && editingConnId === null
-                ? 'Fechar formulário'
-                : 'Conectar número API oficial'}
-            </button>
+            {esQ.data?.configured ? (
+              <button
+                type="button"
+                onClick={() => void conectarComFacebook()}
+                disabled={esBusy}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors disabled:opacity-60"
+              >
+                {esBusy ? <Loader2 size={15} className="animate-spin" /> : <KeyRound size={15} />}
+                Conectar WhatsApp API
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() =>
+                  bizOpen && editingConnId === null ? closeBizForm() : openBizFormFor(null)
+                }
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors"
+              >
+                <KeyRound size={15} />
+                {bizOpen && editingConnId === null
+                  ? 'Fechar formulário'
+                  : 'Conectar número API oficial'}
+              </button>
+            )}
           </div>
 
           {/* Form de NÚMERO NOVO (a edição renderiza dentro do cartão da linha) */}
