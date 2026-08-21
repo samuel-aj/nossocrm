@@ -20,6 +20,24 @@ import ConfirmModal from '@/components/ConfirmModal';
  */
 export const ContactsPage: React.FC = () => {
     const controller = useContactsController();
+
+    // DEEP LINK: /contacts?contactId=... (vindo do Kanban, Inbox, Timeline)
+    // abre o CONTATO direto, não só a aba. Roda uma vez, quando a lista chega;
+    // depois limpa o parâmetro da URL pra fechar o modal não reabrir.
+    const deepLinkFeito = React.useRef(false);
+    React.useEffect(() => {
+        if (deepLinkFeito.current) return;
+        const id = new URLSearchParams(window.location.search).get('contactId');
+        if (!id) {
+            deepLinkFeito.current = true;
+            return;
+        }
+        const alvo = controller.contacts.find(c => c.id === id);
+        if (!alvo) return; // lista ainda carregando; tenta no próximo render
+        deepLinkFeito.current = true;
+        controller.openEditModal(alvo);
+        window.history.replaceState({}, '', '/contacts');
+    }, [controller.contacts, controller.openEditModal]);
     const router = useRouter();
     const [isImportExportOpen, setIsImportExportOpen] = React.useState(false);
 
