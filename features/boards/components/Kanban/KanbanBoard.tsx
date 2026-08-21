@@ -285,6 +285,20 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   useEffect(() => {
     const el = boardScrollRef.current;
     if (!el) return;
+    // FLUIDEZ: a roda não pula em degraus; acumula um ALVO e anima até ele
+    // com easing (requestAnimationFrame) — giros seguidos somam embalo.
+    let alvo = 0;
+    let raf = 0;
+    const anima = () => {
+      const dist = alvo - el.scrollLeft;
+      if (Math.abs(dist) < 0.5) {
+        el.scrollLeft = alvo;
+        raf = 0;
+        return;
+      }
+      el.scrollLeft += dist * 0.16;
+      raf = requestAnimationFrame(anima);
+    };
     const onWheel = (e: WheelEvent) => {
       if (typeof window !== 'undefined' && window.innerWidth < 768) return;
       if (e.deltaY === 0 || e.shiftKey || e.ctrlKey) return;
@@ -295,11 +309,17 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
         const sobe = e.deltaY < 0 && col.scrollTop > 0;
         if (desce || sobe) return;
       }
-      el.scrollLeft += e.deltaY;
+      // sem animação em curso, parte da posição real (barra pode ter sido arrastada)
+      if (!raf) alvo = el.scrollLeft;
+      alvo = Math.max(0, Math.min(alvo + e.deltaY * 1.6, el.scrollWidth - el.clientWidth));
+      if (!raf) raf = requestAnimationFrame(anima);
       e.preventDefault();
     };
     el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      if (raf) cancelAnimationFrame(raf);
+    };
   }, []);
 
   const handleJumpToStage = useCallback((index: number) => {
