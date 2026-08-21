@@ -262,7 +262,18 @@ const DealCardComponent: React.FC<DealCardProps> = ({
         </div>
       )}
 
-      <div className="flex gap-1 mb-2 flex-wrap">
+      <div className="flex gap-1 mb-2 flex-wrap items-center">
+        {/* Chegada do lead: data/hora pequena no canto superior direito
+            (order-last + ml-auto = sempre à direita da fileira, mesmo sem tags) */}
+        {deal.createdAt && (
+          <span
+            className="order-last ml-auto text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap tabular-nums"
+            title={`Lead chegou em ${new Date(deal.createdAt).toLocaleDateString('pt-BR')} às ${new Date(deal.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`}
+          >
+            {new Date(deal.createdAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}{' '}
+            {new Date(deal.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        )}
         {/* Won/Lost status badge */}
         {deal.isWon && (
           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-800/40 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-700">
