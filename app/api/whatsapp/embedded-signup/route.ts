@@ -66,6 +66,18 @@ async function resolveEsConfig(admin: SupabaseClient) {
     configId = String(data?.value ?? '').trim();
   }
 
+  // Chave secreta com CASA PRÓPRIA: se não veio de env nem de conexão (a
+  // conexão que a guardava pode ser excluída, como aconteceu com a da AJ),
+  // vem de platform_config — colada 1x pelo super_admin na tela.
+  if (!appSecret) {
+    const { data } = await admin
+      .from('platform_config')
+      .select('value')
+      .eq('key', 'meta_es_app_secret')
+      .maybeSingle();
+    appSecret = String(data?.value ?? '').trim();
+  }
+
   return { appId, appSecret, configId };
 }
 
@@ -80,6 +92,9 @@ export async function GET() {
     temAppSalvo: Boolean(appId && appSecret),
     appId: appId || null,
     configId: configId || null,
+    // Falta SÓ a chave secreta do app (a conexão que a guardava foi excluída):
+    // a UI mostra o campo de colar pro super_admin.
+    faltaSecret: Boolean(appId && !appSecret),
     graphVersion: (process.env.META_GRAPH_VERSION || 'v21.0').trim(),
   });
 }
@@ -90,14 +105,29 @@ export async function PATCH(req: Request) {
   if (!auth.ok) return auth.response;
   if (auth.user.role !== UserRole.SUPER_ADMIN) return json({ error: 'Forbidden' }, 403);
 
-  const body = (await req.json().catch(() => null)) as { configId?: string } | null;
+  const body = (await req.json().catch(() => null)) as { configId?: string; appSecret?: string } | null;
   const configId = (body?.configId || '').trim().replace(/\D/g, '');
-  if (!configId) return json({ error: 'Configuration ID inválido (só números).' }, 400);
+  const appSecret = (body?.appSecret || '').trim();
+  if (!configId && !appSecret) {
+    return json({ error: 'Informe o Configuration ID e/ou a Chave Secreta do app.' }, 400);
+  }
 
-  const up = await auth.admin
-    .from('platform_config')
-    .upsert({ key: 'meta_es_config_id', value: configId, updated_at: new Date().toISOString() });
-  if (up.error) return json({ error: up.error.message }, 500);
+  const now = new Date().toISOString();
+  if (configId) {
+    const up = await auth.admin
+      .from('platform_config')
+      .upsert({ key: 'meta_es_config_id', value: configId, updated_at: now });
+    if (up.error) return json({ error: up.error.message }, 500);
+  }
+  if (appSecret) {
+    if (!/^[a-f0-9]{20,64}$/i.test(appSecret)) {
+      return json({ error: 'Chave Secreta com formato inesperado (copie do painel da Meta, Configurações > Básico).' }, 400);
+    }
+    const up = await auth.admin
+      .from('platform_config')
+      .upsert({ key: 'meta_es_app_secret', value: appSecret, updated_at: now });
+    if (up.error) return json({ error: up.error.message }, 500);
+  }
   return json({ ok: true });
 }
 

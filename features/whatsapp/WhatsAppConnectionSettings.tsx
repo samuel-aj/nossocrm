@@ -132,7 +132,7 @@ export function WhatsAppConnectionSettings() {
   // O admin clica, loga na Meta, escolhe conta e número; o postMessage do
   // fluxo entrega waba_id/phone_number_id e o FB.login entrega o code — o
   // servidor troca pelo token e monta a conexão inteira sozinho.
-  const esQ = useQuery<{ configured: boolean; temAppSalvo?: boolean; appId: string | null; configId: string | null; graphVersion: string }>({
+  const esQ = useQuery<{ configured: boolean; temAppSalvo?: boolean; faltaSecret?: boolean; appId: string | null; configId: string | null; graphVersion: string }>({
     queryKey: ['waEmbeddedSignupCfg'],
     queryFn: () => fetchJson('/api/whatsapp/embedded-signup'),
     staleTime: 5 * 60_000,
@@ -141,14 +141,20 @@ export function WhatsAppConnectionSettings() {
   // Passo único que a Meta exige no painel dela: colar aqui o Configuration ID
   // (criado 1x em Facebook Login for Business > Configurations). Fica no banco.
   const [esConfigIdDraft, setEsConfigIdDraft] = useState('');
+  const [esSecretDraft, setEsSecretDraft] = useState('');
   const [esSavingCfg, setEsSavingCfg] = useState(false);
   const salvarEsConfigId = async () => {
     const v = esConfigIdDraft.trim().replace(/\D/g, '');
-    if (!v) return addToast('Cole o Configuration ID (só números).', 'error');
+    const secret = esSecretDraft.trim();
+    if (!v && !secret) return addToast('Cole o Configuration ID e/ou a Chave Secreta.', 'error');
     setEsSavingCfg(true);
     try {
-      await fetchJson('/api/whatsapp/embedded-signup', { method: 'PATCH', body: JSON.stringify({ configId: v }) });
+      await fetchJson('/api/whatsapp/embedded-signup', {
+        method: 'PATCH',
+        body: JSON.stringify({ ...(v ? { configId: v } : {}), ...(secret ? { appSecret: secret } : {}) }),
+      });
       setEsConfigIdDraft('');
+      setEsSecretDraft('');
       await qc.invalidateQueries({ queryKey: ['waEmbeddedSignupCfg'] });
       addToast('Cadastro embutido ativado! O botão Conectar com o Facebook já está disponível.', 'success');
     } catch (e) {
@@ -718,7 +724,7 @@ export function WhatsAppConnectionSettings() {
                 Número registrado na Meta, sem QR, 100% estável e sem risco de bloqueio. Requer
                 conta na Meta Business e tem cobrança por conversa.
               </p>
-              {!esQ.data?.configured && esQ.data?.temAppSalvo && profile?.role === 'super_admin' && (
+              {!esQ.data?.configured && (esQ.data?.temAppSalvo || esQ.data?.faltaSecret) && profile?.role === 'super_admin' && (
                 <div className="mb-2 rounded-xl border border-dashed border-sky-300 dark:border-sky-500/40 p-3 text-left">
                   <p className="text-[11px] font-bold text-sky-700 dark:text-sky-300 mb-1.5">
                     Ativar conexão com o Facebook (1 passo)
@@ -735,14 +741,27 @@ export function WhatsAppConnectionSettings() {
                     </a>{' '}
                     e cole o ID dela aqui:
                   </p>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={esConfigIdDraft}
-                      onChange={e => setEsConfigIdDraft(e.target.value)}
-                      placeholder="Configuration ID"
-                      className="flex-1 bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-sky-500 font-mono"
-                    />
+                  <div className="flex flex-col gap-2">
+                    {!esQ.data?.configId && (
+                      <input
+                        type="text"
+                        value={esConfigIdDraft}
+                        onChange={e => setEsConfigIdDraft(e.target.value)}
+                        placeholder="Configuration ID"
+                        className="w-full bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-sky-500 font-mono"
+                      />
+                    )}
+                    {esQ.data?.faltaSecret && (
+                      <input
+                        type="password"
+                        value={esSecretDraft}
+                        onChange={e => setEsSecretDraft(e.target.value)}
+                        placeholder="Chave Secreta do app (Configurações > Básico > Mostrar)"
+                        className="w-full bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-sky-500 font-mono"
+                      />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 mt-2">
                     <button
                       type="button"
                       onClick={() => void salvarEsConfigId()}
