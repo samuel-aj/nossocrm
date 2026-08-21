@@ -32,13 +32,24 @@ async function resolveEsConfig(admin: SupabaseClient) {
   let configId = (process.env.META_ES_CONFIG_ID || '').trim();
 
   if (!appId || !appSecret) {
-    // Reusa o app das conexões existentes (o mais recente conectado manda)
-    const { data } = await admin
+    // App OFICIAL da plataforma: fixado em platform_config (o da agência).
+    // Sem isso o servidor poderia pegar um app avulso de cliente (ex.: o da
+    // RCA) — a Configuration só existe no app da agência.
+    const { data: fixado } = await admin
+      .from('platform_config')
+      .select('value')
+      .eq('key', 'meta_es_app_id')
+      .maybeSingle();
+    const appFixado = String(fixado?.value ?? '').trim();
+
+    let q = admin
       .from('wa_connections')
       .select('meta_app_id, meta_app_secret, last_connected_at')
       .eq('provider', 'meta_cloud')
       .not('meta_app_id', 'is', null)
-      .not('meta_app_secret', 'is', null)
+      .not('meta_app_secret', 'is', null);
+    if (appFixado) q = q.eq('meta_app_id', appFixado);
+    const { data } = await q
       .order('last_connected_at', { ascending: false, nullsFirst: false })
       .limit(1)
       .maybeSingle();
