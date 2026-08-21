@@ -782,27 +782,26 @@ export function WhatsAppConnectionSettings() {
                 conta na Meta Business e tem cobrança por conversa.
               </p>
               {esAtivacaoBloco}
-              {esQ.data?.configured ? (
+              {esQ.data?.configured && (
                 <button
                   type="button"
                   onClick={() => void conectarComFacebook()}
                   disabled={esBusy}
-                  className="mt-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-sm font-bold shadow-lg shadow-sky-600/20 transition-colors disabled:opacity-60"
+                  className="mt-auto mb-2 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-sm font-bold shadow-lg shadow-sky-600/20 transition-colors disabled:opacity-60"
                 >
                   {esBusy ? <Loader2 size={16} className="animate-spin" /> : <KeyRound size={16} />}
                   Conectar WhatsApp API
                 </button>
-              ) : (
-                /* Plataforma sem Cadastro Embutido ativado: caminho manual de reserva */
-                <button
-                  type="button"
-                  onClick={toggleBizForm}
-                  className="mt-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors"
-                >
-                  <KeyRound size={16} />
-                  {bizOpen ? 'Fechar configuração' : 'Configurar API oficial'}
-                </button>
               )}
+              {/* Caminho manual (token/IDs) mantido ENQUANTO o fluxo novo amadurece */}
+              <button
+                type="button"
+                onClick={toggleBizForm}
+                className={`${esQ.data?.configured ? '' : 'mt-auto '}inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors`}
+              >
+                <KeyRound size={16} />
+                {bizOpen ? 'Fechar configuração' : esQ.data?.configured ? 'Configurar manualmente' : 'Configurar API oficial'}
+              </button>
             </div>
           </div>
 
@@ -996,7 +995,7 @@ export function WhatsAppConnectionSettings() {
               )}
               Conectar número via QR Code
             </button>
-            {esQ.data?.configured ? (
+            {esQ.data?.configured && (
               <button
                 type="button"
                 onClick={() => void conectarComFacebook()}
@@ -1006,20 +1005,20 @@ export function WhatsAppConnectionSettings() {
                 {esBusy ? <Loader2 size={15} className="animate-spin" /> : <KeyRound size={15} />}
                 Conectar WhatsApp API
               </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() =>
-                  bizOpen && editingConnId === null ? closeBizForm() : openBizFormFor(null)
-                }
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors"
-              >
-                <KeyRound size={15} />
-                {bizOpen && editingConnId === null
-                  ? 'Fechar formulário'
-                  : 'Conectar número API oficial'}
-              </button>
             )}
+            {/* Caminho manual (token/IDs) mantido ENQUANTO o fluxo novo amadurece */}
+            <button
+              type="button"
+              onClick={() =>
+                bizOpen && editingConnId === null ? closeBizForm() : openBizFormFor(null)
+              }
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors"
+            >
+              <KeyRound size={15} />
+              {bizOpen && editingConnId === null
+                ? 'Fechar formulário'
+                : 'Conectar número API oficial (manual)'}
+            </button>
           </div>
 
           {/* Form de NÚMERO NOVO (a edição renderiza dentro do cartão da linha) */}
