@@ -379,10 +379,10 @@ const ReportsPage: React.FC = () => {
   };
 
   return (
-    // min-h (não h fixo!) + pb-10: com altura FIXA, o conteúdo que passava do
-    // cálculo transbordava POR CIMA do padding e os últimos cards colavam na
-    // borda. Com min-h a página cresce junto do conteúdo e o respiro aparece.
-    <div className="flex flex-col min-h-[calc(100vh-7rem)] max-md:min-h-0 space-y-4 pb-10">
+    // min-h (não h fixo!): com altura FIXA o conteúdo transbordava e os cards
+    // colavam na borda. Com min-h a página cresce e o padding PADRÃO do app
+    // (p-6 do <main>, igual laterais/topo) dá o respiro — sem pb extra aqui.
+    <div className="flex flex-col min-h-[calc(100vh-7rem)] max-md:min-h-0 space-y-4">
       {/* Header com Filtros */}
       <div className="flex justify-between items-center shrink-0 max-md:flex-wrap max-md:gap-y-3">
         <div>
