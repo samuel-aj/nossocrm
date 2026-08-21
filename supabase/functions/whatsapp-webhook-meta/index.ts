@@ -198,7 +198,7 @@ Deno.serve(async (req) => {
   // Resolve a conexão pelo secret do path (cada org tem sua URL/secret).
   const { data: conn } = await supabase
     .from("wa_connections")
-    .select("id, organization_id, webhook_secret, instance_token, provider, meta_phone_number_id, phone_number, status")
+    .select("id, organization_id, webhook_secret, instance_token, provider, meta_phone_number_id, phone_number, status, base_url")
     .eq("webhook_secret", pathSecret)
     .maybeSingle();
 
@@ -290,6 +290,25 @@ Deno.serve(async (req) => {
             }).toString(),
           }).then((r) => r.json()).catch((e) => ({ error: String(e) }));
           console.log(`[wa-meta-cura] conn=${conn.id} override => ${JSON.stringify(ov).slice(0, 300)}`);
+        }
+        // RENOVAÇÃO do token (só conexões do Cadastro Embutido, cujo token
+        // expira em 60 dias): troca por um novo de 60 dias a cada ciclo da
+        // autocura — o token nunca chega perto de vencer. Conexões manuais
+        // (token permanente) ficam intocadas.
+        if (String(conn.base_url ?? "") === "embedded_signup" && appId && appSecret && token) {
+          const ren = await fetch(
+            `https://graph.facebook.com/${GRAPH_VERSION}/oauth/access_token?grant_type=fb_exchange_token&client_id=${encodeURIComponent(appId)}&client_secret=${encodeURIComponent(appSecret)}&fb_exchange_token=${encodeURIComponent(token)}`
+          ).then((r) => r.json()).catch((e) => ({ error: { message: String(e) } }));
+          const novoTok = (ren as { access_token?: string }).access_token;
+          if (novoTok && novoTok !== token) {
+            const up = await supabase
+              .from("wa_connections")
+              .update({ instance_token: novoTok })
+              .eq("id", conn.id);
+            console.log(`[wa-meta-cura] conn=${conn.id} token renovado => ${up.error ? up.error.message : "OK"}`);
+          } else if ((ren as { error?: { message?: string } }).error) {
+            console.log(`[wa-meta-cura] conn=${conn.id} renovacao falhou => ${(ren as { error?: { message?: string } }).error?.message}`);
+          }
         }
       } catch (e) {
         console.error("[wa-meta-cura] falhou:", e);

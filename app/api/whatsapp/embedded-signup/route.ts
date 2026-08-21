@@ -186,7 +186,9 @@ export async function POST(req: Request) {
     conn = await upsertConnection(auth.admin, orgId, {
       instanceName,
       token: businessToken,
-      baseUrl: null,
+      // Marcador: conexão criada pelo Cadastro Embutido -> o token (60 dias)
+      // é RENOVADO automaticamente pela autocura do webhook.
+      baseUrl: 'embedded_signup',
       provider: 'meta_cloud',
       phoneNumberId: check.phoneNumberId,
       wabaId: check.wabaId || wabaId,
