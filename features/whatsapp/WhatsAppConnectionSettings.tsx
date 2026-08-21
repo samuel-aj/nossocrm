@@ -1001,7 +1001,7 @@ export function WhatsAppConnectionSettings() {
                 type="button"
                 onClick={() => void conectarComFacebook()}
                 disabled={esBusy}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors disabled:opacity-60"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-sm font-bold shadow-lg shadow-sky-600/20 transition-colors disabled:opacity-60"
               >
                 {esBusy ? <Loader2 size={15} className="animate-spin" /> : <KeyRound size={15} />}
                 Conectar WhatsApp API
