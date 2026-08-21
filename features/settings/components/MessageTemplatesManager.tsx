@@ -351,13 +351,40 @@ export function MessageTemplatesManager() {
           dependem do WhatsApp API da Meta conectado */}
       {tab === 'whatsapp_api' && connReady && (
         apiConnected ? (
-          <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-xl border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-900/15 text-emerald-700 dark:text-emerald-300 text-xs font-semibold">
+          <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-xl border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-900/15 text-emerald-700 dark:text-emerald-300 text-xs font-semibold flex-wrap">
             <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-            WhatsApp API oficial conectado
-            {connQ.data?.connection?.phoneNumber && (
-              <span className="font-normal text-emerald-600/80 dark:text-emerald-400/80 truncate">
-                · {connQ.data.connection.phoneNumber}
-              </span>
+            {apiConns.length > 1 ? (
+              <>
+                <span className="shrink-0">Números da API oficial:</span>
+                {/* um botão por número: clica pra ver/criar os modelos DELE */}
+                {apiConns.map(c => {
+                  const ativo = c.id === selConnEfetiva;
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => setSelConnId(c.id)}
+                      title={c.profileName || undefined}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-bold transition-colors ${
+                        ativo
+                          ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm'
+                          : 'bg-white dark:bg-black/20 border-emerald-300 dark:border-emerald-500/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/30'
+                      }`}
+                    >
+                      {c.phoneNumber || c.profileName || 'Número'}
+                    </button>
+                  );
+                })}
+              </>
+            ) : (
+              <>
+                WhatsApp API oficial conectado
+                {(connSelecionada?.phoneNumber || connQ.data?.connection?.phoneNumber) && (
+                  <span className="font-normal text-emerald-600/80 dark:text-emerald-400/80 truncate">
+                    · {connSelecionada?.phoneNumber || connQ.data?.connection?.phoneNumber}
+                  </span>
+                )}
+              </>
             )}
           </div>
         ) : (
@@ -568,35 +595,13 @@ export function MessageTemplatesManager() {
         </div>
       ) : (
         <div className="space-y-2">
-          {apiConns.length > 1 && (
-            <div className="flex items-center gap-1.5 flex-wrap pb-1">
-              {apiConns.map(c => {
-                const ativo = c.id === selConnEfetiva;
-                return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => setSelConnId(c.id)}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border transition-colors ${
-                      ativo
-                        ? 'bg-sky-100 dark:bg-sky-900/40 border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300'
-                        : 'bg-slate-100 dark:bg-white/5 border-transparent text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10'
-                    }`}
-                    title={c.profileName || undefined}
-                  >
-                    <span className={`w-1.5 h-1.5 rounded-full ${ativo ? 'bg-sky-500' : 'bg-slate-400'}`} />
-                    {c.phoneNumber || c.profileName || 'Número'}
-                  </button>
-                );
-              })}
-            </div>
-          )}
           <div className="flex items-center justify-between gap-2">
             <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300 flex items-center gap-1.5">
               <KeyRound size={12} className="text-sky-500" />
               WhatsApp API (Meta)
               <span className="font-normal text-slate-400 normal-case">
-                · {apiTemplates.length} modelo{apiTemplates.length === 1 ? '' : 's'}
+                {apiConns.length > 1 && connSelecionada?.phoneNumber ? ` · ${connSelecionada.phoneNumber}` : ''}
+                {' '}· {apiTemplates.length} modelo{apiTemplates.length === 1 ? '' : 's'}
               </span>
             </p>
             <button
