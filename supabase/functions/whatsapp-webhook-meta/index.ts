@@ -24,6 +24,11 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") ?? "v21.0";
 
+// AUTO-CURA da assinatura: conexões já verificadas nesta instância (o isolate
+// recicla de tempos em tempos, então isso roda algumas vezes por dia, no
+// máximo — chamadas idempotentes na Graph API).
+const assinaturaVerificada = new Set<string>();
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -224,6 +229,80 @@ Deno.serve(async (req) => {
   const orgId = conn.organization_id as string;
   const token = String(conn.instance_token ?? "");
 
+  // AUTO-CURA + DIAGNÓSTICO da assinatura de webhook na Meta (uma vez por
+  // conexão por instância): loga os campos REALMENTE assinados e reaplica o
+  // conjunto completo (messages + ecos), sem depender de clique no CRM.
+  if (!assinaturaVerificada.has(conn.id as string)) {
+    assinaturaVerificada.add(conn.id as string);
+    const base = supabaseUrl.replace(/\/+$/, "");
+    const cb = `${base}/functions/v1/whatsapp-webhook-meta/${conn.webhook_secret}`;
+    const cura = (async () => {
+      try {
+        const { data: full } = await supabase
+          .from("wa_connections")
+          .select("meta_app_id, meta_app_secret, meta_waba_id")
+          .eq("id", conn.id)
+          .maybeSingle();
+        const appId = String(full?.meta_app_id ?? "").trim();
+        const appSecret = String(full?.meta_app_secret ?? "").trim();
+        const wabaId = String(full?.meta_waba_id ?? "").trim();
+        if (appId && appSecret) {
+          const appToken = `${appId}|${appSecret}`;
+          const atual = await fetch(
+            `https://graph.facebook.com/${GRAPH_VERSION}/${appId}/subscriptions?access_token=${encodeURIComponent(appToken)}`
+          ).then((r) => r.json()).catch((e) => ({ error: String(e) }));
+          console.log(
+            `[wa-meta-cura] conn=${conn.id} campos_atuais=${JSON.stringify(atual?.data ?? atual?.error ?? atual).slice(0, 600)}`
+          );
+          for (const fields of [
+            "messages,message_echoes,smb_message_echoes",
+            "messages,smb_message_echoes",
+            "messages,message_echoes",
+          ]) {
+            const r = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${appId}/subscriptions`, {
+              method: "POST",
+              headers: { "content-type": "application/x-www-form-urlencoded" },
+              body: new URLSearchParams({
+                object: "whatsapp_business_account",
+                callback_url: cb,
+                verify_token: String(conn.webhook_secret),
+                fields,
+                access_token: appToken,
+              }).toString(),
+            }).then((r) => r.json()).catch((e) => ({ error: String(e) }));
+            const ok = r?.success === true;
+            console.log(
+              `[wa-meta-cura] conn=${conn.id} assinar[${fields}] => ${ok ? "OK" : JSON.stringify(r?.error?.message ?? r).slice(0, 300)}`
+            );
+            if (ok) break;
+          }
+        } else {
+          console.log(`[wa-meta-cura] conn=${conn.id} sem app_id/app_secret salvos`);
+        }
+        if (wabaId && token) {
+          const ov = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${wabaId}/subscribed_apps`, {
+            method: "POST",
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+              override_callback_uri: cb,
+              verify_token: String(conn.webhook_secret),
+              access_token: token,
+            }).toString(),
+          }).then((r) => r.json()).catch((e) => ({ error: String(e) }));
+          console.log(`[wa-meta-cura] conn=${conn.id} override => ${JSON.stringify(ov).slice(0, 300)}`);
+        }
+      } catch (e) {
+        console.error("[wa-meta-cura] falhou:", e);
+      }
+    })();
+    try {
+      // @ts-ignore: EdgeRuntime existe no runtime das Edge Functions da Supabase
+      EdgeRuntime.waitUntil(cura);
+    } catch {
+      void cura;
+    }
+  }
+
   // deno-lint-ignore no-explicit-any
   let payload: any;
   try {
@@ -238,6 +317,23 @@ Deno.serve(async (req) => {
     for (const change of changes) {
       const value = change?.value ?? {};
       const metadata = value?.metadata ?? {};
+
+      // INSTRUMENTAÇÃO (diagnóstico dos ecos): registra o tipo de evento e o
+      // formato, pra sabermos com certeza o que a Meta entrega a este app.
+      // Barato (uma linha por evento) e visível nos logs da função.
+      try {
+        const temEcho = Array.isArray(value?.message_echoes) || Array.isArray(value?.smb_message_echoes);
+        const nMsgs = Array.isArray(value?.messages) ? value.messages.length : 0;
+        const froms = (Array.isArray(value?.messages) ? value.messages : [])
+          .map((m: { from?: string }) => m?.from)
+          .filter(Boolean)
+          .slice(0, 3);
+        console.log(
+          `[wa-meta-diag] field=${change?.field ?? '?'} echoes=${temEcho} msgs=${nMsgs} statuses=${
+            Array.isArray(value?.statuses) ? value.statuses.length : 0
+          } display=${metadata?.display_phone_number ?? '?'} froms=${froms.join(',')}`
+        );
+      } catch { /* diagnóstico nunca derruba o webhook */ }
 
       // Preenche o número da conexão a partir do metadata (a 1ª vez que chega
       // evento já popula o phone_number que nasce nulo). Só grava quando MUDA —
@@ -321,8 +417,16 @@ Deno.serve(async (req) => {
       const inbound = (Array.isArray(value?.messages) ? value.messages : []).map((m: any) => ({ m, isEcho: false }));
       // deno-lint-ignore no-explicit-any
       const outbound = echoes.map((m: any) => ({ m, isEcho: true }));
-      for (const { m, isEcho } of [...inbound, ...outbound]) {
+      // Número da própria conexão (só dígitos), pra reconhecer eco disfarçado:
+      // alguns fluxos da Meta entregam o que o número ENVIOU dentro de
+      // value.messages com from = o próprio número.
+      const digitosConexao = String(metadata?.display_phone_number ?? conn.phone_number ?? "").replace(/\D/g, "");
+
+      for (const item of [...inbound, ...outbound]) {
+        const m = item.m;
         if (!m) continue;
+        const fromDigits = String(m.from ?? "").replace(/\D/g, "");
+        const isEcho = item.isEcho || (!!digitosConexao && fromDigits === digitosConexao);
         const providerId = m.id;
         // No eco quem interessa é o destinatário (`to`); na recebida, o remetente.
         const phone = waIdToE164(isEcho ? m.to : m.from);
