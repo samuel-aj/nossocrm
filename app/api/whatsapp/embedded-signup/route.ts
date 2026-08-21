@@ -4,42 +4,90 @@
  * número, e o CRM se configura sozinho (token, webhook, tudo). Nada de copiar
  * token/IDs na mão.
  *
- * GET  -> config pública pro front abrir o fluxo (appId + configId; sem segredo)
- * POST -> { code, wabaId, phoneNumberId } vindos do fluxo:
- *         1. troca o code por um token de negócio (server-side, com o segredo);
- *         2. valida os IDs e descobre o número exibido;
- *         3. registra o número na Cloud API (best-effort; coexistência já vem
- *            registrada) e assina os webhooks (messages + ecos, com fallback);
- *         4. grava a conexão da org — pronta pra enviar e receber.
+ * GET   -> config pública pro front abrir o fluxo (appId + configId; sem segredo)
+ * PATCH -> super_admin cola o Configuration ID (criado 1x no painel da Meta);
+ *          fica em platform_config — sem depender de env var na Vercel
+ * POST  -> { code, wabaId, phoneNumberId } vindos do fluxo:
+ *          troca o code por token (server-side), valida IDs, registra o número
+ *          (best-effort), grava a conexão e assina webhooks (messages + ecos).
  *
- * Requer no ambiente (Vercel): META_ES_APP_ID, META_ES_APP_SECRET,
- * META_ES_CONFIG_ID. Sem eles o GET devolve configured:false e a UI esconde o
- * botão (o caminho manual continua existindo).
+ * Credenciais do app: env META_ES_APP_ID/META_ES_APP_SECRET se existirem;
+ * senão, REUSA o App ID + Chave Secreta já salvos nas conexões meta_cloud
+ * (todas usam o app da casa). Configuration ID: env META_ES_CONFIG_ID ou
+ * platform_config['meta_es_config_id'].
  */
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireOrgUser, isOrgAdmin, json } from '@/lib/whatsapp/api';
 import { upsertConnection, updateConnectionStatus } from '@/lib/whatsapp/service';
 import { instanceNameForOrg } from '@/lib/whatsapp/admin';
 import { setupMetaWebhooks, validateMetaCredentials } from '@/lib/whatsapp/metaCloudSetup';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+import { UserRole } from '@/types/constants';
 
 const GRAPH = () => `https://graph.facebook.com/${(process.env.META_GRAPH_VERSION || 'v21.0').trim()}`;
 
-const esConfig = () => ({
-  appId: (process.env.META_ES_APP_ID || '').trim(),
-  appSecret: (process.env.META_ES_APP_SECRET || '').trim(),
-  configId: (process.env.META_ES_CONFIG_ID || '').trim(),
-});
+async function resolveEsConfig(admin: SupabaseClient) {
+  let appId = (process.env.META_ES_APP_ID || '').trim();
+  let appSecret = (process.env.META_ES_APP_SECRET || '').trim();
+  let configId = (process.env.META_ES_CONFIG_ID || '').trim();
+
+  if (!appId || !appSecret) {
+    // Reusa o app das conexões existentes (o mais recente conectado manda)
+    const { data } = await admin
+      .from('wa_connections')
+      .select('meta_app_id, meta_app_secret, last_connected_at')
+      .eq('provider', 'meta_cloud')
+      .not('meta_app_id', 'is', null)
+      .not('meta_app_secret', 'is', null)
+      .order('last_connected_at', { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle();
+    appId = appId || String(data?.meta_app_id ?? '').trim();
+    appSecret = appSecret || String(data?.meta_app_secret ?? '').trim();
+  }
+
+  if (!configId) {
+    const { data } = await admin
+      .from('platform_config')
+      .select('value')
+      .eq('key', 'meta_es_config_id')
+      .maybeSingle();
+    configId = String(data?.value ?? '').trim();
+  }
+
+  return { appId, appSecret, configId };
+}
 
 export async function GET() {
   const auth = await requireOrgUser();
   if (!auth.ok) return auth.response;
-  const { appId, appSecret, configId } = esConfig();
+  const { appId, appSecret, configId } = await resolveEsConfig(auth.admin);
   return json({
     configured: Boolean(appId && appSecret && configId),
+    // Sem o configId falta SÓ o passo do painel da Meta: a UI mostra o campo
+    // de colar o ID pro super_admin quando temAppSalvo é true.
+    temAppSalvo: Boolean(appId && appSecret),
     appId: appId || null,
     configId: configId || null,
     graphVersion: (process.env.META_GRAPH_VERSION || 'v21.0').trim(),
   });
+}
+
+export async function PATCH(req: Request) {
+  if (!isAllowedOrigin(req)) return json({ error: 'Forbidden' }, 403);
+  const auth = await requireOrgUser();
+  if (!auth.ok) return auth.response;
+  if (auth.user.role !== UserRole.SUPER_ADMIN) return json({ error: 'Forbidden' }, 403);
+
+  const body = (await req.json().catch(() => null)) as { configId?: string } | null;
+  const configId = (body?.configId || '').trim().replace(/\D/g, '');
+  if (!configId) return json({ error: 'Configuration ID inválido (só números).' }, 400);
+
+  const up = await auth.admin
+    .from('platform_config')
+    .upsert({ key: 'meta_es_config_id', value: configId, updated_at: new Date().toISOString() });
+  if (up.error) return json({ error: up.error.message }, 500);
+  return json({ ok: true });
 }
 
 export async function POST(req: Request) {
@@ -49,9 +97,9 @@ export async function POST(req: Request) {
   if (!auth.ok) return auth.response;
   if (!isOrgAdmin(auth.user.role)) return json({ error: 'Forbidden' }, 403);
 
-  const { appId, appSecret, configId } = esConfig();
+  const { appId, appSecret, configId } = await resolveEsConfig(auth.admin);
   if (!appId || !appSecret || !configId) {
-    return json({ error: 'Cadastro embutido não configurado no servidor.' }, 400);
+    return json({ error: 'Cadastro embutido não configurado.' }, 400);
   }
 
   const body = (await req.json().catch(() => null)) as {
