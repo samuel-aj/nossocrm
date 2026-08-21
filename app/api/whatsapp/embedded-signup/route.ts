@@ -167,7 +167,19 @@ export async function POST(req: Request) {
   //    webhooks — inclusive os ECOS (mensagens enviadas por fora)
   const orgId = auth.user.organizationId;
   const base = instanceNameForOrg(orgId);
-  const instanceName = `${base}_cloud_${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
+  // Número JÁ conectado nesta org: reusa a linha (atualiza token/webhook) em
+  // vez de criar um cartão duplicado.
+  const { data: jaExiste } = await auth.admin
+    .from('wa_connections')
+    .select('instance_name')
+    .eq('organization_id', orgId)
+    .eq('provider', 'meta_cloud')
+    .eq('meta_phone_number_id', check.phoneNumberId)
+    .limit(1)
+    .maybeSingle();
+  const instanceName =
+    (jaExiste?.instance_name as string | undefined) ??
+    `${base}_cloud_${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
 
   let conn;
   try {
