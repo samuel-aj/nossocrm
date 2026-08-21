@@ -289,16 +289,35 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
     // com easing (requestAnimationFrame) — giros seguidos somam embalo.
     let alvo = 0;
     let raf = 0;
+    // última posição que NÓS escrevemos: se a posição real divergir disso, o
+    // usuário assumiu (arrastou a barra) e a animação se desliga sem brigar.
+    let ultimaEscrita = -1;
     const anima = () => {
+      if (ultimaEscrita >= 0 && Math.abs(el.scrollLeft - ultimaEscrita) > 2) {
+        raf = 0;
+        ultimaEscrita = -1;
+        return;
+      }
       const dist = alvo - el.scrollLeft;
       if (Math.abs(dist) < 0.5) {
         el.scrollLeft = alvo;
         raf = 0;
+        ultimaEscrita = -1;
         return;
       }
       el.scrollLeft += dist * 0.16;
+      ultimaEscrita = el.scrollLeft;
       raf = requestAnimationFrame(anima);
     };
+    // Agarrar a barra (ou clicar no board) cancela a animação na hora
+    const cancelaAnim = () => {
+      if (raf) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+      }
+      ultimaEscrita = -1;
+    };
+    el.addEventListener('pointerdown', cancelaAnim);
     const onWheel = (e: WheelEvent) => {
       if (typeof window !== 'undefined' && window.innerWidth < 768) return;
       if (e.deltaY === 0 || e.shiftKey || e.ctrlKey) return;
@@ -310,7 +329,10 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
         if (desce || sobe) return;
       }
       // sem animação em curso, parte da posição real (barra pode ter sido arrastada)
-      if (!raf) alvo = el.scrollLeft;
+      if (!raf) {
+        alvo = el.scrollLeft;
+        ultimaEscrita = -1;
+      }
       alvo = Math.max(0, Math.min(alvo + e.deltaY * 1.6, el.scrollWidth - el.clientWidth));
       if (!raf) raf = requestAnimationFrame(anima);
       e.preventDefault();
@@ -318,6 +340,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => {
       el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('pointerdown', cancelaAnim);
       if (raf) cancelAnimationFrame(raf);
     };
   }, []);
