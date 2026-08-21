@@ -949,6 +949,17 @@ export function WhatsAppConnectionSettings() {
               com o form da API aberto, o dela vira "Fechar" e o do QR fecha o
               form antes de abrir o QR (dá pra trocar de ideia a qualquer hora). */}
           <div className="flex flex-wrap items-center gap-3">
+            {esQ.data?.configured && (
+              <button
+                type="button"
+                onClick={() => void conectarComFacebook()}
+                disabled={esBusy}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#1877F2] hover:bg-[#166FE5] text-white text-sm font-bold transition-colors disabled:opacity-60"
+              >
+                {esBusy ? <Loader2 size={16} className="animate-spin" /> : <ExternalLink size={16} />}
+                Conectar com o Facebook
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {
