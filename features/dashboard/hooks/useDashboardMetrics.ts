@@ -25,7 +25,7 @@ export const PERIOD_LABELS: Record<PeriodFilter, string> = {
   this_month: 'Este Mês',
   last_month: 'Mês Passado',
   this_quarter: 'Este Trimestre',
-  last_quarter: 'Último Trimestre',
+  last_quarter: 'Trimestre Passado',
   this_year: 'Este Ano',
   last_year: 'Ano Passado',
 };
