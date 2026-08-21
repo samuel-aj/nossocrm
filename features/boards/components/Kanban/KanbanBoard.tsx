@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState, useEffect} from 'react';
 import { DealView, BoardStage, CustomFieldDefinition } from '@/types';
 import { DealCard } from './DealCard';
 import { isDealRotting } from '@/features/boards/hooks/useBoardsController';
@@ -278,6 +278,30 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
     setMobileStageIndex((prev) => (prev === idx ? prev : idx));
   }, []);
 
+  // Roda do mouse rola o BOARD lateralmente (visão geral), não a etapa.
+  // Exceção: cursor sobre uma coluna que ainda pode rolar na direção do giro
+  // rola a COLUNA (senão não haveria como descer numa etapa longa); chegou no
+  // fim, a roda volta a mover o board. Shift/trackpad horizontal = nativo.
+  useEffect(() => {
+    const el = boardScrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (typeof window !== 'undefined' && window.innerWidth < 768) return;
+      if (e.deltaY === 0 || e.shiftKey || e.ctrlKey) return;
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      const col = (e.target as HTMLElement).closest?.('[data-kanban-col-scroll]') as HTMLElement | null;
+      if (col) {
+        const desce = e.deltaY > 0 && col.scrollTop + col.clientHeight < col.scrollHeight - 1;
+        const sobe = e.deltaY < 0 && col.scrollTop > 0;
+        if (desce || sobe) return;
+      }
+      el.scrollLeft += e.deltaY;
+      e.preventDefault();
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
   const handleJumpToStage = useCallback((index: number) => {
     const el = boardScrollRef.current;
     if (!el || el.children.length === 0) return;
@@ -421,6 +445,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
             </div>
 
             <div
+              data-kanban-col-scroll
               className={`flex-1 p-2 overflow-y-auto scrollbar-custom space-y-2 bg-slate-100/50 dark:bg-black/20 min-h-[100px]`}
             >
               {stageDeals.length === 0 && !draggingId && (
@@ -493,7 +518,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
               Devolvidos automaticamente ao funil após 30 dias
             </p>
           </div>
-          <div className="flex-1 p-2 overflow-y-auto scrollbar-custom space-y-2 bg-slate-100/50 dark:bg-black/20 min-h-[100px]">
+          <div data-kanban-col-scroll className="flex-1 p-2 overflow-y-auto scrollbar-custom space-y-2 bg-slate-100/50 dark:bg-black/20 min-h-[100px]">
             {inactiveDeals.length === 0 && (
               <div className="h-full flex items-center justify-center text-slate-400 dark:text-slate-600 text-sm py-8 text-center px-4">
                 Arraste aqui os leads que não respondem
