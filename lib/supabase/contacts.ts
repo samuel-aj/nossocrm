@@ -242,6 +242,24 @@ export const contactsService = {
    * 
    * @returns Promise com array de contatos ou erro.
    */
+  /** Posição do contato na ordenação padrão (created_at desc): quantos vêm antes dele. */
+  async getRankByCreatedAt(createdAt: string): Promise<{ data: number | null; error: Error | null }> {
+    try {
+      if (!supabase) return { data: null, error: new Error('Supabase não configurado') };
+      const orgId = await getCurrentOrganizationId();
+      if (!orgId) return { data: null, error: new Error('Organização não encontrada') };
+      const { count, error } = await supabase
+        .from('contacts')
+        .select('id', { count: 'exact', head: true })
+        .eq('organization_id', orgId)
+        .gt('created_at', createdAt);
+      if (error) return { data: null, error };
+      return { data: count ?? 0, error: null };
+    } catch (e) {
+      return { data: null, error: e as Error };
+    }
+  },
+
   /** Um contato pelo id (escopado na org). Usado pelo deep link /contacts?contactId=. */
   async getById(id: string): Promise<{ data: Contact | null; error: Error | null }> {
     try {

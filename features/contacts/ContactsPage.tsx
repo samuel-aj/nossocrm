@@ -26,6 +26,28 @@ export const ContactsPage: React.FC = () => {
     // abre o CONTATO direto, não só a aba. Roda uma vez, quando a lista chega;
     // depois limpa o parâmetro da URL pra fechar o modal não reabrir.
     const deepLinkFeito = React.useRef(false);
+    const [highlightId, setHighlightId] = React.useState<string | null>(null);
+
+    // Localiza o contato NA LISTA: calcula a página dele (ordenação padrão,
+    // created_at desc), salta pra ela e acende o destaque por alguns segundos.
+    const localizarNaLista = React.useCallback(
+        async (contato: { id: string; createdAt: string }) => {
+            try {
+                const { data: antes } = await contactsService.getRankByCreatedAt(contato.createdAt);
+                if (antes !== null) {
+                    const pagina = Math.floor(antes / controller.pagination.pageSize);
+                    controller.setPagination(prev =>
+                        prev.pageIndex === pagina ? prev : { ...prev, pageIndex: pagina }
+                    );
+                }
+            } catch {
+                /* sem página calculada, ainda assim destaca se estiver visível */
+            }
+            setHighlightId(contato.id);
+            setTimeout(() => setHighlightId(null), 6000);
+        },
+        [controller]
+    );
     React.useEffect(() => {
         if (deepLinkFeito.current) return;
         const id = new URLSearchParams(window.location.search).get('contactId');
@@ -37,6 +59,7 @@ export const ContactsPage: React.FC = () => {
         if (alvo) {
             deepLinkFeito.current = true;
             controller.openEditModal(alvo);
+            void localizarNaLista(alvo);
             window.history.replaceState({}, '', '/contacts');
             return;
         }
@@ -47,6 +70,7 @@ export const ContactsPage: React.FC = () => {
         void contactsService.getById(id).then(({ data }) => {
             if (data) {
                 controller.openEditModal(data);
+                void localizarNaLista(data);
             }
             window.history.replaceState({}, '', '/contacts');
         });
@@ -130,6 +154,7 @@ export const ContactsPage: React.FC = () => {
             )}
 
             <ContactsList
+                highlightId={highlightId}
                 viewMode={controller.viewMode}
                 filteredContacts={controller.filteredContacts}
                 filteredCompanies={controller.filteredCompanies}

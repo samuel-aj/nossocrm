@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Building2, Mail, Phone, Plus, Calendar, Pencil, Trash2, Globe, MoreHorizontal, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { Contact, Company, ContactSortableColumn } from '@/types';
 import { StageBadge } from './ContactsStageTabs';
@@ -73,6 +73,8 @@ const SortableHeader: React.FC<SortableHeaderProps> = ({ label, column, currentS
 };
 
 interface ContactsListProps {
+    /** Deep link: contato a destacar e rolar até (linha pisca em primary) */
+    highlightId?: string | null;
     viewMode: 'people' | 'companies';
     filteredContacts: Contact[];
     filteredCompanies: Company[];
@@ -132,6 +134,7 @@ interface ContactsListProps {
  * @returns {Element} Retorna um valor do tipo `Element`.
  */
 export const ContactsList: React.FC<ContactsListProps> = ({
+    highlightId,
     viewMode,
     filteredContacts,
     filteredCompanies,
@@ -156,6 +159,13 @@ export const ContactsList: React.FC<ContactsListProps> = ({
     const allSelected = activeListIds.length > 0 && selectedIds.size === activeListIds.length;
 
     const someSelected = selectedIds.size > 0 && selectedIds.size < activeListIds.length;
+
+    // Deep link: quando a linha destacada renderiza, rola até ela (centro)
+    useEffect(() => {
+        if (!highlightId) return;
+        const el = document.getElementById(`contact-row-${highlightId}`);
+        if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, [highlightId, filteredContacts]);
 
     // Performance: compute "contacts by company" once (avoids N filters per company row).
     const contactsByCompanyId = React.useMemo(() => {
@@ -213,7 +223,11 @@ export const ContactsList: React.FC<ContactsListProps> = ({
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-white/5">
                             {filteredContacts.map((contact) => (
-                                <tr key={contact.id} className={`hover:bg-slate-50/50 dark:hover:bg-white/5 transition-colors group ${selectedIds.has(contact.id) ? 'bg-primary-50/50 dark:bg-primary-900/10' : ''}`}>
+                                <tr
+                                    key={contact.id}
+                                    id={`contact-row-${contact.id}`}
+                                    className={`hover:bg-slate-50/50 dark:hover:bg-white/5 transition-colors group ${selectedIds.has(contact.id) ? 'bg-primary-50/50 dark:bg-primary-900/10' : ''} ${highlightId === contact.id ? 'bg-primary-100/70 dark:bg-primary-900/30 ring-2 ring-inset ring-primary-400' : ''}`}
+                                >
                                     <td className="px-6 py-4 max-md:px-3 max-md:py-2.5">
                                         <input 
                                             type="checkbox" 
