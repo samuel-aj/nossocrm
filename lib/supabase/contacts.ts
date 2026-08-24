@@ -242,6 +242,29 @@ export const contactsService = {
    * 
    * @returns Promise com array de contatos ou erro.
    */
+  /** Um contato pelo id (escopado na org). Usado pelo deep link /contacts?contactId=. */
+  async getById(id: string): Promise<{ data: Contact | null; error: Error | null }> {
+    try {
+      if (!supabase) {
+        return { data: null, error: new Error('Supabase não configurado') };
+      }
+      const orgId = await getCurrentOrganizationId();
+      if (!orgId) return { data: null, error: new Error('Organização não encontrada') };
+
+      const { data, error } = await supabase
+        .from('contacts')
+        .select('*')
+        .eq('organization_id', orgId)
+        .eq('id', id)
+        .maybeSingle();
+
+      if (error) return { data: null, error };
+      return { data: data ? transformContact(data as DbContact) : null, error: null };
+    } catch (e) {
+      return { data: null, error: e as Error };
+    }
+  },
+
   async getAll(): Promise<{ data: Contact[] | null; error: Error | null }> {
     try {
       if (!supabase) {

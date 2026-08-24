@@ -2,6 +2,7 @@ import React from 'react';
 import { useRouter } from 'next/navigation';
 import { Trash2, X } from 'lucide-react';
 import { useContactsController } from './hooks/useContactsController';
+import { contactsService } from '@/lib/supabase/contacts';
 import { ContactsHeader } from './components/ContactsHeader';
 import { ContactsFilters } from './components/ContactsFilters';
 import { ContactsTabs } from './components/ContactsTabs';
@@ -33,10 +34,22 @@ export const ContactsPage: React.FC = () => {
             return;
         }
         const alvo = controller.contacts.find(c => c.id === id);
-        if (!alvo) return; // lista ainda carregando; tenta no próximo render
+        if (alvo) {
+            deepLinkFeito.current = true;
+            controller.openEditModal(alvo);
+            window.history.replaceState({}, '', '/contacts');
+            return;
+        }
+        // A lista é PAGINADA no servidor: contato fora da página carregada não
+        // aparece nela nunca — busca direto pelo id e abre do mesmo jeito.
+        if (controller.contacts.length === 0) return; // 1º load ainda em curso
         deepLinkFeito.current = true;
-        controller.openEditModal(alvo);
-        window.history.replaceState({}, '', '/contacts');
+        void contactsService.getById(id).then(({ data }) => {
+            if (data) {
+                controller.openEditModal(data);
+            }
+            window.history.replaceState({}, '', '/contacts');
+        });
     }, [controller.contacts, controller.openEditModal]);
     const router = useRouter();
     const [isImportExportOpen, setIsImportExportOpen] = React.useState(false);
