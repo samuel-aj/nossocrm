@@ -382,8 +382,10 @@ const DealCardComponent: React.FC<DealCardProps> = ({
         </div>
       )}
 
-      <div className="flex justify-between items-center pt-2 border-t border-slate-100 dark:border-white/5">
-        <div className="flex items-center gap-2">
+      <div className="flex justify-between items-center gap-2 pt-2 border-t border-slate-100 dark:border-white/5">
+        {/* min-w-0 + flex-1 na esquerda: nome longo de produto TRUNCA em vez
+            de empurrar o indicador de dias pra fora do card */}
+        <div className="flex items-center gap-2 min-w-0 flex-1">
           <OwnerBadge ownerId={deal.ownerId} />
           {deal.items && deal.items.length > 0 ? (
             <span className="text-xs font-medium text-slate-600 dark:text-slate-300 flex items-center gap-1 min-w-0" title={`${deal.items[0].name} — R$ ${deal.items[0].price.toLocaleString('pt-BR')}`}>
@@ -397,7 +399,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
           )}
         </div>
 
-        <div className="flex items-center">
+        <div className="flex items-center shrink-0">
           <ActivityStatusIcon
             status={activityStatus}
             dealId={deal.id}
