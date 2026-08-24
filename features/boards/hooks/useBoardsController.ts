@@ -156,7 +156,8 @@ export const useBoardsController = () => {
       if ((d.title || '').toLowerCase().includes(term)) return true;
       if ((d.companyName || '').toLowerCase().includes(term)) return true;
       const digitos = bruto.replace(/\D/g, '');
-      if (digitos.length >= 2 && (d.contactPhone || '').replace(/\D/g, '').includes(digitos)) return true;
+      // desde o PRIMEIRO dígito já filtra pelo telefone
+      if (digitos.length >= 1 && (d.contactPhone || '').replace(/\D/g, '').includes(digitos)) return true;
       return false;
     },
     []
