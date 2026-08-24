@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { DealView, Board, CustomFieldDefinition } from '@/types';
 import {
@@ -146,6 +146,21 @@ export const useBoardsController = () => {
 
   // Filter State (declared before AI context useEffect that uses them)
   const [searchTerm, setSearchTerm] = useState('');
+
+  // FILTRO DE PESQUISA do board casa nome, empresa E TELEFONE. O telefone
+  // compara só dígitos: "9296", "(69) 9296..." e "+5569..." acham o mesmo card.
+  const buscaCasaDeal = useCallback(
+    (d: { title?: string | null; companyName?: string | null; contactPhone?: string | null }, bruto: string) => {
+      if (!bruto) return true;
+      const term = bruto.toLowerCase();
+      if ((d.title || '').toLowerCase().includes(term)) return true;
+      if ((d.companyName || '').toLowerCase().includes(term)) return true;
+      const digitos = bruto.replace(/\D/g, '');
+      if (digitos.length >= 2 && (d.contactPhone || '').replace(/\D/g, '').includes(digitos)) return true;
+      return false;
+    },
+    []
+  );
   // 'all' = todos | 'mine' = meus (profile.id) | 'none' = sem responsável | <userId> = um responsável específico
   const [ownerFilter, setOwnerFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'open' | 'won' | 'lost' | 'all'>('open');
@@ -508,9 +523,7 @@ export const useBoardsController = () => {
         return false;
       }
 
-      const matchesSearch =
-        (l.title || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (l.companyName || '').toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesSearch = buscaCasaDeal(l, searchTerm);
 
       const matchesOwner =
         ownerFilter === 'all'
@@ -588,29 +601,24 @@ export const useBoardsController = () => {
       }
       return deal;
     });
-  }, [deals, searchTerm, ownerFilter, customFieldConditions, customFieldLogic, tagFilter, dateRange, statusFilter, profile, inactiveLeadsEnabled, inactiveContactIds]);
+  }, [deals, searchTerm, ownerFilter, customFieldConditions, customFieldLogic, tagFilter, dateRange, statusFilter, profile, inactiveLeadsEnabled, inactiveContactIds, buscaCasaDeal]);
 
   // ==== Etapa "Inativos" ====
   // Leads guardados (inactive_at setado), mais antigos primeiro — o countdown
   // de devolução (30d) é derivado do inactiveAt na própria coluna.
   const inactiveDeals = useMemo(() => {
     if (!inactiveLeadsEnabled) return [] as typeof deals;
-    const term = searchTerm.toLowerCase();
     return deals
       // guardados manualmente (inactive_at) OU contato com status INATIVO
       .filter(d => d.inactiveAt || (d.contactId && inactiveContactIds.has(d.contactId)))
-      .filter(d =>
-        !term ||
-        (d.title || '').toLowerCase().includes(term) ||
-        (d.companyName || '').toLowerCase().includes(term)
-      )
+      .filter(d => buscaCasaDeal(d, searchTerm))
       // guardados com prazo primeiro (mais antigos no topo); contato-inativo no fim
       .sort((a, b) => {
         const ta = a.inactiveAt ? new Date(a.inactiveAt).getTime() : Number.POSITIVE_INFINITY;
         const tb = b.inactiveAt ? new Date(b.inactiveAt).getTime() : Number.POSITIVE_INFINITY;
         return ta - tb;
       });
-  }, [deals, inactiveLeadsEnabled, searchTerm, inactiveContactIds]);
+  }, [deals, inactiveLeadsEnabled, searchTerm, inactiveContactIds, buscaCasaDeal]);
 
   // Carimbo automático: lead de contato INATIVO entra em Inativos COM data
   // própria (inactive_at = agora). Assim CADA card tem o countdown específico
