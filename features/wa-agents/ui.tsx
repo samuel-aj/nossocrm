@@ -237,6 +237,26 @@ export function errorMessage(err: unknown, fallback = 'Algo deu errado'): string
   return fallback;
 }
 
+/** Mensagem em pt-BR para um problema de validação do zod, pelo código do problema. */
+export function describeZodIssue(issue: { code?: string; message: string }): string {
+  switch (issue.code) {
+    case 'invalid_type':
+      return 'valor inválido';
+    case 'too_small':
+      return 'valor muito pequeno ou obrigatório';
+    case 'too_big':
+      return 'valor muito grande';
+    case 'invalid_format':
+    case 'invalid_string':
+      return 'formato inválido (ex.: URL ou identificador)';
+    case 'invalid_value':
+    case 'invalid_enum_value':
+      return 'opção inválida';
+    default:
+      return issue.message;
+  }
+}
+
 /** Id curto para itens criados no navegador. */
 export function newId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();

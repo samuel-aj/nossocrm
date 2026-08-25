@@ -104,8 +104,8 @@ export function useSaveWaAgent() {
       return json.agent;
     },
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: [WA_AGENTS_QUERY_KEY, 'list'] });
-      void qc.invalidateQueries({ queryKey: [WA_AGENTS_QUERY_KEY, 'agent'] });
+      // Prefixo inteiro: cobre 'list', 'agent' e o ['waAgents', 'minimal'] usado pelo chat.
+      void qc.invalidateQueries({ queryKey: [WA_AGENTS_QUERY_KEY] });
     },
   });
 }

@@ -35,9 +35,11 @@ function describeUsage(usage: unknown): string | null {
   return `Tokens: ${parts.join(', ')}`;
 }
 
+/** Nome da ferramenta: a API devolve `{ tool, input, output }`; `toolName`/`name` ficam como reserva. */
 function toolName(call: unknown): string {
   if (call && typeof call === 'object') {
     const c = call as Record<string, unknown>;
+    if (typeof c.tool === 'string') return c.tool;
     if (typeof c.toolName === 'string') return c.toolName;
     if (typeof c.name === 'string') return c.name;
   }

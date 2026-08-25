@@ -17,7 +17,7 @@ import { dispatchAgentEvent } from './webhooks';
 
 export type ConversationAiFields = {
   id: string;
-  organization_id?: string;
+  organization_id: string;
   ai_status: string | null;
   ai_agent_id: string | null;
   ai_resume_at: string | null;
@@ -65,9 +65,12 @@ export async function getConversationAiInfo(
     if (cached) {
       agent = { id: cached.id, name: cached.name, persona_name: cached.persona_name ?? null };
     } else {
-      let q = admin.from('wa_ai_agents').select('id, name, persona_name').eq('id', conv.ai_agent_id);
-      if (conv.organization_id) q = q.eq('organization_id', conv.organization_id);
-      const { data } = await q.maybeSingle();
+      const { data } = await admin
+        .from('wa_ai_agents')
+        .select('id, name, persona_name')
+        .eq('organization_id', conv.organization_id)
+        .eq('id', conv.ai_agent_id)
+        .maybeSingle();
       agent = (data as AgentNameEntry | null) ?? null;
     }
   }
@@ -109,6 +112,13 @@ export async function applyConversationAction(
     if (!raw) return fail(404, 'Conversa não encontrada');
     const conv = raw as WaConversationFull;
     const now = new Date().toISOString();
+
+    // Agente externo (n8n via API pública): ai_status preenchido sem agente nativo.
+    // Só pausar/retomar fazem sentido; parar/iniciar quebrariam o fluxo de fora.
+    const external = !conv.ai_agent_id && !!conv.ai_status;
+    if (external && (action === 'stop' || action === 'start')) {
+      return fail(409, 'Esta conversa é atendida por um agente externo (API). Use pausar/retomar.');
+    }
 
     const patch: Record<string, unknown> = { ai_status_changed_at: now };
     let event: AgentEvent | null = null;

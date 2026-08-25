@@ -62,7 +62,9 @@ export const AgentList: React.FC = () => {
   }
 
   const connections = optionsQ.data?.connections ?? [];
-  const connectionLabel = (id: string) => connections.find((c) => c.id === id)?.label ?? 'Número removido';
+  const connectionLabel = (id: string) =>
+    connections.find((c) => c.id === id)?.label ??
+    (optionsQ.isLoading ? '...' : optionsQ.error ? `${id.slice(0, 8)}...` : 'Número removido');
 
   const handleToggle = async (item: WaAgentListItem, enabled: boolean) => {
     setTogglingId(item.id);

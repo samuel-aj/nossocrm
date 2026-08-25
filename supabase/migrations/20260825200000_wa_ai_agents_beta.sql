@@ -225,10 +225,10 @@ $$;
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.wa_ai_agent_state()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE st TEXT; ag UUID; cur_resume TIMESTAMPTZ; pause_min INTEGER;
+DECLARE st TEXT; ag UUID; cur_resume TIMESTAMPTZ; pause_min INTEGER; lock_until TIMESTAMPTZ;
 BEGIN
   IF NEW.direction <> 'out' THEN RETURN NEW; END IF;
-  SELECT ai_status, ai_agent_id, ai_resume_at INTO st, ag, cur_resume
+  SELECT ai_status, ai_agent_id, ai_resume_at, ai_lock_until INTO st, ag, cur_resume, lock_until
     FROM public.wa_conversations WHERE id = NEW.conversation_id;
 
   IF ag IS NULL THEN
@@ -240,6 +240,11 @@ BEGIN
     ELSIF NEW.source IN ('crm', 'echo') AND st = 'active' THEN
       UPDATE public.wa_conversations SET ai_status = 'paused', ai_status_changed_at = now(), ai_paused_by = NEW.sent_by WHERE id = NEW.conversation_id;
     END IF;
+    RETURN NEW;
+  END IF;
+
+  -- Agente NATIVO (beta): eco do envio do PRÓPRIO agente (trava ativa) não muda estado
+  IF NEW.source = 'echo' AND lock_until IS NOT NULL AND lock_until > now() THEN
     RETURN NEW;
   END IF;
 

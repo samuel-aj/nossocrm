@@ -8,7 +8,7 @@
 import { z } from 'zod';
 import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
-import type { AgentRow } from '@/lib/wa-agents/types';
+import { loadAgent } from '@/lib/wa-agents/context';
 import { WaAgentError } from '@/lib/wa-agents/errors';
 import { testAgentReply } from '@/lib/wa-agents/test';
 import { getErrorMessage, guardRoute, readJsonBody, validationError } from '../../../_shared';
@@ -35,19 +35,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const parsed = BodySchema.safeParse(await readJsonBody(req));
   if (!parsed.success) return validationError(parsed.error);
 
-  const { data: agent, error } = await auth.admin
-    .from('wa_ai_agents')
-    .select('*')
-    .eq('id', id)
-    .eq('organization_id', orgId)
-    .maybeSingle();
-  if (error) return json({ error: error.message }, 500);
+  // loadAgent normaliza a linha (jsonb validado, números coeridos)
+  const agent = await loadAgent(auth.admin, orgId, id);
   if (!agent) return json({ error: 'Agente não encontrado' }, 404);
 
   try {
     const result = await testAgentReply(auth.admin, {
       organizationId: orgId,
-      agent: agent as AgentRow,
+      agent,
       messages: parsed.data.messages,
       state: parsed.data.state,
     });

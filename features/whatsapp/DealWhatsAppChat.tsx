@@ -37,6 +37,7 @@ import { fillTemplate, templateParams, TEMPLATE_BUTTON_LABEL, type TemplateButto
 import { useWhatsAppChat, type WaChatMessage, type WaMediaKind, type WaSender } from './useWhatsAppChat';
 import { transcodeToMp3 } from './audioTranscode';
 import { useWaAgentsBeta } from '@/hooks/useWaAgentsBeta';
+import { useToast } from '@/context/ToastContext';
 import { ChatAgentBanner } from '@/features/wa-agents/ChatAgentBanner';
 import type { AgentMinimal, ConversationAiAction } from '@/lib/wa-agents/types';
 
@@ -806,12 +807,13 @@ export function DealWhatsAppChat({
   // AGENTE DE IA nesta conversa: pausa sozinho quando um atendente responde
   // (gatilho no banco); aqui o usuário pausa/retoma na mão.
   const qc = useQueryClient();
+  const { showToast } = useToast();
   const aiState = data?.ai ?? null;
   const [aiBusy, setAiBusy] = useState(false);
   // Versão beta (agentes nativos): faixa completa com iniciar/pausar/parar/aprovar.
   // Fora do beta, a faixa antiga (pausar/retomar do agente externo) continua igual.
   const waBeta = useWaAgentsBeta();
-  const useNativeBanner = waBeta.enabled || !!aiState?.native;
+  const nativeBanner = waBeta.enabled || !!aiState?.native;
   const { data: agentsMinimal } = useQuery<{ agents: AgentMinimal[] }>({
     queryKey: ['waAgents', 'minimal'],
     queryFn: async () => {
@@ -825,6 +827,7 @@ export function DealWhatsAppChat({
     },
     enabled: waBeta.enabled,
     staleTime: 60_000,
+    retry: false,
   });
   const runAiAction = async (action: ConversationAiAction, agentId?: string) => {
     if (aiBusy) return;
@@ -832,7 +835,7 @@ export function DealWhatsAppChat({
     if (!conversationId) return;
     setAiBusy(true);
     try {
-      const res = useNativeBanner
+      const res = nativeBanner
         ? await fetch('/api/wa-agents/conversation', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -851,7 +854,8 @@ export function DealWhatsAppChat({
       }
       await qc.invalidateQueries({ queryKey: ['waChat'] });
     } catch (e) {
-      console.error('[wa] agente IA:', (e as Error).message);
+      // 409/403 etc. chegam ao usuário (antes só iam para o console).
+      showToast((e as Error).message || 'Falha ao acionar o agente', 'error');
     } finally {
       setAiBusy(false);
     }
@@ -1738,7 +1742,7 @@ export function DealWhatsAppChat({
         {/* AGENTE DE IA. Beta (agentes nativos): faixa completa, inclusive para
             iniciar um agente numa conversa que ainda não tem. Fora do beta: a
             faixa antiga, só quando um agente (externo) já atuou nesta conversa. */}
-        {useNativeBanner && (aiState || data?.conversation) && (
+        {nativeBanner && (aiState || data?.conversation) && (
           <ChatAgentBanner
             ai={aiState}
             agents={(agentsMinimal?.agents ?? []).filter(a => a.enabled)}
@@ -1746,7 +1750,7 @@ export function DealWhatsAppChat({
             onAction={(action, agentId) => void runAiAction(action, agentId)}
           />
         )}
-        {!useNativeBanner && aiState && (
+        {!nativeBanner && aiState && (
           <div
             className={`flex items-center justify-between gap-2 mb-1.5 px-3 py-1.5 rounded-xl border text-xs ${
               aiState.status === 'active'

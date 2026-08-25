@@ -4,7 +4,7 @@
  * esteira do encerramento. Nada aqui lança sem registrar a execução.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { generateText, stepCountIs, tool, type LanguageModel, type ModelMessage } from 'ai';
+import { generateText, hasToolCall, stepCountIs, tool, type LanguageModel, type ModelMessage } from 'ai';
 import { z } from 'zod';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { getProvider, type SendResult } from '@/lib/whatsapp';
@@ -13,6 +13,7 @@ import { executeOutcomeActions } from './actions';
 import { isWaAgentsBetaEnabled } from './beta';
 import { handleBotReply } from './bots';
 import {
+  AGENT_SOURCES,
   buildHistoryMessages,
   buildSystemPrompt,
   loadAgent,
@@ -61,7 +62,7 @@ export type RunAgentInput = {
 export type CollectedToolCall = { tool: string; input: unknown; output?: unknown };
 
 export const NO_REPLY_TOKEN = '[SEM_RESPOSTA]';
-const LOCK_SECONDS = 120;
+const LOCK_BASE_SECONDS = 90;
 const LOCK_RETRY_MS = 2_000;
 const LOCK_WAIT_MAX_MS = 60_000;
 const MAX_HANDOFF_DEPTH = 3;
@@ -70,6 +71,12 @@ const MAX_STEPS = 4;
 export function sleep(ms: number): Promise<void> {
   if (ms <= 0) return Promise.resolve();
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** Duração da trava por conversa: geração + envio das linhas (até 8) + webhooks ativos. */
+export function lockSecondsFor(agent: Pick<AgentRow, 'line_delay_ms' | 'webhooks'>): number {
+  const activeWebhooks = agent.webhooks.filter(w => w.active !== false).length;
+  return LOCK_BASE_SECONDS + Math.ceil((8 * agent.line_delay_ms) / 1000) + 25 * activeWebhooks;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,7 +130,8 @@ export async function generateAgentReply(input: {
     messages: input.messages,
     temperature: supportsTemperature(input.agent) ? input.agent.temperature : undefined,
     tools: buildAgentTools(input.agent),
-    stopWhen: stepCountIs(MAX_STEPS),
+    // Depois de encerrar_atendimento não há passo extra: o texto sobrando iria para o lead
+    stopWhen: [stepCountIs(MAX_STEPS), hasToolCall('encerrar_atendimento')],
   });
 
   const toolCalls: CollectedToolCall[] = [];
@@ -207,23 +215,80 @@ async function getPendingInbound(
   return (data ?? []) as WaMessageLite[];
 }
 
-async function claimLock(admin: SupabaseClient, conversationId: string): Promise<boolean> {
+/**
+ * Pega a trava da conversa. Devolve o valor gravado em ai_lock_until (quem o
+ * conhece é o dono: só ele renova e libera) ou null se não conseguiu.
+ */
+async function claimLock(
+  admin: SupabaseClient,
+  organizationId: string,
+  conversationId: string,
+  seconds: number
+): Promise<string | null> {
   const deadline = Date.now() + LOCK_WAIT_MAX_MS;
   for (;;) {
     const { data, error } = await admin.rpc('wa_ai_claim_lock', {
       p_conversation: conversationId,
-      p_seconds: LOCK_SECONDS,
+      p_seconds: seconds,
     });
     if (error) throw new WaAgentError('LOCK_ERROR', error.message);
-    if (data === true) return true;
-    if (Date.now() + LOCK_RETRY_MS > deadline) return false;
+    if (data === true) {
+      const { data: row } = await admin
+        .from('wa_conversations')
+        .select('ai_lock_until')
+        .eq('id', conversationId)
+        .eq('organization_id', organizationId)
+        .maybeSingle();
+      // Sem leitura a trava fica com um valor que ninguém libera: expira sozinha
+      return (
+        (row as { ai_lock_until?: string | null } | null)?.ai_lock_until ??
+        new Date(Date.now() + seconds * 1000).toISOString()
+      );
+    }
+    if (Date.now() + LOCK_RETRY_MS > deadline) return null;
     await sleep(LOCK_RETRY_MS);
   }
 }
 
-async function releaseLock(admin: SupabaseClient, conversationId: string): Promise<void> {
+/** Renova a trava só se ainda formos o dono. Devolve o valor vigente (novo ou o antigo). */
+async function renewLock(
+  admin: SupabaseClient,
+  organizationId: string,
+  conversationId: string,
+  current: string,
+  seconds: number
+): Promise<string> {
   try {
-    await admin.from('wa_conversations').update({ ai_lock_until: null }).eq('id', conversationId);
+    const until = new Date(Date.now() + seconds * 1000).toISOString();
+    const { data } = await admin
+      .from('wa_conversations')
+      .update({ ai_lock_until: until })
+      .eq('id', conversationId)
+      .eq('organization_id', organizationId)
+      .eq('ai_lock_until', current)
+      .select('id')
+      .maybeSingle();
+    return data ? until : current;
+  } catch (e) {
+    console.error('[wa-agents] renovar trava falhou:', errorMessage(e));
+    return current;
+  }
+}
+
+/** Libera a trava só se ainda formos o dono (valor igual ao último gravado). */
+async function releaseLock(
+  admin: SupabaseClient,
+  organizationId: string,
+  conversationId: string,
+  current: string
+): Promise<void> {
+  try {
+    await admin
+      .from('wa_conversations')
+      .update({ ai_lock_until: null })
+      .eq('id', conversationId)
+      .eq('organization_id', organizationId)
+      .eq('ai_lock_until', current);
   } catch (e) {
     console.error('[wa-agents] liberar trava falhou:', errorMessage(e));
   }
@@ -249,7 +314,8 @@ async function sendLines(
   admin: SupabaseClient,
   ctx: ConversationContext,
   agent: AgentRow,
-  lines: string[]
+  lines: string[],
+  opts: { renewLock?: () => Promise<void> } = {}
 ): Promise<void> {
   const conn = ctx.connection;
   if (!conn) throw new WaAgentError('NO_CONNECTION', 'Conversa sem número vinculado');
@@ -258,6 +324,8 @@ async function sendLines(
   const orgId = ctx.conversation.organization_id;
   const to = ctx.conversation.wa_phone;
 
+  // Trava renovada antes e depois de cada envio: o eco do webhook chega com ela ativa
+  if (opts.renewLock) await opts.renewLock();
   for (let i = 0; i < lines.length; i++) {
     const text = lines[i];
     let result: SendResult;
@@ -293,6 +361,7 @@ async function sendLines(
     if (!result.ok) {
       throw new WaAgentError('SEND_FAILED', `Envio falhou na linha ${i + 1}: ${result.error || 'erro desconhecido'}`);
     }
+    if (opts.renewLock) await opts.renewLock();
     if (i < lines.length - 1 && agent.line_delay_ms > 0) await sleep(agent.line_delay_ms);
   }
 }
@@ -313,7 +382,9 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
   let inputText: string | null = null;
   let outputText: string | null = null;
   let usage: unknown = null;
-  let lockHeld = false;
+  // Valor gravado em ai_lock_until enquanto formos o dono da trava (null = sem trava)
+  let lockValue: string | null = null;
+  let lockSeconds = LOCK_BASE_SECONDS;
   let pendingHandoffAgentId: string | null = null;
 
   const pushEvent = (type: string, extra?: Record<string, unknown>) => {
@@ -347,6 +418,16 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     });
     return { status, reason: extra.reason, runId, text: extra.text, lines: extra.lines };
   };
+  const renew = async () => {
+    if (!lockValue) return;
+    lockValue = await renewLock(admin, organizationId, conversationId, lockValue, lockSeconds);
+  };
+  const release = async () => {
+    if (!lockValue) return;
+    const current = lockValue;
+    lockValue = null;
+    await releaseLock(admin, organizationId, conversationId, current);
+  };
   const stopConversation = async (reason: string, extra?: Record<string, unknown>) => {
     if (!ctx) return;
     await updateConversation(admin, ctx, {
@@ -360,12 +441,17 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
   };
 
   try {
+    // Beta desligada no meio do caminho (retomada, passagem, robô): não responde
+    if (!(await isWaAgentsBetaEnabled(admin, organizationId))) {
+      return await finish('skipped', { reason: 'beta desativada' });
+    }
     ctx = await loadConversationContext(admin, organizationId, conversationId);
     const agentId = input.agentId ?? ctx.conversation.ai_agent_id;
     if (!agentId) return await finish('skipped', { reason: 'sem agente' });
     agent = await loadAgent(admin, organizationId, agentId);
     if (!agent) return await finish('skipped', { reason: 'agente não encontrado' });
     if (!agent.enabled) return await finish('skipped', { reason: 'agente desligado' });
+    lockSeconds = lockSecondsFor(agent);
 
     // 2. Buffer: espera o lead terminar de digitar; só a execução da ÚLTIMA mensagem responde
     if (!input.skipBuffer && agent.buffer_seconds > 0) await sleep(agent.buffer_seconds * 1000);
@@ -377,8 +463,8 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     }
 
     // 3. Trava por conversa
-    lockHeld = await claimLock(admin, conversationId);
-    if (!lockHeld) return await finish('skipped', { reason: 'locked' });
+    lockValue = await claimLock(admin, organizationId, conversationId, lockSeconds);
+    if (!lockValue) return await finish('skipped', { reason: 'locked' });
 
     // 4. Estado atual (pode ter mudado durante o buffer/trava)
     ctx = await loadConversationContext(admin, organizationId, conversationId);
@@ -395,8 +481,9 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     inputText = pending.map(messageText).filter(Boolean).join('\n') || null;
     if (!input.forceReply) {
       if (pending.length === 0) return await finish('skipped', { reason: 'nada a responder' });
+      // Só saída HUMANA (crm/echo) bloqueia; as do agente, robô e API não contam
       const lastAny = await getLastMessage(admin, ctx, null);
-      if (!lastAny || lastAny.direction !== 'in') {
+      if (lastAny && lastAny.direction === 'out' && !(lastAny.source && AGENT_SOURCES.has(lastAny.source))) {
         return await finish('skipped', { reason: 'atendente respondeu por último' });
       }
     }
@@ -421,7 +508,7 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     let lines: string[] = [];
     if (text && text !== NO_REPLY_TOKEN) {
       lines = splitLines(text);
-      await sendLines(admin, ctx, agent, lines);
+      await sendLines(admin, ctx, agent, lines, { renewLock: renew });
     }
 
     // 8. Estado da conversa
@@ -509,8 +596,7 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
 
     // Passagem em cadeia: fora da trava desta execução
     if (pendingHandoffAgentId && depth < MAX_HANDOFF_DEPTH) {
-      await releaseLock(admin, conversationId);
-      lockHeld = false;
+      await release();
       await runAgentOnConversation({
         organizationId,
         conversationId,
@@ -534,7 +620,7 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     // Em erro a conversa continua 'active': a próxima mensagem tenta de novo
     return await finish('error', { reason: msg, error: msg });
   } finally {
-    if (lockHeld) await releaseLock(admin, conversationId);
+    await release();
   }
 }
 
@@ -709,7 +795,7 @@ export async function handleInboundMessage(input: {
 // ---------------------------------------------------------------------------
 export async function resumeDueConversations(
   admin: SupabaseClient,
-  opts: { limit?: number } = {}
+  opts: { limit?: number; deadlineMs?: number } = {}
 ): Promise<{ resumed: number; results: RunResult[] }> {
   const limit = opts.limit ?? 50;
   const results: RunResult[] = [];
@@ -727,6 +813,8 @@ export async function resumeDueConversations(
       .limit(limit);
 
     for (const c of (data ?? []) as Array<{ id: string; organization_id: string; ai_agent_id: string }>) {
+      // Orçamento de tempo do tick: o que sobrar fica para o próximo
+      if (opts.deadlineMs && Date.now() > opts.deadlineMs) break;
       try {
         const { data: upd } = await admin
           .from('wa_conversations')

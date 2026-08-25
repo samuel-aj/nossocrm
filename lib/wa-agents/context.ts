@@ -224,13 +224,19 @@ export async function loadDealContext(
     const { data: st } = await admin
       .from('board_stages')
       .select('label, name')
+      .eq('organization_id', organizationId)
       .eq('id', deal.stage_id)
       .maybeSingle();
     const s = st as { label?: string | null; name?: string | null } | null;
     stageLabel = s?.label || s?.name || null;
   }
   if (deal.board_id) {
-    const { data: bd } = await admin.from('boards').select('name').eq('id', deal.board_id).maybeSingle();
+    const { data: bd } = await admin
+      .from('boards')
+      .select('name')
+      .eq('organization_id', organizationId)
+      .eq('id', deal.board_id)
+      .maybeSingle();
     boardName = (bd as { name?: string | null } | null)?.name ?? null;
   }
   return {
@@ -309,7 +315,8 @@ export function messageText(row: Pick<WaMessageLite, 'body' | 'media_type' | 'tr
   return body;
 }
 
-const AGENT_SOURCES = new Set(['agent', 'api', 'bot']);
+/** Origens de saída automáticas (agente nativo, API externa, robô): não contam como atendente humano. */
+export const AGENT_SOURCES = new Set(['agent', 'api', 'bot']);
 
 /** Últimas `limit` mensagens da conversa, em ordem cronológica. */
 export async function loadRecentMessages(
@@ -342,7 +349,11 @@ export async function buildHistoryMessages(
   );
   const names = new Map<string, string>();
   if (humanIds.length > 0) {
-    const { data } = await admin.from('profiles').select('id, name, first_name').in('id', humanIds);
+    const { data } = await admin
+      .from('profiles')
+      .select('id, name, first_name')
+      .eq('organization_id', ctx.conversation.organization_id)
+      .in('id', humanIds);
     for (const p of (data ?? []) as Array<{ id: string; name: string | null; first_name: string | null }>) {
       const n = (p.first_name || p.name || '').trim();
       if (n) names.set(p.id, n);

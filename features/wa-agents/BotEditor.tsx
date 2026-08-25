@@ -23,6 +23,7 @@ import {
   Section,
   TEXTAREA_CLASS,
   Toggle,
+  describeZodIssue,
   errorMessage,
   newId,
 } from './ui';
@@ -141,6 +142,35 @@ function clampInt(value: string, min: number, max: number): number {
   return Math.max(min, Math.min(max, n));
 }
 
+/** Limpa, nos demais passos, as referências a um passo removido. */
+function dropStepRefs(steps: BotStep[], removedId: string): BotStep[] {
+  return steps.map((s) => {
+    if (s.type === 'wait_reply' && s.on_timeout_step_id === removedId) return { ...s, on_timeout_step_id: null };
+    if (s.type === 'condition') {
+      return {
+        ...s,
+        rules: s.rules.map((r) => (r.goto_step_id === removedId ? { ...r, goto_step_id: '' } : r)),
+        else_step_id: s.else_step_id === removedId ? null : s.else_step_id,
+      };
+    }
+    return s;
+  });
+}
+
+/** Número (a partir de 1) do primeiro passo que aponta para um passo inexistente, ou null. */
+function findBrokenStepRef(steps: BotStep[]): number | null {
+  const ids = new Set(steps.map((s) => s.id));
+  const missing = (id: string | null | undefined) => !!id && !ids.has(id);
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    if (s.type === 'wait_reply' && missing(s.on_timeout_step_id)) return i + 1;
+    if (s.type === 'condition' && (missing(s.else_step_id) || s.rules.some((r) => missing(r.goto_step_id)))) {
+      return i + 1;
+    }
+  }
+  return null;
+}
+
 const FIELD_NAMES: Record<string, string> = {
   name: 'Nome',
   connection_id: 'Número',
@@ -161,6 +191,7 @@ function describeIssue(path: PropertyKey[], message: string): string {
 
 /** Select de passo de destino (para "ir para o passo"). */
 function StepSelect({
+  id,
   steps,
   value,
   onChange,
@@ -168,6 +199,7 @@ function StepSelect({
   placeholder,
   ariaLabel,
 }: {
+  id?: string;
   steps: BotStep[];
   value: string;
   onChange: (id: string) => void;
@@ -176,7 +208,7 @@ function StepSelect({
   ariaLabel: string;
 }) {
   return (
-    <select className={INPUT_CLASS} value={value} onChange={(e) => onChange(e.target.value)} aria-label={ariaLabel}>
+    <select id={id} className={INPUT_CLASS} value={value} onChange={(e) => onChange(e.target.value)} aria-label={ariaLabel}>
       <option value="">{placeholder}</option>
       {steps.map((s, i) =>
         s.id === excludeId ? null : (
@@ -199,7 +231,7 @@ function StepBody({
   waitUnit,
   onWaitUnit,
   kwDrafts,
-  onKwDraft,
+  onKwDrafts,
 }: {
   step: BotStep;
   steps: BotStep[];
@@ -208,10 +240,13 @@ function StepBody({
   agents: ReturnType<typeof useWaAgentsList>['data'];
   waitUnit: WaitUnit;
   onWaitUnit: (u: WaitUnit) => void;
-  kwDrafts: Record<string, string>;
-  onKwDraft: (key: string, text: string) => void;
+  /** Rascunhos das palavras-chave deste passo, na mesma ordem das regras. */
+  kwDrafts: string[];
+  onKwDrafts: (next: string[]) => void;
 }) {
   const textRef = useRef<HTMLTextAreaElement>(null);
+  // Campo numérico em edição: mostra o que foi digitado e só aplica o limite ao sair do campo.
+  const [numDraft, setNumDraft] = useState<string | null>(null);
 
   switch (step.type) {
     case 'send_text': {
@@ -259,16 +294,24 @@ function StepBody({
     case 'wait': {
       const unitSeconds = WAIT_UNIT_SECONDS[waitUnit];
       const amount = Math.max(1, Math.round(step.seconds / unitSeconds));
+      const toSeconds = (raw: string) => Math.min(604800, Math.max(1, clampInt(raw, 1, 604800) * unitSeconds));
       return (
         <div className="flex items-center gap-2 flex-wrap">
           <input
             type="number"
             min={1}
             className={`${INPUT_CLASS} w-28`}
-            value={amount}
-            onChange={(e) =>
-              onChange({ ...step, seconds: Math.min(604800, Math.max(1, clampInt(e.target.value, 1, 604800) * unitSeconds)) })
-            }
+            value={numDraft ?? amount}
+            onChange={(e) => {
+              // Fixa a unidade atual: sem isso ela mudava sozinha conforme os segundos digitados.
+              onWaitUnit(waitUnit);
+              setNumDraft(e.target.value);
+              if (e.target.value !== '') onChange({ ...step, seconds: toSeconds(e.target.value) });
+            }}
+            onBlur={() => {
+              if (numDraft !== null) onChange({ ...step, seconds: toSeconds(numDraft) });
+              setNumDraft(null);
+            }}
             aria-label="Quanto tempo esperar"
           />
           <select
@@ -294,19 +337,36 @@ function StepBody({
     case 'wait_reply':
       return (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <Field label="Aguardar resposta por (minutos)" help="Até 30 dias (43200 minutos).">
+          <Field
+            label="Aguardar resposta por (minutos)"
+            htmlFor={`step-${step.id}-timeout`}
+            help="Até 30 dias (43200 minutos)."
+          >
             <input
+              id={`step-${step.id}-timeout`}
               type="number"
               min={1}
               max={43200}
               className={INPUT_CLASS}
-              value={step.timeout_minutes}
-              onChange={(e) => onChange({ ...step, timeout_minutes: clampInt(e.target.value, 1, 43200) })}
+              value={numDraft ?? step.timeout_minutes}
+              onChange={(e) => {
+                setNumDraft(e.target.value);
+                if (e.target.value !== '') onChange({ ...step, timeout_minutes: clampInt(e.target.value, 1, 43200) });
+              }}
+              onBlur={() => {
+                if (numDraft !== null) onChange({ ...step, timeout_minutes: clampInt(numDraft, 1, 43200) });
+                setNumDraft(null);
+              }}
               aria-label="Minutos aguardando resposta"
             />
           </Field>
-          <Field label="Se não responder, ir para o passo" help="Vazio: encerra o robô sem resposta.">
+          <Field
+            label="Se não responder, ir para o passo"
+            htmlFor={`step-${step.id}-on-timeout`}
+            help="Vazio: encerra o robô sem resposta."
+          >
             <StepSelect
+              id={`step-${step.id}-on-timeout`}
               steps={steps}
               value={step.on_timeout_step_id ?? ''}
               onChange={(id) => onChange({ ...step, on_timeout_step_id: id || null })}
@@ -326,14 +386,16 @@ function StepBody({
           </p>
           {step.rules.map((rule, rIndex) => {
             const draftKey = `${step.id}:${rIndex}`;
-            const draft = kwDrafts[draftKey] ?? rule.keywords.join(', ');
+            const draft = kwDrafts[rIndex] ?? rule.keywords.join(', ');
             return (
               <div key={draftKey} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-2 items-center">
                 <input
                   className={INPUT_CLASS}
                   value={draft}
                   onChange={(e) => {
-                    onKwDraft(draftKey, e.target.value);
+                    const nextDrafts = [...kwDrafts];
+                    nextDrafts[rIndex] = e.target.value;
+                    onKwDrafts(nextDrafts);
                     onChange({
                       ...step,
                       rules: step.rules.map((r, i) => (i === rIndex ? { ...r, keywords: parseKeywords(e.target.value) } : r)),
@@ -358,7 +420,13 @@ function StepBody({
                   aria-label={`Remover regra ${rIndex + 1}`}
                   title="Remover regra"
                   disabled={step.rules.length <= 1}
-                  onClick={() => onChange({ ...step, rules: step.rules.filter((_, i) => i !== rIndex) })}
+                  onClick={() => {
+                    // Os rascunhos acompanham a remoção para não desalinhar das regras.
+                    const nextDrafts = [...kwDrafts];
+                    nextDrafts.splice(rIndex, 1);
+                    onKwDrafts(nextDrafts);
+                    onChange({ ...step, rules: step.rules.filter((_, i) => i !== rIndex) });
+                  }}
                 >
                   <Trash2 size={14} aria-hidden="true" />
                 </button>
@@ -375,8 +443,13 @@ function StepBody({
               Adicionar regra
             </button>
           </div>
-          <Field label="Senão, ir para o passo" help="Vazio: segue para o próximo passo da lista.">
+          <Field
+            label="Senão, ir para o passo"
+            htmlFor={`step-${step.id}-else`}
+            help="Vazio: segue para o próximo passo da lista."
+          >
             <StepSelect
+              id={`step-${step.id}-else`}
               steps={steps}
               value={step.else_step_id ?? ''}
               onChange={(id) => onChange({ ...step, else_step_id: id || null })}
@@ -436,7 +509,7 @@ export const BotEditor: React.FC<{ bot: BotRow | null; onClose: () => void }> = 
   const [form, setForm] = useState<BotFormState>(() => buildInitialForm(bot));
   const [botId, setBotId] = useState<string | null>(bot?.id ?? null);
   const [waitUnits, setWaitUnits] = useState<Record<string, WaitUnit>>({});
-  const [kwDrafts, setKwDrafts] = useState<Record<string, string>>({});
+  const [kwDrafts, setKwDrafts] = useState<Record<string, string[]>>({});
   const [addType, setAddType] = useState<string>('');
 
   const patch = (p: Partial<BotFormState>) => setForm((prev) => ({ ...prev, ...p }));
@@ -447,14 +520,17 @@ export const BotEditor: React.FC<{ bot: BotRow | null; onClose: () => void }> = 
 
   const setStep = (index: number, step: BotStep) =>
     patch({ steps: form.steps.map((s, i) => (i === index ? step : s)) });
-  const removeStep = (index: number) => {
-    const removed = form.steps[index];
+  const dropKwDrafts = (stepId: string) =>
     setKwDrafts((prev) => {
-      const next: Record<string, string> = {};
-      for (const [k, v] of Object.entries(prev)) if (!k.startsWith(`${removed.id}:`)) next[k] = v;
+      const next = { ...prev };
+      delete next[stepId];
       return next;
     });
-    patch({ steps: form.steps.filter((_, i) => i !== index) });
+  const removeStep = (index: number) => {
+    const removed = form.steps[index];
+    dropKwDrafts(removed.id);
+    // Quem apontava para o passo removido deixa de apontar.
+    patch({ steps: dropStepRefs(form.steps.filter((_, i) => i !== index), removed.id) });
   };
   const moveStep = (index: number, dir: -1 | 1) => {
     const target = index + dir;
@@ -471,11 +547,7 @@ export const BotEditor: React.FC<{ bot: BotRow | null; onClose: () => void }> = 
   const changeStepType = (index: number, type: StepType) => {
     const current = form.steps[index];
     if (current.type === type) return;
-    setKwDrafts((prev) => {
-      const next: Record<string, string> = {};
-      for (const [k, v] of Object.entries(prev)) if (!k.startsWith(`${current.id}:`)) next[k] = v;
-      return next;
-    });
+    dropKwDrafts(current.id);
     setStep(index, defaultStep(type, current.id));
   };
 
@@ -484,7 +556,12 @@ export const BotEditor: React.FC<{ bot: BotRow | null; onClose: () => void }> = 
     const parsed = BotInputSchema.safeParse(payload);
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
-      showToast(issue ? describeIssue(issue.path, issue.message) : 'Dados inválidos', 'error');
+      showToast(issue ? describeIssue(issue.path, describeZodIssue(issue)) : 'Dados inválidos', 'error');
+      return;
+    }
+    const brokenStep = findBrokenStepRef(payload.steps);
+    if (brokenStep !== null) {
+      showToast(`O passo ${brokenStep} aponta para um passo que não existe`, 'error');
       return;
     }
     if (!payload.connection_id) {
@@ -682,8 +759,8 @@ export const BotEditor: React.FC<{ bot: BotRow | null; onClose: () => void }> = 
                 agents={agentsQ.data}
                 waitUnit={unit}
                 onWaitUnit={(u) => setWaitUnits((prev) => ({ ...prev, [step.id]: u }))}
-                kwDrafts={kwDrafts}
-                onKwDraft={(key, text) => setKwDrafts((prev) => ({ ...prev, [key]: text }))}
+                kwDrafts={kwDrafts[step.id] ?? []}
+                onKwDrafts={(next) => setKwDrafts((prev) => ({ ...prev, [step.id]: next }))}
               />
             </div>
           );

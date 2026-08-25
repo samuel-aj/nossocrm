@@ -104,6 +104,20 @@ export function normalizeApiKeyInput(value: string | null | undefined): string |
   return trimmed;
 }
 
+/** true quando todos os ids são números (wa_connections) da organização. Lista vazia passa. */
+export async function connectionsBelongToOrg(admin: SupabaseClient, orgId: string, ids: string[]): Promise<boolean> {
+  const unique = Array.from(new Set(ids.filter(Boolean)));
+  if (unique.length === 0) return true;
+  const { data, error } = await admin.from('wa_connections').select('id').eq('organization_id', orgId).in('id', unique);
+  if (error) throw new Error(error.message);
+  return (data ?? []).length === unique.length;
+}
+
+/** Resposta padrão quando um número informado não é da organização. */
+export function connectionNotFoundError(): Response {
+  return json({ error: 'Número não encontrado nesta organização', code: 'CONNECTION_NOT_FOUND' }, 400);
+}
+
 export function getErrorMessage(err: unknown, fallback: string): string {
   if (err instanceof Error && err.message) return err.message;
   if (typeof err === 'string' && err) return err;

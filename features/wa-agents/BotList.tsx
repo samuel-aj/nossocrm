@@ -36,8 +36,14 @@ export const BotList: React.FC = () => {
   }
 
   const options = optionsQ.data;
-  const connectionLabel = (id: string | null) =>
-    id ? options?.connections.find((c) => c.id === id)?.label ?? 'Número removido' : 'Sem número';
+  const connectionLabel = (id: string | null) => {
+    if (!id) return 'Sem número';
+    const label = options?.connections.find((c) => c.id === id)?.label;
+    if (label) return label;
+    if (optionsQ.isLoading) return '...';
+    if (optionsQ.error) return `${id.slice(0, 8)}...`;
+    return 'Número removido';
+  };
   const describeTrigger = (bot: BotRow): string => {
     const t = bot.trigger;
     const board = t.board_id ? options?.boards.find((b) => b.id === t.board_id) : null;

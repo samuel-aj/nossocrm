@@ -7,7 +7,15 @@
 import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { BotInputSchema, type BotRow } from '@/lib/wa-agents/types';
-import { guardRoute, pickPresentKeys, readJsonBody, validationError } from '../../_shared';
+import {
+  connectionNotFoundError,
+  connectionsBelongToOrg,
+  getErrorMessage,
+  guardRoute,
+  pickPresentKeys,
+  readJsonBody,
+  validationError,
+} from '../../_shared';
 
 export const runtime = 'nodejs';
 
@@ -48,6 +56,15 @@ export async function PATCH(req: Request, ctx: Ctx) {
     ...pickPresentKeys(raw, parsed.data),
     updated_at: new Date().toISOString(),
   };
+
+  try {
+    const connectionId = typeof patch.connection_id === 'string' ? patch.connection_id : null;
+    if (connectionId && !(await connectionsBelongToOrg(auth.admin, auth.user.organizationId, [connectionId]))) {
+      return connectionNotFoundError();
+    }
+  } catch (err) {
+    return json({ error: getErrorMessage(err, 'Falha ao validar o número') }, 500);
+  }
 
   const { data, error } = await auth.admin
     .from('wa_bots')

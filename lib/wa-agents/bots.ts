@@ -15,6 +15,7 @@ import {
   type WaConnectionRow,
 } from '@/lib/whatsapp/service';
 import { addDealTag } from './actions';
+import { isWaAgentsBetaEnabled } from './beta';
 import { loadAgent, loadConversationContext, loadDealContext } from './context';
 import { runAgentOnConversation } from './engine';
 import { errorMessage } from './errors';
@@ -23,8 +24,11 @@ import { BotStepSchema, type BotLogEntry, type BotRow, type BotRunRow, type BotS
 import { dispatchAgentEvent } from './webhooks';
 
 const MAX_STEPS_PER_RUN = 50;
+/** Limite absoluto de passos por execução (soma de todas as retomadas): evita laço infinito entre esperas. */
+const MAX_STEPS_TOTAL = 500;
 const BOT_LOCK_SECONDS = 120;
 const TIMEOUT_STEP_VAR = '_timeout_step_id';
+const STEPS_TOTAL_VAR = '_steps_total';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -88,10 +92,26 @@ type RunState = {
   vars: Record<string, unknown>;
 };
 
-async function saveRun(admin: SupabaseClient, st: RunState, patch: Record<string, unknown>): Promise<void> {
+/**
+ * Grava a execução. `release: true` solta a trava (lock_until null): só nas
+ * saídas terminais (done, error, cancelled) e nas paradas (wait, wait_reply);
+ * gravações intermediárias mantêm a trava para outro tick não reprocessar.
+ */
+async function saveRun(
+  admin: SupabaseClient,
+  st: RunState,
+  patch: Record<string, unknown>,
+  opts: { release?: boolean } = {}
+): Promise<void> {
   const { error } = await admin
     .from('wa_bot_runs')
-    .update({ ...patch, log: st.log, vars: st.vars, updated_at: nowIso(), lock_until: null })
+    .update({
+      ...patch,
+      log: st.log,
+      vars: st.vars,
+      updated_at: nowIso(),
+      ...(opts.release ? { lock_until: null } : {}),
+    })
     .eq('id', st.run.id)
     .eq('organization_id', st.run.organization_id);
   if (error) console.error('[wa-agents] salvar execução do robô falhou:', error.message);
@@ -155,16 +175,21 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
   const orgId = run.organization_id;
 
   try {
+    if (!(await isWaAgentsBetaEnabled(admin, orgId))) {
+      note(st, null, 'versão beta desativada');
+      await saveRun(admin, st, { status: 'cancelled', wake_at: null }, { release: true });
+      return;
+    }
     const bot = await loadBot(admin, orgId, run.bot_id);
     if (!bot || !bot.enabled) {
       note(st, null, bot ? 'robô desligado' : 'robô não encontrado');
-      await saveRun(admin, st, { status: 'cancelled' });
+      await saveRun(admin, st, { status: 'cancelled' }, { release: true });
       return;
     }
     const steps = parseSteps(bot.steps);
     if (steps.length === 0) {
       note(st, null, 'robô sem passos');
-      await saveRun(admin, st, { status: 'done' });
+      await saveRun(admin, st, { status: 'done' }, { release: true });
       return;
     }
 
@@ -192,17 +217,25 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
     }
 
     // Conversa (cria na primeira execução)
+    let connection: WaConnectionRow | null = null;
     let phone = run.phone ? normalizePhoneE164(run.phone) : '';
     if (!run.conversation_id) {
       phone = normalizePhoneE164(run.phone || contact?.phone || '');
       if (!phone) {
         note(st, null, 'sem telefone para enviar');
-        await saveRun(admin, st, { status: 'error', error: 'sem telefone' });
+        await saveRun(admin, st, { status: 'error', error: 'sem telefone' }, { release: true });
         return;
       }
       if (!bot.connection_id) {
         note(st, null, 'robô sem número configurado');
-        await saveRun(admin, st, { status: 'error', error: 'robô sem número' });
+        await saveRun(admin, st, { status: 'error', error: 'robô sem número' }, { release: true });
+        return;
+      }
+      // O número precisa ser da organização antes de criar a conversa
+      connection = await getConnectionByIdForOrg(admin, orgId, bot.connection_id);
+      if (!connection) {
+        note(st, null, 'número do robô não encontrado nesta organização');
+        await saveRun(admin, st, { status: 'error', error: 'número do robô não encontrado' }, { release: true });
         return;
       }
       const conv = await ensureConversation(admin, orgId, bot.connection_id, phone, contact?.name ?? null);
@@ -218,13 +251,12 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
       phone = (data as { wa_phone?: string } | null)?.wa_phone ?? '';
       if (!phone) {
         note(st, null, 'conversa sem telefone');
-        await saveRun(admin, st, { status: 'error', error: 'conversa sem telefone' });
+        await saveRun(admin, st, { status: 'error', error: 'conversa sem telefone' }, { release: true });
         return;
       }
     }
     const conversationId = st.run.conversation_id as string;
 
-    let connection: WaConnectionRow | null = null;
     const getConnection = async (): Promise<WaConnectionRow> => {
       if (connection) return connection;
       if (!bot.connection_id) throw new Error('robô sem número configurado');
@@ -247,7 +279,22 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
       const step = steps[idx];
       if (!step) {
         note(st, null, 'fim dos passos');
-        await saveRun(admin, st, { status: 'done', step_index: idx, wake_at: null });
+        await saveRun(admin, st, { status: 'done', step_index: idx, wake_at: null }, { release: true });
+        return;
+      }
+
+      // Contador persistente (sobrevive a wait/wait_reply): laço infinito vira erro
+      const prevTotal = Number(st.vars[STEPS_TOTAL_VAR]);
+      const stepsTotal = (Number.isFinite(prevTotal) ? prevTotal : 0) + 1;
+      st.vars[STEPS_TOTAL_VAR] = stepsTotal;
+      if (stepsTotal > MAX_STEPS_TOTAL) {
+        note(st, step, 'limite de passos atingido');
+        await saveRun(
+          admin,
+          st,
+          { status: 'error', step_index: idx, wake_at: null, error: 'limite de passos atingido' },
+          { release: true }
+        );
         return;
       }
 
@@ -266,14 +313,19 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
         case 'wait': {
           const wakeAt = new Date(Date.now() + step.seconds * 1000).toISOString();
           note(st, step, `esperando ${step.seconds}s`);
-          await saveRun(admin, st, { status: 'running', step_index: idx + 1, wake_at: wakeAt });
+          await saveRun(admin, st, { status: 'running', step_index: idx + 1, wake_at: wakeAt }, { release: true });
           return;
         }
         case 'wait_reply': {
           const wakeAt = new Date(Date.now() + step.timeout_minutes * 60 * 1000).toISOString();
           st.vars[TIMEOUT_STEP_VAR] = step.on_timeout_step_id ?? null;
           note(st, step, `esperando resposta por até ${step.timeout_minutes} min`);
-          await saveRun(admin, st, { status: 'waiting_reply', step_index: idx + 1, wake_at: wakeAt });
+          await saveRun(
+            admin,
+            st,
+            { status: 'waiting_reply', step_index: idx + 1, wake_at: wakeAt },
+            { release: true }
+          );
           return;
         }
         case 'condition': {
@@ -348,7 +400,7 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
             .eq('organization_id', orgId);
           if (error) throw new Error(error.message);
           note(st, step, `entregue ao agente ${agent.name}`);
-          await saveRun(admin, st, { status: 'done', step_index: idx + 1, wake_at: null });
+          await saveRun(admin, st, { status: 'done', step_index: idx + 1, wake_at: null }, { release: true });
           try {
             const ctx = await loadConversationContext(admin, orgId, conversationId);
             await dispatchAgentEvent(admin, { agent, event: 'started', ctx, extra: { by: 'bot', bot_id: bot.id } });
@@ -367,7 +419,7 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
         }
         case 'end': {
           note(st, step, 'encerrado');
-          await saveRun(admin, st, { status: 'done', step_index: idx, wake_at: null });
+          await saveRun(admin, st, { status: 'done', step_index: idx, wake_at: null }, { release: true });
           return;
         }
         default: {
@@ -377,12 +429,12 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
       }
     }
     note(st, null, 'limite de passos por execução atingido');
-    await saveRun(admin, st, { status: 'error', step_index: idx, error: 'limite de passos' });
+    await saveRun(admin, st, { status: 'error', step_index: idx, error: 'limite de passos' }, { release: true });
   } catch (e) {
     const msg = errorMessage(e);
     console.error('[wa-agents] robô falhou:', msg);
     note(st, null, `erro: ${msg}`);
-    await saveRun(admin, st, { status: 'error', error: msg, wake_at: null });
+    await saveRun(admin, st, { status: 'error', error: msg, wake_at: null }, { release: true });
   }
 }
 
@@ -395,7 +447,7 @@ export async function handleBotReply(
   try {
     const lastReply = (message.body ?? '').trim() || (message.transcription ?? '').trim() || '';
     const vars = { ...((run.vars ?? {}) as Record<string, unknown>), last_reply: lastReply, last_reply_message_id: message.id };
-    const locked = await claimBotLock(admin, run.id);
+    // Primeiro o update condicional; a trava só depois (não fica presa se outra instância já cuidou)
     const { data } = await admin
       .from('wa_bot_runs')
       .update({ vars, status: 'running', wake_at: nowIso(), updated_at: nowIso() })
@@ -406,6 +458,7 @@ export async function handleBotReply(
       .maybeSingle();
     if (!data) return; // outra instância já cuidou
     // Sem a trava, o relógio (tick) pega a execução em 'running' com wake_at vencido
+    const locked = await claimBotLock(admin, run.id);
     if (!locked) return;
     await processBotRun(admin, data as BotRunRow);
   } catch (e) {
@@ -436,12 +489,12 @@ async function handleBotTimeout(admin: SupabaseClient, run: BotRunRow): Promise<
     return;
   }
   note(st, null, 'sem resposta');
-  await saveRun(admin, st, { status: 'done', wake_at: null });
+  await saveRun(admin, st, { status: 'done', wake_at: null }, { release: true });
 }
 
 export async function processDueBotRuns(
   admin: SupabaseClient,
-  opts: { limit?: number } = {}
+  opts: { limit?: number; deadlineMs?: number } = {}
 ): Promise<{ processed: number }> {
   const limit = opts.limit ?? 25;
   let processed = 0;
@@ -456,6 +509,8 @@ export async function processDueBotRuns(
       .limit(limit);
 
     for (const raw of (data ?? []) as BotRunRow[]) {
+      // Orçamento de tempo do tick: o que sobrar fica para o próximo
+      if (opts.deadlineMs && Date.now() > opts.deadlineMs) break;
       try {
         const locked = await claimBotLock(admin, raw.id);
         if (!locked) continue;
@@ -477,10 +532,19 @@ export async function processDueBotRuns(
   return { processed };
 }
 
-export async function startBotRun(
+export type StartBotRunInput = {
+  organizationId: string;
+  botId: string;
+  dealId?: string | null;
+  contactId?: string | null;
+  phone?: string | null;
+};
+
+/** Só cria a execução (status 'running', wake_at agora), sem processar. */
+export async function createBotRun(
   admin: SupabaseClient,
-  input: { organizationId: string; botId: string; dealId?: string | null; contactId?: string | null; phone?: string | null }
-): Promise<{ ok: boolean; runId?: string; error?: string }> {
+  input: StartBotRunInput
+): Promise<{ ok: boolean; run?: BotRunRow; error?: string }> {
   try {
     const bot = await loadBot(admin, input.organizationId, input.botId);
     if (!bot) return { ok: false, error: 'Robô não encontrado' };
@@ -506,10 +570,29 @@ export async function startBotRun(
       .select('*')
       .single();
     if (error) return { ok: false, error: error.message };
-    const run = data as BotRunRow;
-    const locked = await claimBotLock(admin, run.id);
-    if (locked) await processBotRun(admin, run);
-    return { ok: true, runId: run.id };
+    return { ok: true, run: data as BotRunRow };
+  } catch (e) {
+    return { ok: false, error: errorMessage(e) };
+  }
+}
+
+/** Pega a trava e processa a execução agora (sem a trava, o tick cuida). */
+export async function runBotRunNow(admin: SupabaseClient, run: BotRunRow): Promise<void> {
+  const locked = await claimBotLock(admin, run.id);
+  if (locked) await processBotRun(admin, run);
+}
+
+/** Cria a execução e, por padrão, processa na hora (`process: false` só cria). */
+export async function startBotRun(
+  admin: SupabaseClient,
+  input: StartBotRunInput,
+  opts: { process?: boolean } = {}
+): Promise<{ ok: boolean; runId?: string; error?: string }> {
+  try {
+    const created = await createBotRun(admin, input);
+    if (!created.ok || !created.run) return { ok: false, error: created.error };
+    if (opts.process !== false) await runBotRunNow(admin, created.run);
+    return { ok: true, runId: created.run.id };
   } catch (e) {
     return { ok: false, error: errorMessage(e) };
   }

@@ -10,6 +10,8 @@ import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { AgentInputSchema, type AgentRow } from '@/lib/wa-agents/types';
 import {
+  connectionNotFoundError,
+  connectionsBelongToOrg,
   getErrorMessage,
   guardRoute,
   normalizeApiKeyInput,
@@ -69,6 +71,17 @@ export async function PATCH(req: Request, ctx: Ctx) {
   if ('api_key' in present) {
     const apiKey = normalizeApiKeyInput(apiKeyInput);
     if (apiKey !== undefined) patch.api_key = apiKey;
+  }
+
+  try {
+    if (
+      Array.isArray(present.connection_ids) &&
+      !(await connectionsBelongToOrg(auth.admin, auth.user.organizationId, present.connection_ids))
+    ) {
+      return connectionNotFoundError();
+    }
+  } catch (err) {
+    return json({ error: getErrorMessage(err, 'Falha ao validar os números') }, 500);
   }
 
   const { data, error } = await auth.admin

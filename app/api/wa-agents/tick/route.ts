@@ -16,19 +16,22 @@ import { processDueBotRuns } from '@/lib/wa-agents/bots';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
+const TICK_BUDGET_MS = 240_000;
 
 async function handle(req: Request): Promise<Response> {
   if (!verifyInternalSecret(req)) return json({ error: 'Não autorizado' }, 401);
 
   after(async () => {
     const admin = createStaticAdminClient();
+    // O cron roda a cada 30 s: poucos itens por tick e um orçamento de tempo abaixo do maxDuration
+    const deadlineMs = Date.now() + TICK_BUDGET_MS;
     try {
-      await resumeDueConversations(admin, { limit: 50 });
+      await resumeDueConversations(admin, { limit: 5, deadlineMs });
     } catch (err) {
       console.error('[wa-agents/tick] falha ao retomar conversas', err);
     }
     try {
-      await processDueBotRuns(admin, { limit: 25 });
+      await processDueBotRuns(admin, { limit: 5, deadlineMs });
     } catch (err) {
       console.error('[wa-agents/tick] falha ao processar robôs', err);
     }

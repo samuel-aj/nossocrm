@@ -6,7 +6,16 @@
  */
 import { json } from '@/lib/whatsapp/api';
 import { AgentInputSchema, type AgentInput, type AgentMinimal, type AgentRow } from '@/lib/wa-agents/types';
-import { guardRoute, normalizeApiKeyInput, readJsonBody, toAgentPublic, validationError } from '../_shared';
+import {
+  connectionNotFoundError,
+  connectionsBelongToOrg,
+  getErrorMessage,
+  guardRoute,
+  normalizeApiKeyInput,
+  readJsonBody,
+  toAgentPublic,
+  validationError,
+} from '../_shared';
 
 export const runtime = 'nodejs';
 
@@ -63,6 +72,14 @@ export async function POST(req: Request) {
 
   const parsed = AgentInputSchema.safeParse(await readJsonBody(req));
   if (!parsed.success) return validationError(parsed.error);
+
+  try {
+    if (!(await connectionsBelongToOrg(auth.admin, auth.user.organizationId, parsed.data.connection_ids))) {
+      return connectionNotFoundError();
+    }
+  } catch (err) {
+    return json({ error: getErrorMessage(err, 'Falha ao validar os números') }, 500);
+  }
 
   const { data, error } = await auth.admin
     .from('wa_ai_agents')

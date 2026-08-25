@@ -128,6 +128,7 @@ export async function GET(req: Request) {
   const ai = aiConv
     ? await getConversationAiInfo(auth.admin, {
         id: aiConv.id,
+        organization_id: auth.user.organizationId,
         ai_status: aiConv.ai_status ?? null,
         ai_agent_id: aiConv.ai_agent_id ?? null,
         ai_resume_at: aiConv.ai_resume_at ?? null,

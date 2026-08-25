@@ -48,6 +48,7 @@ import {
   Section,
   TEXTAREA_CLASS,
   Toggle,
+  describeZodIssue,
   errorMessage,
 } from './ui';
 
@@ -66,10 +67,11 @@ type AgentFormState = {
   /** Remover a chave própria ao salvar */
   clear_api_key: boolean;
   system_prompt: string;
-  buffer_seconds: number;
-  history_limit: number;
-  line_delay_ms: number;
-  human_pause_minutes: number;
+  /** Campos numéricos aceitam '' enquanto o usuário digita; o limite é aplicado no onBlur e no toPayload. */
+  buffer_seconds: number | '';
+  history_limit: number | '';
+  line_delay_ms: number | '';
+  human_pause_minutes: number | '';
   only_new_conversations: boolean;
   outcomes: Outcome[];
   webhooks: AgentWebhook[];
@@ -115,10 +117,10 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
     model: form.model.trim(),
     temperature: form.temperature,
     system_prompt: form.system_prompt,
-    buffer_seconds: form.buffer_seconds,
-    history_limit: form.history_limit,
-    line_delay_ms: form.line_delay_ms,
-    human_pause_minutes: form.human_pause_minutes,
+    buffer_seconds: clampField('buffer_seconds', form.buffer_seconds),
+    history_limit: clampField('history_limit', form.history_limit),
+    line_delay_ms: clampField('line_delay_ms', form.line_delay_ms),
+    human_pause_minutes: clampField('human_pause_minutes', form.human_pause_minutes),
     only_new_conversations: form.only_new_conversations,
     outcomes: form.outcomes,
     webhooks: form.webhooks,
@@ -158,6 +160,48 @@ function clampInt(value: string, min: number, max: number): number {
   return Math.max(min, Math.min(max, n));
 }
 
+type NumField = 'buffer_seconds' | 'history_limit' | 'line_delay_ms' | 'human_pause_minutes';
+
+const NUM_LIMITS: Record<NumField, [min: number, max: number]> = {
+  buffer_seconds: [0, 60],
+  history_limit: [5, 200],
+  line_delay_ms: [0, 10000],
+  human_pause_minutes: [0, 1440],
+};
+
+/** Limite final de um campo numérico ('' vira o mínimo). */
+function clampField(field: NumField, value: number | ''): number {
+  const [min, max] = NUM_LIMITS[field];
+  return clampInt(String(value), min, max);
+}
+
+/** Valor digitado num campo numérico, sem limite: '' fica '' para não travar a digitação. */
+function readNumber(raw: string): number | '' {
+  if (raw === '') return '';
+  const n = Number(raw);
+  return Number.isNaN(n) ? '' : n;
+}
+
+/** Só os campos cujo valor (em JSON) mudou desde o snapshot; evita sobrescrever o que outra aba alterou. */
+function diffPayload(payload: Partial<AgentInput>, snapshot: Partial<AgentInput>): Partial<AgentInput> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (JSON.stringify(value) !== JSON.stringify(snapshot[key as keyof AgentInput])) out[key] = value;
+  }
+  return out as Partial<AgentInput>;
+}
+
+/** Chaves de resultado que aparecem mais de uma vez. */
+function findDuplicateOutcomeKeys(outcomes: Outcome[]): string[] {
+  const seen = new Set<string>();
+  const dups: string[] = [];
+  for (const o of outcomes) {
+    if (seen.has(o.key) && !dups.includes(o.key)) dups.push(o.key);
+    seen.add(o.key);
+  }
+  return dups;
+}
+
 /**
  * Componente React `AgentEditor`.
  * @returns {Element} Retorna um valor do tipo `Element`.
@@ -175,6 +219,9 @@ export const AgentEditor: React.FC<{
   const save = useSaveWaAgent();
 
   const [form, setForm] = useState<AgentFormState>(() => buildInitialForm(agent, initial));
+  // Snapshot do formulário ao montar (useRef guarda só o valor do primeiro render):
+  // o PATCH manda apenas o que mudou desde então.
+  const snapshotRef = useRef<Partial<AgentInput>>(toPayload(form));
   const [agentId, setAgentId] = useState<string | null>(agent?.id ?? null);
   const [hasApiKey, setHasApiKey] = useState<boolean>(agent?.has_api_key ?? false);
   const [testOpen, setTestOpen] = useState(false);
@@ -217,15 +264,26 @@ export const AgentEditor: React.FC<{
   };
 
   const handleSave = async (): Promise<boolean> => {
+    const duplicateKeys = findDuplicateOutcomeKeys(form.outcomes);
+    if (duplicateKeys.length > 0) {
+      showToast(`Chaves de resultado repetidas: ${duplicateKeys.join(', ')}`, 'error');
+      return false;
+    }
     const payload = toPayload(form);
     const parsed = AgentInputSchema.safeParse(payload);
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
-      showToast(issue ? describeIssue(issue.path, issue.message) : 'Dados inválidos', 'error');
+      showToast(issue ? describeIssue(issue.path, describeZodIssue(issue)) : 'Dados inválidos', 'error');
       return false;
     }
+    // PATCH (agente existente): só o que mudou desde o snapshot; api_key só vai quando digitada ou limpa.
+    // POST (novo): payload completo.
+    const input = agentId ? diffPayload(payload, snapshotRef.current) : payload;
     try {
-      const saved = await save.mutateAsync({ id: agentId, input: payload });
+      const saved = await save.mutateAsync({ id: agentId, input });
+      const snapshot = { ...payload };
+      delete snapshot.api_key;
+      snapshotRef.current = snapshot;
       setAgentId(saved.id);
       setHasApiKey(!!saved.has_api_key);
       patch({ api_key: '', clear_api_key: false });
@@ -510,7 +568,8 @@ export const AgentEditor: React.FC<{
               max={60}
               className={INPUT_CLASS}
               value={form.buffer_seconds}
-              onChange={(e) => patch({ buffer_seconds: clampInt(e.target.value, 0, 60) })}
+              onChange={(e) => patch({ buffer_seconds: readNumber(e.target.value) })}
+              onBlur={() => patch({ buffer_seconds: clampField('buffer_seconds', form.buffer_seconds) })}
             />
           </Field>
           <Field
@@ -525,7 +584,8 @@ export const AgentEditor: React.FC<{
               max={200}
               className={INPUT_CLASS}
               value={form.history_limit}
-              onChange={(e) => patch({ history_limit: clampInt(e.target.value, 5, 200) })}
+              onChange={(e) => patch({ history_limit: readNumber(e.target.value) })}
+              onBlur={() => patch({ history_limit: clampField('history_limit', form.history_limit) })}
             />
           </Field>
           <Field
@@ -541,7 +601,8 @@ export const AgentEditor: React.FC<{
               step={100}
               className={INPUT_CLASS}
               value={form.line_delay_ms}
-              onChange={(e) => patch({ line_delay_ms: clampInt(e.target.value, 0, 10000) })}
+              onChange={(e) => patch({ line_delay_ms: readNumber(e.target.value) })}
+              onBlur={() => patch({ line_delay_ms: clampField('line_delay_ms', form.line_delay_ms) })}
             />
           </Field>
           <Field
@@ -556,7 +617,8 @@ export const AgentEditor: React.FC<{
               max={1440}
               className={INPUT_CLASS}
               value={form.human_pause_minutes}
-              onChange={(e) => patch({ human_pause_minutes: clampInt(e.target.value, 0, 1440) })}
+              onChange={(e) => patch({ human_pause_minutes: readNumber(e.target.value) })}
+              onBlur={() => patch({ human_pause_minutes: clampField('human_pause_minutes', form.human_pause_minutes) })}
             />
           </Field>
         </div>

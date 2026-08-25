@@ -335,7 +335,7 @@ export const OutcomesEditor: React.FC<{
       {value.map((outcome, index) => {
         const idPrefix = `outcome-${index}`;
         return (
-          <div key={`${idPrefix}-${outcome.key}`} className={SUBCARD_CLASS}>
+          <div key={idPrefix} className={SUBCARD_CLASS}>
             <div className="flex items-start gap-2">
               <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3">
                 <Field label="Rótulo" htmlFor={`${idPrefix}-label`}>

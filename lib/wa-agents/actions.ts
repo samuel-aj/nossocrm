@@ -37,6 +37,15 @@ export async function addDealTag(
   if (error) throw new Error(error.message);
 }
 
+/** true se o usuário é da organização (perfil na org ou vínculo em user_organizations). */
+async function ownerBelongsToOrg(admin: SupabaseClient, organizationId: string, ownerId: string): Promise<boolean> {
+  const [{ data: profiles }, { data: members }] = await Promise.all([
+    admin.from('profiles').select('id').eq('organization_id', organizationId).eq('id', ownerId).limit(1),
+    admin.from('user_organizations').select('user_id').eq('organization_id', organizationId).eq('user_id', ownerId).limit(1),
+  ]);
+  return (profiles ?? []).length > 0 || (members ?? []).length > 0;
+}
+
 async function runAction(
   admin: SupabaseClient,
   input: { agent: AgentRow; ctx: ConversationContext; outcome: Outcome; summary: string },
@@ -92,6 +101,9 @@ async function runAction(
       return 'negócio marcado como perdido';
     }
     case 'assign_owner': {
+      if (!(await ownerBelongsToOrg(admin, orgId, action.owner_id))) {
+        throw new Error('responsável não pertence à organização');
+      }
       const notes: string[] = [];
       if (dealId) {
         const { error } = await admin

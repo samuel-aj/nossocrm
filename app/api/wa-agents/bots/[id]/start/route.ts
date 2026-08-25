@@ -4,12 +4,15 @@
  *
  * Dispara o robô manualmente (teste ou uso avulso). Com dealId, o telefone vem
  * do contato do negócio; com phone, roda só com o número -> { ok, runId }
+ * A execução é criada na hora e processada em segundo plano (after).
  */
+import { after } from 'next/server';
 import { z } from 'zod';
 import { json } from '@/lib/whatsapp/api';
+import { createStaticAdminClient } from '@/lib/supabase/server';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { isE164, normalizePhoneE164 } from '@/lib/phone';
-import { startBotRun } from '@/lib/wa-agents/bots';
+import { createBotRun, runBotRunNow } from '@/lib/wa-agents/bots';
 import { getErrorMessage, guardRoute, readJsonBody, validationError } from '../../../_shared';
 
 export const runtime = 'nodejs';
@@ -69,9 +72,17 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   }
 
   try {
-    const result = await startBotRun(auth.admin, { organizationId: orgId, botId: id, dealId, contactId, phone });
-    if (!result.ok) return json({ ok: false, error: result.error ?? 'Falha ao iniciar o robô' }, 400);
-    return json({ ok: true, runId: result.runId ?? null });
+    const created = await createBotRun(auth.admin, { organizationId: orgId, botId: id, dealId, contactId, phone });
+    if (!created.ok || !created.run) return json({ ok: false, error: created.error ?? 'Falha ao iniciar o robô' }, 400);
+    const run = created.run;
+    after(async () => {
+      try {
+        await runBotRunNow(createStaticAdminClient(), run);
+      } catch (err) {
+        console.error('[wa-agents/bots/start] falha ao processar o robô', err);
+      }
+    });
+    return json({ ok: true, runId: run.id });
   } catch (err) {
     console.error('[wa-agents/bots/start]', err);
     return json({ ok: false, error: getErrorMessage(err, 'Falha ao iniciar o robô') }, 500);

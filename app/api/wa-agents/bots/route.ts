@@ -5,7 +5,14 @@
  */
 import { json } from '@/lib/whatsapp/api';
 import { BotInputSchema, type BotRow } from '@/lib/wa-agents/types';
-import { guardRoute, readJsonBody, validationError } from '../_shared';
+import {
+  connectionNotFoundError,
+  connectionsBelongToOrg,
+  getErrorMessage,
+  guardRoute,
+  readJsonBody,
+  validationError,
+} from '../_shared';
 
 export const runtime = 'nodejs';
 
@@ -30,6 +37,14 @@ export async function POST(req: Request) {
   const parsed = BotInputSchema.safeParse(await readJsonBody(req));
   if (!parsed.success) return validationError(parsed.error);
   const input = parsed.data;
+
+  try {
+    if (input.connection_id && !(await connectionsBelongToOrg(auth.admin, auth.user.organizationId, [input.connection_id]))) {
+      return connectionNotFoundError();
+    }
+  } catch (err) {
+    return json({ error: getErrorMessage(err, 'Falha ao validar o número') }, 500);
+  }
 
   const { data, error } = await auth.admin
     .from('wa_bots')

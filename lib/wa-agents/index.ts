@@ -51,5 +51,14 @@ export {
   type RunAgentInput,
   type CollectedToolCall,
 } from './engine';
-export { startBotRun, processDueBotRuns, processBotRun, handleBotReply, normalizeKeyword } from './bots';
+export {
+  startBotRun,
+  createBotRun,
+  runBotRunNow,
+  processDueBotRuns,
+  processBotRun,
+  handleBotReply,
+  normalizeKeyword,
+  type StartBotRunInput,
+} from './bots';
 export { testAgentReply, type TestMessage, type TestAgentReplyResult } from './test';
