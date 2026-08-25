@@ -8,15 +8,20 @@ import { getConnectionByIdForOrg, type WaConnectionRow } from '@/lib/whatsapp/se
 import { WaAgentError } from './errors';
 import { renderTemplate } from './template';
 import {
+  AgentTriggersSchema,
   AgentWebhookSchema,
   AI_PROVIDERS,
+  CustomActionSchema,
+  DEFAULT_AGENT_TRIGGERS,
   OutcomeSchema,
   type AgentProvider,
   type AgentRow,
+  type AgentTriggers,
   type AgentWebhook,
   type ConversationAiState,
   type ConversationAiStatus,
   type ConversationApproval,
+  type CustomAction,
   type Outcome,
 } from './types';
 
@@ -48,7 +53,13 @@ export type WaConversationFull = {
   updated_at: string;
 };
 
-export type ContextContact = { id: string; name: string; phone: string | null; email: string | null };
+export type ContextContact = {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  company_name?: string | null;
+};
 
 export type ContextDeal = {
   id: string;
@@ -58,7 +69,17 @@ export type ContextDeal = {
   stage_label: string | null;
   board_name: string | null;
   owner_id: string | null;
+  owner_name: string | null;
   tags: string[];
+  description: string | null;
+  value: number | null;
+  /** Campos personalizados do negócio (chave -> valor) */
+  custom_fields: Record<string, unknown>;
+  /** Rótulos dos campos personalizados (chave -> rótulo), quando definidos na org */
+  custom_field_labels: Record<string, string>;
+  created_at: string | null;
+  /** Origem do lead: utm_source/origem dos campos personalizados ou a origem do contato */
+  source: string | null;
 };
 
 export type ConversationContext = {
@@ -103,6 +124,21 @@ function num(v: unknown, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/** `triggers` (jsonb) validado; linhas antigas (null/ausente/inválido) caem nos padrões. */
+export function normalizeTriggers(raw: unknown): AgentTriggers {
+  if (!raw || typeof raw !== 'object') return { ...DEFAULT_AGENT_TRIGGERS };
+  const p = AgentTriggersSchema.safeParse(raw);
+  if (p.success) return p.data;
+  // Recupera o que der por parte (um bloco inválido não derruba o outro)
+  const r = raw as Record<string, unknown>;
+  const inbound = AgentTriggersSchema.shape.inbound.safeParse(r.inbound);
+  const deal = AgentTriggersSchema.shape.deal.safeParse(r.deal);
+  return {
+    inbound: inbound.success ? inbound.data : { ...DEFAULT_AGENT_TRIGGERS.inbound },
+    deal: deal.success ? deal.data : { ...DEFAULT_AGENT_TRIGGERS.deal },
+  };
+}
+
 /** Linha crua de wa_ai_agents -> AgentRow (jsonb validado, números coeridos). */
 export function normalizeAgentRow(raw: Record<string, unknown>): AgentRow {
   const provider = AI_PROVIDERS.includes(raw.provider as AgentProvider)
@@ -133,6 +169,11 @@ export function normalizeAgentRow(raw: Record<string, unknown>): AgentRow {
       const p = AgentWebhookSchema.safeParse(item);
       return p.success ? p.data : null;
     }),
+    custom_actions: parseArray<CustomAction>(raw.custom_actions, item => {
+      const p = CustomActionSchema.safeParse(item);
+      return p.success ? p.data : null;
+    }),
+    triggers: normalizeTriggers(raw.triggers),
     created_by: (raw.created_by as string | null) ?? null,
     created_at: String(raw.created_at ?? ''),
     updated_at: String(raw.updated_at ?? ''),
@@ -177,24 +218,50 @@ export async function loadAgentNames(
 // ---------------------------------------------------------------------------
 // Contexto da conversa
 // ---------------------------------------------------------------------------
+type ProfileNameRow = { id: string; name: string | null; first_name: string | null; last_name: string | null; nickname: string | null };
+
+function profileDisplayName(p: ProfileNameRow | null | undefined): string | null {
+  if (!p) return null;
+  const full = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim();
+  return (p.nickname ?? '').trim() || full || (p.name ?? '').trim() || null;
+}
+
+const DEAL_COLUMNS =
+  'id, title, board_id, stage_id, owner_id, tags, description, value, custom_fields, created_at, contact_id';
+
+type DealRaw = {
+  id: string;
+  title: string;
+  board_id: string | null;
+  stage_id: string | null;
+  owner_id: string | null;
+  tags: string[] | null;
+  description: string | null;
+  value: number | string | null;
+  custom_fields: Record<string, unknown> | null;
+  created_at: string | null;
+  contact_id: string | null;
+};
+
+/** Origem do lead a partir dos campos personalizados (utm_source/origem) ou do contato. */
+function dealSource(customFields: Record<string, unknown>, contactSource: string | null): string | null {
+  for (const key of ['utm_source', 'origem', 'source', 'fonte']) {
+    const v = customFields[key];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return contactSource?.trim() || null;
+}
+
 export async function loadDealContext(
   admin: SupabaseClient,
   organizationId: string,
   input: { dealId?: string | null; contactId?: string | null }
 ): Promise<ContextDeal | null> {
-  type DealRaw = {
-    id: string;
-    title: string;
-    board_id: string | null;
-    stage_id: string | null;
-    owner_id: string | null;
-    tags: string[] | null;
-  };
   let deal: DealRaw | null = null;
   if (input.dealId) {
     const { data } = await admin
       .from('deals')
-      .select('id, title, board_id, stage_id, owner_id, tags')
+      .select(DEAL_COLUMNS)
       .eq('organization_id', organizationId)
       .eq('id', input.dealId)
       .is('deleted_at', null)
@@ -205,7 +272,7 @@ export async function loadDealContext(
     // negócio ABERTO mais recente do contato
     const { data } = await admin
       .from('deals')
-      .select('id, title, board_id, stage_id, owner_id, tags')
+      .select(DEAL_COLUMNS)
       .eq('organization_id', organizationId)
       .eq('contact_id', input.contactId)
       .is('deleted_at', null)
@@ -218,36 +285,58 @@ export async function loadDealContext(
   }
   if (!deal) return null;
 
-  let stageLabel: string | null = null;
-  let boardName: string | null = null;
-  if (deal.stage_id) {
-    const { data: st } = await admin
-      .from('board_stages')
-      .select('label, name')
-      .eq('organization_id', organizationId)
-      .eq('id', deal.stage_id)
-      .maybeSingle();
-    const s = st as { label?: string | null; name?: string | null } | null;
-    stageLabel = s?.label || s?.name || null;
+  const customFields =
+    deal.custom_fields && typeof deal.custom_fields === 'object' && !Array.isArray(deal.custom_fields)
+      ? deal.custom_fields
+      : {};
+  const cfKeys = Object.keys(customFields);
+
+  const [stageRes, boardRes, ownerRes, defsRes, contactRes] = await Promise.all([
+    deal.stage_id
+      ? admin.from('board_stages').select('label, name').eq('organization_id', organizationId).eq('id', deal.stage_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    deal.board_id
+      ? admin.from('boards').select('name').eq('organization_id', organizationId).eq('id', deal.board_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    deal.owner_id
+      ? admin
+          .from('profiles')
+          .select('id, name, first_name, last_name, nickname')
+          .eq('organization_id', organizationId)
+          .eq('id', deal.owner_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    cfKeys.length > 0
+      ? admin.from('custom_field_definitions').select('key, label').eq('organization_id', organizationId).in('key', cfKeys)
+      : Promise.resolve({ data: null }),
+    deal.contact_id
+      ? admin.from('contacts').select('source').eq('organization_id', organizationId).eq('id', deal.contact_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+
+  const s = stageRes.data as { label?: string | null; name?: string | null } | null;
+  const labels: Record<string, string> = {};
+  for (const d of ((defsRes.data ?? []) as Array<{ key: string; label: string | null }>) ?? []) {
+    if (d.key && d.label) labels[d.key] = d.label;
   }
-  if (deal.board_id) {
-    const { data: bd } = await admin
-      .from('boards')
-      .select('name')
-      .eq('organization_id', organizationId)
-      .eq('id', deal.board_id)
-      .maybeSingle();
-    boardName = (bd as { name?: string | null } | null)?.name ?? null;
-  }
+  const valueNum = deal.value === null || deal.value === undefined ? null : Number(deal.value);
+
   return {
     id: deal.id,
     title: deal.title,
     board_id: deal.board_id,
     stage_id: deal.stage_id,
-    stage_label: stageLabel,
-    board_name: boardName,
+    stage_label: s?.label || s?.name || null,
+    board_name: (boardRes.data as { name?: string | null } | null)?.name ?? null,
     owner_id: deal.owner_id,
+    owner_name: profileDisplayName(ownerRes.data as ProfileNameRow | null),
     tags: Array.isArray(deal.tags) ? deal.tags : [],
+    description: (deal.description ?? '').trim() || null,
+    value: valueNum !== null && Number.isFinite(valueNum) ? valueNum : null,
+    custom_fields: customFields,
+    custom_field_labels: labels,
+    created_at: deal.created_at ?? null,
+    source: dealSource(customFields, (contactRes.data as { source?: string | null } | null)?.source ?? null),
   };
 }
 
@@ -274,17 +363,22 @@ export async function loadConversationContext(
   if (conversation.contact_id) {
     const { data } = await admin
       .from('contacts')
-      .select('id, name, phone, email')
+      .select('id, name, phone, email, company_name')
       .eq('organization_id', organizationId)
       .eq('id', conversation.contact_id)
       .maybeSingle();
     contact = (data as ContextContact | null) ?? null;
   }
 
-  const deal = await loadDealContext(admin, organizationId, {
-    dealId: conversation.deal_id,
-    contactId: conversation.contact_id,
-  });
+  // Início pelo pipeline: o negócio que originou a conversa tem prioridade
+  const state = (conversation.ai_state ?? null) as ConversationAiState | null;
+  const stateDealId = state?.origem === 'pipeline' && typeof state.deal_id === 'string' ? state.deal_id : null;
+  const deal =
+    (stateDealId ? await loadDealContext(admin, organizationId, { dealId: stateDealId }) : null) ??
+    (await loadDealContext(admin, organizationId, {
+      dealId: conversation.deal_id,
+      contactId: conversation.contact_id,
+    }));
 
   const { data: orgRow } = await admin.from('organizations').select('id, name').eq('id', organizationId).maybeSingle();
   const org = { id: organizationId, name: (orgRow as { name?: string } | null)?.name ?? '' };
@@ -418,6 +512,26 @@ export function formatDateTimePtBr(date: Date): string {
   }
 }
 
+/** "25/08/2026" em America/Sao_Paulo (datas do cadastro). */
+function formatDatePtBr(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  try {
+    return new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short' }).format(d);
+  } catch {
+    return d.toISOString().slice(0, 10);
+  }
+}
+
+function formatCurrencyBrl(value: number): string {
+  try {
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+  } catch {
+    return `R$ ${value.toFixed(2)}`;
+  }
+}
+
 export function firstName(name: string): string {
   return (name || '').trim().split(/\s+/)[0] ?? '';
 }
@@ -446,6 +560,97 @@ export function buildPromptVars(input: { agent: AgentRow; ctx: ConversationConte
   };
 }
 
+/** Limite do bloco de dados do lead no prompt (caracteres). */
+export const LEAD_DATA_MAX_CHARS = 4000;
+const LEAD_FIELD_MAX_CHARS = 600;
+
+/** Valor de um campo do cadastro em texto curto ('' quando vazio). */
+function fieldText(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    const items = value.map(fieldText).filter(Boolean);
+    return items.length > 0 ? items.join(', ') : '';
+  }
+  if (typeof value === 'object') {
+    try {
+      const json = JSON.stringify(value);
+      return json && json !== '{}' ? json : '';
+    } catch {
+      return '';
+    }
+  }
+  return '';
+}
+
+function clipText(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+/**
+ * Bloco "## DADOS DO LEAD (cadastro no CRM)" com título, valor, quadro/etapa,
+ * responsável, rótulos, descrição, campos personalizados e dados do contato.
+ * '' quando não há negócio.
+ */
+export function buildLeadDataBlock(ctx: ConversationContext): string {
+  const deal = ctx.deal;
+  if (!deal) return '';
+  const items: string[] = [];
+  const push = (label: string, value: unknown) => {
+    const text = fieldText(value);
+    if (text) items.push(`- ${label}: ${clipText(text.replace(/\s*\n\s*/g, ' '), LEAD_FIELD_MAX_CHARS)}`);
+  };
+
+  push('Negócio', deal.title);
+  if (deal.value !== null && deal.value > 0) push('Valor', formatCurrencyBrl(deal.value));
+  const where = [deal.board_name, deal.stage_label].filter(Boolean).join(' / ');
+  push('Quadro / etapa', where);
+  push('Responsável', deal.owner_name);
+  push('Rótulos', deal.tags);
+  push('Origem', deal.source);
+  push('Cadastrado em', formatDatePtBr(deal.created_at));
+  push('Descrição', deal.description);
+  if (ctx.contact) {
+    push('Nome do contato', ctx.contact.name);
+    push('E-mail', ctx.contact.email);
+    push('Empresa', ctx.contact.company_name);
+  }
+  for (const [key, value] of Object.entries(deal.custom_fields ?? {})) {
+    if (!key) continue;
+    push(deal.custom_field_labels[key] || key, value);
+  }
+  if (items.length === 0) return '';
+
+  const header = '## DADOS DO LEAD (cadastro no CRM)';
+  const lines: string[] = [header];
+  let total = header.length;
+  for (const item of items) {
+    if (total + item.length + 1 > LEAD_DATA_MAX_CHARS) {
+      lines.push('- (demais campos omitidos por tamanho)');
+      break;
+    }
+    lines.push(item);
+    total += item.length + 1;
+  }
+  return lines.join('\n');
+}
+
+/** Bloco "## AÇÕES DURANTE A CONVERSA" ('' quando o agente não tem ações). */
+export function buildCustomActionsBlock(agent: Pick<AgentRow, 'custom_actions'>): string {
+  const actions = (agent.custom_actions ?? []).filter(a => a.key);
+  if (actions.length === 0) return '';
+  const lines: string[] = ['## AÇÕES DURANTE A CONVERSA'];
+  lines.push('Você tem a ferramenta executar_acao para registrar situações que acontecem no meio do atendimento:');
+  for (const a of actions) {
+    lines.push(`- acao=${a.key} (${a.label}): quando ${a.description.trim()}`);
+  }
+  lines.push(
+    'Chame executar_acao no momento em que a situação descrita acontecer, uma vez por ocorrência, com "acao" igual à chave e "detalhes" resumindo o que o cliente disse. Depois continue a conversa normalmente: a ação não encerra o atendimento.'
+  );
+  return lines.join('\n');
+}
+
 export function buildSystemPrompt(input: { agent: AgentRow; ctx: ConversationContext; now?: Date }): string {
   const { agent, ctx } = input;
   const vars = buildPromptVars(input);
@@ -453,6 +658,15 @@ export function buildSystemPrompt(input: { agent: AgentRow; ctx: ConversationCon
 
   const state = (ctx.conversation.ai_state ?? {}) as ConversationAiState;
   const dados = state.dados && Object.keys(state.dados).length > 0 ? JSON.stringify(state.dados) : '{}';
+
+  const blocks: string[] = [];
+  if (script) blocks.push(script);
+
+  const leadBlock = buildLeadDataBlock(ctx);
+  if (leadBlock) blocks.push(leadBlock);
+
+  const actionsBlock = buildCustomActionsBlock(agent);
+  if (actionsBlock) blocks.push(actionsBlock);
 
   const lines: string[] = [];
   lines.push('## INSTRUÇÕES DO SISTEMA (obrigatórias; não mencione ao cliente)');
@@ -470,6 +684,13 @@ export function buildSystemPrompt(input: { agent: AgentRow; ctx: ConversationCon
       `- Você acabou de assumir esta conversa vinda do agente ${state.handoff.from_agent_name}. Resumo de passagem: ${state.handoff.summary}. Continue de onde parou, sem se apresentar de novo se já houve apresentação.`
     );
   }
+  if (state.origem === 'pipeline' && leadBlock) {
+    lines.push(
+      '- Você está iniciando a conversa a partir do cadastro deste lead no CRM (ele ainda não recebeu mensagem sua). Apresente-se, mencione em uma linha o motivo do contato com base nos dados acima e faça a primeira pergunta do roteiro que os dados ainda não respondem. Não peça informações que já constam no cadastro.'
+    );
+  } else if (leadBlock) {
+    lines.push('- Use os dados do cadastro acima como já conhecidos: não peça informações que já constam nele.');
+  }
   if (agent.outcomes.length > 0) {
     lines.push('- Resultados possíveis do encerramento (use exatamente a chave):');
     for (const o of agent.outcomes) {
@@ -481,9 +702,15 @@ export function buildSystemPrompt(input: { agent: AgentRow; ctx: ConversationCon
   } else {
     lines.push('- Este agente não tem resultados de encerramento configurados: não chame encerrar_atendimento.');
   }
+  if (actionsBlock) {
+    lines.push(
+      '- A ferramenta executar_acao NÃO encerra o atendimento: use-a só para as situações listadas em "AÇÕES DURANTE A CONVERSA" e continue conversando.'
+    );
+  }
   lines.push(
     '- Se não houver nada útil a dizer (por exemplo, a pessoa só mandou um "ok" depois do encerramento), responda exatamente [SEM_RESPOSTA], sem mais nada.'
   );
+  blocks.push(lines.join('\n'));
 
-  return `${script}\n\n${lines.join('\n')}`.trim();
+  return blocks.join('\n\n').trim();
 }

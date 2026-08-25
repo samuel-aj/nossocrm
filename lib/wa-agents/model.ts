@@ -30,6 +30,12 @@ export async function getOrganizationApiKey(
   return (row[column] ?? '').trim();
 }
 
+/** Modelos de raciocínio da OpenAI (gpt-5*, o1/o3/o4) recusam temperature diferente do padrão. */
+export function supportsTemperature(agent: Pick<AgentRow, 'provider' | 'model'>): boolean {
+  if (agent.provider !== 'openai') return true;
+  return !/^(gpt-5|o\d)/i.test((agent.model || '').trim());
+}
+
 export async function resolveAgentModel(
   admin: SupabaseClient,
   organizationId: string,

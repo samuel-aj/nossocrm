@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { getProvider, type SendResult } from '@/lib/whatsapp';
 import { recordOutboundMessage, replicateOutboundToSiblings } from '@/lib/whatsapp/service';
-import { executeOutcomeActions } from './actions';
+import { executeCustomAction, executeOutcomeActions, type OutcomeActionsResult } from './actions';
 import { isWaAgentsBetaEnabled } from './beta';
 import { handleBotReply } from './bots';
 import {
@@ -20,13 +20,15 @@ import {
   loadConversationContext,
   messageText,
   MESSAGE_LITE_COLUMNS,
+  normalizeAgentRow,
   type ConversationContext,
   type WaMessageLite,
 } from './context';
 import { errorMessage, WaAgentError } from './errors';
-import { resolveAgentModel } from './model';
+import { resolveAgentModel, supportsTemperature } from './model';
 import { logRun } from './runs';
 import { splitLines } from './split';
+import { pickInboundAgent } from './triggers';
 import type {
   AgentEvent,
   AgentRow,
@@ -34,6 +36,7 @@ import type {
   BotRunRow,
   ConversationAiState,
   ConversationApproval,
+  CustomAction,
   Outcome,
   RunStatus,
   RunTrigger,
@@ -66,7 +69,8 @@ const LOCK_BASE_SECONDS = 90;
 const LOCK_RETRY_MS = 2_000;
 const LOCK_WAIT_MAX_MS = 60_000;
 const MAX_HANDOFF_DEPTH = 3;
-const MAX_STEPS = 4;
+/** Passos do modelo por resposta: texto + salvar_dados + executar_acao + encerrar_atendimento cabem com folga */
+const MAX_STEPS = 5;
 
 export function sleep(ms: number): Promise<void> {
   if (ms <= 0) return Promise.resolve();
@@ -85,7 +89,7 @@ export function lockSecondsFor(agent: Pick<AgentRow, 'line_delay_ms' | 'webhooks
 export function buildAgentTools(agent: AgentRow) {
   const keys = agent.outcomes.map(o => o.key).filter(Boolean);
   const resultadoSchema = keys.length > 0 ? z.enum(keys) : z.string();
-  return {
+  const tools = {
     encerrar_atendimento: tool({
       description:
         'Encerra o pré-atendimento. Chame UMA única vez, na mesma resposta e depois de escrever a mensagem final ao cliente. Informe o resultado (uma das chaves configuradas) e um resumo objetivo do caso.',
@@ -102,6 +106,35 @@ export function buildAgentTools(agent: AgentRow) {
       execute: async () => ({ ok: true }),
     }),
   };
+
+  // Ações durante a conversa: só quando o agente tem alguma configurada
+  const actionKeys = (agent.custom_actions ?? []).map(a => a.key).filter(Boolean);
+  if (actionKeys.length === 0) return tools;
+  const acaoSchema = z.enum(actionKeys);
+  return {
+    ...tools,
+    executar_acao: tool({
+      description:
+        'Executa uma ação configurada no momento em que a situação descrita acontece na conversa (uma vez por ocorrência). NÃO encerra o atendimento: continue conversando normalmente depois.',
+      inputSchema: z.object({
+        acao: acaoSchema.describe('Chave da ação'),
+        detalhes: z.string().describe('O que o cliente disse ou o contexto que motivou a ação, em uma ou duas frases'),
+      }),
+      execute: async args => ({ ok: true, acao: args.acao }),
+    }),
+  };
+}
+
+/** Acha a ação durante a conversa pela chave (fallback: igual ignorando caixa; depois pelo rótulo). */
+export function findCustomAction(actions: CustomAction[], key: string): CustomAction | null {
+  const k = (key || '').trim();
+  if (!k) return null;
+  return (
+    actions.find(a => a.key === k) ??
+    actions.find(a => a.key.toLowerCase() === k.toLowerCase()) ??
+    actions.find(a => a.label.trim().toLowerCase() === k.toLowerCase()) ??
+    null
+  );
 }
 
 export type GeneratedReply = {
@@ -111,11 +144,7 @@ export type GeneratedReply = {
   finishReason: string;
 };
 
-/** Modelos de raciocínio da OpenAI (gpt-5*, o1/o3/o4) recusam temperature diferente do padrão. */
-export function supportsTemperature(agent: Pick<AgentRow, 'provider' | 'model'>): boolean {
-  if (agent.provider !== 'openai') return true;
-  return !/^(gpt-5|o\d)/i.test((agent.model || '').trim());
-}
+export { supportsTemperature, pickInboundAgent };
 
 /** Chama o modelo com as ferramentas do agente e junta texto/ferramentas de todos os passos. */
 export async function generateAgentReply(input: {
@@ -526,6 +555,37 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     if (lines.length > 0) await emit('reply_sent', { text, lines });
     for (const tc of gen.toolCalls) await emit('tool_used', { tool: tc.tool, input: tc.input });
 
+    // Mudança de estado pedida pelas ações (aprovação, passagem, parada): aplicada uma única vez
+    // no fim. O resultado do encerramento prevalece sobre uma ação durante a conversa.
+    let transition: { acts: OutcomeActionsResult; summary: string; reason: string; extra: Record<string, unknown> } | null =
+      null;
+    const requestsTransition = (acts: OutcomeActionsResult) =>
+      !!(acts.approvalAgentId || acts.handoffAgentId || acts.stopped);
+
+    // 9a. Ações durante a conversa (executar_acao): executam sem encerrar o atendimento
+    for (const tc of gen.toolCalls) {
+      if (tc.tool !== 'executar_acao') continue;
+      const args = (tc.input ?? {}) as { acao?: unknown; detalhes?: unknown };
+      const acao = String(args.acao ?? '').trim();
+      const detalhes = String(args.detalhes ?? '').trim();
+      const custom = findCustomAction(agent.custom_actions ?? [], acao);
+      if (!custom) {
+        pushEvent('custom_action_not_found', { acao, detalhes });
+        continue;
+      }
+      const acts = await executeCustomAction(admin, { agent, ctx, action: custom, details: detalhes, runEvents: events });
+      await emit('custom_action', { acao: custom.key, label: custom.label, detalhes });
+      if (requestsTransition(acts)) {
+        transition = {
+          acts,
+          summary: detalhes,
+          reason: 'ação durante a conversa com parada',
+          extra: { acao: custom.key, detalhes },
+        };
+      }
+    }
+
+    // 9b. Encerramento (encerrar_atendimento)
     const end = gen.toolCalls.find(t => t.tool === 'encerrar_atendimento');
     if (end) {
       const args = (end.input ?? {}) as { resultado?: unknown; resumo?: unknown };
@@ -537,57 +597,64 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
       } else {
         const acts = await executeOutcomeActions(admin, { agent, ctx, outcome, summary: resumo, runEvents: events });
         await emit('finished', { resultado: outcome.key, resultado_label: outcome.label, resumo });
-        const now = new Date().toISOString();
-
-        if (acts.approvalAgentId) {
-          const next = await loadAgent(admin, organizationId, acts.approvalAgentId);
-          if (!next || !next.enabled) {
-            await stopConversation('agente de destino indisponível', { resultado: outcome.key, resumo });
-          } else {
-            const approval: ConversationApproval = {
-              nextAgentId: next.id,
-              nextAgentName: next.persona_name || next.name,
-              summary: resumo,
-              requestedAt: now,
-            };
-            await updateConversation(admin, ctx, {
-              ai_status: 'awaiting_approval',
-              ai_status_changed_at: now,
-              ai_approval: approval,
-            });
-            ctx.conversation.ai_status = 'awaiting_approval';
-            ctx.conversation.ai_approval = approval;
-            await emit('awaiting_approval', { next_agent: { id: next.id, name: next.name }, resumo });
-          }
-        } else if (acts.handoffAgentId) {
-          const next = await loadAgent(admin, organizationId, acts.handoffAgentId);
-          if (!next || !next.enabled) {
-            await stopConversation('agente de destino indisponível', { resultado: outcome.key, resumo });
-          } else {
-            const handoffState: ConversationAiState = {
-              ...state,
-              handoff: {
-                from_agent_id: agent.id,
-                from_agent_name: agent.persona_name || agent.name,
-                summary: resumo,
-                at: now,
-              },
-            };
-            await updateConversation(admin, ctx, {
-              ai_agent_id: next.id,
-              ai_state: handoffState,
-              ai_status: 'active',
-              ai_status_changed_at: now,
-              ai_approval: null,
-            });
-            ctx.conversation.ai_agent_id = next.id;
-            ctx.conversation.ai_state = handoffState;
-            await emit('handed_off', { to_agent: { id: next.id, name: next.name }, resumo });
-            pendingHandoffAgentId = next.id;
-          }
-        } else if (acts.stopped) {
-          await stopConversation('resultado com parada', { resultado: outcome.key, resumo });
+        if (requestsTransition(acts)) {
+          transition = { acts, summary: resumo, reason: 'resultado com parada', extra: { resultado: outcome.key, resumo } };
         }
+      }
+    }
+
+    // 9c. Aprovação, passagem ou parada
+    if (transition) {
+      const { acts, summary, reason, extra } = transition;
+      const now = new Date().toISOString();
+      if (acts.approvalAgentId) {
+        const next = await loadAgent(admin, organizationId, acts.approvalAgentId);
+        if (!next || !next.enabled) {
+          await stopConversation('agente de destino indisponível', extra);
+        } else {
+          const approval: ConversationApproval = {
+            nextAgentId: next.id,
+            nextAgentName: next.persona_name || next.name,
+            summary,
+            requestedAt: now,
+          };
+          await updateConversation(admin, ctx, {
+            ai_status: 'awaiting_approval',
+            ai_status_changed_at: now,
+            ai_approval: approval,
+          });
+          ctx.conversation.ai_status = 'awaiting_approval';
+          ctx.conversation.ai_approval = approval;
+          await emit('awaiting_approval', { next_agent: { id: next.id, name: next.name }, resumo: summary });
+        }
+      } else if (acts.handoffAgentId) {
+        const next = await loadAgent(admin, organizationId, acts.handoffAgentId);
+        if (!next || !next.enabled) {
+          await stopConversation('agente de destino indisponível', extra);
+        } else {
+          const handoffState: ConversationAiState = {
+            ...state,
+            handoff: {
+              from_agent_id: agent.id,
+              from_agent_name: agent.persona_name || agent.name,
+              summary,
+              at: now,
+            },
+          };
+          await updateConversation(admin, ctx, {
+            ai_agent_id: next.id,
+            ai_state: handoffState,
+            ai_status: 'active',
+            ai_status_changed_at: now,
+            ai_approval: null,
+          });
+          ctx.conversation.ai_agent_id = next.id;
+          ctx.conversation.ai_state = handoffState;
+          await emit('handed_off', { to_agent: { id: next.id, name: next.name }, resumo: summary });
+          pendingHandoffAgentId = next.id;
+        }
+      } else if (acts.stopped) {
+        await stopConversation(reason, extra);
       }
     }
 
@@ -683,6 +750,15 @@ export async function handleInboundMessage(input: {
     const conv = ctx.conversation;
     let agent: AgentRow | null = null;
 
+    // Mensagem que disparou (texto ou transcrição): gatilhos por palavra-chave e evento
+    const { data: msgRow } = await admin
+      .from('wa_messages')
+      .select(MESSAGE_LITE_COLUMNS)
+      .eq('organization_id', organizationId)
+      .eq('id', messageId)
+      .maybeSingle();
+    const text = msgRow ? messageText(msgRow as WaMessageLite) : '';
+
     if (conv.ai_agent_id) {
       if (conv.ai_status && conv.ai_status !== 'active') {
         return await skip(`conversa ${conv.ai_status}`, conv.ai_agent_id);
@@ -699,27 +775,20 @@ export async function handleInboundMessage(input: {
       }
     } else if (!conv.ai_status) {
       if (!conv.connection_id) return await skip('conversa sem número');
-      // Agente de entrada do número
-      const { data: candidates } = await admin
+      // Agentes de entrada do número, filtrados pelo gatilho por mensagem (triggers.inbound)
+      const { data: candidatesRaw } = await admin
         .from('wa_ai_agents')
         .select('*')
         .eq('organization_id', organizationId)
         .eq('enabled', true)
         .contains('connection_ids', [conv.connection_id])
-        .order('created_at', { ascending: true })
-        .limit(1);
-      const raw = (candidates ?? [])[0] as Record<string, unknown> | undefined;
-      if (!raw) return await skip('nenhum agente para este número');
-      const candidate = (await loadAgent(admin, organizationId, String(raw.id))) ?? null;
-      if (!candidate) return await skip('nenhum agente para este número');
+        .order('created_at', { ascending: true });
+      const candidates = ((candidatesRaw ?? []) as Record<string, unknown>[]).map(normalizeAgentRow);
+      if (candidates.length === 0) return await skip('nenhum agente para este número');
+      const candidate = pickInboundAgent(candidates, text);
+      if (!candidate) return await skip('sem agente para esta mensagem');
 
       if (candidate.only_new_conversations) {
-        const { data: msgRow } = await admin
-          .from('wa_messages')
-          .select('created_at')
-          .eq('organization_id', organizationId)
-          .eq('id', messageId)
-          .maybeSingle();
         const at = (msgRow as { created_at?: string } | null)?.created_at ?? new Date().toISOString();
         const { count } = await admin
           .from('wa_messages')
@@ -758,13 +827,6 @@ export async function handleInboundMessage(input: {
     if (!agent) return await skip('sem agente');
 
     // Evento de mensagem recebida
-    const { data: msgRow } = await admin
-      .from('wa_messages')
-      .select(MESSAGE_LITE_COLUMNS)
-      .eq('organization_id', organizationId)
-      .eq('id', messageId)
-      .maybeSingle();
-    const text = msgRow ? messageText(msgRow as WaMessageLite) : '';
     await dispatchAgentEvent(admin, { agent, event: 'message_received', ctx, extra: { message_id: messageId, text } });
 
     return await runAgentOnConversation({

@@ -15,6 +15,7 @@ export const AGENT_EVENTS = [
   'message_received',
   'reply_sent',
   'tool_used',
+  'custom_action',
   'finished',
   'handed_off',
   'awaiting_approval',
@@ -23,6 +24,7 @@ export const AGENT_EVENTS = [
   'paused_by_human',
   'resumed',
   'stopped',
+  'deal_started',
   'error',
 ] as const;
 export type AgentEvent = (typeof AGENT_EVENTS)[number];
@@ -32,6 +34,7 @@ export const AGENT_EVENT_LABELS: Record<AgentEvent, string> = {
   message_received: 'Mensagem recebida',
   reply_sent: 'Resposta enviada',
   tool_used: 'Ferramenta usada',
+  custom_action: 'Ação durante a conversa',
   finished: 'Atendimento encerrado',
   handed_off: 'Passado para outro agente',
   awaiting_approval: 'Aguardando aprovação',
@@ -40,6 +43,7 @@ export const AGENT_EVENT_LABELS: Record<AgentEvent, string> = {
   paused_by_human: 'Pausado por atendente',
   resumed: 'Retomado',
   stopped: 'Parado',
+  deal_started: 'Iniciado pelo pipeline',
   error: 'Erro',
 };
 
@@ -60,6 +64,12 @@ export const EndActionSchema = z.discriminatedUnion('type', [
     title: z.string().min(1).max(200),
     days: z.number().int().min(0).max(365).optional(),
   }),
+  z.object({
+    type: z.literal('webhook'),
+    url: z.string().url(),
+    secret: z.string().max(200).nullable().optional(),
+    body_template: z.string().max(20000).nullable().optional(),
+  }),
 ]);
 export type EndAction = z.infer<typeof EndActionSchema>;
 
@@ -71,6 +81,16 @@ export const OutcomeSchema = z.object({
 });
 export type Outcome = z.infer<typeof OutcomeSchema>;
 
+/** Ação que o agente executa DURANTE a conversa (ferramenta executar_acao). */
+export const CustomActionSchema = z.object({
+  key: z.string().regex(/^[a-z0-9_-]{1,40}$/),
+  label: z.string().min(1).max(80),
+  /** Quando acontecer, em linguagem natural (ex.: "o cliente informar que já tem advogado") */
+  description: z.string().min(1).max(600),
+  actions: z.array(EndActionSchema).default([]),
+});
+export type CustomAction = z.infer<typeof CustomActionSchema>;
+
 export const AgentWebhookSchema = z.object({
   id: z.string().min(1),
   event: z.enum(AGENT_EVENTS),
@@ -80,6 +100,41 @@ export const AgentWebhookSchema = z.object({
   active: z.boolean().default(true),
 });
 export type AgentWebhook = z.infer<typeof AgentWebhookSchema>;
+
+// ---------------------------------------------------------------------------
+// Gatilhos do agente
+// ---------------------------------------------------------------------------
+export const AGENT_INBOUND_MODES = ['any', 'keywords', 'none'] as const;
+export type AgentInboundMode = (typeof AGENT_INBOUND_MODES)[number];
+export const AGENT_DEAL_EVENTS = ['deal_created', 'deal_stage_entered'] as const;
+export type AgentDealEvent = (typeof AGENT_DEAL_EVENTS)[number];
+
+export const AgentTriggersSchema = z.object({
+  /** Por mensagem recebida num número vinculado: qualquer, só com palavras-chave ou nunca */
+  inbound: z
+    .object({
+      mode: z.enum(AGENT_INBOUND_MODES).default('any'),
+      keywords: z.array(z.string().min(1).max(80)).default([]),
+    })
+    .default({ mode: 'any', keywords: [] }),
+  /** Por cadastro no pipeline: o agente manda a primeira mensagem sozinho */
+  deal: z
+    .object({
+      enabled: z.boolean().default(false),
+      event: z.enum(AGENT_DEAL_EVENTS).default('deal_created'),
+      board_id: z.string().uuid().nullable().default(null),
+      stage_id: z.string().uuid().nullable().default(null),
+      /** Número (wa_connections) que inicia a conversa */
+      connection_id: z.string().uuid().nullable().default(null),
+    })
+    .default({ enabled: false, event: 'deal_created', board_id: null, stage_id: null, connection_id: null }),
+});
+export type AgentTriggers = z.infer<typeof AgentTriggersSchema>;
+
+export const DEFAULT_AGENT_TRIGGERS: AgentTriggers = {
+  inbound: { mode: 'any', keywords: [] },
+  deal: { enabled: false, event: 'deal_created', board_id: null, stage_id: null, connection_id: null },
+};
 
 // ---------------------------------------------------------------------------
 // Agente
@@ -105,6 +160,8 @@ export const AgentInputSchema = z.object({
   only_new_conversations: z.boolean().default(false),
   outcomes: z.array(OutcomeSchema).default([]),
   webhooks: z.array(AgentWebhookSchema).default([]),
+  custom_actions: z.array(CustomActionSchema).default([]),
+  triggers: AgentTriggersSchema.default(DEFAULT_AGENT_TRIGGERS),
 });
 export type AgentInput = z.infer<typeof AgentInputSchema>;
 
@@ -128,29 +185,48 @@ export function toAgentPublic(row: AgentRow): AgentPublic {
 // ---------------------------------------------------------------------------
 // Robôs (mensagens predefinidas, sem IA)
 // ---------------------------------------------------------------------------
+/** Posição do passo no quadro visual */
+export const BotStepUiSchema = z.object({ x: z.number(), y: z.number() });
+export type BotStepUi = z.infer<typeof BotStepUiSchema>;
+
+/** Campos comuns a todos os passos: id, próximo passo (modo quadro) e posição no quadro */
+const botStepBase = {
+  id: z.string().min(1),
+  next_step_id: z.string().nullable().optional(),
+  ui: BotStepUiSchema.optional(),
+};
+
 export const BotStepSchema = z.discriminatedUnion('type', [
-  z.object({ id: z.string().min(1), type: z.literal('send_text'), text: z.string().min(1).max(4000) }),
-  z.object({ id: z.string().min(1), type: z.literal('wait'), seconds: z.number().int().min(1).max(604800) }),
+  z.object({ ...botStepBase, type: z.literal('send_text'), text: z.string().min(1).max(4000) }),
+  z.object({ ...botStepBase, type: z.literal('wait'), seconds: z.number().int().min(1).max(604800) }),
   z.object({
-    id: z.string().min(1),
+    ...botStepBase,
     type: z.literal('wait_reply'),
     timeout_minutes: z.number().int().min(1).max(43200),
     on_timeout_step_id: z.string().optional().nullable(),
   }),
   z.object({
-    id: z.string().min(1),
+    ...botStepBase,
     type: z.literal('condition'),
     rules: z
       .array(z.object({ keywords: z.array(z.string().min(1)).min(1), goto_step_id: z.string().min(1) }))
       .min(1),
     else_step_id: z.string().optional().nullable(),
   }),
-  z.object({ id: z.string().min(1), type: z.literal('move_stage'), stage_id: z.string().uuid() }),
-  z.object({ id: z.string().min(1), type: z.literal('add_tag'), tag: z.string().min(1).max(60) }),
-  z.object({ id: z.string().min(1), type: z.literal('handoff_agent'), agent_id: z.string().uuid() }),
-  z.object({ id: z.string().min(1), type: z.literal('end') }),
+  z.object({ ...botStepBase, type: z.literal('move_stage'), stage_id: z.string().uuid() }),
+  z.object({ ...botStepBase, type: z.literal('add_tag'), tag: z.string().min(1).max(60) }),
+  z.object({
+    ...botStepBase,
+    type: z.literal('webhook'),
+    url: z.string().url(),
+    secret: z.string().max(200).nullable().optional(),
+    body_template: z.string().max(20000).nullable().optional(),
+  }),
+  z.object({ ...botStepBase, type: z.literal('handoff_agent'), agent_id: z.string().uuid() }),
+  z.object({ ...botStepBase, type: z.literal('end') }),
 ]);
 export type BotStep = z.infer<typeof BotStepSchema>;
+export type BotStepType = BotStep['type'];
 
 export const BotTriggerSchema = z.object({
   type: z.enum(['deal_created', 'deal_stage_entered', 'manual']),
@@ -165,6 +241,8 @@ export const BotInputSchema = z.object({
   connection_id: z.string().uuid().nullable(),
   trigger: BotTriggerSchema,
   steps: z.array(BotStepSchema).default([]),
+  /** Modo quadro: id do primeiro passo; ausente = robô em lista (índice + 1) */
+  start_step_id: z.string().nullable().optional(),
 });
 export type BotInput = z.infer<typeof BotInputSchema>;
 export type BotRow = BotInput & {
@@ -229,12 +307,32 @@ export type ConversationAiState = {
   dados?: Record<string, unknown>;
   /** passagem de bastão vinda de outro agente */
   handoff?: { from_agent_id: string; from_agent_name: string; summary: string; at: string } | null;
+  /** 'pipeline' quando o agente iniciou a conversa a partir do cadastro no CRM */
+  origem?: string | null;
+  /** negócio que originou o início pelo pipeline */
+  deal_id?: string | null;
+};
+
+// ---------------------------------------------------------------------------
+// Inícios pelo pipeline (fila wa_ai_agent_deal_starts)
+// ---------------------------------------------------------------------------
+export type DealStartStatus = 'pending' | 'processing' | 'done' | 'error' | 'cancelled';
+export type DealStartRow = {
+  id: string;
+  organization_id: string;
+  agent_id: string;
+  deal_id: string | null;
+  contact_id: string | null;
+  status: DealStartStatus;
+  error: string | null;
+  created_at: string;
+  processed_at: string | null;
 };
 
 // ---------------------------------------------------------------------------
 // Execuções dos agentes
 // ---------------------------------------------------------------------------
-export type RunTrigger = 'inbound' | 'resume' | 'manual_start' | 'handoff' | 'approval' | 'bot' | 'test';
+export type RunTrigger = 'inbound' | 'resume' | 'manual_start' | 'handoff' | 'approval' | 'bot' | 'test' | 'deal';
 export type RunStatus = 'ok' | 'skipped' | 'error';
 
 /** Evento registrado em `wa_ai_agent_runs.events` */
@@ -257,4 +355,32 @@ export type RunRow = {
   duration_ms: number | null;
   error: string | null;
   created_at: string;
+};
+
+// ---------------------------------------------------------------------------
+// IA na configuração (POST /api/wa-agents/assist)
+// ---------------------------------------------------------------------------
+export const ASSIST_MODES = ['generate', 'improve', 'adjust'] as const;
+export type AssistMode = (typeof ASSIST_MODES)[number];
+
+export const AssistInputSchema = z.object({
+  mode: z.enum(ASSIST_MODES),
+  /** generate: descrição do atendimento */
+  description: z.string().max(8000).optional(),
+  /** improve/adjust: roteiro atual */
+  current_prompt: z.string().max(60000).optional(),
+  /** adjust: o que mudar */
+  instruction: z.string().max(4000).optional(),
+  provider: z.enum(AI_PROVIDERS).optional(),
+  model: z.string().max(120).optional(),
+});
+export type AssistInput = z.infer<typeof AssistInputSchema>;
+
+/** Resultado ou ação sugerida pela IA (com `actions` vazio, pronto para o editor) */
+export type AssistSuggestion = { key: string; label: string; description: string; actions: EndAction[] };
+export type AssistResult = {
+  persona_name: string;
+  system_prompt: string;
+  outcomes: AssistSuggestion[];
+  custom_actions: AssistSuggestion[];
 };

@@ -2,7 +2,8 @@
  * /api/wa-agents/agents/[id]  (admin)
  *   GET    -> { agent }      AgentPublic (sem api_key)
  *   PATCH  -> { agent }      AgentInputSchema.partial(); api_key: ausente mantém,
- *                            '' ou null limpa, valor mascarado (quatro pontos) ignora
+ *                            '' ou null limpa, valor mascarado (quatro pontos) ignora;
+ *                            custom_actions e triggers aceitos (gatilho por pipeline validado)
  *   DELETE -> { ok: true }   desvincula as conversas em andamento e apaga o agente
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -18,6 +19,7 @@ import {
   pickPresentKeys,
   readJsonBody,
   toAgentPublic,
+  validateAgentTriggers,
   validationError,
 } from '../../_shared';
 
@@ -55,6 +57,7 @@ export async function GET(_req: Request, ctx: Ctx) {
 export async function PATCH(req: Request, ctx: Ctx) {
   const auth = await guardRoute({ req, admin: true });
   if (!auth.ok) return auth.response;
+  const orgId = auth.user.organizationId;
 
   const { id } = await ctx.params;
   if (!isValidUUID(id)) return json({ error: 'ID inválido' }, 400);
@@ -76,9 +79,13 @@ export async function PATCH(req: Request, ctx: Ctx) {
   try {
     if (
       Array.isArray(present.connection_ids) &&
-      !(await connectionsBelongToOrg(auth.admin, auth.user.organizationId, present.connection_ids))
+      !(await connectionsBelongToOrg(auth.admin, orgId, present.connection_ids))
     ) {
       return connectionNotFoundError();
+    }
+    if (present.triggers) {
+      const triggersError = await validateAgentTriggers(auth.admin, orgId, present.triggers);
+      if (triggersError) return triggersError;
     }
   } catch (err) {
     return json({ error: getErrorMessage(err, 'Falha ao validar os números') }, 500);
@@ -88,7 +95,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     .from('wa_ai_agents')
     .update(patch)
     .eq('id', id)
-    .eq('organization_id', auth.user.organizationId)
+    .eq('organization_id', orgId)
     .select('*')
     .maybeSingle();
   if (error) return json({ error: error.message }, 500);

@@ -1,6 +1,10 @@
 /**
  * Webhooks por evento do agente. Best-effort: nunca lança; devolve os
  * resultados para o motor gravar em run.events.
+ *
+ * `postWebhook` é o POST genérico (timeout, retentativa, cabeçalhos) reusado
+ * pelas ações do tipo webhook (resultados, ações durante a conversa) e pelo
+ * passo webhook dos robôs.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ConversationContext } from './context';
@@ -9,6 +13,9 @@ import { renderJsonTemplate } from './template';
 import type { AgentEvent, AgentRow } from './types';
 
 export type WebhookResult = { id: string; url: string; ok: boolean; status?: number; error?: string };
+
+/** Nome que vai no cabeçalho X-Webhook-Event: eventos do agente ou os das ações/robôs. */
+export type WebhookEventName = AgentEvent | 'outcome_action' | 'bot_webhook';
 
 const TIMEOUT_MS = 10_000;
 const RETRY_DELAY_MS = 2_000;
@@ -20,7 +27,7 @@ function wait(ms: number): Promise<void> {
 /** Payload padrão enviado a todos os webhooks de um evento. */
 export function buildWebhookPayload(input: {
   agent: AgentRow;
-  event: AgentEvent;
+  event: WebhookEventName;
   ctx: ConversationContext;
   extra?: Record<string, unknown>;
 }): Record<string, unknown> {
@@ -64,6 +71,46 @@ async function postOnce(
   }
 }
 
+export type PostWebhookInput = {
+  url: string;
+  event: WebhookEventName;
+  /** Payload padrão (também são as variáveis do corpo personalizado) */
+  payload: Record<string, unknown>;
+  secret?: string | null;
+  /** Corpo personalizado com {{variáveis}}; vazio = payload em JSON */
+  body_template?: string | null;
+};
+
+/**
+ * POST com timeout de 10 s, cabeçalhos padrão (X-Webhook-Event, segredo) e
+ * uma retentativa após 2 s em erro de rede/5xx. Nunca lança.
+ */
+export async function postWebhook(input: PostWebhookInput): Promise<Omit<WebhookResult, 'id'>> {
+  try {
+    const bodyValue = input.body_template?.trim()
+      ? renderJsonTemplate(input.body_template, input.payload)
+      : input.payload;
+    const body = typeof bodyValue === 'string' ? bodyValue : JSON.stringify(bodyValue);
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'X-Webhook-Event': input.event,
+    };
+    const secret = (input.secret ?? '').trim();
+    if (secret) {
+      headers['X-Webhook-Secret'] = secret;
+      headers['Authorization'] = `Bearer ${secret}`;
+    }
+    let r = await postOnce(input.url, body, headers);
+    if (!r.ok && r.retryable) {
+      await wait(RETRY_DELAY_MS);
+      r = await postOnce(input.url, body, headers);
+    }
+    return { url: input.url, ok: r.ok, status: r.status, error: r.error };
+  } catch (e) {
+    return { url: input.url, ok: false, error: errorMessage(e) };
+  }
+}
+
 export async function dispatchAgentEvent(
   _admin: SupabaseClient,
   input: { agent: AgentRow; event: AgentEvent; ctx: ConversationContext; extra?: Record<string, unknown> }
@@ -75,29 +122,14 @@ export async function dispatchAgentEvent(
     const payload = buildWebhookPayload(input);
 
     for (const hook of hooks) {
-      try {
-        const bodyValue = hook.body_template?.trim()
-          ? renderJsonTemplate(hook.body_template, payload)
-          : payload;
-        const body = typeof bodyValue === 'string' ? bodyValue : JSON.stringify(bodyValue);
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
-          'X-Webhook-Event': input.event,
-        };
-        const secret = (hook.secret ?? '').trim();
-        if (secret) {
-          headers['X-Webhook-Secret'] = secret;
-          headers['Authorization'] = `Bearer ${secret}`;
-        }
-        let r = await postOnce(hook.url, body, headers);
-        if (!r.ok && r.retryable) {
-          await wait(RETRY_DELAY_MS);
-          r = await postOnce(hook.url, body, headers);
-        }
-        results.push({ id: hook.id, url: hook.url, ok: r.ok, status: r.status, error: r.error });
-      } catch (e) {
-        results.push({ id: hook.id, url: hook.url, ok: false, error: errorMessage(e) });
-      }
+      const r = await postWebhook({
+        url: hook.url,
+        event: input.event,
+        payload,
+        secret: hook.secret,
+        body_template: hook.body_template,
+      });
+      results.push({ id: hook.id, ...r });
     }
   } catch (e) {
     console.error('[wa-agents] webhooks falharam:', errorMessage(e));

@@ -2,15 +2,17 @@
  * /api/wa-agents/tick  (interna: pg_cron a cada 30 s e gatilho de negócio)
  * POST ou GET com header X-Internal-Secret.
  *
- * Relógio do módulo: retoma pausas vencidas (ai_resume_at <= now) e executa os
- * passos de robô que venceram (wake_at <= now). Responde 202 na hora e
- * processa em segundo plano para não estourar o tempo do chamador.
+ * Relógio do módulo: retoma pausas vencidas (ai_resume_at <= now), inicia os
+ * agentes disparados pelo pipeline (wa_ai_agent_deal_starts pendentes) e
+ * executa os passos de robô que venceram (wake_at <= now). Responde 202 na
+ * hora e processa em segundo plano para não estourar o tempo do chamador.
  */
 import { after } from 'next/server';
 import { json } from '@/lib/whatsapp/api';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { verifyInternalSecret } from '@/lib/wa-agents/internalAuth';
 import { resumeDueConversations } from '@/lib/wa-agents/engine';
+import { processDealStarts } from '@/lib/wa-agents/dealStarts';
 import { processDueBotRuns } from '@/lib/wa-agents/bots';
 
 export const runtime = 'nodejs';
@@ -29,6 +31,11 @@ async function handle(req: Request): Promise<Response> {
       await resumeDueConversations(admin, { limit: 5, deadlineMs });
     } catch (err) {
       console.error('[wa-agents/tick] falha ao retomar conversas', err);
+    }
+    try {
+      await processDealStarts(admin, { limit: 5, deadlineMs });
+    } catch (err) {
+      console.error('[wa-agents/tick] falha ao iniciar agentes pelo pipeline', err);
     }
     try {
       await processDueBotRuns(admin, { limit: 5, deadlineMs });

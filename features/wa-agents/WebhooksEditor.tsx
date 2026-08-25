@@ -29,6 +29,8 @@ const BODY_VARIABLES: Array<{ key: string; description: string }> = [
   { key: 'deal.title', description: 'título do negócio' },
   { key: 'resultado', description: 'chave do resultado (no encerramento)' },
   { key: 'resumo', description: 'resumo do atendimento (no encerramento)' },
+  { key: 'acao', description: 'chave da ação (em ação durante a conversa)' },
+  { key: 'detalhes', description: 'detalhes informados pelo agente (em ação durante a conversa)' },
   { key: 'text', description: 'texto enviado (em resposta enviada)' },
 ];
 

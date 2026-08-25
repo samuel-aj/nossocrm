@@ -8,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   AgentInput,
   AgentMinimal,
+  AgentProvider,
   AgentPublic,
   BotInput,
   BotRow,
@@ -39,6 +40,25 @@ export type WaBotRunsResult = { runs: BotRunRow[]; bots: Record<string, string> 
 
 export type WaTestMessage = { role: 'user' | 'assistant'; text: string };
 export type WaTestResult = { text: string; lines: string[]; toolCalls: unknown[]; usage: unknown };
+
+/** IA na configuração: gerar do zero, melhorar o roteiro atual ou aplicar um ajuste pedido. */
+export type WaAssistMode = 'generate' | 'improve' | 'adjust';
+export type WaAssistVars = {
+  mode: WaAssistMode;
+  description?: string;
+  current_prompt?: string;
+  instruction?: string;
+  provider?: AgentProvider;
+  model?: string;
+};
+/** Sugestão de resultado ou de ação durante a conversa (sem as ações do CRM). */
+export type WaAssistSuggestion = { key: string; label: string; description: string };
+export type WaAssistResult = {
+  persona_name: string;
+  system_prompt: string;
+  outcomes: WaAssistSuggestion[];
+  custom_actions: WaAssistSuggestion[];
+};
 
 /** Chamada padrão às rotas: cookies da sessão + JSON; erro vira Error com a mensagem do servidor. */
 export async function waAgentsFetch<T>(
@@ -176,6 +196,24 @@ export function useTestWaAgent(id: string | null | undefined) {
         lines: json.lines ?? [],
         toolCalls: json.toolCalls ?? [],
         usage: json.usage ?? null,
+      };
+    },
+  });
+}
+
+/** IA na configuração: POST /api/wa-agents/assist. Não altera nada no servidor; a UI decide o que aplicar. */
+export function useWaAgentAssist() {
+  return useMutation({
+    mutationFn: async (vars: WaAssistVars): Promise<WaAssistResult> => {
+      const json = await waAgentsFetch<Partial<WaAssistResult>>('/api/wa-agents/assist', {
+        method: 'POST',
+        body: vars,
+      });
+      return {
+        persona_name: typeof json.persona_name === 'string' ? json.persona_name : '',
+        system_prompt: typeof json.system_prompt === 'string' ? json.system_prompt : '',
+        outcomes: Array.isArray(json.outcomes) ? json.outcomes : [],
+        custom_actions: Array.isArray(json.custom_actions) ? json.custom_actions : [],
       };
     },
   });

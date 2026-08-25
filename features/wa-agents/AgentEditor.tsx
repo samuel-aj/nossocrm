@@ -1,9 +1,10 @@
 'use client';
 
 /**
- * Editor de agente de IA: identidade, números, modelo, roteiro,
- * comportamento, resultados/ações e webhooks. Salva via POST (novo) ou
- * PATCH (existente). "Testar" abre o chat de teste depois de salvar.
+ * Editor de agente de IA: identidade, números, gatilhos, modelo, roteiro
+ * (com "Criar com IA"), comportamento, resultados/ações, ações durante a
+ * conversa e webhooks. Salva via POST (novo) ou PATCH (existente).
+ * "Testar" abre o chat de teste depois de salvar.
  */
 import React, { useRef, useState } from 'react';
 import {
@@ -19,23 +20,31 @@ import {
   Flag,
   Webhook,
   KeyRound,
+  Zap,
+  ListChecks,
+  X,
 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/context/ToastContext';
 import {
   AI_PROVIDERS,
   AgentInputSchema,
+  DEFAULT_AGENT_TRIGGERS,
   type AgentInput,
   type AgentPublic,
+  type AgentTriggers,
   type AgentWebhook,
+  type CustomAction,
   type Outcome,
 } from '@/lib/wa-agents/types';
 import { MODEL_CATALOG, PROMPT_VARIABLES, PROVIDER_LABELS } from '@/lib/wa-agents/catalog';
 import { DEFAULT_OUTCOMES, DEFAULT_SYSTEM_PROMPT } from '@/lib/wa-agents/defaults';
-import { useSaveWaAgent, useWaAgentOptions, useWaAgentsList } from './useWaAgents';
+import { useSaveWaAgent, useWaAgentOptions, useWaAgentsList, type WaAgentOptions } from './useWaAgents';
 import { OutcomesEditor } from './OutcomesEditor';
+import { CustomActionsEditor } from './CustomActionsEditor';
 import { WebhooksEditor } from './WebhooksEditor';
 import { AgentTestChat } from './AgentTestChat';
+import { AgentAssistPanel } from './AgentAssistPanel';
 import {
   BTN_PRIMARY,
   BTN_SECONDARY,
@@ -45,6 +54,7 @@ import {
   HELP_CLASS,
   INPUT_CLASS,
   Notice,
+  SUBCARD_CLASS,
   Section,
   TEXTAREA_CLASS,
   Toggle,
@@ -53,6 +63,9 @@ import {
 } from './ui';
 
 type AiProvider = (typeof AI_PROVIDERS)[number];
+
+type InboundMode = AgentTriggers['inbound']['mode'];
+type DealEvent = AgentTriggers['deal']['event'];
 
 type AgentFormState = {
   name: string;
@@ -74,6 +87,8 @@ type AgentFormState = {
   human_pause_minutes: number | '';
   only_new_conversations: boolean;
   outcomes: Outcome[];
+  custom_actions: CustomAction[];
+  triggers: AgentTriggers;
   webhooks: AgentWebhook[];
 };
 
@@ -81,6 +96,14 @@ const CUSTOM_MODEL = '__custom__';
 
 function firstModel(provider: AiProvider): string {
   return MODEL_CATALOG[provider]?.[0]?.id ?? '';
+}
+
+/** Gatilhos com os padrões preenchidos (linhas antigas ou objetos parciais). */
+function normalizeTriggers(src: Partial<AgentTriggers> | null | undefined): AgentTriggers {
+  return {
+    inbound: { ...DEFAULT_AGENT_TRIGGERS.inbound, ...(src?.inbound ?? {}) },
+    deal: { ...DEFAULT_AGENT_TRIGGERS.deal, ...(src?.deal ?? {}) },
+  };
 }
 
 function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInput>): AgentFormState {
@@ -103,11 +126,14 @@ function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInpu
     human_pause_minutes: src.human_pause_minutes ?? 30,
     only_new_conversations: src.only_new_conversations ?? false,
     outcomes: src.outcomes ?? DEFAULT_OUTCOMES,
+    custom_actions: src.custom_actions ?? [],
+    triggers: normalizeTriggers(src.triggers),
     webhooks: src.webhooks ?? [],
   };
 }
 
 function toPayload(form: AgentFormState): Partial<AgentInput> {
+  const { inbound, deal } = form.triggers;
   const payload: Partial<AgentInput> = {
     name: form.name.trim(),
     persona_name: form.persona_name.trim() || null,
@@ -123,6 +149,21 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
     human_pause_minutes: clampField('human_pause_minutes', form.human_pause_minutes),
     only_new_conversations: form.only_new_conversations,
     outcomes: form.outcomes,
+    custom_actions: form.custom_actions,
+    triggers: {
+      inbound: {
+        mode: inbound.mode,
+        keywords: inbound.keywords.map((k) => k.trim()).filter(Boolean),
+      },
+      deal: {
+        enabled: deal.enabled,
+        event: deal.event,
+        board_id: deal.board_id || null,
+        // A etapa só faz sentido no evento "entrou numa etapa".
+        stage_id: deal.event === 'deal_stage_entered' ? deal.stage_id || null : null,
+        connection_id: deal.connection_id || null,
+      },
+    },
     webhooks: form.webhooks,
   };
   if (form.clear_api_key) payload.api_key = null;
@@ -144,6 +185,8 @@ const FIELD_NAMES: Record<string, string> = {
   line_delay_ms: 'Intervalo entre linhas',
   human_pause_minutes: 'Pausa após atendente responder',
   outcomes: 'Resultados',
+  custom_actions: 'Ações durante a conversa',
+  triggers: 'Gatilhos',
   webhooks: 'Webhooks',
 };
 
@@ -191,15 +234,312 @@ function diffPayload(payload: Partial<AgentInput>, snapshot: Partial<AgentInput>
   return out as Partial<AgentInput>;
 }
 
-/** Chaves de resultado que aparecem mais de uma vez. */
-function findDuplicateOutcomeKeys(outcomes: Outcome[]): string[] {
+/** Chaves que aparecem mais de uma vez numa lista (resultados ou ações durante a conversa). */
+function findDuplicateKeys(items: Array<{ key: string }>): string[] {
   const seen = new Set<string>();
   const dups: string[] = [];
-  for (const o of outcomes) {
-    if (seen.has(o.key) && !dups.includes(o.key)) dups.push(o.key);
-    seen.add(o.key);
+  for (const item of items) {
+    if (seen.has(item.key) && !dups.includes(item.key)) dups.push(item.key);
+    seen.add(item.key);
   }
   return dups;
+}
+
+/**
+ * Primeira mensagem amigável de validação (antes do zod), ou null se está tudo certo.
+ * Cobre o que o zod descreveria mal: chaves repetidas, gatilhos incompletos, webhooks sem URL.
+ */
+function findFriendlyIssue(form: AgentFormState): string | null {
+  const dupOutcomes = findDuplicateKeys(form.outcomes);
+  if (dupOutcomes.length > 0) return `Chaves de resultado repetidas: ${dupOutcomes.join(', ')}`;
+
+  const dupActions = findDuplicateKeys(form.custom_actions);
+  if (dupActions.length > 0) return `Chaves de ação durante a conversa repetidas: ${dupActions.join(', ')}`;
+
+  for (const [i, o] of form.outcomes.entries()) {
+    if (!o.label.trim()) return `Resultado ${i + 1}: informe o rótulo`;
+    if (!o.key) return `Resultado "${o.label}": informe a chave`;
+    if (o.actions.some((a) => a.type === 'webhook' && !a.url.trim()))
+      return `Resultado "${o.label}": informe a URL do webhook`;
+  }
+  for (const [i, a] of form.custom_actions.entries()) {
+    if (!a.label.trim()) return `Ação durante a conversa ${i + 1}: informe o nome`;
+    if (!a.key) return `Ação "${a.label}": informe a chave`;
+    if (!a.description.trim()) return `Ação "${a.label}": descreva quando ela deve acontecer`;
+    if (a.actions.some((x) => x.type === 'webhook' && !x.url.trim()))
+      return `Ação "${a.label}": informe a URL do webhook`;
+  }
+
+  const { inbound, deal } = form.triggers;
+  if (inbound.mode === 'keywords' && inbound.keywords.filter((k) => k.trim()).length === 0)
+    return 'Gatilhos: informe ao menos uma palavra-chave para o gatilho por mensagem';
+  if (deal.enabled) {
+    if (!deal.connection_id) return 'Gatilhos: escolha o número que inicia a conversa no gatilho por pipeline';
+    if (deal.event === 'deal_stage_entered' && !deal.stage_id)
+      return 'Gatilhos: escolha a etapa que dispara o gatilho por pipeline';
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------- Gatilhos
+
+const INBOUND_MODES: Array<{ value: InboundMode; label: string; help: string }> = [
+  {
+    value: 'any',
+    label: 'Qualquer mensagem nova',
+    help: 'Padrão. O agente assume toda conversa nova que chegar nos números marcados acima.',
+  },
+  {
+    value: 'keywords',
+    label: 'Só quando a mensagem contiver...',
+    help: 'O agente só entra se a mensagem tiver uma das palavras-chave (sem diferenciar maiúsculas e acentos). Tem prioridade sobre um agente do mesmo número que atende qualquer mensagem.',
+  },
+  {
+    value: 'none',
+    label: 'Nunca por mensagem',
+    help: 'Só por passagem de outro agente, pelo cadastro no pipeline ou por início manual no chat.',
+  },
+];
+
+const DEAL_EVENTS: Array<{ value: DealEvent; label: string }> = [
+  { value: 'deal_created', label: 'Negócio criado' },
+  { value: 'deal_stage_entered', label: 'Entrou numa etapa' },
+];
+
+/** Campo de palavras-chave em chips: vírgula ou Enter adiciona; Backspace com o campo vazio remove a última. */
+function KeywordChips({ id, value, onChange }: { id: string; value: string[]; onChange: (v: string[]) => void }) {
+  const [draft, setDraft] = useState('');
+
+  const commit = (raw: string) => {
+    const parts = raw
+      .split(',')
+      .map((s) => s.trim().slice(0, 80))
+      .filter(Boolean);
+    if (parts.length === 0) return;
+    const next = [...value];
+    for (const p of parts) {
+      if (!next.some((k) => k.toLowerCase() === p.toLowerCase())) next.push(p);
+    }
+    onChange(next);
+  };
+
+  return (
+    <div className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg px-2 py-1.5 flex flex-wrap items-center gap-1.5 focus-within:ring-2 focus-within:ring-purple-500/20 focus-within:border-purple-500">
+      {value.map((k, i) => (
+        <span
+          key={`${k}-${i}`}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
+        >
+          {k}
+          <button
+            type="button"
+            className="hover:text-red-600 dark:hover:text-red-400"
+            aria-label={`Remover palavra-chave ${k}`}
+            onClick={() => onChange(value.filter((_, j) => j !== i))}
+          >
+            <X size={12} aria-hidden="true" />
+          </button>
+        </span>
+      ))}
+      <input
+        id={id}
+        className="flex-1 min-w-[160px] bg-transparent outline-none text-sm text-slate-900 dark:text-white py-0.5"
+        value={draft}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v.includes(',')) {
+            commit(v);
+            setDraft('');
+          } else {
+            setDraft(v);
+          }
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            commit(draft);
+            setDraft('');
+          } else if (e.key === 'Backspace' && draft === '' && value.length > 0) {
+            onChange(value.slice(0, -1));
+          }
+        }}
+        onBlur={() => {
+          if (draft.trim()) {
+            commit(draft);
+            setDraft('');
+          }
+        }}
+        placeholder={value.length === 0 ? 'Ex.: advogado, processo, consulta' : ''}
+        maxLength={80}
+        aria-label="Palavras-chave"
+      />
+    </div>
+  );
+}
+
+function TriggersFields({
+  value,
+  onChange,
+  options,
+}: {
+  value: AgentTriggers;
+  onChange: (v: AgentTriggers) => void;
+  options: WaAgentOptions | undefined;
+}) {
+  const boards = options?.boards ?? [];
+  const connections = options?.connections ?? [];
+  const { inbound, deal } = value;
+
+  const setInbound = (patch: Partial<AgentTriggers['inbound']>) => onChange({ ...value, inbound: { ...inbound, ...patch } });
+  const setDeal = (patch: Partial<AgentTriggers['deal']>) => onChange({ ...value, deal: { ...deal, ...patch } });
+
+  // Quadro efetivo: o escolhido ou, se só a etapa estiver definida, o quadro dela.
+  const boardId = deal.board_id ?? boards.find((b) => b.stages.some((s) => s.id === deal.stage_id))?.id ?? '';
+  const stages = boards.find((b) => b.id === boardId)?.stages ?? [];
+  const selectedConnection = connections.find((c) => c.id === deal.connection_id);
+
+  return (
+    <div className="space-y-4">
+      <div className={SUBCARD_CLASS}>
+        <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Por mensagem recebida</p>
+        <div className="space-y-2" role="radiogroup" aria-label="Gatilho por mensagem recebida">
+          {INBOUND_MODES.map((m) => (
+            <label key={m.value} className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="radio"
+                name="agent-inbound-mode"
+                className="mt-1 h-4 w-4 border-slate-300 text-purple-600 focus:ring-purple-500"
+                checked={inbound.mode === m.value}
+                onChange={() => setInbound({ mode: m.value })}
+              />
+              <span className="min-w-0">
+                <span className="block text-sm text-slate-900 dark:text-white">{m.label}</span>
+                <span className="block text-xs text-slate-500 dark:text-slate-400">{m.help}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        {inbound.mode === 'keywords' ? (
+          <Field
+            label="Palavras-chave"
+            htmlFor="agent-inbound-keywords"
+            help="Separe por vírgula ou Enter. Basta uma delas aparecer na mensagem."
+          >
+            <KeywordChips
+              id="agent-inbound-keywords"
+              value={inbound.keywords}
+              onChange={(keywords) => setInbound({ keywords })}
+            />
+          </Field>
+        ) : null}
+      </div>
+
+      <div className={SUBCARD_CLASS}>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Por cadastro no pipeline</p>
+            <p className={HELP_CLASS}>
+              O agente envia a primeira mensagem sozinho, com os dados do cadastro no contexto.
+            </p>
+          </div>
+          <Toggle checked={deal.enabled} onChange={(enabled) => setDeal({ enabled })} label="Gatilho por cadastro no pipeline" />
+        </div>
+
+        {deal.enabled ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Field label="Evento" htmlFor="agent-deal-event">
+              <select
+                id="agent-deal-event"
+                className={INPUT_CLASS}
+                value={deal.event}
+                onChange={(e) => setDeal({ event: e.target.value as DealEvent })}
+              >
+                {DEAL_EVENTS.map((ev) => (
+                  <option key={ev.value} value={ev.value}>
+                    {ev.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field
+              label={deal.event === 'deal_stage_entered' ? 'Quadro' : 'Quadro (opcional)'}
+              htmlFor="agent-deal-board"
+              help={
+                deal.event === 'deal_stage_entered'
+                  ? 'Escolha o quadro para listar as etapas.'
+                  : 'Vazio dispara para negócios criados em qualquer quadro.'
+              }
+            >
+              <select
+                id="agent-deal-board"
+                className={INPUT_CLASS}
+                value={boardId}
+                onChange={(e) => setDeal({ board_id: e.target.value || null, stage_id: null })}
+              >
+                <option value="">{deal.event === 'deal_stage_entered' ? 'Selecione o quadro' : 'Qualquer quadro'}</option>
+                {boards.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {deal.event === 'deal_stage_entered' ? (
+              <Field label="Etapa" htmlFor="agent-deal-stage" help="Dispara quando um negócio entra nesta etapa.">
+                <select
+                  id="agent-deal-stage"
+                  className={INPUT_CLASS}
+                  value={deal.stage_id ?? ''}
+                  onChange={(e) => setDeal({ stage_id: e.target.value || null, board_id: boardId || null })}
+                  disabled={!boardId}
+                >
+                  <option value="">{boardId ? 'Selecione a etapa' : 'Escolha o quadro primeiro'}</option>
+                  {stages.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            ) : null}
+            <Field
+              label="Número que inicia a conversa"
+              htmlFor="agent-deal-connection"
+              help="Número conectado que envia a primeira mensagem ao telefone do contato do negócio."
+            >
+              <select
+                id="agent-deal-connection"
+                className={INPUT_CLASS}
+                value={deal.connection_id ?? ''}
+                onChange={(e) => setDeal({ connection_id: e.target.value || null })}
+              >
+                <option value="">Selecione o número</option>
+                {connections.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label}
+                    {c.status === 'connected' ? '' : ' (desconectado)'}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {selectedConnection && selectedConnection.status !== 'connected' ? (
+              <div className="md:col-span-2">
+                <Notice tone="amber">
+                  Este número não está conectado. O gatilho só consegue enviar a primeira mensagem com o número
+                  conectado.
+                </Notice>
+              </div>
+            ) : null}
+            {connections.length === 0 ? (
+              <div className="md:col-span-2">
+                <Notice tone="amber">Nenhum número conectado. Conecte um número em WhatsApp, Conexão.</Notice>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -264,9 +604,9 @@ export const AgentEditor: React.FC<{
   };
 
   const handleSave = async (): Promise<boolean> => {
-    const duplicateKeys = findDuplicateOutcomeKeys(form.outcomes);
-    if (duplicateKeys.length > 0) {
-      showToast(`Chaves de resultado repetidas: ${duplicateKeys.join(', ')}`, 'error');
+    const friendly = findFriendlyIssue(form);
+    if (friendly) {
+      showToast(friendly, 'error');
       return false;
     }
     const payload = toPayload(form);
@@ -299,6 +639,15 @@ export const AgentEditor: React.FC<{
     const ok = await handleSave();
     if (ok) onClose();
   };
+
+  const triggerSummary = [
+    form.triggers.inbound.mode === 'any'
+      ? 'qualquer mensagem'
+      : form.triggers.inbound.mode === 'keywords'
+        ? 'por palavra-chave'
+        : 'nunca por mensagem',
+    form.triggers.deal.enabled ? 'pipeline ligado' : 'pipeline desligado',
+  ].join(', ');
 
   return (
     <div className="space-y-4">
@@ -395,6 +744,14 @@ export const AgentEditor: React.FC<{
           </div>
         )}
         <p className={HELP_CLASS}>Deixe vazio se este agente só recebe conversas de outro agente.</p>
+      </Section>
+
+      <Section
+        title="Gatilhos"
+        description={`Quando o agente entra em ação: ${triggerSummary}.`}
+        icon={<Zap size={16} />}
+      >
+        <TriggersFields value={form.triggers} onChange={(triggers) => patch({ triggers })} options={options} />
       </Section>
 
       <Section title="Modelo" description="Provedor, modelo, criatividade e chave da API." icon={<Cpu size={16} />}>
@@ -519,6 +876,15 @@ export const AgentEditor: React.FC<{
         description="As instruções que guiam o agente. Use as variáveis para personalizar."
         icon={<FileText size={16} />}
       >
+        <AgentAssistPanel
+          provider={form.provider}
+          model={form.model}
+          personaName={form.persona_name}
+          currentPrompt={form.system_prompt}
+          outcomes={form.outcomes}
+          customActions={form.custom_actions}
+          onApply={(p) => patch(p)}
+        />
         <div className="flex flex-wrap gap-1.5">
           {PROMPT_VARIABLES.map((v) => (
             <button
@@ -645,6 +1011,21 @@ export const AgentEditor: React.FC<{
         <OutcomesEditor
           value={form.outcomes}
           onChange={(outcomes) => patch({ outcomes })}
+          agents={agents}
+          options={options}
+          currentAgentId={agentId}
+        />
+      </Section>
+
+      <Section
+        title="Ações durante a conversa"
+        description="O que o agente faz no meio do atendimento, sem encerrar: registrar, mover, rotular ou avisar outro sistema."
+        icon={<ListChecks size={16} />}
+        defaultOpen={form.custom_actions.length > 0}
+      >
+        <CustomActionsEditor
+          value={form.custom_actions}
+          onChange={(custom_actions) => patch({ custom_actions })}
           agents={agents}
           options={options}
           currentAgentId={agentId}

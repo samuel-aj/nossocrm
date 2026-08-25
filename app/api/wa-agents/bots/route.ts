@@ -2,6 +2,7 @@
  * /api/wa-agents/bots  (admin)
  *   GET  -> { bots: BotRow[] }
  *   POST -> BotInputSchema -> 201 { bot }
+ *           (aceita start_step_id e os campos do quadro nos passos: next_step_id, ui, passo webhook)
  */
 import { json } from '@/lib/whatsapp/api';
 import { BotInputSchema, type BotRow } from '@/lib/wa-agents/types';
@@ -11,6 +12,7 @@ import {
   getErrorMessage,
   guardRoute,
   readJsonBody,
+  validateBotStartStep,
   validationError,
 } from '../_shared';
 
@@ -38,6 +40,9 @@ export async function POST(req: Request) {
   if (!parsed.success) return validationError(parsed.error);
   const input = parsed.data;
 
+  const startError = validateBotStartStep(input.steps, input.start_step_id);
+  if (startError) return startError;
+
   try {
     if (input.connection_id && !(await connectionsBelongToOrg(auth.admin, auth.user.organizationId, [input.connection_id]))) {
       return connectionNotFoundError();
@@ -54,6 +59,7 @@ export async function POST(req: Request) {
       connection_id: input.connection_id,
       trigger: input.trigger,
       steps: input.steps,
+      start_step_id: input.start_step_id ?? null,
       organization_id: auth.user.organizationId,
       created_by: auth.user.id,
     })

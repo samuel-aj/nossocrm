@@ -45,9 +45,26 @@ O agente encerra chamando a ferramenta `encerrar_atendimento(resultado, resumo)`
 - Atendente responde pelo CRM ou pelo celular → o agente **pausa** por N minutos (configurável) e retoma sozinho lendo o que foi dito no meio tempo. Se o atendente continuar falando, o relógio reinicia.
 - Botões no chat: **Pausar / Retomar**, **Parar** (encerra de vez nesta conversa), **Iniciar agente** (escolhe qual agente assume a conversa), **Aprovar / Recusar**.
 
+### Gatilhos do agente
+
+| Gatilho | Configuração | O que acontece |
+|---|---|---|
+| Mensagem recebida (qualquer) | padrão | Conversa nova num número vinculado inicia o agente |
+| Mensagem recebida (específica) | palavras-chave | Só inicia se a primeira mensagem contiver alguma das palavras |
+| Nunca por mensagem | | O agente só entra por passagem de outro agente, pelo pipeline ou na mão |
+| Cadastro no pipeline | negócio criado (quadro opcional) ou entrou numa etapa + número que envia | O agente **manda a primeira mensagem sozinho**, com os dados do cadastro (título, valor, etapa, rótulos, descrição e campos personalizados) no contexto, sem perguntar o que já consta |
+
+### Ações durante a conversa
+
+Além do encerramento, o agente pode executar ações **no meio** da conversa: você descreve em linguagem natural quando acontece ("o cliente disse que já tem advogado", "o cliente pediu para falar com humano") e o que fazer (webhook com corpo personalizável, nota, etapa, rótulo, responsável, tarefa, marcar perdido). O modelo chama a ferramenta `executar_acao` no momento certo e segue a conversa. O evento `custom_action` também dispara os webhooks por evento do agente.
+
+### IA na configuração
+
+No editor do agente, "Criar com IA": descreva o atendimento e o CRM gera o roteiro (persona, perguntas, encerramento, ações), já nas convenções da plataforma. Com um roteiro existente: "Melhorar roteiro" e "Pedir ajuste" (instrução livre). Usa a chave de IA da organização.
+
 ## Robôs (sem IA)
 
-Fluxo de mensagens predefinidas, disparado quando um negócio é **criado** (opcionalmente num board) ou **entra numa etapa**, ou na mão. Passos: enviar mensagem (com variáveis), esperar, esperar resposta (com prazo), condição por palavras-chave, mover etapa, adicionar rótulo, entregar a um agente de IA, encerrar. Precisa de um número (conexão) para enviar. O telefone vem do contato do negócio.
+Fluxo de mensagens predefinidas montado num **quadro visual** (estilo Typebot/ManyChat): balões de mensagem e blocos ligados por setas. Disparado quando um negócio é **criado** (opcionalmente num board) ou **entra numa etapa**, ou na mão. Blocos: Mensagem (com variáveis), Esperar, Esperar resposta (saídas "Respondeu" e "Sem resposta"), Condição (uma saída por regra de palavras-chave + "Senão"), Mover etapa, Rótulo, Webhook, Entregar a um agente de IA, Encerrar. Precisa de um número (conexão) para enviar. O telefone vem do contato do negócio. Robôs criados antes (em lista) são convertidos automaticamente para o quadro ao abrir.
 
 ## Como roda por baixo
 
@@ -63,7 +80,7 @@ pg_cron 'wa-agents-tick' (30 s, só se houver algo pendente) ──▶ POST /api
                                                         └─ retoma pausas vencidas, executa passos dos robôs
 ```
 
-Tabelas novas: `wa_ai_agents`, `wa_ai_agent_runs`, `wa_bots`, `wa_bot_runs`. Colunas novas em `wa_conversations`: `ai_agent_id`, `ai_resume_at`, `ai_state`, `ai_last_processed_at`, `ai_lock_until`, `ai_approval`; `ai_status` aceita também `stopped` e `awaiting_approval`.
+Tabelas novas: `wa_ai_agents` (com `custom_actions` e `triggers`), `wa_ai_agent_runs`, `wa_ai_agent_deal_starts` (fila dos inícios pelo pipeline), `wa_bots` (com `start_step_id`), `wa_bot_runs`. Colunas novas em `wa_conversations`: `ai_agent_id`, `ai_resume_at`, `ai_state`, `ai_last_processed_at`, `ai_lock_until`, `ai_approval`; `ai_status` aceita também `stopped` e `awaiting_approval`.
 
 Mensagens enviadas pelo agente têm `source = 'agent'`; pelo robô, `source = 'bot'` (aparecem no webhook `whatsapp.message.sent`).
 

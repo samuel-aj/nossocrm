@@ -11,7 +11,7 @@ import type { ZodError } from 'zod';
 import { requireOrgUser, isOrgAdmin, json, type OrgUser } from '@/lib/whatsapp/api';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { isWaAgentsBetaEnabled } from '@/lib/wa-agents/beta';
-import type { AgentPublic, AgentRow } from '@/lib/wa-agents/types';
+import type { AgentPublic, AgentRow, AgentTriggers, BotStep } from '@/lib/wa-agents/types';
 
 export type GuardResult =
   | { ok: true; user: OrgUser; admin: SupabaseClient; isAdmin: boolean }
@@ -53,6 +53,14 @@ export async function guardRoute(opts: GuardOptions = {}): Promise<GuardResult> 
 /** Resposta padrão para erro de validação zod. */
 export function validationError(error: ZodError): Response {
   return json({ error: 'Dados inválidos', code: 'VALIDATION_ERROR', issues: error.issues }, 400);
+}
+
+/** Erro de validação de uma regra de negócio (mesmo formato do zod: issues com path e message). */
+export function validationMessage(message: string, path: string): Response {
+  return json(
+    { error: 'Dados inválidos', code: 'VALIDATION_ERROR', issues: [{ code: 'custom', path: path.split('.'), message }] },
+    400
+  );
 }
 
 /** Lê o JSON do corpo sem lançar (null quando inválido ou vazio). */
@@ -116,6 +124,54 @@ export async function connectionsBelongToOrg(admin: SupabaseClient, orgId: strin
 /** Resposta padrão quando um número informado não é da organização. */
 export function connectionNotFoundError(): Response {
   return json({ error: 'Número não encontrado nesta organização', code: 'CONNECTION_NOT_FOUND' }, 400);
+}
+
+/** true quando a etapa (board_stages) é da organização (e do quadro, quando informado). */
+export async function stageBelongsToOrg(
+  admin: SupabaseClient,
+  orgId: string,
+  stageId: string,
+  boardId?: string | null
+): Promise<boolean> {
+  let q = admin.from('board_stages').select('id').eq('organization_id', orgId).eq('id', stageId);
+  if (boardId) q = q.eq('board_id', boardId);
+  const { data, error } = await q.limit(1);
+  if (error) throw new Error(error.message);
+  return (data ?? []).length > 0;
+}
+
+/**
+ * Valida os gatilhos do agente quando o gatilho por pipeline está ligado:
+ * etapa obrigatória (e da org) para "entrou numa etapa" e número que inicia
+ * a conversa obrigatório e da org. null quando está tudo certo.
+ */
+export async function validateAgentTriggers(
+  admin: SupabaseClient,
+  orgId: string,
+  triggers: AgentTriggers
+): Promise<Response | null> {
+  const deal = triggers.deal;
+  if (!deal.enabled) return null;
+  if (deal.event === 'deal_stage_entered') {
+    if (!deal.stage_id) return validationMessage('Informe a etapa do gatilho "entrou numa etapa"', 'triggers.deal.stage_id');
+    if (!(await stageBelongsToOrg(admin, orgId, deal.stage_id, deal.board_id))) {
+      return validationMessage('Etapa não encontrada nesta organização', 'triggers.deal.stage_id');
+    }
+  }
+  if (!deal.connection_id) {
+    return validationMessage('Informe o número que inicia a conversa', 'triggers.deal.connection_id');
+  }
+  if (!(await connectionsBelongToOrg(admin, orgId, [deal.connection_id]))) return connectionNotFoundError();
+  return null;
+}
+
+/** Modo quadro do robô: o passo inicial precisa existir na lista de passos. null quando ok. */
+export function validateBotStartStep(steps: BotStep[], startStepId: string | null | undefined): Response | null {
+  if (!startStepId) return null;
+  if (!steps.some(s => s.id === startStepId)) {
+    return validationMessage('O passo inicial do quadro não existe na lista de passos', 'start_step_id');
+  }
+  return null;
 }
 
 export function getErrorMessage(err: unknown, fallback: string): string {

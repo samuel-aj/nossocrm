@@ -20,8 +20,11 @@ import { loadAgent, loadConversationContext, loadDealContext } from './context';
 import { runAgentOnConversation } from './engine';
 import { errorMessage } from './errors';
 import { renderTemplate } from './template';
+import { normalizeKeyword } from './text';
 import { BotStepSchema, type BotLogEntry, type BotRow, type BotRunRow, type BotStep } from './types';
-import { dispatchAgentEvent } from './webhooks';
+import { dispatchAgentEvent, postWebhook } from './webhooks';
+
+export { normalizeKeyword };
 
 const MAX_STEPS_PER_RUN = 50;
 /** Limite absoluto de passos por execução (soma de todas as retomadas): evita laço infinito entre esperas. */
@@ -29,22 +32,11 @@ const MAX_STEPS_TOTAL = 500;
 const BOT_LOCK_SECONDS = 120;
 const TIMEOUT_STEP_VAR = '_timeout_step_id';
 const STEPS_TOTAL_VAR = '_steps_total';
+/** Modo quadro: marca que a execução já entrou pelo passo inicial (start_step_id) */
+const STARTED_VAR = '_started';
 
 function nowIso(): string {
   return new Date().toISOString();
-}
-
-// Marcas combinantes (acentos) U+0300..U+036F, montadas sem escapes para ficar legível
-const COMBINING_MARKS_RE = new RegExp('[' + String.fromCharCode(0x300) + '-' + String.fromCharCode(0x36f) + ']', 'g');
-
-/** Minúsculas, sem acento, sem espaços extras (comparação de palavras-chave). */
-export function normalizeKeyword(text: string): string {
-  return (text || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(COMBINING_MARKS_RE, '')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 function parseSteps(raw: unknown): BotStep[] {
@@ -60,6 +52,24 @@ function parseSteps(raw: unknown): BotStep[] {
 function stepIndexById(steps: BotStep[], id: string | null | undefined): number {
   if (!id) return -1;
   return steps.findIndex(s => s.id === id);
+}
+
+/**
+ * Índice do passo seguinte. Modo quadro (start_step_id definido): só navega
+ * por `next_step_id`; destino ausente = fim (índice fora do array, que o laço
+ * trata como 'done'). Modo lista (robôs antigos): índice + 1.
+ */
+export function nextStepIndex(steps: BotStep[], current: number, step: BotStep, canvas: boolean): number {
+  if (!canvas) return current + 1;
+  const target = stepIndexById(steps, step.next_step_id);
+  return target >= 0 ? target : steps.length;
+}
+
+/** Variáveis públicas da execução (sem as internas, que começam com "_"). */
+function publicVars(vars: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(vars)) if (!k.startsWith('_')) out[k] = v;
+  return out;
 }
 
 /** Trava por execução: só uma instância mexe na run por vez. */
@@ -274,7 +284,21 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
       negocio: { titulo: deal?.title ?? '', etapa: deal?.stage_label ?? '' },
     };
 
+    // Modo quadro: começa no passo inicial e navega só por ids; modo lista: índice + 1
+    const canvas = !!(bot.start_step_id && String(bot.start_step_id).trim());
     let idx = st.run.step_index ?? 0;
+    if (canvas && st.vars[STARTED_VAR] !== true) {
+      const startIdx = stepIndexById(steps, bot.start_step_id);
+      if (startIdx < 0) {
+        note(st, null, 'passo inicial não encontrado');
+        await saveRun(admin, st, { status: 'error', error: 'passo inicial não encontrado', wake_at: null }, { release: true });
+        return;
+      }
+      idx = startIdx;
+      st.vars[STARTED_VAR] = true;
+    }
+    const next = (step: BotStep): number => nextStepIndex(steps, idx, step, canvas);
+
     for (let guard = 0; guard < MAX_STEPS_PER_RUN; guard++) {
       const step = steps[idx];
       if (!step) {
@@ -307,13 +331,13 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
           } else {
             note(st, step, 'mensagem vazia ignorada');
           }
-          idx++;
+          idx = next(step);
           break;
         }
         case 'wait': {
           const wakeAt = new Date(Date.now() + step.seconds * 1000).toISOString();
           note(st, step, `esperando ${step.seconds}s`);
-          await saveRun(admin, st, { status: 'running', step_index: idx + 1, wake_at: wakeAt }, { release: true });
+          await saveRun(admin, st, { status: 'running', step_index: next(step), wake_at: wakeAt }, { release: true });
           return;
         }
         case 'wait_reply': {
@@ -323,7 +347,7 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
           await saveRun(
             admin,
             st,
-            { status: 'waiting_reply', step_index: idx + 1, wake_at: wakeAt },
+            { status: 'waiting_reply', step_index: next(step), wake_at: wakeAt },
             { release: true }
           );
           return;
@@ -352,6 +376,9 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
             if (elseIdx < 0) throw new Error('passo "senão" não encontrado');
             note(st, step, `sem correspondência, indo para o passo ${steps[elseIdx].id}`);
             idx = elseIdx;
+          } else if (canvas) {
+            note(st, step, 'sem correspondência e sem "senão": encerrando');
+            idx = steps.length;
           } else {
             note(st, step, 'sem correspondência, seguindo para o próximo passo');
             idx++;
@@ -366,7 +393,7 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
             if (!r.ok) throw new Error((r.body as { error?: string }).error || 'falha ao mover etapa');
             note(st, step, 'negócio movido de etapa');
           }
-          idx++;
+          idx = next(step);
           break;
         }
         case 'add_tag': {
@@ -376,7 +403,37 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
             await addDealTag(admin, orgId, deal.id, step.tag);
             note(st, step, `rótulo "${step.tag}" adicionado`);
           }
-          idx++;
+          idx = next(step);
+          break;
+        }
+        case 'webhook': {
+          // Mesmo POST dos webhooks do agente; falha não derruba o robô (fica no log)
+          const r = await postWebhook({
+            url: step.url,
+            event: 'bot_webhook',
+            secret: step.secret,
+            body_template: step.body_template,
+            payload: {
+              event: 'bot_webhook',
+              occurred_at: nowIso(),
+              organization_id: orgId,
+              bot: { id: bot.id, name: bot.name },
+              run: { id: st.run.id, step_id: step.id },
+              conversation: {
+                id: conversationId,
+                phone,
+                name: contact?.name ?? null,
+                contact_id: contact?.id ?? contactId ?? null,
+                deal_id: deal?.id ?? null,
+              },
+              contact,
+              deal,
+              last_reply: st.vars.last_reply ?? null,
+              vars: publicVars(st.vars),
+            },
+          });
+          note(st, step, r.ok ? `webhook enviado (HTTP ${r.status ?? '?'})` : `webhook falhou: ${r.error ?? 'erro desconhecido'}`);
+          idx = next(step);
           break;
         }
         case 'handoff_agent': {
@@ -424,7 +481,7 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
         }
         default: {
           note(st, step, 'tipo de passo desconhecido, ignorado');
-          idx++;
+          idx = next(step);
         }
       }
     }
@@ -476,7 +533,8 @@ async function handleBotTimeout(admin: SupabaseClient, run: BotRunRow): Promise<
   const bot = await loadBot(admin, run.organization_id, run.bot_id);
   const steps = bot ? parseSteps(bot.steps) : [];
   let timeoutStepId = (st.vars[TIMEOUT_STEP_VAR] as string | null | undefined) ?? null;
-  if (!timeoutStepId) {
+  if (!timeoutStepId && !bot?.start_step_id) {
+    // Modo lista: o passo anterior ao índice salvo é o wait_reply
     const prev = steps[run.step_index - 1];
     if (prev && prev.type === 'wait_reply') timeoutStepId = prev.on_timeout_step_id ?? null;
   }

@@ -3,6 +3,10 @@
 /**
  * Editor de resultados do atendimento (outcomes) e das ações executadas
  * quando o agente encerra com cada resultado.
+ *
+ * Exporta também o editor de ações (`ActionsEditor`), reutilizado pelas
+ * ações durante a conversa (CustomActionsEditor), e o tipo de ação
+ * "Chamar webhook" (URL, segredo e corpo opcional com {{variáveis}}).
  */
 import React from 'react';
 import { Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
@@ -10,7 +14,9 @@ import type { EndAction, Outcome } from '@/lib/wa-agents/types';
 import type { WaAgentListItem, WaAgentOptions } from './useWaAgents';
 import { BTN_ICON, BTN_SMALL, Field, HELP_CLASS, INPUT_CLASS, SUBCARD_CLASS, TEXTAREA_CLASS } from './ui';
 
-export const ACTION_LABELS: Record<EndAction['type'], string> = {
+export type ActionType = EndAction['type'];
+
+export const ACTION_LABELS: Record<ActionType, string> = {
   handoff: 'Passar para outro agente',
   approval: 'Pedir aprovação humana para passar a outro agente',
   stop: 'Encerrar e entregar ao atendente',
@@ -20,9 +26,35 @@ export const ACTION_LABELS: Record<EndAction['type'], string> = {
   mark_lost: 'Marcar como perdido',
   assign_owner: 'Atribuir responsável',
   create_task: 'Criar tarefa',
+  webhook: 'Chamar webhook',
 };
 
-const ACTION_TYPES = Object.keys(ACTION_LABELS) as Array<EndAction['type']>;
+const ACTION_TYPES = Object.keys(ACTION_LABELS) as ActionType[];
+
+/** Variáveis aceitas no corpo personalizado da ação "Chamar webhook". */
+export const ACTION_WEBHOOK_VARIABLES: Array<{ key: string; description: string }> = [
+  { key: 'event', description: 'nome do evento' },
+  { key: 'agent.name', description: 'nome do agente' },
+  { key: 'conversation.phone', description: 'telefone da conversa' },
+  { key: 'contact.name', description: 'nome do contato' },
+  { key: 'deal.title', description: 'título do negócio' },
+  { key: 'resultado', description: 'chave do resultado (no encerramento)' },
+  { key: 'resumo', description: 'resumo do atendimento (no encerramento)' },
+  { key: 'acao', description: 'chave da ação (durante a conversa)' },
+  { key: 'detalhes', description: 'detalhes informados pelo agente (durante a conversa)' },
+];
+
+const ACTION_WEBHOOK_PLACEHOLDER = `{
+  "evento": "{{event}}",
+  "agente": "{{agent.name}}",
+  "telefone": "{{conversation.phone}}",
+  "nome": "{{contact.name}}",
+  "negocio": "{{deal.title}}",
+  "resultado": "{{resultado}}",
+  "resumo": "{{resumo}}",
+  "acao": "{{acao}}",
+  "detalhes": "{{detalhes}}"
+}`;
 
 /** Chave a partir do rótulo: minúsculas, sem acento, hífens. */
 export function slugifyKey(label: string): string {
@@ -35,8 +67,9 @@ export function slugifyKey(label: string): string {
     .slice(0, 40);
 }
 
-function defaultAction(
-  type: EndAction['type'],
+/** Ação nova de um tipo, com valores iniciais razoáveis. */
+export function defaultAction(
+  type: ActionType,
   agents: WaAgentListItem[],
   options: WaAgentOptions | undefined,
   currentAgentId: string | null | undefined
@@ -62,6 +95,8 @@ function defaultAction(
       return { type, owner_id: options?.owners[0]?.id ?? '' };
     case 'create_task':
       return { type, title: '', days: 1 };
+    case 'webhook':
+      return { type, url: '', secret: null, body_template: null };
   }
 }
 
@@ -159,6 +194,23 @@ export function TagInput({
         ))}
       </datalist>
     </>
+  );
+}
+
+/** Ajuda com as variáveis do corpo personalizado da ação webhook. */
+function WebhookVariablesHelp() {
+  return (
+    <div className={HELP_CLASS}>
+      <span className="font-medium">Variáveis disponíveis:</span>{' '}
+      {ACTION_WEBHOOK_VARIABLES.map((v, i) => (
+        <span key={v.key}>
+          <code className="font-mono">{`{{${v.key}}}`}</code> ({v.description})
+          {i < ACTION_WEBHOOK_VARIABLES.length - 1 ? ', ' : '.'}
+        </span>
+      ))}{' '}
+      Sem corpo personalizado, o envio traz o evento, o agente, a conversa, o contato, o negócio e o resultado (ou a
+      ação) em JSON. Se o corpo for um JSON válido, ele é enviado como JSON; senão vai como texto.
+    </div>
   );
 }
 
@@ -281,8 +333,142 @@ function ActionFields({
           </div>
         </div>
       );
+    case 'webhook':
+      return (
+        <div className="space-y-2">
+          <input
+            id={`${idPrefix}-url`}
+            type="url"
+            className={INPUT_CLASS}
+            value={action.url}
+            onChange={(e) => onChange({ ...action, url: e.target.value })}
+            placeholder="https://..."
+            aria-label="URL do webhook"
+          />
+          <input
+            id={`${idPrefix}-secret`}
+            type="password"
+            autoComplete="off"
+            className={INPUT_CLASS}
+            value={action.secret ?? ''}
+            onChange={(e) => onChange({ ...action, secret: e.target.value || null })}
+            placeholder="Segredo (opcional): vai em X-Webhook-Secret e Authorization: Bearer"
+            maxLength={200}
+            aria-label="Segredo do webhook"
+          />
+          <details open={!!action.body_template}>
+            <summary className="cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-300 select-none">
+              Corpo personalizado (opcional)
+            </summary>
+            <div className="mt-2 space-y-2">
+              <textarea
+                id={`${idPrefix}-body`}
+                className={`${TEXTAREA_CLASS} font-mono text-xs`}
+                rows={7}
+                value={action.body_template ?? ''}
+                onChange={(e) => onChange({ ...action, body_template: e.target.value || null })}
+                placeholder={ACTION_WEBHOOK_PLACEHOLDER}
+                aria-label="Corpo personalizado do webhook"
+                maxLength={20000}
+              />
+              <WebhookVariablesHelp />
+            </div>
+          </details>
+        </div>
+      );
   }
 }
+
+/**
+ * Editor de uma lista de ações (select de tipo + campos por tipo).
+ * Usado pelos resultados do encerramento e pelas ações durante a conversa.
+ */
+export const ActionsEditor: React.FC<{
+  value: EndAction[];
+  onChange: (actions: EndAction[]) => void;
+  agents: WaAgentListItem[];
+  options: WaAgentOptions | undefined;
+  currentAgentId?: string | null;
+  /** Prefixo dos ids dos campos (acessibilidade e chaves do React) */
+  idPrefix: string;
+  /** Texto exibido quando a lista está vazia */
+  emptyText?: string;
+  /** Tipos que não aparecem no seletor (uma ação já salva com esse tipo continua editável) */
+  hiddenTypes?: ActionType[];
+  /** Tipo da ação criada pelo botão "Adicionar ação" */
+  defaultType?: ActionType;
+}> = ({
+  value,
+  onChange,
+  agents,
+  options,
+  currentAgentId,
+  idPrefix,
+  emptyText = 'Sem ações.',
+  hiddenTypes = [],
+  defaultType = 'note',
+}) => {
+  const visibleTypes = ACTION_TYPES.filter((t) => !hiddenTypes.includes(t));
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Ações</span>
+        <button
+          type="button"
+          className={BTN_SMALL}
+          onClick={() => onChange([...value, defaultAction(defaultType, agents, options, currentAgentId)])}
+        >
+          <Plus size={14} aria-hidden="true" />
+          Adicionar ação
+        </button>
+      </div>
+      {value.length === 0 ? <p className={HELP_CLASS}>{emptyText}</p> : null}
+      {value.map((action, aIndex) => {
+        const aPrefix = `${idPrefix}-action-${aIndex}`;
+        const setAction = (a: EndAction) => onChange(value.map((x, i) => (i === aIndex ? a : x)));
+        const types = visibleTypes.includes(action.type) ? visibleTypes : [action.type, ...visibleTypes];
+        return (
+          <div
+            key={aPrefix}
+            className="grid grid-cols-1 md:grid-cols-[minmax(0,240px)_1fr_auto] gap-2 items-start bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-lg p-2"
+          >
+            <select
+              className={INPUT_CLASS}
+              value={action.type}
+              aria-label={`Tipo da ação ${aIndex + 1}`}
+              onChange={(e) => setAction(defaultAction(e.target.value as ActionType, agents, options, currentAgentId))}
+            >
+              {types.map((t) => (
+                <option key={t} value={t}>
+                  {ACTION_LABELS[t]}
+                </option>
+              ))}
+            </select>
+            <div className="min-w-0">
+              <ActionFields
+                action={action}
+                onChange={setAction}
+                agents={agents}
+                options={options}
+                currentAgentId={currentAgentId}
+                idPrefix={aPrefix}
+              />
+            </div>
+            <button
+              type="button"
+              className={`${BTN_ICON} hover:text-red-600 dark:hover:text-red-400`}
+              aria-label={`Remover ação ${aIndex + 1}`}
+              title="Remover ação"
+              onClick={() => onChange(value.filter((_, i) => i !== aIndex))}
+            >
+              <Trash2 size={14} aria-hidden="true" />
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
 
 /**
  * Componente React `OutcomesEditor`.
@@ -405,71 +591,15 @@ export const OutcomesEditor: React.FC<{
               />
             </Field>
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Ações</span>
-                <button
-                  type="button"
-                  className={BTN_SMALL}
-                  onClick={() =>
-                    update(index, {
-                      actions: [...outcome.actions, defaultAction('note', agents, options, currentAgentId)],
-                    })
-                  }
-                >
-                  <Plus size={14} aria-hidden="true" />
-                  Adicionar ação
-                </button>
-              </div>
-              {outcome.actions.length === 0 ? (
-                <p className={HELP_CLASS}>Sem ações: o agente só encerra e a conversa fica com a equipe.</p>
-              ) : null}
-              {outcome.actions.map((action, aIndex) => {
-                const aPrefix = `${idPrefix}-action-${aIndex}`;
-                const setAction = (a: EndAction) =>
-                  update(index, { actions: outcome.actions.map((x, i) => (i === aIndex ? a : x)) });
-                return (
-                  <div
-                    key={aPrefix}
-                    className="grid grid-cols-1 md:grid-cols-[minmax(0,240px)_1fr_auto] gap-2 items-start bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-lg p-2"
-                  >
-                    <select
-                      className={INPUT_CLASS}
-                      value={action.type}
-                      aria-label={`Tipo da ação ${aIndex + 1}`}
-                      onChange={(e) =>
-                        setAction(defaultAction(e.target.value as EndAction['type'], agents, options, currentAgentId))
-                      }
-                    >
-                      {ACTION_TYPES.map((t) => (
-                        <option key={t} value={t}>
-                          {ACTION_LABELS[t]}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="min-w-0">
-                      <ActionFields
-                        action={action}
-                        onChange={setAction}
-                        agents={agents}
-                        options={options}
-                        currentAgentId={currentAgentId}
-                        idPrefix={aPrefix}
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      className={`${BTN_ICON} hover:text-red-600 dark:hover:text-red-400`}
-                      aria-label={`Remover ação ${aIndex + 1}`}
-                      title="Remover ação"
-                      onClick={() => update(index, { actions: outcome.actions.filter((_, i) => i !== aIndex) })}
-                    >
-                      <Trash2 size={14} aria-hidden="true" />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
+            <ActionsEditor
+              value={outcome.actions}
+              onChange={(actions) => update(index, { actions })}
+              agents={agents}
+              options={options}
+              currentAgentId={currentAgentId}
+              idPrefix={idPrefix}
+              emptyText="Sem ações: o agente só encerra e a conversa fica com a equipe."
+            />
           </div>
         );
       })}

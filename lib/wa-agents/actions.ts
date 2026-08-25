@@ -1,15 +1,25 @@
 /**
- * Esteira do encerramento: executa as ações de um resultado (nota, etapa,
- * rótulo, perdido, responsável, tarefa). handoff/approval/stop só são
- * devolvidos: quem aplica é o motor.
+ * Esteira de ações: executa as ações de um resultado do encerramento ou de
+ * uma ação durante a conversa (nota, etapa, rótulo, perdido, responsável,
+ * tarefa, webhook). handoff/approval/stop só são devolvidos: quem aplica é o
+ * motor.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { moveStageByDealId } from '@/lib/public-api/dealsMoveStage';
 import type { ConversationContext } from './context';
 import { errorMessage } from './errors';
-import type { AgentRow, EndAction, Outcome } from './types';
+import type { AgentRow, CustomAction, EndAction, Outcome } from './types';
+import { buildWebhookPayload, postWebhook } from './webhooks';
 
 export type OutcomeActionsResult = { handoffAgentId?: string; approvalAgentId?: string; stopped?: boolean };
+
+/**
+ * De onde vêm as ações: resultado do encerramento (resumo) ou ação durante a
+ * conversa (detalhes). Muda o título padrão da nota e o payload do webhook.
+ */
+export type ActionSource =
+  | { kind: 'outcome'; outcome: Outcome; summary: string }
+  | { kind: 'custom'; action: CustomAction; details: string };
 
 /** Adiciona um rótulo ao negócio (sem duplicar). */
 export async function addDealTag(
@@ -46,16 +56,34 @@ async function ownerBelongsToOrg(admin: SupabaseClient, organizationId: string, 
   return (profiles ?? []).length > 0 || (members ?? []).length > 0;
 }
 
+function sourceSummary(source: ActionSource): string {
+  return source.kind === 'outcome' ? source.summary : source.details;
+}
+
+function sourceNoteTitle(source: ActionSource): string {
+  return source.kind === 'outcome'
+    ? `Pré-atendimento IA: ${source.outcome.label}`
+    : `Ação do agente de IA: ${source.action.label}`;
+}
+
+/** Campos extras do payload do webhook: resultado/resumo ou acao/detalhes. */
+function sourcePayloadExtra(source: ActionSource): Record<string, unknown> {
+  return source.kind === 'outcome'
+    ? { resultado: source.outcome.key, resultado_label: source.outcome.label, resumo: source.summary }
+    : { acao: source.action.key, acao_label: source.action.label, detalhes: source.details };
+}
+
 async function runAction(
   admin: SupabaseClient,
-  input: { agent: AgentRow; ctx: ConversationContext; outcome: Outcome; summary: string },
+  input: { agent: AgentRow; ctx: ConversationContext; source: ActionSource },
   action: EndAction,
   result: OutcomeActionsResult
 ): Promise<string> {
-  const { ctx, outcome, summary } = input;
+  const { agent, ctx, source } = input;
   const orgId = ctx.conversation.organization_id;
   const dealId = ctx.deal?.id ?? null;
   const contactId = ctx.contact?.id ?? ctx.conversation.contact_id ?? null;
+  const summary = sourceSummary(source);
   const now = new Date();
 
   switch (action.type) {
@@ -63,7 +91,7 @@ async function runAction(
       const { error } = await admin.from('activities').insert({
         organization_id: orgId,
         type: 'note',
-        title: action.title?.trim() || `Pré-atendimento IA: ${outcome.label}`,
+        title: action.title?.trim() || sourceNoteTitle(source),
         description: summary,
         date: now.toISOString(),
         completed: true,
@@ -139,6 +167,20 @@ async function runAction(
       if (error) throw new Error(error.message);
       return 'tarefa criada';
     }
+    case 'webhook': {
+      // Mesmo formato dos webhooks por evento; nunca lança (o resultado vai para o registro)
+      const event = source.kind === 'outcome' ? 'outcome_action' : 'custom_action';
+      const payload = buildWebhookPayload({ agent, event, ctx, extra: sourcePayloadExtra(source) });
+      const r = await postWebhook({
+        url: action.url,
+        event,
+        payload,
+        secret: action.secret,
+        body_template: action.body_template,
+      });
+      if (!r.ok) throw new Error(`webhook falhou: ${r.error || 'erro desconhecido'}`);
+      return `webhook enviado (HTTP ${r.status ?? '?'})`;
+    }
     case 'handoff':
       result.handoffAgentId = action.agent_id;
       return 'passagem para outro agente solicitada';
@@ -153,19 +195,55 @@ async function runAction(
   }
 }
 
+/**
+ * Executa uma lista de ações em ordem. Erros por ação são capturados e
+ * registrados em runEvents, sem abortar as demais.
+ */
+export async function executeActions(
+  admin: SupabaseClient,
+  input: { agent: AgentRow; ctx: ConversationContext; actions: EndAction[]; source: ActionSource; runEvents: unknown[] }
+): Promise<OutcomeActionsResult> {
+  const result: OutcomeActionsResult = {};
+  const origin =
+    input.source.kind === 'outcome'
+      ? { source: 'outcome', key: input.source.outcome.key }
+      : { source: 'custom_action', key: input.source.action.key };
+  for (const action of input.actions ?? []) {
+    const at = new Date().toISOString();
+    try {
+      const note = await runAction(admin, input, action, result);
+      input.runEvents.push({ type: 'action', at, action: action.type, ok: true, note, ...origin });
+    } catch (e) {
+      input.runEvents.push({ type: 'action', at, action: action.type, ok: false, error: errorMessage(e), ...origin });
+    }
+  }
+  return result;
+}
+
+/** Ações de um resultado do encerramento. */
 export async function executeOutcomeActions(
   admin: SupabaseClient,
   input: { agent: AgentRow; ctx: ConversationContext; outcome: Outcome; summary: string; runEvents: unknown[] }
 ): Promise<OutcomeActionsResult> {
-  const result: OutcomeActionsResult = {};
-  for (const action of input.outcome.actions ?? []) {
-    const at = new Date().toISOString();
-    try {
-      const note = await runAction(admin, input, action, result);
-      input.runEvents.push({ type: 'action', at, action: action.type, ok: true, note });
-    } catch (e) {
-      input.runEvents.push({ type: 'action', at, action: action.type, ok: false, error: errorMessage(e) });
-    }
-  }
-  return result;
+  return executeActions(admin, {
+    agent: input.agent,
+    ctx: input.ctx,
+    actions: input.outcome.actions ?? [],
+    source: { kind: 'outcome', outcome: input.outcome, summary: input.summary },
+    runEvents: input.runEvents,
+  });
+}
+
+/** Ações de uma ação durante a conversa (ferramenta executar_acao). */
+export async function executeCustomAction(
+  admin: SupabaseClient,
+  input: { agent: AgentRow; ctx: ConversationContext; action: CustomAction; details: string; runEvents: unknown[] }
+): Promise<OutcomeActionsResult> {
+  return executeActions(admin, {
+    agent: input.agent,
+    ctx: input.ctx,
+    actions: input.action.actions ?? [],
+    source: { kind: 'custom', action: input.action, details: input.details },
+    runEvents: input.runEvents,
+  });
 }

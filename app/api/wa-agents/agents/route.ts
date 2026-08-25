@@ -3,6 +3,7 @@
  *   GET  -> admin: { agents: AgentPublic[] } (sem api_key, com has_api_key)
  *           demais membros: { agents: AgentMinimal[] } (só os ligados; menu do chat)
  *   POST -> (admin) cria um agente a partir de AgentInputSchema -> 201 { agent }
+ *           (inclui custom_actions e triggers; gatilho por pipeline validado na org)
  */
 import { json } from '@/lib/whatsapp/api';
 import { AgentInputSchema, type AgentInput, type AgentMinimal, type AgentRow } from '@/lib/wa-agents/types';
@@ -14,6 +15,7 @@ import {
   normalizeApiKeyInput,
   readJsonBody,
   toAgentPublic,
+  validateAgentTriggers,
   validationError,
 } from '../_shared';
 
@@ -38,6 +40,8 @@ function toInsertRow(input: AgentInput) {
     only_new_conversations: input.only_new_conversations,
     outcomes: input.outcomes,
     webhooks: input.webhooks,
+    custom_actions: input.custom_actions,
+    triggers: input.triggers,
   };
 }
 
@@ -69,14 +73,17 @@ export async function GET() {
 export async function POST(req: Request) {
   const auth = await guardRoute({ req, admin: true });
   if (!auth.ok) return auth.response;
+  const orgId = auth.user.organizationId;
 
   const parsed = AgentInputSchema.safeParse(await readJsonBody(req));
   if (!parsed.success) return validationError(parsed.error);
 
   try {
-    if (!(await connectionsBelongToOrg(auth.admin, auth.user.organizationId, parsed.data.connection_ids))) {
+    if (!(await connectionsBelongToOrg(auth.admin, orgId, parsed.data.connection_ids))) {
       return connectionNotFoundError();
     }
+    const triggersError = await validateAgentTriggers(auth.admin, orgId, parsed.data.triggers);
+    if (triggersError) return triggersError;
   } catch (err) {
     return json({ error: getErrorMessage(err, 'Falha ao validar os números') }, 500);
   }
@@ -85,7 +92,7 @@ export async function POST(req: Request) {
     .from('wa_ai_agents')
     .insert({
       ...toInsertRow(parsed.data),
-      organization_id: auth.user.organizationId,
+      organization_id: orgId,
       created_by: auth.user.id,
     })
     .select('*')
