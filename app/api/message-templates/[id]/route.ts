@@ -49,6 +49,8 @@ function mapRow(row: any) {
     body: row.body as string,
     meta_name: (row.meta_name ?? null) as string | null,
     meta_status: (row.meta_status ?? null) as string | null,
+    connectionId: (row.connection_id ?? null) as string | null,
+    buttons: (Array.isArray(row.buttons) ? row.buttons : null) as unknown[] | null,
     created_at: row.created_at as string | null,
   };
 }
@@ -104,7 +106,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     .update(updates)
     .eq('id', id)
     .eq('organization_id', auth.profile.organization_id)
-    .select('id,name,type,category,language,body,meta_name,meta_status,created_at')
+    .select('id,name,type,category,language,body,meta_name,meta_status,connection_id,buttons,created_at')
     .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

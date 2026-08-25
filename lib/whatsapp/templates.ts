@@ -11,6 +11,23 @@
  */
 import type { WaConnectionRow } from './service';
 import { envEvolution } from './index';
+import type { TemplateButton } from '@/lib/messageTemplates';
+
+/** Componente BUTTONS da Meta -> nossos botões (ignora tipos que não usamos). */
+function parseButtons(comps: Record<string, unknown>[]): TemplateButton[] | null {
+  const comp = comps.find(c => String(c?.type ?? '').toUpperCase() === 'BUTTONS');
+  const raw = Array.isArray(comp?.buttons) ? (comp!.buttons as Record<string, unknown>[]) : [];
+  const out: TemplateButton[] = [];
+  for (const b of raw) {
+    const type = String(b?.type ?? '').toUpperCase();
+    const text = String(b?.text ?? '').trim();
+    if (!text) continue;
+    if (type === 'QUICK_REPLY') out.push({ type, text });
+    else if (type === 'URL') out.push({ type, text, url: String(b?.url ?? '') });
+    else if (type === 'PHONE_NUMBER') out.push({ type, text, phone_number: String(b?.phone_number ?? '') });
+  }
+  return out.length ? out : null;
+}
 
 async function evoInstanceCall<T = unknown>(
   conn: Pick<WaConnectionRow, 'base_url' | 'instance_token' | 'instance_name'>,
@@ -46,6 +63,7 @@ export interface MetaTemplateInfo {
   category: string | null;
   language: string | null;
   bodyText: string | null;
+  buttons: TemplateButton[] | null;
 }
 
 /** Cria o template na Meta (WABA da conexão business). */
@@ -57,7 +75,14 @@ const isMetaCloudTpl = (conn: { provider?: string | null }) =>
 
 export async function createMetaTemplate(
   conn: Pick<WaConnectionRow, 'base_url' | 'instance_token' | 'instance_name' | 'provider' | 'meta_waba_id'>,
-  input: { name: string; category: 'UTILITY' | 'MARKETING'; language: string; bodyText: string; examples: string[] }
+  input: {
+    name: string;
+    category: 'UTILITY' | 'MARKETING';
+    language: string;
+    bodyText: string;
+    examples: string[];
+    buttons?: TemplateButton[] | null;
+  }
 ): Promise<{ ok: boolean; error?: string }> {
   const components: Record<string, unknown>[] = [
     {
@@ -67,6 +92,18 @@ export async function createMetaTemplate(
       ...(input.examples.length > 0 ? { example: { body_text: [input.examples] } } : {}),
     },
   ];
+  if (input.buttons && input.buttons.length > 0) {
+    components.push({
+      type: 'BUTTONS',
+      buttons: input.buttons.map(b =>
+        b.type === 'URL'
+          ? { type: 'URL', text: b.text, url: b.url }
+          : b.type === 'PHONE_NUMBER'
+            ? { type: 'PHONE_NUMBER', text: b.text, phone_number: b.phone_number }
+            : { type: 'QUICK_REPLY', text: b.text }
+      ),
+    });
+  }
 
   // meta_cloud: cria direto na WABA pela Graph API (sem Evolution no meio)
   if (isMetaCloudTpl(conn)) {
@@ -141,6 +178,7 @@ export async function listMetaTemplates(
         category: t.category != null ? String(t.category).toUpperCase() : null,
         language: t.language != null ? String(t.language) : null,
         bodyText: bodyComp?.text != null ? String(bodyComp.text) : null,
+        buttons: parseButtons(comps),
       });
     }
     return { ok: true, templates };
@@ -172,6 +210,7 @@ export async function listMetaTemplates(
       category: t.category != null ? String(t.category).toUpperCase() : null,
       language: t.language != null ? String(t.language) : null,
       bodyText: bodyComp?.text != null ? String(bodyComp.text) : null,
+      buttons: parseButtons(comps),
     });
   }
   return { ok: true, templates: templates.filter(t => t.name) };

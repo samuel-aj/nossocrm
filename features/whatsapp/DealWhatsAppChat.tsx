@@ -32,7 +32,7 @@ import {
   User,
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
-import { fillTemplate } from '@/lib/messageTemplates';
+import { fillTemplate, templateParams, TEMPLATE_BUTTON_LABEL, type TemplateButton } from '@/lib/messageTemplates';
 import { useWhatsAppChat, type WaChatMessage, type WaMediaKind, type WaSender } from './useWhatsAppChat';
 import { transcodeToMp3 } from './audioTranscode';
 
@@ -730,7 +730,19 @@ export function DealWhatsAppChat({
   // Modelos de mensagem GERAIS (aba Modelos): prontos pra inserir no composer
   // com as variáveis já preenchidas com os dados reais do lead/contato
   const [templatesOpen, setTemplatesOpen] = useState(false);
-  const templatesQ = useQuery<{ data: { id: string; name: string; type: string; body: string }[] }>({
+  const templatesQ = useQuery<{
+    data: {
+      id: string;
+      name: string;
+      type: string;
+      body: string;
+      language?: string;
+      meta_name?: string | null;
+      meta_status?: string | null;
+      connectionId?: string | null;
+      buttons?: TemplateButton[] | null;
+    }[];
+  }>({
     queryKey: ['messageTemplates'],
     queryFn: async () => {
       const res = await fetch('/api/message-templates', { credentials: 'include' });
@@ -741,15 +753,30 @@ export function DealWhatsAppChat({
     staleTime: 60000,
   });
   const generalTemplates = (templatesQ.data?.data ?? []).filter(t => t.type === 'general');
-  const applyTemplate = (body: string) => {
-    const filled = fillTemplate(body, {
+  const templateValues = useMemo(
+    () => ({
       'contato.nome': contact?.name || '',
       'contato.telefone': contact?.phone || '',
       ...templateContext,
-    });
+    }),
+    [contact?.name, contact?.phone, templateContext]
+  );
+  const applyTemplate = (body: string) => {
+    const filled = fillTemplate(body, templateValues);
     setText(t => (t.trim() ? `${t}\n${filled}` : filled));
     setTemplatesOpen(false);
   };
+  // Modelo da API oficial escolhido: fica "armado" no composer (prévia já
+  // preenchida) e sai como TEMPLATE de verdade pela Meta no Enviar — é o
+  // único jeito de falar com o lead fora da janela de 24h.
+  const [pendingTemplate, setPendingTemplate] = useState<{
+    id: string;
+    name: string;
+    metaName: string;
+    language: string;
+    body: string;
+    buttons: TemplateButton[] | null;
+  } | null>(null);
   // escolha do menu de anexo: "documento" força enviar como documento
   // (mesmo sendo imagem/vídeo), igual ao WhatsApp
   const forcedKindRef = useRef<'document' | null>(null);
@@ -811,6 +838,43 @@ export function DealWhatsAppChat({
   useEffect(() => {
     senderRef.current = activeSender;
   }, [activeSender]);
+  // Modelos APROVADOS do número que vai enviar (cada número tem os seus na Meta)
+  const senderIsApi = ['meta_cloud', 'evolution_business'].includes(String(activeSender?.provider ?? '').toLowerCase());
+  const apiTemplates = senderIsApi
+    ? (templatesQ.data?.data ?? []).filter(
+        t => t.type === 'whatsapp_api' && t.meta_status === 'APPROVED' && t.connectionId === activeSender?.id
+      )
+    : [];
+  const pickApiTemplate = (t: (typeof apiTemplates)[number]) => {
+    setTemplatesOpen(false);
+    if (String(activeSender?.provider ?? '').toLowerCase() !== 'meta_cloud' || !t.meta_name) {
+      // Evolution business: sem envio de template pela API dela; vai como texto
+      applyTemplate(t.body);
+      return;
+    }
+    setPendingTemplate({
+      id: t.id,
+      name: t.name,
+      metaName: t.meta_name,
+      language: t.language || 'pt_BR',
+      body: t.body,
+      buttons: t.buttons ?? null,
+    });
+  };
+  const sendPendingTemplate = () => {
+    if (!pendingTemplate || send.isPending || sendGateRef.current) return;
+    const tpl = pendingTemplate;
+    setPendingTemplate(null);
+    forceScrollRef.current = true;
+    send.mutate(
+      {
+        text: fillTemplate(tpl.body, templateValues),
+        template: { name: tpl.metaName, language: tpl.language, params: templateParams(tpl.body, templateValues) },
+        connectionId: connectionId ?? senderRef.current?.id,
+      },
+      { onError: () => setPendingTemplate(curr => curr ?? tpl) }
+    );
+  };
 
   // Divisórias por número na visão unificada: rótulo de cada número da org
   // (inclui desconectados/removidos) e flag pra dividir só quando a conversa
@@ -1541,9 +1605,11 @@ export function DealWhatsAppChat({
             </p>
             {templatesQ.isLoading ? (
               <p className="px-3 py-2 text-sm text-slate-400">Carregando...</p>
-            ) : generalTemplates.length === 0 ? (
+            ) : generalTemplates.length === 0 && apiTemplates.length === 0 ? (
               <p className="px-3 py-2 text-sm text-slate-400">
-                Nenhum modelo geral ainda. Crie em Configurações, aba Modelos.
+                {senderIsApi
+                  ? 'Nenhum modelo ainda. Crie em Modelos (gerais ou do WhatsApp API deste número).'
+                  : 'Nenhum modelo geral ainda. Crie em Configurações, aba Modelos.'}
               </p>
             ) : (
               generalTemplates.map(t => (
@@ -1561,6 +1627,33 @@ export function DealWhatsAppChat({
                   </span>
                 </button>
               ))
+            )}
+            {apiTemplates.length > 0 && (
+              <>
+                <p className="px-3 pt-2 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400 border-t border-slate-100 dark:border-white/10 mt-1">
+                  WhatsApp API · aprovados pela Meta
+                </p>
+                {apiTemplates.map(t => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => pickApiTemplate(t)}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-colors"
+                  >
+                    <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                      <span className="truncate">{t.name}</span>
+                      {t.buttons && t.buttons.length > 0 && (
+                        <span className="shrink-0 text-[9px] font-bold uppercase px-1 py-0.5 rounded bg-sky-100 dark:bg-sky-900/40 text-sky-600 dark:text-sky-300">
+                          {t.buttons.length} botão{t.buttons.length === 1 ? '' : 'es'}
+                        </span>
+                      )}
+                    </span>
+                    <span className="block text-xs text-slate-500 dark:text-slate-400 truncate">
+                      {t.body}
+                    </span>
+                  </button>
+                ))}
+              </>
             )}
           </div>
         )}
@@ -1717,6 +1810,53 @@ export function DealWhatsAppChat({
               )}{' '}
               Enviar áudio
             </button>
+          </div>
+        ) : pendingTemplate ? (
+          /* Modelo da API armado: prévia preenchida + Enviar (sai como template) */
+          <div className="rounded-xl border border-sky-200 dark:border-sky-500/30 bg-sky-50 dark:bg-sky-900/15 p-3">
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-sky-700 dark:text-sky-300">
+                <ClipboardList size={13} /> Modelo: {pendingTemplate.name}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPendingTemplate(null)}
+                className="text-slate-400 hover:text-red-500 p-1 rounded"
+                aria-label="Cancelar modelo"
+                title="Cancelar"
+              >
+                <X size={15} />
+              </button>
+            </div>
+            <p className="text-sm text-slate-800 dark:text-slate-100 whitespace-pre-wrap break-words">
+              {fillTemplate(pendingTemplate.body, templateValues)}
+            </p>
+            {pendingTemplate.buttons && pendingTemplate.buttons.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {pendingTemplate.buttons.map((b, i) => (
+                  <span
+                    key={i}
+                    className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-white dark:bg-black/20 border border-sky-200 dark:border-sky-500/30 text-sky-700 dark:text-sky-300"
+                    title={TEMPLATE_BUTTON_LABEL[b.type]}
+                  >
+                    {b.text}
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex items-center justify-between gap-2 mt-2">
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                Vai como modelo aprovado da Meta (funciona fora da janela de 24h).
+              </span>
+              <button
+                type="button"
+                onClick={sendPendingTemplate}
+                disabled={send.isPending}
+                className="shrink-0 h-9 px-4 inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-bold"
+              >
+                {send.isPending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} Enviar modelo
+              </button>
+            </div>
           </div>
         ) : (
           <div className="flex items-end gap-1.5">

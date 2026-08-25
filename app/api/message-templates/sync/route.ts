@@ -62,6 +62,7 @@ export async function POST(req: Request) {
 
   let updated = 0;
   let imported = 0;
+  const vistos = new Set<string>();
   for (const t of result.templates) {
     const match = existing.find(
       r => r.meta_name === t.name && (!t.language || (r.language ?? 'pt_BR') === t.language)
@@ -70,12 +71,14 @@ export async function POST(req: Request) {
     const safeCategory = t.category === 'UTILITY' || t.category === 'MARKETING' ? t.category : null;
 
     if (match) {
+      vistos.add(match.id);
       const { error } = await sb
         .from('message_templates')
         .update({
           meta_status: t.status,
           ...(safeCategory ? { category: safeCategory } : {}),
           connection_id: conn.id,
+          buttons: t.buttons,
           synced_at: now,
           updated_at: now,
         })
@@ -96,6 +99,7 @@ export async function POST(req: Request) {
       body: t.bodyText ?? '',
       meta_name: t.name,
       meta_status: t.status,
+      buttons: t.buttons,
       synced_at: now,
     };
     let ins = await sb.from('message_templates').insert({ ...baseRow, name: readable });
@@ -105,5 +109,14 @@ export async function POST(req: Request) {
     if (!ins.error) imported += 1;
   }
 
-  return NextResponse.json({ ok: true, updated, imported, total_meta: result.templates.length });
+  // A lista do CRM é um ESPELHO da Meta: modelo deste número (ou legado sem
+  // número) que não existe mais lá não pode ser enviado — sai da lista.
+  const sumidos = existing.filter(r => !vistos.has(r.id)).map(r => r.id);
+  let removed = 0;
+  if (sumidos.length > 0) {
+    const { error } = await sb.from('message_templates').delete().in('id', sumidos);
+    if (!error) removed = sumidos.length;
+  }
+
+  return NextResponse.json({ ok: true, updated, imported, removed, total_meta: result.templates.length });
 }

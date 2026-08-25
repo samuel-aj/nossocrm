@@ -3,9 +3,16 @@
 import React, { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowRight, Check, FileText, KeyRound, MessageCircle, Pencil, Plus, RefreshCw, Trash2, Variable, X } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Check, FileText, KeyRound, MessageCircle, MousePointerClick, Pencil, Plus, RefreshCw, Trash2, Variable, X } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
-import { TEMPLATE_VARIABLES, previewTemplate, toMetaName } from '@/lib/messageTemplates';
+import {
+  TEMPLATE_BUTTON_LABEL,
+  TEMPLATE_BUTTON_LIMITS,
+  TEMPLATE_VARIABLES,
+  previewTemplate,
+  toMetaName,
+  type TemplateButton,
+} from '@/lib/messageTemplates';
 
 // ---------------------------------------------------------------------------
 // Aba MODELOS (Configurações): modelos de mensagem da organização.
@@ -30,6 +37,7 @@ interface MessageTemplate {
   body: string;
   meta_name: string | null;
   meta_status: string | null;
+  buttons?: TemplateButton[] | null;
 }
 
 const LANGUAGES = [
@@ -70,7 +78,23 @@ export function MessageTemplatesManager() {
   const [category, setCategory] = useState<TemplateCategory>('UTILITY');
   const [language, setLanguage] = useState('pt_BR');
   const [body, setBody] = useState('');
+  // Botões do modelo da API (Resposta rápida | Link | Ligar), limites da Meta
+  const [buttons, setButtons] = useState<TemplateButton[]>([]);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const addButton = (type: TemplateButton['type']) =>
+    setButtons(prev => (prev.length >= TEMPLATE_BUTTON_LIMITS.total ? prev : [...prev, { type, text: '' }]));
+  const updateButton = (i: number, patch: Partial<TemplateButton>) =>
+    setButtons(prev => prev.map((b, j) => (j === i ? { ...b, ...patch } : b)));
+  const removeButton = (i: number) => setButtons(prev => prev.filter((_, j) => j !== i));
+  const urlCount = buttons.filter(b => b.type === 'URL').length;
+  const phoneCount = buttons.filter(b => b.type === 'PHONE_NUMBER').length;
+  const buttonsOk = buttons.every(
+    b =>
+      b.text.trim() !== '' &&
+      b.text.trim().length <= TEMPLATE_BUTTON_LIMITS.textLen &&
+      (b.type !== 'URL' || /^https?:\/\/\S+$/i.test((b.url ?? '').trim())) &&
+      (b.type !== 'PHONE_NUMBER' || /^\+?[0-9]{8,15}$/.test((b.phone_number ?? '').replace(/[\s()-]/g, '')))
+  );
 
   const listQ = useQuery<{ data: MessageTemplate[] }>({
     queryKey: ['messageTemplates'],
@@ -108,12 +132,9 @@ export function MessageTemplatesManager() {
   const apiLocked = tab === 'whatsapp_api' && connReady && !apiConnected;
   const templates = useMemo(() => listQ.data?.data ?? [], [listQ.data]);
   const generalTemplates = templates.filter(t => t.type === 'general');
-  // Modelos do número escolhido + legados sem número (adotados no 1º Sincronizar)
-  const apiTemplates = templates.filter(
-    t =>
-      t.type === 'whatsapp_api' &&
-      (apiConns.length < 2 || !selConnEfetiva || t.connectionId === selConnEfetiva || t.connectionId == null)
-  );
+  // SÓ os modelos do número escolhido: cada número tem os seus na Meta.
+  // (Modelo sem número = de uma conexão já excluída; some no Sincronizar.)
+  const apiTemplates = templates.filter(t => t.type === 'whatsapp_api' && !!selConnEfetiva && t.connectionId === selConnEfetiva);
 
   const resetForm = () => {
     setEditingId(null);
@@ -121,6 +142,7 @@ export function MessageTemplatesManager() {
     setCategory('UTILITY');
     setLanguage('pt_BR');
     setBody('');
+    setButtons([]);
   };
 
   const switchTab = (next: TemplateType) => {
@@ -139,6 +161,18 @@ export function MessageTemplatesManager() {
         language,
         body,
         ...(tab === 'whatsapp_api' && selConnEfetiva ? { connectionId: selConnEfetiva } : {}),
+        ...(tab === 'whatsapp_api' && buttons.length > 0
+          ? {
+              buttons: buttons.map(b => ({
+                type: b.type,
+                text: b.text.trim(),
+                ...(b.type === 'URL' ? { url: (b.url ?? '').trim() } : {}),
+                ...(b.type === 'PHONE_NUMBER'
+                  ? { phone_number: (b.phone_number ?? '').replace(/[\s()-]/g, '') }
+                  : {}),
+              })),
+            }
+          : {}),
       };
       return editingId
         ? fetchJson(`/api/message-templates/${encodeURIComponent(editingId)}`, {
@@ -178,14 +212,14 @@ export function MessageTemplatesManager() {
   // que existem lá e o CRM ainda não conhece
   const syncMut = useMutation({
     mutationFn: () =>
-      fetchJson<{ updated: number; imported: number; total_meta: number }>(
+      fetchJson<{ updated: number; imported: number; removed?: number; total_meta: number }>(
         '/api/message-templates/sync',
         { method: 'POST', body: JSON.stringify(selConnEfetiva ? { connectionId: selConnEfetiva } : {}) }
       ),
     onSuccess: r => {
       qc.invalidateQueries({ queryKey: ['messageTemplates'] });
       addToast(
-        `Sincronizado com a Meta: ${r.total_meta} template${r.total_meta === 1 ? '' : 's'} lá, ${r.imported} importado${r.imported === 1 ? '' : 's'}.`,
+        `Sincronizado com a Meta: ${r.total_meta} template${r.total_meta === 1 ? '' : 's'} lá, ${r.imported} importado${r.imported === 1 ? '' : 's'}${r.removed ? `, ${r.removed} removido${r.removed === 1 ? '' : 's'} (não existe mais na Meta)` : ''}.`,
         'success'
       );
     },
@@ -220,7 +254,7 @@ export function MessageTemplatesManager() {
     });
   };
 
-  const canSave = name.trim() !== '' && body.trim() !== '';
+  const canSave = name.trim() !== '' && body.trim() !== '' && (tab !== 'whatsapp_api' || buttonsOk);
 
   const renderTemplateCard = (t: MessageTemplate) => (
     <div
@@ -267,6 +301,19 @@ export function MessageTemplatesManager() {
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2 whitespace-pre-wrap break-words">
           {t.body}
         </p>
+        {t.buttons && t.buttons.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {t.buttons.map((b, i) => (
+              <span
+                key={i}
+                title={TEMPLATE_BUTTON_LABEL[b.type]}
+                className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-white/10"
+              >
+                <MousePointerClick size={10} /> {b.text}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
       <div className="flex gap-1 shrink-0">
         {t.type === 'general' && (
@@ -531,6 +578,109 @@ export function MessageTemplatesManager() {
             </p>
             <p className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap break-words">
               {previewBody(body)}
+            </p>
+            {tab === 'whatsapp_api' && buttons.some(b => b.text.trim()) && (
+              <div className="flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-slate-100 dark:border-white/10">
+                {buttons.filter(b => b.text.trim()).map((b, i) => (
+                  <span
+                    key={i}
+                    className="text-xs font-semibold px-3 py-1 rounded-lg bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-sky-700 dark:text-sky-300"
+                  >
+                    {b.text}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Botões do modelo (só WhatsApp API): a Meta cria junto com o corpo */}
+        {tab === 'whatsapp_api' && !editingId && (
+          <div className="mb-3">
+            <p className="text-xs font-bold text-slate-500 uppercase mb-1.5 flex items-center gap-1.5">
+              <MousePointerClick size={12} /> Botões
+              <span className="font-normal normal-case text-slate-400">· opcional, até {TEMPLATE_BUTTON_LIMITS.total}</span>
+            </p>
+            {buttons.length > 0 && (
+              <div className="space-y-2 mb-2">
+                {buttons.map((b, i) => (
+                  <div key={i} className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+                    <select
+                      value={b.type}
+                      onChange={e => updateButton(i, { type: e.target.value as TemplateButton['type'], url: undefined, phone_number: undefined })}
+                      className="bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-2 py-2 text-xs outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                    >
+                      <option value="QUICK_REPLY">Resposta rápida</option>
+                      <option value="URL" disabled={b.type !== 'URL' && urlCount >= TEMPLATE_BUTTON_LIMITS.url}>Link</option>
+                      <option value="PHONE_NUMBER" disabled={b.type !== 'PHONE_NUMBER' && phoneCount >= TEMPLATE_BUTTON_LIMITS.phone}>Ligar</option>
+                    </select>
+                    <input
+                      type="text"
+                      value={b.text}
+                      maxLength={TEMPLATE_BUTTON_LIMITS.textLen}
+                      onChange={e => updateButton(i, { text: e.target.value })}
+                      placeholder="Texto do botão"
+                      className="flex-1 min-w-[140px] bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                    />
+                    {b.type === 'URL' && (
+                      <input
+                        type="url"
+                        value={b.url ?? ''}
+                        onChange={e => updateButton(i, { url: e.target.value })}
+                        placeholder="https://..."
+                        className="flex-1 min-w-[160px] bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                      />
+                    )}
+                    {b.type === 'PHONE_NUMBER' && (
+                      <input
+                        type="tel"
+                        value={b.phone_number ?? ''}
+                        onChange={e => updateButton(i, { phone_number: e.target.value })}
+                        placeholder="+55 69 99999-9999"
+                        className="flex-1 min-w-[160px] bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                      />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeButton(i)}
+                      className="text-slate-400 hover:text-red-500 p-2 rounded hover:bg-red-50 dark:hover:bg-red-900/20"
+                      title="Remover botão"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => addButton('QUICK_REPLY')}
+                disabled={buttons.length >= TEMPLATE_BUTTON_LIMITS.total}
+                className="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-white/10 hover:bg-slate-200 dark:hover:bg-white/15 text-slate-700 dark:text-slate-200 text-[11px] font-semibold transition-colors disabled:opacity-50"
+              >
+                + Resposta rápida
+              </button>
+              <button
+                type="button"
+                onClick={() => addButton('URL')}
+                disabled={buttons.length >= TEMPLATE_BUTTON_LIMITS.total || urlCount >= TEMPLATE_BUTTON_LIMITS.url}
+                className="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-white/10 hover:bg-slate-200 dark:hover:bg-white/15 text-slate-700 dark:text-slate-200 text-[11px] font-semibold transition-colors disabled:opacity-50"
+              >
+                + Link
+              </button>
+              <button
+                type="button"
+                onClick={() => addButton('PHONE_NUMBER')}
+                disabled={buttons.length >= TEMPLATE_BUTTON_LIMITS.total || phoneCount >= TEMPLATE_BUTTON_LIMITS.phone}
+                className="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-white/10 hover:bg-slate-200 dark:hover:bg-white/15 text-slate-700 dark:text-slate-200 text-[11px] font-semibold transition-colors disabled:opacity-50"
+              >
+                + Ligar
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-400 mt-1">
+              Resposta rápida devolve o texto do botão; Link abre um site; Ligar disca pro número. Máximo de{' '}
+              {TEMPLATE_BUTTON_LIMITS.url} links e {TEMPLATE_BUTTON_LIMITS.phone} de ligar.
             </p>
           </div>
         )}

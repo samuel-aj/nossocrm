@@ -62,6 +62,8 @@ export interface SendChatPayload {
   kind?: WaMediaKind;
   /** Multi-número: qual conexão envia (omitido = a padrão da org) */
   connectionId?: string;
+  /** Modelo aprovado da Meta: nome na Meta + idioma + valores dos {{n}} */
+  template?: { name: string; language: string; params: string[] };
 }
 
 /**
@@ -160,6 +162,7 @@ export function useWhatsAppChat(phoneE164: string | null, connectionId?: string 
           text: p.text || '',
           media,
           ...(p.connectionId ? { connectionId: p.connectionId } : {}),
+          ...(p.template ? { template: p.template } : {}),
         }),
       });
       const json = await res.json().catch(() => ({}));

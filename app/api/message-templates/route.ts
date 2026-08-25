@@ -6,7 +6,28 @@ import { withTabOrg } from '@/lib/supabase/tabOrgScope';
 import { getBusinessConnectionByOrg, getConnectionByIdForOrg } from '@/lib/whatsapp/service';
 import { isEvolutionBusinessConnection } from '@/lib/whatsapp';
 import { createMetaTemplate } from '@/lib/whatsapp/templates';
-import { toMetaBody, toMetaName } from '@/lib/messageTemplates';
+import { TEMPLATE_BUTTON_LIMITS, toMetaBody, toMetaName } from '@/lib/messageTemplates';
+
+const ButtonSchema = z
+  .object({
+    type: z.enum(['QUICK_REPLY', 'URL', 'PHONE_NUMBER']),
+    text: z.string().trim().min(1).max(TEMPLATE_BUTTON_LIMITS.textLen),
+    url: z.string().trim().url().max(2000).optional(),
+    phone_number: z.string().trim().regex(/^\+?[0-9]{8,15}$/).optional(),
+  })
+  .strict()
+  .refine(b => b.type !== 'URL' || !!b.url, { message: 'Botão de link precisa da URL' })
+  .refine(b => b.type !== 'PHONE_NUMBER' || !!b.phone_number, { message: 'Botão de ligar precisa do telefone' });
+
+const ButtonsSchema = z
+  .array(ButtonSchema)
+  .max(TEMPLATE_BUTTON_LIMITS.total)
+  .refine(bs => bs.filter(b => b.type === 'URL').length <= TEMPLATE_BUTTON_LIMITS.url, {
+    message: 'No máximo 2 botões de link',
+  })
+  .refine(bs => bs.filter(b => b.type === 'PHONE_NUMBER').length <= TEMPLATE_BUTTON_LIMITS.phone, {
+    message: 'No máximo 1 botão de ligar',
+  });
 
 export const runtime = 'nodejs';
 
@@ -21,6 +42,8 @@ const CreateSchema = z
     body: z.string().min(1).max(4000),
     /** Org com mais de um número de API: em qual conexão criar o modelo */
     connectionId: z.string().uuid().optional(),
+    /** Só whatsapp_api: botões do template (criados na Meta junto) */
+    buttons: ButtonsSchema.optional(),
   })
   .strict()
   .refine(v => v.type !== 'whatsapp_api' || !!v.category, {
@@ -60,6 +83,7 @@ function mapRow(row: any) {
     meta_name: (row.meta_name ?? null) as string | null,
     meta_status: (row.meta_status ?? null) as string | null,
     connectionId: (row.connection_id ?? null) as string | null,
+    buttons: (Array.isArray(row.buttons) ? row.buttons : null) as import('@/lib/messageTemplates').TemplateButton[] | null,
     created_at: row.created_at as string | null,
   };
 }
@@ -71,7 +95,7 @@ export async function GET() {
   const sb = createStaticAdminClient();
   const { data, error } = await sb
     .from('message_templates')
-    .select('id,name,type,category,language,body,meta_name,meta_status,connection_id,created_at')
+    .select('id,name,type,category,language,body,meta_name,meta_status,connection_id,buttons,created_at')
     .eq('organization_id', auth.profile.organization_id)
     .order('created_at', { ascending: true });
 
@@ -119,6 +143,7 @@ export async function POST(req: Request) {
       language: parsed.data.language?.trim() || 'pt_BR',
       bodyText: meta.text,
       examples: meta.examples,
+      buttons: parsed.data.buttons ?? null,
     });
     if (!created.ok) {
       return NextResponse.json({ error: `A Meta recusou o template: ${created.error}` }, { status: 502 });
@@ -139,8 +164,9 @@ export async function POST(req: Request) {
       meta_status: metaStatus,
       ...(metaName ? { synced_at: new Date().toISOString() } : {}),
       ...(parsed.data.type === 'whatsapp_api' && connIdUsada ? { connection_id: connIdUsada } : {}),
+      buttons: parsed.data.type === 'whatsapp_api' && parsed.data.buttons?.length ? parsed.data.buttons : null,
     })
-    .select('id,name,type,category,language,body,meta_name,meta_status,connection_id,created_at')
+    .select('id,name,type,category,language,body,meta_name,meta_status,connection_id,buttons,created_at')
     .single();
 
   if (error) {

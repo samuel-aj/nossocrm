@@ -67,6 +67,36 @@ export function toMetaBody(body: string): { text: string; variables: string[]; e
   return { text, variables: order, examples };
 }
 
+/**
+ * Valores das variáveis na ORDEM dos placeholders {{1}}, {{2}}... do template
+ * na Meta (mesma ordem do toMetaBody). A Meta rejeita parâmetro vazio, por
+ * isso variável sem valor vira '-'.
+ */
+export function templateParams(body: string, values: Record<string, string | undefined>): string[] {
+  const { variables } = toMetaBody(body);
+  return variables.map(key => (values[key.replace(/[{}]/g, '')] ?? '').trim() || '-');
+}
+
+/** Botão de template da Meta (só modelos do WhatsApp API). */
+export interface TemplateButton {
+  type: 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER';
+  /** Rótulo do botão (até 25 caracteres) */
+  text: string;
+  /** Só URL: link fixo */
+  url?: string;
+  /** Só PHONE_NUMBER: E.164 (ex.: +5569999999999) */
+  phone_number?: string;
+}
+
+/** Limites da Meta por template */
+export const TEMPLATE_BUTTON_LIMITS = { total: 10, url: 2, phone: 1, textLen: 25 } as const;
+
+export const TEMPLATE_BUTTON_LABEL: Record<TemplateButton['type'], string> = {
+  QUICK_REPLY: 'Resposta rápida',
+  URL: 'Link',
+  PHONE_NUMBER: 'Ligar',
+};
+
 /** Nome de template no formato exigido pela Meta: minusculas_com_underscore. */
 export function toMetaName(name: string): string {
   return name

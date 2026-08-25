@@ -31,6 +31,11 @@ export async function POST(req: Request) {
     /** Multi-número: qual conexão envia (omitido = a padrão da org) */
     connectionId?: string;
     media?: { path?: string; kind?: string; mimeType?: string; fileName?: string };
+    /**
+     * Modelo aprovado da Meta (fora da janela de 24h só ele passa). `text` é
+     * o corpo já preenchido, gravado no chat; `params` vão nos {{n}} do modelo.
+     */
+    template?: { name?: string; language?: string; params?: string[] };
   };
   try {
     body = await req.json();
@@ -41,9 +46,10 @@ export async function POST(req: Request) {
   const text = (body.text || '').trim();
   const media = body.media;
   const mediaKind = media?.kind as OutboundMediaKind | undefined;
+  const templateName = (body.template?.name || '').trim();
 
   if (!to) return json({ error: 'to é obrigatório' }, 400);
-  if (!text && !media) return json({ error: 'text ou media é obrigatório' }, 400);
+  if (!text && !media && !templateName) return json({ error: 'text ou media é obrigatório' }, 400);
   if (media && (!media.path || !mediaKind || !MEDIA_KINDS.includes(mediaKind))) {
     return json({ error: 'media.path e media.kind (image|video|document|audio|sticker) são obrigatórios' }, 400);
   }
@@ -94,14 +100,25 @@ export async function POST(req: Request) {
       fileName: media.fileName,
       caption: text || undefined,
     });
+  } else if (templateName && provider.sendTemplate) {
+    const params = (body.template?.params ?? []).map(p => String(p ?? '').trim() || '-');
+    result = await provider.sendTemplate({
+      to,
+      name: templateName,
+      language: (body.template?.language || 'pt_BR').trim(),
+      components: params.length
+        ? [{ type: 'body', parameters: params.map(p => ({ type: 'text', text: p })) }]
+        : undefined,
+    });
   } else {
-    result = await provider.sendText({ to, text });
+    // provedor sem envio de modelo (QR/Evolution): vai o texto já preenchido
+    result = await provider.sendText({ to, text: text || `[Modelo: ${templateName}]` });
   }
 
   const message = await recordOutboundMessage(auth.admin, {
     orgId: auth.user.organizationId,
     conversationId: conv.id,
-    text,
+    text: text || (templateName ? `[Modelo: ${templateName}]` : ''),
     providerMessageId: result.providerMessageId,
     fromPhone: conn.phone_number,
     toPhone: to,
