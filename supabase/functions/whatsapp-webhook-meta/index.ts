@@ -166,18 +166,17 @@ async function curarConexao(supabase: any, supabaseUrl: string, conn: ConnRow): 
 async function agendarCura(supabase: any, supabaseUrl: string, conn: ConnRow): Promise<boolean> {
   const agora = Date.now();
   if ((ultimaCura.get(conn.id) ?? 0) > agora - CURA_TTL_MS) return false;
-  const limite = new Date(agora - CURA_TTL_MS).toISOString();
-  const { data: pegou, error } = await supabase
-    .from("wa_connections")
-    .update({ last_webhook_heal_at: new Date(agora).toISOString() })
-    .eq("id", conn.id)
-    .or(`last_webhook_heal_at.is.null,last_webhook_heal_at.lt.${limite}`)
-    .select("id");
+  // RPC (UPDATE ... RETURNING atômico): o PATCH do PostgREST com filtro `or`
+  // dá 42703 nessa coluna, por isso a trava vive numa função SQL.
+  const { data: pegou, error } = await supabase.rpc("wa_claim_heal", {
+    p_connection_id: conn.id,
+    p_ttl_seconds: Math.floor(CURA_TTL_MS / 1000),
+  });
   if (error) {
     console.error(`[wa-meta-cura] conn=${conn.id} trava falhou: ${error.message}`);
     return false;
   }
-  if (!Array.isArray(pegou) || pegou.length === 0) return false;
+  if (pegou !== true) return false;
   // só marca localmente quando a trava foi obtida (falha no banco tenta de novo)
   ultimaCura.set(conn.id, agora);
   const p = curarConexao(supabase, supabaseUrl, conn).catch((e) => console.error("[wa-meta-cura] falhou:", e));

@@ -7,3 +7,21 @@
 ALTER TABLE public.wa_connections ADD COLUMN IF NOT EXISTS forward_webhook_url TEXT;
 ALTER TABLE public.wa_connections ADD COLUMN IF NOT EXISTS last_webhook_heal_at TIMESTAMPTZ;
 ALTER TABLE public.wa_connections ADD COLUMN IF NOT EXISTS token_renewed_at TIMESTAMPTZ;
+
+-- Trava atômica da cura (chamada pela edge function via RPC com service role).
+CREATE OR REPLACE FUNCTION public.wa_claim_heal(p_connection_id uuid, p_ttl_seconds int DEFAULT 600)
+RETURNS boolean
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  WITH u AS (
+    UPDATE public.wa_connections
+       SET last_webhook_heal_at = now()
+     WHERE id = p_connection_id
+       AND (last_webhook_heal_at IS NULL OR last_webhook_heal_at < now() - make_interval(secs => p_ttl_seconds))
+    RETURNING id
+  )
+  SELECT EXISTS (SELECT 1 FROM u);
+$$;
+REVOKE ALL ON FUNCTION public.wa_claim_heal(uuid, int) FROM PUBLIC, anon, authenticated;
