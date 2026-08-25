@@ -6,6 +6,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { brPhoneVariants } from '@/lib/phone';
 
 export interface WaConnectionRow {
+  /** Espelho: URL de outro sistema que também recebe os webhooks brutos da Meta */
+  forward_webhook_url?: string | null;
   id: string;
   organization_id: string;
   provider: string;
@@ -307,6 +309,68 @@ async function touchConversation(
     .from('wa_conversations')
     .update({ last_message_at: new Date().toISOString(), last_message_preview: preview.slice(0, 140) })
     .eq('id', conversationId);
+}
+
+/**
+ * ESPELHO ENTRE ORGS: o mesmo número (phone_number_id da Meta) pode estar
+ * conectado em mais de uma organização. Um envio feito numa org é gravado
+ * também no chat das outras (como enviada por fora), porque a Meta NÃO ecoa
+ * envios feitos por API. Best-effort: nunca derruba o envio principal.
+ * Mídia: o arquivo fica no Storage da org que enviou (caminho por org), então
+ * nas irmãs entra só a marcação do tipo.
+ */
+export async function replicateOutboundToSiblings(
+  admin: SupabaseClient,
+  conn: Pick<WaConnectionRow, 'id' | 'provider' | 'meta_phone_number_id' | 'phone_number'>,
+  input: {
+    toPhone: string;
+    text: string | null;
+    providerMessageId?: string | null;
+    status?: string;
+    mediaType?: string | null;
+  }
+): Promise<void> {
+  try {
+    if (String(conn.provider) !== 'meta_cloud' || !conn.meta_phone_number_id) return;
+    const { data: siblings } = await admin
+      .from('wa_connections')
+      .select('id, organization_id')
+      .eq('provider', 'meta_cloud')
+      .eq('meta_phone_number_id', conn.meta_phone_number_id)
+      .eq('status', 'connected')
+      .neq('id', conn.id);
+    for (const s of (siblings ?? []) as Array<{ id: string; organization_id: string }>) {
+      try {
+        const conv = await ensureConversation(admin, s.organization_id, s.id, input.toPhone);
+        const body = input.text || (input.mediaType ? `[${input.mediaType} enviado por outra organização]` : null);
+        const { error } = await admin.from('wa_messages').insert({
+          organization_id: s.organization_id,
+          conversation_id: conv.id,
+          direction: 'out',
+          status: input.status ?? 'sent',
+          body,
+          evolution_message_id: input.providerMessageId ?? null,
+          from_phone: conn.phone_number ?? null,
+          to_phone: input.toPhone,
+          sent_by: null,
+          source: 'echo',
+        });
+        if (error) continue; // duplicado (índice por org + id do provedor) = já estava lá
+        await admin
+          .from('wa_conversations')
+          .update({
+            last_message_at: new Date().toISOString(),
+            last_message_preview: (body ?? '').slice(0, 140),
+            unread_count: 0,
+          })
+          .eq('id', conv.id);
+      } catch (e) {
+        console.error('[wa] replicar envio pra org irmã falhou:', (e as Error).message);
+      }
+    }
+  } catch (e) {
+    console.error('[wa] replicar envio falhou:', (e as Error).message);
+  }
 }
 
 export async function recordOutboundMessage(

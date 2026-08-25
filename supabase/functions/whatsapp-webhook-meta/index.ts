@@ -24,10 +24,146 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") ?? "v21.0";
 
-// AUTO-CURA da assinatura: conexões já verificadas nesta instância (o isolate
-// recicla de tempos em tempos, então isso roda algumas vezes por dia, no
-// máximo — chamadas idempotentes na Graph API).
-const assinaturaVerificada = new Set<string>();
+// AUTO-CURA da assinatura: última cura por conexão nesta instância. Repete a
+// cada CURA_TTL_MS — se outro sistema "rouba" o webhook (ex.: outro CRM
+// configurado com o mesmo app/WABA), o CRM retoma sozinho em minutos. O ping
+// periódico chega pelo pg_cron em POST /whatsapp-webhook-meta/heal-all.
+const CURA_TTL_MS = 10 * 60 * 1000;
+const RENOVACAO_TTL_MS = 24 * 60 * 60 * 1000;
+const ultimaCura = new Map<string, number>();
+const ultimaRenovacao = new Map<string, number>();
+
+// deno-lint-ignore no-explicit-any
+type ConnRow = any;
+
+async function hmacSha256Hex(secret: string, body: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body));
+  return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Reaplica a assinatura do webhook desta conexão na Meta (app + override da
+ * WABA) e renova o token do Cadastro Embutido (1x/dia). Idempotente.
+ */
+// deno-lint-ignore no-explicit-any
+async function curarConexao(supabase: any, supabaseUrl: string, conn: ConnRow): Promise<void> {
+  const token = String(conn.instance_token ?? "");
+  const base = supabaseUrl.replace(/\/+$/, "");
+  const cb = `${base}/functions/v1/whatsapp-webhook-meta/${conn.webhook_secret}`;
+  const nossoPrefixo = `${base}/functions/v1/whatsapp-webhook-meta/`;
+  const { data: full } = await supabase
+    .from("wa_connections")
+    .select("meta_app_id, meta_app_secret, meta_waba_id")
+    .eq("id", conn.id)
+    .maybeSingle();
+  const appId = String(full?.meta_app_id ?? "").trim();
+  const appSecret = String(full?.meta_app_secret ?? "").trim();
+  const wabaId = String(full?.meta_waba_id ?? "").trim();
+  if (appId && appSecret) {
+    const appToken = `${appId}|${appSecret}`;
+    const atual = await fetch(
+      `https://graph.facebook.com/${GRAPH_VERSION}/${appId}/subscriptions?access_token=${encodeURIComponent(appToken)}`,
+    ).then((r) => r.json()).catch((e) => ({ error: String(e) }));
+    const sub = Array.isArray(atual?.data)
+      ? atual.data.find((d: { object?: string }) => d?.object === "whatsapp_business_account")
+      : null;
+    const camposAtuais: string[] = Array.isArray(sub?.fields)
+      ? sub.fields.map((f: { name?: string }) => String(f?.name ?? ""))
+      : [];
+    const jaNosso = typeof sub?.callback_url === "string" && sub.callback_url.startsWith(nossoPrefixo) &&
+      camposAtuais.includes("messages") &&
+      (camposAtuais.includes("smb_message_echoes") || camposAtuais.includes("message_echoes"));
+    console.log(
+      `[wa-meta-cura] conn=${conn.id} app_callback=${String(sub?.callback_url ?? "").slice(0, 120)} campos=${camposAtuais.join(",")} ok=${jaNosso}`,
+    );
+    // Só reescreve o webhook do APP quando ele NÃO aponta pro CRM (ou perdeu
+    // campos): o app é compartilhado por todos os números; o roteamento por
+    // número é o override da WABA, logo abaixo.
+    if (!jaNosso) {
+      for (
+        const fields of [
+          "messages,message_echoes,smb_message_echoes",
+          "messages,smb_message_echoes",
+          "messages,message_echoes",
+        ]
+      ) {
+        const r = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${appId}/subscriptions`, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            object: "whatsapp_business_account",
+            callback_url: cb,
+            verify_token: String(conn.webhook_secret),
+            fields,
+            access_token: appToken,
+          }).toString(),
+        }).then((r) => r.json()).catch((e) => ({ error: String(e) }));
+        const ok = r?.success === true;
+        console.log(
+          `[wa-meta-cura] conn=${conn.id} assinar[${fields}] => ${ok ? "OK" : JSON.stringify(r?.error?.message ?? r).slice(0, 300)}`,
+        );
+        if (ok) break;
+      }
+    }
+  } else {
+    console.log(`[wa-meta-cura] conn=${conn.id} sem app_id/app_secret salvos`);
+  }
+  if (wabaId && token) {
+    // Override da WABA: é ISSO que garante que os eventos DESTE número chegam
+    // aqui, mesmo que outro sistema tenha mexido no app.
+    const ov = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${wabaId}/subscribed_apps`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        override_callback_uri: cb,
+        verify_token: String(conn.webhook_secret),
+        access_token: token,
+      }).toString(),
+    }).then((r) => r.json()).catch((e) => ({ error: String(e) }));
+    console.log(`[wa-meta-cura] conn=${conn.id} override => ${JSON.stringify(ov).slice(0, 300)}`);
+  }
+  // RENOVAÇÃO do token (só Cadastro Embutido, token de 60 dias): 1x por dia.
+  const agora = Date.now();
+  if (
+    String(conn.base_url ?? "") === "embedded_signup" && appId && appSecret && token &&
+    (ultimaRenovacao.get(conn.id) ?? 0) < agora - RENOVACAO_TTL_MS
+  ) {
+    ultimaRenovacao.set(conn.id, agora);
+    const ren = await fetch(
+      `https://graph.facebook.com/${GRAPH_VERSION}/oauth/access_token?grant_type=fb_exchange_token&client_id=${encodeURIComponent(appId)}&client_secret=${encodeURIComponent(appSecret)}&fb_exchange_token=${encodeURIComponent(token)}`,
+    ).then((r) => r.json()).catch((e) => ({ error: { message: String(e) } }));
+    const novoTok = (ren as { access_token?: string }).access_token;
+    if (novoTok && novoTok !== token) {
+      const up = await supabase.from("wa_connections").update({ instance_token: novoTok }).eq("id", conn.id);
+      console.log(`[wa-meta-cura] conn=${conn.id} token renovado => ${up.error ? up.error.message : "OK"}`);
+    } else if ((ren as { error?: { message?: string } }).error) {
+      console.log(`[wa-meta-cura] conn=${conn.id} renovacao falhou => ${(ren as { error?: { message?: string } }).error?.message}`);
+    }
+  }
+}
+
+/** Agenda a cura em background se a última desta conexão já passou do TTL. */
+// deno-lint-ignore no-explicit-any
+function agendarCura(supabase: any, supabaseUrl: string, conn: ConnRow): boolean {
+  const agora = Date.now();
+  if ((ultimaCura.get(conn.id) ?? 0) > agora - CURA_TTL_MS) return false;
+  ultimaCura.set(conn.id, agora);
+  const p = curarConexao(supabase, supabaseUrl, conn).catch((e) => console.error("[wa-meta-cura] falhou:", e));
+  try {
+    // @ts-ignore: EdgeRuntime existe no runtime das Edge Functions da Supabase
+    EdgeRuntime.waitUntil(p);
+  } catch {
+    void p;
+  }
+  return true;
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -183,152 +319,14 @@ async function downloadMetaMedia(
   }
 }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
-
-  const supabaseUrl = Deno.env.get("CRM_SUPABASE_URL") ?? Deno.env.get("SUPABASE_URL");
-  const serviceKey =
-    Deno.env.get("CRM_SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if (!supabaseUrl || !serviceKey) return json(500, { error: "Supabase não configurado no runtime" });
-  const supabase = createClient(supabaseUrl, serviceKey);
-
-  const pathSecret = getSecretFromPath(req);
-  if (!pathSecret) return json(404, { error: "sem secret" });
-
-  // Resolve a conexão pelo secret do path (cada org tem sua URL/secret).
-  const { data: conn } = await supabase
-    .from("wa_connections")
-    .select("id, organization_id, webhook_secret, instance_token, provider, meta_phone_number_id, phone_number, status, base_url")
-    .eq("webhook_secret", pathSecret)
-    .maybeSingle();
-
-  // --- Verificação da Meta (GET) ---
-  if (req.method === "GET") {
-    const u = new URL(req.url);
-    const mode = u.searchParams.get("hub.mode");
-    const verifyToken = u.searchParams.get("hub.verify_token");
-    const challenge = u.searchParams.get("hub.challenge") ?? "";
-    // verify_token esperado = o próprio webhook_secret da conexão.
-    if (mode === "subscribe" && conn && verifyToken && String(verifyToken) === String(conn.webhook_secret)) {
-      return new Response(challenge, { status: 200, headers: { "Content-Type": "text/plain" } });
-    }
-    return json(403, { error: "verify token inválido" });
-  }
-
-  if (req.method !== "POST") return json(405, { error: "Método não permitido" });
-  if (!conn) return json(200, { ok: true, ignored: "secret nao vinculado" });
-  if (String(conn.provider) !== "meta_cloud") return json(200, { ok: true, ignored: "conexao nao e meta_cloud" });
-  // Conexão DESATIVADA (admin desconectou = credenciais zeradas): ignora tudo.
-  // Sem esse gate, o webhook ressuscitaria o status pra 'connected' e seguiria
-  // gravando mensagens depois do Desconectar (o webhook na Meta é manual e não
-  // some no DELETE). Enquanto o número não for removido lá, a URL segue viva.
-  if (!conn.instance_token || !conn.meta_phone_number_id) {
-    return json(200, { ok: true, ignored: "conexao desativada" });
-  }
-
+/**
+ * Processa os eventos do payload PARA UMA conexão (org): mensagens, ecos,
+ * statuses e mídia, cada um no chat da org dona da conexão.
+ */
+// deno-lint-ignore no-explicit-any
+async function processarEventos(supabase: any, conn: ConnRow, payload: any): Promise<void> {
   const orgId = conn.organization_id as string;
   const token = String(conn.instance_token ?? "");
-
-  // AUTO-CURA + DIAGNÓSTICO da assinatura de webhook na Meta (uma vez por
-  // conexão por instância): loga os campos REALMENTE assinados e reaplica o
-  // conjunto completo (messages + ecos), sem depender de clique no CRM.
-  if (!assinaturaVerificada.has(conn.id as string)) {
-    assinaturaVerificada.add(conn.id as string);
-    const base = supabaseUrl.replace(/\/+$/, "");
-    const cb = `${base}/functions/v1/whatsapp-webhook-meta/${conn.webhook_secret}`;
-    const cura = (async () => {
-      try {
-        const { data: full } = await supabase
-          .from("wa_connections")
-          .select("meta_app_id, meta_app_secret, meta_waba_id")
-          .eq("id", conn.id)
-          .maybeSingle();
-        const appId = String(full?.meta_app_id ?? "").trim();
-        const appSecret = String(full?.meta_app_secret ?? "").trim();
-        const wabaId = String(full?.meta_waba_id ?? "").trim();
-        if (appId && appSecret) {
-          const appToken = `${appId}|${appSecret}`;
-          const atual = await fetch(
-            `https://graph.facebook.com/${GRAPH_VERSION}/${appId}/subscriptions?access_token=${encodeURIComponent(appToken)}`
-          ).then((r) => r.json()).catch((e) => ({ error: String(e) }));
-          console.log(
-            `[wa-meta-cura] conn=${conn.id} campos_atuais=${JSON.stringify(atual?.data ?? atual?.error ?? atual).slice(0, 600)}`
-          );
-          for (const fields of [
-            "messages,message_echoes,smb_message_echoes",
-            "messages,smb_message_echoes",
-            "messages,message_echoes",
-          ]) {
-            const r = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${appId}/subscriptions`, {
-              method: "POST",
-              headers: { "content-type": "application/x-www-form-urlencoded" },
-              body: new URLSearchParams({
-                object: "whatsapp_business_account",
-                callback_url: cb,
-                verify_token: String(conn.webhook_secret),
-                fields,
-                access_token: appToken,
-              }).toString(),
-            }).then((r) => r.json()).catch((e) => ({ error: String(e) }));
-            const ok = r?.success === true;
-            console.log(
-              `[wa-meta-cura] conn=${conn.id} assinar[${fields}] => ${ok ? "OK" : JSON.stringify(r?.error?.message ?? r).slice(0, 300)}`
-            );
-            if (ok) break;
-          }
-        } else {
-          console.log(`[wa-meta-cura] conn=${conn.id} sem app_id/app_secret salvos`);
-        }
-        if (wabaId && token) {
-          const ov = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${wabaId}/subscribed_apps`, {
-            method: "POST",
-            headers: { "content-type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({
-              override_callback_uri: cb,
-              verify_token: String(conn.webhook_secret),
-              access_token: token,
-            }).toString(),
-          }).then((r) => r.json()).catch((e) => ({ error: String(e) }));
-          console.log(`[wa-meta-cura] conn=${conn.id} override => ${JSON.stringify(ov).slice(0, 300)}`);
-        }
-        // RENOVAÇÃO do token (só conexões do Cadastro Embutido, cujo token
-        // expira em 60 dias): troca por um novo de 60 dias a cada ciclo da
-        // autocura — o token nunca chega perto de vencer. Conexões manuais
-        // (token permanente) ficam intocadas.
-        if (String(conn.base_url ?? "") === "embedded_signup" && appId && appSecret && token) {
-          const ren = await fetch(
-            `https://graph.facebook.com/${GRAPH_VERSION}/oauth/access_token?grant_type=fb_exchange_token&client_id=${encodeURIComponent(appId)}&client_secret=${encodeURIComponent(appSecret)}&fb_exchange_token=${encodeURIComponent(token)}`
-          ).then((r) => r.json()).catch((e) => ({ error: { message: String(e) } }));
-          const novoTok = (ren as { access_token?: string }).access_token;
-          if (novoTok && novoTok !== token) {
-            const up = await supabase
-              .from("wa_connections")
-              .update({ instance_token: novoTok })
-              .eq("id", conn.id);
-            console.log(`[wa-meta-cura] conn=${conn.id} token renovado => ${up.error ? up.error.message : "OK"}`);
-          } else if ((ren as { error?: { message?: string } }).error) {
-            console.log(`[wa-meta-cura] conn=${conn.id} renovacao falhou => ${(ren as { error?: { message?: string } }).error?.message}`);
-          }
-        }
-      } catch (e) {
-        console.error("[wa-meta-cura] falhou:", e);
-      }
-    })();
-    try {
-      // @ts-ignore: EdgeRuntime existe no runtime das Edge Functions da Supabase
-      EdgeRuntime.waitUntil(cura);
-    } catch {
-      void cura;
-    }
-  }
-
-  // deno-lint-ignore no-explicit-any
-  let payload: any;
-  try {
-    payload = await req.json();
-  } catch {
-    return json(400, { error: "JSON inválido" });
-  }
 
   const entries = Array.isArray(payload?.entry) ? payload.entry : [];
   for (const entry of entries) {
@@ -611,6 +609,130 @@ Deno.serve(async (req) => {
           await supabase.rpc("wa_increment_unread", { p_conversation_id: convId });
         }
       }
+    }
+  }
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
+
+  const supabaseUrl = Deno.env.get("CRM_SUPABASE_URL") ?? Deno.env.get("SUPABASE_URL");
+  const serviceKey =
+    Deno.env.get("CRM_SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseUrl || !serviceKey) return json(500, { error: "Supabase não configurado no runtime" });
+  const supabase = createClient(supabaseUrl, serviceKey);
+
+  const pathSecret = getSecretFromPath(req);
+  if (!pathSecret) return json(404, { error: "sem secret" });
+
+  // Ping do pg_cron (a cada 10 min): reaplica o webhook de todos os números
+  // da API oficial. Sem segredo na URL — é idempotente e limitado pelo TTL.
+  if (pathSecret === "heal-all") {
+    const { data: conns } = await supabase
+      .from("wa_connections")
+      .select("id, organization_id, webhook_secret, instance_token, provider, meta_phone_number_id, phone_number, status, base_url")
+      .eq("provider", "meta_cloud")
+      .eq("status", "connected");
+    let agendadas = 0;
+    for (const c of conns ?? []) {
+      if (!c.instance_token || !c.webhook_secret) continue;
+      if (agendarCura(supabase, supabaseUrl, c)) agendadas += 1;
+    }
+    return json(200, { ok: true, conexoes: (conns ?? []).length, curas_agendadas: agendadas });
+  }
+
+  // Resolve a conexão pelo secret do path (cada org tem sua URL/secret).
+  const { data: conn } = await supabase
+    .from("wa_connections")
+    .select("id, organization_id, webhook_secret, instance_token, provider, meta_phone_number_id, phone_number, status, base_url, forward_webhook_url, meta_app_secret")
+    .eq("webhook_secret", pathSecret)
+    .maybeSingle();
+
+  // --- Verificação da Meta (GET) ---
+  if (req.method === "GET") {
+    const u = new URL(req.url);
+    const mode = u.searchParams.get("hub.mode");
+    const verifyToken = u.searchParams.get("hub.verify_token");
+    const challenge = u.searchParams.get("hub.challenge") ?? "";
+    // verify_token esperado = o próprio webhook_secret da conexão.
+    if (mode === "subscribe" && conn && verifyToken && String(verifyToken) === String(conn.webhook_secret)) {
+      return new Response(challenge, { status: 200, headers: { "Content-Type": "text/plain" } });
+    }
+    return json(403, { error: "verify token inválido" });
+  }
+
+  if (req.method !== "POST") return json(405, { error: "Método não permitido" });
+  if (!conn) return json(200, { ok: true, ignored: "secret nao vinculado" });
+  if (String(conn.provider) !== "meta_cloud") return json(200, { ok: true, ignored: "conexao nao e meta_cloud" });
+  // Conexão DESATIVADA (admin desconectou = credenciais zeradas): ignora tudo.
+  // Sem esse gate, o webhook ressuscitaria o status pra 'connected' e seguiria
+  // gravando mensagens depois do Desconectar (o webhook na Meta é manual e não
+  // some no DELETE). Enquanto o número não for removido lá, a URL segue viva.
+  if (!conn.instance_token || !conn.meta_phone_number_id) {
+    return json(200, { ok: true, ignored: "conexao desativada" });
+  }
+
+  // AUTO-CURA da assinatura (a cada 10 min por conexão; ver curarConexao).
+  agendarCura(supabase, supabaseUrl, conn);
+
+  // deno-lint-ignore no-explicit-any
+  let payload: any;
+  let rawBody = "";
+  try {
+    rawBody = await req.text();
+    payload = JSON.parse(rawBody);
+  } catch {
+    return json(400, { error: "JSON inválido" });
+  }
+
+  // ESPELHO: outro sistema (ex.: outro CRM) que também precisa dos eventos
+  // deste número. A Meta só entrega pra UM destino por app, então o CRM fica
+  // com o webhook e repassa o payload BRUTO (assinado com o app secret, igual
+  // à Meta) — os dois recebem tudo. Pings do cron não são espelhados.
+  const espelhoUrl = String(conn.forward_webhook_url ?? "").trim();
+  if (
+    espelhoUrl && req.headers.get("x-wa-heal") !== "1" &&
+    Array.isArray(payload?.entry) && payload.entry.length > 0
+  ) {
+    const espelho = (async () => {
+      try {
+        const headers: Record<string, string> = {
+          "content-type": "application/json",
+          "user-agent": "NossoCRM-Webhook-Mirror/1.0",
+        };
+        const appSecret = String(conn.meta_app_secret ?? "");
+        if (appSecret) headers["x-hub-signature-256"] = `sha256=${await hmacSha256Hex(appSecret, rawBody)}`;
+        const r = await fetch(espelhoUrl, { method: "POST", headers, body: rawBody });
+        console.log(`[wa-meta-espelho] conn=${conn.id} => ${r.status}`);
+      } catch (e) {
+        console.error("[wa-meta-espelho] falhou:", e);
+      }
+    })();
+    try {
+      // @ts-ignore: EdgeRuntime existe no runtime das Edge Functions da Supabase
+      EdgeRuntime.waitUntil(espelho);
+    } catch {
+      void espelho;
+    }
+  }
+
+  // FAN-OUT: o MESMO número pode estar conectado em mais de uma organização
+  // (ex.: agência e cliente). A Meta entrega cada evento UMA vez (na URL de
+  // uma das conexões); aqui ele é processado para TODAS as conexões ativas
+  // desse phone_number_id, cada uma no chat da própria org.
+  const { data: irmas } = await supabase
+    .from("wa_connections")
+    .select("id, organization_id, webhook_secret, instance_token, provider, meta_phone_number_id, phone_number, status, base_url")
+    .eq("provider", "meta_cloud")
+    .eq("meta_phone_number_id", conn.meta_phone_number_id)
+    .eq("status", "connected")
+    .neq("id", conn.id);
+  const alvos: ConnRow[] = [conn, ...(irmas ?? []).filter((c: ConnRow) => c.instance_token)];
+  for (const alvo of alvos) {
+    try {
+      await processarEventos(supabase, alvo, payload);
+    } catch (e) {
+      console.error(`[wa-webhook-meta] processar conn=${alvo.id}:`, e);
     }
   }
 

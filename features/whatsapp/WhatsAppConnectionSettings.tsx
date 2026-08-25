@@ -10,7 +10,7 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, ExternalLink, KeyRound, Loader2, MessageCircle, QrCode, RefreshCw, Trash2, Unplug } from 'lucide-react';
+import { CheckCircle2, Copy, ExternalLink, KeyRound, Loader2, MessageCircle, QrCode, RefreshCw, Trash2, Unplug } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 import { useAuth } from '@/context/AuthContext';
 
@@ -22,6 +22,8 @@ interface WaConnectionInfo {
   phoneNumber: string | null;
   profileName: string | null;
   status: 'disconnected' | 'connecting' | 'connected' | string;
+  /** Espelho: outro sistema que também recebe os webhooks deste número */
+  forwardWebhookUrl?: string | null;
 }
 
 /** Só pra admin (modo API oficial): credenciais salvas, pra edição abrir preenchida.
@@ -284,6 +286,29 @@ export function WhatsAppConnectionSettings() {
       addToast(`Erro ao reconfigurar: ${(e as Error).message}`, 'error');
     } finally {
       setResyncingId(null);
+    }
+  };
+
+  // ESPELHO do webhook: o CRM fica com o webhook da Meta e repassa os eventos
+  // pra outro sistema (outro CRM/automação) que use o MESMO número.
+  const [mirrorOpenId, setMirrorOpenId] = useState<string | null>(null);
+  const [mirrorDraft, setMirrorDraft] = useState('');
+  const [mirrorSaving, setMirrorSaving] = useState(false);
+  const saveMirror = async (connectionId: string, url: string) => {
+    setMirrorSaving(true);
+    try {
+      await fetchJson('/api/whatsapp/connection/forward', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ connectionId, url: url.trim() || null }),
+      });
+      qc.invalidateQueries({ queryKey: ['waConnection'] });
+      addToast(url.trim() ? 'Espelho salvo: o outro sistema passa a receber os eventos deste número.' : 'Espelho desligado.', 'success');
+      setMirrorOpenId(null);
+    } catch (e) {
+      addToast(`Não deu pra salvar o espelho: ${(e as Error).message}`, 'error');
+    } finally {
+      setMirrorSaving(false);
     }
   };
 
@@ -919,6 +944,64 @@ export function WhatsAppConnectionSettings() {
                             )}
                             Reconfigurar webhook
                           </button>
+                        )}
+                        {rowEditable && rowOn && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (mirrorOpenId === c.id) {
+                                setMirrorOpenId(null);
+                              } else {
+                                setMirrorDraft(c.forwardWebhookUrl ?? '');
+                                setMirrorOpenId(c.id);
+                              }
+                            }}
+                            title="Outro sistema usa este mesmo número? Cole a URL do webhook dele aqui: o CRM recebe da Meta e repassa tudo pra lá, e os dois funcionam ao mesmo tempo"
+                            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-bold transition-colors ${
+                              c.forwardWebhookUrl
+                                ? 'border-violet-300 dark:border-violet-500/40 bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300'
+                                : 'border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10'
+                            }`}
+                          >
+                            <Copy size={14} />
+                            {c.forwardWebhookUrl ? 'Espelho ligado' : 'Espelhar webhook'}
+                          </button>
+                        )}
+                        {rowEditable && rowOn && mirrorOpenId === c.id && (
+                          <div className="basis-full mt-2 p-3 rounded-xl border border-violet-200 dark:border-violet-500/30 bg-violet-50/60 dark:bg-violet-900/10">
+                            <p className="text-xs text-slate-600 dark:text-slate-300 mb-2">
+                              A Meta entrega os eventos de um número para <b>um</b> destino. Se outro sistema for usar este número
+                              (outro CRM, automação), não configure o webhook lá: cole aqui a URL do webhook dele. O CRM recebe da
+                              Meta e repassa o payload original (assinado com o app secret) para essa URL.
+                            </p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <input
+                                type="url"
+                                value={mirrorDraft}
+                                onChange={e => setMirrorDraft(e.target.value)}
+                                placeholder="https://outro-sistema.com/webhook/whatsapp"
+                                className="flex-1 min-w-[240px] bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-violet-500 font-mono"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => void saveMirror(c.id, mirrorDraft)}
+                                disabled={mirrorSaving}
+                                className="px-3 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold disabled:opacity-60"
+                              >
+                                {mirrorSaving ? 'Salvando...' : 'Salvar'}
+                              </button>
+                              {c.forwardWebhookUrl && (
+                                <button
+                                  type="button"
+                                  onClick={() => void saveMirror(c.id, '')}
+                                  disabled={mirrorSaving}
+                                  className="px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-white/10 disabled:opacity-60"
+                                >
+                                  Desligar espelho
+                                </button>
+                              )}
+                            </div>
+                          </div>
                         )}
                         {rowEditable && (
                           <button

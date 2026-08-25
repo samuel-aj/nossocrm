@@ -24,6 +24,7 @@ import {
   getConnectionByIdForOrg,
   getConnectionByOrg,
   recordOutboundMessage,
+  replicateOutboundToSiblings,
 } from '@/lib/whatsapp/service';
 import { traduzErroWhatsApp } from '@/lib/whatsapp/metaErrorsPtBr';
 
@@ -135,6 +136,14 @@ export async function POST(request: Request) {
     status: result.ok ? 'sent' : 'failed',
     error: result.ok ? null : result.error,
   });
+
+  if (result.ok) {
+    await replicateOutboundToSiblings(sb, conn, {
+      toPhone: to,
+      text: message.body,
+      providerMessageId: result.providerMessageId,
+    });
+  }
 
   const out = {
     id: message.id,

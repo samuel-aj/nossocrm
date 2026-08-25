@@ -37,6 +37,7 @@ function mask(conn: WaConnectionRow) {
     phoneNumber: conn.phone_number,
     profileName: conn.profile_name,
     status: conn.status,
+    forwardWebhookUrl: conn.forward_webhook_url ?? null,
   };
 }
 

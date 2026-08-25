@@ -15,6 +15,7 @@ import {
   getConnectionByIdForOrg,
   ensureConversation,
   recordOutboundMessage,
+  replicateOutboundToSiblings,
 } from '@/lib/whatsapp/service';
 import { getProvider, type OutboundMediaKind } from '@/lib/whatsapp';
 import { normalizePhoneE164 } from '@/lib/phone';
@@ -129,6 +130,16 @@ export async function POST(req: Request) {
     mediaUrl: media ? mediaPath : null,
     mediaMime: media?.mimeType ?? null,
   });
+
+  // Mesmo número em outra org: o envio aparece lá também
+  if (result.ok) {
+    await replicateOutboundToSiblings(auth.admin, conn, {
+      toPhone: to,
+      text: message.body,
+      providerMessageId: result.providerMessageId,
+      mediaType: media ? mediaKind : null,
+    });
+  }
 
   if (!result.ok) {
     return json({ ok: false, error: result.error || 'Falha no envio', message }, 502);
