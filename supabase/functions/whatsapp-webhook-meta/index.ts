@@ -30,8 +30,9 @@ const GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") ?? "v21.0";
 // periódico chega pelo pg_cron em POST /whatsapp-webhook-meta/heal-all.
 const CURA_TTL_MS = 10 * 60 * 1000;
 const RENOVACAO_TTL_MS = 24 * 60 * 60 * 1000;
+// Atalho local; a trava de verdade é wa_connections.last_webhook_heal_at
+// (compartilhada entre TODAS as instâncias da função).
 const ultimaCura = new Map<string, number>();
-const ultimaRenovacao = new Map<string, number>();
 
 // deno-lint-ignore no-explicit-any
 type ConnRow = any;
@@ -60,7 +61,7 @@ async function curarConexao(supabase: any, supabaseUrl: string, conn: ConnRow): 
   const nossoPrefixo = `${base}/functions/v1/whatsapp-webhook-meta/`;
   const { data: full } = await supabase
     .from("wa_connections")
-    .select("meta_app_id, meta_app_secret, meta_waba_id")
+    .select("meta_app_id, meta_app_secret, meta_waba_id, token_renewed_at")
     .eq("id", conn.id)
     .maybeSingle();
   const appId = String(full?.meta_app_id ?? "").trim();
@@ -81,7 +82,9 @@ async function curarConexao(supabase: any, supabaseUrl: string, conn: ConnRow): 
       camposAtuais.includes("messages") &&
       (camposAtuais.includes("smb_message_echoes") || camposAtuais.includes("message_echoes"));
     console.log(
-      `[wa-meta-cura] conn=${conn.id} app_callback=${String(sub?.callback_url ?? "").slice(0, 120)} campos=${camposAtuais.join(",")} ok=${jaNosso}`,
+      `[wa-meta-cura] conn=${conn.id} app_callback=${String(sub?.callback_url ?? "").slice(0, 120)} campos=${camposAtuais.join(",")} ok=${jaNosso}${
+        sub ? "" : ` resposta=${JSON.stringify(atual).slice(0, 200)}`
+      }`,
     );
     // Só reescreve o webhook do APP quando ele NÃO aponta pro CRM (ou perdeu
     // campos): o app é compartilhado por todos os números; o roteamento por
@@ -129,19 +132,23 @@ async function curarConexao(supabase: any, supabaseUrl: string, conn: ConnRow): 
     }).then((r) => r.json()).catch((e) => ({ error: String(e) }));
     console.log(`[wa-meta-cura] conn=${conn.id} override => ${JSON.stringify(ov).slice(0, 300)}`);
   }
-  // RENOVAÇÃO do token (só Cadastro Embutido, token de 60 dias): 1x por dia.
+  // RENOVAÇÃO do token (só Cadastro Embutido, token de 60 dias): 1x por dia,
+  // controlada no banco (token_renewed_at), não na memória da instância.
   const agora = Date.now();
+  const renovadoEm = full?.token_renewed_at ? Date.parse(String(full.token_renewed_at)) : 0;
   if (
     String(conn.base_url ?? "") === "embedded_signup" && appId && appSecret && token &&
-    (ultimaRenovacao.get(conn.id) ?? 0) < agora - RENOVACAO_TTL_MS
+    (!renovadoEm || renovadoEm < agora - RENOVACAO_TTL_MS)
   ) {
-    ultimaRenovacao.set(conn.id, agora);
     const ren = await fetch(
       `https://graph.facebook.com/${GRAPH_VERSION}/oauth/access_token?grant_type=fb_exchange_token&client_id=${encodeURIComponent(appId)}&client_secret=${encodeURIComponent(appSecret)}&fb_exchange_token=${encodeURIComponent(token)}`,
     ).then((r) => r.json()).catch((e) => ({ error: { message: String(e) } }));
     const novoTok = (ren as { access_token?: string }).access_token;
     if (novoTok && novoTok !== token) {
-      const up = await supabase.from("wa_connections").update({ instance_token: novoTok }).eq("id", conn.id);
+      const up = await supabase
+        .from("wa_connections")
+        .update({ instance_token: novoTok, token_renewed_at: new Date(agora).toISOString() })
+        .eq("id", conn.id);
       console.log(`[wa-meta-cura] conn=${conn.id} token renovado => ${up.error ? up.error.message : "OK"}`);
     } else if ((ren as { error?: { message?: string } }).error) {
       console.log(`[wa-meta-cura] conn=${conn.id} renovacao falhou => ${(ren as { error?: { message?: string } }).error?.message}`);
@@ -149,12 +156,25 @@ async function curarConexao(supabase: any, supabaseUrl: string, conn: ConnRow): 
   }
 }
 
-/** Agenda a cura em background se a última desta conexão já passou do TTL. */
+/**
+ * Agenda a cura em background se a última desta conexão já passou do TTL.
+ * A trava é a linha no banco: só a instância que "pegar" a atualização
+ * (última cura há mais de CURA_TTL) roda — várias instâncias em paralelo
+ * (rajada de webhooks) não bombardeiam a Graph API (#80008).
+ */
 // deno-lint-ignore no-explicit-any
-function agendarCura(supabase: any, supabaseUrl: string, conn: ConnRow): boolean {
+async function agendarCura(supabase: any, supabaseUrl: string, conn: ConnRow): Promise<boolean> {
   const agora = Date.now();
   if ((ultimaCura.get(conn.id) ?? 0) > agora - CURA_TTL_MS) return false;
   ultimaCura.set(conn.id, agora);
+  const limite = new Date(agora - CURA_TTL_MS).toISOString();
+  const { data: pegou, error } = await supabase
+    .from("wa_connections")
+    .update({ last_webhook_heal_at: new Date(agora).toISOString() })
+    .eq("id", conn.id)
+    .or(`last_webhook_heal_at.is.null,last_webhook_heal_at.lt.${limite}`)
+    .select("id");
+  if (error || !Array.isArray(pegou) || pegou.length === 0) return false;
   const p = curarConexao(supabase, supabaseUrl, conn).catch((e) => console.error("[wa-meta-cura] falhou:", e));
   try {
     // @ts-ignore: EdgeRuntime existe no runtime das Edge Functions da Supabase
@@ -636,7 +656,7 @@ Deno.serve(async (req) => {
     let agendadas = 0;
     for (const c of conns ?? []) {
       if (!c.instance_token || !c.webhook_secret) continue;
-      if (agendarCura(supabase, supabaseUrl, c)) agendadas += 1;
+      if (await agendarCura(supabase, supabaseUrl, c)) agendadas += 1;
     }
     return json(200, { ok: true, conexoes: (conns ?? []).length, curas_agendadas: agendadas });
   }
@@ -673,7 +693,7 @@ Deno.serve(async (req) => {
   }
 
   // AUTO-CURA da assinatura (a cada 10 min por conexão; ver curarConexao).
-  agendarCura(supabase, supabaseUrl, conn);
+  await agendarCura(supabase, supabaseUrl, conn);
 
   // deno-lint-ignore no-explicit-any
   let payload: any;
