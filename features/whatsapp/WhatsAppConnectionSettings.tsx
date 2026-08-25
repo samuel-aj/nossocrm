@@ -854,7 +854,9 @@ export function WhatsAppConnectionSettings() {
                   key={c.id}
                   className="rounded-2xl border border-slate-200 dark:border-white/10 overflow-hidden"
                 >
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-4">
+                  <div className="p-4">
+                    {/* Linha 1: identidade do número (nome, status, telefone) com espaço próprio */}
+                    <div className="flex items-center gap-3">
                     <span
                       className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
                         rowBiz
@@ -890,8 +892,10 @@ export function WhatsAppConnectionSettings() {
                         {rowBiz ? 'API oficial da Meta' : 'QR Code'}
                       </p>
                     </div>
+                    </div>
+                    {/* Linha 2: barra de ações, separada da identidade para nada ficar espremido */}
                     {confirmDisconnect === c.id ? (
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-2 flex-wrap mt-3 pt-3 border-t border-slate-100 dark:border-white/10">
                         <button
                           type="button"
                           onClick={() => disconnectMut.mutate({ id: c.id, purge: !rowOn })}
@@ -916,7 +920,7 @@ export function WhatsAppConnectionSettings() {
                         </button>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                      <div className="flex items-center gap-2 flex-wrap mt-3 pt-3 border-t border-slate-100 dark:border-white/10">
                         {!rowBiz && !rowOn && !rowPairing && (
                           <button
                             type="button"
@@ -1031,7 +1035,7 @@ export function WhatsAppConnectionSettings() {
                         <button
                           type="button"
                           onClick={() => setConfirmDisconnect(c.id)}
-                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-200 dark:border-red-500/30 text-red-600 dark:text-red-400 text-xs font-bold hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                          className="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-200 dark:border-red-500/30 text-red-600 dark:text-red-400 text-xs font-bold hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
                         >
                           {rowOn ? (
                             <>
