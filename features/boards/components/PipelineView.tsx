@@ -107,8 +107,8 @@ interface PipelineViewProps {
   setSearchTerm: (term: string) => void;
   ownerFilter: string;
   setOwnerFilter: (filter: string) => void;
-  customFieldConditions: Array<{ id: string; field: string; operator: 'contains' | 'equals' | 'empty' | 'not_empty'; value: string }>;
-  setCustomFieldConditions: (c: Array<{ id: string; field: string; operator: 'contains' | 'equals' | 'empty' | 'not_empty'; value: string }>) => void;
+  customFieldConditions: Array<{ id: string; field: string; operator: 'contains' | 'not_contains' | 'equals' | 'empty' | 'not_empty'; value: string }>;
+  setCustomFieldConditions: (c: Array<{ id: string; field: string; operator: 'contains' | 'not_contains' | 'equals' | 'empty' | 'not_empty'; value: string }>) => void;
   customFieldLogic: 'AND' | 'OR';
   setCustomFieldLogic: (l: 'AND' | 'OR') => void;
   customFieldOptions: Array<{ key: string; label: string; kind: 'select' | 'text'; options: string[] }>;

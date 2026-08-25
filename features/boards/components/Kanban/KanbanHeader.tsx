@@ -23,8 +23,8 @@ interface KanbanHeaderProps {
     setSearchTerm: (term: string) => void;
     ownerFilter: string;
     setOwnerFilter: (filter: string) => void;
-    customFieldConditions: Array<{ id: string; field: string; operator: 'contains' | 'equals' | 'empty' | 'not_empty'; value: string }>;
-    setCustomFieldConditions: (c: Array<{ id: string; field: string; operator: 'contains' | 'equals' | 'empty' | 'not_empty'; value: string }>) => void;
+    customFieldConditions: Array<{ id: string; field: string; operator: 'contains' | 'not_contains' | 'equals' | 'empty' | 'not_empty'; value: string }>;
+    setCustomFieldConditions: (c: Array<{ id: string; field: string; operator: 'contains' | 'not_contains' | 'equals' | 'empty' | 'not_empty'; value: string }>) => void;
     customFieldLogic: 'AND' | 'OR';
     setCustomFieldLogic: (l: 'AND' | 'OR') => void;
     customFieldOptions: Array<{ key: string; label: string; kind: 'select' | 'text'; options: string[] }>;
@@ -46,7 +46,7 @@ interface KanbanHeaderProps {
 type CfCondition = {
     id: string;
     field: string;
-    operator: 'contains' | 'equals' | 'empty' | 'not_empty';
+    operator: 'contains' | 'not_contains' | 'equals' | 'empty' | 'not_empty';
     value: string;
 };
 
@@ -230,7 +230,7 @@ function CustomFieldFiltersButton({
                             )}
                             {conditions.map((c) => {
                                 const fieldDef = options.find((o) => o.key === c.field);
-                                const needsValue = c.operator === 'contains' || c.operator === 'equals';
+                                const needsValue = c.operator === 'contains' || c.operator === 'not_contains' || c.operator === 'equals';
                                 return (
                                     <div key={c.id} className="rounded-lg border border-slate-200 dark:border-white/10 p-2 space-y-1.5">
                                         <div className="flex items-center gap-1.5">
@@ -262,6 +262,7 @@ function CustomFieldFiltersButton({
                                                 className={`${inputClass} w-32 shrink-0 cursor-pointer`}
                                             >
                                                 <option value="contains">contém</option>
+                                                <option value="not_contains">não contém</option>
                                                 <option value="equals">é igual a</option>
                                                 <option value="empty">está vazio</option>
                                                 <option value="not_empty">está preenchido</option>

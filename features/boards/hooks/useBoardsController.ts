@@ -171,7 +171,7 @@ export const useBoardsController = () => {
   // campo + operador (contém / igual / vazio / preenchido) + valor, combinadas
   // com E (todas) ou OU (qualquer).
   const [customFieldConditions, setCustomFieldConditions] = useState<
-    Array<{ id: string; field: string; operator: 'contains' | 'equals' | 'empty' | 'not_empty'; value: string }>
+    Array<{ id: string; field: string; operator: 'contains' | 'not_contains' | 'equals' | 'empty' | 'not_empty'; value: string }>
   >([]);
   const [customFieldLogic, setCustomFieldLogic] = useState<'AND' | 'OR'>('AND');
   // Filtro por TAG (select com as tags cadastradas em Configurações). '' = todas.
@@ -554,6 +554,9 @@ export const useBoardsController = () => {
               return has;
             case 'equals':
               return has && str.toLowerCase() === term;
+            case 'not_contains':
+              // campo vazio também "não contém" o termo
+              return !str.toLowerCase().includes(term);
             default: // contains
               return has && str.toLowerCase().includes(term);
           }
