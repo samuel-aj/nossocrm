@@ -24,6 +24,9 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
         'Cada aviso é um `POST` JSON com os headers `X-Webhook-Event`, `X-Webhook-Secret` e `Authorization: Bearer <secret>`.',
         'Payload das mensagens: `{ event_type, occurred_at, organization_id, message: { id, direction (in|out), status, text, media_type, media_mime, media_path, provider_message_id, source (inbound|echo|crm|api), sent_by_user_id, sent_by_name, timestamp }, conversation: { id, phone, name, contact_id, deal_id, assigned_owner_id }, connection: { id, phone_number, provider, name }, contact: { id, name, phone, email }, deal: { id, title, board_id, stage_id } }`.',
         'Para um agente de IA: use `conversation.phone` + `connection.id` como chave da memória e responda com `POST /whatsapp/messages` (a resposta chega com `source: "api"`, ignore-a no seu fluxo pra não responder a si mesmo).',
+        '',
+        '## Agente de IA: pausa automática',
+        '`conversation.ai_status` vem no webhook: `null` (nenhum agente atuou), `active` ou `paused`. Quando um atendente responde pelo CRM, pelo celular ou pelo Kommo, o CRM pausa o agente naquela conversa; no chat do CRM há o botão Pausar/Retomar. Com `paused`, `POST /whatsapp/messages` devolve **409 AGENT_PAUSED** (a não ser que mande `force: true`). Mídia do lead: `GET /whatsapp/messages/{id}/media` troca o id pela URL assinada.',
       ].join('\n'),
     },
     servers: [{ url: '/api/public/v1' }],
@@ -97,6 +100,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
               required: ['name'],
             },
             connection_id: { type: 'string', description: 'Qual número envia (GET /whatsapp/connections). Omitido = padrão da org.' },
+            force: { type: 'boolean', description: 'Envia mesmo com o agente de IA pausado nesta conversa (409 AGENT_PAUSED sem isso)' },
           },
           required: ['to'],
         },
@@ -446,11 +450,42 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
             400: { description: 'Corpo inválido / modelo em conexão sem API oficial', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
             401: { $ref: '#/components/responses/Unauthorized' },
             404: { description: 'Nenhum número conectado / connection_id inexistente', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
-            409: { description: 'Número desconectado', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+            409: { description: 'Número desconectado (DISCONNECTED) ou agente de IA pausado nesta conversa (AGENT_PAUSED)', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
             502: {
               description: 'O provedor recusou o envio (a mensagem fica registrada como falha)',
               content: { 'application/json': { schema: { $ref: '#/components/schemas/WhatsAppSendResponse' } } },
             },
+          },
+        },
+      },
+      '/whatsapp/messages/{id}/media': {
+        get: {
+          tags: ['WhatsApp'],
+          summary: 'Link temporário da mídia de uma mensagem',
+          description: 'O webhook entrega só `media_path` (bucket privado). Troque o `message.id` por uma URL assinada (10 min) para baixar, transcrever (áudio) ou analisar (imagem/PDF).',
+          security: [{ ApiKeyAuth: [] }],
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'UUID da mensagem (message.id do webhook)' }],
+          responses: {
+            200: {
+              description: 'OK',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      url: { type: 'string' },
+                      media_type: { type: ['string', 'null'], description: 'image | audio | video | document | sticker' },
+                      mime: { type: ['string', 'null'] },
+                      transcription: { type: ['string', 'null'], description: 'Transcrição feita pelo CRM, quando existir' },
+                      expires_in: { type: 'integer' },
+                    },
+                    required: ['url', 'expires_in'],
+                  },
+                },
+              },
+            },
+            401: { $ref: '#/components/responses/Unauthorized' },
+            404: { description: 'Mensagem inexistente ou sem mídia', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
           },
         },
       },

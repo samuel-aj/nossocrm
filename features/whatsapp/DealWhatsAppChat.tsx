@@ -4,7 +4,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { traduzErroWhatsApp } from '@/lib/whatsapp/metaErrorsPtBr';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Send,
   MessageCircle,
@@ -30,6 +30,7 @@ import {
   Info,
   Play,
   User,
+  Bot,
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { fillTemplate, templateParams, TEMPLATE_BUTTON_LABEL, type TemplateButton } from '@/lib/messageTemplates';
@@ -799,6 +800,35 @@ export function DealWhatsAppChat({
     typeof window !== 'undefined' ? window.localStorage.getItem('wa-sender-connection') : null
   );
   const [senderMenuOpen, setSenderMenuOpen] = useState(false);
+  // AGENTE DE IA nesta conversa: pausa sozinho quando um atendente responde
+  // (gatilho no banco); aqui o usuário pausa/retoma na mão.
+  const qc = useQueryClient();
+  const aiState = data?.ai ?? null;
+  const [aiBusy, setAiBusy] = useState(false);
+  const toggleAi = async () => {
+    if (!aiState || aiBusy) return;
+    setAiBusy(true);
+    try {
+      const res = await fetch('/api/whatsapp/conversations/ai', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          conversationId: aiState.conversationId,
+          status: aiState.status === 'active' ? 'paused' : 'active',
+        }),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error || `HTTP ${res.status}`);
+      }
+      await qc.invalidateQueries({ queryKey: ['waChat'] });
+    } catch (e) {
+      console.error('[wa] agente IA:', (e as Error).message);
+    } finally {
+      setAiBusy(false);
+    }
+  };
   const senderMenuRef = useRef<HTMLDivElement>(null);
   // Pesquisa de mensagens (estilo WhatsApp): barra + navegação entre matches
   const [searchOpen, setSearchOpen] = useState(false);
@@ -1671,6 +1701,50 @@ export function DealWhatsAppChat({
                 {e}
               </button>
             ))}
+          </div>
+        )}
+
+        {/* AGENTE DE IA: só aparece quando um agente já atuou nesta conversa */}
+        {aiState && (
+          <div
+            className={`flex items-center justify-between gap-2 mb-1.5 px-3 py-1.5 rounded-xl border text-xs ${
+              aiState.status === 'active'
+                ? 'border-violet-200 dark:border-violet-500/30 bg-violet-50 dark:bg-violet-900/15 text-violet-700 dark:text-violet-300'
+                : 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-900/15 text-amber-700 dark:text-amber-300'
+            }`}
+          >
+            <span className="inline-flex items-center gap-1.5 font-bold min-w-0">
+              <Bot size={13} className="shrink-0" />
+              <span className="truncate">
+                {aiState.status === 'active'
+                  ? 'Agente de IA ativo nesta conversa'
+                  : 'Agente de IA pausado (atendimento humano)'}
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={() => void toggleAi()}
+              disabled={aiBusy}
+              title={
+                aiState.status === 'active'
+                  ? 'Pausar o agente: ele para de responder este contato até você retomar'
+                  : 'Retomar: o agente volta a responder este contato'
+              }
+              className={`shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors disabled:opacity-60 ${
+                aiState.status === 'active'
+                  ? 'border-violet-300 dark:border-violet-500/40 bg-white dark:bg-black/20 hover:bg-violet-100 dark:hover:bg-violet-900/30'
+                  : 'border-amber-300 dark:border-amber-500/40 bg-white dark:bg-black/20 hover:bg-amber-100 dark:hover:bg-amber-900/30'
+              }`}
+            >
+              {aiBusy ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : aiState.status === 'active' ? (
+                <Pause size={12} />
+              ) : (
+                <Play size={12} />
+              )}
+              {aiState.status === 'active' ? 'Pausar' : 'Retomar'}
+            </button>
           </div>
         )}
 

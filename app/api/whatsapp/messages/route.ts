@@ -59,7 +59,7 @@ export async function GET(req: Request) {
   const variants = brPhoneVariants(phone);
   let convQ = auth.admin
     .from('wa_conversations')
-    .select('id, connection_id, wa_phone, wa_name, contact_id, last_message_at, unread_count')
+    .select('id, connection_id, wa_phone, wa_name, contact_id, last_message_at, unread_count, ai_status')
     .eq('organization_id', auth.user.organizationId)
     .in('wa_phone', variants.length ? variants : [phone]);
   // 'none' = só a conversa órfã (sem número conectado); ausente = unificada
@@ -67,7 +67,14 @@ export async function GET(req: Request) {
   else if (connectionId) convQ = convQ.eq('connection_id', connectionId);
   const { data: convList } = await convQ;
 
-  const convs = (convList ?? []) as Array<{ id: string; connection_id: string | null; contact_id: string | null }>;
+  const convs = (convList ?? []) as Array<{
+    id: string;
+    connection_id: string | null;
+    contact_id: string | null;
+    ai_status?: 'active' | 'paused' | null;
+  }>;
+  // Agente de IA: a conversa (deste contato) em que um agente já atuou
+  const aiConv = convs.find(c => c.ai_status) ?? null;
   const connByConv = new Map(convs.map(c => [c.id, c.connection_id]));
   const conv = convs.find(c => c.contact_id) ?? convs[0] ?? null;
 
@@ -120,6 +127,7 @@ export async function GET(req: Request) {
     senders,
     numbers,
     conversation: conv ?? null,
+    ai: aiConv ? { conversationId: aiConv.id, status: aiConv.ai_status } : null,
     messages,
   });
 }

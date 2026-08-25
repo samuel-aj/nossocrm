@@ -44,6 +44,8 @@ const BodySchema = z.object({
   text: z.string().trim().max(4096).optional(),
   template: TemplateSchema.optional(),
   connection_id: z.string().trim().optional(),
+  /** Envia mesmo com o agente pausado nesta conversa (uso humano/automação não-agente) */
+  force: z.boolean().optional(),
 });
 
 export async function POST(request: Request) {
@@ -98,6 +100,23 @@ export async function POST(request: Request) {
 
   const provider = getProvider(conn);
   const conv = await ensureConversation(sb, orgId, conn.id, to);
+
+  // AGENTE PAUSADO: um atendente assumiu (ou pausou no chat). O agente não
+  // fala por cima do humano; quem precisar mesmo assim manda force: true.
+  if (!body.force) {
+    const { data: convRow } = await sb.from('wa_conversations').select('ai_status').eq('id', conv.id).maybeSingle();
+    if (convRow?.ai_status === 'paused') {
+      return NextResponse.json(
+        {
+          error: 'AI agent is paused for this conversation (a human took over). Resume it in the CRM chat or send force: true.',
+          code: 'AGENT_PAUSED',
+          ai_status: 'paused',
+          conversation_id: conv.id,
+        },
+        { status: 409 }
+      );
+    }
+  }
 
   let result;
   let bodyText = text;
