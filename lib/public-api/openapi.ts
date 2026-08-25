@@ -12,8 +12,19 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
     info: {
       title: 'NossoCRM Public API',
       version: 'v1',
-      description:
+      description: [
         'API pública do NossoCRM para integrações (n8n/Make). Produto em primeiro lugar: copiar → colar → testar.',
+        '',
+        '## Webhooks de saída (Follow-up)',
+        'Em **Configurações → Integrações → Follow-up** você cadastra a URL do seu n8n/Make e marca os avisos:',
+        '- `deal.stage_changed` — lead mudou de etapa',
+        '- `whatsapp.message.received` — o lead mandou mensagem para um número conectado',
+        '- `whatsapp.message.sent` — você respondeu (pelo CRM, pelo celular/Kommo ou por esta API)',
+        '',
+        'Cada aviso é um `POST` JSON com os headers `X-Webhook-Event`, `X-Webhook-Secret` e `Authorization: Bearer <secret>`.',
+        'Payload das mensagens: `{ event_type, occurred_at, organization_id, message: { id, direction (in|out), status, text, media_type, media_mime, media_path, provider_message_id, source (inbound|echo|crm|api), sent_by_user_id, sent_by_name, timestamp }, conversation: { id, phone, name, contact_id, deal_id, assigned_owner_id }, connection: { id, phone_number, provider, name }, contact: { id, name, phone, email }, deal: { id, title, board_id, stage_id } }`.',
+        'Para um agente de IA: use `conversation.phone` + `connection.id` como chave da memória e responda com `POST /whatsapp/messages` (a resposta chega com `source: "api"`, ignore-a no seu fluxo pra não responder a si mesmo).',
+      ].join('\n'),
     },
     servers: [{ url: '/api/public/v1' }],
     tags: [
@@ -24,6 +35,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
       { name: 'Deals', description: 'Negócios (cards)' },
       { name: 'Activities', description: 'Atividades (nota/tarefa/reunião/ligação)' },
       { name: 'Catálogo', description: 'Produtos e campos personalizados (IDs/keys para usar em deals)' },
+      { name: 'WhatsApp', description: 'Enviar mensagens pelo WhatsApp conectado (texto ou modelo aprovado). Tudo fica registrado no chat do CRM.' },
     ],
     components: {
       securitySchemes: {
@@ -52,6 +64,63 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
             nextCursor: { type: 'string', nullable: true },
           },
           required: ['data'],
+        },
+        WhatsAppConnection: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            id: { type: 'string', description: 'UUID da conexão (use em connection_id)' },
+            phone_number: { type: ['string', 'null'], description: 'Número conectado (E.164)' },
+            name: { type: ['string', 'null'], description: 'Nome do perfil/empresa no WhatsApp' },
+            provider: { type: 'string', description: 'meta_cloud (API oficial) | evolution (QR) | evolution_business' },
+            status: { type: 'string', description: 'connected | connecting | disconnected' },
+            official_api: { type: 'boolean' },
+            supports_templates: { type: 'boolean', description: 'true só na API oficial' },
+          },
+          required: ['id', 'provider', 'status'],
+        },
+        WhatsAppSendRequest: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            to: { type: 'string', description: 'Telefone do destinatário (E.164 ou só dígitos, ex.: 5569999999999)' },
+            text: { type: 'string', description: 'Texto da mensagem (dentro da janela de 24h)' },
+            template: {
+              type: 'object',
+              description: 'Modelo aprovado na Meta (só API oficial). Obrigatório fora da janela de 24h.',
+              properties: {
+                name: { type: 'string' },
+                language: { type: 'string', description: 'Padrão pt_BR' },
+                params: { type: 'array', items: { type: 'string' }, description: 'Valores de {{1}}, {{2}}... do corpo, em ordem' },
+                components: { type: 'array', items: { type: 'object' }, description: 'Formato completo da Meta (substitui params)' },
+              },
+              required: ['name'],
+            },
+            connection_id: { type: 'string', description: 'Qual número envia (GET /whatsapp/connections). Omitido = padrão da org.' },
+          },
+          required: ['to'],
+        },
+        WhatsAppSendResponse: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean' },
+            error: { type: 'string' },
+            error_pt: { type: 'string', description: 'Explicação em português quando a Meta recusa' },
+            code: { type: 'string' },
+            message: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                status: { type: 'string', description: 'sent | failed' },
+                provider_message_id: { type: ['string', 'null'] },
+                conversation_id: { type: 'string' },
+                connection_id: { type: 'string' },
+                to: { type: 'string' },
+              },
+            },
+          },
+          required: ['ok'],
         },
         Board: {
           type: 'object',
@@ -323,6 +392,65 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
               },
             },
             401: { $ref: '#/components/responses/Unauthorized' },
+          },
+        },
+      },
+      '/whatsapp/connections': {
+        get: {
+          tags: ['WhatsApp'],
+          summary: 'Listar números de WhatsApp conectados',
+          description: 'Use o `id` em `connection_id` ao enviar quando a organização tem mais de um número.',
+          security: [{ ApiKeyAuth: [] }],
+          responses: {
+            200: {
+              description: 'OK',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: { data: { type: 'array', items: { $ref: '#/components/schemas/WhatsAppConnection' } } },
+                    required: ['data'],
+                  },
+                },
+              },
+            },
+            401: { $ref: '#/components/responses/Unauthorized' },
+          },
+        },
+      },
+      '/whatsapp/messages': {
+        post: {
+          tags: ['WhatsApp'],
+          summary: 'Enviar mensagem de WhatsApp (texto ou modelo)',
+          description:
+            'Envia pelo número conectado e grava no chat do CRM (card do lead e /chats). Feito para agentes de IA no n8n/Make: receba as mensagens pelo webhook de saída e responda por aqui. Texto só funciona dentro da janela de 24h desde a última mensagem do lead; fora dela use `template`.',
+          security: [{ ApiKeyAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/WhatsAppSendRequest' },
+                examples: {
+                  texto: { value: { to: '+5569999999999', text: 'Olá! Aqui é a equipe do escritório.' } },
+                  modelo: { value: { to: '+5569999999999', template: { name: 'boas_vindas', language: 'pt_BR', params: ['Maria'] } } },
+                },
+              },
+            },
+          },
+          responses: {
+            201: {
+              description: 'Enviada',
+              content: { 'application/json': { schema: { $ref: '#/components/schemas/WhatsAppSendResponse' } } },
+            },
+            400: { description: 'Corpo inválido / modelo em conexão sem API oficial', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+            401: { $ref: '#/components/responses/Unauthorized' },
+            404: { description: 'Nenhum número conectado / connection_id inexistente', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+            409: { description: 'Número desconectado', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+            502: {
+              description: 'O provedor recusou o envio (a mensagem fica registrada como falha)',
+              content: { 'application/json': { schema: { $ref: '#/components/schemas/WhatsAppSendResponse' } } },
+            },
           },
         },
       },

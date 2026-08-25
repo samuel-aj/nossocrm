@@ -19,12 +19,28 @@ type InboundSourceRow = {
   active: boolean;
 };
 
+/** Eventos que o follow-up (webhook de saída) pode avisar */
+const OUTBOUND_EVENTS: Array<{ key: string; label: string; hint: string }> = [
+  { key: 'deal.stage_changed', label: 'Lead mudou de etapa', hint: 'Aviso com o lead, a etapa de origem e a de destino.' },
+  {
+    key: 'whatsapp.message.received',
+    label: 'Mensagem de WhatsApp recebida',
+    hint: 'O lead mandou mensagem para um número conectado (ideal para agentes de IA).',
+  },
+  {
+    key: 'whatsapp.message.sent',
+    label: 'Mensagem de WhatsApp enviada',
+    hint: 'Você respondeu (pelo CRM, pelo celular ou pela API). Mantém a memória do agente atualizada.',
+  },
+];
+
 type OutboundEndpointRow = {
   id: string;
   name: string;
   url: string;
   secret: string;
   active: boolean;
+  events: string[];
 };
 
 type InboundEventRow = {
@@ -93,6 +109,14 @@ export const WebhooksSection: React.FC = () => {
   // Follow-up modal
   const [isFollowUpOpen, setIsFollowUpOpen] = useState(false);
   const [followUpUrl, setFollowUpUrl] = useState('');
+  const [followUpEvents, setFollowUpEvents] = useState<string[]>(['deal.stage_changed']);
+  const abrirFollowUp = (ep: OutboundEndpointRow | null) => {
+    setFollowUpUrl(ep?.url ?? '');
+    setFollowUpEvents(ep?.events?.length ? ep.events : ['deal.stage_changed']);
+    setIsFollowUpOpen(true);
+  };
+  const toggleFollowUpEvent = (key: string) =>
+    setFollowUpEvents(prev => (prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]));
 
   // Quick start (produto) — inbound/outbound
   const [isQuickStartOpen, setIsQuickStartOpen] = useState(false);
@@ -139,7 +163,7 @@ export const WebhooksSection: React.FC = () => {
 
       const { data: epData } = await supabase
         .from('integration_outbound_endpoints')
-        .select('id,name,url,secret,active')
+        .select('id,name,url,secret,active,events')
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -301,9 +325,10 @@ export const WebhooksSection: React.FC = () => {
           .from('integration_outbound_endpoints')
           .update({
             url: followUpUrl.trim(),
+            events: followUpEvents,
           })
           .eq('id', endpoint.id)
-          .select('id,name,url,secret,active')
+          .select('id,name,url,secret,active,events')
           .single();
         if (error) throw error;
         setEndpoint(data as any);
@@ -317,10 +342,10 @@ export const WebhooksSection: React.FC = () => {
             name: 'Follow-up (Webhook)',
             url: followUpUrl.trim(),
             secret,
-            events: ['deal.stage_changed'],
+            events: followUpEvents,
             active: true,
           })
-          .select('id,name,url,secret,active')
+          .select('id,name,url,secret,active,events')
           .single();
 
         if (error) throw error;
@@ -417,7 +442,7 @@ export const WebhooksSection: React.FC = () => {
         .from('integration_outbound_endpoints')
         .update({ secret: nextSecret })
         .eq('id', endpoint.id)
-        .select('id,name,url,secret,active')
+        .select('id,name,url,secret,active,events')
         .single();
       if (error) throw error;
       setEndpoint(data as any);
@@ -574,7 +599,8 @@ export const WebhooksSection: React.FC = () => {
               <div>
                 <h4 className="text-sm font-bold text-slate-900 dark:text-white">Follow-up (Webhook de saída)</h4>
                 <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">
-                  Quando um lead mudar de etapa, enviamos um aviso para seu WhatsApp/n8n/Make.
+                  Avisamos seu n8n/Make quando um lead muda de etapa e, se quiser, a cada mensagem de WhatsApp
+                  recebida ou enviada (para agentes de IA).
                 </p>
               </div>
               <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase ${endpoint?.active ? 'bg-green-100 dark:bg-green-500/10 text-green-700 dark:text-green-400' : 'bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300'}`}>
@@ -587,6 +613,16 @@ export const WebhooksSection: React.FC = () => {
                 <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
                   <LinkIcon className="h-4 w-4" />
                   <span className="font-mono truncate max-w-[520px]">{endpoint.url}</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {OUTBOUND_EVENTS.filter(ev => (endpoint.events ?? []).includes(ev.key)).map(ev => (
+                    <span
+                      key={ev.key}
+                      className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-primary-50 dark:bg-primary-500/10 text-primary-700 dark:text-primary-300 border border-primary-100 dark:border-primary-500/20"
+                    >
+                      {ev.label}
+                    </span>
+                  ))}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <button
@@ -606,7 +642,7 @@ export const WebhooksSection: React.FC = () => {
                     {copiedKey === 'outboundSecret' && <Check className="h-4 w-4 text-green-600" />}
                   </button>
                   <button
-                    onClick={() => { setFollowUpUrl(endpoint.url); setIsFollowUpOpen(true); }}
+                    onClick={() => abrirFollowUp(endpoint)}
                     disabled={loading}
                     className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/10 transition-colors disabled:opacity-60"
                   >
@@ -703,8 +739,9 @@ export const WebhooksSection: React.FC = () => {
           {quickStartTab === 'outbound' ? (
         <div className="space-y-4">
               <div className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed">
-                <b>Follow-up</b> envia um aviso quando um lead muda de etapa. Você cola uma URL (n8n/Make/WhatsApp) e
-                valida o Secret no seu lado.
+                <b>Follow-up</b> envia um aviso quando um lead muda de etapa e, se você marcar, a cada mensagem de
+                WhatsApp recebida ou enviada (para agentes de IA). Você cola uma URL (n8n/Make) e valida o Secret no
+                seu lado.
               </div>
               <div className="p-4 rounded-2xl bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10">
                 <div className="flex items-center justify-between gap-3">
@@ -722,8 +759,7 @@ export const WebhooksSection: React.FC = () => {
                     type="button"
                     onClick={() => {
                       setIsQuickStartOpen(false);
-                      if (endpoint?.url) setFollowUpUrl(endpoint.url);
-                      setIsFollowUpOpen(true);
+                      abrirFollowUp(endpoint);
                     }}
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold bg-primary-600 text-white hover:bg-primary-700 transition-colors"
                   >
@@ -1133,7 +1169,7 @@ export const WebhooksSection: React.FC = () => {
       >
         <div className="space-y-4">
           <div className="text-sm text-slate-600 dark:text-slate-300">
-            Cole a URL do seu WhatsApp/n8n/Make. Quando um lead mudar de etapa, enviaremos um aviso.
+            Cole a URL do seu n8n/Make e marque quais avisos quer receber nela.
           </div>
           <div className="space-y-2">
             <label className="text-xs font-bold text-slate-600 dark:text-slate-300">URL do destino</label>
@@ -1143,6 +1179,28 @@ export const WebhooksSection: React.FC = () => {
               placeholder="https://..."
               className="w-full px-4 py-2.5 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-slate-900 dark:text-white"
             />
+          </div>
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-600 dark:text-slate-300">Avisar quando</label>
+            <div className="space-y-1.5">
+              {OUTBOUND_EVENTS.map(ev => (
+                <label
+                  key={ev.key}
+                  className="flex items-start gap-3 p-3 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20 cursor-pointer hover:bg-slate-100 dark:hover:bg-white/5 transition-colors"
+                >
+                  <input
+                    type="checkbox"
+                    checked={followUpEvents.includes(ev.key)}
+                    onChange={() => toggleFollowUpEvent(ev.key)}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-slate-900 dark:text-white">{ev.label}</span>
+                    <span className="block text-xs text-slate-500 dark:text-slate-400">{ev.hint}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
           </div>
 
           <div className="flex items-center justify-end gap-2 pt-2">
@@ -1154,7 +1212,7 @@ export const WebhooksSection: React.FC = () => {
             </button>
             <button
               onClick={handleSaveFollowUp}
-              disabled={loading || !followUpUrl.trim()}
+              disabled={loading || !followUpUrl.trim() || followUpEvents.length === 0}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
             >
               {endpoint?.id ? 'Salvar' : 'Conectar'}

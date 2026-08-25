@@ -22,6 +22,7 @@ import type {
   QrResult,
   InboundEvent,
   WaConnectionState,
+  SendTemplateInput,
 } from './types';
 
 const DEFAULT_GRAPH_VERSION = 'v21.0';
@@ -95,6 +96,22 @@ export class MetaCloudProvider implements WhatsAppProvider {
       to,
       type: 'text',
       text: { preview_url: true, body: input.text },
+    });
+  }
+
+  /** Modelo aprovado: único jeito de iniciar conversa fora da janela de 24h. */
+  async sendTemplate(input: SendTemplateInput): Promise<SendResult> {
+    const to = toWhatsAppPhone(input.to);
+    if (!to) return { ok: false, error: 'Telefone inválido' };
+    return this.send({
+      recipient_type: 'individual',
+      to,
+      type: 'template',
+      template: {
+        name: input.name,
+        language: { code: input.language || 'pt_BR' },
+        ...(input.components?.length ? { components: input.components } : {}),
+      },
     });
   }
 

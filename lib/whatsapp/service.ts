@@ -318,7 +318,10 @@ export async function recordOutboundMessage(
     providerMessageId?: string | null;
     fromPhone?: string | null;
     toPhone: string;
-    sentBy: string;
+    /** Usuário do CRM que enviou; null = API pública (ex.: agente de IA) */
+    sentBy?: string | null;
+    /** Origem: 'crm' (padrão) | 'api' — vai no webhook whatsapp.message.sent */
+    source?: string | null;
     status?: string;
     error?: string | null;
     /** Mídia enviada: tipo (image|video|audio|document|sticker), caminho no Storage e mime */
@@ -341,7 +344,8 @@ export async function recordOutboundMessage(
       evolution_message_id: input.providerMessageId ?? null,
       from_phone: input.fromPhone ?? null,
       to_phone: input.toPhone,
-      sent_by: input.sentBy,
+      sent_by: input.sentBy ?? null,
+      source: input.source ?? 'crm',
       error: input.error ?? null,
     })
     .select('*')

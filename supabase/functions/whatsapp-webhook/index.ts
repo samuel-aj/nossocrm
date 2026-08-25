@@ -573,6 +573,8 @@ Deno.serve(async (req) => {
         from_phone: fromMe ? null : phone,
         to_phone: fromMe ? phone : null,
         wa_timestamp: waTs,
+        // webhook de saída: echo = enviada por fora (celular)
+        source: fromMe ? "echo" : "inbound",
       });
       const dup = insErr && String(insErr.message).toLowerCase().includes("duplicate");
       if (insErr && !dup) {

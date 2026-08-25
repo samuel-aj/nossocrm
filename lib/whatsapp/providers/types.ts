@@ -39,6 +39,16 @@ export interface SendMediaInput {
   caption?: string;
 }
 
+export interface SendTemplateInput {
+  to: string;
+  /** Nome do modelo aprovado na Meta */
+  name: string;
+  /** Código do idioma do modelo (ex.: pt_BR) */
+  language: string;
+  /** Componentes no formato da Meta (header/body/buttons) */
+  components?: unknown[];
+}
+
 export interface SendResult {
   ok: boolean;
   /** id da mensagem no provedor (usado p/ idempotência + atualização de status) */
@@ -90,6 +100,8 @@ export interface WhatsAppProvider {
   sendText(input: SendTextInput): Promise<SendResult>;
   /** Envia mídia: imagem, vídeo, documento, áudio (voz) ou figurinha. */
   sendMedia(input: SendMediaInput): Promise<SendResult>;
+  /** Envia um modelo aprovado (só API oficial da Meta; fora da janela de 24h). */
+  sendTemplate?(input: SendTemplateInput): Promise<SendResult>;
   /** Configura o webhook da instância para apontar para o CRM. */
   setWebhook(url: string): Promise<void>;
   /** Desconecta o número da instância (logout) — a instância continua existindo. */
