@@ -69,6 +69,18 @@ vi.mock('./components/McpSection', () => ({
   ),
 }))
 
+// Versão beta dos agentes: o hook usa react-query (sem provider no teste) e a
+// aba só existe com a chave ligada; aqui fica desligada.
+vi.mock('@/hooks/useWaAgentsBeta', () => ({
+  useWaAgentsBeta: () => ({ enabled: false, isAdmin: false, isLoading: false, setEnabled: async () => {} }),
+}))
+vi.mock('@/features/wa-agents/WaAgentsSettings', () => ({
+  WaAgentsSettings: () => null,
+}))
+vi.mock('@/features/wa-agents/WaAgentsBetaCard', () => ({
+  WaAgentsBetaCard: () => null,
+}))
+
 import SettingsPage from './SettingsPage'
 import { useAuth } from '@/context/AuthContext'
 

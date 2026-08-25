@@ -10,6 +10,7 @@
 import { useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createClient } from '@/lib/supabase/client';
+import type { ConversationAiInfo } from '@/lib/wa-agents/types';
 
 export interface WaChatMessage {
   id: string;
@@ -48,8 +49,8 @@ export interface WaChatData {
   /** Todos os números CONECTADOS da org (seletor de envio do chat) */
   senders: WaSender[];
   conversation: { id: string; wa_phone: string; wa_name: string | null; contact_id: string | null } | null;
-  /** Agente de IA nesta conversa (null = nenhum agente atuou ainda) */
-  ai?: { conversationId: string; status: 'active' | 'paused' } | null;
+  /** Agente de IA nesta conversa (null = nenhum agente atuou ainda). Externo (API) ou nativo (beta). */
+  ai?: ConversationAiInfo | null;
   /** Rótulo de TODOS os números da org (inclui desconectados), por id */
   numbers?: Record<string, { phoneNumber: string | null; profileName: string | null }>;
   messages: WaChatMessage[];

@@ -1,0 +1,766 @@
+/**
+ * Motor dos agentes de IA nativos: recebe a mensagem, decide qual agente
+ * responde, gera a resposta com o modelo, envia pelo WhatsApp e aplica a
+ * esteira do encerramento. Nada aqui lança sem registrar a execução.
+ */
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { generateText, stepCountIs, tool, type LanguageModel, type ModelMessage } from 'ai';
+import { z } from 'zod';
+import { createStaticAdminClient } from '@/lib/supabase/server';
+import { getProvider, type SendResult } from '@/lib/whatsapp';
+import { recordOutboundMessage, replicateOutboundToSiblings } from '@/lib/whatsapp/service';
+import { executeOutcomeActions } from './actions';
+import { isWaAgentsBetaEnabled } from './beta';
+import { handleBotReply } from './bots';
+import {
+  buildHistoryMessages,
+  buildSystemPrompt,
+  loadAgent,
+  loadConversationContext,
+  messageText,
+  MESSAGE_LITE_COLUMNS,
+  type ConversationContext,
+  type WaMessageLite,
+} from './context';
+import { errorMessage, WaAgentError } from './errors';
+import { resolveAgentModel } from './model';
+import { logRun } from './runs';
+import { splitLines } from './split';
+import type {
+  AgentEvent,
+  AgentRow,
+  AgentRunEvent,
+  BotRunRow,
+  ConversationAiState,
+  ConversationApproval,
+  Outcome,
+  RunStatus,
+  RunTrigger,
+} from './types';
+import { dispatchAgentEvent } from './webhooks';
+
+export type RunResult = {
+  status: RunStatus;
+  reason?: string;
+  runId?: string | null;
+  text?: string;
+  lines?: string[];
+};
+
+export type RunAgentInput = {
+  organizationId: string;
+  conversationId: string;
+  trigger: RunTrigger;
+  agentId?: string;
+  forceReply?: boolean;
+  skipBuffer?: boolean;
+  triggerMessageId?: string;
+  depth?: number;
+};
+
+export type CollectedToolCall = { tool: string; input: unknown; output?: unknown };
+
+export const NO_REPLY_TOKEN = '[SEM_RESPOSTA]';
+const LOCK_SECONDS = 120;
+const LOCK_RETRY_MS = 2_000;
+const LOCK_WAIT_MAX_MS = 60_000;
+const MAX_HANDOFF_DEPTH = 3;
+const MAX_STEPS = 4;
+
+export function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// ---------------------------------------------------------------------------
+// Ferramentas do modelo
+// ---------------------------------------------------------------------------
+export function buildAgentTools(agent: AgentRow) {
+  const keys = agent.outcomes.map(o => o.key).filter(Boolean);
+  const resultadoSchema = keys.length > 0 ? z.enum(keys) : z.string();
+  return {
+    encerrar_atendimento: tool({
+      description:
+        'Encerra o pré-atendimento. Chame UMA única vez, na mesma resposta e depois de escrever a mensagem final ao cliente. Informe o resultado (uma das chaves configuradas) e um resumo objetivo do caso.',
+      inputSchema: z.object({
+        resultado: resultadoSchema.describe('Chave do resultado do atendimento'),
+        resumo: z.string().describe('Resumo objetivo do caso: quem, o quê, quando, onde, provas, urgência'),
+      }),
+      execute: async args => args,
+    }),
+    salvar_dados: tool({
+      description:
+        'Salva dados descobertos sobre o atendimento (nome completo, cidade, tipo de caso, datas, documentos, urgência). Os dados são mesclados aos já salvos.',
+      inputSchema: z.object({ dados: z.record(z.string(), z.any()) }),
+      execute: async () => ({ ok: true }),
+    }),
+  };
+}
+
+export type GeneratedReply = {
+  text: string;
+  toolCalls: CollectedToolCall[];
+  usage: unknown;
+  finishReason: string;
+};
+
+/** Modelos de raciocínio da OpenAI (gpt-5*, o1/o3/o4) recusam temperature diferente do padrão. */
+export function supportsTemperature(agent: Pick<AgentRow, 'provider' | 'model'>): boolean {
+  if (agent.provider !== 'openai') return true;
+  return !/^(gpt-5|o\d)/i.test((agent.model || '').trim());
+}
+
+/** Chama o modelo com as ferramentas do agente e junta texto/ferramentas de todos os passos. */
+export async function generateAgentReply(input: {
+  model: LanguageModel;
+  agent: AgentRow;
+  system: string;
+  messages: ModelMessage[];
+}): Promise<GeneratedReply> {
+  const result = await generateText({
+    model: input.model,
+    system: input.system,
+    messages: input.messages,
+    temperature: supportsTemperature(input.agent) ? input.agent.temperature : undefined,
+    tools: buildAgentTools(input.agent),
+    stopWhen: stepCountIs(MAX_STEPS),
+  });
+
+  const toolCalls: CollectedToolCall[] = [];
+  const texts: string[] = [];
+  for (const step of result.steps) {
+    const t = (step.text ?? '').trim();
+    if (t) texts.push(t);
+    for (const tc of step.toolCalls) {
+      const tr = step.toolResults.find(r => r.toolCallId === tc.toolCallId);
+      toolCalls.push({ tool: tc.toolName, input: tc.input, output: tr?.output });
+    }
+  }
+  // O texto final pode ter vindo no passo anterior ao da ferramenta: junta todos
+  const text = (texts.join('\n') || result.text || '').trim();
+  const u = result.totalUsage;
+  const usage = {
+    inputTokens: u?.inputTokens ?? null,
+    outputTokens: u?.outputTokens ?? null,
+    totalTokens: u?.totalTokens ?? null,
+  };
+  return { text, toolCalls, usage, finishReason: String(result.finishReason ?? '') };
+}
+
+/** Dados salvos via salvar_dados (mesclados na ordem das chamadas). */
+export function mergeSavedData(toolCalls: CollectedToolCall[]): Record<string, unknown> | null {
+  let merged: Record<string, unknown> | null = null;
+  for (const tc of toolCalls) {
+    if (tc.tool !== 'salvar_dados') continue;
+    const dados = (tc.input as { dados?: unknown } | null)?.dados;
+    if (dados && typeof dados === 'object' && !Array.isArray(dados)) {
+      merged = { ...(merged ?? {}), ...(dados as Record<string, unknown>) };
+    }
+  }
+  return merged;
+}
+
+/** Acha o resultado pela chave (fallback: igual ignorando caixa/espaços). */
+export function findOutcome(outcomes: Outcome[], key: string): Outcome | null {
+  const k = (key || '').trim();
+  if (!k) return null;
+  return (
+    outcomes.find(o => o.key === k) ??
+    outcomes.find(o => o.key.toLowerCase() === k.toLowerCase()) ??
+    outcomes.find(o => o.label.trim().toLowerCase() === k.toLowerCase()) ??
+    null
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Consultas auxiliares
+// ---------------------------------------------------------------------------
+async function getLastMessage(
+  admin: SupabaseClient,
+  ctx: ConversationContext,
+  direction: 'in' | 'out' | null
+): Promise<WaMessageLite | null> {
+  let q = admin
+    .from('wa_messages')
+    .select(MESSAGE_LITE_COLUMNS)
+    .eq('organization_id', ctx.conversation.organization_id)
+    .eq('conversation_id', ctx.conversation.id);
+  if (direction) q = q.eq('direction', direction);
+  const { data } = await q.order('created_at', { ascending: false }).limit(1).maybeSingle();
+  return (data as WaMessageLite | null) ?? null;
+}
+
+async function getPendingInbound(
+  admin: SupabaseClient,
+  ctx: ConversationContext,
+  sinceIso: string
+): Promise<WaMessageLite[]> {
+  const { data } = await admin
+    .from('wa_messages')
+    .select(MESSAGE_LITE_COLUMNS)
+    .eq('organization_id', ctx.conversation.organization_id)
+    .eq('conversation_id', ctx.conversation.id)
+    .eq('direction', 'in')
+    .gt('created_at', sinceIso)
+    .order('created_at', { ascending: true })
+    .limit(50);
+  return (data ?? []) as WaMessageLite[];
+}
+
+async function claimLock(admin: SupabaseClient, conversationId: string): Promise<boolean> {
+  const deadline = Date.now() + LOCK_WAIT_MAX_MS;
+  for (;;) {
+    const { data, error } = await admin.rpc('wa_ai_claim_lock', {
+      p_conversation: conversationId,
+      p_seconds: LOCK_SECONDS,
+    });
+    if (error) throw new WaAgentError('LOCK_ERROR', error.message);
+    if (data === true) return true;
+    if (Date.now() + LOCK_RETRY_MS > deadline) return false;
+    await sleep(LOCK_RETRY_MS);
+  }
+}
+
+async function releaseLock(admin: SupabaseClient, conversationId: string): Promise<void> {
+  try {
+    await admin.from('wa_conversations').update({ ai_lock_until: null }).eq('id', conversationId);
+  } catch (e) {
+    console.error('[wa-agents] liberar trava falhou:', errorMessage(e));
+  }
+}
+
+async function updateConversation(
+  admin: SupabaseClient,
+  ctx: ConversationContext,
+  patch: Record<string, unknown>
+): Promise<void> {
+  const { error } = await admin
+    .from('wa_conversations')
+    .update(patch)
+    .eq('id', ctx.conversation.id)
+    .eq('organization_id', ctx.conversation.organization_id);
+  if (error) throw new WaAgentError('DB_ERROR', error.message);
+}
+
+// ---------------------------------------------------------------------------
+// Envio das linhas
+// ---------------------------------------------------------------------------
+async function sendLines(
+  admin: SupabaseClient,
+  ctx: ConversationContext,
+  agent: AgentRow,
+  lines: string[]
+): Promise<void> {
+  const conn = ctx.connection;
+  if (!conn) throw new WaAgentError('NO_CONNECTION', 'Conversa sem número vinculado');
+  if (conn.status !== 'connected') throw new WaAgentError('DISCONNECTED', 'número desconectado');
+  const provider = getProvider(conn);
+  const orgId = ctx.conversation.organization_id;
+  const to = ctx.conversation.wa_phone;
+
+  for (let i = 0; i < lines.length; i++) {
+    const text = lines[i];
+    let result: SendResult;
+    try {
+      result = await provider.sendText({ to, text });
+    } catch (e) {
+      result = { ok: false, error: errorMessage(e) };
+    }
+    // A gravação no chat nunca derruba o fluxo: mensagem enviada (ou falha) fica registrada
+    try {
+      const msg = await recordOutboundMessage(admin, {
+        orgId,
+        conversationId: ctx.conversation.id,
+        text,
+        providerMessageId: result.providerMessageId ?? null,
+        fromPhone: conn.phone_number,
+        toPhone: to,
+        sentBy: null,
+        source: 'agent',
+        status: result.ok ? 'sent' : 'failed',
+        error: result.ok ? null : result.error || 'falha no envio',
+      });
+      if (result.ok) {
+        await replicateOutboundToSiblings(admin, conn, {
+          toPhone: to,
+          text: msg.body,
+          providerMessageId: result.providerMessageId ?? null,
+        });
+      }
+    } catch (e) {
+      console.error('[wa-agents] gravar mensagem do agente falhou:', errorMessage(e));
+    }
+    if (!result.ok) {
+      throw new WaAgentError('SEND_FAILED', `Envio falhou na linha ${i + 1}: ${result.error || 'erro desconhecido'}`);
+    }
+    if (i < lines.length - 1 && agent.line_delay_ms > 0) await sleep(agent.line_delay_ms);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Execução do agente numa conversa
+// ---------------------------------------------------------------------------
+export async function runAgentOnConversation(input: RunAgentInput): Promise<RunResult> {
+  const admin = createStaticAdminClient();
+  const { organizationId, conversationId, trigger } = input;
+  const depth = input.depth ?? 0;
+  const startedAt = Date.now();
+  const events: AgentRunEvent[] = [];
+  const toolCalls: CollectedToolCall[] = [];
+  let agent: AgentRow | null = null;
+  let ctx: ConversationContext | null = null;
+  let modelId: string | null = null;
+  let inputText: string | null = null;
+  let outputText: string | null = null;
+  let usage: unknown = null;
+  let lockHeld = false;
+  let pendingHandoffAgentId: string | null = null;
+
+  const pushEvent = (type: string, extra?: Record<string, unknown>) => {
+    events.push({ type, at: new Date().toISOString(), ...(extra ?? {}) });
+  };
+  const emit = async (event: AgentEvent, extra?: Record<string, unknown>) => {
+    pushEvent(event, extra);
+    if (!agent || !ctx) return;
+    const results = await dispatchAgentEvent(admin, { agent, event, ctx, extra });
+    if (results.length > 0) pushEvent('webhook', { event, results });
+  };
+  const finish = async (
+    status: RunStatus,
+    extra: { reason?: string; error?: string; text?: string; lines?: string[] } = {}
+  ): Promise<RunResult> => {
+    const runId = await logRun(admin, {
+      organization_id: organizationId,
+      agent_id: agent?.id ?? input.agentId ?? null,
+      conversation_id: conversationId,
+      trigger,
+      status,
+      reason: extra.reason ?? null,
+      input_text: inputText,
+      output_text: outputText,
+      tool_calls: toolCalls,
+      events,
+      usage,
+      model: modelId,
+      duration_ms: Date.now() - startedAt,
+      error: extra.error ?? null,
+    });
+    return { status, reason: extra.reason, runId, text: extra.text, lines: extra.lines };
+  };
+  const stopConversation = async (reason: string, extra?: Record<string, unknown>) => {
+    if (!ctx) return;
+    await updateConversation(admin, ctx, {
+      ai_status: 'stopped',
+      ai_status_changed_at: new Date().toISOString(),
+      ai_resume_at: null,
+      ai_approval: null,
+    });
+    ctx.conversation.ai_status = 'stopped';
+    await emit('stopped', { reason, ...(extra ?? {}) });
+  };
+
+  try {
+    ctx = await loadConversationContext(admin, organizationId, conversationId);
+    const agentId = input.agentId ?? ctx.conversation.ai_agent_id;
+    if (!agentId) return await finish('skipped', { reason: 'sem agente' });
+    agent = await loadAgent(admin, organizationId, agentId);
+    if (!agent) return await finish('skipped', { reason: 'agente não encontrado' });
+    if (!agent.enabled) return await finish('skipped', { reason: 'agente desligado' });
+
+    // 2. Buffer: espera o lead terminar de digitar; só a execução da ÚLTIMA mensagem responde
+    if (!input.skipBuffer && agent.buffer_seconds > 0) await sleep(agent.buffer_seconds * 1000);
+    if (input.triggerMessageId) {
+      const lastIn = await getLastMessage(admin, ctx, 'in');
+      if (lastIn && lastIn.id !== input.triggerMessageId) {
+        return await finish('skipped', { reason: 'superseded' });
+      }
+    }
+
+    // 3. Trava por conversa
+    lockHeld = await claimLock(admin, conversationId);
+    if (!lockHeld) return await finish('skipped', { reason: 'locked' });
+
+    // 4. Estado atual (pode ter mudado durante o buffer/trava)
+    ctx = await loadConversationContext(admin, organizationId, conversationId);
+    const conv = ctx.conversation;
+    if (conv.ai_status !== 'active') {
+      return await finish('skipped', { reason: `conversa ${conv.ai_status ?? 'sem agente'}` });
+    }
+    if (conv.ai_agent_id !== agent.id) {
+      return await finish('skipped', { reason: 'agente da conversa mudou' });
+    }
+
+    const since = conv.ai_last_processed_at ?? '1970-01-01T00:00:00.000Z';
+    const pending = await getPendingInbound(admin, ctx, since);
+    inputText = pending.map(messageText).filter(Boolean).join('\n') || null;
+    if (!input.forceReply) {
+      if (pending.length === 0) return await finish('skipped', { reason: 'nada a responder' });
+      const lastAny = await getLastMessage(admin, ctx, null);
+      if (!lastAny || lastAny.direction !== 'in') {
+        return await finish('skipped', { reason: 'atendente respondeu por último' });
+      }
+    }
+
+    // 5. Modelo, prompt e histórico
+    const resolved = await resolveAgentModel(admin, organizationId, agent);
+    modelId = resolved.modelId;
+    const system = buildSystemPrompt({ agent, ctx });
+    const messages = await buildHistoryMessages(admin, ctx, agent.history_limit);
+    if (input.forceReply && (messages.length === 0 || messages[messages.length - 1].role === 'assistant')) {
+      messages.push({ role: 'user', content: '(o sistema pediu que você inicie/continue o atendimento agora)' });
+    }
+
+    // 6. Geração
+    const gen = await generateAgentReply({ model: resolved.model, agent, system, messages });
+    toolCalls.push(...gen.toolCalls);
+    usage = gen.usage;
+    const text = gen.text;
+    outputText = text || null;
+
+    // 7. Envio linha a linha
+    let lines: string[] = [];
+    if (text && text !== NO_REPLY_TOKEN) {
+      lines = splitLines(text);
+      await sendLines(admin, ctx, agent, lines);
+    }
+
+    // 8. Estado da conversa
+    const lastIn = pending.length > 0 ? pending[pending.length - 1] : await getLastMessage(admin, ctx, 'in');
+    const saved = mergeSavedData(gen.toolCalls);
+    const state: ConversationAiState = { ...((conv.ai_state ?? {}) as ConversationAiState) };
+    if (saved) state.dados = { ...(state.dados ?? {}), ...saved };
+    await updateConversation(admin, ctx, {
+      ai_last_processed_at: lastIn?.created_at ?? new Date().toISOString(),
+      ai_state: state,
+    });
+    ctx.conversation.ai_state = state;
+
+    // 9. Eventos e esteira
+    if (lines.length > 0) await emit('reply_sent', { text, lines });
+    for (const tc of gen.toolCalls) await emit('tool_used', { tool: tc.tool, input: tc.input });
+
+    const end = gen.toolCalls.find(t => t.tool === 'encerrar_atendimento');
+    if (end) {
+      const args = (end.input ?? {}) as { resultado?: unknown; resumo?: unknown };
+      const resultado = String(args.resultado ?? '').trim();
+      const resumo = String(args.resumo ?? '').trim();
+      const outcome = findOutcome(agent.outcomes, resultado);
+      if (!outcome) {
+        pushEvent('outcome_not_found', { resultado, resumo });
+      } else {
+        const acts = await executeOutcomeActions(admin, { agent, ctx, outcome, summary: resumo, runEvents: events });
+        await emit('finished', { resultado: outcome.key, resultado_label: outcome.label, resumo });
+        const now = new Date().toISOString();
+
+        if (acts.approvalAgentId) {
+          const next = await loadAgent(admin, organizationId, acts.approvalAgentId);
+          if (!next || !next.enabled) {
+            await stopConversation('agente de destino indisponível', { resultado: outcome.key, resumo });
+          } else {
+            const approval: ConversationApproval = {
+              nextAgentId: next.id,
+              nextAgentName: next.persona_name || next.name,
+              summary: resumo,
+              requestedAt: now,
+            };
+            await updateConversation(admin, ctx, {
+              ai_status: 'awaiting_approval',
+              ai_status_changed_at: now,
+              ai_approval: approval,
+            });
+            ctx.conversation.ai_status = 'awaiting_approval';
+            ctx.conversation.ai_approval = approval;
+            await emit('awaiting_approval', { next_agent: { id: next.id, name: next.name }, resumo });
+          }
+        } else if (acts.handoffAgentId) {
+          const next = await loadAgent(admin, organizationId, acts.handoffAgentId);
+          if (!next || !next.enabled) {
+            await stopConversation('agente de destino indisponível', { resultado: outcome.key, resumo });
+          } else {
+            const handoffState: ConversationAiState = {
+              ...state,
+              handoff: {
+                from_agent_id: agent.id,
+                from_agent_name: agent.persona_name || agent.name,
+                summary: resumo,
+                at: now,
+              },
+            };
+            await updateConversation(admin, ctx, {
+              ai_agent_id: next.id,
+              ai_state: handoffState,
+              ai_status: 'active',
+              ai_status_changed_at: now,
+              ai_approval: null,
+            });
+            ctx.conversation.ai_agent_id = next.id;
+            ctx.conversation.ai_state = handoffState;
+            await emit('handed_off', { to_agent: { id: next.id, name: next.name }, resumo });
+            pendingHandoffAgentId = next.id;
+          }
+        } else if (acts.stopped) {
+          await stopConversation('resultado com parada', { resultado: outcome.key, resumo });
+        }
+      }
+    }
+
+    // 10. Registro
+    const res = await finish('ok', { text, lines });
+
+    // Passagem em cadeia: fora da trava desta execução
+    if (pendingHandoffAgentId && depth < MAX_HANDOFF_DEPTH) {
+      await releaseLock(admin, conversationId);
+      lockHeld = false;
+      await runAgentOnConversation({
+        organizationId,
+        conversationId,
+        trigger: 'handoff',
+        agentId: pendingHandoffAgentId,
+        forceReply: true,
+        skipBuffer: true,
+        depth: depth + 1,
+      });
+    }
+    return res;
+  } catch (e) {
+    const msg = errorMessage(e);
+    const code = e instanceof WaAgentError ? e.code : undefined;
+    console.error('[wa-agents] execução falhou:', msg);
+    try {
+      await emit('error', { message: msg, code });
+    } catch {
+      // nunca derruba o registro do erro
+    }
+    // Em erro a conversa continua 'active': a próxima mensagem tenta de novo
+    return await finish('error', { reason: msg, error: msg });
+  } finally {
+    if (lockHeld) await releaseLock(admin, conversationId);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Mensagem recebida (chamada pelo /api/wa-agents/ingest)
+// ---------------------------------------------------------------------------
+export async function handleInboundMessage(input: {
+  organizationId: string;
+  conversationId: string;
+  messageId: string;
+}): Promise<RunResult> {
+  const admin = createStaticAdminClient();
+  const { organizationId, conversationId, messageId } = input;
+  const events: AgentRunEvent[] = [];
+  const skip = async (reason: string, agentId?: string | null): Promise<RunResult> => {
+    const runId = await logRun(admin, {
+      organization_id: organizationId,
+      agent_id: agentId ?? null,
+      conversation_id: conversationId,
+      trigger: 'inbound',
+      status: 'skipped',
+      reason,
+      events,
+    });
+    return { status: 'skipped', reason, runId };
+  };
+
+  try {
+    if (!(await isWaAgentsBetaEnabled(admin, organizationId))) {
+      return { status: 'skipped', reason: 'beta desativada' };
+    }
+
+    // Robô esperando resposta nesta conversa tem prioridade
+    const { data: waiting } = await admin
+      .from('wa_bot_runs')
+      .select('*')
+      .eq('organization_id', organizationId)
+      .eq('conversation_id', conversationId)
+      .eq('status', 'waiting_reply')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (waiting) {
+      const { data: msg } = await admin
+        .from('wa_messages')
+        .select('id, body, transcription')
+        .eq('organization_id', organizationId)
+        .eq('id', messageId)
+        .maybeSingle();
+      const m = (msg as { id: string; body: string | null; transcription: string | null } | null) ?? {
+        id: messageId,
+        body: null,
+        transcription: null,
+      };
+      await handleBotReply(admin, { run: waiting as BotRunRow, message: m });
+      return { status: 'ok', reason: 'robô' };
+    }
+
+    let ctx = await loadConversationContext(admin, organizationId, conversationId);
+    const conv = ctx.conversation;
+    let agent: AgentRow | null = null;
+
+    if (conv.ai_agent_id) {
+      if (conv.ai_status && conv.ai_status !== 'active') {
+        return await skip(`conversa ${conv.ai_status}`, conv.ai_agent_id);
+      }
+      agent = await loadAgent(admin, organizationId, conv.ai_agent_id);
+      if (!agent) return await skip('agente não encontrado', conv.ai_agent_id);
+      if (!agent.enabled) return await skip('agente desligado', agent.id);
+      if (!conv.ai_status) {
+        await admin
+          .from('wa_conversations')
+          .update({ ai_status: 'active', ai_status_changed_at: new Date().toISOString() })
+          .eq('id', conversationId)
+          .eq('organization_id', organizationId);
+      }
+    } else if (!conv.ai_status) {
+      if (!conv.connection_id) return await skip('conversa sem número');
+      // Agente de entrada do número
+      const { data: candidates } = await admin
+        .from('wa_ai_agents')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .eq('enabled', true)
+        .contains('connection_ids', [conv.connection_id])
+        .order('created_at', { ascending: true })
+        .limit(1);
+      const raw = (candidates ?? [])[0] as Record<string, unknown> | undefined;
+      if (!raw) return await skip('nenhum agente para este número');
+      const candidate = (await loadAgent(admin, organizationId, String(raw.id))) ?? null;
+      if (!candidate) return await skip('nenhum agente para este número');
+
+      if (candidate.only_new_conversations) {
+        const { data: msgRow } = await admin
+          .from('wa_messages')
+          .select('created_at')
+          .eq('organization_id', organizationId)
+          .eq('id', messageId)
+          .maybeSingle();
+        const at = (msgRow as { created_at?: string } | null)?.created_at ?? new Date().toISOString();
+        const { count } = await admin
+          .from('wa_messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('organization_id', organizationId)
+          .eq('conversation_id', conversationId)
+          .eq('direction', 'out')
+          .lt('created_at', at);
+        if ((count ?? 0) > 0) return await skip('conversa antiga', candidate.id);
+      }
+
+      const now = new Date().toISOString();
+      await admin
+        .from('wa_conversations')
+        .update({
+          ai_agent_id: candidate.id,
+          ai_status: 'active',
+          ai_status_changed_at: now,
+          ai_state: {},
+          ai_approval: null,
+          ai_resume_at: null,
+          ai_paused_by: null,
+        })
+        .eq('id', conversationId)
+        .eq('organization_id', organizationId);
+      agent = candidate;
+      ctx = await loadConversationContext(admin, organizationId, conversationId);
+      events.push({ type: 'started', at: now });
+      const results = await dispatchAgentEvent(admin, { agent, event: 'started', ctx });
+      if (results.length > 0) events.push({ type: 'webhook', at: now, event: 'started', results });
+    } else {
+      // ai_status preenchido sem agente nativo: agente externo (API pública)
+      return { status: 'skipped', reason: 'agente externo' };
+    }
+
+    if (!agent) return await skip('sem agente');
+
+    // Evento de mensagem recebida
+    const { data: msgRow } = await admin
+      .from('wa_messages')
+      .select(MESSAGE_LITE_COLUMNS)
+      .eq('organization_id', organizationId)
+      .eq('id', messageId)
+      .maybeSingle();
+    const text = msgRow ? messageText(msgRow as WaMessageLite) : '';
+    await dispatchAgentEvent(admin, { agent, event: 'message_received', ctx, extra: { message_id: messageId, text } });
+
+    return await runAgentOnConversation({
+      organizationId,
+      conversationId,
+      trigger: 'inbound',
+      agentId: agent.id,
+      triggerMessageId: messageId,
+    });
+  } catch (e) {
+    const msg = errorMessage(e);
+    console.error('[wa-agents] mensagem recebida falhou:', msg);
+    const runId = await logRun(admin, {
+      organization_id: organizationId,
+      conversation_id: conversationId,
+      trigger: 'inbound',
+      status: 'error',
+      reason: msg,
+      error: msg,
+      events,
+    });
+    return { status: 'error', reason: msg, runId };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pausas vencidas (chamado pelo /api/wa-agents/tick)
+// ---------------------------------------------------------------------------
+export async function resumeDueConversations(
+  admin: SupabaseClient,
+  opts: { limit?: number } = {}
+): Promise<{ resumed: number; results: RunResult[] }> {
+  const limit = opts.limit ?? 50;
+  const results: RunResult[] = [];
+  let resumed = 0;
+  try {
+    const now = new Date().toISOString();
+    const { data } = await admin
+      .from('wa_conversations')
+      .select('id, organization_id, ai_agent_id')
+      .eq('ai_status', 'paused')
+      .not('ai_resume_at', 'is', null)
+      .lte('ai_resume_at', now)
+      .not('ai_agent_id', 'is', null)
+      .order('ai_resume_at', { ascending: true })
+      .limit(limit);
+
+    for (const c of (data ?? []) as Array<{ id: string; organization_id: string; ai_agent_id: string }>) {
+      try {
+        const { data: upd } = await admin
+          .from('wa_conversations')
+          .update({ ai_status: 'active', ai_resume_at: null, ai_paused_by: null, ai_status_changed_at: now })
+          .eq('id', c.id)
+          .eq('organization_id', c.organization_id)
+          .eq('ai_status', 'paused')
+          .select('id')
+          .maybeSingle();
+        if (!upd) continue;
+        resumed++;
+        try {
+          const agent = await loadAgent(admin, c.organization_id, c.ai_agent_id);
+          if (agent) {
+            const ctx = await loadConversationContext(admin, c.organization_id, c.id);
+            await dispatchAgentEvent(admin, { agent, event: 'resumed', ctx, extra: { by: 'timer' } });
+          }
+        } catch (e) {
+          console.error('[wa-agents] webhook de retomada falhou:', errorMessage(e));
+        }
+        results.push(
+          await runAgentOnConversation({
+            organizationId: c.organization_id,
+            conversationId: c.id,
+            trigger: 'resume',
+            skipBuffer: true,
+          })
+        );
+      } catch (e) {
+        console.error('[wa-agents] retomada falhou:', errorMessage(e));
+      }
+    }
+  } catch (e) {
+    console.error('[wa-agents] busca de pausas vencidas falhou:', errorMessage(e));
+  }
+  return { resumed, results };
+}

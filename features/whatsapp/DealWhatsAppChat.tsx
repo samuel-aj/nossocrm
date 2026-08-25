@@ -36,6 +36,9 @@ import { normalizePhoneE164 } from '@/lib/phone';
 import { fillTemplate, templateParams, TEMPLATE_BUTTON_LABEL, type TemplateButton } from '@/lib/messageTemplates';
 import { useWhatsAppChat, type WaChatMessage, type WaMediaKind, type WaSender } from './useWhatsAppChat';
 import { transcodeToMp3 } from './audioTranscode';
+import { useWaAgentsBeta } from '@/hooks/useWaAgentsBeta';
+import { ChatAgentBanner } from '@/features/wa-agents/ChatAgentBanner';
+import type { AgentMinimal, ConversationAiAction } from '@/lib/wa-agents/types';
 
 const TIME_FMT = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
@@ -805,19 +808,43 @@ export function DealWhatsAppChat({
   const qc = useQueryClient();
   const aiState = data?.ai ?? null;
   const [aiBusy, setAiBusy] = useState(false);
-  const toggleAi = async () => {
-    if (!aiState || aiBusy) return;
+  // Versão beta (agentes nativos): faixa completa com iniciar/pausar/parar/aprovar.
+  // Fora do beta, a faixa antiga (pausar/retomar do agente externo) continua igual.
+  const waBeta = useWaAgentsBeta();
+  const useNativeBanner = waBeta.enabled || !!aiState?.native;
+  const { data: agentsMinimal } = useQuery<{ agents: AgentMinimal[] }>({
+    queryKey: ['waAgents', 'minimal'],
+    queryFn: async () => {
+      const res = await fetch('/api/wa-agents/agents', {
+        credentials: 'include',
+        headers: { accept: 'application/json' },
+      });
+      const j = (await res.json().catch(() => null)) as { agents?: AgentMinimal[]; error?: string } | null;
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`);
+      return { agents: j?.agents ?? [] };
+    },
+    enabled: waBeta.enabled,
+    staleTime: 60_000,
+  });
+  const runAiAction = async (action: ConversationAiAction, agentId?: string) => {
+    if (aiBusy) return;
+    const conversationId = aiState?.conversationId ?? data?.conversation?.id ?? null;
+    if (!conversationId) return;
     setAiBusy(true);
     try {
-      const res = await fetch('/api/whatsapp/conversations/ai', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          conversationId: aiState.conversationId,
-          status: aiState.status === 'active' ? 'paused' : 'active',
-        }),
-      });
+      const res = useNativeBanner
+        ? await fetch('/api/wa-agents/conversation', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ conversationId, action, agentId }),
+          })
+        : await fetch('/api/whatsapp/conversations/ai', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ conversationId, status: action === 'pause' ? 'paused' : 'active' }),
+          });
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(j.error || `HTTP ${res.status}`);
@@ -828,6 +855,10 @@ export function DealWhatsAppChat({
     } finally {
       setAiBusy(false);
     }
+  };
+  const toggleAi = async () => {
+    if (!aiState) return;
+    await runAiAction(aiState.status === 'active' ? 'pause' : 'resume');
   };
   const senderMenuRef = useRef<HTMLDivElement>(null);
   // Pesquisa de mensagens (estilo WhatsApp): barra + navegação entre matches
@@ -1704,8 +1735,18 @@ export function DealWhatsAppChat({
           </div>
         )}
 
-        {/* AGENTE DE IA: só aparece quando um agente já atuou nesta conversa */}
-        {aiState && (
+        {/* AGENTE DE IA. Beta (agentes nativos): faixa completa, inclusive para
+            iniciar um agente numa conversa que ainda não tem. Fora do beta: a
+            faixa antiga, só quando um agente (externo) já atuou nesta conversa. */}
+        {useNativeBanner && (aiState || data?.conversation) && (
+          <ChatAgentBanner
+            ai={aiState}
+            agents={(agentsMinimal?.agents ?? []).filter(a => a.enabled)}
+            busy={aiBusy}
+            onAction={(action, agentId) => void runAiAction(action, agentId)}
+          />
+        )}
+        {!useNativeBanner && aiState && (
           <div
             className={`flex items-center justify-between gap-2 mb-1.5 px-3 py-1.5 rounded-xl border text-xs ${
               aiState.status === 'active'

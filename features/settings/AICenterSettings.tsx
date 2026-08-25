@@ -6,6 +6,7 @@ import { useCRM } from '@/context/CRMContext';
 import { UserRole } from '@/types/constants';
 import { AIConfigSection } from './components/AIConfigSection';
 import { AIFeaturesSection } from './components/AIFeaturesSection';
+import { WaAgentsBetaCard } from '@/features/wa-agents/WaAgentsBetaCard';
 
 /**
  * Componente React `AICenterSettings`.
@@ -26,6 +27,9 @@ export const AICenterSettings: React.FC = () => {
           Configure o provedor/modelo e gerencie os prompts usados no sistema.
         </p>
       </div>
+
+      {/* Versão beta: agentes de IA e robôs de atendimento nativos (WhatsApp) */}
+      <WaAgentsBetaCard />
 
       {/* Org-wide toggle (admin-only) — sempre visível no topo */}
       <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl p-6 mb-6">

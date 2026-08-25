@@ -16,9 +16,11 @@ import { AICenterSettings } from './AICenterSettings';
 import { UsersPage } from './UsersPage';
 import { LeadDistributionSettings } from './LeadDistributionSettings';
 import { useAuth } from '@/context/AuthContext';
-import { Settings as SettingsIcon, Users, Database, Sparkles, Plug, Package, Shuffle } from 'lucide-react';
+import { useWaAgentsBeta } from '@/hooks/useWaAgentsBeta';
+import { WaAgentsSettings } from '@/features/wa-agents/WaAgentsSettings';
+import { Settings as SettingsIcon, Users, Database, Sparkles, Plug, Package, Shuffle, Bot } from 'lucide-react';
 
-type SettingsTab = 'general' | 'products' | 'integrations' | 'ai' | 'data' | 'users' | 'distribution';
+type SettingsTab = 'general' | 'products' | 'integrations' | 'ai' | 'data' | 'users' | 'distribution' | 'agents';
 
 interface GeneralSettingsProps {
   hash?: string;
@@ -208,13 +210,17 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
   const { profile } = useAuth();
   const pathname = usePathname();
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab || 'general');
+  // Versão beta: aba "Agentes" (agentes de IA e robôs nativos) só com a chave ligada
+  const waBeta = useWaAgentsBeta();
 
   // Get hash from URL for scrolling
   const hash = typeof window !== 'undefined' ? window.location.hash : '';
 
   // Determine tab from pathname if available
   useEffect(() => {
-    if (pathname?.includes('/settings/ai')) {
+    if (pathname?.includes('/settings/agentes')) {
+      setActiveTab('agents');
+    } else if (pathname?.includes('/settings/ai')) {
       setActiveTab('ai');
     } else if (pathname?.includes('/settings/products')) {
       setActiveTab('products');
@@ -241,11 +247,14 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
     ...(isAdminOrSuper ? [{ id: 'products' as SettingsTab, name: 'Produtos/Serviços', icon: Package }] : []),
     ...(isAdminOrSuper ? [{ id: 'integrations' as SettingsTab, name: 'Integrações', icon: Plug }] : []),
     { id: 'ai' as SettingsTab, name: 'Central de I.A', icon: Sparkles },
+    ...(isAdminOrSuper && waBeta.enabled ? [{ id: 'agents' as SettingsTab, name: 'Agentes', icon: Bot }] : []),
     { id: 'data' as SettingsTab, name: 'Dados', icon: Database },
   ];
 
   const renderContent = () => {
     switch (activeTab) {
+      case 'agents':
+        return <WaAgentsSettings />;
       case 'products':
         return <ProductsSettings />;
       case 'integrations':
