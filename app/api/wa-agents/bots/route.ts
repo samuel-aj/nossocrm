@@ -1,12 +1,13 @@
 /**
- * /api/wa-agents/bots  (admin)
- *   GET  -> { bots: BotRow[] }  (segredo do passo webhook mascarado)
- *   POST -> BotInputSchema -> 201 { bot }
+ * /api/wa-agents/bots
+ *   GET  -> admin: { bots: BotRow[] }  (segredo do passo webhook mascarado)
+ *           demais membros: { bots: BotMinimal[] }  (só os robôs ligados: menu do chat)
+ *   POST -> (admin) BotInputSchema -> 201 { bot }
  *           (aceita start_step_id e os campos do quadro nos passos: next_step_id, ui, passo webhook;
  *           segredo mascarado vira vazio)
  */
 import { json } from '@/lib/whatsapp/api';
-import { BotInputSchema, type BotRow } from '@/lib/wa-agents/types';
+import { BotInputSchema, type BotMinimal, type BotRow } from '@/lib/wa-agents/types';
 import {
   connectionNotFoundError,
   connectionsBelongToOrg,
@@ -22,13 +23,26 @@ import {
 export const runtime = 'nodejs';
 
 export async function GET() {
-  const auth = await guardRoute({ admin: true });
+  const auth = await guardRoute();
   if (!auth.ok) return auth.response;
+  const orgId = auth.user.organizationId;
+
+  if (!auth.isAdmin) {
+    // Menu do chat: qualquer membro vê só id, nome e número dos robôs ligados
+    const { data, error } = await auth.admin
+      .from('wa_bots')
+      .select('id, name, enabled, connection_id')
+      .eq('organization_id', orgId)
+      .eq('enabled', true)
+      .order('name', { ascending: true });
+    if (error) return json({ error: error.message }, 500);
+    return json({ bots: (data ?? []) as BotMinimal[] });
+  }
 
   const { data, error } = await auth.admin
     .from('wa_bots')
     .select('*')
-    .eq('organization_id', auth.user.organizationId)
+    .eq('organization_id', orgId)
     .order('created_at', { ascending: true });
   if (error) return json({ error: error.message }, 500);
 

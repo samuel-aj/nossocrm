@@ -226,6 +226,8 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
 
     // Conversa (cria na primeira execução)
     let connection: WaConnectionRow | null = null;
+    /** Número da conversa existente: é ele que envia (o do robô só como reserva) */
+    let convConnectionId: string | null = null;
     let phone = run.phone ? normalizePhoneE164(run.phone) : '';
     if (!run.conversation_id) {
       phone = normalizePhoneE164(run.phone || contact?.phone || '');
@@ -249,14 +251,18 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
       const conv = await ensureConversation(admin, orgId, bot.connection_id, phone, contact?.name ?? null);
       st.run = { ...st.run, conversation_id: conv.id, phone, contact_id: contact?.id ?? contactId ?? null };
       await saveRun(admin, st, { conversation_id: conv.id, phone, contact_id: st.run.contact_id });
-    } else if (!phone) {
+    } else {
+      // Execução presa a uma conversa existente (iniciada pelo chat ou retomada):
+      // envia pelo número da conversa, para a resposta do lead cair nela
       const { data } = await admin
         .from('wa_conversations')
-        .select('wa_phone')
+        .select('wa_phone, connection_id')
         .eq('organization_id', orgId)
         .eq('id', run.conversation_id)
         .maybeSingle();
-      phone = (data as { wa_phone?: string } | null)?.wa_phone ?? '';
+      const conv = data as { wa_phone?: string | null; connection_id?: string | null } | null;
+      convConnectionId = conv?.connection_id ?? null;
+      if (!phone) phone = conv?.wa_phone ?? '';
       if (!phone) {
         note(st, null, 'conversa sem telefone');
         await saveRun(admin, st, { status: 'error', error: 'conversa sem telefone' }, { release: true });
@@ -267,9 +273,13 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
 
     const getConnection = async (): Promise<WaConnectionRow> => {
       if (connection) return connection;
-      if (!bot.connection_id) throw new Error('robô sem número configurado');
-      connection = await getConnectionByIdForOrg(admin, orgId, bot.connection_id);
-      if (!connection) throw new Error('número do robô não encontrado');
+      const fromConversation = !!convConnectionId;
+      const connectionId = convConnectionId || bot.connection_id;
+      if (!connectionId) throw new Error('conversa sem número e robô sem número configurado');
+      connection = await getConnectionByIdForOrg(admin, orgId, connectionId);
+      if (!connection) {
+        throw new Error(fromConversation ? 'número da conversa não encontrado nesta organização' : 'número do robô não encontrado');
+      }
       return connection;
     };
 
@@ -610,6 +620,8 @@ export type StartBotRunInput = {
   dealId?: string | null;
   contactId?: string | null;
   phone?: string | null;
+  /** Conversa existente (iniciado pelo chat): a execução fica presa a ela e envia pelo número dela */
+  conversationId?: string | null;
 };
 
 /** Só cria a execução (status 'running', wake_at agora), sem processar. */
@@ -621,8 +633,27 @@ export async function createBotRun(
     const bot = await loadBot(admin, input.organizationId, input.botId);
     if (!bot) return { ok: false, error: 'Robô não encontrado' };
     if (!bot.enabled) return { ok: false, error: 'Robô desligado' };
-    const phone = input.phone ? normalizePhoneE164(input.phone) : null;
-    if (!input.dealId && !input.contactId && !phone) {
+    let phone = input.phone ? normalizePhoneE164(input.phone) : '';
+    let dealId = input.dealId ?? null;
+    let contactId = input.contactId ?? null;
+    let conversationId: string | null = null;
+    if (input.conversationId) {
+      // Conversa existente: telefone, contato e negócio vêm dela quando não informados
+      const { data, error } = await admin
+        .from('wa_conversations')
+        .select('id, wa_phone, contact_id, deal_id')
+        .eq('organization_id', input.organizationId)
+        .eq('id', input.conversationId)
+        .maybeSingle();
+      if (error) return { ok: false, error: error.message };
+      const conv = data as { id: string; wa_phone: string | null; contact_id: string | null; deal_id: string | null } | null;
+      if (!conv) return { ok: false, error: 'Conversa não encontrada' };
+      conversationId = conv.id;
+      phone = phone || (conv.wa_phone ? normalizePhoneE164(conv.wa_phone) : '');
+      contactId = contactId ?? conv.contact_id ?? null;
+      dealId = dealId ?? conv.deal_id ?? null;
+    }
+    if (!conversationId && !dealId && !contactId && !phone) {
       return { ok: false, error: 'Informe um negócio, um contato ou um telefone' };
     }
     const { data, error } = await admin
@@ -630,8 +661,9 @@ export async function createBotRun(
       .insert({
         organization_id: input.organizationId,
         bot_id: bot.id,
-        deal_id: input.dealId ?? null,
-        contact_id: input.contactId ?? null,
+        deal_id: dealId,
+        contact_id: contactId,
+        conversation_id: conversationId,
         phone: phone || null,
         status: 'running',
         wake_at: nowIso(),

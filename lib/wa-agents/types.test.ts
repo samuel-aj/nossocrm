@@ -131,6 +131,18 @@ describe('esquemas do agente (adendo)', () => {
     expect(AgentInputSchema.safeParse({ name: 'Ana', provider: 'openai', model: 'x', helper_agent_ids: ['abc'] }).success).toBe(false);
   });
 
+  it('AgentInputSchema aplica os padrões de stop_rules e max_replies e limita o teto a 500', () => {
+    const parsed = AgentInputSchema.parse({ name: 'Ana', provider: 'openai', model: 'gpt-4.1-mini' });
+    expect(parsed.stop_rules).toBe('');
+    expect(parsed.max_replies).toBe(0);
+    const withLimit = AgentInputSchema.parse({ name: 'Ana', provider: 'openai', model: 'x', stop_rules: 'Encerre quando tiver a cidade.', max_replies: 30 });
+    expect(withLimit.stop_rules).toBe('Encerre quando tiver a cidade.');
+    expect(withLimit.max_replies).toBe(30);
+    expect(AgentInputSchema.safeParse({ name: 'Ana', provider: 'openai', model: 'x', max_replies: 501 }).success).toBe(false);
+    expect(AgentInputSchema.safeParse({ name: 'Ana', provider: 'openai', model: 'x', max_replies: -1 }).success).toBe(false);
+    expect(AgentInputSchema.safeParse({ name: 'Ana', provider: 'openai', model: 'x', max_replies: 2.5 }).success).toBe(false);
+  });
+
   it('eventos novos têm rótulo em pt-BR', () => {
     expect(AGENT_EVENTS).toContain('custom_action');
     expect(AGENT_EVENTS).toContain('deal_started');

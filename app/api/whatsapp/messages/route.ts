@@ -11,7 +11,7 @@
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { getConnectionsByOrg } from '@/lib/whatsapp/service';
 import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
-import { getConversationAiInfo } from '@/lib/wa-agents/conversation';
+import { getConversationAiInfo, getConversationBotInfo } from '@/lib/wa-agents/conversation';
 
 export async function GET(req: Request) {
   const auth = await requireOrgUser();
@@ -136,6 +136,12 @@ export async function GET(req: Request) {
       })
     : null;
 
+  // Robô em andamento: na mesma conversa em que o chat aplica as ações (a do agente ou, sem agente, a principal)
+  const botConv = aiConv ?? conv;
+  const bot = botConv
+    ? await getConversationBotInfo(auth.admin, { organizationId: auth.user.organizationId, conversationId: botConv.id })
+    : null;
+
   return json({
     connected: conn?.status === 'connected',
     hasConnection: !!conn,
@@ -144,6 +150,7 @@ export async function GET(req: Request) {
     numbers,
     conversation: conv ?? null,
     ai,
+    bot,
     messages,
   });
 }

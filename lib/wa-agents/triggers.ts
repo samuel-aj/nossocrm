@@ -1,5 +1,6 @@
 /**
- * Gatilho por mensagem recebida: escolha do agente de entrada de um número.
+ * Gatilho por mensagem recebida: escolha do agente de entrada de um número
+ * (conversa sem estado: qualquer modo; conversa parada: só por palavra-chave).
  *
  * CLIENT-SAFE: só funções puras sobre AgentRow.
  */
@@ -12,9 +13,15 @@ import { DEFAULT_AGENT_TRIGGERS, type AgentRow } from './types';
  * - 'none': nunca por mensagem;
  * - 'keywords': só se o texto contiver alguma palavra-chave (sem acento/caixa); tem preferência;
  * - 'any': reserva, na ordem recebida (o mais antigo primeiro).
+ * Com `keywordsOnly` (conversa parada) o modo 'any' é ignorado: só a palavra-chave,
+ * gatilho explícito, reabre o atendimento.
  * null quando nenhum candidato serve para esta mensagem.
  */
-export function pickInboundAgent(agents: AgentRow[], text: string): AgentRow | null {
+export function pickInboundAgent(
+  agents: AgentRow[],
+  text: string,
+  opts: { keywordsOnly?: boolean } = {}
+): AgentRow | null {
   let fallback: AgentRow | null = null;
   for (const agent of agents) {
     const inbound = agent.triggers?.inbound ?? DEFAULT_AGENT_TRIGGERS.inbound;
@@ -23,7 +30,7 @@ export function pickInboundAgent(agents: AgentRow[], text: string): AgentRow | n
       if (inbound.keywords.length > 0 && findKeyword(text, inbound.keywords)) return agent;
       continue;
     }
-    if (!fallback) fallback = agent;
+    if (!fallback && !opts.keywordsOnly) fallback = agent;
   }
   return fallback;
 }

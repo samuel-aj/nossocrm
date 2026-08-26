@@ -39,9 +39,17 @@ import { transcodeToMp3 } from './audioTranscode';
 import { useWaAgentsBeta } from '@/hooks/useWaAgentsBeta';
 import { useToast } from '@/context/ToastContext';
 import { ChatAgentBanner } from '@/features/wa-agents/ChatAgentBanner';
-import type { AgentMinimal, ConversationAiAction } from '@/lib/wa-agents/types';
+import type { AgentMinimal, BotMinimal, ConversationAiAction } from '@/lib/wa-agents/types';
 
 const TIME_FMT = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+/** Confirmação (toast) das ações da faixa que trocam quem atende a conversa; as demais só atualizam a faixa. */
+const AI_ACTION_DONE_TOAST: Partial<Record<ConversationAiAction, string>> = {
+  start: 'Agente iniciado nesta conversa',
+  start_bot: 'Robô iniciado nesta conversa. Se havia agente, ele foi parado.',
+  cancel_bot: 'Robô cancelado',
+  stop: 'Agente parado nesta conversa',
+};
 
 const MEDIA_LABEL: Record<string, string> = {
   image: 'imagem',
@@ -829,7 +837,28 @@ export function DealWhatsAppChat({
     staleTime: 60_000,
     retry: false,
   });
-  const runAiAction = async (action: ConversationAiAction, agentId?: string) => {
+  // Robôs ligados da org (menu "Iniciar" da faixa): qualquer membro pode listar.
+  const { data: botsMinimal } = useQuery<{ bots: BotMinimal[] }>({
+    queryKey: ['waBots', 'minimal'],
+    queryFn: async () => {
+      const res = await fetch('/api/wa-agents/bots', {
+        credentials: 'include',
+        headers: { accept: 'application/json' },
+      });
+      const j = (await res.json().catch(() => null)) as { bots?: BotMinimal[]; error?: string } | null;
+      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`);
+      return {
+        bots: (j?.bots ?? [])
+          .filter(b => b.enabled)
+          .map(b => ({ id: b.id, name: b.name, enabled: b.enabled, connection_id: b.connection_id ?? null })),
+      };
+    },
+    enabled: waBeta.enabled,
+    staleTime: 60_000,
+    retry: false,
+  });
+  /** `id` = agentId em "start"; botId em "start_bot". */
+  const runAiAction = async (action: ConversationAiAction, id?: string) => {
     if (aiBusy) return;
     const conversationId = aiState?.conversationId ?? data?.conversation?.id ?? null;
     if (!conversationId) return;
@@ -840,7 +869,12 @@ export function DealWhatsAppChat({
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify({ conversationId, action, agentId }),
+            body: JSON.stringify({
+              conversationId,
+              action,
+              agentId: action === 'start' ? id : undefined,
+              botId: action === 'start_bot' ? id : undefined,
+            }),
           })
         : await fetch('/api/whatsapp/conversations/ai', {
             method: 'POST',
@@ -853,6 +887,8 @@ export function DealWhatsAppChat({
         throw new Error(j.error || `HTTP ${res.status}`);
       }
       await qc.invalidateQueries({ queryKey: ['waChat'] });
+      const done = AI_ACTION_DONE_TOAST[action];
+      if (done) showToast(done, 'success');
     } catch (e) {
       // 409/403 etc. chegam ao usuário (antes só iam para o console).
       showToast((e as Error).message || 'Falha ao acionar o agente', 'error');
@@ -1739,15 +1775,18 @@ export function DealWhatsAppChat({
           </div>
         )}
 
-        {/* AGENTE DE IA. Beta (agentes nativos): faixa completa, inclusive para
-            iniciar um agente numa conversa que ainda não tem. Fora do beta: a
-            faixa antiga, só quando um agente (externo) já atuou nesta conversa. */}
-        {nativeBanner && (aiState || data?.conversation) && (
+        {/* AGENTE DE IA E ROBÔ. Beta (agentes nativos): faixa completa, inclusive
+            para iniciar um agente ou um robô numa conversa que ainda não tem.
+            Fora do beta: a faixa antiga, só quando um agente (externo) já atuou
+            nesta conversa. */}
+        {nativeBanner && (aiState || data?.bot || data?.conversation) && (
           <ChatAgentBanner
             ai={aiState}
+            bot={data?.bot ?? null}
             agents={(agentsMinimal?.agents ?? []).filter(a => a.enabled)}
+            bots={botsMinimal?.bots ?? []}
             busy={aiBusy}
-            onAction={(action, agentId) => void runAiAction(action, agentId)}
+            onAction={(action, id) => void runAiAction(action, id)}
           />
         )}
         {!nativeBanner && aiState && (

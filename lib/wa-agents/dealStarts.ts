@@ -108,11 +108,18 @@ async function processDealStart(admin: SupabaseClient, row: DealStartRow): Promi
   const full = (fullRaw as WaConversationFull | null) ?? null;
   if (!full) return { status: 'error', reason: 'conversa não encontrada' };
 
-  if (full.ai_agent_id && full.ai_status && ['active', 'awaiting_approval', 'paused'].includes(full.ai_status)) {
-    return { status: 'cancelled', reason: `conversa já tem agente (${full.ai_status})` };
+  // Atendimento em andamento (ativo, pausado ou aguardando aprovação), nativo ou externo, não recebe
+  // outro início. Conversa parada (nativa ou externa) e conversa sem estado seguem para o início.
+  if (full.ai_status && ['active', 'awaiting_approval', 'paused'].includes(full.ai_status)) {
+    if (full.ai_agent_id) return { status: 'cancelled', reason: `conversa já tem agente (${full.ai_status})` };
+    // Agente externo (n8n via API) ATIVO: o início pelo pipeline assume a conversa (a API passa a
+    // receber 409). Externo pausado = atendente na conversa: não recebe início.
+    if (full.ai_status !== 'active') return { status: 'cancelled', reason: 'conversa com agente externo pausada' };
   }
-  if (full.ai_status === 'stopped') return { status: 'cancelled', reason: 'agente parado nesta conversa' };
-  if (!full.ai_agent_id && full.ai_status) return { status: 'cancelled', reason: 'conversa com agente externo' };
+  // Parada pelo ATENDENTE (ai_paused_by preenchido): nada automático reabre, só Iniciar no chat
+  if (full.ai_status === 'stopped' && full.ai_paused_by) {
+    return { status: 'cancelled', reason: 'conversa parada pelo atendente' };
+  }
 
   const now = nowIso();
   // origem/deal_id só priorizam este negócio no contexto; a apresentação vem do gatilho 'deal' da primeira execução

@@ -21,6 +21,7 @@ import {
   FileText,
   SlidersHorizontal,
   Flag,
+  CircleStop,
   Webhook,
   KeyRound,
   Zap,
@@ -45,7 +46,7 @@ import {
   type Outcome,
 } from '@/lib/wa-agents/types';
 import { MODEL_CATALOG, PROVIDER_LABELS } from '@/lib/wa-agents/catalog';
-import { DEFAULT_OUTCOMES, DEFAULT_SYSTEM_PROMPT } from '@/lib/wa-agents/defaults';
+import { DEFAULT_OUTCOMES, DEFAULT_STOP_RULES, DEFAULT_SYSTEM_PROMPT } from '@/lib/wa-agents/defaults';
 import {
   WaAgentsApiError,
   useSaveWaAgent,
@@ -73,6 +74,7 @@ import {
   Notice,
   Panel,
   SUBCARD_CLASS,
+  TEXTAREA_CLASS,
   TabPanel,
   Tabs,
   Toggle,
@@ -102,11 +104,15 @@ type AgentFormState = {
   /** Remover a chave própria ao salvar */
   clear_api_key: boolean;
   system_prompt: string;
+  /** "Quando encerrar": regras de encerramento que o motor injeta no prompt como bloco obrigatório */
+  stop_rules: string;
   /** Campos numéricos aceitam '' enquanto o usuário digita; o limite é aplicado no onBlur e no toPayload. */
   buffer_seconds: number | '';
   history_limit: number | '';
   line_delay_ms: number | '';
   human_pause_minutes: number | '';
+  /** Teto de respostas por atendimento (0 = sem limite) */
+  max_replies: number | '';
   only_new_conversations: boolean;
   outcomes: Outcome[];
   custom_actions: CustomAction[];
@@ -145,6 +151,7 @@ const FIELD_TABS: Record<string, EditorTab> = {
   persona_name: 'roteiro',
   enabled: 'roteiro',
   system_prompt: 'roteiro',
+  stop_rules: 'roteiro',
   connection_ids: 'gatilhos',
   triggers: 'gatilhos',
   provider: 'config',
@@ -155,6 +162,7 @@ const FIELD_TABS: Record<string, EditorTab> = {
   history_limit: 'config',
   line_delay_ms: 'config',
   human_pause_minutes: 'config',
+  max_replies: 'config',
   only_new_conversations: 'config',
   webhooks: 'config',
   outcomes: 'acoes',
@@ -191,10 +199,13 @@ function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInpu
     api_key: '',
     clear_api_key: false,
     system_prompt: src.system_prompt ?? DEFAULT_SYSTEM_PROMPT,
+    // Agente existente mantém o que tem (o roteiro antigo já traz o encerramento); novo começa com o padrão
+    stop_rules: agent ? (agent.stop_rules ?? '') : (initial?.stop_rules ?? DEFAULT_STOP_RULES),
     buffer_seconds: src.buffer_seconds ?? 10,
     history_limit: src.history_limit ?? 40,
     line_delay_ms: src.line_delay_ms ?? 1500,
     human_pause_minutes: src.human_pause_minutes ?? 30,
+    max_replies: src.max_replies ?? 0,
     only_new_conversations: src.only_new_conversations ?? false,
     outcomes: src.outcomes ?? DEFAULT_OUTCOMES,
     custom_actions: src.custom_actions ?? [],
@@ -216,10 +227,12 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
     model: form.model.trim(),
     temperature: form.temperature,
     system_prompt: form.system_prompt,
+    stop_rules: form.stop_rules,
     buffer_seconds: clampField('buffer_seconds', form.buffer_seconds),
     history_limit: clampField('history_limit', form.history_limit),
     line_delay_ms: clampField('line_delay_ms', form.line_delay_ms),
     human_pause_minutes: clampField('human_pause_minutes', form.human_pause_minutes),
+    max_replies: clampField('max_replies', form.max_replies),
     only_new_conversations: form.only_new_conversations,
     outcomes: form.outcomes,
     custom_actions: form.custom_actions,
@@ -255,10 +268,12 @@ const FIELD_NAMES: Record<string, string> = {
   temperature: 'Temperatura',
   api_key: 'Chave da API',
   system_prompt: 'Roteiro',
+  stop_rules: 'Quando encerrar',
   buffer_seconds: 'Espera para agrupar mensagens',
   history_limit: 'Mensagens de histórico',
   line_delay_ms: 'Intervalo entre linhas',
   human_pause_minutes: 'Pausa após atendente responder',
+  max_replies: 'Limite de respostas',
   outcomes: 'Resultados',
   custom_actions: 'Ações durante a conversa',
   triggers: 'Gatilhos',
@@ -280,13 +295,14 @@ function clampInt(value: string, min: number, max: number): number {
   return Math.max(min, Math.min(max, n));
 }
 
-type NumField = 'buffer_seconds' | 'history_limit' | 'line_delay_ms' | 'human_pause_minutes';
+type NumField = 'buffer_seconds' | 'history_limit' | 'line_delay_ms' | 'human_pause_minutes' | 'max_replies';
 
 const NUM_LIMITS: Record<NumField, [min: number, max: number]> = {
   buffer_seconds: [0, 60],
   history_limit: [5, 200],
   line_delay_ms: [0, 10000],
   human_pause_minutes: [0, 1440],
+  max_replies: [0, 500],
 };
 
 /** Limite final de um campo numérico ('' vira o mínimo). */
@@ -984,6 +1000,29 @@ export const AgentEditor: React.FC<{
             highlight={promptHighlight}
           />
         </Panel>
+
+        <Panel
+          title="Quando encerrar"
+          description="O momento em que o agente para: o que precisa ter acontecido para ele encerrar e o que diz na mensagem final. Vale como regra obrigatória, junto do roteiro."
+          icon={<CircleStop size={16} />}
+        >
+          <Field
+            label="Regras de encerramento"
+            htmlFor="agent-stop-rules"
+            help="Ex.: encerrar quando tiver nome, cidade e resumo do caso; ou quando a pessoa pedir para falar com alguém da equipe. Ao encerrar, o agente escolhe um dos Resultados da aba Ações."
+          >
+            <textarea
+              id="agent-stop-rules"
+              className={TEXTAREA_CLASS}
+              rows={7}
+              maxLength={4000}
+              value={form.stop_rules}
+              onChange={(e) => patch({ stop_rules: e.target.value })}
+              aria-label="Quando encerrar"
+              placeholder="Descreva quando o agente deve encerrar o atendimento e o que dizer na mensagem final."
+            />
+          </Field>
+        </Panel>
       </TabPanel>
 
       {/* Conhecimento e mídias */}
@@ -1242,7 +1281,7 @@ export const AgentEditor: React.FC<{
 
         <Panel
           title="Comportamento"
-          description="Tempos de espera, histórico e pausa quando um atendente responde."
+          description="Tempos de espera, histórico, pausa quando um atendente responde e limite de respostas."
           icon={<SlidersHorizontal size={16} />}
         >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1309,6 +1348,22 @@ export const AgentEditor: React.FC<{
                 value={form.human_pause_minutes}
                 onChange={(e) => patch({ human_pause_minutes: readNumber(e.target.value) })}
                 onBlur={() => patch({ human_pause_minutes: clampField('human_pause_minutes', form.human_pause_minutes) })}
+              />
+            </Field>
+            <Field
+              label="Limite de respostas por atendimento"
+              htmlFor="agent-max-replies"
+              help="0 = sem limite. Ao atingir o limite, o agente manda a mensagem final e encerra sozinho: garantia de que ele sempre para."
+            >
+              <input
+                id="agent-max-replies"
+                type="number"
+                min={0}
+                max={500}
+                className={INPUT_CLASS}
+                value={form.max_replies}
+                onChange={(e) => patch({ max_replies: readNumber(e.target.value) })}
+                onBlur={() => patch({ max_replies: clampField('max_replies', form.max_replies) })}
               />
             </Field>
           </div>

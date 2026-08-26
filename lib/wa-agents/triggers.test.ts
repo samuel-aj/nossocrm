@@ -20,6 +20,8 @@ function agent(id: string, triggers?: Partial<AgentTriggers>): AgentRow {
     line_delay_ms: 0,
     human_pause_minutes: 30,
     only_new_conversations: false,
+    stop_rules: '',
+    max_replies: 0,
     outcomes: [],
     webhooks: [],
     custom_actions: [],
@@ -55,5 +57,15 @@ describe('pickInboundAgent', () => {
   it('trata linhas antigas sem triggers como "qualquer mensagem"', () => {
     const legacy = { ...agent('legacy'), triggers: undefined as unknown as AgentTriggers };
     expect(pickInboundAgent([legacy], 'oi')?.id).toBe('legacy');
+  });
+
+  it('com keywordsOnly (conversa parada) ignora o modo "qualquer mensagem" e só casa por palavra-chave', () => {
+    const any = agent('any');
+    const kw = agent('kw', { inbound: { mode: 'keywords', keywords: ['contrato'] } });
+    expect(pickInboundAgent([any, kw], 'oi, tudo bem?', { keywordsOnly: true })).toBeNull();
+    expect(pickInboundAgent([any], 'oi, tudo bem?', { keywordsOnly: true })).toBeNull();
+    expect(pickInboundAgent([any, kw], 'revisão de CONTRATO', { keywordsOnly: true })?.id).toBe('kw');
+    // sem a opção, o comportamento de conversa nova continua o mesmo
+    expect(pickInboundAgent([any, kw], 'oi, tudo bem?')?.id).toBe('any');
   });
 });

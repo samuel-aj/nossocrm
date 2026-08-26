@@ -265,6 +265,24 @@ export async function generateAgentReply(input: {
       }
     }
   }
+  // Legenda repetida no texto: o modelo costuma escrever a mesma frase na legenda da mídia e
+  // na resposta; sem isto o lead recebe a frase duas vezes (na mídia e como mensagem solta)
+  const captions = segments
+    .map(s => (s.kind === 'media' ? normalizeKeyword(s.caption ?? '') : ''))
+    .filter(Boolean);
+  if (captions.length > 0) {
+    for (let i = segments.length - 1; i >= 0; i--) {
+      const seg = segments[i];
+      if (seg.kind !== 'text') continue;
+      const kept = seg.text
+        .split('\n')
+        .filter(line => !captions.includes(normalizeKeyword(line)))
+        .join('\n')
+        .trim();
+      if (kept) segments[i] = { kind: 'text', text: kept };
+      else segments.splice(i, 1);
+    }
+  }
   // O texto final pode ter vindo no passo anterior ao da ferramenta: junta todos
   const text = (texts.join('\n') || result.text || '').trim();
   // Sem mídia, um único segmento com o texto todo (mesma divisão em linhas de antes)
@@ -568,6 +586,8 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
       ai_status_changed_at: new Date().toISOString(),
       ai_resume_at: null,
       ai_approval: null,
+      // parada pelo próprio agente (não pelo atendente): palavra-chave ou pipeline podem reabrir
+      ai_paused_by: null,
     });
     ctx.conversation.ai_status = 'stopped';
     await emit('stopped', { reason, ...(extra ?? {}) });
@@ -664,8 +684,14 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
         if (knowledge.length > 0) pushEvent('knowledge_injected', { trechos: knowledge.length });
       }
     }
+    // Teto de respostas por atendimento (max_replies; 0 = sem limite; contador ai_state.respostas):
+    // na última resposta permitida o prompt manda encerrar (mustClose) e, se o modelo não
+    // encerrar, a conversa para depois do envio (passo 9d)
+    const priorState = (conv.ai_state ?? {}) as ConversationAiState;
+    const repliesSoFar = Number(priorState.respostas ?? 0) || 0;
+    const mustClose = agent.max_replies > 0 && repliesSoFar + 1 >= agent.max_replies;
     // Instrução de apresentação só no primeiro contato pelo pipeline (não nas rodadas seguintes nem após passagem)
-    const system = buildSystemPrompt({ agent, ctx, firstContact: input.trigger === 'deal', resources, knowledge });
+    const system = buildSystemPrompt({ agent, ctx, firstContact: input.trigger === 'deal', resources, knowledge, mustClose });
     const messages = await buildHistoryMessages(admin, ctx, agent.history_limit);
     if (input.forceReply && (messages.length === 0 || messages[messages.length - 1].role === 'assistant')) {
       messages.push({ role: 'user', content: '(o sistema pediu que você inicie/continue o atendimento agora)' });
@@ -677,7 +703,6 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     // as consultas (auxiliares, base) têm teto por resposta.
     const runCtx = ctx;
     const runAgent = agent;
-    const priorState = (conv.ai_state ?? {}) as ConversationAiState;
     const mediaSentBefore = new Set((priorState.midias_enviadas ?? []).map(normalizeKeyword));
     const mediaQueued = new Set<string>();
     let helperCalls = 0;
@@ -762,6 +787,8 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     if (mediaSent.length > 0) {
       state.midias_enviadas = Array.from(new Set([...(state.midias_enviadas ?? []), ...mediaSent]));
     }
+    // Respostas enviadas neste atendimento (teto max_replies): só conta quando algo saiu
+    if (lines.length > 0 || mediaSent.length > 0) state.respostas = repliesSoFar + 1;
     await updateConversation(admin, ctx, {
       ai_last_processed_at: lastIn?.created_at ?? new Date().toISOString(),
       ai_state: state,
@@ -878,6 +905,8 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
         } else {
           const handoffState: ConversationAiState = {
             ...state,
+            // o teto de respostas é por agente: o próximo começa do zero
+            respostas: 0,
             handoff: {
               from_agent_id: agent.id,
               from_agent_name: agent.persona_name || agent.name,
@@ -900,6 +929,15 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
       } else if (acts.stopped) {
         await stopConversation(reason, extra);
       }
+    }
+
+    // 9d. Teto de respostas: esta era a última resposta permitida e a conversa continua ativa
+    // com este agente (o modelo não encerrou, encerrou com resultado inválido ou o resultado
+    // não parou a conversa; sem passagem nem aprovação): para aqui
+    if (mustClose && ctx.conversation.ai_status === 'active' && !pendingHandoffAgentId) {
+      const extra = { max_replies: agent.max_replies, respostas: state.respostas ?? repliesSoFar };
+      pushEvent('max_replies_reached', extra);
+      await stopConversation('limite de respostas atingido', extra);
     }
 
     // 10. Registro
@@ -1003,7 +1041,19 @@ export async function handleInboundMessage(input: {
       .maybeSingle();
     const text = msgRow ? messageText(msgRow as WaMessageLite) : '';
 
-    if (conv.ai_agent_id) {
+    // O que cada gatilho por mensagem pode fazer, pelo estado da conversa:
+    // - sem estado: qualquer agente de entrada do número ("qualquer mensagem" ou palavra-chave);
+    // - parada pelo ATENDENTE (ai_paused_by preenchido): nada automático reabre, só Iniciar no chat;
+    // - parada pelo próprio agente (resultado/limite): só palavra-chave (gatilho explícito) reabre;
+    // - agente EXTERNO ativo (n8n via API): palavra-chave assume a conversa (a API passa a receber 409);
+    // - pausada/aguardando aprovação (nativa) e externo pausado (atendente na conversa): pula.
+    const stopped = conv.ai_status === 'stopped';
+    const externalActive = !conv.ai_agent_id && conv.ai_status === 'active';
+    const keywordsOnly = stopped || externalActive;
+    if (stopped && conv.ai_paused_by) {
+      return { status: 'skipped', reason: 'conversa parada pelo atendente' };
+    }
+    if (conv.ai_agent_id && !stopped) {
       if (conv.ai_status && conv.ai_status !== 'active') {
         return await skip(`conversa ${conv.ai_status}`, conv.ai_agent_id);
       }
@@ -1017,7 +1067,7 @@ export async function handleInboundMessage(input: {
           .eq('id', conversationId)
           .eq('organization_id', organizationId);
       }
-    } else if (!conv.ai_status) {
+    } else if (!conv.ai_status || stopped || externalActive) {
       if (!conv.connection_id) return await skip('conversa sem número');
       // Agentes de entrada do número, filtrados pelo gatilho por mensagem (triggers.inbound)
       const { data: candidatesRaw } = await admin
@@ -1031,8 +1081,15 @@ export async function handleInboundMessage(input: {
       // Sem candidato (gatilho 'none' ou palavra-chave sem correspondência): pula sem registrar execução,
       // senão cada mensagem do número viraria uma linha no histórico
       if (candidates.length === 0) return { status: 'skipped', reason: 'nenhum agente para este número' };
-      const candidate = pickInboundAgent(candidates, text);
-      if (!candidate) return { status: 'skipped', reason: 'sem agente para esta mensagem' };
+      const candidate = pickInboundAgent(candidates, text, { keywordsOnly });
+      if (!candidate) {
+        const reason = stopped
+          ? 'conversa parada: sem palavra-chave'
+          : externalActive
+            ? 'agente externo: sem palavra-chave'
+            : 'sem agente para esta mensagem';
+        return { status: 'skipped', reason };
+      }
 
       if (candidate.only_new_conversations) {
         const at = (msgRow as { created_at?: string } | null)?.created_at ?? new Date().toISOString();
@@ -1066,8 +1123,8 @@ export async function handleInboundMessage(input: {
       const results = await dispatchAgentEvent(admin, { agent, event: 'started', ctx });
       if (results.length > 0) events.push({ type: 'webhook', at: now, event: 'started', results });
     } else {
-      // ai_status preenchido sem agente nativo: agente externo (API pública)
-      return { status: 'skipped', reason: 'agente externo' };
+      // agente externo (API pública) pausado: o atendente está na conversa
+      return { status: 'skipped', reason: 'agente externo pausado' };
     }
 
     if (!agent) return await skip('sem agente');

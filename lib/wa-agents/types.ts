@@ -172,6 +172,10 @@ export const AgentInputSchema = z.object({
   line_delay_ms: z.number().int().min(0).max(10000).default(1500),
   human_pause_minutes: z.number().int().min(0).max(1440).default(30),
   only_new_conversations: z.boolean().default(false),
+  /** Regras explícitas de quando o agente encerra (bloco "QUANDO ENCERRAR" do prompt; obrigatórias) */
+  stop_rules: z.string().max(4000).default(''),
+  /** Teto de respostas do agente por atendimento (0 = sem limite): ao atingir, ele manda a mensagem final e encerra */
+  max_replies: z.number().int().min(0).max(500).default(0),
   outcomes: z.array(OutcomeSchema).default([]),
   webhooks: z.array(AgentWebhookSchema).default([]),
   custom_actions: z.array(CustomActionSchema).default([]),
@@ -192,6 +196,8 @@ export type AgentRow = AgentInput & {
 };
 export type AgentPublic = Omit<AgentRow, 'api_key'> & { has_api_key: boolean };
 export type AgentMinimal = { id: string; name: string; persona_name: string | null; enabled: boolean };
+/** Robô para o menu do chat (qualquer membro da org) */
+export type BotMinimal = { id: string; name: string; enabled: boolean; connection_id: string | null };
 
 // ---------------------------------------------------------------------------
 // Segredos (chave da API e segredos de webhook) nunca voltam em claro para a UI
@@ -496,7 +502,25 @@ export type ConversationAiInfo = {
   approval?: { nextAgentId: string; nextAgentName: string; summary: string; requestedAt: string } | null;
 };
 
-export type ConversationAiAction = 'pause' | 'resume' | 'stop' | 'start' | 'approve' | 'reject';
+export type ConversationAiAction =
+  | 'pause'
+  | 'resume'
+  | 'stop'
+  | 'start'
+  | 'approve'
+  | 'reject'
+  /** inicia um robô nesta conversa (botId); o agente da conversa, se houver, para */
+  | 'start_bot'
+  /** cancela o robô em andamento nesta conversa */
+  | 'cancel_bot';
+
+/** Robô em andamento numa conversa (execução 'running' ou 'waiting_reply') */
+export type ConversationBotInfo = {
+  runId: string;
+  botId: string;
+  name: string;
+  status: 'running' | 'waiting_reply';
+};
 
 /** Conteúdo de `wa_conversations.ai_approval` */
 export type ConversationApproval = {
@@ -518,6 +542,8 @@ export type ConversationAiState = {
   deal_id?: string | null;
   /** nomes das mídias já enviadas neste atendimento (enviar_midia não repete) */
   midias_enviadas?: string[];
+  /** respostas já enviadas pelo agente neste atendimento (teto max_replies) */
+  respostas?: number;
 };
 
 // ---------------------------------------------------------------------------

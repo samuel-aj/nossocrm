@@ -185,6 +185,9 @@ export function normalizeAgentRow(raw: Record<string, unknown>): AgentRow {
     line_delay_ms: num(raw.line_delay_ms, 1500),
     human_pause_minutes: num(raw.human_pause_minutes, 30),
     only_new_conversations: raw.only_new_conversations === true,
+    // linhas anteriores à migração de stop_rules/max_replies ficam com os padrões
+    stop_rules: String(raw.stop_rules ?? ''),
+    max_replies: num(raw.max_replies, 0),
     outcomes: parseArray<Outcome>(raw.outcomes, item => {
       const p = OutcomeSchema.safeParse(item);
       return p.success ? p.data : null;
@@ -841,14 +844,21 @@ export function buildSystemPrompt(input: {
   resources?: Partial<AgentResources> | null;
   /** Trechos da base de conhecimento já buscados para a última mensagem */
   knowledge?: KnowledgeHit[] | null;
+  /** Teto de respostas (max_replies) atingido: esta resposta precisa ser a última e encerrar o atendimento */
+  mustClose?: boolean;
 }): string {
   const { agent, ctx } = input;
   const vars = buildPromptVars(input);
   const rawScript = agent.system_prompt || '';
-  const markers = hasScriptMarkers(rawScript);
+  const rawStopRules = (agent.stop_rules || '').trim();
+  const markers = hasScriptMarkers(rawScript) || hasScriptMarkers(rawStopRules);
   const script = replaceScriptMarkers(
     renderTemplate(rawScript, vars as unknown as Record<string, unknown>)
   ).trim();
+  // "Quando encerrar": mesmas variáveis e marcadores do roteiro; bloco obrigatório logo depois dele
+  const stopRules = rawStopRules
+    ? replaceScriptMarkers(renderTemplate(rawStopRules, vars as unknown as Record<string, unknown>)).trim()
+    : '';
 
   const state = (ctx.conversation.ai_state ?? {}) as ConversationAiState;
   const dados = state.dados && Object.keys(state.dados).length > 0 ? JSON.stringify(state.dados) : '{}';
@@ -858,6 +868,7 @@ export function buildSystemPrompt(input: {
 
   const blocks: string[] = [];
   if (script) blocks.push(script);
+  if (stopRules) blocks.push(`# QUANDO ENCERRAR\n${stopRules}`);
 
   blocks.push(buildContextBlock(vars, ctx));
 
@@ -911,8 +922,23 @@ export function buildSystemPrompt(input: {
     lines.push(
       '- Para encerrar o atendimento, chame a ferramenta encerrar_atendimento UMA única vez, na mesma resposta e DEPOIS de escrever a mensagem final para o cliente, com "resultado" igual a uma das chaves acima e "resumo" com o resumo objetivo do caso (quem, o quê, quando, onde, provas, urgência). Se nenhum resultado se aplicar, não encerre.'
     );
+    if (stopRules) {
+      lines.push(
+        '- As regras de QUANDO ENCERRAR são obrigatórias: assim que uma delas se cumprir, escreva a mensagem final e chame encerrar_atendimento na mesma resposta.'
+      );
+    }
+    if (input.mustClose) {
+      lines.push(
+        '- LIMITE DE RESPOSTAS ATINGIDO: esta é a sua última mensagem neste atendimento. Escreva a mensagem final (explique que alguém da equipe continua) e chame encerrar_atendimento agora, com o resultado mais adequado ao que já sabe.'
+      );
+    }
   } else {
     lines.push('- Este agente não tem resultados de encerramento configurados: não chame encerrar_atendimento.');
+    if (input.mustClose) {
+      lines.push(
+        '- LIMITE DE RESPOSTAS ATINGIDO: esta é a sua última mensagem neste atendimento; escreva a mensagem final. O CRM encerra o atendimento depois desta resposta.'
+      );
+    }
   }
   if (actionsBlock) {
     lines.push(

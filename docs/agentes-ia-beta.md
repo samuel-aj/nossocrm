@@ -20,7 +20,8 @@ Cada agente tem:
 | Números | Em quais números ele é o **ponto de entrada** de conversas novas. Vazio = só recebe conversas passadas por outro agente ou iniciadas na mão |
 | Modelo | Provedor + modelo + temperatura, fixos por agente. A chave da API vem de Configurações → Central de I.A; pode ser sobrescrita por agente |
 | Roteiro | O prompt do agente. Variáveis: `{{nome_lead}}`, `{{primeiro_nome}}`, `{{telefone}}`, `{{data_hora}}`, `{{nome_agente}}`, `{{nome_escritorio}}`, `{{negocio.titulo}}`, `{{negocio.etapa}}` |
-| Comportamento | Buffer (segundos que espera para juntar mensagens picadas), histórico (quantas mensagens da conversa o agente lê), intervalo entre linhas, pausa automática quando um atendente responde (minutos; 0 = só retoma na mão), só conversas novas |
+| Quando encerrar | Regras obrigatórias de quando o agente para e o que diz na mensagem final (aceita as mesmas variáveis e marcadores do roteiro). Ver "Quando encerrar" abaixo |
+| Comportamento | Buffer (segundos que espera para juntar mensagens picadas), histórico (quantas mensagens da conversa o agente lê), intervalo entre linhas, pausa automática quando um atendente responde (minutos; 0 = só retoma na mão), limite de respostas por atendimento (0 = sem limite), só conversas novas |
 | Resultados e ações | Resultados possíveis do encerramento (ex.: qualificado, desqualificado) e o que fazer em cada um: passar para outro agente, pedir aprovação humana, encerrar, registrar nota, mover etapa, adicionar rótulo, marcar perdido, atribuir responsável, criar tarefa |
 | Webhooks | Por evento (iniciado, mensagem recebida, resposta enviada, ferramenta usada, encerrado, passado para agente, aguardando aprovação, aprovado, recusado, pausado, retomado, parado, erro), com URL, segredo e corpo personalizável com `{{variáveis}}` |
 
@@ -31,6 +32,13 @@ Cada **quebra de linha** na resposta do modelo vira uma mensagem separada no Wha
 ### Memória
 
 O agente lê o histórico da própria conversa (`wa_messages`), inclusive o que o atendente humano escreveu (marcado como `[Atendente humano]`), e um estado curto que ele mesmo salva (`salvar_dados`). Não existe tabela de memória separada.
+
+### Quando encerrar
+
+O agente precisa ter um momento claro em que para. Isso mora em dois campos da configuração, sem depender de o roteiro lembrar de dizer:
+
+- **Quando encerrar** (`stop_rules`, aba Roteiro, logo abaixo do roteiro): as regras de encerramento em linguagem natural (ex.: "encerrar quando tiver nome, cidade e resumo do caso" ou "quando a pessoa pedir para falar com alguém da equipe") e o que dizer na mensagem final. O motor injeta o texto no prompt como bloco `# QUANDO ENCERRAR` logo depois do roteiro (com as mesmas variáveis e marcadores `[[acao:...]]`/`[[midia:...]]`) e acrescenta às instruções do sistema que essas regras são **obrigatórias**: assim que uma delas se cumprir, o agente escreve a mensagem final e chama `encerrar_atendimento` na mesma resposta, escolhendo um dos resultados da aba Ações. Agentes novos já vêm com um texto padrão (`DEFAULT_STOP_RULES`); agentes criados antes continuam com a seção de encerramento dentro do próprio roteiro (o campo fica vazio e nada muda para eles até alguém preencher).
+- **Limite de respostas por atendimento** (`max_replies`, aba Configurações; 0 = sem limite): teto de respostas do agente numa mesma conversa, contado em `ai_state.respostas`. Na resposta que atinge o teto, o motor avisa o modelo que aquela é a última mensagem (`LIMITE DE RESPOSTAS ATINGIDO`) e pede a mensagem final com `encerrar_atendimento`, com o resultado mais adequado ao que ele já sabe; sem resultados configurados (ou se o modelo não chamar a ferramenta), o CRM encerra o atendimento sozinho depois dessa resposta. É a garantia de que o agente sempre para.
 
 ### Esteira (vários agentes)
 
@@ -43,16 +51,18 @@ O agente encerra chamando a ferramenta `encerrar_atendimento(resultado, resumo)`
 ### Pausa e parada no chat
 
 - Atendente responde pelo CRM ou pelo celular → o agente **pausa** por N minutos (configurável) e retoma sozinho lendo o que foi dito no meio tempo. Se o atendente continuar falando, o relógio reinicia.
-- Botões no chat: **Pausar / Retomar**, **Parar** (encerra de vez nesta conversa), **Iniciar agente** (escolhe qual agente assume a conversa), **Aprovar / Recusar**.
+- Botões no chat: **Pausar / Retomar**, **Parar** (encerra de vez nesta conversa; vale também para o agente externo, o n8n via API), **Iniciar** (abre a lista de agentes de IA **e** de robôs: escolhe qual agente assume a conversa ou inicia um robô nela; ao iniciar um robô, o agente da conversa, se houver, para), **Cancelar robô** (interrompe o robô em andamento nesta conversa) e **Aprovar / Recusar**.
 
 ### Gatilhos do agente
 
 | Gatilho | Configuração | O que acontece |
 |---|---|---|
-| Mensagem recebida (qualquer) | padrão | Conversa nova num número vinculado inicia o agente |
-| Mensagem recebida (específica) | palavras-chave | Só inicia se a primeira mensagem contiver alguma das palavras |
+| Mensagem recebida (qualquer) | padrão | Conversa nova num número vinculado inicia o agente. Só em conversa **sem estado** (que nunca teve agente) |
+| Mensagem recebida (específica) | palavras-chave | Só inicia se a mensagem contiver alguma das palavras. Também **reinicia** uma conversa parada |
 | Nunca por mensagem | | O agente só entra por passagem de outro agente, pelo pipeline ou na mão |
-| Cadastro no pipeline | negócio criado (quadro opcional) ou entrou numa etapa + número que envia | O agente **manda a primeira mensagem sozinho**, com os dados do cadastro (título, valor, etapa, rótulos, descrição e campos personalizados) no contexto, sem perguntar o que já consta |
+| Cadastro no pipeline | negócio criado (quadro opcional) ou entrou numa etapa + número que envia | O agente **manda a primeira mensagem sozinho**, com os dados do cadastro (título, valor, etapa, rótulos, descrição e campos personalizados) no contexto, sem perguntar o que já consta. Também **reinicia** uma conversa parada |
+
+Conversa **parada** (pelo botão Parar, por um encerramento ou pelo agente externo via API): palavra-chave e pipeline reiniciam o atendimento com o agente do gatilho, tanto para o nativo quanto para o externo. "Qualquer mensagem" não reinicia: uma mensagem comum numa conversa parada fica com o atendente, para ninguém ser atropelado.
 
 ### Ações durante a conversa
 
@@ -92,7 +102,7 @@ pg_cron 'wa-agents-tick' (30 s, só se houver algo pendente) ──▶ POST /api
                                                         └─ retoma pausas vencidas, executa passos dos robôs
 ```
 
-Tabelas novas: `wa_ai_agents` (com `custom_actions`, `triggers`, `helper_agent_ids`, `tools`), `wa_ai_agent_runs`, `wa_ai_agent_deal_starts` (fila dos inícios pelo pipeline), `wa_ai_agent_documents` + `wa_ai_agent_chunks` (base de conhecimento, extensão `vector`), `wa_ai_agent_media`, `wa_bots` (com `start_step_id`), `wa_bot_runs`. Bucket privado `wa-agent-files`.
+Tabelas novas: `wa_ai_agents` (com `custom_actions`, `triggers`, `helper_agent_ids`, `tools`, `stop_rules`, `max_replies`), `wa_ai_agent_runs`, `wa_ai_agent_deal_starts` (fila dos inícios pelo pipeline), `wa_ai_agent_documents` + `wa_ai_agent_chunks` (base de conhecimento, extensão `vector`), `wa_ai_agent_media`, `wa_bots` (com `start_step_id`), `wa_bot_runs`. Bucket privado `wa-agent-files`.
 
 ### Conexão via QR e n8n
 
@@ -107,16 +117,16 @@ Mensagens enviadas pelo agente têm `source = 'agent'`; pelo robô, `source = 'b
 
 ## O que precisa existir por ambiente
 
-1. **Migrações** `20260825200000_wa_ai_agents_beta.sql`, `20260825230000_wa_ai_agents_triggers.sql` e `20260826000000_wa_ai_agents_knowledge.sql` aplicadas (habilitam `pg_net`, `pg_cron` e `vector`).
+1. **Migrações** `20260825200000_wa_ai_agents_beta.sql`, `20260825230000_wa_ai_agents_triggers.sql`, `20260826000000_wa_ai_agents_knowledge.sql` e `20260826120000_wa_ai_agents_stop_rules.sql` (colunas `stop_rules` e `max_replies` em `wa_ai_agents`) aplicadas (habilitam `pg_net`, `pg_cron` e `vector`).
 2. **`platform_config`** com duas linhas (é assim que o banco encontra o CRM):
    - `wa_agents_app_url` = URL base do CRM naquele ambiente (ex.: `https://crm.anunciojuridico.com.br`; no preview, a URL da branch na Vercel).
    - `wa_agents_internal_secret` = o mesmo valor da variável de ambiente abaixo.
-3. **Variável de ambiente na Vercel**: `WA_AGENTS_INTERNAL_SECRET` (ou, em produção, o `CRON_SECRET` já existente serve). Sem isso as rotas internas respondem 401 e nada acontece.
+3. **Variável de ambiente na Vercel**: `WA_AGENTS_INTERNAL_SECRET` ou, na falta dela, o `CRON_SECRET` já existente (o mesmo valor gravado em `wa_agents_internal_secret`). Sem isso as rotas internas respondem 401 e nada acontece.
 4. Chave de IA da organização em Configurações → Central de I.A (ou chave própria no agente).
 
 ## Rotas
 
-Sessão (membros da org; escrita só admin): `/api/wa-agents/beta`, `/api/wa-agents/agents[/{id}[/test]]`, `/api/wa-agents/runs`, `/api/wa-agents/bots[/{id}[/start]]`, `/api/wa-agents/bot-runs`, `/api/wa-agents/options`, `/api/wa-agents/conversation` (qualquer membro: pausar/retomar/parar/iniciar/aprovar/recusar).
+Sessão (membros da org; escrita só admin): `/api/wa-agents/beta`, `/api/wa-agents/agents[/{id}[/test]]`, `/api/wa-agents/runs`, `/api/wa-agents/bots[/{id}[/start]]`, `/api/wa-agents/bot-runs`, `/api/wa-agents/options`, `/api/wa-agents/conversation` (qualquer membro: pausar/retomar/parar/iniciar/aprovar/recusar/iniciar robô/cancelar robô).
 
 Internas (header `X-Internal-Secret`): `POST /api/wa-agents/ingest`, `POST /api/wa-agents/tick`.
 
