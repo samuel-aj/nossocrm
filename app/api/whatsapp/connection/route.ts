@@ -114,9 +114,40 @@ export async function GET() {
         }
       : null;
 
-  const connections = withStatus.map(({ conn: c, status }) => ({
+  // Saúde do envio: a Evolution pode dizer "open" com a sessão do WhatsApp morta (tudo
+  // responde 400). Se os últimos envios pela conexão (2 h) falharam todos, a tela mostra
+  // "Falha de envio" com o motivo e o botão de reiniciar, mesmo com status conectado.
+  const since = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  const healthOf = async (id: string) => {
+    try {
+      const { data } = await auth.admin
+        .from('wa_messages')
+        .select('status, error, created_at, wa_conversations!inner(connection_id)')
+        .eq('organization_id', auth.user.organizationId)
+        .eq('direction', 'out')
+        .eq('wa_conversations.connection_id', id)
+        .gte('created_at', since)
+        .order('created_at', { ascending: false })
+        .limit(5);
+      const rows = (data ?? []) as Array<{ status: string | null; error: string | null; created_at: string }>;
+      const failed = rows.filter(r => r.status === 'failed');
+      const failing = rows.length >= 2 && failed.length === rows.length;
+      return {
+        failing,
+        failedCount: failed.length,
+        lastError: failing ? (rows[0]?.error ?? null) : null,
+        lastAt: rows[0]?.created_at ?? null,
+      };
+    } catch {
+      return { failing: false, failedCount: 0, lastError: null, lastAt: null };
+    }
+  };
+  const healths = await Promise.all(withStatus.map(w => healthOf(w.conn.id)));
+
+  const connections = withStatus.map(({ conn: c, status }, i) => ({
     ...mask(c),
     status,
+    sendHealth: healths[i],
     metaCredentials: credsOf(c),
   }));
 

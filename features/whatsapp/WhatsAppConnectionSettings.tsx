@@ -10,7 +10,20 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Copy, ExternalLink, KeyRound, Loader2, MessageCircle, QrCode, RefreshCw, Trash2, Unplug } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Copy,
+  ExternalLink,
+  KeyRound,
+  Loader2,
+  MessageCircle,
+  QrCode,
+  RefreshCw,
+  RotateCw,
+  Trash2,
+  Unplug,
+} from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 import { useAuth } from '@/context/AuthContext';
 
@@ -24,6 +37,8 @@ interface WaConnectionInfo {
   status: 'disconnected' | 'connecting' | 'connected' | string;
   /** Espelho: outro sistema que também recebe os webhooks deste número */
   forwardWebhookUrl?: string | null;
+  /** Últimos envios pela conexão: todos falharam = sessão morta (mesmo "conectado") */
+  sendHealth?: { failing: boolean; failedCount: number; lastError: string | null; lastAt: string | null } | null;
 }
 
 /** Só pra admin (modo API oficial): credenciais salvas, pra edição abrir preenchida.
@@ -71,6 +86,33 @@ export function WhatsAppConnectionSettings() {
   const { profile } = useAuth();
   // MULTI-NÚMERO: a confirmação de desconectar é POR conexão (guarda o id)
   const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
+  // Reiniciar a sessão da instância (Evolution) quando ela diz "conectado" mas os envios falham
+  const [restartingId, setRestartingId] = useState<string | null>(null);
+  const restartConn = async (id: string) => {
+    if (restartingId) return;
+    setRestartingId(id);
+    try {
+      const res = await fetch('/api/whatsapp/connection/restart', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ id }),
+      });
+      const j = (await res.json().catch(() => ({}))) as { error?: string; status?: string };
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      addToast(
+        j.status === 'connected'
+          ? 'Conexão reiniciada e conectada. Mande uma mensagem de teste para conferir.'
+          : `Conexão reiniciada (${j.status || 'aguardando'}). Se não conectar em instantes, desconecte e leia o QR de novo.`,
+        j.status === 'connected' ? 'success' : 'error'
+      );
+      await qc.invalidateQueries({ queryKey: ['waConnection'] });
+    } catch (e) {
+      addToast((e as Error).message || 'Falha ao reiniciar a conexão', 'error');
+    } finally {
+      setRestartingId(null);
+    }
+  };
   // HUB: qual linha QR está sendo PAREADA agora (null = nenhum QR aberto).
   // Substitui o antigo boolean: com várias linhas QR, o painel precisa saber
   // exatamente qual conexão está esperando o scan.
@@ -880,7 +922,11 @@ export function WhatsAppConnectionSettings() {
                         <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
                           {c.profileName || (rowBiz ? 'WhatsApp API oficial' : 'WhatsApp via QR Code')}
                         </p>
-                        {rowOn ? (
+                        {rowOn && c.sendHealth?.failing ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-500/15 text-red-700 dark:text-red-300">
+                            <AlertTriangle size={11} /> Falha de envio
+                          </span>
+                        ) : rowOn ? (
                           <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
                             <CheckCircle2 size={11} /> Conectado
                           </span>
@@ -894,6 +940,27 @@ export function WhatsAppConnectionSettings() {
                           </span>
                         )}
                       </div>
+                      {rowOn && c.sendHealth?.failing ? (
+                        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-900/15 px-3 py-2 text-xs text-red-700 dark:text-red-300">
+                          <AlertTriangle size={14} className="shrink-0" />
+                          <span className="flex-1 min-w-[12rem]">
+                            Os últimos {c.sendHealth.failedCount} envios falharam
+                            {c.sendHealth.lastError ? ` (${c.sendHealth.lastError})` : ''}. O provedor diz "conectado", mas a
+                            sessão do WhatsApp pode ter caído: reinicie a conexão; se continuar, desconecte e leia o QR de novo.
+                          </span>
+                          {!rowBiz ? (
+                            <button
+                              type="button"
+                              onClick={() => void restartConn(c.id)}
+                              disabled={restartingId === c.id}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-300 dark:border-red-500/40 bg-white dark:bg-black/20 text-red-700 dark:text-red-300 font-bold hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors disabled:opacity-60"
+                            >
+                              {restartingId === c.id ? <Loader2 size={13} className="animate-spin" /> : <RotateCw size={13} />}
+                              Reiniciar conexão
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : null}
                       <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
                         {c.phoneNumber ||
                           (rowBiz ? 'Número da Meta (Cloud API)' : 'Número pareado pelo celular')}

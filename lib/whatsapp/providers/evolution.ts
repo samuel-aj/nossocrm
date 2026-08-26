@@ -79,7 +79,7 @@ export class EvolutionProvider implements WhatsAppProvider {
   }
 
   private async call<T = unknown>(
-    method: 'GET' | 'POST' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     path: string,
     body?: unknown
   ): Promise<{ ok: boolean; status: number; data: T | null }> {
@@ -190,6 +190,11 @@ export class EvolutionProvider implements WhatsAppProvider {
     if (!ok && status !== 404 && status !== 400) {
       throw new Error(`Evolution respondeu ${status} no logout`);
     }
+  }
+
+  async restart(): Promise<void> {
+    const { ok, status } = await this.call('PUT', `/instance/restart/${encodeURIComponent(this.instanceName)}`);
+    if (!ok) throw new Error(`Evolution respondeu ${status} ao reiniciar a instância`);
   }
 
   async setWebhook(url: string): Promise<void> {

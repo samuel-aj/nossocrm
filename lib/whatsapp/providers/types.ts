@@ -106,6 +106,8 @@ export interface WhatsAppProvider {
   setWebhook(url: string): Promise<void>;
   /** Desconecta o número da instância (logout) — a instância continua existindo. */
   logout(): Promise<void>;
+  /** Reinicia a sessão da instância sem perder o pareamento (sessão "aberta" mas morta). */
+  restart?(): Promise<void>;
   /** Normaliza um payload de webhook do provedor em um InboundEvent. */
   parseWebhook(payload: unknown): InboundEvent;
 }
