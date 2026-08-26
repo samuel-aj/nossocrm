@@ -50,6 +50,22 @@ const WEBHOOK_EVENTS = [
   'QRCODE_UPDATED',
 ] as const;
 
+/**
+ * Mensagem de erro legível a partir da resposta da Evolution. "Connection Closed" /
+ * "not open" = a instância caiu (o número precisa ser reconectado pelo QR).
+ */
+function describeEvolutionError(status: number, data: unknown): string {
+  const d = (data ?? {}) as { response?: { message?: unknown }; message?: unknown; error?: unknown };
+  const raw = d.response?.message ?? d.message ?? d.error;
+  const parts = (Array.isArray(raw) ? raw : raw ? [raw] : [])
+    .map(v => (typeof v === 'string' ? v : JSON.stringify(v)))
+    .filter(Boolean);
+  const detail = parts.join('; ').slice(0, 200);
+  const closed = /connection closed|not open|not connected|disconnected/i.test(detail);
+  const hint = closed ? ' (número desconectado: reconecte pelo QR na tela Conexão)' : '';
+  return `Evolution respondeu ${status}${detail ? `: ${detail}` : ''}${hint}`;
+}
+
 export class EvolutionProvider implements WhatsAppProvider {
   readonly instanceName: string;
   private readonly baseUrl: string;
@@ -129,7 +145,7 @@ export class EvolutionProvider implements WhatsAppProvider {
     });
 
     if (!ok) {
-      return { ok: false, error: `Evolution respondeu ${status}`, raw: data };
+      return { ok: false, error: describeEvolutionError(status, data), raw: data };
     }
     return { ok: true, providerMessageId: data?.key?.id, raw: data };
   }
@@ -160,7 +176,7 @@ export class EvolutionProvider implements WhatsAppProvider {
     }
 
     const { ok, status, data } = await this.call<{ key?: { id?: string } }>('POST', path, body);
-    if (!ok) return { ok: false, error: `Evolution respondeu ${status}`, raw: data };
+    if (!ok) return { ok: false, error: describeEvolutionError(status, data), raw: data };
     return { ok: true, providerMessageId: data?.key?.id, raw: data };
   }
 

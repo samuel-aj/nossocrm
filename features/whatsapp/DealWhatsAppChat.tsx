@@ -33,6 +33,7 @@ import {
   Play,
   User,
   Bot,
+  Square,
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
 import {
@@ -909,7 +910,10 @@ export function DealWhatsAppChat({
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify({ conversationId, status: action === 'pause' ? 'paused' : 'active' }),
+            body: JSON.stringify({
+              conversationId,
+              status: action === 'pause' ? 'paused' : action === 'stop' ? 'stopped' : 'active',
+            }),
           });
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string };
@@ -1855,7 +1859,7 @@ export function DealWhatsAppChat({
             onAction={action => void runAiAction(action)}
           />
         )}
-        {!nativeBanner && aiState && (
+        {!nativeBanner && aiState && aiState.status !== 'stopped' && (
           <div
             className={`flex items-center justify-between gap-2 mb-1.5 px-3 py-1.5 rounded-xl border text-xs ${
               aiState.status === 'active'
@@ -1894,6 +1898,16 @@ export function DealWhatsAppChat({
                 <Play size={12} />
               )}
               {aiState.status === 'active' ? 'Pausar' : 'Retomar'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void runAiAction('stop')}
+              disabled={aiBusy}
+              title="Parar de vez: o agente sai desta conversa e só volta se alguém retomar na mão"
+              className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border border-red-300 dark:border-red-500/40 bg-white dark:bg-black/20 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors disabled:opacity-60"
+            >
+              <Square size={12} />
+              Parar
             </button>
           </div>
         )}
