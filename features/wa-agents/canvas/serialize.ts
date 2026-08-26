@@ -1,16 +1,23 @@
 /**
- * Serialização entre o quadro (nós e arestas do React Flow) e o formato salvo
- * do robô (BotInput: passos com next_step_id / goto_step_id / else_step_id /
- * on_timeout_step_id, posição em `ui` e `start_step_id`).
+ * Serialização entre o quadro (balões e arestas do React Flow) e o formato salvo
+ * do robô (BotInput: passos planos com next_step_id / goto_step_id / else_step_id /
+ * on_timeout_step_id, posição em `ui`, `start_step_id` e o desenho em `layout.groups`).
  *
- * Robôs antigos em lista (sem start_step_id, sem `ui` e sem next_step_id) são
- * convertidos em cadeia: cada passo liga ao seguinte da lista, com layout
- * vertical automático (x fixo, y = índice * 170).
+ * Um balão = lista ORDENADA de blocos (passos). Dentro do balão cada passo liga
+ * ao seguinte (`next_step_id`); as saídas do ÚLTIMO bloco viram as ligações do
+ * balão. O motor não muda: continua lendo os passos planos.
+ *
+ * Compatibilidade ao abrir:
+ * - robô salvo sem `layout.groups` (um passo por nó, `ui` em cada passo): vira
+ *   um balão por passo, na posição salva;
+ * - robô antigo em lista (sem start_step_id, sem `ui` e sem next_step_id): cada
+ *   passo liga ao seguinte da lista, com layout vertical automático.
  */
 import type { XYPosition } from '@xyflow/react';
-import type { BotInput, BotRow, BotStep } from '@/lib/wa-agents/types';
+import type { BotInput, BotLayoutGroup, BotRow, BotStep } from '@/lib/wa-agents/types';
 import { newId } from '../ui';
 import {
+  BLOCK_KIND,
   HANDLE_ELSE,
   HANDLE_IN,
   HANDLE_NEXT,
@@ -20,10 +27,14 @@ import {
   STEP_LABELS,
   TRIGGER_NODE_ID,
   WAIT_UNIT_SECONDS,
+  bubbleOutputs,
   edgeIdFor,
-  isStepType,
+  isLinearType,
   ruleHandleId,
   unitFor,
+  type Block,
+  type BubbleData,
+  type BubbleNode,
   type FlowEdge,
   type FlowGraph,
   type FlowHeader,
@@ -36,8 +47,8 @@ import {
 /** Layout automático dos robôs em lista: coluna fixa, um passo abaixo do outro. */
 const LEGACY_X = 80;
 const LEGACY_GAP_Y = 170;
-/** O gatilho fica à esquerda do primeiro passo. */
-const TRIGGER_OFFSET_X = 360;
+/** O gatilho fica à esquerda do primeiro balão. */
+export const TRIGGER_OFFSET_X = 360;
 
 /**
  * "sim, quero, pode" -> ['sim', 'quero', 'pode'] (sem repetidos e sem vazios).
@@ -75,13 +86,17 @@ export function clampInt(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n));
 }
 
-/** Segundos de um passo Esperar a partir do que foi digitado (quantidade + unidade). */
+/** Segundos de um bloco Esperar a partir do que foi digitado (quantidade + unidade). */
 export function waitSeconds(data: WaitData): number {
   return Math.round(data.amount * WAIT_UNIT_SECONDS[data.unit]);
 }
 
 export function isTriggerNode(node: FlowNode): node is TriggerNode {
   return node.type === 'trigger';
+}
+
+export function isBubbleNode(node: FlowNode): node is BubbleNode {
+  return node.type === 'bubble';
 }
 
 function isHttpUrl(value: string): boolean {
@@ -93,36 +108,43 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
-/** Rótulo curto de um nó para mensagens ("Mensagem", "Condição"...). */
-export function nodeLabel(node: FlowNode): string {
-  if (node.type === 'trigger') return 'Gatilho';
-  return node.type && isStepType(node.type) ? STEP_LABELS[node.type] : 'Passo';
+/** Nome mostrado do balão: o nome dado ou o rótulo do primeiro bloco. */
+export function bubbleTitle(data: BubbleData): string {
+  const name = data.name.trim();
+  if (name) return name;
+  const first = data.blocks[0];
+  return first ? STEP_LABELS[first.type] : 'Balão';
 }
 
-// ---------------------------------------------------------------- Criação de nós
+// ---------------------------------------------------------------- Criação
 
-/** Nó novo com os dados padrão do tipo. */
-export function createStepNode(type: StepType, position: XYPosition, id: string = newId()): FlowNode {
+/** Bloco novo com os dados padrão do tipo. */
+export function createBlock(type: StepType, id: string = newId()): Block {
   switch (type) {
     case 'send_text':
-      return { id, type, position, data: { text: '' } };
+      return { id, type, data: { text: '' } };
     case 'wait':
-      return { id, type, position, data: { amount: 1, unit: 'h' } };
+      return { id, type, data: { amount: 1, unit: 'h' } };
     case 'wait_reply':
-      return { id, type, position, data: { timeout_minutes: 60 } };
+      return { id, type, data: { timeout_minutes: 60 } };
     case 'condition':
-      return { id, type, position, data: { rules: [{ id: newId(), keywords: '' }] } };
+      return { id, type, data: { rules: [{ id: newId(), keywords: '' }] } };
     case 'move_stage':
-      return { id, type, position, data: { stage_id: '' } };
+      return { id, type, data: { stage_id: '' } };
     case 'add_tag':
-      return { id, type, position, data: { tag: '' } };
+      return { id, type, data: { tag: '' } };
     case 'webhook':
-      return { id, type, position, data: { url: '', secret: '', body_template: '' } };
+      return { id, type, data: { url: '', secret: '', body_template: '' } };
     case 'handoff_agent':
-      return { id, type, position, data: { agent_id: '' } };
+      return { id, type, data: { agent_id: '' } };
     case 'end':
-      return { id, type, position, data: {} };
+      return { id, type, data: {} };
   }
+}
+
+/** Nó Balão novo. */
+export function createBubble(blocks: Block[], position: XYPosition, name = '', id: string = newId()): BubbleNode {
+  return { id, type: 'bubble', position, data: { name, blocks } };
 }
 
 function createTriggerNode(trigger: BotRow['trigger'] | null, position: XYPosition): TriggerNode {
@@ -139,45 +161,60 @@ function createTriggerNode(trigger: BotRow['trigger'] | null, position: XYPositi
   };
 }
 
-/** Passo salvo -> nó do quadro. */
-function stepToNode(step: BotStep, position: XYPosition): FlowNode {
+/**
+ * Cópia de um bloco com ids novos (do bloco e das regras da condição).
+ * `handleMap` recebe "handle antigo -> handle novo" das regras, para as
+ * ligações copiadas continuarem apontando para a regra certa.
+ */
+export function cloneBlock(block: Block, handleMap?: Map<string, string>): Block {
+  const id = newId();
+  if (block.type === 'condition') {
+    const rules = block.data.rules.map((rule) => {
+      const ruleId = newId();
+      handleMap?.set(ruleHandleId(rule.id), ruleHandleId(ruleId));
+      return { id: ruleId, keywords: rule.keywords };
+    });
+    return { id, type: 'condition', data: { rules } };
+  }
+  return { ...block, id, data: { ...block.data } } as Block;
+}
+
+/** Passo salvo -> bloco do balão. */
+function stepToBlock(step: BotStep): Block {
   const id = step.id;
   switch (step.type) {
     case 'send_text':
-      return { id, type: 'send_text', position, data: { text: step.text } };
+      return { id, type: 'send_text', data: { text: step.text } };
     case 'wait': {
       const unit = unitFor(step.seconds);
       return {
         id,
         type: 'wait',
-        position,
         data: { amount: Math.max(1, Math.round(step.seconds / WAIT_UNIT_SECONDS[unit])), unit },
       };
     }
     case 'wait_reply':
-      return { id, type: 'wait_reply', position, data: { timeout_minutes: step.timeout_minutes } };
+      return { id, type: 'wait_reply', data: { timeout_minutes: step.timeout_minutes } };
     case 'condition':
       return {
         id,
         type: 'condition',
-        position,
         data: { rules: step.rules.map((r) => ({ id: newId(), keywords: formatKeywords(r.keywords) })) },
       };
     case 'move_stage':
-      return { id, type: 'move_stage', position, data: { stage_id: step.stage_id } };
+      return { id, type: 'move_stage', data: { stage_id: step.stage_id } };
     case 'add_tag':
-      return { id, type: 'add_tag', position, data: { tag: step.tag } };
+      return { id, type: 'add_tag', data: { tag: step.tag } };
     case 'webhook':
       return {
         id,
         type: 'webhook',
-        position,
         data: { url: step.url, secret: step.secret ?? '', body_template: step.body_template ?? '' },
       };
     case 'handoff_agent':
-      return { id, type: 'handoff_agent', position, data: { agent_id: step.agent_id } };
+      return { id, type: 'handoff_agent', data: { agent_id: step.agent_id } };
     case 'end':
-      return { id, type: 'end', position, data: {} };
+      return { id, type: 'end', data: {} };
   }
 }
 
@@ -188,39 +225,81 @@ function makeEdge(source: string, sourceHandle: string, target: string): FlowEdg
 // ---------------------------------------------------------------- Robô -> quadro
 
 /**
- * Converte um robô salvo (ou os passos padrão de um robô novo) em nós e arestas.
- * Robô em lista (sem `start_step_id`, sem posição `ui` e sem `next_step_id` em
- * nenhum passo): a ordem da lista vira a cadeia de ligações. Qualquer sinal de
- * quadro (mesmo salvo com o gatilho solto) preserva as ligações gravadas.
+ * Converte um robô salvo (ou os passos padrão de um robô novo) em balões e arestas.
+ * Balões vêm de `layout.groups`; passos fora de qualquer balão viram um balão
+ * cada (na posição `ui` ou, no robô em lista, empilhados na vertical). Em modo
+ * lista (sem `start_step_id`, sem `ui`, sem `next_step_id` e sem balões) a ordem
+ * da lista vira a cadeia de ligações.
  */
 export function botToFlow(bot: BotRow | null, fallbackSteps: BotStep[]): FlowGraph {
   const steps: BotStep[] = bot ? bot.steps : fallbackSteps;
-  const canvasMode = !!bot?.start_step_id || steps.some((s) => s.ui !== undefined || s.next_step_id !== undefined);
-  const stepIds = new Set(steps.map((s) => s.id));
+  const rawGroups = bot?.layout?.groups;
+  const groups: BotLayoutGroup[] = Array.isArray(rawGroups) ? rawGroups : [];
+  const canvasMode =
+    !!bot?.start_step_id || groups.length > 0 || steps.some((s) => s.ui !== undefined || s.next_step_id !== undefined);
+  const stepById = new Map(steps.map((s) => [s.id, s]));
+  const indexById = new Map(steps.map((s, i) => [s.id, i]));
 
-  const stepNodes: FlowNode[] = steps.map((step, index) =>
-    stepToNode(step, step.ui ? { x: step.ui.x, y: step.ui.y } : { x: LEGACY_X, y: index * LEGACY_GAP_Y })
-  );
+  const bubbles: BubbleNode[] = [];
+  const usedSteps = new Set<string>();
+  const usedIds = new Set<string>([TRIGGER_NODE_ID]);
+  const uniqueId = (wanted: string): string => {
+    let id = wanted;
+    while (usedIds.has(id)) id = newId();
+    usedIds.add(id);
+    return id;
+  };
 
-  const startId = canvasMode ? (bot?.start_step_id ?? null) : (steps[0]?.id ?? null);
-  const startNode = startId ? stepNodes.find((n) => n.id === startId) : undefined;
-  // Posição salva do gatilho tem prioridade; sem ela, fica à esquerda do primeiro passo
+  // 1) Balões salvos: ids de passos que não existem são ignorados; passo repetido fica no primeiro balão.
+  for (const group of groups) {
+    const blocks: Block[] = [];
+    for (const stepId of group.step_ids ?? []) {
+      const step = stepById.get(stepId);
+      if (!step || usedSteps.has(stepId)) continue;
+      usedSteps.add(stepId);
+      blocks.push(stepToBlock(step));
+    }
+    if (blocks.length === 0) continue;
+    bubbles.push(createBubble(blocks, { x: group.x, y: group.y }, group.name ?? '', uniqueId(group.id)));
+  }
+
+  // 2) Passos fora de qualquer balão: um balão por passo (robô salvo antes dos balões ou em lista).
+  steps.forEach((step, index) => {
+    if (usedSteps.has(step.id)) return;
+    usedSteps.add(step.id);
+    const position = step.ui ? { x: step.ui.x, y: step.ui.y } : { x: LEGACY_X, y: index * LEGACY_GAP_Y };
+    bubbles.push(createBubble([stepToBlock(step)], position, '', uniqueId(step.id)));
+  });
+
+  const bubbleOfStep = new Map<string, string>();
+  for (const bubble of bubbles) for (const block of bubble.data.blocks) bubbleOfStep.set(block.id, bubble.id);
+
+  const startStepId = canvasMode ? (bot?.start_step_id ?? null) : (steps[0]?.id ?? null);
+  const startBubbleId = startStepId ? (bubbleOfStep.get(startStepId) ?? null) : null;
+  const startBubble = startBubbleId ? bubbles.find((b) => b.id === startBubbleId) : undefined;
+  // Posição salva do gatilho tem prioridade; sem ela, fica à esquerda do primeiro balão
   const triggerPosition: XYPosition = bot?.trigger?.ui
     ? { x: bot.trigger.ui.x, y: bot.trigger.ui.y }
-    : startNode
-      ? { x: startNode.position.x - TRIGGER_OFFSET_X, y: startNode.position.y }
+    : startBubble
+      ? { x: startBubble.position.x - TRIGGER_OFFSET_X, y: startBubble.position.y }
       : { x: LEGACY_X - TRIGGER_OFFSET_X, y: 0 };
 
-  const nodes: FlowNode[] = [createTriggerNode(bot?.trigger ?? null, triggerPosition), ...stepNodes];
+  const nodes: FlowNode[] = [createTriggerNode(bot?.trigger ?? null, triggerPosition), ...bubbles];
   const edges: FlowEdge[] = [];
-  const link = (source: string, handle: string, target: string | null | undefined) => {
-    if (!target || target === source || !stepIds.has(target)) return;
+  const link = (source: string, handle: string, targetStepId: string | null | undefined) => {
+    const target = targetStepId ? bubbleOfStep.get(targetStepId) : undefined;
+    if (!target || target === source) return;
     edges.push(makeEdge(source, handle, target));
   };
 
-  if (startId) link(TRIGGER_NODE_ID, HANDLE_NEXT, startId);
+  if (startStepId) link(TRIGGER_NODE_ID, HANDLE_NEXT, startStepId);
 
-  steps.forEach((step, index) => {
+  // As saídas de cada balão são as do último bloco (o encadeamento interno é a ordem do balão).
+  for (const bubble of bubbles) {
+    const last = bubble.data.blocks[bubble.data.blocks.length - 1];
+    const step = stepById.get(last.id);
+    if (!step) continue;
+    const index = indexById.get(step.id) ?? -1;
     // Em lista, o passo seguinte é o próximo do array (salvo se o passo já disser outro); no quadro, só o que está ligado.
     const listNext = canvasMode ? null : (steps[index + 1]?.id ?? null);
     const next = canvasMode ? (step.next_step_id ?? null) : (step.next_step_id ?? listNext);
@@ -230,34 +309,33 @@ export function botToFlow(bot: BotRow | null, fallbackSteps: BotStep[]): FlowGra
       case 'move_stage':
       case 'add_tag':
       case 'webhook':
-        link(step.id, HANDLE_NEXT, next);
+        link(bubble.id, HANDLE_NEXT, next);
         break;
       case 'wait_reply':
-        link(step.id, HANDLE_NEXT, next);
-        link(step.id, HANDLE_TIMEOUT, step.on_timeout_step_id);
+        link(bubble.id, HANDLE_NEXT, next);
+        link(bubble.id, HANDLE_TIMEOUT, step.on_timeout_step_id);
         break;
       case 'condition': {
-        const node = stepNodes[index];
-        const ruleIds = node.type === 'condition' ? node.data.rules.map((r) => r.id) : [];
+        const ruleIds = last.type === 'condition' ? last.data.rules.map((r) => r.id) : [];
         step.rules.forEach((rule, i) => {
           const ruleId = ruleIds[i];
-          if (ruleId) link(step.id, ruleHandleId(ruleId), rule.goto_step_id);
+          if (ruleId) link(bubble.id, ruleHandleId(ruleId), rule.goto_step_id);
         });
-        link(step.id, HANDLE_ELSE, step.else_step_id ?? listNext);
+        link(bubble.id, HANDLE_ELSE, step.else_step_id ?? listNext);
         break;
       }
       default:
         // handoff_agent e end não têm saída.
         break;
     }
-  });
+  }
 
   return { nodes, edges };
 }
 
 // ---------------------------------------------------------------- Quadro -> robô
 
-/** Mapa "origem__handle" -> destino, só com arestas válidas. */
+/** Mapa "origem__handle" -> balão de destino, só com arestas válidas. */
 function edgeTargets(nodes: FlowNode[], edges: FlowEdge[]): Map<string, string> {
   const ids = new Set(nodes.map((n) => n.id));
   const map = new Map<string, string>();
@@ -269,20 +347,20 @@ function edgeTargets(nodes: FlowNode[], edges: FlowEdge[]): Map<string, string> 
 }
 
 /**
- * Ordem dos passos no array salvo: primeiro os alcançáveis a partir do início
+ * Ordem dos balões no array salvo: primeiro os alcançáveis a partir do início
  * (largura), depois os soltos, de cima para baixo. Só afeta `step_index` e os logs.
  */
-export function orderStepNodes(nodes: FlowNode[], edges: FlowEdge[], startId: string | null): FlowNode[] {
-  const byId = new Map<string, FlowNode>();
-  for (const n of nodes) if (!isTriggerNode(n)) byId.set(n.id, n);
+export function orderBubbles(nodes: FlowNode[], edges: FlowEdge[], startBubbleId: string | null): BubbleNode[] {
+  const byId = new Map<string, BubbleNode>();
+  for (const n of nodes) if (isBubbleNode(n)) byId.set(n.id, n);
   const outgoing = new Map<string, string[]>();
   for (const e of edges) {
     if (!byId.has(e.source) || !byId.has(e.target)) continue;
     outgoing.set(e.source, [...(outgoing.get(e.source) ?? []), e.target]);
   }
   const visited = new Set<string>();
-  const result: FlowNode[] = [];
-  const queue: string[] = startId && byId.has(startId) ? [startId] : [];
+  const result: BubbleNode[] = [];
+  const queue: string[] = startBubbleId && byId.has(startBubbleId) ? [startBubbleId] : [];
   while (queue.length) {
     const id = queue.shift() as string;
     if (visited.has(id)) continue;
@@ -298,69 +376,96 @@ export function orderStepNodes(nodes: FlowNode[], edges: FlowEdge[], startId: st
   return [...result, ...loose];
 }
 
-/** Nó do quadro -> passo salvo (null para o gatilho). */
-function nodeToStep(node: FlowNode, to: (source: string, handle: string) => string | null): BotStep | null {
-  const id = node.id;
-  const ui = { x: Math.round(node.position.x), y: Math.round(node.position.y) };
-  switch (node.type) {
+/** Bloco -> passo salvo. `to(handle)` devolve o id do passo ligado àquela saída. */
+function blockToStep(block: Block, to: (handle: string) => string | null, ui: { x: number; y: number }): BotStep {
+  const id = block.id;
+  switch (block.type) {
     case 'send_text':
-      return { id, type: 'send_text', text: node.data.text.trim(), next_step_id: to(id, HANDLE_NEXT), ui };
+      return { id, type: 'send_text', text: block.data.text.trim(), next_step_id: to(HANDLE_NEXT), ui };
     case 'wait':
-      return { id, type: 'wait', seconds: waitSeconds(node.data), next_step_id: to(id, HANDLE_NEXT), ui };
+      return { id, type: 'wait', seconds: waitSeconds(block.data), next_step_id: to(HANDLE_NEXT), ui };
     case 'wait_reply':
       return {
         id,
         type: 'wait_reply',
-        timeout_minutes: node.data.timeout_minutes,
-        on_timeout_step_id: to(id, HANDLE_TIMEOUT),
-        next_step_id: to(id, HANDLE_NEXT),
+        timeout_minutes: block.data.timeout_minutes,
+        on_timeout_step_id: to(HANDLE_TIMEOUT),
+        next_step_id: to(HANDLE_NEXT),
         ui,
       };
     case 'condition':
       return {
         id,
         type: 'condition',
-        rules: node.data.rules.map((r) => ({
+        rules: block.data.rules.map((r) => ({
           keywords: parseKeywords(r.keywords),
-          goto_step_id: to(id, ruleHandleId(r.id)) ?? '',
+          goto_step_id: to(ruleHandleId(r.id)) ?? '',
         })),
-        else_step_id: to(id, HANDLE_ELSE),
+        else_step_id: to(HANDLE_ELSE),
         ui,
       };
     case 'move_stage':
-      return { id, type: 'move_stage', stage_id: node.data.stage_id, next_step_id: to(id, HANDLE_NEXT), ui };
+      return { id, type: 'move_stage', stage_id: block.data.stage_id, next_step_id: to(HANDLE_NEXT), ui };
     case 'add_tag':
-      return { id, type: 'add_tag', tag: node.data.tag.trim(), next_step_id: to(id, HANDLE_NEXT), ui };
+      return { id, type: 'add_tag', tag: block.data.tag.trim(), next_step_id: to(HANDLE_NEXT), ui };
     case 'webhook':
       return {
         id,
         type: 'webhook',
-        url: node.data.url.trim(),
-        secret: node.data.secret.trim() || null,
-        body_template: node.data.body_template.trim() || null,
-        next_step_id: to(id, HANDLE_NEXT),
+        url: block.data.url.trim(),
+        secret: block.data.secret.trim() || null,
+        body_template: block.data.body_template.trim() || null,
+        next_step_id: to(HANDLE_NEXT),
         ui,
       };
     case 'handoff_agent':
-      return { id, type: 'handoff_agent', agent_id: node.data.agent_id, ui };
+      return { id, type: 'handoff_agent', agent_id: block.data.agent_id, ui };
     case 'end':
       return { id, type: 'end', ui };
-    default:
-      return null;
   }
 }
 
-/** Monta o BotInput a partir do quadro e do cabeçalho. */
+/**
+ * Monta o BotInput a partir do quadro e do cabeçalho: passos planos (cada bloco
+ * liga ao seguinte do balão; o último liga ao primeiro bloco do balão de
+ * destino), `start_step_id` = primeiro bloco do balão ligado ao gatilho e
+ * `layout.groups` com o desenho. Balões vazios são ignorados.
+ */
 export function flowToBot(nodes: FlowNode[], edges: FlowEdge[], header: FlowHeader): BotInput {
   const targets = edgeTargets(nodes, edges);
-  const to = (source: string, handle: string): string | null => targets.get(edgeIdFor(source, handle)) ?? null;
+  const byId = new Map<string, BubbleNode>();
+  for (const n of nodes) if (isBubbleNode(n)) byId.set(n.id, n);
+  const firstStepOf = (bubbleId: string | null | undefined): string | null => {
+    const bubble = bubbleId ? byId.get(bubbleId) : undefined;
+    return bubble?.data.blocks[0]?.id ?? null;
+  };
+  const to = (source: string, handle: string): string | null => firstStepOf(targets.get(edgeIdFor(source, handle)));
   const trigger = nodes.find(isTriggerNode);
-  const startId = to(TRIGGER_NODE_ID, HANDLE_NEXT);
+  const startBubbleId = targets.get(edgeIdFor(TRIGGER_NODE_ID, HANDLE_NEXT)) ?? null;
+  const startId = firstStepOf(startBubbleId);
+
   const steps: BotStep[] = [];
-  for (const node of orderStepNodes(nodes, edges, startId)) {
-    const step = nodeToStep(node, to);
-    if (step) steps.push(step);
+  const groups: BotLayoutGroup[] = [];
+  for (const bubble of orderBubbles(nodes, edges, startBubbleId)) {
+    const blocks = bubble.data.blocks;
+    if (blocks.length === 0) continue;
+    const ui = { x: Math.round(bubble.position.x), y: Math.round(bubble.position.y) };
+    blocks.forEach((block, i) => {
+      const isLast = i === blocks.length - 1;
+      const link = isLast
+        ? (handle: string) => to(bubble.id, handle)
+        : (handle: string) => (handle === HANDLE_NEXT ? blocks[i + 1].id : null);
+      steps.push(blockToStep(block, link, ui));
+    });
+    groups.push({
+      id: bubble.id,
+      name: bubble.data.name.trim().slice(0, 80),
+      x: ui.x,
+      y: ui.y,
+      step_ids: blocks.map((b) => b.id),
+    });
   }
+
   const triggerType = trigger?.data.trigger_type ?? 'manual';
   return {
     name: header.name.trim(),
@@ -374,18 +479,78 @@ export function flowToBot(nodes: FlowNode[], edges: FlowEdge[], header: FlowHead
     },
     steps,
     start_step_id: startId,
+    layout: { groups },
   };
+}
+
+// ---------------------------------------------------------------- Copiar / colar / limpeza
+
+/**
+ * Cópias dos balões com ids novos (balões, blocos e regras), deslocadas por
+ * `offset` e já selecionadas. As ligações ENTRE os balões copiados são
+ * preservadas (apontando para as cópias); ligações com o resto do quadro são
+ * descartadas. Base do copiar/colar e do duplicar.
+ */
+export function cloneBubbles(bubbles: BubbleNode[], edges: FlowEdge[], offset: XYPosition): { nodes: BubbleNode[]; edges: FlowEdge[] } {
+  const idMap = new Map<string, string>();
+  const handleMaps = new Map<string, Map<string, string>>();
+  const nodes: BubbleNode[] = bubbles.map((bubble) => {
+    const id = newId();
+    idMap.set(bubble.id, id);
+    const handleMap = new Map<string, string>();
+    handleMaps.set(bubble.id, handleMap);
+    const blocks = bubble.data.blocks.map((block) => cloneBlock(block, handleMap));
+    return {
+      ...bubble,
+      id,
+      position: { x: Math.round(bubble.position.x + offset.x), y: Math.round(bubble.position.y + offset.y) },
+      selected: true,
+      dragging: false,
+      data: { name: bubble.data.name, blocks },
+    };
+  });
+  const clonedEdges: FlowEdge[] = [];
+  for (const e of edges) {
+    const source = idMap.get(e.source);
+    const target = idMap.get(e.target);
+    if (!source || !target || !e.sourceHandle) continue;
+    const handle = handleMaps.get(e.source)?.get(e.sourceHandle) ?? e.sourceHandle;
+    clonedEdges.push(makeEdge(source, handle, target));
+  }
+  return { nodes, edges: clonedEdges };
+}
+
+/** Handles de saída válidos de um balão (só o último bloco tem saídas). */
+export function bubbleHandleIds(blocks: Block[]): Set<string> {
+  return new Set(bubbleOutputs(blocks).map((o) => o.handleId));
+}
+
+/**
+ * Tira as arestas que perderam a origem, o destino ou a saída (bloco removido
+ * ou movido, regra apagada, balão excluído). Devolve o mesmo array quando nada muda.
+ */
+export function pruneEdges(nodes: FlowNode[], edges: FlowEdge[]): FlowEdge[] {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const kept = edges.filter((e) => {
+    const source = byId.get(e.source);
+    const target = byId.get(e.target);
+    if (!source || !target || !isBubbleNode(target) || !e.sourceHandle || e.source === e.target) return false;
+    if (isTriggerNode(source)) return e.sourceHandle === HANDLE_NEXT;
+    return bubbleHandleIds(source.data.blocks).has(e.sourceHandle);
+  });
+  return kept.length === edges.length ? edges : kept;
 }
 
 // ---------------------------------------------------------------- Validação
 
-export type FlowIssue = { nodeId?: string; message: string };
+export type FlowIssue = { nodeId?: string; blockId?: string; message: string };
 export type FlowValidation = { errors: FlowIssue[]; warnings: FlowIssue[] };
 
 /**
- * Confere o quadro antes de salvar. `errors` impedem o salvamento (inclusive o
- * gatilho solto com passos no quadro, que zeraria `start_step_id`); `warnings`
- * pedem confirmação (robô sem passos, passos fora do fluxo).
+ * Confere o quadro antes de salvar (e a cada mudança, para a marcação inline).
+ * `errors` impedem o salvamento; `warnings` pedem confirmação (rascunho sem
+ * balões, gatilho solto com o robô desligado, balões fora do fluxo).
+ * Ligar o robô (enabled) exige o gatilho ligado a um balão.
  */
 export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowHeader): FlowValidation {
   const errors: FlowIssue[] = [];
@@ -409,76 +574,112 @@ export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowH
   if (broken) {
     errors.push({
       nodeId: ids.has(broken.source) ? broken.source : undefined,
-      message: 'Há uma ligação apontando para um passo que não existe',
+      message: 'Há uma ligação apontando para um balão que não existe',
     });
   }
 
-  const startId = to(TRIGGER_NODE_ID, HANDLE_NEXT);
-  const ordered = orderStepNodes(nodes, edges, startId);
-  if (!startId) {
-    // Sem primeiro passo, o robô seria salvo em modo lista e reaberto com as ligações reescritas.
-    if (ordered.length) errors.push({ nodeId: TRIGGER_NODE_ID, message: 'Ligue a saída Então do gatilho ao primeiro passo' });
-    else warnings.push({ nodeId: TRIGGER_NODE_ID, message: 'O robô não tem passos.' });
+  const bubbles = nodes.filter(isBubbleNode);
+  const startBubbleId = to(TRIGGER_NODE_ID, HANDLE_NEXT);
+  const ordered = orderBubbles(nodes, edges, startBubbleId);
+  if (!startBubbleId) {
+    if (bubbles.length === 0) {
+      if (header.enabled) {
+        errors.push({
+          nodeId: TRIGGER_NODE_ID,
+          message: 'O robô está vazio: adicione um balão ligado ao gatilho ou desligue o robô para salvar como rascunho',
+        });
+      } else {
+        warnings.push({ nodeId: TRIGGER_NODE_ID, message: 'O robô ainda não tem balões: fica salvo como rascunho.' });
+      }
+    } else if (header.enabled) {
+      errors.push({
+        nodeId: TRIGGER_NODE_ID,
+        message: 'Ligue a saída "Então" do gatilho ao primeiro balão (ou desligue o robô para salvar como rascunho)',
+      });
+    } else {
+      warnings.push({
+        nodeId: TRIGGER_NODE_ID,
+        message: 'O gatilho não está ligado a nenhum balão: o robô não vai fazer nada até isso ser ligado.',
+      });
+    }
   }
 
-  // Numeração por tipo, na ordem do fluxo ("Mensagem 2"); sem número quando há só um passo do tipo.
+  // Numeração por tipo, na ordem do fluxo ("Mensagem 2"); sem número quando há só um bloco do tipo.
   const totalByType = new Map<string, number>();
-  for (const node of ordered) totalByType.set(node.type ?? '', (totalByType.get(node.type ?? '') ?? 0) + 1);
+  for (const bubble of ordered) {
+    for (const block of bubble.data.blocks) totalByType.set(block.type, (totalByType.get(block.type) ?? 0) + 1);
+  }
   const seenByType = new Map<string, number>();
-  ordered.forEach((node) => {
-    const type = node.type ?? '';
-    const ordinal = (seenByType.get(type) ?? 0) + 1;
-    seenByType.set(type, ordinal);
-    const label = (totalByType.get(type) ?? 0) > 1 ? `${nodeLabel(node)} ${ordinal}` : nodeLabel(node);
-    const fail = (message: string) => errors.push({ nodeId: node.id, message: `${label}: ${message}` });
-    switch (node.type) {
-      case 'send_text':
-        if (!node.data.text.trim()) fail('a mensagem está vazia');
-        else if (node.data.text.length > 4000) fail('a mensagem passa de 4000 caracteres');
-        break;
-      case 'wait': {
-        const seconds = waitSeconds(node.data);
-        if (!(node.data.amount >= 1) || !(seconds >= 1) || seconds > MAX_WAIT_SECONDS) {
-          fail('informe um tempo entre 1 minuto e 7 dias');
-        }
-        break;
-      }
-      case 'wait_reply': {
-        const minutes = node.data.timeout_minutes;
-        if (!(minutes >= 1) || minutes > MAX_REPLY_MINUTES) {
-          fail('o prazo precisa ficar entre 1 e 43200 minutos (30 dias)');
-        }
-        break;
-      }
-      case 'condition':
-        if (node.data.rules.length === 0) fail('adicione ao menos uma regra');
-        node.data.rules.forEach((rule, i) => {
-          if (parseKeywords(rule.keywords).length === 0) fail(`a regra ${i + 1} está sem palavras-chave`);
-          else if (!to(node.id, ruleHandleId(rule.id))) fail(`ligue a regra ${i + 1} a um passo`);
-        });
-        break;
-      case 'move_stage':
-        if (!node.data.stage_id) fail('escolha a etapa de destino');
-        break;
-      case 'add_tag':
-        if (!node.data.tag.trim()) fail('informe o rótulo');
-        else if (node.data.tag.trim().length > 60) fail('o rótulo passa de 60 caracteres');
-        break;
-      case 'webhook':
-        if (!isHttpUrl(node.data.url.trim())) fail('informe uma URL válida, começando com http:// ou https://');
-        break;
-      case 'handoff_agent':
-        if (!node.data.agent_id) fail('escolha o agente de IA');
-        break;
-      default:
-        break;
+  for (const bubble of ordered) {
+    const title = bubble.data.name.trim();
+    const blocks = bubble.data.blocks;
+    if (blocks.length === 0) {
+      errors.push({ nodeId: bubble.id, message: `${title || 'Balão'}: está vazio. Adicione um bloco ou exclua o balão` });
+      continue;
     }
-  });
+    blocks.forEach((block, index) => {
+      const ordinal = (seenByType.get(block.type) ?? 0) + 1;
+      seenByType.set(block.type, ordinal);
+      const numbered = (totalByType.get(block.type) ?? 0) > 1 ? `${STEP_LABELS[block.type]} ${ordinal}` : STEP_LABELS[block.type];
+      const label = title ? `${title} › ${numbered}` : numbered;
+      const isLast = index === blocks.length - 1;
+      const fail = (message: string) => errors.push({ nodeId: bubble.id, blockId: block.id, message: `${label}: ${message}` });
+      if (!isLast && !isLinearType(block.type)) {
+        fail(
+          BLOCK_KIND[block.type] === 'terminal'
+            ? 'encerra o robô, por isso precisa ser o último bloco do balão'
+            : 'tem mais de uma saída, por isso precisa ser o último bloco do balão'
+        );
+      }
+      switch (block.type) {
+        case 'send_text':
+          if (!block.data.text.trim()) fail('a mensagem está vazia');
+          else if (block.data.text.length > 4000) fail('a mensagem passa de 4000 caracteres');
+          break;
+        case 'wait': {
+          const seconds = waitSeconds(block.data);
+          if (!(block.data.amount >= 1) || !(seconds >= 1) || seconds > MAX_WAIT_SECONDS) {
+            fail('informe um tempo entre 1 minuto e 7 dias');
+          }
+          break;
+        }
+        case 'wait_reply': {
+          const minutes = block.data.timeout_minutes;
+          if (!(minutes >= 1) || minutes > MAX_REPLY_MINUTES) {
+            fail('o prazo precisa ficar entre 1 e 43200 minutos (30 dias)');
+          }
+          break;
+        }
+        case 'condition':
+          if (block.data.rules.length === 0) fail('adicione ao menos uma regra');
+          block.data.rules.forEach((rule, i) => {
+            if (parseKeywords(rule.keywords).length === 0) fail(`a regra ${i + 1} está sem palavras-chave`);
+            else if (isLast && !to(bubble.id, ruleHandleId(rule.id))) fail(`ligue a regra ${i + 1} a um balão`);
+          });
+          break;
+        case 'move_stage':
+          if (!block.data.stage_id) fail('escolha a etapa de destino');
+          break;
+        case 'add_tag':
+          if (!block.data.tag.trim()) fail('informe o rótulo');
+          else if (block.data.tag.trim().length > 60) fail('o rótulo passa de 60 caracteres');
+          break;
+        case 'webhook':
+          if (!isHttpUrl(block.data.url.trim())) fail('informe uma URL válida, começando com http:// ou https://');
+          break;
+        case 'handoff_agent':
+          if (!block.data.agent_id) fail('escolha o agente de IA');
+          break;
+        default:
+          break;
+      }
+    });
+  }
 
-  // Passos que existem no quadro mas não são alcançados a partir do gatilho.
-  if (startId) {
+  // Balões que existem no quadro mas não são alcançados a partir do gatilho.
+  if (startBubbleId) {
     const reachable = new Set<string>();
-    const queue = [startId];
+    const queue = [startBubbleId];
     while (queue.length) {
       const id = queue.shift() as string;
       if (reachable.has(id)) continue;
@@ -491,8 +692,8 @@ export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowH
         nodeId: loose[0].id,
         message:
           loose.length === 1
-            ? '1 passo não está ligado ao fluxo e nunca será executado.'
-            : `${loose.length} passos não estão ligados ao fluxo e nunca serão executados.`,
+            ? '1 balão não está ligado ao fluxo e nunca será executado.'
+            : `${loose.length} balões não estão ligados ao fluxo e nunca serão executados.`,
       });
     }
   }

@@ -3,8 +3,9 @@
  *   GET  -> admin: { bots: BotRow[] }  (segredo do passo webhook mascarado)
  *           demais membros: { bots: BotMinimal[] }  (só os robôs ligados: menu do chat)
  *   POST -> (admin) BotInputSchema -> 201 { bot }
- *           (aceita start_step_id e os campos do quadro nos passos: next_step_id, ui, passo webhook;
- *           segredo mascarado vira vazio)
+ *           (aceita start_step_id, layout (balões do quadro) e os campos do quadro nos passos:
+ *           next_step_id, ui, passo webhook; segredo mascarado vira vazio; robô sem passos só
+ *           pode ser salvo desligado)
  */
 import { json } from '@/lib/whatsapp/api';
 import { BotInputSchema, type BotMinimal, type BotRow } from '@/lib/wa-agents/types';
@@ -58,7 +59,7 @@ export async function POST(req: Request) {
   const input = parsed.data;
   const steps = restoreMaskedBotSecrets(input.steps, null);
 
-  const stepsError = validateBotSteps(steps, input.start_step_id);
+  const stepsError = validateBotSteps(steps, input.start_step_id, input.layout, input.enabled);
   if (stepsError) return stepsError;
 
   try {
@@ -78,6 +79,7 @@ export async function POST(req: Request) {
       trigger: input.trigger,
       steps,
       start_step_id: input.start_step_id ?? null,
+      layout: input.layout,
       organization_id: auth.user.organizationId,
       created_by: auth.user.id,
     })

@@ -21,6 +21,7 @@ import {
   type AgentMediaRow,
   type AgentRow,
   type AgentTriggers,
+  type BotLayout,
   type BotStep,
   type EndAction,
 } from '@/lib/wa-agents/types';
@@ -354,13 +355,42 @@ function botStepReferences(step: BotStep): Array<{ field: string; id: string }> 
   return refs;
 }
 
+const BOT_STEP_LABELS: Record<BotStep['type'], string> = {
+  send_text: 'Mensagem',
+  wait: 'Esperar',
+  wait_reply: 'Esperar resposta',
+  condition: 'Condição',
+  move_stage: 'Mover etapa',
+  add_tag: 'Rótulo',
+  webhook: 'Webhook',
+  handoff_agent: 'Entregar a agente',
+  end: 'Encerrar',
+};
+
+/** Blocos com uma única saída: podem ficar em qualquer posição do balão. */
+const LINEAR_BOT_STEP_TYPES = new Set<BotStep['type']>(['send_text', 'wait', 'move_stage', 'add_tag', 'webhook']);
+
 /**
- * Passos do robô: o passo inicial (modo quadro) e todo id referenciado
- * (next_step_id, goto_step_id, else_step_id, on_timeout_step_id) precisam
- * existir na lista de passos. null quando ok.
+ * Passos do robô:
+ * - o passo inicial (modo quadro) e todo id referenciado (next_step_id,
+ *   goto_step_id, else_step_id, on_timeout_step_id) precisam existir na lista;
+ * - balões (layout.groups): todo step_id existe, cada passo está em no máximo
+ *   um balão, blocos com várias saídas ou terminais só podem ser o último do
+ *   balão e o encadeamento interno bate com next_step_id (o editor é quem
+ *   garante isso; aqui só se rejeita inconsistência);
+ * - ligar o robô (enabled) exige ao menos um passo e, no modo quadro, o passo
+ *   inicial ligado ao gatilho. Robô sem passos pode ser salvo desligado (rascunho).
+ * null quando ok.
  */
-export function validateBotSteps(steps: BotStep[], startStepId: string | null | undefined): Response | null {
+export function validateBotSteps(
+  steps: BotStep[],
+  startStepId: string | null | undefined,
+  layout: BotLayout | null | undefined,
+  enabled: boolean
+): Response | null {
   const ids = new Set(steps.map(s => s.id));
+  const byId = new Map(steps.map(s => [s.id, s]));
+  const indexById = new Map(steps.map((s, i) => [s.id, i]));
   if (startStepId && !ids.has(startStepId)) {
     return validationMessage('O passo inicial do quadro não existe na lista de passos', 'start_step_id');
   }
@@ -372,6 +402,58 @@ export function validateBotSteps(steps: BotStep[], startStepId: string | null | 
           `steps.${i}.${ref.field}`
         );
       }
+    }
+  }
+
+  const groups = layout?.groups ?? [];
+  const seen = new Set<string>();
+  for (let gi = 0; gi < groups.length; gi++) {
+    const group = groups[gi];
+    const name = group.name?.trim() || `Balão ${gi + 1}`;
+    const stepIds = group.step_ids ?? [];
+    for (let si = 0; si < stepIds.length; si++) {
+      const stepId = stepIds[si];
+      if (!ids.has(stepId)) {
+        return validationMessage(`O balão "${name}" aponta para um passo que não existe ("${stepId}")`, `layout.groups.${gi}.step_ids.${si}`);
+      }
+      if (seen.has(stepId)) {
+        return validationMessage(`O passo "${stepId}" está em mais de um balão`, `layout.groups.${gi}.step_ids.${si}`);
+      }
+      seen.add(stepId);
+    }
+    for (let si = 0; si < stepIds.length - 1; si++) {
+      const step = byId.get(stepIds[si]);
+      if (!step) continue;
+      const index = indexById.get(step.id) ?? 0;
+      if (!LINEAR_BOT_STEP_TYPES.has(step.type)) {
+        return validationMessage(
+          `No balão "${name}", o bloco "${BOT_STEP_LABELS[step.type]}" só pode ser o último`,
+          `layout.groups.${gi}.step_ids.${si}`
+        );
+      }
+      const expected = stepIds[si + 1];
+      if ((step.next_step_id ?? null) !== expected) {
+        return validationMessage(
+          `No balão "${name}", o passo "${step.id}" deveria seguir para "${expected}" (ordem do balão)`,
+          `steps.${index}.next_step_id`
+        );
+      }
+    }
+  }
+
+  if (enabled) {
+    if (steps.length === 0) {
+      return validationMessage(
+        'O robô está vazio: adicione ao menos um balão ligado ao gatilho antes de ligá-lo (ou salve desligado, como rascunho)',
+        'enabled'
+      );
+    }
+    const canvasMode = groups.length > 0 || steps.some(s => s.ui !== undefined || s.next_step_id !== undefined);
+    if (canvasMode && !startStepId) {
+      return validationMessage(
+        'Ligue a saída "Então" do gatilho ao primeiro balão antes de ligar o robô (ou salve desligado, como rascunho)',
+        'start_step_id'
+      );
     }
   }
   return null;

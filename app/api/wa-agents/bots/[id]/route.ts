@@ -1,13 +1,14 @@
 /**
  * /api/wa-agents/bots/[id]  (admin)
  *   GET    -> { bot }  (segredo do passo webhook mascarado)
- *   PATCH  -> BotInputSchema.partial() -> { bot }  (aceita start_step_id e os campos do quadro;
- *             segredo mascarado mantém o valor salvo do passo com o mesmo id)
+ *   PATCH  -> BotInputSchema.partial() -> { bot }  (aceita start_step_id, layout (balões) e os campos
+ *             do quadro; segredo mascarado mantém o valor salvo do passo com o mesmo id; ligar o
+ *             robô exige um começo: robô vazio ou com o gatilho solto só fica salvo desligado)
  *   DELETE -> cancela as execuções abertas e apaga o robô -> { ok: true }
  */
 import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
-import { BotInputSchema, BotStepSchema, type BotRow, type BotStep } from '@/lib/wa-agents/types';
+import { BotInputSchema, BotStepSchema, normalizeBotLayout, type BotRow, type BotStep } from '@/lib/wa-agents/types';
 import {
   connectionNotFoundError,
   connectionsBelongToOrg,
@@ -69,21 +70,24 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return connectionNotFoundError();
     }
 
-    // Passos e passo inicial: os enviados ou os já salvos (o que faltar vem do banco).
-    // O passo inicial e todo id referenciado precisam existir na lista; segredos
-    // mascarados dos passos webhook voltam ao valor salvo (mesmo id).
+    // Passos, passo inicial, balões e ligado/desligado: os enviados ou os já salvos
+    // (o que faltar vem do banco). O passo inicial e todo id referenciado precisam
+    // existir na lista, os balões precisam bater com os passos e ligar o robô exige
+    // um começo; segredos mascarados dos passos webhook voltam ao valor salvo (mesmo id).
     const sendsSteps = Array.isArray(present.steps);
     const sendsStart = 'start_step_id' in present;
-    if (sendsSteps || sendsStart) {
+    const sendsLayout = 'layout' in present;
+    const sendsEnabled = typeof present.enabled === 'boolean';
+    if (sendsSteps || sendsStart || sendsLayout || sendsEnabled) {
       const { data: existing, error: existingError } = await auth.admin
         .from('wa_bots')
-        .select('steps, start_step_id')
+        .select('steps, start_step_id, layout, enabled')
         .eq('id', id)
         .eq('organization_id', orgId)
         .maybeSingle();
       if (existingError) throw new Error(existingError.message);
       if (!existing) return json({ error: 'Robô não encontrado' }, 404);
-      const saved = existing as { steps?: unknown[]; start_step_id?: string | null };
+      const saved = existing as { steps?: unknown[]; start_step_id?: string | null; layout?: unknown; enabled?: boolean };
       const savedSteps: BotStep[] = [];
       for (const item of (saved.steps ?? []) as unknown[]) {
         const p = BotStepSchema.safeParse(item);
@@ -91,7 +95,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
       }
       const steps: BotStep[] = sendsSteps ? restoreMaskedBotSecrets(present.steps ?? [], savedSteps) : savedSteps;
       const startStepId: string | null = sendsStart ? (present.start_step_id ?? null) : (saved.start_step_id ?? null);
-      const stepsError = validateBotSteps(steps, startStepId);
+      const layout = sendsLayout && present.layout ? present.layout : normalizeBotLayout(saved.layout);
+      const enabled = sendsEnabled ? present.enabled === true : saved.enabled === true;
+      const stepsError = validateBotSteps(steps, startStepId, layout, enabled);
       if (stepsError) return stepsError;
       if (sendsSteps) patch.steps = steps;
     }

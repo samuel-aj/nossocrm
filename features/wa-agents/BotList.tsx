@@ -127,7 +127,7 @@ export const BotList: React.FC = () => {
         <EmptyState
           icon={<Workflow size={22} aria-hidden="true" />}
           title="Nenhum robô ainda"
-          description="Crie um robô com um exemplo pronto de boas-vindas e ajuste os passos."
+          description="Monte o fluxo do zero no quadro visual: balões com mensagens, esperas e condições ligados por setas."
           action={
             <button type="button" className={BTN_PRIMARY} onClick={() => setEditor({ bot: null })}>
               <Plus size={16} aria-hidden="true" />

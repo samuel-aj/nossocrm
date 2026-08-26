@@ -435,6 +435,30 @@ export const BotTriggerSchema = z.object({
 });
 export type BotTrigger = z.infer<typeof BotTriggerSchema>;
 
+/**
+ * Balão do quadro (estilo Typebot): lista ORDENADA de passos empilhados, com
+ * nome e posição. Só desenho: os passos continuam planos em `steps`, e o
+ * encadeamento dentro do balão é gravado em `next_step_id` pelo editor.
+ */
+export const BotLayoutGroupSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().max(80).default(''),
+  x: z.number(),
+  y: z.number(),
+  step_ids: z.array(z.string().min(1)).default([]),
+});
+export type BotLayoutGroup = z.infer<typeof BotLayoutGroupSchema>;
+
+/** Desenho do quadro (coluna wa_bots.layout). */
+export const BotLayoutSchema = z.object({ groups: z.array(BotLayoutGroupSchema).default([]) });
+export type BotLayout = z.infer<typeof BotLayoutSchema>;
+
+/** Desenho do quadro como a UI espera ({ groups: [] } quando a coluna está vazia ou inválida). */
+export function normalizeBotLayout(raw: unknown): BotLayout {
+  const parsed = BotLayoutSchema.safeParse(raw && typeof raw === 'object' ? raw : {});
+  return parsed.success ? parsed.data : { groups: [] };
+}
+
 export const BotInputSchema = z.object({
   name: z.string().min(1).max(120),
   enabled: z.boolean().default(true),
@@ -443,6 +467,8 @@ export const BotInputSchema = z.object({
   steps: z.array(BotStepSchema).default([]),
   /** Modo quadro: id do primeiro passo; ausente = robô em lista (índice + 1) */
   start_step_id: z.string().nullable().optional(),
+  /** Balões do quadro (vários passos por balão); vazio = um balão por passo */
+  layout: BotLayoutSchema.default({ groups: [] }),
 });
 export type BotInput = z.infer<typeof BotInputSchema>;
 export type BotRow = BotInput & {
@@ -453,14 +479,15 @@ export type BotRow = BotInput & {
   updated_at: string;
 };
 
-/** Robô para a UI: segredo do passo webhook mascarado. */
-export function toBotPublic<T extends { steps?: unknown }>(row: T): T {
+/** Robô para a UI: segredo do passo webhook mascarado e desenho do quadro sempre com `groups`. */
+export function toBotPublic<T extends { steps?: unknown; layout?: unknown }>(row: T): T {
   const steps = Array.isArray(row.steps) ? (row.steps as Array<Record<string, unknown>>) : [];
   return {
     ...row,
     steps: steps.map(s =>
       s && typeof s === 'object' && s.type === 'webhook' ? { ...s, secret: maskSecret(s.secret as string | null | undefined) } : s
     ),
+    layout: normalizeBotLayout(row.layout),
   };
 }
 

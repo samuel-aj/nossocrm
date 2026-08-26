@@ -4,7 +4,12 @@
  * Editor do robô em quadro visual (React Flow), aberto como uma camada de tela
  * cheia por cima do app (portal em document.body, estilo Typebot): barra superior
  * (voltar, nome, ligado, número que envia, Testar, Salvar), quadro ocupando todo
- * o resto da altura e paleta de passos flutuando sobre o quadro.
+ * o resto da altura, paleta de blocos flutuando sobre o quadro e painel de
+ * propriedades do bloco (gaveta à direita no desktop, folha inferior no celular).
+ *
+ * Balões empilham vários blocos; copiar/colar/duplicar/excluir agem sobre os
+ * balões selecionados (Ctrl/Cmd+C, V, D e Delete). Robô novo começa vazio e
+ * desligado (rascunho); ligar exige o gatilho ligado a um balão.
  * Salva via POST (novo) ou PATCH (existente) com o payload validado por BotInputSchema.
  */
 import '@xyflow/react/dist/style.css';
@@ -42,13 +47,38 @@ import {
   errorMessage,
 } from './ui';
 import { BotCanvas } from './canvas/BotCanvas';
+import { BlockPanel } from './canvas/BlockPanel';
 import { Palette } from './canvas/Palette';
-import { CanvasContext, type CanvasContextValue } from './canvas/context';
-import { botToFlow, createStepNode, flowToBot, validateFlow } from './canvas/serialize';
+import {
+  CanvasContext,
+  type CanvasActions,
+  type CanvasContextValue,
+  type CanvasIssues,
+  type IssueSummary,
+} from './canvas/context';
+import {
+  TRIGGER_OFFSET_X,
+  botToFlow,
+  cloneBubbles,
+  createBlock,
+  createBubble,
+  flowToBot,
+  isBubbleNode,
+  pruneEdges,
+  validateFlow,
+  type FlowIssue,
+} from './canvas/serialize';
 import {
   HANDLE_IN,
+  HANDLE_NEXT,
   NODE_WIDTH,
+  PASTE_OFFSET,
+  TRIGGER_NODE_ID,
   edgeIdFor,
+  placementProblem,
+  type Block,
+  type BlockRef,
+  type BubbleNode,
   type FlowEdge,
   type FlowHeader,
   type FlowNode,
@@ -63,6 +93,7 @@ const FIELD_NAMES: Record<string, string> = {
   trigger: 'Gatilho',
   steps: 'Passos',
   start_step_id: 'Primeiro passo',
+  layout: 'Quadro',
 };
 
 /**
@@ -111,6 +142,8 @@ function isTextField(el: Element | null): el is HTMLElement {
 }
 
 type PendingSave = { payload: BotInput; warnings: string[] };
+type Clipboard = { nodes: BubbleNode[]; edges: FlowEdge[] };
+type GraphState = { nodes: FlowNode[]; edges: FlowEdge[] };
 
 /**
  * Esc na camada é tratado pelo próprio editor (listener na janela): o trap de
@@ -120,6 +153,35 @@ const keepTrapOnEscape = () => {};
 
 /** Referência estável enquanto a lista de agentes não chega (evita re-renderizar os nós a cada tecla). */
 const EMPTY_AGENTS: WaAgentListItem[] = [];
+
+function bubbleById(nodes: FlowNode[], id: string): BubbleNode | undefined {
+  const node = nodes.find((n) => n.id === id);
+  return node && isBubbleNode(node) ? node : undefined;
+}
+
+function replaceBubble(nodes: FlowNode[], bubble: BubbleNode, blocks: Block[]): FlowNode[] {
+  return nodes.map((n) => (n.id === bubble.id ? { ...bubble, data: { ...bubble.data, blocks } } : n));
+}
+
+/** Problemas de validação agrupados por balão e por bloco (marcação inline). */
+function groupIssues(errors: FlowIssue[], warnings: FlowIssue[]): CanvasIssues {
+  const byNode = new Map<string, IssueSummary>();
+  const byBlock = new Map<string, IssueSummary>();
+  const add = (map: Map<string, IssueSummary>, key: string, kind: 'errors' | 'warnings', message: string) => {
+    const current = map.get(key) ?? { errors: [], warnings: [] };
+    current[kind].push(message);
+    map.set(key, current);
+  };
+  for (const issue of errors) {
+    if (issue.nodeId) add(byNode, issue.nodeId, 'errors', issue.message);
+    if (issue.blockId) add(byBlock, issue.blockId, 'errors', issue.message);
+  }
+  for (const issue of warnings) {
+    if (issue.nodeId) add(byNode, issue.nodeId, 'warnings', issue.message);
+    if (issue.blockId) add(byBlock, issue.blockId, 'warnings', issue.message);
+  }
+  return { byNode, byBlock };
+}
 
 const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({ bot, onClose }) => {
   const { showToast } = useToast();
@@ -133,9 +195,10 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
   const initial = useMemo(() => botToFlow(bot, DEFAULT_BOT_STEPS), [bot]);
   const [nodes, setNodes, handleNodeChanges] = useNodesState<FlowNode>(initial.nodes);
   const [edges, setEdges, handleEdgeChanges] = useEdgesState<FlowEdge>(initial.edges);
+  // Robô novo nasce desligado (rascunho): ligar exige o gatilho ligado a um balão.
   const [header, setHeader] = useState<FlowHeader>({
     name: bot?.name ?? '',
-    enabled: bot?.enabled ?? true,
+    enabled: bot?.enabled ?? false,
     connection_id: bot?.connection_id ?? '',
   });
   const [botId, setBotId] = useState<string | null>(bot?.id ?? null);
@@ -144,16 +207,29 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
   const [pending, setPending] = useState<PendingSave | null>(null);
   const [testOpen, setTestOpen] = useState(false);
   const [testPhone, setTestPhone] = useState('');
+  const [selectedBlock, setSelectedBlock] = useState<BlockRef | null>(null);
+  const [clipboard, setClipboard] = useState<Clipboard | null>(null);
+  const [showMinimap, setShowMinimap] = useState(true);
+  const [paletteCollapsed, setPaletteCollapsed] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
-  // Conta os passos adicionados pela paleta para não empilhar todos no mesmo ponto.
+  // Conta os balões adicionados pela paleta para não empilhar todos no mesmo ponto.
   const addedRef = useRef(0);
+  // Último estado do quadro, para as ações lerem sem depender do ciclo de render.
+  const graphRef = useRef<GraphState>({ nodes: initial.nodes, edges: initial.edges });
+  const clipboardRef = useRef<Clipboard | null>(null);
+
+  useEffect(() => {
+    graphRef.current = { nodes, edges };
+  }, [nodes, edges]);
+  useEffect(() => {
+    clipboardRef.current = clipboard;
+  }, [clipboard]);
 
   const options = optionsQ.data;
   const connections = options?.connections ?? [];
   const agents = agentsQ.data ?? EMPTY_AGENTS;
-  const ctx = useMemo<CanvasContextValue>(() => ({ options, agents }), [options, agents]);
 
   // Enquanto a camada está aberta, a página de trás não rola (o quadro cuida da própria rolagem).
   useEffect(() => {
@@ -179,21 +255,26 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
   }, [dirty, onClose]);
 
   // Esc: com um modal aberto, o próprio modal trata; num campo de texto só tira o foco;
-  // fora disso pergunta antes de sair (com alterações) ou fecha direto.
+  // com o painel do bloco aberto, fecha o painel; fora disso pergunta antes de sair
+  // (com alterações) ou fecha direto.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || anyModalOpen) return;
+      if (e.key !== 'Escape' || anyModalOpen || e.defaultPrevented) return;
       const active = document.activeElement;
       if (isTextField(active)) {
         active.blur();
         return;
       }
       e.preventDefault();
+      if (selectedBlock) {
+        setSelectedBlock(null);
+        return;
+      }
       handleCancel();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [anyModalOpen, handleCancel]);
+  }, [anyModalOpen, handleCancel, selectedBlock]);
 
   const patchHeader = (patch: Partial<FlowHeader>) => {
     setHeader((prev) => ({ ...prev, ...patch }));
@@ -236,6 +317,25 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
     [setEdges]
   );
 
+  /**
+   * Aplica uma mudança no quadro a partir do último estado. Depois da mudança,
+   * as arestas que perderam a origem, o destino ou a saída são descartadas.
+   * `fn` devolve null para não mudar nada.
+   */
+  const mutateGraph = useCallback(
+    (fn: (nodes: FlowNode[], edges: FlowEdge[]) => GraphState | null) => {
+      const current = graphRef.current;
+      const result = fn(current.nodes, current.edges);
+      if (!result) return;
+      const nextEdges = pruneEdges(result.nodes, result.edges);
+      graphRef.current = { nodes: result.nodes, edges: nextEdges };
+      setNodes(result.nodes);
+      setEdges(nextEdges);
+      setDirty(true);
+    },
+    [setEdges, setNodes]
+  );
+
   /** Posição perto do centro da área visível, com um pequeno deslocamento a cada adição. */
   const viewportCenter = useCallback((): XYPosition => {
     const jitter = (addedRef.current % 6) * 24;
@@ -246,19 +346,278 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
     return { x: Math.round(center.x - NODE_WIDTH / 2 + jitter), y: Math.round(center.y - 40 + jitter) };
   }, [flow]);
 
+  /**
+   * Bloco vindo da paleta. Clique (sem posição) com um único balão selecionado:
+   * entra no fim dele, se couber. Senão vira um balão novo: na posição do
+   * drop, à direita do gatilho (primeiro balão, que já sai ligado a ele) ou
+   * perto do centro da tela.
+   */
   const addStep = useCallback(
     (type: StepType, position?: XYPosition) => {
-      const node = createStepNode(type, position ?? viewportCenter());
-      setNodes((nds) => [...nds.map((n) => (n.selected ? { ...n, selected: false } : n)), { ...node, selected: true }]);
-      setDirty(true);
+      mutateGraph((nodes, edges) => {
+        const bubbles = nodes.filter(isBubbleNode);
+        const selected = bubbles.filter((n) => n.selected);
+        if (!position && selected.length === 1) {
+          const bubble = selected[0];
+          const problem = placementProblem(bubble.data.blocks.map((b) => b.type), type, bubble.data.blocks.length);
+          if (!problem) {
+            const block = createBlock(type);
+            setSelectedBlock({ bubbleId: bubble.id, blockId: block.id });
+            return { nodes: replaceBubble(nodes, bubble, [...bubble.data.blocks, block]), edges };
+          }
+          showToast(`${problem} Criando um balão novo.`, 'info');
+        }
+        const block = createBlock(type);
+        const trigger = nodes.find((n) => n.id === TRIGGER_NODE_ID);
+        const first = bubbles.length === 0;
+        const at =
+          position ??
+          (first && trigger ? { x: trigger.position.x + TRIGGER_OFFSET_X, y: trigger.position.y } : viewportCenter());
+        const bubble = createBubble([block], at, `Balão ${bubbles.length + 1}`);
+        bubble.selected = true;
+        setSelectedBlock({ bubbleId: bubble.id, blockId: block.id });
+        const nextEdges = [...edges];
+        // Primeiro balão do quadro: já sai ligado ao gatilho.
+        if (first && !edges.some((e) => e.source === TRIGGER_NODE_ID)) {
+          nextEdges.push({
+            id: edgeIdFor(TRIGGER_NODE_ID, HANDLE_NEXT),
+            source: TRIGGER_NODE_ID,
+            sourceHandle: HANDLE_NEXT,
+            target: bubble.id,
+            targetHandle: HANDLE_IN,
+          });
+        }
+        return { nodes: [...nodes.map((n) => (n.selected ? { ...n, selected: false } : n)), bubble], edges: nextEdges };
+      });
     },
-    [setNodes, viewportCenter]
+    [mutateGraph, showToast, viewportCenter]
   );
 
-  /** Seleciona e enquadra um nó (usado para apontar o problema de validação). */
+  const addBlock = useCallback(
+    (bubbleId: string, type: StepType, index?: number) => {
+      mutateGraph((nodes, edges) => {
+        const bubble = bubbleById(nodes, bubbleId);
+        if (!bubble) return null;
+        const blocks = bubble.data.blocks;
+        const at = index === undefined ? blocks.length : Math.max(0, Math.min(blocks.length, index));
+        const problem = placementProblem(blocks.map((b) => b.type), type, at);
+        if (problem) {
+          showToast(problem, 'warning');
+          return null;
+        }
+        const block = createBlock(type);
+        setSelectedBlock({ bubbleId, blockId: block.id });
+        const withBlock = replaceBubble(nodes, bubble, [...blocks.slice(0, at), block, ...blocks.slice(at)]);
+        return { nodes: withBlock.map((n) => (n.selected !== (n.id === bubbleId) ? { ...n, selected: n.id === bubbleId } : n)), edges };
+      });
+    },
+    [mutateGraph, showToast]
+  );
+
+  const moveBlock = useCallback(
+    (from: BlockRef, toBubbleId: string, rawIndex: number) => {
+      mutateGraph((nodes, edges) => {
+        const source = bubbleById(nodes, from.bubbleId);
+        const target = bubbleById(nodes, toBubbleId);
+        if (!source || !target) return null;
+        const fromIndex = source.data.blocks.findIndex((b) => b.id === from.blockId);
+        if (fromIndex < 0) return null;
+        const block = source.data.blocks[fromIndex];
+        const same = source.id === target.id;
+        const sourceBlocks = source.data.blocks.filter((_, i) => i !== fromIndex);
+        // No mesmo balão, o índice foi contado com o bloco ainda na lista: depois de tirá-lo, o que vinha depois anda uma casa.
+        const base = same ? sourceBlocks : target.data.blocks;
+        const index = Math.max(0, Math.min(base.length, same && rawIndex > fromIndex ? rawIndex - 1 : rawIndex));
+        if (same && index === fromIndex) return null;
+        const problem = placementProblem(base.map((b) => b.type), block.type, index);
+        if (problem) {
+          showToast(problem, 'warning');
+          return null;
+        }
+        const targetBlocks = [...base.slice(0, index), block, ...base.slice(index)];
+        let next = nodes.map((n) => {
+          if (n.id === target.id) return { ...target, data: { ...target.data, blocks: targetBlocks } };
+          if (n.id === source.id) return { ...source, data: { ...source.data, blocks: sourceBlocks } };
+          return n;
+        });
+        // Balão de origem que ficou vazio some (com as ligações dele).
+        if (!same && sourceBlocks.length === 0) next = next.filter((n) => n.id !== source.id);
+        setSelectedBlock({ bubbleId: target.id, blockId: block.id });
+        return { nodes: next, edges };
+      });
+    },
+    [mutateGraph, showToast]
+  );
+
+  const removeBlock = useCallback(
+    (ref: BlockRef) => {
+      mutateGraph((nodes, edges) => {
+        const bubble = bubbleById(nodes, ref.bubbleId);
+        if (!bubble) return null;
+        const blocks = bubble.data.blocks.filter((b) => b.id !== ref.blockId);
+        if (blocks.length === bubble.data.blocks.length) return null;
+        setSelectedBlock((prev) => (prev?.blockId === ref.blockId ? null : prev));
+        // Balão sem blocos some (com as ligações dele).
+        if (blocks.length === 0) return { nodes: nodes.filter((n) => n.id !== bubble.id), edges };
+        return { nodes: replaceBubble(nodes, bubble, blocks), edges };
+      });
+    },
+    [mutateGraph]
+  );
+
+  const updateBlock = useCallback(
+    (bubbleId: string, block: Block) => {
+      mutateGraph((nodes, edges) => {
+        const bubble = bubbleById(nodes, bubbleId);
+        if (!bubble) return null;
+        return { nodes: replaceBubble(nodes, bubble, bubble.data.blocks.map((b) => (b.id === block.id ? block : b))), edges };
+      });
+    },
+    [mutateGraph]
+  );
+
+  const renameBubble = useCallback(
+    (bubbleId: string, name: string) => {
+      mutateGraph((nodes, edges) => {
+        const bubble = bubbleById(nodes, bubbleId);
+        if (!bubble || bubble.data.name === name) return null;
+        return { nodes: nodes.map((n) => (n.id === bubbleId ? { ...bubble, data: { ...bubble.data, name } } : n)), edges };
+      });
+    },
+    [mutateGraph]
+  );
+
+  const deleteBubbles = useCallback(
+    (ids: string[]) => {
+      const list = ids.filter((id) => id !== TRIGGER_NODE_ID);
+      if (list.length === 0) return;
+      setSelectedBlock((prev) => (prev && list.includes(prev.bubbleId) ? null : prev));
+      void flow.deleteElements({ nodes: list.map((id) => ({ id })) });
+    },
+    [flow]
+  );
+
+  /** Balões selecionados no quadro (o gatilho nunca entra). */
+  const selectedBubbleIds = useCallback(
+    (): string[] => graphRef.current.nodes.filter((n) => isBubbleNode(n) && n.selected).map((n) => n.id),
+    []
+  );
+
+  const copyBubbles = useCallback(
+    (ids: string[]) => {
+      const { nodes, edges } = graphRef.current;
+      const bubbles = nodes.filter((n): n is BubbleNode => isBubbleNode(n) && ids.includes(n.id));
+      if (bubbles.length === 0) return;
+      const set = new Set(bubbles.map((b) => b.id));
+      setClipboard({
+        nodes: bubbles.map((b) => ({ ...b, selected: false })),
+        edges: edges.filter((e) => set.has(e.source) && set.has(e.target)),
+      });
+      showToast(bubbles.length === 1 ? '1 balão copiado' : `${bubbles.length} balões copiados`, 'info');
+    },
+    [showToast]
+  );
+
+  /** Cola cópias (ids novos, deslocadas) já selecionadas; as próximas colagens caem um pouco mais adiante. */
+  const pasteClones = useCallback(
+    (source: Clipboard, verb: 'colado' | 'duplicado') => {
+      const cloned = cloneBubbles(source.nodes, source.edges, { x: PASTE_OFFSET, y: PASTE_OFFSET });
+      if (cloned.nodes.length === 0) return;
+      mutateGraph((nodes, edges) => ({
+        nodes: [...nodes.map((n) => (n.selected ? { ...n, selected: false } : n)), ...cloned.nodes],
+        edges: [...edges, ...cloned.edges],
+      }));
+      setSelectedBlock(null);
+      const n = cloned.nodes.length;
+      showToast(n === 1 ? `Balão ${verb}` : `${n} balões ${verb}s`, 'success');
+      return cloned;
+    },
+    [mutateGraph, showToast]
+  );
+
+  const paste = useCallback(() => {
+    const clip = clipboardRef.current;
+    if (!clip) return;
+    const cloned = pasteClones(clip, 'colado');
+    if (cloned) setClipboard({ nodes: cloned.nodes.map((n) => ({ ...n, selected: false })), edges: cloned.edges });
+  }, [pasteClones]);
+
+  const duplicateBubbles = useCallback(
+    (ids: string[]) => {
+      const { nodes, edges } = graphRef.current;
+      const bubbles = nodes.filter((n): n is BubbleNode => isBubbleNode(n) && ids.includes(n.id));
+      if (bubbles.length === 0) return;
+      const set = new Set(bubbles.map((b) => b.id));
+      pasteClones({ nodes: bubbles, edges: edges.filter((e) => set.has(e.source) && set.has(e.target)) }, 'duplicado');
+    },
+    [pasteClones]
+  );
+
+  // Atalhos do quadro: Ctrl/Cmd + C, V, D (Delete/Backspace é do próprio React Flow).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (anyModalOpen || e.altKey || !(e.ctrlKey || e.metaKey)) return;
+      if (isTextField(document.activeElement)) return;
+      const key = e.key.toLowerCase();
+      if (key === 'c') {
+        const ids = selectedBubbleIds();
+        if (ids.length === 0) return;
+        e.preventDefault();
+        copyBubbles(ids);
+      } else if (key === 'v') {
+        if (!clipboardRef.current) return;
+        e.preventDefault();
+        paste();
+      } else if (key === 'd') {
+        const ids = selectedBubbleIds();
+        if (ids.length === 0) return;
+        e.preventDefault();
+        duplicateBubbles(ids);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [anyModalOpen, copyBubbles, duplicateBubbles, paste, selectedBubbleIds]);
+
+  const selectBlock = useCallback((ref: BlockRef | null) => setSelectedBlock(ref), []);
+
+  const actions = useMemo<CanvasActions>(
+    () => ({ selectBlock, addBlock, moveBlock, removeBlock, renameBubble, duplicateBubbles, copyBubbles, deleteBubbles }),
+    [selectBlock, addBlock, moveBlock, removeBlock, renameBubble, duplicateBubbles, copyBubbles, deleteBubbles]
+  );
+
+  // Validação a cada mudança: marca balões e blocos com problema no próprio quadro.
+  const validation = useMemo(() => validateFlow(nodes, edges, header), [nodes, edges, header]);
+  const issues = useMemo(() => groupIssues(validation.errors, validation.warnings), [validation]);
+  const connected = useMemo(
+    () => new Set(edges.filter((e) => e.sourceHandle).map((e) => edgeIdFor(e.source, e.sourceHandle as string))),
+    [edges]
+  );
+
+  const ctx = useMemo<CanvasContextValue>(
+    () => ({ options, agents, actions, selectedBlock, issues, connected }),
+    [options, agents, actions, selectedBlock, issues, connected]
+  );
+
+  // Bloco apontado no painel (some se o balão ou o bloco deixarem de existir).
+  const panelTarget = useMemo(() => {
+    if (!selectedBlock) return null;
+    const bubble = bubbleById(nodes, selectedBlock.bubbleId);
+    if (!bubble) return null;
+    const index = bubble.data.blocks.findIndex((b) => b.id === selectedBlock.blockId);
+    if (index < 0) return null;
+    return { bubble, block: bubble.data.blocks[index], index };
+  }, [nodes, selectedBlock]);
+
+  useEffect(() => {
+    if (selectedBlock && !panelTarget) setSelectedBlock(null);
+  }, [selectedBlock, panelTarget]);
+
+  /** Seleciona e enquadra um balão (e aponta o bloco), usado para mostrar o problema de validação. */
   const focusNode = useCallback(
-    (id: string) => {
+    (id: string, blockId?: string) => {
       setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === id })));
+      if (blockId) setSelectedBlock({ bubbleId: id, blockId });
       void flow.fitView({ nodes: [{ id }], duration: 400, maxZoom: 1, padding: 0.4 });
     },
     [flow, setNodes]
@@ -280,7 +639,7 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
     if (errors.length > 0) {
       const first = errors[0];
       showToast(errors.length > 1 ? `${first.message} (+${errors.length - 1})` : first.message, 'error');
-      if (first.nodeId) focusNode(first.nodeId);
+      if (first.nodeId) focusNode(first.nodeId, first.blockId);
       return;
     }
     const parsed = BotInputSchema.safeParse(flowToBot(nodes, edges, header));
@@ -329,6 +688,7 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
   };
 
   const connectionLabel = connections.find((c) => c.id === header.connection_id)?.label ?? 'número escolhido';
+  const empty = !nodes.some(isBubbleNode);
 
   // Só existe no navegador (a lista carrega este componente sem SSR).
   if (typeof document === 'undefined') return null;
@@ -367,7 +727,10 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
               placeholder="Nome do robô"
               aria-label="Nome do robô"
             />
-            <div className="flex items-center gap-2 pl-1">
+            <div
+              className="flex items-center gap-2 pl-1"
+              title={header.enabled ? 'O robô dispara pelo gatilho' : 'Desligado: fica salvo como rascunho e não dispara'}
+            >
               <span className="text-sm text-slate-600 dark:text-slate-300">{header.enabled ? 'Ligado' : 'Desligado'}</span>
               <Toggle checked={header.enabled} onChange={(enabled) => patchHeader({ enabled })} label="Robô ligado" />
             </div>
@@ -411,17 +774,38 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
             </div>
           ) : null}
 
-          <div ref={canvasRef} className="relative flex-1 min-h-0">
-            <Palette onAdd={addStep} />
-            <BotCanvas
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              onDropStep={addStep}
-              darkMode={darkMode}
-            />
+          <div className="relative flex-1 min-h-0 flex md:flex-row">
+            <div ref={canvasRef} className="relative flex-1 min-h-0">
+              <Palette
+                onAdd={(type) => addStep(type)}
+                collapsed={paletteCollapsed}
+                onToggle={() => setPaletteCollapsed((v) => !v)}
+              />
+              <BotCanvas
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onConnect={onConnect}
+                onDropStep={addStep}
+                onPaneClick={() => setSelectedBlock(null)}
+                empty={empty}
+                onQuickStart={() => addStep('send_text')}
+                showMinimap={showMinimap}
+                onToggleMinimap={() => setShowMinimap((v) => !v)}
+                darkMode={darkMode}
+              />
+            </div>
+            {panelTarget ? (
+              <BlockPanel
+                bubble={panelTarget.bubble}
+                block={panelTarget.block}
+                index={panelTarget.index}
+                update={(block) => updateBlock(panelTarget.bubble.id, block)}
+                onClose={() => setSelectedBlock(null)}
+                onRemove={() => removeBlock({ bubbleId: panelTarget.bubble.id, blockId: panelTarget.block.id })}
+              />
+            ) : null}
           </div>
 
           <ConfirmModal

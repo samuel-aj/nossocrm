@@ -24,6 +24,8 @@
   --xy-controls-button-border-color-default: #e2e8f0;
   --xy-controls-box-shadow-default: 0 1px 3px rgb(15 23 42 / 0.12);
   --xy-attribution-background-color-default: transparent;
+  --xy-selection-background-color-default: rgb(168 85 247 / 0.08);
+  --xy-selection-border-default: 1px dashed #a855f7;
 }
 
 .react-flow.wa-bot-canvas.dark {
@@ -43,6 +45,8 @@
   --xy-controls-button-color-hover-default: #ffffff;
   --xy-controls-button-border-color-default: #334155;
   --xy-controls-box-shadow-default: 0 1px 3px rgb(0 0 0 / 0.5);
+  --xy-selection-background-color-default: rgb(192 132 252 / 0.1);
+  --xy-selection-border-default: 1px dashed #c084fc;
 }
 
 /* Nada escapa da moldura arredondada (o React Flow não corta por padrão). */
@@ -72,6 +76,15 @@
 .wa-bot-canvas .react-flow__handle.wa-handle-in.valid {
   background-color: #22c55e;
 }
+/* Saída sem ligação: bolinha vazada, para chamar a atenção sem gritar. */
+.wa-bot-canvas .react-flow__handle.wa-handle-loose {
+  background-color: #ffffff;
+  border-color: #a855f7;
+  border-style: dashed;
+}
+.wa-bot-canvas.dark .react-flow__handle.wa-handle-loose {
+  background-color: #0f172a;
+}
 
 /* Arestas: realce ao passar o mouse. */
 .wa-bot-canvas .react-flow__edge:hover .react-flow__edge-path {
@@ -95,6 +108,31 @@
   outline: none;
 }
 
+/* Blocos dentro do balão: ações (subir, descer, remover) aparecem ao passar o mouse; sempre visíveis no toque. */
+.wa-block-actions {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.group:hover .wa-block-actions,
+.group:focus-within .wa-block-actions {
+  opacity: 1;
+}
+@media (hover: none) {
+  .wa-block-actions {
+    opacity: 1;
+  }
+}
+/* Linha que mostra onde o bloco arrastado vai cair. */
+.wa-drop-line {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 2px;
+  border-radius: 2px;
+  background-color: #a855f7;
+  pointer-events: none;
+}
+
 /* Controles e minimapa com cantos arredondados. */
 .wa-bot-canvas .react-flow__controls {
   border-radius: 10px;
@@ -114,9 +152,13 @@
   opacity: 0.6;
 }
 
-/* Minimapa some em telas pequenas para não cobrir o quadro. */
+/* Telas pequenas: minimapa e dica somem; os controles sobem para não ficar atrás da barra de blocos. */
 @media (max-width: 767px) {
-  .wa-bot-canvas .react-flow__minimap {
+  .wa-bot-canvas .react-flow__minimap,
+  .wa-bot-canvas .wa-canvas-hint {
     display: none;
+  }
+  .wa-bot-canvas .react-flow__panel.bottom.left {
+    bottom: 96px;
   }
 }

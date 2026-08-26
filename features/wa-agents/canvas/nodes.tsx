@@ -1,11 +1,13 @@
 'use client';
 
 /**
- * Nós do quadro do robô: Gatilho, Mensagem, Esperar, Esperar resposta, Condição,
- * Mover etapa, Rótulo, Webhook, Entregar a agente e Encerrar.
+ * Nós do quadro do robô: Gatilho (fixo) e Balão (blocos empilhados, estilo Typebot).
  *
- * Cada nó edita seus dados inline (updateNodeData) e expõe handles de saída com
- * nome fixo; a serialização usa esses nomes para montar next/goto/else/timeout.
+ * O balão mostra cada bloco com ícone, título e resumo; a edição dos campos
+ * acontece no painel de propriedades (BlockPanel). A entrada fica à esquerda,
+ * no cabeçalho; as saídas (uma por saída do ÚLTIMO bloco) ficam à direita, no
+ * rodapé. Blocos podem ser reordenados arrastando pela alça ou pelos botões
+ * de subir/descer, e recebem blocos soltos da paleta ou de outro balão.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -17,268 +19,240 @@ import {
   type NodeTypes,
 } from '@xyflow/react';
 import {
-  Bot,
-  Clock,
-  Flag,
-  GitBranch,
-  MessageCircle,
-  MessageSquareReply,
-  MoveRight,
+  AlertCircle,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  CopyPlus,
+  GripVertical,
+  MoreHorizontal,
+  Pencil,
   Plus,
-  Tag,
+  Rows3,
   Trash2,
-  Webhook,
   X,
   Zap,
   type LucideIcon,
 } from 'lucide-react';
-import { AgentSelect, StageSelect, TagInput } from '../OutcomesEditor';
-import { HELP_CLASS, INPUT_CLASS, newId } from '../ui';
-import { useCanvasContext } from './context';
+import type { WaAgentListItem, WaAgentOptions } from '../useWaAgents';
+import { HELP_CLASS, INPUT_CLASS } from '../ui';
+import { BlockCatalog, BlockIcon, NODE_META, toneClass } from './catalog';
+import { useCanvasContext, type IssueSummary } from './context';
+import { bubbleTitle } from './serialize';
 import {
-  BOT_VARIABLES,
-  HANDLE_ELSE,
+  DND_BLOCK_MIME,
+  DND_MIME,
   HANDLE_IN,
   HANDLE_NEXT,
-  HANDLE_TIMEOUT,
-  MAX_REPLY_MINUTES,
-  MAX_WAIT_SECONDS,
   STEP_LABELS,
   TRIGGER_LABELS,
   WAIT_UNIT_LABELS,
-  WAIT_UNIT_SECONDS,
-  ruleHandleId,
+  bubbleOutputs,
+  edgeIdFor,
+  isStepType,
+  isValidBlockOrder,
+  placementProblem,
+  type Block,
+  type BlockRef,
   type BotTriggerType,
-  type ConditionNode,
-  type ConditionRuleDraft,
-  type EndNode,
+  type BubbleNode,
   type FlowEdge,
   type FlowNode,
-  type HandoffNode,
-  type MessageNode,
-  type MoveStageNode,
+  type OutputTone,
   type StepType,
-  type TagNode,
   type TriggerData,
   type TriggerNode,
-  type WaitNode,
-  type WaitReplyNode,
   type WaitUnit,
-  type WebhookNode,
 } from './types';
 
-// ---------------------------------------------------------------- Aparência
-
-export type NodeTone = 'amber' | 'green' | 'sky' | 'blue' | 'purple' | 'pink' | 'orange' | 'slate' | 'red';
-
-const TONE_CLASS: Record<NodeTone, string> = {
-  amber: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
-  green: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
-  sky: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300',
-  blue: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
-  purple: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
-  pink: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300',
-  orange: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
-  slate: 'bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-200',
-  red: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
-};
-
-/** Classes do ícone colorido de um tom. */
-export function toneClass(tone: NodeTone): string {
-  return TONE_CLASS[tone];
-}
-
-export type NodeMeta = { label: string; icon: LucideIcon; tone: NodeTone; color: string; hint: string };
-
-/** Rótulo, ícone, cor (minimapa) e dica de cada tipo de passo. */
-export const NODE_META: Record<StepType, NodeMeta> = {
-  send_text: {
-    label: STEP_LABELS.send_text,
-    icon: MessageCircle,
-    tone: 'green',
-    color: '#22c55e',
-    hint: 'Envia um texto pelo WhatsApp',
-  },
-  wait: { label: STEP_LABELS.wait, icon: Clock, tone: 'sky', color: '#0ea5e9', hint: 'Aguarda um tempo antes de seguir' },
-  wait_reply: {
-    label: STEP_LABELS.wait_reply,
-    icon: MessageSquareReply,
-    tone: 'blue',
-    color: '#3b82f6',
-    hint: 'Espera o lead responder, com prazo',
-  },
-  condition: {
-    label: STEP_LABELS.condition,
-    icon: GitBranch,
-    tone: 'purple',
-    color: '#a855f7',
-    hint: 'Escolhe o caminho pela resposta do lead',
-  },
-  move_stage: {
-    label: STEP_LABELS.move_stage,
-    icon: MoveRight,
-    tone: 'orange',
-    color: '#f97316',
-    hint: 'Move o negócio para uma etapa',
-  },
-  add_tag: { label: STEP_LABELS.add_tag, icon: Tag, tone: 'pink', color: '#ec4899', hint: 'Adiciona um rótulo ao negócio' },
-  webhook: { label: STEP_LABELS.webhook, icon: Webhook, tone: 'slate', color: '#64748b', hint: 'Chama uma URL externa' },
-  handoff_agent: {
-    label: STEP_LABELS.handoff_agent,
-    icon: Bot,
-    tone: 'purple',
-    color: '#7c3aed',
-    hint: 'Um agente de IA assume a conversa',
-  },
-  end: { label: STEP_LABELS.end, icon: Flag, tone: 'red', color: '#ef4444', hint: 'Encerra o robô' },
-};
+export { NODE_META, toneClass } from './catalog';
 
 const TRIGGER_COLOR = '#f59e0b';
 
-/** Cor do nó no minimapa. */
-export function minimapColor(type: string | undefined): string {
-  if (type === 'trigger') return TRIGGER_COLOR;
-  return (type && (NODE_META as Record<string, NodeMeta | undefined>)[type]?.color) || '#94a3b8';
+/** Cor do nó no minimapa (balão: cor do primeiro bloco). */
+export function minimapColor(node: FlowNode): string {
+  if (node.type === 'trigger') return TRIGGER_COLOR;
+  const first = node.type === 'bubble' ? node.data.blocks[0] : undefined;
+  return first ? NODE_META[first.type].color : '#94a3b8';
+}
+
+const WAIT_UNIT_SINGULAR: Record<WaitUnit, string> = { min: 'minuto', h: 'hora', d: 'dia' };
+
+/** Resumo curto de um bloco, mostrado dentro do balão. */
+export function blockSummary(block: Block, options: WaAgentOptions | undefined, agents: WaAgentListItem[]): string {
+  switch (block.type) {
+    case 'send_text':
+      return block.data.text.trim() || 'Sem texto ainda';
+    case 'wait': {
+      const { amount, unit } = block.data;
+      return `${amount} ${amount === 1 ? WAIT_UNIT_SINGULAR[unit] : WAIT_UNIT_LABELS[unit]}`;
+    }
+    case 'wait_reply':
+      return `Aguarda a resposta por até ${block.data.timeout_minutes} min`;
+    case 'condition': {
+      const n = block.data.rules.length;
+      return `${n} ${n === 1 ? 'regra' : 'regras'} + Senão`;
+    }
+    case 'move_stage': {
+      for (const board of options?.boards ?? []) {
+        const stage = board.stages.find((s) => s.id === block.data.stage_id);
+        if (stage) return `${board.name} › ${stage.label}`;
+      }
+      return block.data.stage_id ? 'Etapa não encontrada' : 'Escolha a etapa';
+    }
+    case 'add_tag':
+      return block.data.tag.trim() || 'Informe o rótulo';
+    case 'webhook': {
+      const url = block.data.url.trim();
+      if (!url) return 'Informe a URL';
+      try {
+        return new URL(url).host;
+      } catch {
+        return url;
+      }
+    }
+    case 'handoff_agent': {
+      const agent = agents.find((a) => a.id === block.data.agent_id);
+      return agent ? agent.name : block.data.agent_id ? 'Agente não encontrado' : 'Escolha o agente';
+    }
+    case 'end':
+      return 'O robô termina aqui';
+  }
+}
+
+/**
+ * Motivo de um bloco não poder ir da posição `from` para a posição de inserção
+ * `rawIndex` (contada na lista atual, antes de tirar o bloco), ou null.
+ */
+function moveProblem(types: StepType[], from: number, rawIndex: number): string | null {
+  const rest = types.filter((_, i) => i !== from);
+  const index = rawIndex > from ? rawIndex - 1 : rawIndex;
+  return placementProblem(rest, types[from], index);
 }
 
 // ---------------------------------------------------------------- Peças comuns
 
-/** Cartão do nó: título, ícone, botão de remover, entrada à esquerda e saídas no rodapé. */
-function NodeShell({
-  id,
-  title,
-  icon: Icon,
-  tone,
-  selected,
-  deletable = true,
-  hasInput = true,
-  children,
-  outputs,
-}: {
-  id: string;
-  title: string;
-  icon: LucideIcon;
-  tone: NodeTone;
-  selected: boolean;
-  deletable?: boolean;
-  hasInput?: boolean;
-  children: React.ReactNode;
-  outputs?: React.ReactNode;
-}) {
-  const { deleteElements } = useReactFlow<FlowNode, FlowEdge>();
-  return (
-    <div
-      className={`w-[300px] rounded-xl border bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm transition-shadow ${
-        selected ? 'border-purple-500 ring-2 ring-purple-500/30 shadow-lg' : 'border-slate-200 dark:border-white/10'
-      }`}
-    >
-      {hasInput ? (
-        <Handle type="target" position={Position.Left} id={HANDLE_IN} className="wa-handle-in" aria-label={`Entrada de ${title}`} />
-      ) : null}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 dark:border-white/5">
-        <span className={`p-1 rounded-md shrink-0 ${TONE_CLASS[tone]}`} aria-hidden="true">
-          <Icon size={14} />
-        </span>
-        <span className="text-sm font-semibold truncate">{title}</span>
-        {deletable ? (
-          <button
-            type="button"
-            className="nodrag ml-auto p-1 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-900/20 transition-colors"
-            aria-label={`Remover ${title}`}
-            title="Remover"
-            onClick={() => void deleteElements({ nodes: [{ id }] })}
-          >
-            <X size={14} aria-hidden="true" />
-          </button>
-        ) : (
-          <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide text-slate-400">Fixo</span>
-        )}
-      </div>
-      <div className="nodrag p-3 space-y-2">{children}</div>
-      {outputs ? <div className="border-t border-slate-100 dark:border-white/5 py-1">{outputs}</div> : null}
-    </div>
-  );
-}
+const OUTPUT_COLOR: Record<OutputTone, string> = {
+  slate: 'text-slate-500 dark:text-slate-400',
+  green: 'text-emerald-600 dark:text-emerald-400',
+  amber: 'text-amber-600 dark:text-amber-400',
+};
 
-/** Linha de saída com rótulo e handle à direita. */
+/** Linha de saída com rótulo e handle à direita; saída sem ligação fica esmaecida. */
 function OutputRow({
   handleId,
   label,
-  tone = 'slate',
+  tone,
+  connected,
 }: {
   handleId: string;
   label: string;
-  tone?: 'slate' | 'green' | 'amber';
+  tone: OutputTone;
+  connected: boolean;
 }) {
-  const color = {
-    slate: 'text-slate-500 dark:text-slate-400',
-    green: 'text-emerald-600 dark:text-emerald-400',
-    amber: 'text-amber-600 dark:text-amber-400',
-  }[tone];
   return (
-    <div className="relative flex items-center justify-end px-3 py-1.5">
-      <span className={`text-[11px] font-medium ${color}`}>{label}</span>
-      <Handle type="source" position={Position.Right} id={handleId} aria-label={`Saída: ${label}`} />
+    <div
+      className="relative flex items-center justify-end px-3 py-1.5"
+      title={connected ? undefined : 'Sem ligação: o robô termina aqui. Arraste da bolinha até outro balão.'}
+    >
+      <span className={`text-[11px] font-medium truncate ${OUTPUT_COLOR[tone]} ${connected ? '' : 'opacity-60'}`}>{label}</span>
+      <Handle
+        type="source"
+        position={Position.Right}
+        id={handleId}
+        className={connected ? undefined : 'wa-handle-loose'}
+        aria-label={`Saída: ${label}${connected ? '' : ' (sem ligação)'}`}
+      />
     </div>
   );
 }
 
-/** Campo numérico que aceita digitação livre e só aplica o limite ao sair do campo. */
-function NumberField({
-  id,
-  value,
-  min,
-  max,
-  onCommit,
-  ariaLabel,
-  className,
-}: {
-  id?: string;
-  value: number;
-  min: number;
-  max: number;
-  onCommit: (value: number) => void;
-  ariaLabel: string;
-  className?: string;
-}) {
-  const [draft, setDraft] = useState<string | null>(null);
-  return (
-    <input
-      id={id}
-      type="number"
-      inputMode="numeric"
-      min={min}
-      max={max}
-      className={className ?? INPUT_CLASS}
-      value={draft ?? String(value)}
-      onChange={(e) => {
-        setDraft(e.target.value);
-        const n = Number(e.target.value);
-        if (e.target.value !== '' && Number.isFinite(n)) onCommit(Math.round(n));
-      }}
-      onBlur={() => {
-        if (draft !== null) {
-          const n = Number(draft);
-          onCommit(draft === '' || !Number.isFinite(n) ? min : Math.max(min, Math.min(max, Math.round(n))));
-        }
-        setDraft(null);
-      }}
-      aria-label={ariaLabel}
-    />
-  );
+function IssueMark({ issue, size = 14 }: { issue: IssueSummary | undefined; size?: number }) {
+  if (!issue) return null;
+  if (issue.errors.length > 0) {
+    return (
+      <span className="text-red-500 shrink-0" title={issue.errors.join('\n')} aria-label={`Problemas: ${issue.errors.join('; ')}`}>
+        <AlertCircle size={size} aria-hidden="true" />
+      </span>
+    );
+  }
+  if (issue.warnings.length > 0) {
+    return (
+      <span className="text-amber-500 shrink-0" title={issue.warnings.join('\n')} aria-label={`Avisos: ${issue.warnings.join('; ')}`}>
+        <AlertTriangle size={size} aria-hidden="true" />
+      </span>
+    );
+  }
+  return null;
 }
 
-function autoResize(el: HTMLTextAreaElement | null) {
-  if (!el) return;
-  el.style.height = 'auto';
-  el.style.height = `${el.scrollHeight}px`;
+/** Fecha ao clicar fora do elemento ou ao apertar Esc. */
+function useDismiss(open: boolean, onClose: () => void) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent | TouchEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('touchstart', onDown);
+    // Captura: fecha antes de o editor tratar o Esc (que fecharia o painel ou o editor)
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('touchstart', onDown);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [open, onClose]);
+  return ref;
+}
+
+function MenuItem({
+  icon: Icon,
+  label,
+  shortcut,
+  danger = false,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  shortcut?: string;
+  danger?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors ${
+        danger
+          ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
+          : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'
+      }`}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+    >
+      <Icon size={14} aria-hidden="true" />
+      <span className="flex-1">{label}</span>
+      {shortcut ? <kbd className="text-[10px] text-slate-400 font-sans">{shortcut}</kbd> : null}
+    </button>
+  );
 }
 
 // ---------------------------------------------------------------- Gatilho
 
 function TriggerNodeView({ id, data, selected }: NodeProps<TriggerNode>) {
   const { updateNodeData } = useReactFlow<FlowNode, FlowEdge>();
-  const { options } = useCanvasContext();
+  const { options, issues, connected } = useCanvasContext();
   const boards = options?.boards ?? [];
   const board = boards.find((b) => b.id === data.board_id) ?? null;
   const set = (patch: Partial<TriggerData>) => updateNodeData(id, patch);
@@ -288,417 +262,467 @@ function TriggerNodeView({ id, data, selected }: NodeProps<TriggerNode>) {
       : data.trigger_type === 'deal_stage_entered'
         ? 'Dispara quando um negócio entra nesta etapa.'
         : 'Só dispara pelo botão Testar ou pela API.';
+  const issue = issues.byNode.get(id);
+  const linked = connected.has(edgeIdFor(id, HANDLE_NEXT));
 
   return (
-    <NodeShell
-      id={id}
-      title="Gatilho"
-      icon={Zap}
-      tone="amber"
-      selected={selected}
-      deletable={false}
-      hasInput={false}
-      outputs={<OutputRow handleId={HANDLE_NEXT} label="Então" tone="green" />}
+    <div
+      className={`w-[300px] rounded-xl border bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm transition-shadow ${
+        selected
+          ? 'border-purple-500 ring-2 ring-purple-500/30 shadow-lg'
+          : issue?.errors.length
+            ? 'border-red-400 dark:border-red-500/60'
+            : 'border-slate-200 dark:border-white/10'
+      }`}
     >
-      <select
-        className={INPUT_CLASS}
-        value={data.trigger_type}
-        aria-label="Quando o robô dispara"
-        onChange={(e) => {
-          const t = e.target.value as BotTriggerType;
-          set(t === 'manual' ? { trigger_type: t, board_id: '', stage_id: '' } : { trigger_type: t });
-        }}
-      >
-        {(Object.keys(TRIGGER_LABELS) as BotTriggerType[]).map((t) => (
-          <option key={t} value={t}>
-            {TRIGGER_LABELS[t]}
-          </option>
-        ))}
-      </select>
-      {data.trigger_type !== 'manual' ? (
-        <select
-          className={INPUT_CLASS}
-          value={data.board_id}
-          aria-label="Quadro"
-          onChange={(e) => set({ board_id: e.target.value, stage_id: '' })}
-        >
-          <option value="">{data.trigger_type === 'deal_created' ? 'Qualquer quadro' : 'Selecione o quadro'}</option>
-          {boards.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.name}
-            </option>
-          ))}
-        </select>
-      ) : null}
-      {data.trigger_type === 'deal_stage_entered' ? (
-        <select
-          className={INPUT_CLASS}
-          value={data.stage_id}
-          aria-label="Etapa"
-          disabled={!board}
-          onChange={(e) => set({ stage_id: e.target.value })}
-        >
-          <option value="">Selecione a etapa</option>
-          {(board?.stages ?? []).map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.label}
-            </option>
-          ))}
-        </select>
-      ) : null}
-      <p className={HELP_CLASS}>{help}</p>
-    </NodeShell>
-  );
-}
-
-// ---------------------------------------------------------------- Mensagem
-
-function MessageNodeView({ id, data, selected }: NodeProps<MessageNode>) {
-  const { updateNodeData } = useReactFlow<FlowNode, FlowEdge>();
-  const textRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    autoResize(textRef.current);
-  }, [data.text]);
-
-  const insert = (key: string) => {
-    const el = textRef.current;
-    const value = data.text;
-    const startPos = el?.selectionStart ?? value.length;
-    const endPos = el?.selectionEnd ?? value.length;
-    updateNodeData(id, { text: value.slice(0, startPos) + key + value.slice(endPos) });
-    const caret = startPos + key.length;
-    window.setTimeout(() => {
-      const target = textRef.current;
-      if (!target) return;
-      target.focus();
-      target.setSelectionRange(caret, caret);
-    }, 0);
-  };
-
-  return (
-    <NodeShell
-      id={id}
-      title="Mensagem"
-      icon={MessageCircle}
-      tone="green"
-      selected={selected}
-      outputs={<OutputRow handleId={HANDLE_NEXT} label="Depois" />}
-    >
-      <div className="rounded-2xl rounded-tl-md bg-[#d9fdd3] dark:bg-[#005c4b] px-3 py-2 shadow-sm">
-        <textarea
-          ref={textRef}
-          className="nowheel w-full bg-transparent resize-none outline-none text-sm leading-snug text-slate-900 dark:text-white placeholder:text-slate-500 dark:placeholder:text-emerald-100/70"
-          rows={2}
-          value={data.text}
-          onChange={(e) => updateNodeData(id, { text: e.target.value })}
-          placeholder="Escreva a mensagem..."
-          aria-label="Texto da mensagem"
-          maxLength={4000}
-        />
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 dark:border-white/5">
+        <span className={`p-1 rounded-md shrink-0 ${toneClass('amber')}`} aria-hidden="true">
+          <Zap size={14} />
+        </span>
+        <span className="text-sm font-semibold truncate">Gatilho</span>
+        <IssueMark issue={issue} />
+        <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide text-slate-400">Fixo</span>
       </div>
-      <div className="flex flex-wrap gap-1" role="group" aria-label="Variáveis disponíveis">
-        {BOT_VARIABLES.map((v) => (
-          <button
-            key={v.key}
-            type="button"
-            className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors"
-            title={`Inserir ${v.description}`}
-            onClick={() => insert(v.key)}
-          >
-            {v.key}
-          </button>
-        ))}
-      </div>
-    </NodeShell>
-  );
-}
-
-// ---------------------------------------------------------------- Esperar
-
-function maxAmountFor(unit: WaitUnit): number {
-  return Math.floor(MAX_WAIT_SECONDS / WAIT_UNIT_SECONDS[unit]);
-}
-
-function WaitNodeView({ id, data, selected }: NodeProps<WaitNode>) {
-  const { updateNodeData } = useReactFlow<FlowNode, FlowEdge>();
-  return (
-    <NodeShell
-      id={id}
-      title="Esperar"
-      icon={Clock}
-      tone="sky"
-      selected={selected}
-      outputs={<OutputRow handleId={HANDLE_NEXT} label="Depois" />}
-    >
-      <div className="flex items-center gap-2">
-        <NumberField
-          className={`${INPUT_CLASS} w-24`}
-          value={data.amount}
-          min={1}
-          max={maxAmountFor(data.unit)}
-          onCommit={(amount) => updateNodeData(id, { amount })}
-          ariaLabel="Quanto tempo esperar"
-        />
+      <div className="nodrag p-3 space-y-2">
         <select
           className={INPUT_CLASS}
-          value={data.unit}
-          aria-label="Unidade de tempo"
+          value={data.trigger_type}
+          aria-label="Quando o robô dispara"
           onChange={(e) => {
-            const unit = e.target.value as WaitUnit;
-            updateNodeData(id, { unit, amount: Math.min(data.amount, maxAmountFor(unit)) });
+            const t = e.target.value as BotTriggerType;
+            set(t === 'manual' ? { trigger_type: t, board_id: '', stage_id: '' } : { trigger_type: t });
           }}
         >
-          {(Object.keys(WAIT_UNIT_LABELS) as WaitUnit[]).map((u) => (
-            <option key={u} value={u}>
-              {WAIT_UNIT_LABELS[u]}
+          {(Object.keys(TRIGGER_LABELS) as BotTriggerType[]).map((t) => (
+            <option key={t} value={t}>
+              {TRIGGER_LABELS[t]}
             </option>
           ))}
         </select>
+        {data.trigger_type !== 'manual' ? (
+          <select
+            className={INPUT_CLASS}
+            value={data.board_id}
+            aria-label="Quadro"
+            onChange={(e) => set({ board_id: e.target.value, stage_id: '' })}
+          >
+            <option value="">{data.trigger_type === 'deal_created' ? 'Qualquer quadro' : 'Selecione o quadro'}</option>
+            {boards.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
+          </select>
+        ) : null}
+        {data.trigger_type === 'deal_stage_entered' ? (
+          <select
+            className={INPUT_CLASS}
+            value={data.stage_id}
+            aria-label="Etapa"
+            disabled={!board}
+            onChange={(e) => set({ stage_id: e.target.value })}
+          >
+            <option value="">Selecione a etapa</option>
+            {(board?.stages ?? []).map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        ) : null}
+        <p className={HELP_CLASS}>{help}</p>
       </div>
-      <p className={HELP_CLASS}>No máximo 7 dias.</p>
-    </NodeShell>
+      <div className="border-t border-slate-100 dark:border-white/5 py-1">
+        <OutputRow handleId={HANDLE_NEXT} label="Então" tone="green" connected={linked} />
+      </div>
+    </div>
   );
 }
 
-// ---------------------------------------------------------------- Esperar resposta
+// ---------------------------------------------------------------- Balão
 
-function WaitReplyNodeView({ id, data, selected }: NodeProps<WaitReplyNode>) {
-  const { updateNodeData } = useReactFlow<FlowNode, FlowEdge>();
+type DropTarget = 'bubble' | number | null;
+
+function acceptsDrop(e: React.DragEvent): boolean {
+  const types = e.dataTransfer.types;
+  return types.includes(DND_MIME) || types.includes(DND_BLOCK_MIME);
+}
+
+/** Índice de inserção (antes ou depois da linha) pela posição vertical do mouse. */
+function insertionIndex(e: React.DragEvent, el: HTMLElement | null, index: number): number {
+  if (!el) return index + 1;
+  const rect = el.getBoundingClientRect();
+  return e.clientY < rect.top + rect.height / 2 ? index : index + 1;
+}
+
+function BlockRow({
+  bubbleId,
+  block,
+  index,
+  types,
+  selected,
+  issue,
+  summary,
+  dropIndex,
+  onDragOverRow,
+  onDropRow,
+}: {
+  bubbleId: string;
+  block: Block;
+  index: number;
+  types: StepType[];
+  selected: boolean;
+  issue: IssueSummary | undefined;
+  summary: string;
+  dropIndex: DropTarget;
+  onDragOverRow: (index: number) => void;
+  onDropRow: (e: React.DragEvent, index: number) => void;
+}) {
+  const { actions } = useCanvasContext();
+  const rowRef = useRef<HTMLLIElement>(null);
+  const isLast = index === types.length - 1;
+  const ref: BlockRef = { bubbleId, blockId: block.id };
+  const upProblem = index === 0 ? 'Já é o primeiro bloco' : moveProblem(types, index, index - 1);
+  const downProblem = isLast ? 'Já é o último bloco' : moveProblem(types, index, index + 2);
+  const hasError = (issue?.errors.length ?? 0) > 0;
+  const label = STEP_LABELS[block.type];
+
   return (
-    <NodeShell
-      id={id}
-      title="Esperar resposta"
-      icon={MessageSquareReply}
-      tone="blue"
-      selected={selected}
-      outputs={
-        <>
-          <OutputRow handleId={HANDLE_NEXT} label="Respondeu" tone="green" />
-          <OutputRow handleId={HANDLE_TIMEOUT} label="Sem resposta" tone="amber" />
-        </>
-      }
+    <li
+      ref={rowRef}
+      className={`group relative flex items-start gap-1.5 rounded-lg border pl-1 pr-1.5 py-1.5 cursor-pointer transition-colors ${
+        selected
+          ? 'border-purple-500 bg-purple-50/70 dark:bg-purple-900/20'
+          : hasError
+            ? 'border-red-300 dark:border-red-500/50 bg-white dark:bg-slate-900'
+            : 'border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 hover:border-purple-300 dark:hover:border-purple-500/50'
+      }`}
+      onClick={() => actions.selectBlock(ref)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          e.stopPropagation();
+          actions.selectBlock(ref);
+        }
+      }}
+      onDragOver={(e) => {
+        if (!acceptsDrop(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onDragOverRow(insertionIndex(e, rowRef.current, index));
+      }}
+      onDrop={(e) => {
+        if (!acceptsDrop(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onDropRow(e, insertionIndex(e, rowRef.current, index));
+      }}
+      tabIndex={0}
+      role="button"
+      aria-pressed={selected}
+      aria-label={`${label}: ${summary}`}
     >
-      <label htmlFor={`node-${id}-timeout`} className="block text-xs font-medium text-slate-600 dark:text-slate-300">
-        Aguardar por (minutos)
-      </label>
-      <NumberField
-        id={`node-${id}-timeout`}
-        value={data.timeout_minutes}
-        min={1}
-        max={MAX_REPLY_MINUTES}
-        onCommit={(timeout_minutes) => updateNodeData(id, { timeout_minutes })}
-        ariaLabel="Minutos aguardando resposta"
-      />
-      <p className={HELP_CLASS}>Até 30 dias (43200 minutos). Sem resposta no prazo, segue pela saída "Sem resposta".</p>
-    </NodeShell>
+      {dropIndex === index ? <span className="wa-drop-line -top-1" aria-hidden="true" /> : null}
+      {isLast && dropIndex === index + 1 ? <span className="wa-drop-line -bottom-1" aria-hidden="true" /> : null}
+      <span
+        className="nodrag wa-block-grip mt-1 shrink-0 text-slate-300 hover:text-slate-500 dark:text-slate-600 dark:hover:text-slate-300 cursor-grab active:cursor-grabbing"
+        draggable
+        onClick={(e) => e.stopPropagation()}
+        onDragStart={(e) => {
+          e.stopPropagation();
+          e.dataTransfer.setData(DND_BLOCK_MIME, JSON.stringify(ref));
+          e.dataTransfer.effectAllowed = 'move';
+          if (rowRef.current) e.dataTransfer.setDragImage(rowRef.current, 16, 16);
+        }}
+        title="Arraste para reordenar ou levar a outro balão"
+        aria-label={`Arrastar o bloco ${label}`}
+      >
+        <GripVertical size={12} aria-hidden="true" />
+      </span>
+      <BlockIcon type={block.type} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1">
+          <span className="text-xs font-semibold truncate">{label}</span>
+          <IssueMark issue={issue} size={12} />
+        </div>
+        <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-3 whitespace-pre-line break-words">{summary}</p>
+      </div>
+      <div className="nodrag wa-block-actions flex flex-col items-center -my-0.5">
+        <button
+          type="button"
+          className="p-0.5 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
+          disabled={!!upProblem}
+          title={upProblem ?? 'Subir'}
+          aria-label={`Subir o bloco ${label}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            actions.moveBlock(ref, bubbleId, index - 1);
+          }}
+        >
+          <ChevronUp size={12} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="p-0.5 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
+          disabled={!!downProblem}
+          title={downProblem ?? 'Descer'}
+          aria-label={`Descer o bloco ${label}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            actions.moveBlock(ref, bubbleId, index + 2);
+          }}
+        >
+          <ChevronDown size={12} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="p-0.5 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-900/20"
+          title="Remover bloco"
+          aria-label={`Remover o bloco ${label}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            actions.removeBlock(ref);
+          }}
+        >
+          <X size={12} aria-hidden="true" />
+        </button>
+      </div>
+    </li>
   );
 }
 
-// ---------------------------------------------------------------- Condição
-
-function ConditionNodeView({ id, data, selected }: NodeProps<ConditionNode>) {
-  const { updateNodeData, setEdges } = useReactFlow<FlowNode, FlowEdge>();
+function BubbleNodeView({ id, data, selected }: NodeProps<BubbleNode>) {
+  const { actions, issues, connected, selectedBlock, options, agents } = useCanvasContext();
   const updateNodeInternals = useUpdateNodeInternals();
-  const ruleCount = data.rules.length;
+  const blocks = data.blocks;
+  const types = blocks.map((b) => b.type);
+  const outputs = bubbleOutputs(blocks);
+  const handleKey = outputs.map((o) => o.handleId).join('|');
+  const title = bubbleTitle(data);
 
-  // Regras entram e saem: avisa o React Flow para medir os handles de novo.
+  // Blocos entram, saem e mudam de ordem: avisa o React Flow para medir os handles de novo.
   useEffect(() => {
     updateNodeInternals(id);
-  }, [id, ruleCount, updateNodeInternals]);
+  }, [id, handleKey, blocks.length, updateNodeInternals]);
 
-  const setRules = (rules: ConditionRuleDraft[]) => updateNodeData(id, { rules });
-  const removeRule = (rule: ConditionRuleDraft) => {
-    setRules(data.rules.filter((r) => r.id !== rule.id));
-    const handle = ruleHandleId(rule.id);
-    setEdges((eds) => eds.filter((e) => !(e.source === id && e.sourceHandle === handle)));
+  const [editing, setEditing] = useState(false);
+  const [draftName, setDraftName] = useState(data.name);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [drop, setDrop] = useState<DropTarget>(null);
+  const menuRef = useDismiss(menuOpen, () => setMenuOpen(false));
+  const addRef = useDismiss(addOpen, () => setAddOpen(false));
+
+  const issue = issues.byNode.get(id);
+  const hasError = (issue?.errors.length ?? 0) > 0;
+  const last = blocks[blocks.length - 1];
+  // Depois de um bloco com várias saídas ou terminal não entra mais nada.
+  const appendProblem = last ? placementProblem(types, 'send_text', blocks.length) : null;
+  const orderOk = isValidBlockOrder(types);
+
+  const startRename = () => {
+    setDraftName(data.name);
+    setEditing(true);
+    setMenuOpen(false);
+  };
+  const commitRename = () => {
+    setEditing(false);
+    if (draftName.trim() !== data.name.trim()) actions.renameBubble(id, draftName.trim().slice(0, 80));
+  };
+
+  const handleDrop = (e: React.DragEvent, index: number) => {
+    setDrop(null);
+    const type = e.dataTransfer.getData(DND_MIME);
+    if (type && isStepType(type)) {
+      actions.addBlock(id, type, index);
+      return;
+    }
+    const raw = e.dataTransfer.getData(DND_BLOCK_MIME);
+    if (!raw) return;
+    try {
+      const from = JSON.parse(raw) as BlockRef;
+      if (from && typeof from.bubbleId === 'string' && typeof from.blockId === 'string') actions.moveBlock(from, id, index);
+    } catch {
+      // conteúdo inesperado no arrasto: ignora
+    }
   };
 
   return (
-    <NodeShell
-      id={id}
-      title="Condição"
-      icon={GitBranch}
-      tone="purple"
-      selected={selected}
-      outputs={<OutputRow handleId={HANDLE_ELSE} label="Senão" tone="amber" />}
+    <div
+      className={`relative w-[300px] rounded-xl border bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm transition-shadow ${
+        selected
+          ? 'border-purple-500 ring-2 ring-purple-500/30 shadow-lg'
+          : hasError
+            ? 'border-red-400 dark:border-red-500/60'
+            : 'border-slate-200 dark:border-white/10'
+      } ${drop === 'bubble' ? 'ring-2 ring-emerald-400/70' : ''}`}
+      onDragOver={(e) => {
+        if (!acceptsDrop(e)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = e.dataTransfer.types.includes(DND_BLOCK_MIME) ? 'move' : 'copy';
+        setDrop('bubble');
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDrop(null);
+      }}
+      onDrop={(e) => {
+        if (!acceptsDrop(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        handleDrop(e, blocks.length);
+      }}
+      data-bubble-id={id}
     >
-      <p className={HELP_CLASS}>
-        Compara a última resposta do lead (sem acentos, sem diferenciar maiúsculas). A primeira regra que bater decide o
-        caminho. Separe as palavras por vírgula; use aspas para palavras com vírgula, ex.: "sim, quero".
-      </p>
-      {data.rules.map((rule, index) => (
-        <div key={rule.id} className="relative flex items-center gap-1 -mr-3 pr-4">
+      <div
+        className="relative flex items-center gap-1.5 pl-3 pr-1.5 py-1.5 border-b border-slate-100 dark:border-white/5"
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          startRename();
+        }}
+      >
+        <Handle type="target" position={Position.Left} id={HANDLE_IN} className="wa-handle-in" aria-label={`Entrada de ${title}`} />
+        <Rows3 size={14} className="text-slate-400 shrink-0" aria-hidden="true" />
+        {editing ? (
           <input
-            className={INPUT_CLASS}
-            value={rule.keywords}
-            onChange={(e) =>
-              setRules(data.rules.map((r) => (r.id === rule.id ? { ...r, keywords: e.target.value } : r)))
-            }
-            placeholder="sim, quero, pode"
-            aria-label={`Palavras-chave da regra ${index + 1} (separadas por vírgula)`}
+            autoFocus
+            className="nodrag flex-1 min-w-0 bg-slate-50 dark:bg-slate-800 border border-purple-500 rounded px-1.5 py-0.5 text-sm font-semibold outline-none"
+            value={draftName}
+            maxLength={80}
+            placeholder={title}
+            aria-label="Nome do balão"
+            onChange={(e) => setDraftName(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') commitRename();
+              if (e.key === 'Escape') setEditing(false);
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
           />
+        ) : (
+          <span className="flex-1 min-w-0 text-sm font-semibold truncate select-none" title="Duplo clique para renomear">
+            {title}
+          </span>
+        )}
+        <IssueMark issue={issue} />
+        <div ref={menuRef} className="nodrag relative shrink-0">
           <button
             type="button"
-            className="p-1 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-900/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            aria-label={`Remover regra ${index + 1}`}
-            title="Remover regra"
-            disabled={ruleCount <= 1}
-            onClick={() => removeRule(rule)}
+            className="p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-white/10 transition-colors"
+            aria-label={`Opções do balão ${title}`}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            title="Opções"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen((v) => !v);
+            }}
           >
-            <Trash2 size={12} aria-hidden="true" />
+            <MoreHorizontal size={14} aria-hidden="true" />
           </button>
-          <Handle
-            type="source"
-            position={Position.Right}
-            id={ruleHandleId(rule.id)}
-            aria-label={`Saída da regra ${index + 1}`}
-          />
+          {menuOpen ? (
+            <div
+              role="menu"
+              className="nodrag nopan absolute right-0 top-full mt-1 z-30 w-48 py-1 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-800 shadow-lg"
+            >
+              <MenuItem icon={Pencil} label="Renomear" onClick={startRename} />
+              <MenuItem
+                icon={CopyPlus}
+                label="Duplicar"
+                shortcut="Ctrl+D"
+                onClick={() => {
+                  setMenuOpen(false);
+                  actions.duplicateBubbles([id]);
+                }}
+              />
+              <MenuItem
+                icon={Copy}
+                label="Copiar"
+                shortcut="Ctrl+C"
+                onClick={() => {
+                  setMenuOpen(false);
+                  actions.copyBubbles([id]);
+                }}
+              />
+              <MenuItem
+                icon={Trash2}
+                label="Excluir"
+                shortcut="Delete"
+                danger
+                onClick={() => {
+                  setMenuOpen(false);
+                  actions.deleteBubbles([id]);
+                }}
+              />
+            </div>
+          ) : null}
         </div>
-      ))}
-      <button
-        type="button"
-        className="inline-flex items-center gap-1 text-xs font-medium text-purple-600 dark:text-purple-300 hover:underline"
-        onClick={() => setRules([...data.rules, { id: newId(), keywords: '' }])}
-      >
-        <Plus size={12} aria-hidden="true" />
-        regra
-      </button>
-    </NodeShell>
-  );
-}
+      </div>
 
-// ---------------------------------------------------------------- Mover etapa
+      <ol className="p-2 space-y-1.5" aria-label={`Blocos do balão ${title}`}>
+        {blocks.map((block, index) => (
+          <BlockRow
+            key={block.id}
+            bubbleId={id}
+            block={block}
+            index={index}
+            types={types}
+            selected={selectedBlock?.bubbleId === id && selectedBlock.blockId === block.id}
+            issue={issues.byBlock.get(block.id)}
+            summary={blockSummary(block, options, agents)}
+            dropIndex={drop}
+            onDragOverRow={(i) => setDrop(i)}
+            onDropRow={(e, i) => handleDrop(e, i)}
+          />
+        ))}
+        {blocks.length === 0 ? (
+          <li className="rounded-lg border border-dashed border-slate-300 dark:border-white/15 px-2 py-3 text-center text-xs text-slate-400">
+            Balão vazio: solte um bloco aqui
+          </li>
+        ) : null}
+      </ol>
 
-function MoveStageNodeView({ id, data, selected }: NodeProps<MoveStageNode>) {
-  const { updateNodeData } = useReactFlow<FlowNode, FlowEdge>();
-  const { options } = useCanvasContext();
-  return (
-    <NodeShell
-      id={id}
-      title="Mover etapa"
-      icon={MoveRight}
-      tone="orange"
-      selected={selected}
-      outputs={<OutputRow handleId={HANDLE_NEXT} label="Depois" />}
-    >
-      <StageSelect
-        id={`node-${id}-stage`}
-        value={data.stage_id}
-        onChange={(stage_id) => updateNodeData(id, { stage_id })}
-        options={options}
-        ariaLabel="Etapa de destino"
-      />
-      <p className={HELP_CLASS}>Sem negócio ligado à conversa, este passo é pulado.</p>
-    </NodeShell>
-  );
-}
+      <div ref={addRef} className="nodrag relative px-2 pb-2">
+        <button
+          type="button"
+          className="w-full inline-flex items-center justify-center gap-1 rounded-lg border border-dashed border-slate-300 dark:border-white/15 px-2 py-1.5 text-xs font-medium text-purple-600 dark:text-purple-300 hover:border-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
+          disabled={!!appendProblem}
+          title={appendProblem ?? 'Adicionar um bloco ao fim deste balão'}
+          aria-expanded={addOpen}
+          onClick={(e) => {
+            e.stopPropagation();
+            setAddOpen((v) => !v);
+          }}
+        >
+          <Plus size={12} aria-hidden="true" />
+          Adicionar bloco
+        </button>
+        {appendProblem ? <p className="mt-1 text-[10px] leading-snug text-slate-400 text-center">{appendProblem}</p> : null}
+        {!orderOk ? (
+          <p className="mt-1 text-[10px] leading-snug text-red-500 text-center">
+            Só o último bloco pode ter várias saídas ou encerrar o robô.
+          </p>
+        ) : null}
+        {addOpen ? (
+          <div className="nodrag nopan nowheel absolute left-2 right-2 top-full z-30 mt-1 max-h-64 overflow-y-auto p-1 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-800 shadow-lg">
+            <BlockCatalog
+              onPick={(type) => {
+                setAddOpen(false);
+                actions.addBlock(id, type);
+              }}
+            />
+          </div>
+        ) : null}
+      </div>
 
-// ---------------------------------------------------------------- Rótulo
-
-function TagNodeView({ id, data, selected }: NodeProps<TagNode>) {
-  const { updateNodeData } = useReactFlow<FlowNode, FlowEdge>();
-  const { options } = useCanvasContext();
-  return (
-    <NodeShell
-      id={id}
-      title="Rótulo"
-      icon={Tag}
-      tone="pink"
-      selected={selected}
-      outputs={<OutputRow handleId={HANDLE_NEXT} label="Depois" />}
-    >
-      <TagInput
-        id={`node-${id}-tag`}
-        value={data.tag}
-        onChange={(tag) => updateNodeData(id, { tag })}
-        options={options}
-        ariaLabel="Rótulo a adicionar"
-      />
-      <p className={HELP_CLASS}>Adiciona o rótulo ao negócio da conversa.</p>
-    </NodeShell>
-  );
-}
-
-// ---------------------------------------------------------------- Webhook
-
-function WebhookNodeView({ id, data, selected }: NodeProps<WebhookNode>) {
-  const { updateNodeData } = useReactFlow<FlowNode, FlowEdge>();
-  const bodyRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    autoResize(bodyRef.current);
-  }, [data.body_template]);
-
-  return (
-    <NodeShell
-      id={id}
-      title="Webhook"
-      icon={Webhook}
-      tone="slate"
-      selected={selected}
-      outputs={<OutputRow handleId={HANDLE_NEXT} label="Depois" />}
-    >
-      <input
-        type="url"
-        className={INPUT_CLASS}
-        value={data.url}
-        onChange={(e) => updateNodeData(id, { url: e.target.value })}
-        placeholder="https://..."
-        aria-label="URL do webhook"
-        autoComplete="off"
-      />
-      <input
-        type="password"
-        className={INPUT_CLASS}
-        value={data.secret}
-        onChange={(e) => updateNodeData(id, { secret: e.target.value })}
-        placeholder="Segredo (opcional)"
-        aria-label="Segredo do webhook"
-        autoComplete="off"
-        maxLength={200}
-      />
-      <textarea
-        ref={bodyRef}
-        className={`${INPUT_CLASS} nowheel resize-none font-mono text-xs`}
-        rows={2}
-        value={data.body_template}
-        onChange={(e) => updateNodeData(id, { body_template: e.target.value })}
-        placeholder={'Corpo personalizado (opcional), ex.: {"telefone": "{{telefone}}"}'}
-        aria-label="Corpo personalizado do webhook"
-        maxLength={20000}
-      />
-      <p className={HELP_CLASS}>POST em JSON. Vazio: envia os dados padrão do lead e do negócio.</p>
-    </NodeShell>
-  );
-}
-
-// ---------------------------------------------------------------- Entregar a agente
-
-function HandoffNodeView({ id, data, selected }: NodeProps<HandoffNode>) {
-  const { updateNodeData } = useReactFlow<FlowNode, FlowEdge>();
-  const { agents } = useCanvasContext();
-  return (
-    <NodeShell id={id} title="Entregar a agente" icon={Bot} tone="purple" selected={selected}>
-      <AgentSelect
-        id={`node-${id}-agent`}
-        value={data.agent_id}
-        onChange={(agent_id) => updateNodeData(id, { agent_id })}
-        agents={agents}
-        ariaLabel="Agente de IA que assume"
-      />
-      <p className={HELP_CLASS}>O robô encerra e o agente de IA assume a conversa a partir daqui.</p>
-    </NodeShell>
-  );
-}
-
-// ---------------------------------------------------------------- Encerrar
-
-function EndNodeView({ id, selected }: NodeProps<EndNode>) {
-  return (
-    <NodeShell id={id} title="Encerrar" icon={Flag} tone="red" selected={selected}>
-      <p className={HELP_CLASS}>O robô termina aqui.</p>
-    </NodeShell>
+      {outputs.length > 0 ? (
+        <div className="border-t border-slate-100 dark:border-white/5 py-1">
+          {outputs.map((o) => (
+            <OutputRow key={o.handleId} handleId={o.handleId} label={o.label} tone={o.tone} connected={connected.has(edgeIdFor(id, o.handleId))} />
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -707,13 +731,5 @@ function EndNodeView({ id, selected }: NodeProps<EndNode>) {
 /** Mapa tipo -> componente, referência estável para o React Flow. */
 export const nodeTypes: NodeTypes = {
   trigger: TriggerNodeView,
-  send_text: MessageNodeView,
-  wait: WaitNodeView,
-  wait_reply: WaitReplyNodeView,
-  condition: ConditionNodeView,
-  move_stage: MoveStageNodeView,
-  add_tag: TagNodeView,
-  webhook: WebhookNodeView,
-  handoff_agent: HandoffNodeView,
-  end: EndNodeView,
+  bubble: BubbleNodeView,
 };

@@ -13,6 +13,7 @@ import {
   isMaskedSecret,
   SECRET_MASK,
   toAgentPublic,
+  normalizeBotLayout,
   toBotPublic,
   type AgentRow,
   type BotRow,
@@ -183,5 +184,24 @@ describe('esquemas do robô (quadro)', () => {
   it('start_step_id aceita texto ou null', () => {
     expect(BotInputSchema.parse({ name: 'x', connection_id: null, trigger: { type: 'manual' }, start_step_id: 'p1' }).start_step_id).toBe('p1');
     expect(BotInputSchema.parse({ name: 'x', connection_id: null, trigger: { type: 'manual' }, start_step_id: null }).start_step_id).toBeNull();
+  });
+
+  it('layout (balões) tem padrão vazio, aceita grupos e é normalizado ao devolver o robô', () => {
+    const empty = BotInputSchema.parse({ name: 'x', connection_id: null, trigger: { type: 'manual' } });
+    expect(empty.layout).toEqual({ groups: [] });
+    const withGroups = BotInputSchema.parse({
+      name: 'x',
+      connection_id: null,
+      trigger: { type: 'manual' },
+      steps: [{ id: 'a', type: 'send_text', text: 'Oi', next_step_id: 'b' }, { id: 'b', type: 'end' }],
+      start_step_id: 'a',
+      layout: { groups: [{ id: 'g1', x: 10, y: 20, step_ids: ['a', 'b'] }] },
+    });
+    expect(withGroups.layout.groups[0]).toEqual({ id: 'g1', name: '', x: 10, y: 20, step_ids: ['a', 'b'] });
+    expect(normalizeBotLayout({})).toEqual({ groups: [] });
+    expect(normalizeBotLayout(null)).toEqual({ groups: [] });
+    expect(normalizeBotLayout({ groups: 'x' })).toEqual({ groups: [] });
+    const pub = toBotPublic({ steps: [], layout: {} } as unknown as BotRow);
+    expect(pub.layout).toEqual({ groups: [] });
   });
 });

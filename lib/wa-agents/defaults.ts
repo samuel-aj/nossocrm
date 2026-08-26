@@ -93,39 +93,9 @@ Faça UMA pergunta por mensagem e espere a resposta antes da próxima. Se a pess
 - Nunca deixe linhas em branco.
 - A pergunta fica sempre na última linha.`;
 
-export const DEFAULT_BOT_STEPS: BotStep[] = [
-  {
-    id: 'passo-1',
-    type: 'send_text',
-    text: 'Oi {{primeiro_nome}}, tudo bem? Aqui é do escritório. Vi que você entrou em contato com a gente.',
-  },
-  {
-    id: 'passo-2',
-    type: 'send_text',
-    text: 'Posso te ajudar por aqui? Responda SIM para continuar ou NÃO se preferir falar depois.',
-  },
-  { id: 'passo-3', type: 'wait_reply', timeout_minutes: 60, on_timeout_step_id: 'passo-7' },
-  {
-    id: 'passo-4',
-    type: 'condition',
-    rules: [
-      { keywords: ['sim', 'pode', 'quero', 'claro'], goto_step_id: 'passo-5' },
-      { keywords: ['nao', 'não', 'depois', 'agora não'], goto_step_id: 'passo-6' },
-    ],
-    else_step_id: 'passo-5',
-  },
-  {
-    id: 'passo-5',
-    type: 'send_text',
-    text: 'Perfeito! Me conta em poucas palavras o que aconteceu que alguém da equipe já assume daqui.',
-    // os dois ramos terminam no mesmo passo (sem isso, o "sim" mandaria também a mensagem do "não")
-    next_step_id: 'passo-7',
-  },
-  {
-    id: 'passo-6',
-    type: 'send_text',
-    text: 'Sem problemas. Quando quiser, é só mandar uma mensagem por aqui.',
-    next_step_id: 'passo-7',
-  },
-  { id: 'passo-7', type: 'end' },
-];
+/**
+ * Robô novo começa VAZIO: o quadro mostra só o gatilho e a pessoa monta os
+ * balões do zero (nada de exemplo para ficar excluindo). Mantido como export
+ * para quem chama `botToFlow(bot, DEFAULT_BOT_STEPS)`.
+ */
+export const DEFAULT_BOT_STEPS: BotStep[] = [];
