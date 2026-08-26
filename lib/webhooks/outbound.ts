@@ -229,14 +229,15 @@ export async function retryFailedWebhooks(
 ): Promise<{ processed: number; succeeded: number; failed: number; results: DeliveryResult[] }> {
   const now = new Date().toISOString();
 
-  // Find deliveries that are due for retry OR initial deliveries that were never
-  // picked up by the application layer (next_retry_at is null, retry_count = 0,
-  // status = 'queued')
+  // Entregas com retentativa agendada (next_retry_at vencido: o job wa_webhook_reconcile
+  // marca as que o pg_net falhou) OU que nunca saíram pelo pg_net (request_id nulo).
+  // As 'queued' com request_id e sem agendamento JÁ foram enviadas pelo banco: reenviar
+  // aqui entregava o mesmo evento duas vezes (agente respondendo de novo, negócio duplicado).
   const { data: deliveries, error } = await supabase
     .from('webhook_deliveries')
     .select('id')
     .eq('status', 'queued')
-    .or(`next_retry_at.is.null,next_retry_at.lte.${now}`)
+    .or(`next_retry_at.lte.${now},and(request_id.is.null,next_retry_at.is.null)`)
     .order('attempted_at', { ascending: true })
     .limit(100);
 

@@ -373,6 +373,50 @@ export async function replicateOutboundToSiblings(
   }
 }
 
+/**
+ * Corrida do eco com o agente EXTERNO (n8n via API pública): a Evolution devolve o
+ * MESSAGES_UPSERT da própria resposta do agente antes de a API gravá-la, o eco entra
+ * como 'echo' e o gatilho do banco trata como resposta humana (ativo -> pausado; na 1ª
+ * resposta, nem ativa). Aqui a regra do envio pela API é reaplicada: sem estado -> ativo;
+ * pausado sem ninguém (ai_paused_by nulo) desde o eco -> ativo de novo. Conversa de agente
+ * nativo não entra (tem trava própria).
+ */
+async function restoreExternalAgentStateAfterEcho(
+  admin: SupabaseClient,
+  orgId: string,
+  conversationId: string,
+  claimed: WaMessageRow
+): Promise<void> {
+  try {
+    const { data } = await admin
+      .from('wa_conversations')
+      .select('ai_status, ai_agent_id, ai_paused_by, ai_status_changed_at')
+      .eq('id', conversationId)
+      .eq('organization_id', orgId)
+      .maybeSingle();
+    const conv = data as {
+      ai_status: string | null;
+      ai_agent_id: string | null;
+      ai_paused_by: string | null;
+      ai_status_changed_at: string | null;
+    } | null;
+    if (!conv || conv.ai_agent_id) return;
+    const echoAt = Date.parse(String((claimed as { created_at?: string }).created_at ?? '')) || 0;
+    const changedAt = Date.parse(conv.ai_status_changed_at ?? '') || 0;
+    const pausedByEcho =
+      conv.ai_status === 'paused' && !conv.ai_paused_by && echoAt > 0 && changedAt >= echoAt - 5_000;
+    if (conv.ai_status !== null && !pausedByEcho) return;
+    await admin
+      .from('wa_conversations')
+      .update({ ai_status: 'active', ai_status_changed_at: new Date().toISOString(), ai_paused_by: null })
+      .eq('id', conversationId)
+      .eq('organization_id', orgId)
+      .is('ai_agent_id', null);
+  } catch (e) {
+    console.error('[whatsapp] restaurar estado do agente externo após eco falhou:', (e as Error).message);
+  }
+}
+
 export async function recordOutboundMessage(
   admin: SupabaseClient,
   input: {
@@ -434,6 +478,12 @@ export async function recordOutboundMessage(
         .select('*')
         .single();
       if (claimed) {
+        // O eco entrou como source 'echo' e o gatilho wa_ai_agent_state já rodou como se um
+        // humano tivesse respondido: para o agente EXTERNO (API) isso deixa a conversa 'paused'
+        // (ou sem ativar, na 1ª resposta). Reaplica a regra do envio pela API.
+        if ((input.source ?? 'crm') === 'api') {
+          await restoreExternalAgentStateAfterEcho(admin, input.orgId, input.conversationId, claimed as WaMessageRow);
+        }
         await touchConversation(admin, input.conversationId, preview);
         return claimed as WaMessageRow;
       }
