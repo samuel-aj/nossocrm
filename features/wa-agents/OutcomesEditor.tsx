@@ -1,18 +1,37 @@
 'use client';
 
 /**
- * Editor de resultados do atendimento (outcomes) e das ações executadas
- * quando o agente encerra com cada resultado.
+ * Resultados do atendimento (outcomes) como cartões "Resultado X -> ações",
+ * com resumo legível das ações e edição expandida (um cartão por vez).
  *
  * Exporta também o editor de ações (`ActionsEditor`), reutilizado pelas
- * ações durante a conversa (CustomActionsEditor), e o tipo de ação
- * "Chamar webhook" (URL, segredo e corpo opcional com {{variáveis}}).
+ * ações durante a conversa (CustomActionsEditor), os ícones e rótulos por
+ * tipo de ação e `describeActions` (resumo em texto de uma lista de ações).
  */
-import React from 'react';
-import { Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  Plus,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
+  Pencil,
+  ChevronUp,
+  Flag,
+  ArrowRightLeft,
+  ShieldCheck,
+  Hand,
+  StickyNote,
+  ArrowRight,
+  Tag,
+  CircleX,
+  UserCheck,
+  CalendarPlus,
+  Webhook,
+  type LucideIcon,
+} from 'lucide-react';
 import type { EndAction, Outcome } from '@/lib/wa-agents/types';
 import type { WaAgentListItem, WaAgentOptions } from './useWaAgents';
-import { BTN_ICON, BTN_SMALL, Field, HELP_CLASS, INPUT_CLASS, SUBCARD_CLASS, TEXTAREA_CLASS } from './ui';
+import { BTN_ICON, BTN_SMALL, Badge, Field, HELP_CLASS, INPUT_CLASS, SUBCARD_CLASS, TEXTAREA_CLASS } from './ui';
 
 export type ActionType = EndAction['type'];
 
@@ -27,6 +46,19 @@ export const ACTION_LABELS: Record<ActionType, string> = {
   assign_owner: 'Atribuir responsável',
   create_task: 'Criar tarefa',
   webhook: 'Chamar webhook',
+};
+
+export const ACTION_ICONS: Record<ActionType, LucideIcon> = {
+  handoff: ArrowRightLeft,
+  approval: ShieldCheck,
+  stop: Hand,
+  note: StickyNote,
+  move_stage: ArrowRight,
+  add_tag: Tag,
+  mark_lost: CircleX,
+  assign_owner: UserCheck,
+  create_task: CalendarPlus,
+  webhook: Webhook,
 };
 
 const ACTION_TYPES = Object.keys(ACTION_LABELS) as ActionType[];
@@ -98,6 +130,98 @@ export function defaultAction(
     case 'webhook':
       return { type, url: '', secret: null, body_template: null };
   }
+}
+
+function findStage(options: WaAgentOptions | undefined, stageId: string) {
+  for (const b of options?.boards ?? []) {
+    const s = b.stages.find((x) => x.id === stageId);
+    if (s) return { board: b.name, label: s.label };
+  }
+  return null;
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url.trim() ? url.trim() : 'sem URL';
+  }
+}
+
+/** Uma ação em texto legível, em minúsculas (para compor frases). */
+export function describeAction(action: EndAction, agents: WaAgentListItem[], options: WaAgentOptions | undefined): string {
+  const agentName = (id: string) =>
+    id ? (agents.find((a) => a.id === id)?.name ?? 'agente não encontrado') : 'agente não escolhido';
+  switch (action.type) {
+    case 'handoff':
+      return `passar para o agente ${agentName(action.agent_id)}`;
+    case 'approval':
+      return `pedir aprovação para passar a ${agentName(action.agent_id)}`;
+    case 'stop':
+      return 'encerrar e entregar ao atendente';
+    case 'note':
+      return action.title ? `registrar nota "${action.title}"` : 'registrar nota no negócio';
+    case 'move_stage': {
+      const stage = findStage(options, action.stage_id);
+      return `mover para a etapa ${stage ? stage.label : 'não escolhida'}`;
+    }
+    case 'add_tag':
+      return `adicionar rótulo ${action.tag.trim() ? `"${action.tag.trim()}"` : 'sem nome'}`;
+    case 'mark_lost':
+      return action.loss_reason ? `marcar como perdido (${action.loss_reason})` : 'marcar como perdido';
+    case 'assign_owner': {
+      const owner = options?.owners.find((o) => o.id === action.owner_id);
+      return `atribuir a ${owner?.name ?? 'responsável não escolhido'}`;
+    }
+    case 'create_task': {
+      const days = action.days ?? 0;
+      return `criar tarefa ${action.title.trim() ? `"${action.title.trim()}"` : 'sem título'}${
+        days > 0 ? ` em ${days} ${days === 1 ? 'dia' : 'dias'}` : ''
+      }`;
+    }
+    case 'webhook':
+      return `chamar webhook ${hostOf(action.url)}`;
+  }
+}
+
+/** Lista de ações em uma frase: "Mover para a etapa Qualificado, adicionar rótulo Quente, passar para o agente Fechamento". */
+export function describeActions(actions: EndAction[], agents: WaAgentListItem[], options: WaAgentOptions | undefined): string {
+  if (actions.length === 0) return '';
+  const text = actions.map((a) => describeAction(a, agents, options)).join(', ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** Resumo visual das ações: um chip com ícone por ação. */
+export function ActionSummary({
+  actions,
+  agents,
+  options,
+  emptyText,
+}: {
+  actions: EndAction[];
+  agents: WaAgentListItem[];
+  options: WaAgentOptions | undefined;
+  emptyText: string;
+}) {
+  if (actions.length === 0) return <p className="text-xs text-slate-500 dark:text-slate-400">{emptyText}</p>;
+  return (
+    <ul className="flex flex-wrap gap-1.5" aria-label="Ações">
+      {actions.map((a, i) => {
+        const Icon = ACTION_ICONS[a.type];
+        const text = describeAction(a, agents, options);
+        return (
+          <li
+            key={`${a.type}-${i}`}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200"
+            title={ACTION_LABELS[a.type]}
+          >
+            <Icon size={12} className="text-purple-600 dark:text-purple-400 shrink-0" aria-hidden="true" />
+            <span>{text.charAt(0).toUpperCase() + text.slice(1)}</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 /** Select de etapa agrupado por board. */
@@ -380,7 +504,7 @@ function ActionFields({
 }
 
 /**
- * Editor de uma lista de ações (select de tipo + campos por tipo).
+ * Editor de uma lista de ações (select de tipo com ícone + campos por tipo).
  * Usado pelos resultados do encerramento e pelas ações durante a conversa.
  */
 export const ActionsEditor: React.FC<{
@@ -427,11 +551,18 @@ export const ActionsEditor: React.FC<{
         const aPrefix = `${idPrefix}-action-${aIndex}`;
         const setAction = (a: EndAction) => onChange(value.map((x, i) => (i === aIndex ? a : x)));
         const types = visibleTypes.includes(action.type) ? visibleTypes : [action.type, ...visibleTypes];
+        const Icon = ACTION_ICONS[action.type];
         return (
           <div
             key={aPrefix}
-            className="grid grid-cols-1 md:grid-cols-[minmax(0,240px)_1fr_auto] gap-2 items-start bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-lg p-2"
+            className="grid grid-cols-[auto_minmax(0,1fr)] md:grid-cols-[auto_minmax(0,240px)_1fr_auto] gap-2 items-start bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-lg p-2"
           >
+            <span
+              className="mt-2 p-1.5 rounded-md bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400"
+              title={ACTION_LABELS[action.type]}
+            >
+              <Icon size={14} aria-hidden="true" />
+            </span>
             <select
               className={INPUT_CLASS}
               value={action.type}
@@ -444,7 +575,7 @@ export const ActionsEditor: React.FC<{
                 </option>
               ))}
             </select>
-            <div className="min-w-0">
+            <div className="min-w-0 col-span-2 md:col-span-1">
               <ActionFields
                 action={action}
                 onChange={setAction}
@@ -456,7 +587,7 @@ export const ActionsEditor: React.FC<{
             </div>
             <button
               type="button"
-              className={`${BTN_ICON} hover:text-red-600 dark:hover:text-red-400`}
+              className={`${BTN_ICON} hover:text-red-600 dark:hover:text-red-400 col-start-2 md:col-start-auto justify-self-end`}
               aria-label={`Remover ação ${aIndex + 1}`}
               title="Remover ação"
               onClick={() => onChange(value.filter((_, i) => i !== aIndex))}
@@ -470,6 +601,71 @@ export const ActionsEditor: React.FC<{
   );
 };
 
+/** Botões de ordenar e remover de um cartão. */
+export function CardControls({
+  index,
+  total,
+  onMove,
+  onRemove,
+  itemLabel,
+}: {
+  index: number;
+  total: number;
+  onMove: (index: number, dir: -1 | 1) => void;
+  onRemove: (index: number) => void;
+  itemLabel: string;
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        className={BTN_ICON}
+        aria-label={`Mover ${itemLabel} para cima`}
+        title="Mover para cima"
+        disabled={index === 0}
+        onClick={() => onMove(index, -1)}
+      >
+        <ArrowUp size={14} aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        className={BTN_ICON}
+        aria-label={`Mover ${itemLabel} para baixo`}
+        title="Mover para baixo"
+        disabled={index === total - 1}
+        onClick={() => onMove(index, 1)}
+      >
+        <ArrowDown size={14} aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        className={`${BTN_ICON} hover:text-red-600 dark:hover:text-red-400`}
+        aria-label={`Remover ${itemLabel}`}
+        title="Remover"
+        onClick={() => onRemove(index)}
+      >
+        <Trash2 size={14} aria-hidden="true" />
+      </button>
+    </>
+  );
+}
+
+/** Índice expandido após mover/remover um item (um cartão aberto por vez). */
+export function nextExpanded(expanded: number | null, change: { moved?: [from: number, to: number]; removed?: number }): number | null {
+  if (expanded === null) return null;
+  if (change.moved) {
+    const [from, to] = change.moved;
+    if (expanded === from) return to;
+    if (expanded === to) return from;
+    return expanded;
+  }
+  if (change.removed !== undefined) {
+    if (expanded === change.removed) return null;
+    return expanded > change.removed ? expanded - 1 : expanded;
+  }
+  return expanded;
+}
+
 /**
  * Componente React `OutcomesEditor`.
  * @returns {Element} Retorna um valor do tipo `Element`.
@@ -481,10 +677,15 @@ export const OutcomesEditor: React.FC<{
   options: WaAgentOptions | undefined;
   currentAgentId?: string | null;
 }> = ({ value, onChange, agents, options, currentAgentId }) => {
+  const [expanded, setExpanded] = useState<number | null>(null);
+
   const update = (index: number, patch: Partial<Outcome>) => {
     onChange(value.map((o, i) => (i === index ? { ...o, ...patch } : o)));
   };
-  const remove = (index: number) => onChange(value.filter((_, i) => i !== index));
+  const remove = (index: number) => {
+    onChange(value.filter((_, i) => i !== index));
+    setExpanded((e) => nextExpanded(e, { removed: index }));
+  };
   const move = (index: number, dir: -1 | 1) => {
     const target = index + dir;
     if (target < 0 || target >= value.length) return;
@@ -492,12 +693,14 @@ export const OutcomesEditor: React.FC<{
     const [item] = next.splice(index, 1);
     next.splice(target, 0, item);
     onChange(next);
+    setExpanded((e) => nextExpanded(e, { moved: [index, target] }));
   };
   const add = () => {
     let key = 'novo-resultado';
     let n = 2;
     while (value.some((o) => o.key === key)) key = `novo-resultado-${n++}`;
     onChange([...value, { key, label: 'Novo resultado', description: '', actions: [] }]);
+    setExpanded(value.length);
   };
 
   const setLabel = (index: number, label: string) => {
@@ -510,8 +713,8 @@ export const OutcomesEditor: React.FC<{
   return (
     <div className="space-y-3">
       <p className={HELP_CLASS}>
-        Quando o agente encerra o atendimento, ele escolhe um destes resultados e as ações da lista são executadas em
-        ordem. A chave é o nome que o modelo usa internamente.
+        Ao encerrar, o agente escolhe um destes resultados e as ações do cartão são executadas em ordem. A chave é o
+        nome que o modelo usa internamente.
       </p>
 
       {value.length === 0 ? (
@@ -520,86 +723,112 @@ export const OutcomesEditor: React.FC<{
 
       {value.map((outcome, index) => {
         const idPrefix = `outcome-${index}`;
+        const open = expanded === index;
+        const bodyId = `${idPrefix}-body`;
         return (
           <div key={idPrefix} className={SUBCARD_CLASS}>
             <div className="flex items-start gap-2">
-              <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3">
-                <Field label="Rótulo" htmlFor={`${idPrefix}-label`}>
-                  <input
-                    id={`${idPrefix}-label`}
-                    className={INPUT_CLASS}
-                    value={outcome.label}
-                    onChange={(e) => setLabel(index, e.target.value)}
-                    maxLength={80}
-                  />
-                </Field>
-                <Field label="Chave" htmlFor={`${idPrefix}-key`} help="Só letras minúsculas, números, hífen e sublinhado.">
-                  <input
-                    id={`${idPrefix}-key`}
-                    className={`${INPUT_CLASS} font-mono`}
-                    value={outcome.key}
-                    onChange={(e) => update(index, { key: slugifyKey(e.target.value) })}
-                    maxLength={40}
-                  />
-                </Field>
+              <span className="mt-0.5 p-1.5 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 shrink-0">
+                <Flag size={14} aria-hidden="true" />
+              </span>
+              <div className="flex-1 min-w-0 space-y-1.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold text-slate-900 dark:text-white">
+                    {outcome.label.trim() || 'Sem rótulo'}
+                  </span>
+                  {outcome.key ? (
+                    <Badge tone="slate">
+                      <span className="font-mono font-normal">{outcome.key}</span>
+                    </Badge>
+                  ) : (
+                    <Badge tone="amber">sem chave</Badge>
+                  )}
+                </div>
+                {!open ? (
+                  <>
+                    {outcome.description.trim() ? (
+                      <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-2">
+                        <span className="font-medium">Quando usar:</span> {outcome.description}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-amber-700 dark:text-amber-300">Sem descrição de quando usar.</p>
+                    )}
+                    <div className="flex items-start gap-1.5">
+                      <ArrowRight size={14} className="mt-0.5 text-slate-400 shrink-0" aria-hidden="true" />
+                      <ActionSummary
+                        actions={outcome.actions}
+                        agents={agents}
+                        options={options}
+                        emptyText="Sem ações: o agente só encerra e a conversa fica com a equipe."
+                      />
+                    </div>
+                  </>
+                ) : null}
               </div>
-              <div className="flex flex-col gap-1 shrink-0">
+              <div className="flex items-center gap-0.5 shrink-0">
                 <button
                   type="button"
-                  className={BTN_ICON}
-                  aria-label="Mover resultado para cima"
-                  title="Mover para cima"
-                  disabled={index === 0}
-                  onClick={() => move(index, -1)}
+                  className={BTN_SMALL}
+                  aria-expanded={open}
+                  aria-controls={bodyId}
+                  onClick={() => setExpanded(open ? null : index)}
                 >
-                  <ArrowUp size={14} aria-hidden="true" />
+                  {open ? <ChevronUp size={14} aria-hidden="true" /> : <Pencil size={14} aria-hidden="true" />}
+                  {open ? 'Fechar' : 'Editar'}
                 </button>
-                <button
-                  type="button"
-                  className={BTN_ICON}
-                  aria-label="Mover resultado para baixo"
-                  title="Mover para baixo"
-                  disabled={index === value.length - 1}
-                  onClick={() => move(index, 1)}
-                >
-                  <ArrowDown size={14} aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  className={`${BTN_ICON} hover:text-red-600 dark:hover:text-red-400`}
-                  aria-label="Remover resultado"
-                  title="Remover"
-                  onClick={() => remove(index)}
-                >
-                  <Trash2 size={14} aria-hidden="true" />
-                </button>
+                <CardControls index={index} total={value.length} onMove={move} onRemove={remove} itemLabel="resultado" />
               </div>
             </div>
 
-            <Field
-              label="Quando usar"
-              htmlFor={`${idPrefix}-description`}
-              help="Explique ao modelo em que situação este resultado se aplica."
-            >
-              <textarea
-                id={`${idPrefix}-description`}
-                className={TEXTAREA_CLASS}
-                rows={2}
-                value={outcome.description}
-                onChange={(e) => update(index, { description: e.target.value })}
-                maxLength={500}
-              />
-            </Field>
+            {open ? (
+              <div id={bodyId} className="space-y-3 border-t border-slate-200 dark:border-white/10 pt-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <Field label="Rótulo" htmlFor={`${idPrefix}-label`}>
+                    <input
+                      id={`${idPrefix}-label`}
+                      className={INPUT_CLASS}
+                      value={outcome.label}
+                      onChange={(e) => setLabel(index, e.target.value)}
+                      maxLength={80}
+                    />
+                  </Field>
+                  <Field label="Chave" htmlFor={`${idPrefix}-key`} help="Só letras minúsculas, números, hífen e sublinhado.">
+                    <input
+                      id={`${idPrefix}-key`}
+                      className={`${INPUT_CLASS} font-mono`}
+                      value={outcome.key}
+                      onChange={(e) => update(index, { key: slugifyKey(e.target.value) })}
+                      maxLength={40}
+                    />
+                  </Field>
+                </div>
 
-            <ActionsEditor
-              value={outcome.actions}
-              onChange={(actions) => update(index, { actions })}
-              agents={agents}
-              options={options}
-              currentAgentId={currentAgentId}
-              idPrefix={idPrefix}
-              emptyText="Sem ações: o agente só encerra e a conversa fica com a equipe."
-            />
+                <Field
+                  label="Quando usar"
+                  htmlFor={`${idPrefix}-description`}
+                  help="Explique ao modelo em que situação este resultado se aplica."
+                >
+                  <textarea
+                    id={`${idPrefix}-description`}
+                    className={TEXTAREA_CLASS}
+                    rows={2}
+                    value={outcome.description}
+                    onChange={(e) => update(index, { description: e.target.value })}
+                    maxLength={500}
+                  />
+                </Field>
+
+                <ActionsEditor
+                  value={outcome.actions}
+                  onChange={(actions) => update(index, { actions })}
+                  agents={agents}
+                  options={options}
+                  currentAgentId={currentAgentId}
+                  idPrefix={idPrefix}
+                  emptyText="Sem ações: o agente só encerra e a conversa fica com a equipe."
+                />
+              </div>
+            ) : null}
           </div>
         );
       })}

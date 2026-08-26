@@ -1,12 +1,15 @@
 'use client';
 
 /**
- * Editor de agente de IA: identidade, números, gatilhos, modelo, roteiro
- * (com "Criar com IA"), comportamento, resultados/ações, ações durante a
- * conversa e webhooks. Salva via POST (novo) ou PATCH (existente).
- * "Testar" abre o chat de teste depois de salvar.
+ * Editor de agente de IA em abas: Roteiro | Conhecimento e mídias | Ações |
+ * Gatilhos e números | Configurações (estado local + hash da URL).
+ * Barra inferior fixa com Testar / Cancelar / Salvar. "Testar" abre o painel
+ * lateral com o chat de teste e o "Ajustar com IA".
+ *
+ * Salva via POST (novo) ou PATCH (existente, só o que mudou). Um agente novo
+ * continua no editor depois de salvo (o id libera uploads e teste).
  */
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Save,
@@ -23,8 +26,12 @@ import {
   Zap,
   ListChecks,
   X,
+  BookOpen,
+  Settings,
+  Users,
+  Calculator,
 } from 'lucide-react';
-import { Modal } from '@/components/ui/Modal';
+import ConfirmModal from '@/components/ConfirmModal';
 import { useToast } from '@/context/ToastContext';
 import {
   AI_PROVIDERS,
@@ -37,14 +44,23 @@ import {
   type CustomAction,
   type Outcome,
 } from '@/lib/wa-agents/types';
-import { MODEL_CATALOG, PROMPT_VARIABLES, PROVIDER_LABELS } from '@/lib/wa-agents/catalog';
+import { MODEL_CATALOG, PROVIDER_LABELS } from '@/lib/wa-agents/catalog';
 import { DEFAULT_OUTCOMES, DEFAULT_SYSTEM_PROMPT } from '@/lib/wa-agents/defaults';
-import { useSaveWaAgent, useWaAgentOptions, useWaAgentsList, type WaAgentOptions } from './useWaAgents';
+import {
+  useSaveWaAgent,
+  useWaAgentDocuments,
+  useWaAgentMedia,
+  useWaAgentOptions,
+  useWaAgentsList,
+  type WaAgentListItem,
+  type WaAgentOptions,
+} from './useWaAgents';
 import { OutcomesEditor } from './OutcomesEditor';
 import { CustomActionsEditor } from './CustomActionsEditor';
 import { WebhooksEditor } from './WebhooksEditor';
-import { AgentTestChat } from './AgentTestChat';
-import { AgentAssistPanel } from './AgentAssistPanel';
+import { PromptEditor, insertToken, mediaToken } from './PromptEditor';
+import { KnowledgePanel } from './KnowledgePanel';
+import { AgentTestDrawer } from './AgentTestDrawer';
 import {
   BTN_PRIMARY,
   BTN_SECONDARY,
@@ -54,18 +70,23 @@ import {
   HELP_CLASS,
   INPUT_CLASS,
   Notice,
+  Panel,
   SUBCARD_CLASS,
-  Section,
-  TEXTAREA_CLASS,
+  TabPanel,
+  Tabs,
   Toggle,
   describeZodIssue,
   errorMessage,
+  type TabDef,
 } from './ui';
 
 type AiProvider = (typeof AI_PROVIDERS)[number];
 
 type InboundMode = AgentTriggers['inbound']['mode'];
 type DealEvent = AgentTriggers['deal']['event'];
+
+/** Ferramentas extras do agente (espelha AgentToolsSchema). */
+type AgentToolsState = { calculator: boolean };
 
 type AgentFormState = {
   name: string;
@@ -90,9 +111,58 @@ type AgentFormState = {
   custom_actions: CustomAction[];
   triggers: AgentTriggers;
   webhooks: AgentWebhook[];
+  helper_agent_ids: string[];
+  tools: AgentToolsState;
 };
 
 const CUSTOM_MODEL = '__custom__';
+
+// ---------------------------------------------------------------- Abas
+
+type EditorTab = 'roteiro' | 'conhecimento' | 'acoes' | 'gatilhos' | 'config';
+
+const TAB_IDS: EditorTab[] = ['roteiro', 'conhecimento', 'acoes', 'gatilhos', 'config'];
+
+function isEditorTab(value: string): value is EditorTab {
+  return (TAB_IDS as string[]).includes(value);
+}
+
+function readHash(): string {
+  return typeof window === 'undefined' ? '' : (window.location.hash || '').replace('#', '');
+}
+
+function writeHash(value: string) {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  url.hash = `#${value}`;
+  window.history.replaceState({}, '', url.toString());
+}
+
+/** Aba onde cada campo mora (para levar o usuário até o erro de validação). */
+const FIELD_TABS: Record<string, EditorTab> = {
+  name: 'roteiro',
+  persona_name: 'roteiro',
+  enabled: 'roteiro',
+  system_prompt: 'roteiro',
+  connection_ids: 'gatilhos',
+  triggers: 'gatilhos',
+  provider: 'config',
+  model: 'config',
+  temperature: 'config',
+  api_key: 'config',
+  buffer_seconds: 'config',
+  history_limit: 'config',
+  line_delay_ms: 'config',
+  human_pause_minutes: 'config',
+  only_new_conversations: 'config',
+  webhooks: 'config',
+  outcomes: 'acoes',
+  custom_actions: 'acoes',
+  helper_agent_ids: 'acoes',
+  tools: 'acoes',
+};
+
+// ---------------------------------------------------------------- Formulário
 
 function firstModel(provider: AiProvider): string {
   return MODEL_CATALOG[provider]?.[0]?.id ?? '';
@@ -129,6 +199,8 @@ function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInpu
     custom_actions: src.custom_actions ?? [],
     triggers: normalizeTriggers(src.triggers),
     webhooks: src.webhooks ?? [],
+    helper_agent_ids: src.helper_agent_ids ?? [],
+    tools: { calculator: src.tools?.calculator ?? true },
   };
 }
 
@@ -165,6 +237,8 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
       },
     },
     webhooks: form.webhooks,
+    helper_agent_ids: form.helper_agent_ids,
+    tools: { calculator: form.tools.calculator },
   };
   if (form.clear_api_key) payload.api_key = null;
   else if (form.api_key.trim()) payload.api_key = form.api_key.trim();
@@ -188,6 +262,8 @@ const FIELD_NAMES: Record<string, string> = {
   custom_actions: 'Ações durante a conversa',
   triggers: 'Gatilhos',
   webhooks: 'Webhooks',
+  helper_agent_ids: 'Agentes auxiliares',
+  tools: 'Ferramentas',
 };
 
 function describeIssue(path: PropertyKey[], message: string): string {
@@ -245,39 +321,53 @@ function findDuplicateKeys(items: Array<{ key: string }>): string[] {
   return dups;
 }
 
+type FriendlyIssue = { message: string; tab: EditorTab };
+
 /**
- * Primeira mensagem amigável de validação (antes do zod), ou null se está tudo certo.
- * Cobre o que o zod descreveria mal: chaves repetidas, gatilhos incompletos, webhooks sem URL.
+ * Primeira mensagem amigável de validação (antes do zod), com a aba onde
+ * corrigir, ou null se está tudo certo. Cobre o que o zod descreveria mal:
+ * chaves repetidas, gatilhos incompletos, webhooks sem URL, auxiliar desligado.
  */
-function findFriendlyIssue(form: AgentFormState): string | null {
+function findFriendlyIssue(form: AgentFormState, agents: WaAgentListItem[]): FriendlyIssue | null {
+  if (!form.name.trim()) return { message: 'Informe o nome do agente', tab: 'roteiro' };
+
   const dupOutcomes = findDuplicateKeys(form.outcomes);
-  if (dupOutcomes.length > 0) return `Chaves de resultado repetidas: ${dupOutcomes.join(', ')}`;
+  if (dupOutcomes.length > 0) return { message: `Chaves de resultado repetidas: ${dupOutcomes.join(', ')}`, tab: 'acoes' };
 
   const dupActions = findDuplicateKeys(form.custom_actions);
-  if (dupActions.length > 0) return `Chaves de ação durante a conversa repetidas: ${dupActions.join(', ')}`;
+  if (dupActions.length > 0)
+    return { message: `Chaves de ação durante a conversa repetidas: ${dupActions.join(', ')}`, tab: 'acoes' };
 
   for (const [i, o] of form.outcomes.entries()) {
-    if (!o.label.trim()) return `Resultado ${i + 1}: informe o rótulo`;
-    if (!o.key) return `Resultado "${o.label}": informe a chave`;
+    if (!o.label.trim()) return { message: `Resultado ${i + 1}: informe o rótulo`, tab: 'acoes' };
+    if (!o.key) return { message: `Resultado "${o.label}": informe a chave`, tab: 'acoes' };
     if (o.actions.some((a) => a.type === 'webhook' && !a.url.trim()))
-      return `Resultado "${o.label}": informe a URL do webhook`;
+      return { message: `Resultado "${o.label}": informe a URL do webhook`, tab: 'acoes' };
   }
   for (const [i, a] of form.custom_actions.entries()) {
-    if (!a.label.trim()) return `Ação durante a conversa ${i + 1}: informe o nome`;
-    if (!a.key) return `Ação "${a.label}": informe a chave`;
-    if (!a.description.trim()) return `Ação "${a.label}": descreva quando ela deve acontecer`;
+    if (!a.label.trim()) return { message: `Ação durante a conversa ${i + 1}: informe o nome`, tab: 'acoes' };
+    if (!a.key) return { message: `Ação "${a.label}": informe a chave`, tab: 'acoes' };
+    if (!a.description.trim()) return { message: `Ação "${a.label}": descreva quando ela deve acontecer`, tab: 'acoes' };
     if (a.actions.some((x) => x.type === 'webhook' && !x.url.trim()))
-      return `Ação "${a.label}": informe a URL do webhook`;
+      return { message: `Ação "${a.label}": informe a URL do webhook`, tab: 'acoes' };
+  }
+
+  for (const id of form.helper_agent_ids) {
+    const helper = agents.find((x) => x.id === id);
+    if (helper && !helper.enabled)
+      return { message: `Agentes auxiliares: "${helper.name}" está desligado. Ligue-o ou remova da lista.`, tab: 'acoes' };
   }
 
   const { inbound, deal } = form.triggers;
   if (inbound.mode === 'keywords' && inbound.keywords.filter((k) => k.trim()).length === 0)
-    return 'Gatilhos: informe ao menos uma palavra-chave para o gatilho por mensagem';
+    return { message: 'Gatilhos: informe ao menos uma palavra-chave para o gatilho por mensagem', tab: 'gatilhos' };
   if (deal.enabled) {
-    if (!deal.connection_id) return 'Gatilhos: escolha o número que inicia a conversa no gatilho por pipeline';
+    if (!deal.connection_id)
+      return { message: 'Gatilhos: escolha o número que inicia a conversa no gatilho por pipeline', tab: 'gatilhos' };
     if (deal.event === 'deal_stage_entered' && !deal.stage_id)
-      return 'Gatilhos: escolha a etapa que dispara o gatilho por pipeline';
+      return { message: 'Gatilhos: escolha a etapa que dispara o gatilho por pipeline', tab: 'gatilhos' };
   }
+  if (!form.model.trim()) return { message: 'Modelo: informe o ID do modelo', tab: 'config' };
   return null;
 }
 
@@ -542,6 +632,51 @@ function TriggersFields({
   );
 }
 
+/** Lista de opções marcáveis (números, agentes auxiliares) no mesmo visual. */
+function CheckList<T extends { id: string }>({
+  items,
+  selected,
+  onToggle,
+  render,
+  disabledIds,
+}: {
+  items: T[];
+  selected: string[];
+  onToggle: (id: string, checked: boolean) => void;
+  render: (item: T) => React.ReactNode;
+  disabledIds?: string[];
+}) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+      {items.map((item) => {
+        const checked = selected.includes(item.id);
+        const disabled = disabledIds?.includes(item.id) ?? false;
+        return (
+          <label
+            key={item.id}
+            className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-sm ${
+              disabled ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'
+            } ${
+              checked
+                ? 'border-purple-300 dark:border-purple-500/40 bg-purple-50 dark:bg-purple-900/15'
+                : 'border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-800'
+            }`}
+          >
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500"
+              checked={checked}
+              disabled={disabled}
+              onChange={(e) => onToggle(item.id, e.target.checked)}
+            />
+            {render(item)}
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
 /**
  * Componente React `AgentEditor`.
  * @returns {Element} Retorna um valor do tipo `Element`.
@@ -559,13 +694,40 @@ export const AgentEditor: React.FC<{
   const save = useSaveWaAgent();
 
   const [form, setForm] = useState<AgentFormState>(() => buildInitialForm(agent, initial));
-  // Snapshot do formulário ao montar (useRef guarda só o valor do primeiro render):
-  // o PATCH manda apenas o que mudou desde então.
-  const snapshotRef = useRef<Partial<AgentInput>>(toPayload(form));
+  // Snapshot do último estado salvo: o PATCH manda só o que mudou desde então e "dirty" compara com ele.
+  const [snapshot, setSnapshot] = useState<Partial<AgentInput>>(() => toPayload(buildInitialForm(agent, initial)));
   const [agentId, setAgentId] = useState<string | null>(agent?.id ?? null);
   const [hasApiKey, setHasApiKey] = useState<boolean>(agent?.has_api_key ?? false);
+  const [tab, setTabState] = useState<EditorTab>('roteiro');
   const [testOpen, setTestOpen] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [promptHighlight, setPromptHighlight] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+
+  const docsQ = useWaAgentDocuments(agentId);
+  const mediaQ = useWaAgentMedia(agentId);
+
+  // Aba sincronizada com o hash (#roteiro, #conhecimento...). Ao sair, devolve o hash da lista (#agentes).
+  useEffect(() => {
+    const fromHash = readHash();
+    const start: EditorTab = isEditorTab(fromHash) ? fromHash : 'roteiro';
+    setTabState(start);
+    writeHash(start);
+    const onHash = () => {
+      const h = readHash();
+      if (isEditorTab(h)) setTabState(h);
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => {
+      window.removeEventListener('hashchange', onHash);
+      if (isEditorTab(readHash())) writeHash('agentes');
+    };
+  }, []);
+
+  const setTab = (next: EditorTab) => {
+    setTabState(next);
+    writeHash(next);
+  };
 
   const patch = (p: Partial<AgentFormState>) => setForm((prev) => ({ ...prev, ...p }));
 
@@ -580,6 +742,8 @@ export const AgentEditor: React.FC<{
   });
   const modelSelectValue = customModel || (!isCatalogModel && form.model !== '') ? CUSTOM_MODEL : form.model;
 
+  const dirty = Object.keys(diffPayload(toPayload(form), snapshot)).length > 0;
+
   const toggleConnection = (id: string, checked: boolean) => {
     patch({
       connection_ids: checked
@@ -588,46 +752,69 @@ export const AgentEditor: React.FC<{
     });
   };
 
-  const insertVariable = (key: string) => {
+  const toggleHelper = (id: string, checked: boolean) => {
+    patch({
+      helper_agent_ids: checked
+        ? Array.from(new Set([...form.helper_agent_ids, id]))
+        : form.helper_agent_ids.filter((c) => c !== id),
+    });
+  };
+
+  /**
+   * Insere um token no roteiro: no ponto `at` (solto por arrasto) ou na
+   * seleção atual da textarea. Troca para a aba Roteiro, foca e destaca.
+   */
+  const insertPromptToken = (token: string, at?: number) => {
     const el = promptRef.current;
     const value = form.system_prompt;
-    const start = el?.selectionStart ?? value.length;
-    const end = el?.selectionEnd ?? value.length;
-    const next = value.slice(0, start) + key + value.slice(end);
+    const start = at ?? el?.selectionStart ?? value.length;
+    const end = at ?? el?.selectionEnd ?? value.length;
+    const { next, caret } = insertToken(value, token, start, end);
     patch({ system_prompt: next });
-    const caret = start + key.length;
+    setTab('roteiro');
+    setPromptHighlight(true);
     window.setTimeout(() => {
-      if (!promptRef.current) return;
-      promptRef.current.focus();
-      promptRef.current.setSelectionRange(caret, caret);
+      const ta = promptRef.current;
+      if (!ta) return;
+      ta.focus();
+      ta.setSelectionRange(caret, caret);
+      ta.scrollIntoView({ block: 'nearest' });
     }, 0);
+    window.setTimeout(() => setPromptHighlight(false), 1200);
   };
 
   const handleSave = async (): Promise<boolean> => {
-    const friendly = findFriendlyIssue(form);
+    const friendly = findFriendlyIssue(form, agents);
     if (friendly) {
-      showToast(friendly, 'error');
+      setTab(friendly.tab);
+      showToast(friendly.message, 'error');
       return false;
     }
     const payload = toPayload(form);
     const parsed = AgentInputSchema.safeParse(payload);
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
+      const root = String(issue?.path[0] ?? '');
+      if (FIELD_TABS[root]) setTab(FIELD_TABS[root]);
       showToast(issue ? describeIssue(issue.path, describeZodIssue(issue)) : 'Dados inválidos', 'error');
       return false;
     }
     // PATCH (agente existente): só o que mudou desde o snapshot; api_key só vai quando digitada ou limpa.
     // POST (novo): payload completo.
-    const input = agentId ? diffPayload(payload, snapshotRef.current) : payload;
+    const input = agentId ? diffPayload(payload, snapshot) : payload;
+    if (agentId && Object.keys(input).length === 0) {
+      showToast('Nada para salvar', 'info');
+      return true;
+    }
     try {
       const saved = await save.mutateAsync({ id: agentId, input });
-      const snapshot = { ...payload };
-      delete snapshot.api_key;
-      snapshotRef.current = snapshot;
+      const next = { ...payload };
+      delete next.api_key;
+      setSnapshot(next);
       setAgentId(saved.id);
       setHasApiKey(!!saved.has_api_key);
       patch({ api_key: '', clear_api_key: false });
-      showToast(agentId ? 'Agente salvo' : 'Agente criado', 'success');
+      showToast(agentId ? 'Agente salvo' : 'Agente criado. Agora você pode enviar documentos e mídias e testar.', 'success');
       return true;
     } catch (err) {
       showToast(errorMessage(err, 'Falha ao salvar o agente'), 'error');
@@ -635,9 +822,18 @@ export const AgentEditor: React.FC<{
     }
   };
 
-  const handleSaveAndClose = async () => {
-    const ok = await handleSave();
-    if (ok) onClose();
+  /** Testar: um agente novo precisa existir no servidor, então salva antes de abrir o painel. */
+  const handleTest = async () => {
+    if (!agentId) {
+      const ok = await handleSave();
+      if (!ok) return;
+    }
+    setTestOpen(true);
+  };
+
+  const handleCancel = () => {
+    if (dirty) setConfirmDiscard(true);
+    else onClose();
   };
 
   const triggerSummary = [
@@ -649,11 +845,41 @@ export const AgentEditor: React.FC<{
     form.triggers.deal.enabled ? 'pipeline ligado' : 'pipeline desligado',
   ].join(', ');
 
+  const helperCandidates = agents.filter((a) => a.id !== agentId);
+  const disabledHelpers = helperCandidates.filter((a) => !a.enabled && !form.helper_agent_ids.includes(a.id)).map((a) => a.id);
+  const knowledgeCount = (docsQ.data?.length ?? 0) + (mediaQ.data?.length ?? 0);
+  const countBadge = (n: number) => (n > 0 ? <Badge tone="slate">{n}</Badge> : undefined);
+
+  const tabs: TabDef[] = [
+    { id: 'roteiro', label: 'Roteiro', icon: <FileText size={16} aria-hidden="true" /> },
+    {
+      id: 'conhecimento',
+      label: 'Conhecimento e mídias',
+      icon: <BookOpen size={16} aria-hidden="true" />,
+      badge: countBadge(knowledgeCount),
+    },
+    {
+      id: 'acoes',
+      label: 'Ações',
+      icon: <ListChecks size={16} aria-hidden="true" />,
+      badge: countBadge(form.custom_actions.length + form.outcomes.length),
+    },
+    {
+      id: 'gatilhos',
+      label: 'Gatilhos e números',
+      icon: <Zap size={16} aria-hidden="true" />,
+      badge: countBadge(form.connection_ids.length),
+    },
+    { id: 'config', label: 'Configurações', icon: <Settings size={16} aria-hidden="true" /> },
+  ];
+
+  const agentLabel = form.persona_name || form.name || 'agente';
+
   return (
-    <div className="space-y-4">
+    <div className={`space-y-4 transition-[padding] duration-200 ${testOpen ? 'lg:pr-[496px] xl:pr-[576px]' : ''}`}>
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3 min-w-0">
-          <button type="button" className={BTN_SECONDARY} onClick={onClose} aria-label="Voltar para a lista de agentes">
+          <button type="button" className={BTN_SECONDARY} onClick={handleCancel} aria-label="Voltar para a lista de agentes">
             <ArrowLeft size={16} aria-hidden="true" />
             Voltar
           </button>
@@ -662,7 +888,9 @@ export const AgentEditor: React.FC<{
               {agentId ? `Editar agente: ${form.name || 'sem nome'}` : 'Novo agente'}
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Salve para liberar o teste. Alterações só valem depois de salvar.
+              {agentId
+                ? 'Alterações só valem depois de salvar. Teste em qualquer aba pelo botão Testar.'
+                : 'Salve para liberar documentos, mídias e o teste. Você continua aqui depois de salvar.'}
             </p>
           </div>
         </div>
@@ -670,417 +898,480 @@ export const AgentEditor: React.FC<{
 
       {optionsQ.error ? <Notice tone="red">{errorMessage(optionsQ.error, 'Falha ao carregar as opções')}</Notice> : null}
 
-      <Section title="Identidade" description="Como o agente se apresenta e se está ligado." icon={<User size={16} />}>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Field label="Nome do agente" htmlFor="agent-name" help="Uso interno, aparece nas listas e execuções.">
-            <input
-              id="agent-name"
-              className={INPUT_CLASS}
-              value={form.name}
-              onChange={(e) => patch({ name: e.target.value })}
-              maxLength={120}
-              placeholder="Ex.: Pré-atendimento trabalhista"
-            />
-          </Field>
-          <Field
-            label="Nome da persona"
-            htmlFor="agent-persona"
-            help="Nome com que o agente se apresenta ao lead. Vazio usa o nome do agente."
-          >
-            <input
-              id="agent-persona"
-              className={INPUT_CLASS}
-              value={form.persona_name}
-              onChange={(e) => patch({ persona_name: e.target.value })}
-              maxLength={80}
-              placeholder="Ex.: Ana"
-            />
-          </Field>
-        </div>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Ligado</p>
-            <p className={HELP_CLASS}>Desligado, o agente não responde e não pode ser iniciado.</p>
-          </div>
-          <Toggle checked={form.enabled} onChange={(enabled) => patch({ enabled })} label="Agente ligado" />
-        </div>
-      </Section>
+      <Tabs tabs={tabs} value={tab} onChange={(id) => setTab(id as EditorTab)} ariaLabel="Seções do agente" idPrefix="agent-tab" />
 
-      <Section
-        title="Números"
-        description="Em quais números conectados este agente responde as conversas novas."
-        icon={<Phone size={16} />}
-      >
-        {connections.length === 0 ? (
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            Nenhum número conectado. Conecte um número em WhatsApp, Conexão.
+      {/* Roteiro */}
+      <TabPanel id="roteiro" active={tab === 'roteiro'} idPrefix="agent-tab" className="space-y-4">
+        <Panel
+          title="Identidade"
+          description="Como o agente se apresenta e se está ligado."
+          icon={<User size={16} />}
+          right={
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500 dark:text-slate-400">{form.enabled ? 'Ligado' : 'Desligado'}</span>
+              <Toggle checked={form.enabled} onChange={(enabled) => patch({ enabled })} label="Agente ligado" />
+            </div>
+          }
+        >
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Field label="Nome do agente" htmlFor="agent-name" help="Uso interno, aparece nas listas e execuções.">
+              <input
+                id="agent-name"
+                className={INPUT_CLASS}
+                value={form.name}
+                onChange={(e) => patch({ name: e.target.value })}
+                maxLength={120}
+                placeholder="Ex.: Pré-atendimento trabalhista"
+              />
+            </Field>
+            <Field
+              label="Nome da persona"
+              htmlFor="agent-persona"
+              help="Nome com que o agente se apresenta ao lead. Vazio usa o nome do agente."
+            >
+              <input
+                id="agent-persona"
+                className={INPUT_CLASS}
+                value={form.persona_name}
+                onChange={(e) => patch({ persona_name: e.target.value })}
+                maxLength={80}
+                placeholder="Ex.: Ana"
+              />
+            </Field>
+          </div>
+          {!form.enabled ? <p className={HELP_CLASS}>Desligado, o agente não responde e não pode ser iniciado.</p> : null}
+        </Panel>
+
+        <Panel
+          title="Roteiro"
+          description="As instruções que guiam o agente: papel, como conduzir, regras e tom. Teste e peça ajustes à IA pelo botão Testar."
+          icon={<FileText size={16} />}
+        >
+          <PromptEditor
+            id="agent-system-prompt"
+            value={form.system_prompt}
+            onChange={(system_prompt) => patch({ system_prompt })}
+            textareaRef={promptRef}
+            onInsertToken={insertPromptToken}
+            actions={form.custom_actions.filter((a) => a.key).map((a) => ({ key: a.key, label: a.label }))}
+            media={(mediaQ.data ?? []).map((m) => ({ name: m.name, kind: m.kind }))}
+            highlight={promptHighlight}
+          />
+        </Panel>
+      </TabPanel>
+
+      {/* Conhecimento e mídias */}
+      <TabPanel id="conhecimento" active={tab === 'conhecimento'} idPrefix="agent-tab" className="space-y-4">
+        <KnowledgePanel
+          agentId={agentId}
+          onInsertMedia={(name) => insertPromptToken(mediaToken(name))}
+          onRequestSave={() => void handleSave()}
+          saving={save.isPending}
+        />
+      </TabPanel>
+
+      {/* Ações */}
+      <TabPanel id="acoes" active={tab === 'acoes'} idPrefix="agent-tab" className="space-y-4">
+        <Panel
+          title="Ações durante a conversa"
+          description="O que o agente faz no meio do atendimento, sem encerrar: registrar, mover, rotular ou avisar outro sistema."
+          icon={<ListChecks size={16} />}
+        >
+          <CustomActionsEditor
+            value={form.custom_actions}
+            onChange={(custom_actions) => patch({ custom_actions })}
+            agents={agents}
+            options={options}
+            currentAgentId={agentId}
+            onInsertToken={(token) => insertPromptToken(token)}
+          />
+        </Panel>
+
+        <Panel
+          title="Quando o atendimento terminar"
+          description="Os resultados que o agente pode escolher ao encerrar e o que acontece em cada um."
+          icon={<Flag size={16} />}
+        >
+          <OutcomesEditor
+            value={form.outcomes}
+            onChange={(outcomes) => patch({ outcomes })}
+            agents={agents}
+            options={options}
+            currentAgentId={agentId}
+          />
+        </Panel>
+
+        <Panel
+          title="Agentes auxiliares"
+          description="O agente pode consultar estes agentes durante a conversa (ferramenta consultar_agente)."
+          icon={<Users size={16} />}
+        >
+          {agentsQ.isLoading ? (
+            <p className={HELP_CLASS}>Carregando agentes...</p>
+          ) : helperCandidates.length === 0 ? (
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Nenhum outro agente cadastrado. Crie outro agente (por exemplo, um especialista com os próprios documentos)
+              para usá-lo como auxiliar.
+            </p>
+          ) : (
+            <CheckList
+              items={helperCandidates}
+              selected={form.helper_agent_ids}
+              onToggle={toggleHelper}
+              disabledIds={disabledHelpers}
+              render={(a) => (
+                <>
+                  <span className="flex-1 min-w-0 truncate text-slate-900 dark:text-white">
+                    {a.name}
+                    {a.persona_name ? <span className="text-slate-500 dark:text-slate-400"> ({a.persona_name})</span> : null}
+                  </span>
+                  {!a.enabled ? <Badge tone="amber">Desligado</Badge> : null}
+                </>
+              )}
+            />
+          )}
+          <p className={HELP_CLASS}>
+            O auxiliar não fala com o lead: responde só a este agente, com o próprio roteiro e a própria base de
+            conhecimento. Agentes desligados não podem ser auxiliares.
           </p>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            {connections.map((c) => {
-              const checked = form.connection_ids.includes(c.id);
-              return (
-                <label
-                  key={c.id}
-                  className={`flex items-center gap-3 rounded-lg border px-3 py-2 cursor-pointer text-sm ${
-                    checked
-                      ? 'border-purple-300 dark:border-purple-500/40 bg-purple-50 dark:bg-purple-900/15'
-                      : 'border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-800'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500"
-                    checked={checked}
-                    onChange={(e) => toggleConnection(c.id, e.target.checked)}
-                  />
+        </Panel>
+
+        <Panel title="Ferramentas" description="Recursos extras que o agente pode usar na conversa." icon={<Calculator size={16} />}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Calculadora</p>
+              <p className={HELP_CLASS}>
+                Para contas (parcelas, prazos, percentuais) sem o modelo chutar números (ferramenta calcular).
+              </p>
+            </div>
+            <Toggle
+              checked={form.tools.calculator}
+              onChange={(calculator) => patch({ tools: { ...form.tools, calculator } })}
+              label="Calculadora"
+            />
+          </div>
+        </Panel>
+      </TabPanel>
+
+      {/* Gatilhos e números */}
+      <TabPanel id="gatilhos" active={tab === 'gatilhos'} idPrefix="agent-tab" className="space-y-4">
+        <Panel
+          title="Números"
+          description="Em quais números conectados este agente responde as conversas novas."
+          icon={<Phone size={16} />}
+        >
+          {connections.length === 0 ? (
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Nenhum número conectado. Conecte um número em WhatsApp, Conexão.
+            </p>
+          ) : (
+            <CheckList
+              items={connections}
+              selected={form.connection_ids}
+              onToggle={toggleConnection}
+              render={(c) => (
+                <>
                   <span className="flex-1 min-w-0 truncate text-slate-900 dark:text-white">{c.label}</span>
                   <Badge tone={c.status === 'connected' ? 'green' : 'amber'}>
                     {c.status === 'connected' ? 'Conectado' : c.status || 'Desconectado'}
                   </Badge>
-                </label>
-              );
-            })}
+                </>
+              )}
+            />
+          )}
+          <p className={HELP_CLASS}>Deixe vazio se este agente só recebe conversas de outro agente.</p>
+        </Panel>
+
+        <Panel title="Gatilhos" description={`Quando o agente entra em ação: ${triggerSummary}.`} icon={<Zap size={16} />}>
+          <TriggersFields value={form.triggers} onChange={(triggers) => patch({ triggers })} options={options} />
+        </Panel>
+      </TabPanel>
+
+      {/* Configurações */}
+      <TabPanel id="config" active={tab === 'config'} idPrefix="agent-tab" className="space-y-4">
+        <Panel title="Modelo" description="Provedor, modelo e criatividade." icon={<Cpu size={16} />}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Field label="Provedor" htmlFor="agent-provider">
+              <select
+                id="agent-provider"
+                className={INPUT_CLASS}
+                value={form.provider}
+                onChange={(e) => {
+                  const provider = e.target.value as AiProvider;
+                  setCustomModel(false);
+                  patch({ provider, model: firstModel(provider) });
+                }}
+              >
+                {AI_PROVIDERS.map((p) => (
+                  <option key={p} value={p}>
+                    {PROVIDER_LABELS[p] ?? p}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Modelo" htmlFor="agent-model">
+              <select
+                id="agent-model"
+                className={INPUT_CLASS}
+                value={modelSelectValue}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  if (next === CUSTOM_MODEL) {
+                    setCustomModel(true);
+                    if (isCatalogModel) patch({ model: '' });
+                    return;
+                  }
+                  setCustomModel(false);
+                  patch({ model: next });
+                }}
+              >
+                {catalog.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                    {m.hint ? ` (${m.hint})` : ''}
+                  </option>
+                ))}
+                <option value={CUSTOM_MODEL}>Outro (digitar ID)</option>
+              </select>
+              {modelSelectValue === CUSTOM_MODEL ? (
+                <input
+                  className={`${INPUT_CLASS} mt-2 font-mono`}
+                  value={form.model}
+                  onChange={(e) => patch({ model: e.target.value })}
+                  placeholder="ID do modelo no provedor"
+                  aria-label="ID do modelo"
+                  maxLength={120}
+                />
+              ) : null}
+            </Field>
           </div>
-        )}
-        <p className={HELP_CLASS}>Deixe vazio se este agente só recebe conversas de outro agente.</p>
-      </Section>
-
-      <Section
-        title="Gatilhos"
-        description={`Quando o agente entra em ação: ${triggerSummary}.`}
-        icon={<Zap size={16} />}
-      >
-        <TriggersFields value={form.triggers} onChange={(triggers) => patch({ triggers })} options={options} />
-      </Section>
-
-      <Section title="Modelo" description="Provedor, modelo, criatividade e chave da API." icon={<Cpu size={16} />}>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Field label="Provedor" htmlFor="agent-provider">
-            <select
-              id="agent-provider"
-              className={INPUT_CLASS}
-              value={form.provider}
-              onChange={(e) => {
-                const provider = e.target.value as AiProvider;
-                setCustomModel(false);
-                patch({ provider, model: firstModel(provider) });
-              }}
-            >
-              {AI_PROVIDERS.map((p) => (
-                <option key={p} value={p}>
-                  {PROVIDER_LABELS[p] ?? p}
-                </option>
-              ))}
-            </select>
+          <Field
+            label={`Temperatura: ${form.temperature.toFixed(2)}`}
+            htmlFor="agent-temperature"
+            help="Baixa = respostas mais previsíveis; alta = mais criativas. Para atendimento, entre 0,3 e 0,7."
+          >
+            <input
+              id="agent-temperature"
+              type="range"
+              min={0}
+              max={1.5}
+              step={0.05}
+              value={form.temperature}
+              onChange={(e) => patch({ temperature: Number(e.target.value) })}
+              className="w-full accent-purple-600"
+            />
           </Field>
-          <Field label="Modelo" htmlFor="agent-model">
-            <select
-              id="agent-model"
-              className={INPUT_CLASS}
-              value={modelSelectValue}
-              onChange={(e) => {
-                const next = e.target.value;
-                if (next === CUSTOM_MODEL) {
-                  setCustomModel(true);
-                  if (isCatalogModel) patch({ model: '' });
-                  return;
-                }
-                setCustomModel(false);
-                patch({ model: next });
-              }}
-            >
-              {catalog.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                  {m.hint ? ` (${m.hint})` : ''}
-                </option>
-              ))}
-              <option value={CUSTOM_MODEL}>Outro (digitar ID)</option>
-            </select>
-            {modelSelectValue === CUSTOM_MODEL ? (
-              <input
-                className={`${INPUT_CLASS} mt-2 font-mono`}
-                value={form.model}
-                onChange={(e) => patch({ model: e.target.value })}
-                placeholder="ID do modelo no provedor"
-                aria-label="ID do modelo"
-                maxLength={120}
-              />
-            ) : null}
-          </Field>
-        </div>
-        <Field
-          label={`Temperatura: ${form.temperature.toFixed(2)}`}
-          htmlFor="agent-temperature"
-          help="Baixa = respostas mais previsíveis; alta = mais criativas. Para atendimento, entre 0,3 e 0,7."
+        </Panel>
+
+        <Panel
+          title="Chave própria da API"
+          description="Opcional. Vazio usa a chave da organização configurada na Central de I.A."
+          icon={<KeyRound size={16} />}
         >
-          <input
-            id="agent-temperature"
-            type="range"
-            min={0}
-            max={1.5}
-            step={0.05}
-            value={form.temperature}
-            onChange={(e) => patch({ temperature: Number(e.target.value) })}
-            className="w-full accent-purple-600"
-          />
-        </Field>
-        <Field
-          label="Chave própria da API (opcional)"
-          htmlFor="agent-api-key"
-          help={
-            form.clear_api_key
-              ? 'A chave própria será removida ao salvar; o agente passará a usar a chave da organização.'
-              : hasApiKey
-                ? 'Este agente tem uma chave própria salva. Digite outra para substituir.'
-                : 'Vazio usa a chave da organização configurada na Central de I.A.'
-          }
-        >
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <KeyRound size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
-              <input
-                id="agent-api-key"
-                type="password"
-                autoComplete="off"
-                className={`${INPUT_CLASS} pl-9`}
-                value={form.api_key}
-                onChange={(e) => patch({ api_key: e.target.value, clear_api_key: false })}
-                placeholder={hasApiKey ? 'Chave própria configurada' : 'Usar chave da organização'}
-                maxLength={500}
-                disabled={form.clear_api_key}
-              />
+          <Field
+            label="Chave da API"
+            htmlFor="agent-api-key"
+            help={
+              form.clear_api_key
+                ? 'A chave própria será removida ao salvar; o agente passará a usar a chave da organização.'
+                : hasApiKey
+                  ? 'Este agente tem uma chave própria salva. Digite outra para substituir.'
+                  : 'Vazio usa a chave da organização configurada na Central de I.A.'
+            }
+          >
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <KeyRound size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+                <input
+                  id="agent-api-key"
+                  type="password"
+                  autoComplete="off"
+                  className={`${INPUT_CLASS} pl-9`}
+                  value={form.api_key}
+                  onChange={(e) => patch({ api_key: e.target.value, clear_api_key: false })}
+                  placeholder={hasApiKey ? 'Chave própria configurada' : 'Usar chave da organização'}
+                  maxLength={500}
+                  disabled={form.clear_api_key}
+                />
+              </div>
+              {hasApiKey ? (
+                form.clear_api_key ? (
+                  <button type="button" className={BTN_SMALL} onClick={() => patch({ clear_api_key: false })}>
+                    Manter chave
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className={BTN_SMALL}
+                    onClick={() => patch({ clear_api_key: true, api_key: '' })}
+                  >
+                    Usar chave da organização
+                  </button>
+                )
+              ) : null}
             </div>
-            {hasApiKey ? (
-              form.clear_api_key ? (
-                <button type="button" className={BTN_SMALL} onClick={() => patch({ clear_api_key: false })}>
-                  Manter chave
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className={BTN_SMALL}
-                  onClick={() => patch({ clear_api_key: true, api_key: '' })}
-                >
-                  Usar chave da organização
-                </button>
-              )
-            ) : null}
-          </div>
-        </Field>
-      </Section>
+          </Field>
+        </Panel>
 
-      <Section
-        title="Roteiro"
-        description="As instruções que guiam o agente. Use as variáveis para personalizar."
-        icon={<FileText size={16} />}
-      >
-        <AgentAssistPanel
-          provider={form.provider}
-          model={form.model}
-          personaName={form.persona_name}
-          currentPrompt={form.system_prompt}
-          outcomes={form.outcomes}
-          customActions={form.custom_actions}
-          onApply={(p) => patch(p)}
-        />
-        <div className="flex flex-wrap gap-1.5">
-          {PROMPT_VARIABLES.map((v) => (
-            <button
-              key={v.key}
-              type="button"
-              className="px-2 py-1 rounded-md text-xs font-mono bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-200 hover:bg-purple-100 dark:hover:bg-purple-900/30"
-              title={v.description}
-              onClick={() => insertVariable(v.key)}
+        <Panel
+          title="Comportamento"
+          description="Tempos de espera, histórico e pausa quando um atendente responde."
+          icon={<SlidersHorizontal size={16} />}
+        >
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Field
+              label="Espera para agrupar mensagens (segundos)"
+              htmlFor="agent-buffer"
+              help="O agente aguarda esse tempo para o lead terminar de digitar antes de responder. 0 a 60."
             >
-              {v.key}
-            </button>
-          ))}
-        </div>
-        <textarea
-          ref={promptRef}
-          id="agent-system-prompt"
-          className={`${TEXTAREA_CLASS} font-mono text-xs leading-relaxed min-h-[360px]`}
-          rows={22}
-          value={form.system_prompt}
-          onChange={(e) => patch({ system_prompt: e.target.value })}
-          aria-label="Roteiro do agente"
-          maxLength={60000}
-          spellCheck={false}
-        />
-        <Notice tone="blue">
-          Lembrete: cada quebra de linha da resposta vira uma mensagem separada no WhatsApp. Peça ao agente uma ideia por
-          linha, no máximo 3 linhas e nunca linhas em branco.
-        </Notice>
-      </Section>
-
-      <Section
-        title="Comportamento"
-        description="Tempos de espera, histórico e pausa quando um atendente responde."
-        icon={<SlidersHorizontal size={16} />}
-        defaultOpen={false}
-      >
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Field
-            label="Espera para agrupar mensagens (segundos)"
-            htmlFor="agent-buffer"
-            help="O agente aguarda esse tempo para o lead terminar de digitar antes de responder. 0 a 60."
-          >
-            <input
-              id="agent-buffer"
-              type="number"
-              min={0}
-              max={60}
-              className={INPUT_CLASS}
-              value={form.buffer_seconds}
-              onChange={(e) => patch({ buffer_seconds: readNumber(e.target.value) })}
-              onBlur={() => patch({ buffer_seconds: clampField('buffer_seconds', form.buffer_seconds) })}
-            />
-          </Field>
-          <Field
-            label="Mensagens de histórico"
-            htmlFor="agent-history"
-            help="Quantas mensagens anteriores o modelo enxerga. 5 a 200."
-          >
-            <input
-              id="agent-history"
-              type="number"
-              min={5}
-              max={200}
-              className={INPUT_CLASS}
-              value={form.history_limit}
-              onChange={(e) => patch({ history_limit: readNumber(e.target.value) })}
-              onBlur={() => patch({ history_limit: clampField('history_limit', form.history_limit) })}
-            />
-          </Field>
-          <Field
-            label="Intervalo entre linhas (ms)"
-            htmlFor="agent-line-delay"
-            help="Pausa entre cada mensagem enviada, para parecer natural. 0 a 10000."
-          >
-            <input
-              id="agent-line-delay"
-              type="number"
-              min={0}
-              max={10000}
-              step={100}
-              className={INPUT_CLASS}
-              value={form.line_delay_ms}
-              onChange={(e) => patch({ line_delay_ms: readNumber(e.target.value) })}
-              onBlur={() => patch({ line_delay_ms: clampField('line_delay_ms', form.line_delay_ms) })}
-            />
-          </Field>
-          <Field
-            label="Pausa após atendente responder (minutos)"
-            htmlFor="agent-human-pause"
-            help="Quando alguém da equipe responde, o agente pausa por esse tempo. 0 = só retoma manualmente."
-          >
-            <input
-              id="agent-human-pause"
-              type="number"
-              min={0}
-              max={1440}
-              className={INPUT_CLASS}
-              value={form.human_pause_minutes}
-              onChange={(e) => patch({ human_pause_minutes: readNumber(e.target.value) })}
-              onBlur={() => patch({ human_pause_minutes: clampField('human_pause_minutes', form.human_pause_minutes) })}
-            />
-          </Field>
-        </div>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Só conversas novas</p>
-            <p className={HELP_CLASS}>
-              Ligado, o agente não entra em conversas que já tiveram mensagens enviadas pela equipe.
-            </p>
+              <input
+                id="agent-buffer"
+                type="number"
+                min={0}
+                max={60}
+                className={INPUT_CLASS}
+                value={form.buffer_seconds}
+                onChange={(e) => patch({ buffer_seconds: readNumber(e.target.value) })}
+                onBlur={() => patch({ buffer_seconds: clampField('buffer_seconds', form.buffer_seconds) })}
+              />
+            </Field>
+            <Field
+              label="Mensagens de histórico"
+              htmlFor="agent-history"
+              help="Quantas mensagens anteriores o modelo enxerga. 5 a 200."
+            >
+              <input
+                id="agent-history"
+                type="number"
+                min={5}
+                max={200}
+                className={INPUT_CLASS}
+                value={form.history_limit}
+                onChange={(e) => patch({ history_limit: readNumber(e.target.value) })}
+                onBlur={() => patch({ history_limit: clampField('history_limit', form.history_limit) })}
+              />
+            </Field>
+            <Field
+              label="Intervalo entre linhas (ms)"
+              htmlFor="agent-line-delay"
+              help="Pausa entre cada mensagem enviada, para parecer natural. 0 a 10000."
+            >
+              <input
+                id="agent-line-delay"
+                type="number"
+                min={0}
+                max={10000}
+                step={100}
+                className={INPUT_CLASS}
+                value={form.line_delay_ms}
+                onChange={(e) => patch({ line_delay_ms: readNumber(e.target.value) })}
+                onBlur={() => patch({ line_delay_ms: clampField('line_delay_ms', form.line_delay_ms) })}
+              />
+            </Field>
+            <Field
+              label="Pausa após atendente responder (minutos)"
+              htmlFor="agent-human-pause"
+              help="Quando alguém da equipe responde, o agente pausa por esse tempo. 0 = só retoma manualmente."
+            >
+              <input
+                id="agent-human-pause"
+                type="number"
+                min={0}
+                max={1440}
+                className={INPUT_CLASS}
+                value={form.human_pause_minutes}
+                onChange={(e) => patch({ human_pause_minutes: readNumber(e.target.value) })}
+                onBlur={() => patch({ human_pause_minutes: clampField('human_pause_minutes', form.human_pause_minutes) })}
+              />
+            </Field>
           </div>
-          <Toggle
-            checked={form.only_new_conversations}
-            onChange={(only_new_conversations) => patch({ only_new_conversations })}
-            label="Atender só conversas novas"
-          />
-        </div>
-      </Section>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Só conversas novas</p>
+              <p className={HELP_CLASS}>
+                Ligado, o agente não entra em conversas que já tiveram mensagens enviadas pela equipe.
+              </p>
+            </div>
+            <Toggle
+              checked={form.only_new_conversations}
+              onChange={(only_new_conversations) => patch({ only_new_conversations })}
+              label="Atender só conversas novas"
+            />
+          </div>
+        </Panel>
 
-      <Section
-        title="Resultados e ações"
-        description="Como o agente pode encerrar o atendimento e o que acontece em cada caso."
-        icon={<Flag size={16} />}
-        defaultOpen={form.outcomes.length > 0}
-      >
-        <OutcomesEditor
-          value={form.outcomes}
-          onChange={(outcomes) => patch({ outcomes })}
-          agents={agents}
-          options={options}
-          currentAgentId={agentId}
-        />
-      </Section>
-
-      <Section
-        title="Ações durante a conversa"
-        description="O que o agente faz no meio do atendimento, sem encerrar: registrar, mover, rotular ou avisar outro sistema."
-        icon={<ListChecks size={16} />}
-        defaultOpen={form.custom_actions.length > 0}
-      >
-        <CustomActionsEditor
-          value={form.custom_actions}
-          onChange={(custom_actions) => patch({ custom_actions })}
-          agents={agents}
-          options={options}
-          currentAgentId={agentId}
-        />
-      </Section>
-
-      <Section
-        title="Webhooks"
-        description="Avise outros sistemas quando algo acontecer no atendimento."
-        icon={<Webhook size={16} />}
-        defaultOpen={form.webhooks.length > 0}
-      >
-        <WebhooksEditor value={form.webhooks} onChange={(webhooks) => patch({ webhooks })} />
-      </Section>
+        <Panel
+          title="Webhooks"
+          description="Avise outros sistemas quando algo acontecer no atendimento."
+          icon={<Webhook size={16} />}
+        >
+          <WebhooksEditor value={form.webhooks} onChange={(webhooks) => patch({ webhooks })} />
+        </Panel>
+      </TabPanel>
 
       {/* Barra fixa inferior */}
       <div className="sticky bottom-0 z-10 -mx-1 px-1 pb-1">
         <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur border border-slate-200 dark:border-white/10 rounded-xl shadow-lg p-3 flex items-center justify-between gap-2 flex-wrap">
-          <button
-            type="button"
-            className={BTN_SECONDARY}
-            onClick={() => setTestOpen(true)}
-            disabled={!agentId || save.isPending}
-            title={agentId ? 'Abrir o chat de teste' : 'Salve o agente antes de testar'}
-          >
-            <FlaskConical size={16} aria-hidden="true" />
-            Testar
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className={BTN_SECONDARY}
+              onClick={() => void handleTest()}
+              disabled={save.isPending}
+              title={agentId ? 'Abrir o chat de teste' : 'Salva o agente e abre o chat de teste'}
+              aria-expanded={testOpen}
+            >
+              <FlaskConical size={16} aria-hidden="true" />
+              Testar
+            </button>
+            {dirty ? (
+              <span className="text-xs text-amber-700 dark:text-amber-300" role="status">
+                Alterações não salvas
+              </span>
+            ) : null}
+          </div>
           <div className="flex items-center gap-2">
-            <button type="button" className={BTN_SECONDARY} onClick={onClose} disabled={save.isPending}>
+            <button type="button" className={BTN_SECONDARY} onClick={handleCancel} disabled={save.isPending}>
               Cancelar
             </button>
-            <button type="button" className={BTN_SECONDARY} onClick={() => void handleSave()} disabled={save.isPending}>
+            <button type="button" className={BTN_PRIMARY} onClick={() => void handleSave()} disabled={save.isPending}>
               {save.isPending ? <Loader2 size={16} className="animate-spin" aria-hidden="true" /> : <Save size={16} aria-hidden="true" />}
               Salvar
-            </button>
-            <button type="button" className={BTN_PRIMARY} onClick={() => void handleSaveAndClose()} disabled={save.isPending}>
-              {save.isPending ? <Loader2 size={16} className="animate-spin" aria-hidden="true" /> : <Save size={16} aria-hidden="true" />}
-              Salvar e voltar
             </button>
           </div>
         </div>
       </div>
 
-      {agentId ? (
-        <Modal
-          isOpen={testOpen}
-          onClose={() => setTestOpen(false)}
-          title={`Testar: ${form.persona_name || form.name || 'agente'}`}
-          size="xl"
-        >
-          <AgentTestChat agentId={agentId} agentName={form.persona_name || form.name} />
-        </Modal>
-      ) : null}
+      <AgentTestDrawer
+        open={testOpen}
+        onClose={() => setTestOpen(false)}
+        agentId={agentId}
+        agentName={agentLabel}
+        provider={form.provider}
+        model={form.model}
+        currentPrompt={form.system_prompt}
+        dirty={dirty}
+        saving={save.isPending}
+        onSave={handleSave}
+        onApplyPrompt={(system_prompt) => {
+          patch({ system_prompt });
+          setTab('roteiro');
+        }}
+      />
+
+      <ConfirmModal
+        isOpen={confirmDiscard}
+        onClose={() => setConfirmDiscard(false)}
+        onConfirm={() => {
+          setConfirmDiscard(false);
+          onClose();
+        }}
+        title="Descartar alterações?"
+        message="Há alterações que ainda não foram salvas. Ao sair, elas se perdem."
+        confirmText="Sair sem salvar"
+        cancelText="Continuar editando"
+        variant="danger"
+      />
     </div>
   );
 };

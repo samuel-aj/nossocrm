@@ -847,6 +847,11 @@ export function WhatsAppConnectionSettings() {
               // e salvar converteria o modo por baixo dos panos)
               const rowEditable = (c.provider || '').toLowerCase() === 'meta_cloud';
               const rowOn = c.status === 'connected';
+              // ID da conexão: sempre para meta_cloud; para QR (evolution) e
+              // evolution_business só quando conectada. O espelho do webhook
+              // continua só para meta_cloud: a função da Evolution não repassa
+              // o payload e a rota do espelho recusa outros provedores.
+              const rowIdVisible = rowEditable || rowOn;
               const rowPairing = qrTargetId === c.id && !rowOn;
               const rowEditing = bizOpen && editingConnId === c.id;
               return (
@@ -949,7 +954,7 @@ export function WhatsAppConnectionSettings() {
                             Reconfigurar webhook
                           </button>
                         )}
-                        {rowEditable && (
+                        {rowIdVisible && (
                           <button
                             type="button"
                             onClick={() => {
@@ -958,7 +963,11 @@ export function WhatsAppConnectionSettings() {
                                 () => addToast(`Connection ID: ${c.id}`, 'info')
                               );
                             }}
-                            title={`ID desta conexão para integrações (n8n, agente de IA). Clique pra copiar: ${c.id}`}
+                            title={
+                              rowEditable
+                                ? `ID desta conexão para integrações (n8n, agente de IA). Clique pra copiar: ${c.id}`
+                                : `ID desta conexão para integrações (n8n, agente de IA). Para receber em outro sistema as mensagens já tratadas pelo CRM, use Configurações > Integrações > Webhooks (Follow-up), eventos whatsapp.message.received e whatsapp.message.sent, e filtre por connection.id. Clique pra copiar: ${c.id}`
+                            }
                             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 text-xs font-bold hover:bg-slate-50 dark:hover:bg-white/10 transition-colors"
                           >
                             <Copy size={14} /> ID da conexão <span className="font-mono font-normal">{c.id.slice(0, 8)}…</span>
@@ -992,6 +1001,20 @@ export function WhatsAppConnectionSettings() {
                               A Meta entrega os eventos de um número para <b>um</b> destino. Se outro sistema for usar este número
                               (outro CRM, automação), não configure o webhook lá: cole aqui a URL do webhook dele. O CRM recebe da
                               Meta e repassa o payload original (assinado com o app secret) para essa URL.
+                            </p>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-2">
+                              Cabeçalhos enviados no repasse: <span className="font-mono">content-type: application/json</span>,{' '}
+                              <span className="font-mono">user-agent: NossoCRM-Webhook-Mirror/1.0</span> e{' '}
+                              <span className="font-mono">x-hub-signature-256</span> (HMAC SHA-256 do corpo com a Chave Secreta do
+                              App, igual ao que a Meta envia, quando ela estiver salva na conexão). Os pings de verificação do
+                              próprio CRM não são repassados.
+                            </p>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-2">
+                              Dica: para receber só as mensagens já tratadas pelo CRM (sem o payload bruto da Meta), use
+                              Configurações &gt; Integrações &gt; Webhooks (Follow-up), marque os eventos{' '}
+                              <span className="font-mono">whatsapp.message.received</span> e{' '}
+                              <span className="font-mono">whatsapp.message.sent</span> e filtre pelo ID da conexão (campo{' '}
+                              <span className="font-mono">connection.id</span> do payload).
                             </p>
                             <div className="flex items-center gap-2 flex-wrap">
                               <input

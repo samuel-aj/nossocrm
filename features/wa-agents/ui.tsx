@@ -4,8 +4,9 @@
  * Peças visuais compartilhadas das telas de Agentes de IA e Robôs.
  * Segue o visual da Central de I.A (AIConfigSection).
  */
-import React, { useId, useState } from 'react';
-import { ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import React, { useEffect, useId, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { ChevronDown, ChevronUp, GripVertical, Loader2, X } from 'lucide-react';
 
 export const CARD_CLASS =
   'bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/5 rounded-xl p-4 shadow-sm space-y-4';
@@ -268,4 +269,273 @@ export function describeZodIssue(issue: { code?: string; message: string }): str
 export function newId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** Tamanho de arquivo legível em pt-BR (B, KB, MB). */
+export function formatBytes(n: number | null | undefined): string {
+  if (typeof n !== 'number' || !Number.isFinite(n) || n < 0) return '';
+  if (n < 1024) return `${n} B`;
+  const kb = n / 1024;
+  if (kb < 1024) return `${kb.toLocaleString('pt-BR', { maximumFractionDigits: kb < 10 ? 1 : 0 })} KB`;
+  const mb = kb / 1024;
+  return `${mb.toLocaleString('pt-BR', { maximumFractionDigits: mb < 10 ? 1 : 0 })} MB`;
+}
+
+/** Cartão fixo (não colapsável) com cabeçalho: ícone, título, descrição e um espaço à direita. */
+export function Panel({
+  title,
+  description,
+  icon,
+  right,
+  children,
+  className,
+}: {
+  title: string;
+  description?: React.ReactNode;
+  icon?: React.ReactNode;
+  right?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={`${CARD_CLASS} ${className ?? ''}`} aria-label={title}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          {icon ? (
+            <span className="p-1.5 bg-purple-100 dark:bg-purple-900/20 rounded-lg text-purple-600 dark:text-purple-400 shrink-0">
+              {icon}
+            </span>
+          ) : null}
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{title}</h3>
+            {description ? <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{description}</p> : null}
+          </div>
+        </div>
+        {right ? <div className="shrink-0">{right}</div> : null}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------- Abas
+
+export type TabDef = {
+  id: string;
+  label: string;
+  icon?: React.ReactNode;
+  /** Contador ou etiqueta ao lado do rótulo */
+  badge?: React.ReactNode;
+  title?: string;
+};
+
+/** Barra de abas (role tablist) com navegação por setas, Home e End. */
+export function Tabs({
+  tabs,
+  value,
+  onChange,
+  ariaLabel,
+  idPrefix = 'tab',
+}: {
+  tabs: TabDef[];
+  value: string;
+  onChange: (id: string) => void;
+  ariaLabel: string;
+  idPrefix?: string;
+}) {
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const idx = tabs.findIndex((t) => t.id === value);
+    if (idx < 0 || tabs.length === 0) return;
+    let next = -1;
+    if (e.key === 'ArrowRight') next = (idx + 1) % tabs.length;
+    else if (e.key === 'ArrowLeft') next = (idx - 1 + tabs.length) % tabs.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = tabs.length - 1;
+    if (next < 0) return;
+    e.preventDefault();
+    onChange(tabs[next].id);
+    document.getElementById(`${idPrefix}-${tabs[next].id}`)?.focus();
+  };
+  return (
+    <div
+      role="tablist"
+      aria-label={ariaLabel}
+      onKeyDown={onKeyDown}
+      className="flex items-end gap-1 overflow-x-auto border-b border-slate-200 dark:border-white/10"
+    >
+      {tabs.map((t) => {
+        const active = t.id === value;
+        return (
+          <button
+            key={t.id}
+            id={`${idPrefix}-${t.id}`}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            aria-controls={`${idPrefix}panel-${t.id}`}
+            tabIndex={active ? 0 : -1}
+            title={t.title}
+            onClick={() => onChange(t.id)}
+            className={`inline-flex items-center gap-2 whitespace-nowrap px-3 py-2.5 -mb-px border-b-2 text-sm font-medium transition-colors ${
+              active
+                ? 'border-purple-600 text-purple-700 dark:text-purple-300'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:border-slate-300 dark:hover:border-white/20'
+            }`}
+          >
+            {t.icon}
+            {t.label}
+            {t.badge}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Conteúdo de uma aba. Fica montado mesmo inativo (mantém campos, cursor do
+ * roteiro e rolagem) e some com o atributo `hidden`.
+ */
+export function TabPanel({
+  id,
+  active,
+  idPrefix = 'tab',
+  children,
+  className,
+}: {
+  id: string;
+  active: boolean;
+  idPrefix?: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      id={`${idPrefix}panel-${id}`}
+      role="tabpanel"
+      aria-labelledby={`${idPrefix}-${id}`}
+      hidden={!active}
+      className={className}
+    >
+      {children}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- Chips arrastáveis
+
+/**
+ * Chip de token do roteiro: clique insere no cursor; arrastar leva o token
+ * (dataTransfer 'text/plain') até o ponto do texto onde for solto.
+ */
+export function TokenChip({
+  token,
+  label,
+  title,
+  tone = 'slate',
+  icon,
+  onInsert,
+}: {
+  token: string;
+  label?: string;
+  title?: string;
+  tone?: 'slate' | 'purple' | 'green' | 'blue' | 'amber';
+  icon?: React.ReactNode;
+  onInsert?: (token: string) => void;
+}) {
+  const tones: Record<string, string> = {
+    slate:
+      'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200 dark:bg-white/10 dark:border-white/10 dark:text-slate-200 dark:hover:bg-white/20',
+    purple:
+      'bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100 dark:bg-purple-900/20 dark:border-purple-500/30 dark:text-purple-300 dark:hover:bg-purple-900/40',
+    green:
+      'bg-green-50 border-green-200 text-green-700 hover:bg-green-100 dark:bg-green-900/20 dark:border-green-500/30 dark:text-green-300 dark:hover:bg-green-900/40',
+    blue: 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 dark:bg-blue-900/20 dark:border-blue-500/30 dark:text-blue-300 dark:hover:bg-blue-900/40',
+    amber:
+      'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100 dark:bg-amber-900/20 dark:border-amber-500/30 dark:text-amber-200 dark:hover:bg-amber-900/40',
+  };
+  return (
+    <button
+      type="button"
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData('text/plain', token);
+        e.dataTransfer.effectAllowed = 'copy';
+      }}
+      onClick={() => onInsert?.(token)}
+      title={title ?? `Clique para inserir no cursor ou arraste até o ponto do roteiro: ${token}`}
+      aria-label={`Inserir ${label ?? token} no roteiro`}
+      className={`inline-flex items-center gap-1 max-w-full pl-1 pr-2 py-1 rounded-md text-xs font-mono border cursor-grab active:cursor-grabbing select-none transition-colors ${tones[tone]}`}
+    >
+      <GripVertical size={12} className="opacity-50 shrink-0" aria-hidden="true" />
+      {icon}
+      <span className="truncate">{label ?? token}</span>
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------- Painel lateral
+
+/**
+ * Painel lateral à direita (não modal: a tela atrás continua editável).
+ * Renderiza num portal no body; Esc fecha. Fica montado fechado para
+ * preservar o estado (ex.: a conversa do chat de teste).
+ */
+export function Drawer({
+  open,
+  onClose,
+  title,
+  description,
+  headerRight,
+  children,
+  widthClass = 'sm:w-[480px] xl:w-[560px]',
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  description?: React.ReactNode;
+  headerRight?: React.ReactNode;
+  children: React.ReactNode;
+  widthClass?: string;
+}) {
+  const titleId = useId();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!mounted) return null;
+  return createPortal(
+    <aside
+      role="dialog"
+      aria-labelledby={titleId}
+      aria-hidden={!open}
+      className={`fixed inset-y-0 right-0 z-[9990] w-full ${widthClass} max-w-full flex flex-col bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-white/10 shadow-2xl transition-transform duration-200 ${
+        open ? 'translate-x-0' : 'translate-x-full invisible'
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3 px-4 py-3 border-b border-slate-200 dark:border-white/10">
+        <div className="min-w-0">
+          <h2 id={titleId} className="text-base font-semibold text-slate-900 dark:text-white truncate">
+            {title}
+          </h2>
+          {description ? <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{description}</p> : null}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {headerRight}
+          <button type="button" className={BTN_ICON} onClick={onClose} aria-label="Fechar painel">
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+      <div className="flex-1 min-h-0 flex flex-col">{children}</div>
+    </aside>,
+    document.body
+  );
 }

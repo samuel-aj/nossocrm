@@ -11,9 +11,19 @@ import { MODEL_CATALOG, PROMPT_VARIABLES, PROVIDER_LABELS } from './catalog';
 import { WaAgentError } from './errors';
 import { getOrganizationApiKey, supportsTemperature } from './model';
 import { normalizeKeyword } from './text';
-import { AI_PROVIDERS, type AgentProvider, type AssistInput, type AssistResult, type AssistSuggestion } from './types';
+import {
+  AI_PROVIDERS,
+  type AgentProvider,
+  type AssistExample,
+  type AssistInput,
+  type AssistResult,
+  type AssistSuggestion,
+} from './types';
 
 const MAX_SUGGESTIONS = 12;
+/** Mensagens do chat de teste usadas como exemplo no ajuste (as últimas). */
+const MAX_EXAMPLES = 12;
+const EXAMPLE_MAX_CHARS = 600;
 
 /** Esquema do objeto gerado pelo modelo. */
 const AssistObjectSchema = z.object({
@@ -50,6 +60,8 @@ export function buildAssistSystemPrompt(): string {
 
 ## COMO O AGENTE FUNCIONA NO CRM
 - O roteiro é o system prompt do agente. O CRM acrescenta sozinho, depois do roteiro, as instruções técnicas (regra de divisão das mensagens, dados salvos, resultados do encerramento, ações). Não repita nomes de ferramenta em excesso: o roteiro deve ser natural.
+- O CRM também injeta sozinho o contexto oculto: data e hora, nome e telefone do lead, dados do negócio (etapa, campos do cadastro), histórico da conversa e trechos da base de conhecimento. NÃO escreva no roteiro linhas como "Agora é {{data_hora}}" ou "Você está falando com {{nome_lead}}": use as variáveis só quando fizer sentido no texto (ex.: cumprimentar pelo {{primeiro_nome}}).
+- Marcadores de momento exato (preserve-os quando já existirem no roteiro): [[acao:chave]] indica onde o agente deve chamar executar_acao com aquela chave; [[midia:nome]] indica onde deve enviar a mídia cadastrada com aquele nome (ferramenta enviar_midia). Não invente marcadores de ações ou mídias que o roteiro atual não cita.
 - O agente conversa pelo WhatsApp. Cada quebra de linha da resposta vira uma mensagem separada: uma ideia por linha, no máximo 3 linhas por resposta, nunca linhas em branco, sem markdown (negrito, títulos, listas) nas respostas ao cliente.
 - O agente NÃO é advogado e não dá parecer jurídico: faz a triagem, coleta as informações e encaminha para a equipe.
 - Encerramento: quando tiver o que precisa (ou ficar claro que o caso não é da casa), o agente escreve a mensagem final e, na mesma resposta, DEPOIS dela, chama a ferramenta encerrar_atendimento uma única vez informando o resultado (uma das chaves configuradas) e um resumo objetivo (quem, o quê, quando, onde, provas, urgência). Depois disso não continua a conversa.
@@ -59,7 +71,7 @@ ${vars}
 
 ## FORMATO DO ROTEIRO (system_prompt)
 Use exatamente estas seções, em markdown simples (só títulos com #), nesta ordem:
-# PAPEL (quem é a persona, para quem trabalha, o que faz e o que NÃO faz; use {{nome_agente}}, {{nome_escritorio}}, {{data_hora}}, {{nome_lead}}, {{telefone}} e o contexto do negócio {{negocio.titulo}} / {{negocio.etapa}})
+# PAPEL (quem é a persona, para quem trabalha, o que faz e o que NÃO faz; use {{nome_agente}} e {{nome_escritorio}}; sem repetir data, lead ou negócio, que o CRM injeta)
 # COMO COMEÇAR (cumprimentar pelo {{primeiro_nome}}, apresentar-se uma única vez, não pedir para repetir o que já foi dito, continuar de onde parou quando há histórico)
 # O QUE DESCOBRIR (uma pergunta por vez) (lista numerada das informações a coletar, específica da área; instrução de fazer UMA pergunta por mensagem e não repetir perguntas já respondidas)
 # ENCERRAMENTO (quando encerrar, o que dizer na mensagem final, chamar encerrar_atendimento uma única vez com o resultado certo)
@@ -72,17 +84,39 @@ Use exatamente estas seções, em markdown simples (só títulos com #), nesta o
 - custom_actions: 0 a 5 ações durante a conversa, com chave, rótulo e descrição em linguagem natural de quando acontecer. Não mencione as ações na seção ENCERRAMENTO.`;
 }
 
+/** Instrução do ajuste: `instruction` ou seu sinônimo `feedback` ("o que o agente fez de errado"). */
+export function adjustInstruction(input: Pick<AssistInput, 'instruction' | 'feedback'>): string {
+  return (input.instruction ?? '').trim() || (input.feedback ?? '').trim();
+}
+
+/** Últimas mensagens do chat de teste em texto ("Cliente:" / "Agente:"), para contextualizar o ajuste. */
+export function formatAssistExamples(examples: AssistExample[] | undefined | null): string {
+  const items = (examples ?? [])
+    .map(e => ({ role: e.role, text: (e.text ?? '').replace(/\s+/g, ' ').trim() }))
+    .filter(e => e.text)
+    .slice(-MAX_EXAMPLES);
+  if (items.length === 0) return '';
+  return items
+    .map(e => `${e.role === 'assistant' ? 'Agente' : 'Cliente'}: ${e.text.length > EXAMPLE_MAX_CHARS ? `${e.text.slice(0, EXAMPLE_MAX_CHARS)}…` : e.text}`)
+    .join('\n');
+}
+
 function buildUserPrompt(input: AssistInput): string {
   const description = (input.description ?? '').trim();
   const current = (input.current_prompt ?? '').trim();
-  const instruction = (input.instruction ?? '').trim();
   switch (input.mode) {
     case 'generate':
       return `Crie do zero o roteiro de um agente de pré-atendimento a partir desta descrição feita pelo administrador do CRM:\n\n"""\n${description}\n"""\n\nEntregue persona_name, system_prompt completo (todas as seções), outcomes e custom_actions coerentes com a descrição.`;
     case 'improve':
       return `Reescreva o roteiro abaixo corrigindo lacunas e deixando-o completo nas convenções do CRM (todas as seções, uma pergunta por vez, encerramento com encerrar_atendimento, regras invioláveis, tom, regra de divisão). MANTENHA o conteúdo, a área, a persona e as decisões do autor: melhore, não substitua. Sugira outcomes e custom_actions coerentes com o roteiro (se ele já cita resultados, mantenha as mesmas chaves).\n\nRoteiro atual:\n"""\n${current}\n"""`;
-    case 'adjust':
-      return `Aplique a instrução abaixo ao roteiro atual, mudando só o necessário e preservando todo o resto (estrutura, persona, seções, chaves dos resultados). Devolva o roteiro completo já ajustado, além de persona_name, outcomes e custom_actions coerentes com o resultado.\n\nInstrução do administrador:\n"""\n${instruction}\n"""\n\nRoteiro atual:\n"""\n${current}\n"""`;
+    case 'adjust': {
+      const instruction = adjustInstruction(input);
+      const examples = formatAssistExamples(input.examples);
+      const exampleBlock = examples
+        ? `\n\nTrecho da conversa de teste em que o problema apareceu (últimas mensagens; "Agente" é o roteiro atual em ação):\n"""\n${examples}\n"""`
+        : '';
+      return `Reescreva o roteiro aplicando a correção pedida, mantendo todo o resto igual (estrutura, persona, seções, chaves dos resultados, marcadores [[acao:...]] e [[midia:...]]). Mude só o necessário para o problema não se repetir. Devolva o roteiro completo já ajustado, além de persona_name, outcomes e custom_actions coerentes com o resultado (mantenha as chaves existentes).\n\nCorreção pedida pelo administrador (o que o agente fez de errado ou o que deve mudar):\n"""\n${instruction}\n"""${exampleBlock}\n\nRoteiro atual:\n"""\n${current}\n"""`;
+    }
     default:
       return description;
   }
@@ -94,7 +128,7 @@ export function validateAssistInput(input: AssistInput): string | null {
   if (input.mode === 'improve' && !(input.current_prompt ?? '').trim()) return 'Não há roteiro para melhorar';
   if (input.mode === 'adjust') {
     if (!(input.current_prompt ?? '').trim()) return 'Não há roteiro para ajustar';
-    if (!(input.instruction ?? '').trim()) return 'Informe o ajuste desejado';
+    if (!adjustInstruction(input)) return 'Informe o ajuste desejado';
   }
   return null;
 }

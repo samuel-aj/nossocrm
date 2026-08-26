@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeSuggestions, slugifyKey, validateAssistInput } from './assist';
+import { adjustInstruction, formatAssistExamples, normalizeSuggestions, slugifyKey, validateAssistInput } from './assist';
+import { AssistInputSchema } from './types';
 
 describe('slugifyKey', () => {
   it('gera chave válida (minúsculas, sem acento, hífens) e limita a 40 caracteres', () => {
@@ -35,5 +36,35 @@ describe('validateAssistInput', () => {
     expect(validateAssistInput({ mode: 'improve' })).toBeTruthy();
     expect(validateAssistInput({ mode: 'adjust', current_prompt: '# PAPEL' })).toBeTruthy();
     expect(validateAssistInput({ mode: 'adjust', current_prompt: '# PAPEL', instruction: 'mais curto' })).toBeNull();
+  });
+
+  it('adjust aceita feedback como sinônimo de instruction', () => {
+    expect(validateAssistInput({ mode: 'adjust', current_prompt: '# PAPEL', feedback: 'se apresentou duas vezes' })).toBeNull();
+    expect(adjustInstruction({ feedback: ' não ofereça desconto ' })).toBe('não ofereça desconto');
+    expect(adjustInstruction({ instruction: 'a', feedback: 'b' })).toBe('a');
+  });
+});
+
+describe('formatAssistExamples', () => {
+  it('formata as últimas mensagens do teste como Cliente/Agente e ignora vazias', () => {
+    expect(
+      formatAssistExamples([
+        { role: 'user', text: 'Oi,\n tudo bem?' },
+        { role: 'assistant', text: '   ' },
+        { role: 'assistant', text: 'Olá! Sou a Ana.' },
+      ])
+    ).toBe('Cliente: Oi, tudo bem?\nAgente: Olá! Sou a Ana.');
+    expect(formatAssistExamples(undefined)).toBe('');
+  });
+
+  it('AssistInputSchema aceita feedback e examples', () => {
+    const parsed = AssistInputSchema.parse({
+      mode: 'adjust',
+      current_prompt: '# PAPEL',
+      feedback: 'ele se apresentou duas vezes',
+      examples: [{ role: 'user', text: 'oi' }],
+    });
+    expect(parsed.feedback).toBe('ele se apresentou duas vezes');
+    expect(parsed.examples).toHaveLength(1);
   });
 });

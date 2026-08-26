@@ -11,7 +11,14 @@ import type { ZodError } from 'zod';
 import { requireOrgUser, isOrgAdmin, json, type OrgUser } from '@/lib/whatsapp/api';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { isWaAgentsBetaEnabled } from '@/lib/wa-agents/beta';
-import type { AgentTriggers, BotStep } from '@/lib/wa-agents/types';
+import { normalizeKeyword } from '@/lib/wa-agents/text';
+import {
+  WA_AGENT_FILES_BUCKET,
+  type AgentMediaKind,
+  type AgentMediaRow,
+  type AgentTriggers,
+  type BotStep,
+} from '@/lib/wa-agents/types';
 
 /** Versão sem a chave da API (has_api_key): implementação única em types.ts. */
 export { toAgentPublic } from '@/lib/wa-agents/types';
@@ -121,6 +128,82 @@ export async function connectionsBelongToOrg(admin: SupabaseClient, orgId: strin
 /** Resposta padrão quando um número informado não é da organização. */
 export function connectionNotFoundError(): Response {
   return json({ error: 'Número não encontrado nesta organização', code: 'CONNECTION_NOT_FOUND' }, 400);
+}
+
+/** true quando o agente existe na organização. */
+export async function agentBelongsToOrg(admin: SupabaseClient, orgId: string, agentId: string): Promise<boolean> {
+  const { data, error } = await admin
+    .from('wa_ai_agents')
+    .select('id')
+    .eq('organization_id', orgId)
+    .eq('id', agentId)
+    .limit(1);
+  if (error) throw new Error(error.message);
+  return (data ?? []).length > 0;
+}
+
+/** Resposta padrão quando o agente não existe na organização. */
+export function agentNotFoundError(): Response {
+  return json({ error: 'Agente não encontrado', code: 'AGENT_NOT_FOUND' }, 404);
+}
+
+/**
+ * Valida os agentes auxiliares: cada id precisa ser da org, estar ligado e ser
+ * diferente do próprio agente (`selfId`, no PATCH). null quando ok.
+ */
+export async function validateHelperAgentIds(
+  admin: SupabaseClient,
+  orgId: string,
+  ids: string[],
+  selfId?: string | null
+): Promise<Response | null> {
+  const unique = Array.from(new Set(ids.filter(Boolean)));
+  if (selfId && unique.includes(selfId)) {
+    return validationMessage('O agente não pode ser auxiliar de si mesmo', 'helper_agent_ids');
+  }
+  if (unique.length === 0) return null;
+  const { data, error } = await admin
+    .from('wa_ai_agents')
+    .select('id, enabled')
+    .eq('organization_id', orgId)
+    .in('id', unique);
+  if (error) throw new Error(error.message);
+  const found = new Map(((data ?? []) as Array<{ id: string; enabled: boolean }>).map(r => [r.id, r.enabled]));
+  for (const id of unique) {
+    if (!found.has(id)) return validationMessage('Agente auxiliar não encontrado nesta organização', 'helper_agent_ids');
+    if (found.get(id) === false) return validationMessage('Agente auxiliar desligado: ligue-o antes de usá-lo', 'helper_agent_ids');
+  }
+  return null;
+}
+
+/** Ids únicos, na ordem recebida. */
+export function uniqueIds(ids: string[]): string[] {
+  return Array.from(new Set(ids.filter(Boolean)));
+}
+
+/** Mime coerente com a categoria da mídia (documento aceita qualquer tipo). */
+export function mediaMimeMatchesKind(kind: AgentMediaKind, mime: string): boolean {
+  const m = (mime || '').toLowerCase();
+  if (kind === 'document' || !m) return true;
+  return m.startsWith(`${kind}/`);
+}
+
+/** true quando já existe outra mídia com o mesmo nome (sem acento/caixa) na lista. */
+export function mediaNameTaken(media: AgentMediaRow[], name: string, exceptId?: string | null): boolean {
+  const key = normalizeKeyword(name);
+  return media.some(m => m.id !== exceptId && normalizeKeyword(m.name) === key);
+}
+
+/** Apaga arquivos do bucket wa-agent-files (melhor esforço: erros só vão para o log). */
+export async function removeAgentFiles(admin: SupabaseClient, paths: string[]): Promise<void> {
+  const list = paths.filter(Boolean);
+  if (list.length === 0) return;
+  try {
+    const { error } = await admin.storage.from(WA_AGENT_FILES_BUCKET).remove(list);
+    if (error) console.error('[wa-agents] apagar arquivos do agente falhou:', error.message);
+  } catch (err) {
+    console.error('[wa-agents] apagar arquivos do agente falhou:', getErrorMessage(err, 'erro desconhecido'));
+  }
 }
 
 /** true quando a etapa (board_stages) é da organização (e do quadro, quando informado). */

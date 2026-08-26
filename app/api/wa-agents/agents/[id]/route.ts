@@ -4,8 +4,10 @@
  *   PATCH  -> { agent }      AgentInputSchema.partial(); api_key: ausente mantém,
  *                            '' ou null limpa, valor mascarado (quatro pontos) ignora;
  *                            custom_actions e triggers aceitos (gatilho por pipeline validado;
- *                            triggers parcial é mesclado por bloco com o salvo)
- *   DELETE -> { ok: true }   desvincula as conversas em andamento e apaga o agente
+ *                            triggers parcial é mesclado por bloco com o salvo);
+ *                            helper_agent_ids (da org, ligados, diferentes do próprio) e tools
+ *   DELETE -> { ok: true }   desvincula as conversas em andamento, apaga o agente
+ *                            (documentos, trechos e mídias em cascata) e os arquivos do bucket
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { json } from '@/lib/whatsapp/api';
@@ -20,8 +22,11 @@ import {
   normalizeApiKeyInput,
   pickPresentKeys,
   readJsonBody,
+  removeAgentFiles,
   toAgentPublic,
+  uniqueIds,
   validateAgentTriggers,
+  validateHelperAgentIds,
   validationError,
 } from '../../_shared';
 
@@ -105,6 +110,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const apiKey = normalizeApiKeyInput(apiKeyInput);
     if (apiKey !== undefined) patch.api_key = apiKey;
   }
+  if (Array.isArray(present.helper_agent_ids)) patch.helper_agent_ids = uniqueIds(present.helper_agent_ids);
 
   try {
     if (
@@ -116,6 +122,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (present.triggers) {
       const triggersError = await validateAgentTriggers(auth.admin, orgId, present.triggers);
       if (triggersError) return triggersError;
+    }
+    if (Array.isArray(present.helper_agent_ids)) {
+      const helpersError = await validateHelperAgentIds(auth.admin, orgId, present.helper_agent_ids, id);
+      if (helpersError) return helpersError;
     }
   } catch (err) {
     return json({ error: getErrorMessage(err, 'Falha ao validar os números') }, 500);
@@ -166,8 +176,19 @@ export async function DELETE(req: Request, ctx: Ctx) {
     .in('ai_status', ['active', 'paused', 'awaiting_approval']);
   if (convError) return json({ error: convError.message }, 500);
 
+  // Arquivos do bucket (as linhas de documentos, trechos e mídias caem em cascata)
+  const [{ data: docs }, { data: media }] = await Promise.all([
+    auth.admin.from('wa_ai_agent_documents').select('storage_path').eq('organization_id', orgId).eq('agent_id', id),
+    auth.admin.from('wa_ai_agent_media').select('storage_path').eq('organization_id', orgId).eq('agent_id', id),
+  ]);
+  const paths = [...((docs ?? []) as Array<{ storage_path: string }>), ...((media ?? []) as Array<{ storage_path: string }>)]
+    .map(r => r.storage_path)
+    .filter(p => typeof p === 'string' && p.startsWith(`${orgId}/`));
+
   const { error } = await auth.admin.from('wa_ai_agents').delete().eq('id', id).eq('organization_id', orgId);
   if (error) return json({ error: error.message }, 500);
+
+  await removeAgentFiles(auth.admin, paths);
 
   return json({ ok: true });
 }

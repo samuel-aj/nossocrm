@@ -7,21 +7,31 @@ import type { ModelMessage } from 'ai';
 import { getConnectionByIdForOrg, type WaConnectionRow } from '@/lib/whatsapp/service';
 import { WaAgentError } from './errors';
 import { renderTemplate } from './template';
+import { formatKnowledgeHits } from './knowledge';
 import {
+  AgentToolsSchema,
   AgentTriggersSchema,
   AgentWebhookSchema,
   AI_PROVIDERS,
   CustomActionSchema,
+  DEFAULT_AGENT_TOOLS,
   DEFAULT_AGENT_TRIGGERS,
   OutcomeSchema,
+  SCRIPT_ACTION_MARKER_RE,
+  SCRIPT_MEDIA_MARKER_RE,
+  type AgentDocumentRow,
+  type AgentMediaRow,
   type AgentProvider,
+  type AgentResources,
   type AgentRow,
+  type AgentTools,
   type AgentTriggers,
   type AgentWebhook,
   type ConversationAiState,
   type ConversationAiStatus,
   type ConversationApproval,
   type CustomAction,
+  type KnowledgeHit,
   type Outcome,
 } from './types';
 
@@ -139,6 +149,19 @@ export function normalizeTriggers(raw: unknown): AgentTriggers {
   };
 }
 
+/** `tools` (jsonb) validado; linhas antigas (null/ausente/inválido) caem nos padrões. */
+export function normalizeTools(raw: unknown): AgentTools {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ...DEFAULT_AGENT_TOOLS };
+  const p = AgentToolsSchema.safeParse(raw);
+  return p.success ? p.data : { ...DEFAULT_AGENT_TOOLS };
+}
+
+/** `helper_agent_ids` (uuid[]) como lista de strings únicas; linhas antigas viram []. */
+export function normalizeHelperIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return Array.from(new Set(raw.filter(v => typeof v === 'string' && v.trim()).map(v => String(v))));
+}
+
 /** Linha crua de wa_ai_agents -> AgentRow (jsonb validado, números coeridos). */
 export function normalizeAgentRow(raw: Record<string, unknown>): AgentRow {
   const provider = AI_PROVIDERS.includes(raw.provider as AgentProvider)
@@ -174,6 +197,8 @@ export function normalizeAgentRow(raw: Record<string, unknown>): AgentRow {
       return p.success ? p.data : null;
     }),
     triggers: normalizeTriggers(raw.triggers),
+    helper_agent_ids: normalizeHelperIds(raw.helper_agent_ids),
+    tools: normalizeTools(raw.tools),
     created_by: (raw.created_by as string | null) ?? null,
     created_at: String(raw.created_at ?? ''),
     updated_at: String(raw.updated_at ?? ''),
@@ -670,25 +695,160 @@ export function buildCustomActionsBlock(agent: Pick<AgentRow, 'custom_actions'>)
   return lines.join('\n');
 }
 
+// ---------------------------------------------------------------------------
+// Marcadores do roteiro, contexto oculto, mídias, auxiliares e conhecimento
+// ---------------------------------------------------------------------------
+/** true quando o roteiro usa `[[acao:...]]` ou `[[midia:...]]`. */
+export function hasScriptMarkers(script: string): boolean {
+  if (!script) return false;
+  SCRIPT_ACTION_MARKER_RE.lastIndex = 0;
+  SCRIPT_MEDIA_MARKER_RE.lastIndex = 0;
+  return SCRIPT_ACTION_MARKER_RE.test(script) || SCRIPT_MEDIA_MARKER_RE.test(script);
+}
+
+/**
+ * Substitui os marcadores do roteiro pelo momento exato da ferramenta:
+ * `[[acao:chave]]` -> (neste momento, chame a ferramenta executar_acao com acao="chave")
+ * `[[midia:nome]]` -> (neste momento, envie a mídia "nome" com a ferramenta enviar_midia)
+ * Com `strip`, os marcadores são removidos (agente auxiliar, que não tem essas ferramentas).
+ */
+export function replaceScriptMarkers(script: string, opts: { strip?: boolean } = {}): string {
+  if (!script) return '';
+  const out = script
+    .replace(SCRIPT_ACTION_MARKER_RE, (_m, key: string) =>
+      opts.strip ? '' : `(neste momento, chame a ferramenta executar_acao com acao="${key.trim()}")`
+    )
+    .replace(SCRIPT_MEDIA_MARKER_RE, (_m, name: string) =>
+      opts.strip ? '' : `(neste momento, envie a mídia "${name.trim()}" com a ferramenta enviar_midia)`
+    );
+  return opts.strip ? out.replace(/[ \t]{2,}/g, ' ') : out;
+}
+
+/**
+ * Bloco "## CONTEXTO DO ATENDIMENTO": data/hora, persona, escritório, lead e
+ * telefone. O CRM injeta sempre; o roteiro não precisa repetir esses dados.
+ */
+export function buildContextBlock(vars: PromptVars, ctx: ConversationContext): string {
+  const lines: string[] = ['## CONTEXTO DO ATENDIMENTO (o CRM preenche; use, mas não diga que recebeu estes dados)'];
+  lines.push(`- Agora: ${vars.data_hora}`);
+  const who = [vars.nome_agente ? `Você é ${vars.nome_agente}` : '', vars.nome_escritorio ? `do escritório ${vars.nome_escritorio}` : '']
+    .filter(Boolean)
+    .join(', ');
+  if (who) lines.push(`- ${who}`);
+  const lead = vars.nome_lead ? vars.nome_lead : 'nome ainda desconhecido';
+  lines.push(`- Lead: ${lead}${vars.telefone ? ` (telefone ${vars.telefone})` : ''}`);
+  if (!ctx.deal && ctx.contact?.email) lines.push(`- E-mail do contato: ${ctx.contact.email}`);
+  return lines.join('\n');
+}
+
+const MEDIA_KIND_LABEL: Record<AgentMediaRow['kind'], string> = {
+  image: 'imagem',
+  video: 'vídeo',
+  audio: 'áudio',
+  document: 'documento',
+};
+
+/** Bloco "## MÍDIAS DISPONÍVEIS" ('' sem mídias). */
+export function buildMediaBlock(media: AgentMediaRow[]): string {
+  const seen = new Set<string>();
+  const items = media.filter(m => {
+    const key = m.name.trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (items.length === 0) return '';
+  const lines: string[] = ['## MÍDIAS DISPONÍVEIS'];
+  lines.push('Você pode enviar estes arquivos ao cliente com a ferramenta enviar_midia (pelo nome exato):');
+  for (const m of items) {
+    const when = (m.description ?? '').trim();
+    lines.push(`- "${m.name.trim()}" (${MEDIA_KIND_LABEL[m.kind] ?? m.kind})${when ? `: enviar quando ${when}` : ''}`);
+  }
+  return lines.join('\n');
+}
+
+/** Resumo curto do papel de um agente auxiliar: primeiro parágrafo do roteiro (sem títulos), até 220 caracteres. */
+export function helperPurpose(agent: Pick<AgentRow, 'system_prompt'>): string {
+  const text = replaceScriptMarkers(agent.system_prompt || '', { strip: true })
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l && !l.startsWith('#'))
+    .join(' ')
+    .replace(/\{\{[^}]*\}\}/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return text.length > 220 ? `${text.slice(0, 220).trim()}…` : text;
+}
+
+/** Bloco "## AGENTES AUXILIARES" ('' sem auxiliares). */
+export function buildHelpersBlock(helpers: AgentRow[]): string {
+  const seen = new Set<string>();
+  const items = helpers.filter(h => {
+    const key = (h.persona_name || h.name || '').trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (items.length === 0) return '';
+  const lines: string[] = ['## AGENTES AUXILIARES'];
+  lines.push('Você pode tirar dúvidas com estes agentes da equipe pela ferramenta consultar_agente (pelo nome exato):');
+  for (const h of items) {
+    const display = (h.persona_name || h.name).trim();
+    const alias = h.persona_name && h.persona_name.trim() !== h.name.trim() ? ` (agente "${h.name.trim()}")` : '';
+    const purpose = helperPurpose(h);
+    lines.push(`- "${display}"${alias}${purpose ? `: ${purpose}` : ''}`);
+  }
+  return lines.join('\n');
+}
+
+/** Bloco "## TRECHOS DA BASE DE CONHECIMENTO" ('' sem trechos). */
+export function buildKnowledgeBlock(hits: KnowledgeHit[], documents: Array<Pick<AgentDocumentRow, 'id' | 'name'>>): string {
+  const text = formatKnowledgeHits(hits, documents);
+  if (!text) return '';
+  return `## TRECHOS DA BASE DE CONHECIMENTO (relevantes para a última mensagem)\n${text}`;
+}
+
 export function buildSystemPrompt(input: {
   agent: AgentRow;
   ctx: ConversationContext;
   now?: Date;
   /** Primeiro contato iniciado pelo sistema (gatilho por pipeline): o lead ainda não recebeu mensagem */
   firstContact?: boolean;
+  /** Documentos prontos, mídias e auxiliares do agente (blocos e ferramentas condicionais) */
+  resources?: Partial<AgentResources> | null;
+  /** Trechos da base de conhecimento já buscados para a última mensagem */
+  knowledge?: KnowledgeHit[] | null;
 }): string {
   const { agent, ctx } = input;
   const vars = buildPromptVars(input);
-  const script = renderTemplate(agent.system_prompt || '', vars as unknown as Record<string, unknown>).trim();
+  const rawScript = agent.system_prompt || '';
+  const markers = hasScriptMarkers(rawScript);
+  const script = replaceScriptMarkers(
+    renderTemplate(rawScript, vars as unknown as Record<string, unknown>)
+  ).trim();
 
   const state = (ctx.conversation.ai_state ?? {}) as ConversationAiState;
   const dados = state.dados && Object.keys(state.dados).length > 0 ? JSON.stringify(state.dados) : '{}';
+  const documents = input.resources?.documents ?? [];
+  const media = input.resources?.media ?? [];
+  const helpers = input.resources?.helpers ?? [];
 
   const blocks: string[] = [];
   if (script) blocks.push(script);
 
+  blocks.push(buildContextBlock(vars, ctx));
+
   const leadBlock = buildLeadDataBlock(ctx);
   if (leadBlock) blocks.push(leadBlock);
+
+  const knowledgeBlock = buildKnowledgeBlock(input.knowledge ?? [], documents);
+  if (knowledgeBlock) blocks.push(knowledgeBlock);
+
+  const mediaBlock = buildMediaBlock(media);
+  if (mediaBlock) blocks.push(mediaBlock);
+
+  const helpersBlock = buildHelpersBlock(helpers);
+  if (helpersBlock) blocks.push(helpersBlock);
 
   const actionsBlock = buildCustomActionsBlock(agent);
   if (actionsBlock) blocks.push(actionsBlock);
@@ -731,6 +891,31 @@ export function buildSystemPrompt(input: {
   if (actionsBlock) {
     lines.push(
       '- A ferramenta executar_acao serve só para as situações listadas em "AÇÕES DURANTE A CONVERSA". Nas ações marcadas como finais, escreva a mensagem final ao cliente antes de chamar; nas demais, continue conversando.'
+    );
+  }
+  if (documents.length > 0) {
+    lines.push(
+      knowledgeBlock
+        ? '- Base de conhecimento: responda com base nos trechos do bloco "TRECHOS DA BASE DE CONHECIMENTO". Quando precisar de mais detalhes, ou a dúvida do cliente não estiver coberta por eles, chame consultar_documentos com a pergunta. Não invente informações que não estejam na base.'
+        : '- Base de conhecimento: antes de responder dúvidas sobre o escritório, serviços, valores, prazos ou procedimentos, chame consultar_documentos com a pergunta e responda só com o que estiver nos trechos. Não invente informações que não estejam na base.'
+    );
+  }
+  if (mediaBlock) {
+    lines.push(
+      '- Mídias: para enviar um arquivo da lista "MÍDIAS DISPONÍVEIS", chame enviar_midia com o nome exato, no momento indicado no roteiro ou quando a descrição "enviar quando" se aplicar. Cada mídia vai uma única vez por atendimento. O arquivo é entregue no ponto da conversa em que você chamou a ferramenta; escreva normalmente a mensagem que o acompanha.'
+    );
+  }
+  if (helpersBlock) {
+    lines.push(
+      '- Agentes auxiliares: para dúvidas do assunto deles, chame consultar_agente com o nome exato e uma pergunta objetiva com o contexto do caso; use a resposta para orientar o cliente com suas palavras, sem citar o auxiliar nem repassar a resposta inteira.'
+    );
+  }
+  if (agent.tools?.calculator !== false) {
+    lines.push('- Contas (percentuais, prazos, valores): chame a ferramenta calcular com a expressão em vez de calcular de cabeça.');
+  }
+  if (markers) {
+    lines.push(
+      '- Os trechos do roteiro entre parênteses que começam com "neste momento" indicam o momento exato de chamar a ferramenta citada (executar_acao ou enviar_midia): chame a ferramenta ali, uma única vez, e siga o roteiro.'
     );
   }
   lines.push(

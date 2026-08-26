@@ -72,7 +72,14 @@ function mergeSavedData(state: Record<string, unknown>, toolCalls: unknown[]): R
  * Componente React `AgentTestChat`.
  * @returns {Element} Retorna um valor do tipo `Element`.
  */
-export const AgentTestChat: React.FC<{ agentId: string; agentName?: string | null }> = ({ agentId, agentName }) => {
+export const AgentTestChat: React.FC<{
+  agentId: string;
+  agentName?: string | null;
+  /** Classes de altura/flex do contêiner (padrão: 70vh, máximo 640px) */
+  className?: string;
+  /** Recebe o histórico (papel + texto) a cada mudança, ex.: para o "Ajustar com IA" */
+  onMessagesChange?: (messages: WaTestMessage[]) => void;
+}> = ({ agentId, agentName, className, onMessagesChange }) => {
   const test = useTestWaAgent(agentId);
   const { showToast } = useToast();
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -84,6 +91,10 @@ export const AgentTestChat: React.FC<{ agentId: string; agentName?: string | nul
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [entries.length, test.isPending]);
+
+  useEffect(() => {
+    onMessagesChange?.(entries.map((e) => ({ role: e.role, text: e.text })));
+  }, [entries]);
 
   const send = async () => {
     const value = text.trim();
@@ -122,7 +133,7 @@ export const AgentTestChat: React.FC<{ agentId: string; agentName?: string | nul
   };
 
   return (
-    <div className="flex flex-col h-[70vh] max-h-[640px]">
+    <div className={`flex flex-col ${className ?? 'h-[70vh] max-h-[640px]'}`}>
       <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-200 dark:border-white/10">
         <p className="text-xs text-slate-500 dark:text-slate-400">
           Simulação com um lead fictício. Nada é enviado ao WhatsApp e nenhuma ação é executada.

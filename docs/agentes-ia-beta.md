@@ -58,9 +58,21 @@ O agente encerra chamando a ferramenta `encerrar_atendimento(resultado, resumo)`
 
 Além do encerramento, o agente pode executar ações **no meio** da conversa: você descreve em linguagem natural quando acontece ("o cliente disse que já tem advogado", "o cliente pediu para falar com humano") e o que fazer (webhook com corpo personalizável, nota, etapa, rótulo, responsável, tarefa, marcar perdido). O modelo chama a ferramenta `executar_acao` no momento certo e segue a conversa. O evento `custom_action` também dispara os webhooks por evento do agente.
 
-### IA na configuração
+### Conhecimento, mídias, auxiliares e ferramentas
 
-No editor do agente, "Criar com IA": descreva o atendimento e o CRM gera o roteiro (persona, perguntas, encerramento, ações), já nas convenções da plataforma. Com um roteiro existente: "Melhorar roteiro" e "Pedir ajuste" (instrução livre). Usa a chave de IA da organização.
+- **Base de conhecimento**: envie PDF, DOCX, TXT ou Markdown na aba "Conhecimento e mídias". O CRM extrai o texto, divide em trechos e indexa (busca vetorial quando há chave OpenAI ou Google; senão, busca por texto em português). Os trechos relevantes para a última mensagem do lead entram sozinhos no contexto; o agente também pode pesquisar com `consultar_documentos`. Arquivos ficam num bucket privado, acessível só pelo servidor.
+- **Mídias**: imagem, vídeo, áudio ou PDF com uma descrição de quando enviar. O agente envia com `enviar_midia` (ou no ponto do roteiro marcado com `[[midia:nome]]`).
+- **Agentes auxiliares**: outros agentes que este pode consultar durante a conversa (`consultar_agente`), por exemplo um especialista jurídico que responde com base nos próprios documentos.
+- **Calculadora**: `calcular` para contas (parcelas, prazos, percentuais), sem o modelo "chutar" números.
+- **Marcadores no roteiro**: `[[acao:chave]]` marca o momento exato de uma ação durante a conversa; `[[midia:nome]]` o momento de enviar uma mídia. Os chips do editor podem ser clicados ou arrastados para dentro do texto.
+
+### Contexto oculto
+
+Sem escrever nada no roteiro, o CRM já injeta: data e hora, nome e telefone do lead, dados do negócio (etapa, valor, rótulos, campos personalizados), histórico da conversa (inclusive o que atendentes humanos escreveram) e os trechos da base de conhecimento. O roteiro fica só com papel, condução, regras e tom.
+
+### Ajustar com IA
+
+No painel de teste do agente, descreva o que ele fez de errado ("se apresentou duas vezes", "ofereceu desconto") e a IA reescreve o roteiro aplicando a correção, mantendo o resto igual. Usa a chave de IA da organização.
 
 ## Robôs (sem IA)
 
@@ -80,13 +92,17 @@ pg_cron 'wa-agents-tick' (30 s, só se houver algo pendente) ──▶ POST /api
                                                         └─ retoma pausas vencidas, executa passos dos robôs
 ```
 
-Tabelas novas: `wa_ai_agents` (com `custom_actions` e `triggers`), `wa_ai_agent_runs`, `wa_ai_agent_deal_starts` (fila dos inícios pelo pipeline), `wa_bots` (com `start_step_id`), `wa_bot_runs`. Colunas novas em `wa_conversations`: `ai_agent_id`, `ai_resume_at`, `ai_state`, `ai_last_processed_at`, `ai_lock_until`, `ai_approval`; `ai_status` aceita também `stopped` e `awaiting_approval`.
+Tabelas novas: `wa_ai_agents` (com `custom_actions`, `triggers`, `helper_agent_ids`, `tools`), `wa_ai_agent_runs`, `wa_ai_agent_deal_starts` (fila dos inícios pelo pipeline), `wa_ai_agent_documents` + `wa_ai_agent_chunks` (base de conhecimento, extensão `vector`), `wa_ai_agent_media`, `wa_bots` (com `start_step_id`), `wa_bot_runs`. Bucket privado `wa-agent-files`.
+
+### Conexão via QR e n8n
+
+No cartão de qualquer número (QR ou API oficial) há **ID da conexão** e **Espelhar webhook**. Para receber no n8n as mensagens já tratadas pelo CRM (de qualquer número), use Configurações → Integrações → Follow-up com os eventos `whatsapp.message.received` / `whatsapp.message.sent` e filtre pelo ID da conexão; para enviar, use a API pública (`POST /api/public/v1/whatsapp/messages` com `connection_id`). Nada do funcionamento atual muda. Colunas novas em `wa_conversations`: `ai_agent_id`, `ai_resume_at`, `ai_state`, `ai_last_processed_at`, `ai_lock_until`, `ai_approval`; `ai_status` aceita também `stopped` e `awaiting_approval`.
 
 Mensagens enviadas pelo agente têm `source = 'agent'`; pelo robô, `source = 'bot'` (aparecem no webhook `whatsapp.message.sent`).
 
 ## O que precisa existir por ambiente
 
-1. **Migração** `supabase/migrations/20260825200000_wa_ai_agents_beta.sql` aplicada (habilita `pg_net` e `pg_cron`).
+1. **Migrações** `20260825200000_wa_ai_agents_beta.sql`, `20260825230000_wa_ai_agents_triggers.sql` e `20260826000000_wa_ai_agents_knowledge.sql` aplicadas (habilitam `pg_net`, `pg_cron` e `vector`).
 2. **`platform_config`** com duas linhas (é assim que o banco encontra o CRM):
    - `wa_agents_app_url` = URL base do CRM naquele ambiente (ex.: `https://crm.anunciojuridico.com.br`; no preview, a URL da branch na Vercel).
    - `wa_agents_internal_secret` = o mesmo valor da variável de ambiente abaixo.

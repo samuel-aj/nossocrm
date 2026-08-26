@@ -1,218 +1,159 @@
 'use client';
 
 /**
- * "Criar com IA" no topo do roteiro: gera um roteiro do zero a partir de uma
- * descrição, melhora o roteiro atual ou aplica um ajuste pedido em texto.
- * Chama POST /api/wa-agents/assist com o provedor/modelo do formulário.
- *
- * Regras de aplicação:
- * - roteiro existente só é substituído depois de confirmação;
- * - persona, resultados e ações durante a conversa só são preenchidos quando
- *   estão vazios; senão o painel oferece "Adicionar sugestões" (merge por chave,
- *   sem duplicar).
+ * "Ajustar com IA": no painel de teste, você descreve o que o agente fez de
+ * errado e a IA reescreve o roteiro aplicando a correção (POST assist, modo
+ * 'adjust', com as últimas mensagens do teste como exemplo). Antes de
+ * substituir, mostra o resumo do que mudou (linhas, caracteres) e a
+ * diferença linha a linha; só troca o roteiro depois de confirmar.
  */
 import React, { useState } from 'react';
-import { Loader2, Plus, Sparkles, X } from 'lucide-react';
-import ConfirmModal from '@/components/ConfirmModal';
+import { Loader2, Sparkles, X, Check, ChevronDown, ChevronUp, TriangleAlert } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
-import type { AgentProvider, CustomAction, Outcome } from '@/lib/wa-agents/types';
-import { useWaAgentAssist, type WaAssistMode, type WaAssistResult, type WaAssistSuggestion } from './useWaAgents';
-import { slugifyKey } from './OutcomesEditor';
-import { BTN_PRIMARY, BTN_SECONDARY, BTN_SMALL, HELP_CLASS, INPUT_CLASS, Notice, TEXTAREA_CLASS, errorMessage } from './ui';
-
-/** Campos do formulário que o painel pode preencher. */
-export type AgentAssistPatch = {
-  persona_name?: string;
-  system_prompt?: string;
-  outcomes?: Outcome[];
-  custom_actions?: CustomAction[];
-};
+import type { AgentProvider } from '@/lib/wa-agents/types';
+import { useWaAgentAssist, type WaTestMessage } from './useWaAgents';
+import { describeDiff, diffLines, type DiffOp, type PromptDiff } from './promptDiff';
+import { BTN_PRIMARY, BTN_SMALL, HELP_CLASS, Notice, TEXTAREA_CLASS, errorMessage } from './ui';
 
 export type AgentAssistPanelProps = {
   provider: AgentProvider;
   model: string;
-  personaName: string;
+  /** Roteiro atual do formulário (o que será ajustado) */
   currentPrompt: string;
-  outcomes: Outcome[];
-  customActions: CustomAction[];
-  onApply: (patch: AgentAssistPatch) => void;
+  /** Últimas mensagens do chat de teste (contexto do ajuste) */
+  examples: WaTestMessage[];
+  /** Aplica o novo roteiro no formulário (nada é salvo no servidor) */
+  onApply: (systemPrompt: string) => void;
 };
 
-const MODE_DONE_TOAST: Record<WaAssistMode, string> = {
-  generate: 'Roteiro gerado',
-  improve: 'Roteiro melhorado',
-  adjust: 'Ajuste aplicado',
-};
+/** Quantas mensagens do teste vão junto com o pedido. */
+export const ASSIST_EXAMPLES_LIMIT = 10;
 
-const MODE_PENDING_TOAST: Record<WaAssistMode, string> = {
-  generate: 'Roteiro gerado. Confirme para substituir o atual.',
-  improve: 'Roteiro melhorado. Confirme para substituir o atual.',
-  adjust: 'Ajuste pronto. Confirme para substituir o roteiro atual.',
-};
+type Proposal = { base: string; prompt: string; diff: PromptDiff; feedback: string };
 
-/** Normaliza as sugestões da IA: chave válida (gerada do nome se preciso), sem repetidas, sem vazias. */
-function normalizeSuggestions(list: WaAssistSuggestion[]): WaAssistSuggestion[] {
-  const seen = new Set<string>();
-  const out: WaAssistSuggestion[] = [];
-  for (const s of list) {
-    const label = String(s?.label ?? '').trim().slice(0, 80);
-    const key = slugifyKey(String(s?.key ?? '').trim() || label);
-    if (!key || !label || seen.has(key)) continue;
-    seen.add(key);
-    out.push({ key, label, description: String(s?.description ?? '').trim() });
-  }
-  return out;
+type DiffRow = DiffOp | { type: 'skip'; count: number };
+
+/** Mantém só as linhas mudadas com até `context` linhas iguais ao redor; o resto vira "N linhas iguais". */
+export function compactDiff(ops: DiffOp[], context = 2): DiffRow[] {
+  const keep = new Array<boolean>(ops.length).fill(false);
+  ops.forEach((op, i) => {
+    if (op.type === 'same') return;
+    for (let j = Math.max(0, i - context); j <= Math.min(ops.length - 1, i + context); j++) keep[j] = true;
+  });
+  const rows: DiffRow[] = [];
+  let skipped = 0;
+  ops.forEach((op, i) => {
+    if (keep[i]) {
+      if (skipped > 0) {
+        rows.push({ type: 'skip', count: skipped });
+        skipped = 0;
+      }
+      rows.push(op);
+    } else {
+      skipped++;
+    }
+  });
+  if (skipped > 0) rows.push({ type: 'skip', count: skipped });
+  return rows;
 }
 
-function toOutcome(s: WaAssistSuggestion): Outcome {
-  return { key: s.key, label: s.label, description: s.description.slice(0, 500), actions: [] };
-}
-
-function toCustomAction(s: WaAssistSuggestion): CustomAction {
-  return { key: s.key, label: s.label, description: (s.description || s.label).slice(0, 600), actions: [] };
-}
-
-/** Sugestões cuja chave ainda não existe na lista atual. */
-function onlyNew(suggestions: WaAssistSuggestion[], existing: Array<{ key: string }>): WaAssistSuggestion[] {
-  return suggestions.filter((s) => !existing.some((e) => e.key === s.key));
+function DiffView({ diff }: { diff: PromptDiff }) {
+  const rows = compactDiff(diff.ops);
+  return (
+    <pre
+      className="max-h-72 overflow-auto rounded-md bg-slate-900 text-slate-100 p-2 text-[11px] leading-relaxed whitespace-pre-wrap break-words"
+      aria-label="Diferenças entre o roteiro atual e o sugerido"
+    >
+      {rows.map((row, i) =>
+        row.type === 'skip' ? (
+          <div key={i} className="text-slate-500 italic">
+            ... {row.count} {row.count === 1 ? 'linha igual' : 'linhas iguais'} ...
+          </div>
+        ) : (
+          <div
+            key={i}
+            className={
+              row.type === 'add'
+                ? 'bg-green-900/50 text-green-200'
+                : row.type === 'del'
+                  ? 'bg-red-900/50 text-red-200'
+                  : 'text-slate-400'
+            }
+          >
+            <span className="select-none inline-block w-4 text-center">{row.type === 'add' ? '+' : row.type === 'del' ? '-' : ' '}</span>
+            {row.text || ' '}
+          </div>
+        )
+      )}
+    </pre>
+  );
 }
 
 /**
  * Componente React `AgentAssistPanel`.
  * @returns {Element} Retorna um valor do tipo `Element`.
  */
-export const AgentAssistPanel: React.FC<AgentAssistPanelProps> = ({
-  provider,
-  model,
-  personaName,
-  currentPrompt,
-  outcomes,
-  customActions,
-  onApply,
-}) => {
+export const AgentAssistPanel: React.FC<AgentAssistPanelProps> = ({ provider, model, currentPrompt, examples, onApply }) => {
   const { showToast } = useToast();
   const assist = useWaAgentAssist();
 
-  const [description, setDescription] = useState('');
-  const [instruction, setInstruction] = useState('');
-  /** Resultado recebido enquanto o roteiro atual ainda não foi substituído (aguarda confirmação). */
-  const [pending, setPending] = useState<{ mode: WaAssistMode; result: WaAssistResult } | null>(null);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  /** Sugestões (já normalizadas) que não foram aplicadas automaticamente por já haver itens no formulário. */
-  const [suggestions, setSuggestions] = useState<WaAssistResult | null>(null);
+  const [feedback, setFeedback] = useState('');
+  const [proposal, setProposal] = useState<Proposal | null>(null);
+  const [showDiff, setShowDiff] = useState(false);
 
-  const hasPrompt = currentPrompt.trim().length > 0;
   const busy = assist.isPending;
+  const recent = examples.slice(-ASSIST_EXAMPLES_LIMIT);
 
-  /** Aplica o resultado: roteiro (se pedido) e o que estiver vazio; guarda o restante como sugestão. */
-  const applyResult = (result: WaAssistResult, replacePrompt: boolean) => {
-    const outs = normalizeSuggestions(result.outcomes);
-    const acts = normalizeSuggestions(result.custom_actions);
-    const persona = result.persona_name.trim().slice(0, 80);
-
-    const patch: AgentAssistPatch = {};
-    if (replacePrompt && result.system_prompt.trim()) patch.system_prompt = result.system_prompt;
-    if (!personaName.trim() && persona) patch.persona_name = persona;
-    if (outcomes.length === 0 && outs.length > 0) patch.outcomes = outs.map(toOutcome);
-    if (customActions.length === 0 && acts.length > 0) patch.custom_actions = acts.map(toCustomAction);
-    if (Object.keys(patch).length > 0) onApply(patch);
-
-    const leftoverOutcomes = outcomes.length === 0 ? [] : onlyNew(outs, outcomes);
-    const leftoverActions = customActions.length === 0 ? [] : onlyNew(acts, customActions);
-    setSuggestions(
-      leftoverOutcomes.length > 0 || leftoverActions.length > 0
-        ? { persona_name: persona, system_prompt: '', outcomes: leftoverOutcomes, custom_actions: leftoverActions }
-        : null
-    );
-  };
-
-  const run = async (mode: WaAssistMode) => {
+  const run = async () => {
     if (busy) return;
-    if (mode === 'generate' && !description.trim()) {
-      showToast('Descreva o atendimento antes de gerar o roteiro', 'error');
+    const text = feedback.trim();
+    if (!text) {
+      showToast('Descreva o que o agente fez de errado', 'error');
       return;
     }
-    if (mode !== 'generate' && !hasPrompt) {
-      showToast('Não há roteiro para melhorar. Gere um primeiro.', 'error');
-      return;
-    }
-    if (mode === 'adjust' && !instruction.trim()) {
-      showToast('Escreva o ajuste que você quer no roteiro', 'error');
+    if (!currentPrompt.trim()) {
+      showToast('Não há roteiro para ajustar', 'error');
       return;
     }
     const modelId = model.trim();
     try {
       const result = await assist.mutateAsync({
-        mode,
-        description: mode === 'generate' ? description.trim() : undefined,
-        current_prompt: mode === 'generate' ? undefined : currentPrompt,
-        instruction: mode === 'adjust' ? instruction.trim() : undefined,
+        mode: 'adjust',
+        current_prompt: currentPrompt,
+        feedback: text,
+        // Mesmo texto no campo antigo, para servidores que ainda só leem `instruction`.
+        instruction: text,
+        examples: recent,
         // Sem modelo definido no formulário, o servidor usa o provedor/modelo da Central de I.A.
         ...(modelId ? { provider, model: modelId } : {}),
       });
-      if (!result.system_prompt.trim()) {
-        showToast('A IA não devolveu um roteiro. Tente descrever melhor o atendimento.', 'error');
+      const next = result.system_prompt;
+      if (!next.trim()) {
+        showToast('A IA não devolveu um roteiro. Tente descrever melhor o problema.', 'error');
         return;
       }
-      if (hasPrompt) {
-        setPending({ mode, result });
-        setConfirmOpen(true);
-        showToast(MODE_PENDING_TOAST[mode], 'info');
-      } else {
-        applyResult(result, true);
-        showToast(MODE_DONE_TOAST[mode], 'success');
-        // O pedido de ajuste só é limpo depois de aplicado (ao confirmar, fica no campo).
-        if (mode === 'adjust') setInstruction('');
+      const diff = diffLines(currentPrompt, next);
+      if (diff.added === 0 && diff.removed === 0) {
+        showToast('A IA não mudou nada no roteiro. Tente ser mais específico.', 'info');
+        return;
       }
+      setProposal({ base: currentPrompt, prompt: next, diff, feedback: text });
+      setShowDiff(false);
+      showToast('Sugestão pronta. Confira a diferença e confirme para substituir.', 'info');
     } catch (err) {
-      showToast(errorMessage(err, 'Falha ao gerar o roteiro com IA'), 'error');
+      showToast(errorMessage(err, 'Falha ao ajustar o roteiro com IA'), 'error');
     }
   };
 
-  const confirmReplace = () => {
-    if (!pending) return;
-    applyResult(pending.result, true);
-    showToast(`${MODE_DONE_TOAST[pending.mode]}: roteiro substituído`, 'success');
-    if (pending.mode === 'adjust') setInstruction('');
-    setPending(null);
+  const apply = () => {
+    if (!proposal) return;
+    onApply(proposal.prompt);
+    setProposal(null);
+    setFeedback('');
+    showToast('Roteiro substituído. Salve para valer no atendimento.', 'success');
   };
 
-  const keepPromptOnlySuggestions = () => {
-    if (!pending) return;
-    applyResult(pending.result, false);
-    showToast('Roteiro mantido; sugestões separadas', 'info');
-    if (pending.mode === 'adjust') setInstruction('');
-    setPending(null);
-  };
-
-  // Sugestões pendentes calculadas contra o formulário atual (o usuário pode ter editado depois).
-  const newOutcomes = suggestions ? onlyNew(suggestions.outcomes, outcomes) : [];
-  const newActions = suggestions ? onlyNew(suggestions.custom_actions, customActions) : [];
-  const suggestPersona = !!suggestions?.persona_name && !personaName.trim();
-  const hasSuggestions = newOutcomes.length > 0 || newActions.length > 0 || suggestPersona;
-
-  const addSuggestions = () => {
-    if (!suggestions) return;
-    const patch: AgentAssistPatch = {};
-    if (suggestPersona) patch.persona_name = suggestions.persona_name;
-    if (newOutcomes.length > 0) patch.outcomes = [...outcomes, ...newOutcomes.map(toOutcome)];
-    if (newActions.length > 0) patch.custom_actions = [...customActions, ...newActions.map(toCustomAction)];
-    if (Object.keys(patch).length > 0) onApply(patch);
-    setSuggestions(null);
-    const parts: string[] = [];
-    if (newOutcomes.length > 0) parts.push(`${newOutcomes.length} resultado(s)`);
-    if (newActions.length > 0) parts.push(`${newActions.length} ação(ões)`);
-    if (suggestPersona) parts.push('nome da persona');
-    showToast(`Sugestões adicionadas: ${parts.join(', ')}`, 'success');
-  };
-
-  const suggestionSummary = [
-    newOutcomes.length > 0 ? `${newOutcomes.length} resultado(s)` : '',
-    newActions.length > 0 ? `${newActions.length} ação(ões) durante a conversa` : '',
-    suggestPersona ? 'nome da persona' : '',
-  ]
-    .filter(Boolean)
-    .join(', ');
+  const baseChanged = !!proposal && proposal.base !== currentPrompt;
 
   return (
     <div className="rounded-lg border border-purple-200 dark:border-purple-500/30 bg-purple-50/60 dark:bg-purple-900/10 p-3 space-y-3">
@@ -221,142 +162,86 @@ export const AgentAssistPanel: React.FC<AgentAssistPanelProps> = ({
           <Sparkles size={16} aria-hidden="true" />
         </span>
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-slate-900 dark:text-white">Criar com IA</p>
+          <p className="text-sm font-semibold text-slate-900 dark:text-white">Ajustar com IA</p>
           <p className={HELP_CLASS}>
-            Usa o provedor e o modelo da seção Modelo, com a chave da organização. Nada é salvo até você clicar em
+            A IA reescreve o roteiro aplicando a correção e mantendo o resto igual. Nada é salvo até você clicar em
             Salvar.
           </p>
         </div>
       </div>
 
       <div>
-        <label htmlFor="agent-assist-description" className="sr-only">
-          Descreva o atendimento
+        <label htmlFor="agent-assist-feedback" className="sr-only">
+          O que o agente fez de errado?
         </label>
         <textarea
-          id="agent-assist-description"
+          id="agent-assist-feedback"
           className={TEXTAREA_CLASS}
           rows={3}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Descreva o atendimento: área, quem é a persona, o que perguntar, quando encerrar e o que fazer"
+          value={feedback}
+          onChange={(e) => setFeedback(e.target.value)}
+          placeholder="O que o agente fez de errado? Ex.: ele se apresentou duas vezes; não quero que ofereça desconto"
           maxLength={4000}
           disabled={busy}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+              e.preventDefault();
+              void run();
+            }
+          }}
         />
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className={BTN_PRIMARY} onClick={() => void run('generate')} disabled={busy}>
-          {busy && assist.variables?.mode === 'generate' ? (
-            <Loader2 size={16} className="animate-spin" aria-hidden="true" />
-          ) : (
-            <Sparkles size={16} aria-hidden="true" />
-          )}
-          Gerar roteiro com IA
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button type="button" className={BTN_PRIMARY} onClick={() => void run()} disabled={busy || !feedback.trim()}>
+          {busy ? <Loader2 size={16} className="animate-spin" aria-hidden="true" /> : <Sparkles size={16} aria-hidden="true" />}
+          Ajustar roteiro
         </button>
-        {hasPrompt ? (
-          <button type="button" className={BTN_SECONDARY} onClick={() => void run('improve')} disabled={busy}>
-            {busy && assist.variables?.mode === 'improve' ? (
-              <Loader2 size={16} className="animate-spin" aria-hidden="true" />
-            ) : null}
-            Melhorar roteiro
-          </button>
-        ) : null}
+        <span className="text-[11px] text-slate-500 dark:text-slate-400">
+          {recent.length > 0
+            ? `Usa as últimas ${recent.length} ${recent.length === 1 ? 'mensagem' : 'mensagens'} do teste como exemplo. Ctrl+Enter envia.`
+            : 'Converse no teste primeiro para a IA ver o erro no contexto. Ctrl+Enter envia.'}
+        </span>
       </div>
-
-      {hasPrompt ? (
-        <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-center">
-          <label htmlFor="agent-assist-instruction" className="sr-only">
-            Ajuste que você quer no roteiro
-          </label>
-          <input
-            id="agent-assist-instruction"
-            className={INPUT_CLASS}
-            value={instruction}
-            onChange={(e) => setInstruction(e.target.value)}
-            placeholder='Pedir ajuste. Ex.: "pergunte a cidade antes do caso" ou "fale de forma mais formal"'
-            maxLength={2000}
-            disabled={busy}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                void run('adjust');
-              }
-            }}
-          />
-          <button type="button" className={BTN_SECONDARY} onClick={() => void run('adjust')} disabled={busy}>
-            {busy && assist.variables?.mode === 'adjust' ? (
-              <Loader2 size={16} className="animate-spin" aria-hidden="true" />
-            ) : null}
-            Pedir ajuste
-          </button>
-        </div>
-      ) : null}
 
       {busy ? (
         <p className={HELP_CLASS} role="status">
-          Gerando com IA... isso pode levar alguns segundos.
+          Ajustando o roteiro... isso pode levar alguns segundos.
         </p>
       ) : null}
 
-      {pending && !confirmOpen ? (
+      {proposal ? (
         <Notice tone="blue">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span>Há um roteiro gerado que ainda não foi aplicado.</span>
-            <span className="flex flex-wrap items-center gap-2">
-              <button type="button" className={BTN_SMALL} onClick={() => setConfirmOpen(true)}>
+          <div className="space-y-2">
+            <p className="font-medium">Sugestão pronta. Substituir o roteiro atual?</p>
+            <p className="text-xs">{describeDiff(proposal.diff)}</p>
+            <p className="text-xs">
+              <span className="font-medium">Pedido:</span> {proposal.feedback}
+            </p>
+            {baseChanged ? (
+              <p className="text-xs flex items-start gap-1 text-amber-800 dark:text-amber-200">
+                <TriangleAlert size={14} className="shrink-0 mt-0.5" aria-hidden="true" />
+                O roteiro foi editado depois da sugestão. Ao substituir, essas edições se perdem.
+              </p>
+            ) : null}
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" className={BTN_SMALL} onClick={() => setShowDiff((v) => !v)} aria-expanded={showDiff}>
+                {showDiff ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+                {showDiff ? 'Ocultar diferenças' : 'Ver diferenças'}
+              </button>
+              <button type="button" className={`${BTN_SMALL} !bg-purple-600 !text-white !border-purple-600 hover:!bg-purple-700`} onClick={apply}>
+                <Check size={14} aria-hidden="true" />
                 Substituir roteiro
               </button>
-              <button type="button" className={BTN_SMALL} onClick={keepPromptOnlySuggestions}>
-                Manter roteiro, só sugestões
-              </button>
-              <button
-                type="button"
-                className={BTN_SMALL}
-                onClick={() => setPending(null)}
-                aria-label="Descartar roteiro gerado"
-              >
+              <button type="button" className={BTN_SMALL} onClick={() => setProposal(null)} aria-label="Descartar sugestão">
                 <X size={14} aria-hidden="true" />
                 Descartar
               </button>
-            </span>
+            </div>
+            {showDiff ? <DiffView diff={proposal.diff} /> : null}
           </div>
         </Notice>
       ) : null}
-
-      {hasSuggestions ? (
-        <Notice tone="blue">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span>A IA sugeriu {suggestionSummary} que ainda não estão no formulário.</span>
-            <span className="flex items-center gap-2">
-              <button type="button" className={BTN_SMALL} onClick={addSuggestions}>
-                <Plus size={14} aria-hidden="true" />
-                Adicionar sugestões
-              </button>
-              <button
-                type="button"
-                className={BTN_SMALL}
-                onClick={() => setSuggestions(null)}
-                aria-label="Ignorar sugestões"
-              >
-                <X size={14} aria-hidden="true" />
-                Ignorar
-              </button>
-            </span>
-          </div>
-        </Notice>
-      ) : null}
-
-      <ConfirmModal
-        isOpen={confirmOpen}
-        onClose={() => setConfirmOpen(false)}
-        onConfirm={confirmReplace}
-        title="Substituir o roteiro atual?"
-        message="O texto do roteiro será trocado pelo gerado com IA. Você ainda pode editar antes de salvar. Nome da persona, resultados e ações durante a conversa só são preenchidos se estiverem vazios."
-        confirmText="Substituir"
-        cancelText="Agora não"
-        variant="primary"
-      />
     </div>
   );
 };

@@ -5,8 +5,14 @@
  * Consomem as rotas /api/wa-agents/**. Todas as chaves começam com 'waAgents'.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { z } from 'zod';
+import { createClient } from '@/lib/supabase/client';
 import type {
+  AgentDocumentInputSchema,
+  AgentDocumentRow,
   AgentInput,
+  AgentMediaInputSchema,
+  AgentMediaRow,
   AgentMinimal,
   AgentProvider,
   AgentPublic,
@@ -48,9 +54,19 @@ export type WaAssistVars = {
   description?: string;
   current_prompt?: string;
   instruction?: string;
+  /** adjust: o que o agente fez de errado (sinônimo de instruction) */
+  feedback?: string;
+  /** adjust: últimas mensagens do chat de teste, para contextualizar o ajuste */
+  examples?: WaTestMessage[];
   provider?: AgentProvider;
   model?: string;
 };
+
+/** Documentos (base de conhecimento) e mídias do agente. */
+export type WaAgentDocumentInput = z.input<typeof AgentDocumentInputSchema>;
+export type WaAgentMediaInput = z.input<typeof AgentMediaInputSchema>;
+export type WaAgentMediaKind = AgentMediaRow['kind'];
+export type WaAgentFileKind = 'doc' | 'media';
 /** Sugestão de resultado ou de ação durante a conversa (sem as ações do CRM). */
 export type WaAssistSuggestion = { key: string; label: string; description: string };
 export type WaAssistResult = {
@@ -215,6 +231,163 @@ export function useWaAgentAssist() {
         outcomes: Array.isArray(json.outcomes) ? json.outcomes : [],
         custom_actions: Array.isArray(json.custom_actions) ? json.custom_actions : [],
       };
+    },
+  });
+}
+
+// ---------------------------------------------------------------- Documentos e mídias
+
+const documentsKey = (agentId: string | null | undefined) => [WA_AGENTS_QUERY_KEY, 'documents', agentId ?? ''];
+const mediaKey = (agentId: string | null | undefined) => [WA_AGENTS_QUERY_KEY, 'media', agentId ?? ''];
+
+/**
+ * Sobe um arquivo do agente direto para o bucket privado `wa-agent-files`
+ * (o arquivo não passa pela Vercel): pede { path, token } em POST /uploads e
+ * usa `uploadToSignedUrl`. Devolve o caminho para registrar o documento/mídia.
+ */
+export async function uploadWaAgentFile(input: {
+  agentId: string;
+  file: File;
+  kind: WaAgentFileKind;
+  mime: string;
+}): Promise<{ path: string }> {
+  const fileName = input.file.name || `arquivo_${Date.now()}`;
+  const up = await waAgentsFetch<{ path?: string; token?: string }>('/api/wa-agents/uploads', {
+    method: 'POST',
+    body: { agentId: input.agentId, fileName, kind: input.kind },
+  });
+  if (!up.path || !up.token) throw new Error('Falha ao preparar o upload');
+
+  const supabase = createClient();
+  if (!supabase) throw new Error('Supabase não configurado');
+  const { error } = await supabase.storage
+    .from('wa-agent-files')
+    .uploadToSignedUrl(up.path, up.token, input.file, { contentType: input.mime || 'application/octet-stream' });
+  if (error) throw new Error(`Upload falhou: ${error.message}`);
+  return { path: up.path };
+}
+
+/** Documentos da base de conhecimento; consulta a cada 5 s enquanto algum estiver em processamento. */
+export function useWaAgentDocuments(agentId: string | null | undefined) {
+  return useQuery({
+    queryKey: documentsKey(agentId),
+    queryFn: async () => {
+      const json = await waAgentsFetch<{ documents: AgentDocumentRow[] }>(`/api/wa-agents/agents/${agentId}/documents`);
+      return json.documents ?? [];
+    },
+    enabled: !!agentId,
+    refetchInterval: (query) => (query.state.data?.some((d) => d.status === 'processing') ? 5000 : false),
+  });
+}
+
+/** Registra um documento já enviado ao bucket (o servidor extrai, divide e indexa em segundo plano). */
+export function useAddWaAgentDocument(agentId: string | null | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: WaAgentDocumentInput): Promise<AgentDocumentRow> => {
+      if (!agentId) throw new Error('Salve o agente antes de enviar documentos');
+      const json = await waAgentsFetch<{ document: AgentDocumentRow }>(`/api/wa-agents/agents/${agentId}/documents`, {
+        method: 'POST',
+        body: input,
+      });
+      return json.document;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: documentsKey(agentId) });
+    },
+  });
+}
+
+/** Exclui um documento (trechos, linha e arquivo). */
+export function useDeleteWaAgentDocument(agentId: string | null | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (docId: string) => {
+      await waAgentsFetch<{ ok: boolean }>(`/api/wa-agents/agents/${agentId}/documents/${docId}`, { method: 'DELETE' });
+      return docId;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: documentsKey(agentId) });
+    },
+  });
+}
+
+/** Reprocessa um documento (extrai e indexa de novo). */
+export function useReprocessWaAgentDocument(agentId: string | null | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (docId: string) => {
+      await waAgentsFetch<{ ok?: boolean; document?: AgentDocumentRow }>(
+        `/api/wa-agents/agents/${agentId}/documents/${docId}/reprocess`,
+        { method: 'POST' }
+      );
+      return docId;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: documentsKey(agentId) });
+    },
+  });
+}
+
+/** Mídias que o agente pode enviar. */
+export function useWaAgentMedia(agentId: string | null | undefined) {
+  return useQuery({
+    queryKey: mediaKey(agentId),
+    queryFn: async () => {
+      const json = await waAgentsFetch<{ media: AgentMediaRow[] }>(`/api/wa-agents/agents/${agentId}/media`);
+      return json.media ?? [];
+    },
+    enabled: !!agentId,
+    staleTime: 30 * 1000,
+  });
+}
+
+/** Registra uma mídia já enviada ao bucket. */
+export function useAddWaAgentMedia(agentId: string | null | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: WaAgentMediaInput): Promise<AgentMediaRow> => {
+      if (!agentId) throw new Error('Salve o agente antes de enviar mídias');
+      const json = await waAgentsFetch<{ media: AgentMediaRow }>(`/api/wa-agents/agents/${agentId}/media`, {
+        method: 'POST',
+        body: input,
+      });
+      return json.media;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: mediaKey(agentId) });
+    },
+  });
+}
+
+/** Atualiza nome e/ou descrição ("quando enviar") de uma mídia. */
+export function useUpdateWaAgentMedia(agentId: string | null | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { mediaId: string; name?: string; description?: string }): Promise<AgentMediaRow> => {
+      const { mediaId, ...body } = vars;
+      const json = await waAgentsFetch<{ media: AgentMediaRow }>(`/api/wa-agents/agents/${agentId}/media/${mediaId}`, {
+        method: 'PATCH',
+        body,
+      });
+      return json.media;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: mediaKey(agentId) });
+    },
+  });
+}
+
+/** Exclui uma mídia (linha e arquivo). */
+export function useDeleteWaAgentMedia(agentId: string | null | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (mediaId: string) => {
+      await waAgentsFetch<{ ok: boolean }>(`/api/wa-agents/agents/${agentId}/media/${mediaId}`, { method: 'DELETE' });
+      return mediaId;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: mediaKey(agentId) });
     },
   });
 }

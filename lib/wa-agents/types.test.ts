@@ -44,6 +44,15 @@ describe('esquemas do agente (adendo)', () => {
     expect(ok.actions).toEqual([]);
   });
 
+  it('AgentInputSchema aplica os padrões de helper_agent_ids e tools', () => {
+    const parsed = AgentInputSchema.parse({ name: 'Ana', provider: 'openai', model: 'gpt-4.1-mini' });
+    expect(parsed.helper_agent_ids).toEqual([]);
+    expect(parsed.tools).toEqual({ calculator: true });
+    const off = AgentInputSchema.parse({ name: 'Ana', provider: 'openai', model: 'x', tools: { calculator: false } });
+    expect(off.tools.calculator).toBe(false);
+    expect(AgentInputSchema.safeParse({ name: 'Ana', provider: 'openai', model: 'x', helper_agent_ids: ['abc'] }).success).toBe(false);
+  });
+
   it('eventos novos têm rótulo em pt-BR', () => {
     expect(AGENT_EVENTS).toContain('custom_action');
     expect(AGENT_EVENTS).toContain('deal_started');

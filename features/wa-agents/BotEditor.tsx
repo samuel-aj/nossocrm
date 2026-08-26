@@ -1,13 +1,16 @@
 'use client';
 
 /**
- * Editor do robô em quadro visual (React Flow): cabeçalho (nome, ligado, número
- * que envia, Salvar / Cancelar / Testar), paleta de passos e o quadro com os nós.
+ * Editor do robô em quadro visual (React Flow), aberto como uma camada de tela
+ * cheia por cima do app (portal em document.body, estilo Typebot): barra superior
+ * (voltar, nome, ligado, número que envia, Testar, Salvar), quadro ocupando todo
+ * o resto da altura e paleta de passos flutuando sobre o quadro.
  * Salva via POST (novo) ou PATCH (existente) com o payload validado por BotInputSchema.
  */
 import '@xyflow/react/dist/style.css';
 import './canvas/canvas.css';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ReactFlowProvider,
   useEdgesState,
@@ -61,6 +64,29 @@ const FIELD_NAMES: Record<string, string> = {
   start_step_id: 'Primeiro passo',
 };
 
+/**
+ * Camada do editor. Fica acima do app inteiro (sidebar z-20, cabeçalho z-40) e
+ * logo ABAIXO das notificações do ToastContext (z-50), que precisam continuar
+ * aparecendo por cima do editor ("Robô salvo", erros de validação). Os modais
+ * internos (z-[9999]) vivem dentro deste contexto de empilhamento, portanto
+ * também ficam abaixo dos toasts.
+ */
+const OVERLAY_CLASS =
+  'fixed inset-0 z-[49] flex flex-col bg-slate-50 dark:bg-dark-bg text-slate-900 dark:text-white outline-none';
+
+/**
+ * Estilo da camada: para em cima da barra de navegação inferior do celular e
+ * zera o deslocamento da sidebar que os modais usam (`--app-sidebar-width`),
+ * já que aqui a camada cobre a sidebar e os modais devem centralizar na tela.
+ */
+const OVERLAY_STYLE = {
+  bottom: 'var(--app-bottom-nav-height, 0px)',
+  '--app-sidebar-width': '0px',
+} as React.CSSProperties;
+
+const NAME_INPUT_CLASS =
+  'flex-1 min-w-[140px] max-w-md bg-transparent border border-transparent hover:border-slate-200 dark:hover:border-white/10 focus:border-purple-500 focus:bg-white dark:focus:bg-slate-800 rounded-lg px-2 py-1.5 text-base font-semibold text-slate-900 dark:text-white placeholder:font-normal placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-purple-500/20 transition-colors';
+
 /** Mensagem em pt-BR para um problema do zod, pelo caminho do campo. */
 function describeIssue(path: PropertyKey[], message: string): string {
   const root = String(path[0] ?? '');
@@ -71,6 +97,16 @@ function describeIssue(path: PropertyKey[], message: string): string {
   }
   const rest = path.slice(1).map(String).join('.');
   return `${label}${rest ? ` (${rest})` : ''}: ${message}`;
+}
+
+/** Campo de texto em foco (Esc só tira o foco dele, em vez de fechar o editor). */
+function isTextField(el: Element | null): el is HTMLElement {
+  return (
+    el instanceof HTMLInputElement ||
+    el instanceof HTMLTextAreaElement ||
+    el instanceof HTMLSelectElement ||
+    (el instanceof HTMLElement && el.isContentEditable)
+  );
 }
 
 type PendingSave = { payload: BotInput; warnings: string[] };
@@ -101,6 +137,8 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
   const [pending, setPending] = useState<PendingSave | null>(null);
   const [testOpen, setTestOpen] = useState(false);
   const [testPhone, setTestPhone] = useState('');
+  const rootRef = useRef<HTMLDivElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   // Conta os passos adicionados pela paleta para não empilhar todos no mesmo ponto.
   const addedRef = useRef(0);
@@ -109,6 +147,46 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
   const connections = options?.connections ?? [];
   const agents = agentsQ.data ?? EMPTY_AGENTS;
   const ctx = useMemo<CanvasContextValue>(() => ({ options, agents }), [options, agents]);
+
+  // Enquanto a camada está aberta, a página de trás não rola (o quadro cuida da própria rolagem).
+  useEffect(() => {
+    const { body } = document;
+    const previous = body.style.overflow;
+    body.style.overflow = 'hidden';
+    return () => {
+      body.style.overflow = previous;
+    };
+  }, []);
+
+  // Foco inicial: robô novo começa pelo nome; robô existente foca a camada (leitores de tela).
+  useEffect(() => {
+    if (bot) rootRef.current?.focus();
+    else nameRef.current?.focus();
+  }, [bot]);
+
+  const anyModalOpen = confirmLeave || pending !== null || testOpen;
+
+  const handleCancel = useCallback(() => {
+    if (dirty) setConfirmLeave(true);
+    else onClose();
+  }, [dirty, onClose]);
+
+  // Esc: com um modal aberto, o próprio modal trata; num campo de texto só tira o foco;
+  // fora disso pergunta antes de sair (com alterações) ou fecha direto.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || anyModalOpen) return;
+      const active = document.activeElement;
+      if (isTextField(active)) {
+        active.blur();
+        return;
+      }
+      e.preventDefault();
+      handleCancel();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [anyModalOpen, handleCancel]);
 
   const patchHeader = (patch: Partial<FlowHeader>) => {
     setHeader((prev) => ({ ...prev, ...patch }));
@@ -212,11 +290,6 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
     void persist(parsed.data);
   };
 
-  const handleCancel = () => {
-    if (dirty) setConfirmLeave(true);
-    else onClose();
-  };
-
   const openTest = () => {
     if (!botId) {
       showToast('Salve o robô antes de testar', 'info');
@@ -250,31 +323,47 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
 
   const connectionLabel = connections.find((c) => c.id === header.connection_id)?.label ?? 'número escolhido';
 
-  return (
+  // Só existe no navegador (a lista carrega este componente sem SSR).
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
     <CanvasContext.Provider value={ctx}>
-      <div className="space-y-3">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/5 rounded-xl p-3 shadow-sm flex flex-wrap items-center gap-3">
+      <div
+        ref={rootRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Editor do robô ${header.name || 'novo'}`}
+        tabIndex={-1}
+        className={OVERLAY_CLASS}
+        style={OVERLAY_STYLE}
+      >
+        <header className="shrink-0 flex flex-wrap items-center gap-2 px-3 py-2 min-h-14 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card shadow-sm">
           <button
             type="button"
             className={BTN_ICON}
             onClick={handleCancel}
             aria-label="Voltar para a lista de robôs"
-            title="Voltar"
+            title="Voltar (Esc)"
           >
             <ArrowLeft size={18} aria-hidden="true" />
           </button>
           <input
+            ref={nameRef}
             id="bot-name"
-            className={`${INPUT_CLASS} flex-1 min-w-[180px] font-semibold`}
+            className={NAME_INPUT_CLASS}
             value={header.name}
             onChange={(e) => patchHeader({ name: e.target.value })}
             maxLength={120}
             placeholder="Nome do robô"
             aria-label="Nome do robô"
           />
+          <div className="flex items-center gap-2 pl-1">
+            <span className="text-sm text-slate-600 dark:text-slate-300">{header.enabled ? 'Ligado' : 'Desligado'}</span>
+            <Toggle checked={header.enabled} onChange={(enabled) => patchHeader({ enabled })} label="Robô ligado" />
+          </div>
           <select
             id="bot-connection"
-            className={`${INPUT_CLASS} w-auto min-w-[200px] max-w-xs`}
+            className={`${INPUT_CLASS} w-auto min-w-[160px] max-w-[260px]`}
             value={header.connection_id}
             onChange={(e) => patchHeader({ connection_id: e.target.value })}
             aria-label="Número que envia as mensagens"
@@ -287,10 +376,6 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
               </option>
             ))}
           </select>
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-600 dark:text-slate-300">{header.enabled ? 'Ligado' : 'Desligado'}</span>
-            <Toggle checked={header.enabled} onChange={(enabled) => patchHeader({ enabled })} label="Robô ligado" />
-          </div>
           <div className="flex items-center gap-2 ml-auto">
             {dirty ? (
               <span className="hidden sm:inline text-xs font-medium text-amber-600 dark:text-amber-400">Não salvo</span>
@@ -298,9 +383,6 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
             <button type="button" className={BTN_SECONDARY} onClick={openTest} disabled={save.isPending}>
               <Play size={16} aria-hidden="true" />
               Testar
-            </button>
-            <button type="button" className={BTN_SECONDARY} onClick={handleCancel} disabled={save.isPending}>
-              Cancelar
             </button>
             <button type="button" className={BTN_PRIMARY} onClick={handleSave} disabled={save.isPending}>
               {save.isPending ? (
@@ -311,30 +393,26 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
               Salvar
             </button>
           </div>
-        </div>
+        </header>
 
-        {optionsQ.error ? <Notice tone="red">{errorMessage(optionsQ.error, 'Falha ao carregar as opções')}</Notice> : null}
-
-        <div className="flex flex-col md:flex-row gap-3 h-[640px] md:h-[calc(100vh-260px)] min-h-[520px]">
-          <Palette onAdd={addStep} />
-          <div ref={canvasRef} className="relative flex-1 min-h-[460px]">
-            <BotCanvas
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              onDropStep={addStep}
-              darkMode={darkMode}
-            />
+        {optionsQ.error ? (
+          <div className="shrink-0 px-3 pt-3">
+            <Notice tone="red">{errorMessage(optionsQ.error, 'Falha ao carregar as opções')}</Notice>
           </div>
-        </div>
+        ) : null}
 
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          Arraste os passos pelo título. Ligue uma saída (bolinha à direita) à entrada de outro passo (bolinha à
-          esquerda). Cada saída aceita uma ligação: ligar de novo substitui a anterior. A saída "Então" do gatilho define
-          o primeiro passo.
-        </p>
+        <div ref={canvasRef} className="relative flex-1 min-h-0">
+          <Palette onAdd={addStep} />
+          <BotCanvas
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onDropStep={addStep}
+            darkMode={darkMode}
+          />
+        </div>
 
         <ConfirmModal
           isOpen={confirmLeave}
@@ -414,12 +492,15 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
           </form>
         </Modal>
       </div>
-    </CanvasContext.Provider>
+    </CanvasContext.Provider>,
+    document.body
   );
 };
 
 /**
- * Componente React `BotEditor`.
+ * Componente React `BotEditor`: camada de tela cheia com o quadro do robô.
+ * Renderiza num portal em document.body, por isso pode ficar montado ao lado da
+ * lista de robôs (a lista continua embaixo e reaparece ao fechar).
  * @returns {Element} Retorna um valor do tipo `Element`.
  */
 export const BotEditor: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({ bot, onClose }) => (

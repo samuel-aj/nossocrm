@@ -141,6 +141,16 @@ export const DEFAULT_AGENT_TRIGGERS: AgentTriggers = {
 };
 
 // ---------------------------------------------------------------------------
+// Ferramentas do agente (ligadas/desligadas na configuração)
+// ---------------------------------------------------------------------------
+export const AgentToolsSchema = z.object({
+  /** Ferramenta calcular (avaliador seguro de expressões) */
+  calculator: z.boolean().default(true),
+});
+export type AgentTools = z.infer<typeof AgentToolsSchema>;
+export const DEFAULT_AGENT_TOOLS: AgentTools = { calculator: true };
+
+// ---------------------------------------------------------------------------
 // Agente
 // ---------------------------------------------------------------------------
 export const AI_PROVIDERS = ['openai', 'anthropic', 'google'] as const;
@@ -166,6 +176,9 @@ export const AgentInputSchema = z.object({
   webhooks: z.array(AgentWebhookSchema).default([]),
   custom_actions: z.array(CustomActionSchema).default([]),
   triggers: AgentTriggersSchema.default(DEFAULT_AGENT_TRIGGERS),
+  /** Agentes da org que este agente pode consultar durante a conversa (ferramenta consultar_agente) */
+  helper_agent_ids: z.array(z.string().uuid()).max(20).default([]),
+  tools: AgentToolsSchema.default(DEFAULT_AGENT_TOOLS),
 });
 export type AgentInput = z.infer<typeof AgentInputSchema>;
 
@@ -185,6 +198,112 @@ export function toAgentPublic(row: AgentRow): AgentPublic {
   const { api_key, ...rest } = row;
   return { ...rest, has_api_key: !!(api_key && api_key.trim()) };
 }
+
+// ---------------------------------------------------------------------------
+// Base de conhecimento (documentos) e mídias do agente
+// ---------------------------------------------------------------------------
+/** Bucket PRIVADO dos arquivos dos agentes (documentos e mídias). */
+export const WA_AGENT_FILES_BUCKET = 'wa-agent-files';
+/** Tamanho máximo de um arquivo do agente (50 MB, limite do bucket). */
+export const AGENT_FILE_MAX_BYTES = 52428800;
+
+export const AGENT_DOC_MIMES = [
+  'application/pdf',
+  'text/plain',
+  'text/markdown',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+] as const;
+export type AgentDocMime = (typeof AGENT_DOC_MIMES)[number];
+
+export const AGENT_DOCUMENT_STATUSES = ['processing', 'ready', 'error'] as const;
+export type AgentDocumentStatus = (typeof AGENT_DOCUMENT_STATUSES)[number];
+
+export type AgentDocumentRow = {
+  id: string;
+  organization_id: string;
+  agent_id: string;
+  name: string;
+  mime: string | null;
+  size_bytes: number;
+  storage_path: string;
+  status: AgentDocumentStatus;
+  error: string | null;
+  chunk_count: number;
+  created_by?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export const AGENT_MEDIA_KINDS = ['image', 'video', 'audio', 'document'] as const;
+export type AgentMediaKind = (typeof AGENT_MEDIA_KINDS)[number];
+
+export type AgentMediaRow = {
+  id: string;
+  organization_id: string;
+  agent_id: string;
+  name: string;
+  /** Quando enviar (linguagem natural) */
+  description: string | null;
+  kind: AgentMediaKind;
+  mime: string | null;
+  size_bytes: number;
+  storage_path: string;
+  created_at: string;
+};
+
+export const AgentMediaInputSchema = z.object({
+  name: z.string().min(1).max(80),
+  description: z.string().max(500).default(''),
+  kind: z.enum(AGENT_MEDIA_KINDS),
+  storage_path: z.string().min(1),
+  mime: z.string().max(120),
+  size_bytes: z.number().int().min(0).max(AGENT_FILE_MAX_BYTES),
+});
+export type AgentMediaInput = z.infer<typeof AgentMediaInputSchema>;
+
+/** PATCH de uma mídia: só nome e descrição */
+export const AgentMediaPatchSchema = z.object({
+  name: z.string().min(1).max(80).optional(),
+  description: z.string().max(500).optional(),
+});
+
+export const AgentDocumentInputSchema = z.object({
+  name: z.string().min(1).max(160),
+  storage_path: z.string().min(1),
+  mime: z.string().max(120),
+  size_bytes: z.number().int().min(0).max(AGENT_FILE_MAX_BYTES),
+});
+export type AgentDocumentInput = z.infer<typeof AgentDocumentInputSchema>;
+
+export const AGENT_UPLOAD_KINDS = ['doc', 'media'] as const;
+export type AgentUploadKind = (typeof AGENT_UPLOAD_KINDS)[number];
+
+/** POST /api/wa-agents/uploads */
+export const AgentUploadInputSchema = z.object({
+  agentId: z.string().uuid(),
+  fileName: z.string().min(1).max(255),
+  kind: z.enum(AGENT_UPLOAD_KINDS),
+});
+export type AgentUploadInput = z.infer<typeof AgentUploadInputSchema>;
+
+/** Trecho da base de conhecimento devolvido pela busca */
+export type KnowledgeHit = { content: string; document_id: string; idx: number; score: number };
+
+/** Recursos carregados de um agente para montar o prompt e as ferramentas */
+export type AgentResources = {
+  /** Documentos prontos (com trechos) */
+  documents: AgentDocumentRow[];
+  media: AgentMediaRow[];
+  /** Agentes auxiliares (da org, ligados, diferentes do próprio) */
+  helpers: AgentRow[];
+};
+
+/**
+ * Marcadores do roteiro: `[[acao:chave]]` e `[[midia:nome]]` indicam o momento
+ * exato em que o agente chama executar_acao / enviar_midia.
+ */
+export const SCRIPT_ACTION_MARKER_RE = /\[\[\s*acao\s*:\s*([^\]]+?)\s*\]\]/gi;
+export const SCRIPT_MEDIA_MARKER_RE = /\[\[\s*midia\s*:\s*([^\]]+?)\s*\]\]/gi;
 
 // ---------------------------------------------------------------------------
 // Robôs (mensagens predefinidas, sem IA)
@@ -369,6 +488,13 @@ export type RunRow = {
 export const ASSIST_MODES = ['generate', 'improve', 'adjust'] as const;
 export type AssistMode = (typeof ASSIST_MODES)[number];
 
+/** Mensagem do chat de teste enviada como exemplo para o ajuste */
+export const AssistExampleSchema = z.object({
+  role: z.enum(['user', 'assistant']),
+  text: z.string().max(8000),
+});
+export type AssistExample = z.infer<typeof AssistExampleSchema>;
+
 export const AssistInputSchema = z.object({
   mode: z.enum(ASSIST_MODES),
   /** generate: descrição do atendimento */
@@ -377,6 +503,10 @@ export const AssistInputSchema = z.object({
   current_prompt: z.string().max(60000).optional(),
   /** adjust: o que mudar */
   instruction: z.string().max(4000).optional(),
+  /** adjust: sinônimo de instruction ("o que o agente fez de errado") */
+  feedback: z.string().max(4000).optional(),
+  /** adjust: últimas mensagens do chat de teste, para contextualizar a correção */
+  examples: z.array(AssistExampleSchema).max(30).optional(),
   provider: z.enum(AI_PROVIDERS).optional(),
   model: z.string().max(120).optional(),
 });

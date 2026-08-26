@@ -8,12 +8,10 @@ import {
   generateText,
   hasToolCall,
   stepCountIs,
-  tool,
   type LanguageModel,
   type ModelMessage,
   type StopCondition,
 } from 'ai';
-import { z } from 'zod';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { getProvider, type SendResult } from '@/lib/whatsapp';
 import { recordOutboundMessage, replicateOutboundToSiblings } from '@/lib/whatsapp/service';
@@ -34,18 +32,25 @@ import {
   type WaMessageLite,
 } from './context';
 import { errorMessage, WaAgentError } from './errors';
+import { consultHelperAgent } from './helpers';
+import { searchKnowledge } from './knowledge';
+import { sendAgentMedia } from './media';
 import { resolveAgentModel, supportsTemperature } from './model';
+import { loadAgentResources } from './resources';
 import { logRun } from './runs';
 import { splitLines } from './split';
+import { buildAgentTools, findByName, type AgentToolRuntime } from './tools';
 import { pickInboundAgent } from './triggers';
 import type {
   AgentEvent,
+  AgentResources,
   AgentRow,
   AgentRunEvent,
   BotRunRow,
   ConversationAiState,
   ConversationApproval,
   CustomAction,
+  KnowledgeHit,
   Outcome,
   RunStatus,
   RunTrigger,
@@ -78,67 +83,47 @@ const LOCK_BASE_SECONDS = 90;
 const LOCK_RETRY_MS = 2_000;
 const LOCK_WAIT_MAX_MS = 60_000;
 const MAX_HANDOFF_DEPTH = 3;
-/** Passos do modelo por resposta: texto + salvar_dados + executar_acao + encerrar_atendimento cabem com folga */
-const MAX_STEPS = 5;
+/**
+ * Passos do modelo por resposta: consulta (documentos/auxiliar/calculadora) +
+ * texto + salvar_dados + executar_acao/enviar_midia + encerrar_atendimento.
+ */
+const MAX_STEPS = 6;
+/** Trechos da base de conhecimento injetados automaticamente no prompt. */
+const AUTO_KNOWLEDGE_LIMIT = 3;
+/** Trechos devolvidos pela ferramenta consultar_documentos. */
+const TOOL_KNOWLEDGE_LIMIT = 5;
 
 export function sleep(ms: number): Promise<void> {
   if (ms <= 0) return Promise.resolve();
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/** Duração da trava por conversa: geração + envio das linhas (até 8) + webhooks (por evento e das ações). */
+/**
+ * Duração da trava por conversa: geração + envio das linhas (até 8) + webhooks
+ * (por evento e das ações) + consultas a agentes auxiliares (cada uma é outra
+ * chamada ao modelo).
+ */
 export function lockSecondsFor(
-  agent: Pick<AgentRow, 'line_delay_ms' | 'webhooks' | 'outcomes' | 'custom_actions'>
+  agent: Pick<AgentRow, 'line_delay_ms' | 'webhooks' | 'outcomes' | 'custom_actions'> & Partial<Pick<AgentRow, 'helper_agent_ids'>>
 ): number {
   const activeWebhooks = agent.webhooks.filter(w => w.active !== false).length;
   const actionWebhooks = [...(agent.outcomes ?? []), ...(agent.custom_actions ?? [])].reduce(
     (n, item) => n + (item.actions ?? []).filter(a => a.type === 'webhook').length,
     0
   );
-  return LOCK_BASE_SECONDS + Math.ceil((8 * agent.line_delay_ms) / 1000) + 25 * (activeWebhooks + actionWebhooks);
+  const helpers = Math.min((agent.helper_agent_ids ?? []).length, 3);
+  return (
+    LOCK_BASE_SECONDS +
+    Math.ceil((8 * agent.line_delay_ms) / 1000) +
+    25 * (activeWebhooks + actionWebhooks) +
+    30 * helpers
+  );
 }
 
 // ---------------------------------------------------------------------------
-// Ferramentas do modelo
+// Ferramentas do modelo (definidas em tools.ts)
 // ---------------------------------------------------------------------------
-export function buildAgentTools(agent: AgentRow) {
-  const keys = agent.outcomes.map(o => o.key).filter(Boolean);
-  const resultadoSchema = keys.length > 0 ? z.enum(keys) : z.string();
-  const tools = {
-    encerrar_atendimento: tool({
-      description:
-        'Encerra o pré-atendimento. Chame UMA única vez, na mesma resposta e depois de escrever a mensagem final ao cliente. Informe o resultado (uma das chaves configuradas) e um resumo objetivo do caso.',
-      inputSchema: z.object({
-        resultado: resultadoSchema.describe('Chave do resultado do atendimento'),
-        resumo: z.string().describe('Resumo objetivo do caso: quem, o quê, quando, onde, provas, urgência'),
-      }),
-      execute: async args => args,
-    }),
-    salvar_dados: tool({
-      description:
-        'Salva dados descobertos sobre o atendimento (nome completo, cidade, tipo de caso, datas, documentos, urgência). Os dados são mesclados aos já salvos.',
-      inputSchema: z.object({ dados: z.record(z.string(), z.any()) }),
-      execute: async () => ({ ok: true }),
-    }),
-  };
-
-  // Ações durante a conversa: só quando o agente tem alguma configurada
-  const actionKeys = (agent.custom_actions ?? []).map(a => a.key).filter(Boolean);
-  if (actionKeys.length === 0) return tools;
-  const acaoSchema = z.enum(actionKeys);
-  return {
-    ...tools,
-    executar_acao: tool({
-      description:
-        'Executa uma ação configurada no momento em que a situação descrita acontece na conversa (uma vez por ocorrência). Nas ações marcadas como finais no prompt, escreva a mensagem final ao cliente antes de chamar; as demais não encerram o atendimento.',
-      inputSchema: z.object({
-        acao: acaoSchema.describe('Chave da ação'),
-        detalhes: z.string().describe('O que o cliente disse ou o contexto que motivou a ação, em uma ou duas frases'),
-      }),
-      execute: async args => ({ ok: true, acao: args.acao }),
-    }),
-  };
-}
+export { buildAgentTools };
 
 /** Acha a ação durante a conversa pela chave (fallback: igual ignorando caixa; depois pelo rótulo). */
 export function findCustomAction(actions: CustomAction[], key: string): CustomAction | null {
@@ -152,8 +137,16 @@ export function findCustomAction(actions: CustomAction[], key: string): CustomAc
   );
 }
 
+/**
+ * Pedaço da resposta na ordem em que o modelo produziu: texto (dividido em
+ * linhas na hora do envio) ou mídia pedida por enviar_midia. Assim a mídia é
+ * entregue no ponto da conversa em que a ferramenta foi chamada.
+ */
+export type ReplySegment = { kind: 'text'; text: string } | { kind: 'media'; name: string; caption?: string };
+
 export type GeneratedReply = {
   text: string;
+  segments: ReplySegment[];
   toolCalls: CollectedToolCall[];
   usage: unknown;
   finishReason: string;
@@ -167,6 +160,8 @@ export async function generateAgentReply(input: {
   agent: AgentRow;
   system: string;
   messages: ModelMessage[];
+  /** Recursos e efeitos das ferramentas condicionais (documentos, mídias, auxiliares) */
+  runtime?: AgentToolRuntime;
 }): Promise<GeneratedReply> {
   // Ação durante a conversa com transição (parar, passar, aprovação) também encerra a geração:
   // o texto de um passo seguinte iria para um lead que já não é deste agente
@@ -185,30 +180,52 @@ export async function generateAgentReply(input: {
     system: input.system,
     messages: input.messages,
     temperature: supportsTemperature(input.agent) ? input.agent.temperature : undefined,
-    tools: buildAgentTools(input.agent),
+    tools: buildAgentTools(input.agent, input.runtime),
     // Depois de encerrar_atendimento não há passo extra: o texto sobrando iria para o lead
     stopWhen: [stepCountIs(MAX_STEPS), hasToolCall('encerrar_atendimento'), hasTransitionAction],
   });
 
   const toolCalls: CollectedToolCall[] = [];
   const texts: string[] = [];
+  const segments: ReplySegment[] = [];
   for (const step of result.steps) {
     const t = (step.text ?? '').trim();
-    if (t) texts.push(t);
+    if (t) {
+      texts.push(t);
+      segments.push({ kind: 'text', text: t });
+    }
     for (const tc of step.toolCalls) {
       const tr = step.toolResults.find(r => r.toolCallId === tc.toolCallId);
       toolCalls.push({ tool: tc.toolName, input: tc.input, output: tr?.output });
+      if (tc.toolName === 'enviar_midia') {
+        const out = (tr?.output ?? null) as { ok?: boolean; midia?: string } | null;
+        const args = (tc.input ?? {}) as { nome?: string; legenda?: string };
+        if (out?.ok) {
+          segments.push({ kind: 'media', name: out.midia || String(args.nome ?? ''), caption: args.legenda });
+        }
+      }
     }
   }
   // O texto final pode ter vindo no passo anterior ao da ferramenta: junta todos
   const text = (texts.join('\n') || result.text || '').trim();
+  // Sem mídia, um único segmento com o texto todo (mesma divisão em linhas de antes)
+  if (!segments.some(s => s.kind === 'media')) {
+    segments.length = 0;
+    if (text) segments.push({ kind: 'text', text });
+  }
   const u = result.totalUsage;
   const usage = {
     inputTokens: u?.inputTokens ?? null,
     outputTokens: u?.outputTokens ?? null,
     totalTokens: u?.totalTokens ?? null,
   };
-  return { text, toolCalls, usage, finishReason: String(result.finishReason ?? '') };
+  return { text, segments, toolCalls, usage, finishReason: String(result.finishReason ?? '') };
+}
+
+/** Texto de um segmento sem o marcador [SEM_RESPOSTA] ('' quando só havia o marcador). */
+export function segmentText(seg: ReplySegment): string {
+  if (seg.kind !== 'text') return '';
+  return seg.text.split(NO_REPLY_TOKEN).join('').trim();
 }
 
 /** Dados salvos via salvar_dados (mesclados na ordem das chamadas). */
@@ -544,28 +561,86 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
       }
     }
 
-    // 5. Modelo, prompt e histórico
+    // 5. Modelo, recursos (documentos, mídias, auxiliares), prompt e histórico
     const resolved = await resolveAgentModel(admin, organizationId, agent);
     modelId = resolved.modelId;
+    const resources: AgentResources = await loadAgentResources(admin, organizationId, agent);
+    // Trechos da base para a(s) última(s) mensagem(ns) do lead, injetados no prompt
+    let knowledge: KnowledgeHit[] = [];
+    if (resources.documents.length > 0) {
+      const lastInForQuery = pending.length > 0 ? null : await getLastMessage(admin, ctx, 'in');
+      const query = inputText ?? (lastInForQuery ? messageText(lastInForQuery) : '');
+      if (query) {
+        knowledge = await searchKnowledge(admin, { organizationId, agent, query, limit: AUTO_KNOWLEDGE_LIMIT });
+        if (knowledge.length > 0) pushEvent('knowledge_injected', { trechos: knowledge.length });
+      }
+    }
     // Instrução de apresentação só no primeiro contato pelo pipeline (não nas rodadas seguintes nem após passagem)
-    const system = buildSystemPrompt({ agent, ctx, firstContact: input.trigger === 'deal' });
+    const system = buildSystemPrompt({ agent, ctx, firstContact: input.trigger === 'deal', resources, knowledge });
     const messages = await buildHistoryMessages(admin, ctx, agent.history_limit);
     if (input.forceReply && (messages.length === 0 || messages[messages.length - 1].role === 'assistant')) {
       messages.push({ role: 'user', content: '(o sistema pediu que você inicie/continue o atendimento agora)' });
     }
 
+    // Efeitos das ferramentas condicionais. enviar_midia só enfileira: a mídia
+    // sai na ordem dos segmentos (texto anterior, mídia, texto seguinte), no passo 7.
+    const runCtx = ctx;
+    const runAgent = agent;
+    const runtime: AgentToolRuntime = {
+      documents: resources.documents,
+      media: resources.media,
+      helpers: resources.helpers,
+      searchKnowledge: q => searchKnowledge(admin, { organizationId, agent: runAgent, query: q, limit: TOOL_KNOWLEDGE_LIMIT }),
+      sendMedia: async media => {
+        const conn = runCtx.connection;
+        if (!conn) return { ok: false, error: 'conversa sem número vinculado' };
+        if (conn.status !== 'connected') return { ok: false, error: 'número desconectado' };
+        return { ok: true, note: `mídia "${media.name}" será enviada neste ponto da conversa` };
+      },
+      consultHelper: async (helper, question) => {
+        await renew();
+        const answer = await consultHelperAgent(admin, { organizationId, helper, question, ctx: runCtx, askedBy: runAgent });
+        await renew();
+        return answer;
+      },
+    };
+
     // 6. Geração
-    const gen = await generateAgentReply({ model: resolved.model, agent, system, messages });
+    const gen = await generateAgentReply({ model: resolved.model, agent, system, messages, runtime });
     toolCalls.push(...gen.toolCalls);
     usage = gen.usage;
     const text = gen.text;
     outputText = text || null;
 
-    // 7. Envio linha a linha
-    let lines: string[] = [];
-    if (text && text !== NO_REPLY_TOKEN) {
-      lines = splitLines(text);
-      await sendLines(admin, ctx, agent, lines, { renewLock: renew });
+    // 7. Envio na ordem dos segmentos: linhas de texto e mídias no ponto em que foram pedidas
+    const lines: string[] = [];
+    const mediaSent: string[] = [];
+    for (const seg of gen.segments) {
+      if (seg.kind === 'text') {
+        const t = segmentText(seg);
+        if (!t) continue;
+        const segLines = splitLines(t);
+        if (lines.length > 0 && agent.line_delay_ms > 0) await sleep(agent.line_delay_ms);
+        await sendLines(admin, ctx, agent, segLines, { renewLock: renew });
+        lines.push(...segLines);
+        continue;
+      }
+      const media = findByName(resources.media, seg.name);
+      if (!media) {
+        pushEvent('media_not_found', { nome: seg.name });
+        continue;
+      }
+      if ((lines.length > 0 || mediaSent.length > 0) && agent.line_delay_ms > 0) await sleep(agent.line_delay_ms);
+      await renew();
+      const sent = await sendAgentMedia(admin, { organizationId, agent, ctx, media, caption: seg.caption });
+      await renew();
+      if (sent.ok) {
+        mediaSent.push(media.name);
+        pushEvent('media_sent', { nome: media.name, kind: media.kind, message_id: sent.messageId });
+      } else {
+        // O texto já foi: a falha da mídia fica registrada (e a mensagem 'failed' aparece no chat)
+        pushEvent('media_failed', { nome: media.name, error: sent.error });
+      }
     }
 
     // 8. Estado da conversa
@@ -580,7 +655,7 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     ctx.conversation.ai_state = state;
 
     // 9. Eventos e esteira
-    if (lines.length > 0) await emit('reply_sent', { text, lines });
+    if (lines.length > 0 || mediaSent.length > 0) await emit('reply_sent', { text, lines, media: mediaSent });
     for (const tc of gen.toolCalls) await emit('tool_used', { tool: tc.tool, input: tc.input });
 
     // Mudança de estado pedida pelas ações (aprovação, passagem, parada): aplicada uma única vez

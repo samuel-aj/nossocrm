@@ -3,7 +3,8 @@
  *   GET  -> admin: { agents: AgentPublic[] } (sem api_key, com has_api_key)
  *           demais membros: { agents: AgentMinimal[] } (só os ligados; menu do chat)
  *   POST -> (admin) cria um agente a partir de AgentInputSchema -> 201 { agent }
- *           (inclui custom_actions e triggers; gatilho por pipeline validado na org)
+ *           (inclui custom_actions, triggers, helper_agent_ids e tools; gatilho por
+ *           pipeline e auxiliares validados na org)
  */
 import { json } from '@/lib/whatsapp/api';
 import { AgentInputSchema, type AgentInput, type AgentMinimal, type AgentRow } from '@/lib/wa-agents/types';
@@ -15,7 +16,9 @@ import {
   normalizeApiKeyInput,
   readJsonBody,
   toAgentPublic,
+  uniqueIds,
   validateAgentTriggers,
+  validateHelperAgentIds,
   validationError,
 } from '../_shared';
 
@@ -42,6 +45,8 @@ function toInsertRow(input: AgentInput) {
     webhooks: input.webhooks,
     custom_actions: input.custom_actions,
     triggers: input.triggers,
+    helper_agent_ids: uniqueIds(input.helper_agent_ids),
+    tools: input.tools,
   };
 }
 
@@ -84,6 +89,8 @@ export async function POST(req: Request) {
     }
     const triggersError = await validateAgentTriggers(auth.admin, orgId, parsed.data.triggers);
     if (triggersError) return triggersError;
+    const helpersError = await validateHelperAgentIds(auth.admin, orgId, parsed.data.helper_agent_ids);
+    if (helpersError) return helpersError;
   } catch (err) {
     return json({ error: getErrorMessage(err, 'Falha ao validar os números') }, 500);
   }

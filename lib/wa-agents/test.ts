@@ -1,23 +1,40 @@
 /**
  * Teste de um agente no painel: mesma montagem de prompt e ferramentas, com
- * contexto fictício, sem enviar nada e sem executar ações.
+ * contexto fictício, sem enviar nada e sem executar ações. As ferramentas
+ * consultar_documentos, consultar_agente e calcular são reais; enviar_midia é
+ * simulada (devolve "mídia X enviada (simulado)").
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ModelMessage } from 'ai';
 import { buildSystemPrompt, type ConversationContext } from './context';
-import { generateAgentReply, NO_REPLY_TOKEN } from './engine';
+import { generateAgentReply, NO_REPLY_TOKEN, type ReplySegment } from './engine';
 import { errorMessage } from './errors';
+import { consultHelperAgent } from './helpers';
+import { searchKnowledge } from './knowledge';
 import { resolveAgentModel } from './model';
+import { loadAgentResources } from './resources';
 import { logRun } from './runs';
 import { splitLines } from './split';
-import type { AgentRow } from './types';
+import type { AgentToolRuntime } from './tools';
+import type { AgentRow, KnowledgeHit } from './types';
 
 export type TestMessage = { role: 'user' | 'assistant'; text: string };
 
-export type TestAgentReplyResult = { text: string; lines: string[]; toolCalls: unknown[]; usage: unknown };
+export type TestAgentReplyResult = {
+  text: string;
+  lines: string[];
+  toolCalls: unknown[];
+  usage: unknown;
+  /** Texto e mídias (simuladas) na ordem em que o agente produziu */
+  segments: ReplySegment[];
+  /** Nomes das mídias que o agente pediu para enviar (simulado) */
+  media: string[];
+};
 
 const TEST_PHONE = '+5500000000000';
 const TEST_CONVERSATION_ID = '00000000-0000-0000-0000-000000000000';
+const AUTO_KNOWLEDGE_LIMIT = 3;
+const TOOL_KNOWLEDGE_LIMIT = 5;
 
 export function buildTestContext(input: {
   organizationId: string;
@@ -80,29 +97,48 @@ export async function testAgentReply(
   input: { organizationId: string; agent: AgentRow; messages: TestMessage[]; state?: Record<string, unknown> }
 ): Promise<TestAgentReplyResult> {
   const startedAt = Date.now();
+  const { organizationId, agent } = input;
   const { data: orgRow } = await admin
     .from('organizations')
     .select('name')
-    .eq('id', input.organizationId)
+    .eq('id', organizationId)
     .maybeSingle();
   const ctx = buildTestContext({
-    organizationId: input.organizationId,
+    organizationId,
     organizationName: (orgRow as { name?: string } | null)?.name ?? '',
-    agent: input.agent,
+    agent,
     state: input.state,
   });
 
-  const resolved = await resolveAgentModel(admin, input.organizationId, input.agent);
-  const system = buildSystemPrompt({ agent: input.agent, ctx });
-  const messages = toModelMessages(input.messages);
+  const resolved = await resolveAgentModel(admin, organizationId, agent);
+  const resources = await loadAgentResources(admin, organizationId, agent);
   const lastUser = [...input.messages].reverse().find(m => m.role === 'user')?.text ?? null;
 
+  // Mesma injeção automática da conversa real: trechos para a última mensagem do lead
+  let knowledge: KnowledgeHit[] = [];
+  if (resources.documents.length > 0 && lastUser) {
+    knowledge = await searchKnowledge(admin, { organizationId, agent, query: lastUser, limit: AUTO_KNOWLEDGE_LIMIT });
+  }
+  const system = buildSystemPrompt({ agent, ctx, resources, knowledge });
+  const messages = toModelMessages(input.messages);
+
+  const runtime: AgentToolRuntime = {
+    documents: resources.documents,
+    media: resources.media,
+    helpers: resources.helpers,
+    searchKnowledge: q => searchKnowledge(admin, { organizationId, agent, query: q, limit: TOOL_KNOWLEDGE_LIMIT }),
+    // Simulado: nada é enviado
+    sendMedia: async media => ({ ok: true, note: `mídia ${media.name} enviada (simulado)` }),
+    consultHelper: (helper, question) => consultHelperAgent(admin, { organizationId, helper, question, ctx, askedBy: agent }),
+  };
+
   try {
-    const gen = await generateAgentReply({ model: resolved.model, agent: input.agent, system, messages });
+    const gen = await generateAgentReply({ model: resolved.model, agent, system, messages, runtime });
     const lines = gen.text && gen.text !== NO_REPLY_TOKEN ? splitLines(gen.text) : [];
+    const media = gen.segments.filter(s => s.kind === 'media').map(s => (s.kind === 'media' ? s.name : ''));
     await logRun(admin, {
-      organization_id: input.organizationId,
-      agent_id: input.agent.id,
+      organization_id: organizationId,
+      agent_id: agent.id,
       conversation_id: null,
       trigger: 'test',
       status: 'ok',
@@ -113,12 +149,12 @@ export async function testAgentReply(
       model: resolved.modelId,
       duration_ms: Date.now() - startedAt,
     });
-    return { text: gen.text, lines, toolCalls: gen.toolCalls, usage: gen.usage };
+    return { text: gen.text, lines, toolCalls: gen.toolCalls, usage: gen.usage, segments: gen.segments, media };
   } catch (e) {
     const msg = errorMessage(e);
     await logRun(admin, {
-      organization_id: input.organizationId,
-      agent_id: input.agent.id,
+      organization_id: organizationId,
+      agent_id: agent.id,
       conversation_id: null,
       trigger: 'test',
       status: 'error',

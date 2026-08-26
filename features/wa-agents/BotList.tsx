@@ -3,6 +3,8 @@
 /**
  * Lista de robôs de mensagens: cards com gatilho, número e passos; ações
  * Editar, Testar com um negócio (dispara por telefone) e Excluir.
+ * O editor abre como camada de tela cheia por cima da lista (portal), então a
+ * lista continua montada embaixo e reaparece atualizada ao fechar.
  */
 import React, { useState } from 'react';
 import dynamic from 'next/dynamic';
@@ -37,10 +39,6 @@ export const BotList: React.FC = () => {
   const [testBot, setTestBot] = useState<BotRow | null>(null);
   const [testPhone, setTestPhone] = useState('');
   const [togglingId, setTogglingId] = useState<string | null>(null);
-
-  if (editor) {
-    return <BotEditor bot={editor.bot} onClose={() => setEditor(null)} />;
-  }
 
   const options = optionsQ.data;
   const connectionLabel = (id: string | null) => {
@@ -117,6 +115,9 @@ export const BotList: React.FC = () => {
           Novo robô
         </button>
       </div>
+
+      {/* Editor em tela cheia (portal): fica por cima da lista enquanto aberto */}
+      {editor ? <BotEditor bot={editor.bot} onClose={() => setEditor(null)} /> : null}
 
       {listQ.isLoading ? (
         <Spinner label="Carregando robôs..." />

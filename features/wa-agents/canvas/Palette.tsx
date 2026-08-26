@@ -1,8 +1,9 @@
 'use client';
 
 /**
- * Paleta de passos do quadro: clique adiciona perto do centro da tela;
- * arrastar solta o passo onde o mouse largar.
+ * Paleta de passos: flutua sobre o quadro, no canto superior esquerdo (estilo
+ * Typebot). Clique adiciona perto do centro da tela; arrastar solta o passo onde
+ * o mouse largar. Em telas pequenas vira uma faixa horizontal no topo do quadro.
  */
 import React from 'react';
 import { NODE_META, toneClass } from './nodes';
@@ -12,7 +13,7 @@ export function Palette({ onAdd }: { onAdd: (type: StepType) => void }) {
   return (
     <aside
       aria-label="Passos disponíveis"
-      className="shrink-0 md:w-48 bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-xl shadow-sm p-2 flex md:flex-col gap-1 overflow-x-auto md:overflow-visible"
+      className="absolute z-10 top-3 left-3 right-3 md:right-auto md:w-52 md:max-h-[calc(100%-1.5rem)] bg-white/95 dark:bg-slate-900/95 backdrop-blur border border-slate-200 dark:border-white/10 rounded-xl shadow-lg p-2 flex md:flex-col gap-1 overflow-x-auto md:overflow-x-hidden md:overflow-y-auto"
     >
       <p className="hidden md:block px-2 pt-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
         Adicionar passo
@@ -49,7 +50,9 @@ export function Palette({ onAdd }: { onAdd: (type: StepType) => void }) {
         );
       })}
       <p className="hidden md:block px-2 pt-2 text-[11px] leading-snug text-slate-400">
-        Clique ou arraste para o quadro. Ligue as saídas puxando das bolinhas. Delete apaga o que estiver selecionado.
+        Clique ou arraste para o quadro. Ligue uma saída (bolinha à direita) à entrada de outro passo (bolinha à
+        esquerda). Cada saída aceita uma ligação: ligar de novo substitui a anterior. A saída "Então" do gatilho
+        define o primeiro passo. Delete apaga o que estiver selecionado.
       </p>
     </aside>
   );

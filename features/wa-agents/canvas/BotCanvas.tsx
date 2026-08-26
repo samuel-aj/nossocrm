@@ -3,6 +3,7 @@
 /**
  * Área do quadro: React Flow com os nós do robô, fundo pontilhado, controles de
  * zoom e minimapa. Recebe o estado (nós/arestas) do editor e devolve as mudanças.
+ * Ocupa todo o contêiner pai (sem moldura própria: o editor em tela cheia é a moldura).
  * Precisa estar dentro de um ReactFlowProvider.
  */
 import React, { useCallback } from 'react';
@@ -92,7 +93,7 @@ export function BotCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnec
       onConnect={onConnect}
       nodeTypes={nodeTypes}
       colorMode={darkMode ? 'dark' : 'light'}
-      className="wa-bot-canvas rounded-xl border border-slate-200 dark:border-white/10"
+      className="wa-bot-canvas"
       style={CANVAS_STYLE}
       fitView
       fitViewOptions={FIT_VIEW_OPTIONS}
