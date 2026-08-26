@@ -51,18 +51,21 @@ O agente encerra chamando a ferramenta `encerrar_atendimento(resultado, resumo)`
 ### Pausa e parada no chat
 
 - Atendente responde pelo CRM ou pelo celular → o agente **pausa** por N minutos (configurável) e retoma sozinho lendo o que foi dito no meio tempo. Se o atendente continuar falando, o relógio reinicia.
-- Botões no chat: **Pausar / Retomar**, **Parar** (encerra de vez nesta conversa; vale também para o agente externo, o n8n via API), **Iniciar** (abre a lista de agentes de IA **e** de robôs: escolhe qual agente assume a conversa ou inicia um robô nela; ao iniciar um robô, o agente da conversa, se houver, para), **Cancelar robô** (interrompe o robô em andamento nesta conversa) e **Aprovar / Recusar**.
+- A faixa acima do campo de texto só aparece enquanto há algo em andamento: **Pausar / Retomar**, **Parar** (encerra de vez nesta conversa; vale também para o agente externo, o n8n via API), **Cancelar robô** (interrompe o robô em andamento) e **Aprovar / Recusar**. Com tudo parado, a faixa some.
+- **Automações** (botão ✨ ao lado do emoji/anexo no compositor): abre a lista de agentes de IA **e** de robôs ligados. Escolher um mostra um passo de confirmação com **Contexto adicional (opcional)**: um texto escrito pela equipe que entra no prompt do agente como fato conhecido (bloco "CONTEXTO ADICIONAL INFORMADO PELA EQUIPE") e vira a variável `{{contexto_extra}}` nas mensagens do robô (e segue para o agente quando o robô entrega). Ao iniciar um robô, o agente da conversa, se houver, para. Com agente ou robô em andamento, o popover só avisa (pare pela faixa para trocar).
+- **Limpar memória do agente nesta conversa** (rodapé do popover Automações): o agente para, esquece o que veio antes (só enxerga mensagens a partir daquele momento, `ai_state.memoria_desde`) e a conversa volta a "sem agente", como um contato novo. O histórico do chat continua visível para a equipe. Serve para recomeçar um teste do zero.
+- Quando o agente chama `encerrar_atendimento` com um resultado válido, a conversa fica **parada** (o chat mostra que ele não está mais ativo), mesmo que o resultado não tenha a ação "parar".
 
 ### Gatilhos do agente
 
 | Gatilho | Configuração | O que acontece |
 |---|---|---|
 | Mensagem recebida (qualquer) | padrão | Conversa nova num número vinculado inicia o agente. Só em conversa **sem estado** (que nunca teve agente) |
-| Mensagem recebida (específica) | palavras-chave | Só inicia se a mensagem contiver alguma das palavras. Também **reinicia** uma conversa parada |
+| Mensagem recebida (específica) | palavras-chave | Só inicia se a mensagem contiver alguma das palavras. Também **assume** uma conversa de agente externo ativo (n8n via API), que passa a receber 409 |
 | Nunca por mensagem | | O agente só entra por passagem de outro agente, pelo pipeline ou na mão |
-| Cadastro no pipeline | negócio criado (quadro opcional) ou entrou numa etapa + número que envia | O agente **manda a primeira mensagem sozinho**, com os dados do cadastro (título, valor, etapa, rótulos, descrição e campos personalizados) no contexto, sem perguntar o que já consta. Também **reinicia** uma conversa parada |
+| Cadastro no pipeline | negócio criado (quadro opcional) ou entrou numa etapa + número que envia | O agente **manda a primeira mensagem sozinho**, com os dados do cadastro (título, valor, etapa, rótulos, descrição e campos personalizados) no contexto, sem perguntar o que já consta. Também assume uma conversa de agente externo ativo |
 
-Conversa **parada** (pelo botão Parar, por um encerramento ou pelo agente externo via API): palavra-chave e pipeline reiniciam o atendimento com o agente do gatilho, tanto para o nativo quanto para o externo. "Qualquer mensagem" não reinicia: uma mensagem comum numa conversa parada fica com o atendente, para ninguém ser atropelado.
+Conversa **parada** (pelo botão Parar, por um encerramento do próprio agente ou pela API) **nunca é reaberta por gatilho automático**: quem já foi atendido pela IA só volta a ser atendido se alguém, na mão, usar **Limpar memória** e/ou iniciar um agente ou robô pelo botão Automações. Conversa pausada (atendente na conversa) também não recebe gatilho.
 
 ### Ações durante a conversa
 

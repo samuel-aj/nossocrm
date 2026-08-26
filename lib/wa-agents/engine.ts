@@ -629,7 +629,10 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
       return await finish('skipped', { reason: 'agente da conversa mudou' });
     }
 
-    const since = conv.ai_last_processed_at ?? '1970-01-01T00:00:00.000Z';
+    // "Limpar memória" (ai_state.memoria_desde): o agente não enxerga nem responde o que veio antes
+    const memoriaDesde = ((conv.ai_state ?? {}) as ConversationAiState).memoria_desde ?? null;
+    const since = [conv.ai_last_processed_at, memoriaDesde].filter((v): v is string => !!v).sort().pop() ??
+      '1970-01-01T00:00:00.000Z';
     const pending = await getPendingInbound(admin, ctx, since);
     inputText = pending.map(messageText).filter(Boolean).join('\n') || null;
     if (!input.forceReply) {
@@ -870,6 +873,15 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
         await emit('finished', { resultado: outcome.key, resultado_label: outcome.label, resumo });
         if (requestsTransition(acts)) {
           transition = { acts, summary: resumo, reason: 'resultado com parada', extra: { resultado: outcome.key, resumo } };
+        } else {
+          // Atendimento encerrado = agente para nesta conversa (o chat mostra que ele não está mais
+          // ativo). Parada pelo próprio agente: palavra-chave ou pipeline podem abrir um atendimento novo.
+          transition = {
+            acts: { ...acts, stopped: true },
+            summary: resumo,
+            reason: 'atendimento encerrado',
+            extra: { resultado: outcome.key, resumo },
+          };
         }
       }
     }
@@ -1043,17 +1055,17 @@ export async function handleInboundMessage(input: {
 
     // O que cada gatilho por mensagem pode fazer, pelo estado da conversa:
     // - sem estado: qualquer agente de entrada do número ("qualquer mensagem" ou palavra-chave);
-    // - parada pelo ATENDENTE (ai_paused_by preenchido): nada automático reabre, só Iniciar no chat;
-    // - parada pelo próprio agente (resultado/limite): só palavra-chave (gatilho explícito) reabre;
+    // - PARADA (atendimento já feito pela IA ou parada pelo atendente): nada automático reabre;
+    //   só "Limpar memória" e/ou Iniciar no chat, na mão;
     // - agente EXTERNO ativo (n8n via API): palavra-chave assume a conversa (a API passa a receber 409);
     // - pausada/aguardando aprovação (nativa) e externo pausado (atendente na conversa): pula.
     const stopped = conv.ai_status === 'stopped';
     const externalActive = !conv.ai_agent_id && conv.ai_status === 'active';
-    const keywordsOnly = stopped || externalActive;
-    if (stopped && conv.ai_paused_by) {
-      return { status: 'skipped', reason: 'conversa parada pelo atendente' };
+    const keywordsOnly = externalActive;
+    if (stopped) {
+      return { status: 'skipped', reason: 'conversa parada: só reabre na mão' };
     }
-    if (conv.ai_agent_id && !stopped) {
+    if (conv.ai_agent_id) {
       if (conv.ai_status && conv.ai_status !== 'active') {
         return await skip(`conversa ${conv.ai_status}`, conv.ai_agent_id);
       }
@@ -1067,7 +1079,7 @@ export async function handleInboundMessage(input: {
           .eq('id', conversationId)
           .eq('organization_id', organizationId);
       }
-    } else if (!conv.ai_status || stopped || externalActive) {
+    } else if (!conv.ai_status || externalActive) {
       if (!conv.connection_id) return await skip('conversa sem número');
       // Agentes de entrada do número, filtrados pelo gatilho por mensagem (triggers.inbound)
       const { data: candidatesRaw } = await admin
@@ -1083,12 +1095,10 @@ export async function handleInboundMessage(input: {
       if (candidates.length === 0) return { status: 'skipped', reason: 'nenhum agente para este número' };
       const candidate = pickInboundAgent(candidates, text, { keywordsOnly });
       if (!candidate) {
-        const reason = stopped
-          ? 'conversa parada: sem palavra-chave'
-          : externalActive
-            ? 'agente externo: sem palavra-chave'
-            : 'sem agente para esta mensagem';
-        return { status: 'skipped', reason };
+        return {
+          status: 'skipped',
+          reason: externalActive ? 'agente externo: sem palavra-chave' : 'sem agente para esta mensagem',
+        };
       }
 
       if (candidate.only_new_conversations) {

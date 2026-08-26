@@ -116,9 +116,10 @@ async function processDealStart(admin: SupabaseClient, row: DealStartRow): Promi
     // receber 409). Externo pausado = atendente na conversa: não recebe início.
     if (full.ai_status !== 'active') return { status: 'cancelled', reason: 'conversa com agente externo pausada' };
   }
-  // Parada pelo ATENDENTE (ai_paused_by preenchido): nada automático reabre, só Iniciar no chat
-  if (full.ai_status === 'stopped' && full.ai_paused_by) {
-    return { status: 'cancelled', reason: 'conversa parada pelo atendente' };
+  // PARADA (atendimento já feito pela IA ou parada pelo atendente): nada automático reabre;
+  // só "Limpar memória" e/ou Iniciar no chat, na mão
+  if (full.ai_status === 'stopped') {
+    return { status: 'cancelled', reason: 'conversa parada: só reabre na mão' };
   }
 
   const now = nowIso();

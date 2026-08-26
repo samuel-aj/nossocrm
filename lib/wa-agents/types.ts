@@ -512,7 +512,9 @@ export type ConversationAiAction =
   /** inicia um robô nesta conversa (botId); o agente da conversa, se houver, para */
   | 'start_bot'
   /** cancela o robô em andamento nesta conversa */
-  | 'cancel_bot';
+  | 'cancel_bot'
+  /** limpa a memória do agente nesta conversa (ele esquece o que veio antes e para); o chat continua visível */
+  | 'reset_memory';
 
 /** Robô em andamento numa conversa (execução 'running' ou 'waiting_reply') */
 export type ConversationBotInfo = {
@@ -544,6 +546,10 @@ export type ConversationAiState = {
   midias_enviadas?: string[];
   /** respostas já enviadas pelo agente neste atendimento (teto max_replies) */
   respostas?: number;
+  /** "Limpar memória": o agente só enxerga mensagens a partir desta data (ISO) */
+  memoria_desde?: string | null;
+  /** contexto adicional escrito pela equipe ao iniciar o agente/robô nesta conversa */
+  contexto_extra?: string | null;
 };
 
 // ---------------------------------------------------------------------------

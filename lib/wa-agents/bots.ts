@@ -296,6 +296,8 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
     const nome = (contact?.name || '').trim();
     const tplVars: Record<string, unknown> = {
       nome,
+      // contexto escrito pela equipe ao iniciar o robô pelo chat ({{contexto_extra}} nas mensagens)
+      contexto_extra: String(st.vars.contexto_extra ?? ''),
       nome_lead: nome,
       primeiro_nome: nome.split(/\s+/)[0] ?? '',
       telefone: phone,
@@ -481,7 +483,8 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
               ai_agent_id: agent.id,
               ai_status: 'active',
               ai_status_changed_at: now,
-              ai_state: {},
+              // o contexto escrito pela equipe ao iniciar o robô segue para o agente
+              ai_state: st.vars.contexto_extra ? { contexto_extra: String(st.vars.contexto_extra) } : {},
               ai_approval: null,
               ai_resume_at: null,
               ai_paused_by: null,
@@ -632,6 +635,8 @@ export type StartBotRunInput = {
   phone?: string | null;
   /** Conversa existente (iniciado pelo chat): a execução fica presa a ela e envia pelo número dela */
   conversationId?: string | null;
+  /** Contexto adicional escrito pela equipe (vira {{contexto_extra}} nas mensagens e segue para o agente na entrega) */
+  context?: string | null;
 };
 
 /** Só cria a execução (status 'running', wake_at agora), sem processar. */
@@ -678,7 +683,7 @@ export async function createBotRun(
         status: 'running',
         wake_at: nowIso(),
         step_index: 0,
-        vars: {},
+        vars: input.context?.trim() ? { contexto_extra: input.context.trim() } : {},
         log: [],
       })
       .select('*')

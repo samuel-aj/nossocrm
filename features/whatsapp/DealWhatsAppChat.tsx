@@ -35,13 +35,21 @@ import {
   Bot,
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
-import { fillTemplate, templateParams, TEMPLATE_BUTTON_LABEL, type TemplateButton } from '@/lib/messageTemplates';
+import {
+  fillTemplate,
+  templateParams,
+  toMetaBody,
+  TEMPLATE_BUTTON_LABEL,
+  TEMPLATE_VARIABLES,
+  type TemplateButton,
+} from '@/lib/messageTemplates';
 import { formatRemaining, getServiceWindow } from '@/lib/whatsapp/serviceWindow';
 import { useWhatsAppChat, type WaChatMessage, type WaMediaKind, type WaSender } from './useWhatsAppChat';
 import { transcodeToMp3 } from './audioTranscode';
 import { useWaAgentsBeta } from '@/hooks/useWaAgentsBeta';
 import { useToast } from '@/context/ToastContext';
 import { ChatAgentBanner } from '@/features/wa-agents/ChatAgentBanner';
+import { AutomationsMenu } from '@/features/wa-agents/AutomationsMenu';
 import type { AgentMinimal, BotMinimal, ConversationAiAction } from '@/lib/wa-agents/types';
 
 const TIME_FMT = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -52,6 +60,7 @@ const AI_ACTION_DONE_TOAST: Partial<Record<ConversationAiAction, string>> = {
   start_bot: 'Robô iniciado nesta conversa. Se havia agente, ele foi parado.',
   cancel_bot: 'Robô cancelado',
   stop: 'Agente parado nesta conversa',
+  reset_memory: 'Memória do agente limpa nesta conversa',
 };
 
 const MEDIA_LABEL: Record<string, string> = {
@@ -743,6 +752,8 @@ export function DealWhatsAppChat({
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  // Popover Automações (beta): iniciar agente/robô, limpar memória
+  const [automationsOpen, setAutomationsOpen] = useState(false);
   // Modelos de mensagem GERAIS (aba Modelos): prontos pra inserir no composer
   // com as variáveis já preenchidas com os dados reais do lead/contato
   const [templatesOpen, setTemplatesOpen] = useState(false);
@@ -793,6 +804,19 @@ export function DealWhatsAppChat({
     body: string;
     buttons: TemplateButton[] | null;
   } | null>(null);
+  // Variáveis do modelo armado: o que o CRM resolveu sozinho (templateValues) e o que
+  // a pessoa digitou por cima (para as que ele não achou, ou para corrigir)
+  const [templateOverrides, setTemplateOverrides] = useState<Record<string, string>>({});
+  useEffect(() => {
+    setTemplateOverrides({});
+  }, [pendingTemplate?.id]);
+  const templateEffective = useMemo(() => {
+    const out: Record<string, string | undefined> = { ...templateValues };
+    for (const [k, v] of Object.entries(templateOverrides)) out[k] = v;
+    return out;
+  }, [templateValues, templateOverrides]);
+  const templateVarKeys = pendingTemplate ? toMetaBody(pendingTemplate.body).variables : [];
+  const templateMissing = templateVarKeys.some(k => !(templateEffective[k.replace(/[{}]/g, '')] ?? '').trim());
   // escolha do menu de anexo: "documento" força enviar como documento
   // (mesmo sendo imagem/vídeo), igual ao WhatsApp
   const forcedKindRef = useRef<'document' | null>(null);
@@ -861,7 +885,7 @@ export function DealWhatsAppChat({
     retry: false,
   });
   /** `id` = agentId em "start"; botId em "start_bot". */
-  const runAiAction = async (action: ConversationAiAction, id?: string) => {
+  const runAiAction = async (action: ConversationAiAction, id?: string, context?: string) => {
     if (aiBusy) return;
     const conversationId = aiState?.conversationId ?? data?.conversation?.id ?? null;
     if (!conversationId) return;
@@ -877,6 +901,8 @@ export function DealWhatsAppChat({
               action,
               agentId: action === 'start' ? id : undefined,
               botId: action === 'start_bot' ? id : undefined,
+              // contexto adicional escrito pela equipe (Automações → Iniciar)
+              context: context && (action === 'start' || action === 'start_bot') ? context : undefined,
             }),
           })
         : await fetch('/api/whatsapp/conversations/ai', {
@@ -998,8 +1024,8 @@ export function DealWhatsAppChat({
     forceScrollRef.current = true;
     send.mutate(
       {
-        text: fillTemplate(tpl.body, templateValues),
-        template: { name: tpl.metaName, language: tpl.language, params: templateParams(tpl.body, templateValues) },
+        text: fillTemplate(tpl.body, templateEffective),
+        template: { name: tpl.metaName, language: tpl.language, params: templateParams(tpl.body, templateEffective) },
         connectionId: connectionId ?? senderRef.current?.id,
       },
       { onError: () => setPendingTemplate(curr => curr ?? tpl) }
@@ -1817,18 +1843,16 @@ export function DealWhatsAppChat({
           </div>
         )}
 
-        {/* AGENTE DE IA E ROBÔ. Beta (agentes nativos): faixa completa, inclusive
-            para iniciar um agente ou um robô numa conversa que ainda não tem.
-            Fora do beta: a faixa antiga, só quando um agente (externo) já atuou
-            nesta conversa. */}
-        {nativeBanner && (aiState || data?.bot || data?.conversation) && (
+        {/* AGENTE DE IA E ROBÔ. Beta (agentes nativos): faixa só enquanto há algo em
+            andamento (pausar/parar/aprovar/cancelar robô); iniciar é pelo botão
+            Automações do compositor. Fora do beta: a faixa antiga, só quando um
+            agente (externo) já atuou nesta conversa. */}
+        {nativeBanner && (aiState || data?.bot) && (
           <ChatAgentBanner
             ai={aiState}
             bot={data?.bot ?? null}
-            agents={(agentsMinimal?.agents ?? []).filter(a => a.enabled)}
-            bots={botsMinimal?.bots ?? []}
             busy={aiBusy}
-            onAction={(action, id) => void runAiAction(action, id)}
+            onAction={action => void runAiAction(action)}
           />
         )}
         {!nativeBanner && aiState && (
@@ -2045,8 +2069,40 @@ export function DealWhatsAppChat({
               </button>
             </div>
             <p className="text-sm text-slate-800 dark:text-slate-100 whitespace-pre-wrap break-words">
-              {fillTemplate(pendingTemplate.body, templateValues)}
+              {fillTemplate(pendingTemplate.body, templateEffective)}
             </p>
+            {templateVarKeys.length > 0 && (
+              <div className="mt-2 space-y-1">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-sky-700/80 dark:text-sky-300/80">
+                  Variáveis do modelo (confira ou preencha)
+                </p>
+                {templateVarKeys.map(key => {
+                  const bare = key.replace(/[{}]/g, '');
+                  const label = TEMPLATE_VARIABLES.find(v => v.key === key)?.label ?? bare;
+                  const missing = !(templateEffective[bare] ?? '').trim();
+                  return (
+                    <label key={key} className="flex items-center gap-2 text-xs">
+                      <span className="w-36 shrink-0 text-slate-600 dark:text-slate-300 truncate" title={key}>
+                        {label}
+                      </span>
+                      <input
+                        value={templateOverrides[bare] ?? templateValues[bare] ?? ''}
+                        onChange={e => setTemplateOverrides(o => ({ ...o, [bare]: e.target.value }))}
+                        placeholder={missing ? 'Preencha' : ''}
+                        className={`flex-1 min-w-0 px-2 py-1 rounded-lg border bg-white dark:bg-black/20 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500 ${
+                          missing ? 'border-amber-400 dark:border-amber-500/60' : 'border-sky-200 dark:border-sky-500/30'
+                        }`}
+                      />
+                    </label>
+                  );
+                })}
+                {templateMissing && (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                    O CRM não achou o valor de alguma variável: preencha à mão para enviar.
+                  </p>
+                )}
+              </div>
+            )}
             {pendingTemplate.buttons && pendingTemplate.buttons.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-2">
                 {pendingTemplate.buttons.map((b, i) => (
@@ -2067,7 +2123,8 @@ export function DealWhatsAppChat({
               <button
                 type="button"
                 onClick={sendPendingTemplate}
-                disabled={send.isPending}
+                disabled={send.isPending || templateMissing}
+                title={templateMissing ? 'Preencha as variáveis em branco antes de enviar' : undefined}
                 className="shrink-0 h-9 px-4 inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-bold"
               >
                 {send.isPending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} Enviar modelo
@@ -2110,6 +2167,7 @@ export function DealWhatsAppChat({
                 setEmojiOpen(o => !o);
                 setAttachMenuOpen(false);
                 setTemplatesOpen(false);
+                setAutomationsOpen(false);
               }}
               className={`shrink-0 h-10 w-10 inline-flex items-center justify-center rounded-xl transition-colors ${
                 emojiOpen
@@ -2127,6 +2185,7 @@ export function DealWhatsAppChat({
                 setTemplatesOpen(o => !o);
                 setEmojiOpen(false);
                 setAttachMenuOpen(false);
+                setAutomationsOpen(false);
               }}
               className={`shrink-0 h-10 w-10 inline-flex items-center justify-center rounded-xl transition-colors ${
                 templatesOpen
@@ -2144,6 +2203,7 @@ export function DealWhatsAppChat({
                 setAttachMenuOpen(o => !o);
                 setEmojiOpen(false);
                 setTemplatesOpen(false);
+                setAutomationsOpen(false);
               }}
               className={`shrink-0 h-10 w-10 inline-flex items-center justify-center rounded-xl transition-colors ${
                 attachMenuOpen
@@ -2155,6 +2215,29 @@ export function DealWhatsAppChat({
             >
               <Paperclip size={18} />
             </button>
+            {/* AUTOMAÇÕES (beta): iniciar um agente de IA ou um robô nesta conversa, com
+                contexto adicional opcional; também "Limpar memória do agente" */}
+            {waBeta.enabled && data?.conversation && (
+              <AutomationsMenu
+                open={automationsOpen}
+                onOpenChange={open => {
+                  setAutomationsOpen(open);
+                  if (open) {
+                    setEmojiOpen(false);
+                    setAttachMenuOpen(false);
+                    setTemplatesOpen(false);
+                  }
+                }}
+                agents={agentsMinimal?.agents ?? []}
+                bots={botsMinimal?.bots ?? []}
+                ai={aiState}
+                bot={data?.bot ?? null}
+                busy={aiBusy}
+                hasHistory={!!aiState || (data?.messages?.length ?? 0) > 0}
+                onStart={(kind, id, context) => void runAiAction(kind === 'agent' ? 'start' : 'start_bot', id, context)}
+                onResetMemory={() => void runAiAction('reset_memory')}
+              />
+            )}
             <input
               ref={fileInputRef}
               type="file"

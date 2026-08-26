@@ -447,13 +447,15 @@ export async function loadRecentMessages(
   ctx: ConversationContext,
   limit: number
 ): Promise<WaMessageLite[]> {
-  const { data } = await admin
+  // "Limpar memória": o agente só enxerga o que veio depois de ai_state.memoria_desde
+  const memoriaDesde = ((ctx.conversation.ai_state ?? {}) as ConversationAiState).memoria_desde ?? null;
+  let q = admin
     .from('wa_messages')
     .select(MESSAGE_LITE_COLUMNS)
     .eq('organization_id', ctx.conversation.organization_id)
-    .eq('conversation_id', ctx.conversation.id)
-    .order('created_at', { ascending: false })
-    .limit(Math.max(1, limit));
+    .eq('conversation_id', ctx.conversation.id);
+  if (memoriaDesde) q = q.gte('created_at', memoriaDesde);
+  const { data } = await q.order('created_at', { ascending: false }).limit(Math.max(1, limit));
   return ((data ?? []) as WaMessageLite[]).reverse();
 }
 
@@ -875,6 +877,12 @@ export function buildSystemPrompt(input: {
   const leadBlock = buildLeadDataBlock(ctx);
   if (leadBlock) blocks.push(leadBlock);
 
+  // Contexto escrito pela equipe ao iniciar o agente/robô nesta conversa (opcional)
+  const contextoExtra = (state.contexto_extra ?? '').trim();
+  if (contextoExtra) {
+    blocks.push(`## CONTEXTO ADICIONAL INFORMADO PELA EQUIPE\n${clipText(contextoExtra, 2000)}`);
+  }
+
   const knowledgeBlock = buildKnowledgeBlock(input.knowledge ?? [], documents);
   if (knowledgeBlock) blocks.push(knowledgeBlock);
 
@@ -904,6 +912,11 @@ export function buildSystemPrompt(input: {
   if (state.handoff) {
     lines.push(
       `- Você acabou de assumir esta conversa vinda do agente ${state.handoff.from_agent_name}. Resumo de passagem: ${state.handoff.summary}. Continue de onde parou, sem se apresentar de novo se já houve apresentação.`
+    );
+  }
+  if (contextoExtra) {
+    lines.push(
+      '- O bloco "CONTEXTO ADICIONAL INFORMADO PELA EQUIPE" foi escrito por uma pessoa da equipe: trate como fato conhecido e use na condução; não o leia em voz alta para o cliente.'
     );
   }
   // Só no primeiro contato: nas rodadas seguintes (e após passagem) o lead já recebeu mensagem

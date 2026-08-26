@@ -163,6 +163,8 @@ export async function applyConversationAction(
     agentId?: string;
     /** start_bot: robô (wa_bots) a iniciar nesta conversa */
     botId?: string;
+    /** start / start_bot: contexto adicional escrito pela equipe (opcional) */
+    context?: string;
     userId?: string | null;
   }
 ): Promise<ApplyConversationActionResult> {
@@ -233,7 +235,11 @@ export async function applyConversationAction(
         await cancelActiveBotRuns(admin, organizationId, conversationId);
         patch.ai_agent_id = agent.id;
         patch.ai_status = 'active';
-        patch.ai_state = {};
+        // Estado novo, preservando "Limpar memória" (memoria_desde) e levando o contexto da equipe
+        patch.ai_state = {
+          ...(conv.ai_state?.memoria_desde ? { memoria_desde: conv.ai_state.memoria_desde } : {}),
+          ...(input.context?.trim() ? { contexto_extra: input.context.trim() } : {}),
+        };
         patch.ai_approval = null;
         patch.ai_last_processed_at = null;
         patch.ai_resume_at = null;
@@ -319,6 +325,28 @@ export async function applyConversationAction(
         const bot = await getConversationBotInfo(admin, { organizationId, conversationId });
         return { ok: true, ai, bot };
       }
+      case 'reset_memory': {
+        // "Limpar memória": o agente para, esquece o que veio antes (só enxerga mensagens a partir
+        // de agora) e a conversa volta a "sem agente", como um contato novo. O histórico do chat
+        // continua visível para a equipe; robôs em andamento são cancelados.
+        await cancelActiveBotRuns(admin, organizationId, conversationId);
+        const { error: resetErr } = await admin
+          .from('wa_conversations')
+          .update({
+            ai_agent_id: null,
+            ai_status: null,
+            ai_status_changed_at: now,
+            ai_state: { memoria_desde: now },
+            ai_last_processed_at: null,
+            ai_approval: null,
+            ai_resume_at: null,
+            ai_paused_by: null,
+          })
+          .eq('id', conversationId)
+          .eq('organization_id', organizationId);
+        if (resetErr) return fail(500, resetErr.message);
+        return { ok: true, ai: null, bot: null };
+      }
       default:
         return fail(400, 'Ação inválida');
     }
@@ -361,6 +389,7 @@ export async function applyConversationAction(
         dealId: conv.deal_id,
         contactId: conv.contact_id,
         phone: conv.wa_phone,
+        context: input.context ?? null,
       });
       if (!created.ok || !created.run) return fail(400, created.error ?? 'Falha ao iniciar o robô');
       runAfter = { kind: 'bot', run: created.run };

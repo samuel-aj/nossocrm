@@ -24,7 +24,9 @@ export const maxDuration = 120;
 
 const BodySchema = z.object({
   conversationId: z.string().uuid(),
-  action: z.enum(['pause', 'resume', 'stop', 'start', 'approve', 'reject', 'start_bot', 'cancel_bot']),
+  action: z.enum(['pause', 'resume', 'stop', 'start', 'approve', 'reject', 'start_bot', 'cancel_bot', 'reset_memory']),
+  /** Contexto adicional escrito pela equipe ao iniciar um agente ou robô (opcional) */
+  context: z.string().trim().max(2000).optional(),
   agentId: z.string().uuid().optional(),
   botId: z.string().uuid().optional(),
 });
@@ -35,7 +37,7 @@ export async function POST(req: Request) {
 
   const parsed = BodySchema.safeParse(await readJsonBody(req));
   if (!parsed.success) return validationError(parsed.error);
-  const { conversationId, action, agentId, botId } = parsed.data;
+  const { conversationId, action, agentId, botId, context } = parsed.data;
   const organizationId = auth.user.organizationId;
 
   try {
@@ -45,6 +47,7 @@ export async function POST(req: Request) {
       action,
       agentId,
       botId,
+      context,
       userId: auth.user.id,
     });
     if (!result.ok) return json({ error: result.error }, result.status);
