@@ -70,18 +70,28 @@ function publicVars(vars: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-/** Trava por execução: só uma instância mexe na run por vez. */
-async function claimBotLock(admin: SupabaseClient, runId: string): Promise<boolean> {
-  const now = new Date();
-  const until = new Date(now.getTime() + BOT_LOCK_SECONDS * 1000).toISOString();
-  const { data } = await admin
-    .from('wa_bot_runs')
-    .update({ lock_until: until })
-    .eq('id', runId)
-    .or(`lock_until.is.null,lock_until.lt.${now.toISOString()}`)
-    .select('id')
-    .maybeSingle();
-  return !!data;
+/**
+ * Trava por execução: só uma instância mexe na run por vez. Via RPC
+ * (UPDATE atômico): o PATCH do PostgREST com filtro `or` dá 42703 neste
+ * banco, e a trava nunca era obtida (o robô ficava "running" sem rodar).
+ */
+async function claimBotLock(admin: SupabaseClient, runId: string, organizationId?: string): Promise<boolean> {
+  let orgId = organizationId ?? null;
+  if (!orgId) {
+    const { data } = await admin.from('wa_bot_runs').select('organization_id').eq('id', runId).maybeSingle();
+    orgId = (data as { organization_id?: string } | null)?.organization_id ?? null;
+  }
+  if (!orgId) return false;
+  const { data, error } = await admin.rpc('wa_bot_claim_lock', {
+    p_org: orgId,
+    p_run: runId,
+    p_seconds: BOT_LOCK_SECONDS,
+  });
+  if (error) {
+    console.error('[wa-agents] trava da execução do robô falhou:', error.message);
+    return false;
+  }
+  return data === true;
 }
 
 async function loadBot(admin: SupabaseClient, organizationId: string, botId: string): Promise<BotRow | null> {
@@ -539,7 +549,7 @@ export async function handleBotReply(
       .maybeSingle();
     if (!data) return; // outra instância já cuidou
     // Sem a trava, o relógio (tick) pega a execução em 'running' com wake_at vencido
-    const locked = await claimBotLock(admin, run.id);
+    const locked = await claimBotLock(admin, run.id, run.organization_id);
     if (!locked) return;
     await processBotRun(admin, data as BotRunRow);
   } catch (e) {
@@ -594,7 +604,7 @@ export async function processDueBotRuns(
       // Orçamento de tempo do tick: o que sobrar fica para o próximo
       if (opts.deadlineMs && Date.now() > opts.deadlineMs) break;
       try {
-        const locked = await claimBotLock(admin, raw.id);
+        const locked = await claimBotLock(admin, raw.id, raw.organization_id);
         if (!locked) continue;
         if (raw.status === 'waiting_reply') await handleBotTimeout(admin, raw);
         else await processBotRun(admin, raw);
@@ -682,7 +692,7 @@ export async function createBotRun(
 
 /** Pega a trava e processa a execução agora (sem a trava, o tick cuida). */
 export async function runBotRunNow(admin: SupabaseClient, run: BotRunRow): Promise<void> {
-  const locked = await claimBotLock(admin, run.id);
+  const locked = await claimBotLock(admin, run.id, run.organization_id);
   if (locked) await processBotRun(admin, run);
 }
 
