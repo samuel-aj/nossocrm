@@ -357,6 +357,7 @@ function botStepReferences(step: BotStep): Array<{ field: string; id: string }> 
 
 const BOT_STEP_LABELS: Record<BotStep['type'], string> = {
   send_text: 'Mensagem',
+  send_template: 'Modelo de mensagem',
   wait: 'Esperar',
   wait_reply: 'Esperar resposta',
   condition: 'Condição',
@@ -368,7 +369,7 @@ const BOT_STEP_LABELS: Record<BotStep['type'], string> = {
 };
 
 /** Blocos com uma única saída: podem ficar em qualquer posição do balão. */
-const LINEAR_BOT_STEP_TYPES = new Set<BotStep['type']>(['send_text', 'wait', 'move_stage', 'add_tag', 'webhook']);
+const LINEAR_BOT_STEP_TYPES = new Set<BotStep['type']>(['send_text', 'send_template', 'wait', 'move_stage', 'add_tag', 'webhook']);
 
 /**
  * Passos do robô:

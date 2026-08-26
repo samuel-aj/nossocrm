@@ -6,6 +6,7 @@
  * aqui (o balão só mostra ícone, título e resumo).
  */
 import React, { useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Plus, Trash2, X } from 'lucide-react';
 import { AgentSelect, StageSelect, TagInput } from '../OutcomesEditor';
 import { BTN_ICON, HELP_CLASS, INPUT_CLASS, newId } from '../ui';
@@ -370,6 +371,80 @@ function WebhookEditor({ block, update }: EditorProps<'webhook'>) {
   );
 }
 
+type TemplateOption = { id: string; name: string; type: 'general' | 'whatsapp_api'; meta_status?: string | null; body: string };
+
+function TemplateEditor({ block, update }: EditorProps<'send_template'>) {
+  const templatesQ = useQuery<{ data: TemplateOption[] }>({
+    queryKey: ['messageTemplates'],
+    queryFn: async () => {
+      const res = await fetch('/api/message-templates', { credentials: 'include' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    },
+    staleTime: 60000,
+  });
+  const all = templatesQ.data?.data ?? [];
+  const api = all.filter((t) => t.type === 'whatsapp_api');
+  const general = all.filter((t) => t.type === 'general');
+  const chosen = all.find((t) => t.id === block.data.template_id);
+  const pick = (id: string) => {
+    const t = all.find((x) => x.id === id);
+    update({ ...block, data: { template_id: id, template_name: t?.name ?? '' } });
+  };
+  const statusLabel = (status: string | null | undefined) =>
+    status === 'APPROVED' ? '' : status === 'REJECTED' ? ' (rejeitado pela Meta)' : ' (aguardando aprovação)';
+  return (
+    <>
+      <label htmlFor={`block-${block.id}-template`} className={LABEL_CLASS}>
+        Modelo de mensagem
+      </label>
+      <select
+        id={`block-${block.id}-template`}
+        className={INPUT_CLASS}
+        value={block.data.template_id}
+        onChange={(e) => pick(e.target.value)}
+        aria-label="Modelo de mensagem"
+      >
+        <option value="">{templatesQ.isLoading ? 'Carregando...' : 'Escolha o modelo'}</option>
+        {api.length > 0 ? (
+          <optgroup label="WhatsApp API (modelos da Meta)">
+            {api.map((t) => (
+              <option key={t.id} value={t.id} disabled={t.meta_status !== 'APPROVED'}>
+                {t.name}
+                {statusLabel(t.meta_status)}
+              </option>
+            ))}
+          </optgroup>
+        ) : null}
+        {general.length > 0 ? (
+          <optgroup label="Modelos gerais (vão como texto)">
+            {general.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </optgroup>
+        ) : null}
+      </select>
+      {templatesQ.isError ? <p className={HELP_CLASS}>Não foi possível carregar os modelos.</p> : null}
+      {!templatesQ.isLoading && all.length === 0 ? (
+        <p className={HELP_CLASS}>Nenhum modelo cadastrado. Crie em Configurações → Modelos.</p>
+      ) : null}
+      {chosen ? (
+        <div className="mt-2 rounded-2xl rounded-tl-md bg-[#d9fdd3] dark:bg-[#005c4b] px-3 py-2 text-sm leading-snug text-slate-900 dark:text-white whitespace-pre-wrap">
+          {chosen.body}
+        </div>
+      ) : null}
+      <p className={HELP_CLASS}>
+        Modelo do WhatsApp API sai como template de verdade pela Meta: funciona fora da janela de 24 h e leva os
+        botões aprovados. As variáveis ({'{{contato.nome}}'}, {'{{contato.telefone}}'}, {'{{lead.titulo}}'},{' '}
+        {'{{lead.etapa}}'}) são preenchidas pelo contato e pelo negócio. Num número conectado por QR, vai o texto já
+        preenchido.
+      </p>
+    </>
+  );
+}
+
 function HandoffEditor({ block, update }: EditorProps<'handoff_agent'>) {
   const { agents } = useCanvasContext();
   return (
@@ -393,6 +468,8 @@ function BlockFields({ block, update }: { block: Block; update: (block: Block) =
   switch (block.type) {
     case 'send_text':
       return <MessageEditor block={block} update={update} />;
+    case 'send_template':
+      return <TemplateEditor block={block} update={update} />;
     case 'wait':
       return <WaitEditor block={block} update={update} />;
     case 'wait_reply':

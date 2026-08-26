@@ -8,6 +8,7 @@
 import React from 'react';
 import {
   Bot,
+  ClipboardList,
   Clock,
   Flag,
   GitBranch,
@@ -49,6 +50,13 @@ export const NODE_META: Record<StepType, NodeMeta> = {
     tone: 'green',
     color: '#22c55e',
     hint: 'Envia um texto pelo WhatsApp',
+  },
+  send_template: {
+    label: STEP_LABELS.send_template,
+    icon: ClipboardList,
+    tone: 'green',
+    color: '#16a34a',
+    hint: 'Envia um modelo aprovado do WhatsApp API (vale fora das 24 h, com botões)',
   },
   wait: { label: STEP_LABELS.wait, icon: Clock, tone: 'sky', color: '#0ea5e9', hint: 'Aguarda um tempo antes de seguir' },
   wait_reply: {

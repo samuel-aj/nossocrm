@@ -5,6 +5,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { moveStageByDealId } from '@/lib/public-api/dealsMoveStage';
+import { fillTemplate, templateParams } from '@/lib/messageTemplates';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { getProvider, type SendResult } from '@/lib/whatsapp';
 import {
@@ -180,6 +181,88 @@ async function sendBotText(
   if (!result.ok) throw new Error(`envio falhou: ${result.error || 'erro desconhecido'}`);
 }
 
+type BotTemplateRow = {
+  id: string;
+  name: string;
+  type: string;
+  language: string | null;
+  body: string;
+  meta_name: string | null;
+  meta_status: string | null;
+};
+
+/**
+ * Bloco "Modelo de mensagem": modelo do WhatsApp API sai como TEMPLATE de verdade pela
+ * Meta (funciona fora da janela de 24 h e leva os botões aprovados); modelo geral, ou
+ * número conectado por QR, vai como texto já preenchido. As variáveis ({{contato.nome}},
+ * {{lead.titulo}}...) vêm do contato e do negócio, como no chat. Devolve o nome do modelo.
+ */
+async function sendBotTemplate(
+  admin: SupabaseClient,
+  st: RunState,
+  connection: WaConnectionRow,
+  phone: string,
+  templateId: string,
+  values: Record<string, string | undefined>
+): Promise<string> {
+  const { data, error } = await admin
+    .from('message_templates')
+    .select('id, name, type, language, body, meta_name, meta_status')
+    .eq('organization_id', st.run.organization_id)
+    .eq('id', templateId)
+    .maybeSingle();
+  if (error) throw new Error(`carregar modelo falhou: ${error.message}`);
+  const tpl = data as BotTemplateRow | null;
+  if (!tpl) throw new Error('modelo de mensagem não encontrado');
+  if (connection.status !== 'connected') throw new Error('número desconectado');
+  const provider = getProvider(connection);
+  const sendTemplate = provider.sendTemplate?.bind(provider);
+  const text = fillTemplate(tpl.body, values) || `[Modelo: ${tpl.name}]`;
+  let result: SendResult;
+  try {
+    if (tpl.type === 'whatsapp_api' && tpl.meta_name && sendTemplate) {
+      const params = templateParams(tpl.body, values);
+      result = await sendTemplate({
+        to: phone,
+        name: tpl.meta_name,
+        language: (tpl.language || 'pt_BR').trim(),
+        components: params.length
+          ? [{ type: 'body', parameters: params.map(p => ({ type: 'text', text: p })) }]
+          : undefined,
+      });
+    } else {
+      result = await provider.sendText({ to: phone, text });
+    }
+  } catch (e) {
+    result = { ok: false, error: errorMessage(e) };
+  }
+  try {
+    const msg = await recordOutboundMessage(admin, {
+      orgId: st.run.organization_id,
+      conversationId: st.run.conversation_id as string,
+      text,
+      providerMessageId: result.providerMessageId ?? null,
+      fromPhone: connection.phone_number,
+      toPhone: phone,
+      sentBy: null,
+      source: 'bot',
+      status: result.ok ? 'sent' : 'failed',
+      error: result.ok ? null : result.error || 'falha no envio',
+    });
+    if (result.ok) {
+      await replicateOutboundToSiblings(admin, connection, {
+        toPhone: phone,
+        text: msg.body,
+        providerMessageId: result.providerMessageId ?? null,
+      });
+    }
+  } catch (e) {
+    console.error('[wa-agents] gravar modelo do robô falhou:', errorMessage(e));
+  }
+  if (!result.ok) throw new Error(`envio do modelo falhou: ${result.error || 'erro desconhecido'}`);
+  return tpl.name;
+}
+
 /**
  * Processa uma execução a partir de `run.step_index`. Quem chama já deve ter
  * a trava (claimBotLock) ou ter acabado de criar a run.
@@ -303,6 +386,13 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
       telefone: phone,
       negocio: { titulo: deal?.title ?? '', etapa: deal?.stage_label ?? '' },
     };
+    // Variáveis dos modelos de mensagem ({{contato.nome}}, {{lead.titulo}}...), como no chat
+    const templateValues: Record<string, string | undefined> = {
+      'contato.nome': nome,
+      'contato.telefone': phone,
+      'lead.titulo': deal?.title ?? '',
+      'lead.etapa': deal?.stage_label ?? '',
+    };
 
     // Modo quadro: começa no passo inicial e navega só por ids; modo lista: índice + 1
     const canvas = !!(bot.start_step_id && String(bot.start_step_id).trim());
@@ -367,6 +457,12 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
           } else {
             note(st, step, 'mensagem vazia ignorada');
           }
+          idx = next(step);
+          break;
+        }
+        case 'send_template': {
+          const tplName = await sendBotTemplate(admin, st, await getConnection(), phone, step.template_id, templateValues);
+          note(st, step, `modelo enviado: ${tplName}`);
           idx = next(step);
           break;
         }

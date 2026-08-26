@@ -123,6 +123,8 @@ export function createBlock(type: StepType, id: string = newId()): Block {
   switch (type) {
     case 'send_text':
       return { id, type, data: { text: '' } };
+    case 'send_template':
+      return { id, type, data: { template_id: '', template_name: '' } };
     case 'wait':
       return { id, type, data: { amount: 1, unit: 'h' } };
     case 'wait_reply':
@@ -185,6 +187,8 @@ function stepToBlock(step: BotStep): Block {
   switch (step.type) {
     case 'send_text':
       return { id, type: 'send_text', data: { text: step.text } };
+    case 'send_template':
+      return { id, type: 'send_template', data: { template_id: step.template_id, template_name: step.template_name ?? '' } };
     case 'wait': {
       const unit = unitFor(step.seconds);
       return {
@@ -305,6 +309,7 @@ export function botToFlow(bot: BotRow | null, fallbackSteps: BotStep[]): FlowGra
     const next = canvasMode ? (step.next_step_id ?? null) : (step.next_step_id ?? listNext);
     switch (step.type) {
       case 'send_text':
+      case 'send_template':
       case 'wait':
       case 'move_stage':
       case 'add_tag':
@@ -382,6 +387,15 @@ function blockToStep(block: Block, to: (handle: string) => string | null, ui: { 
   switch (block.type) {
     case 'send_text':
       return { id, type: 'send_text', text: block.data.text.trim(), next_step_id: to(HANDLE_NEXT), ui };
+    case 'send_template':
+      return {
+        id,
+        type: 'send_template',
+        template_id: block.data.template_id,
+        template_name: block.data.template_name.trim() || undefined,
+        next_step_id: to(HANDLE_NEXT),
+        ui,
+      };
     case 'wait':
       return { id, type: 'wait', seconds: waitSeconds(block.data), next_step_id: to(HANDLE_NEXT), ui };
     case 'wait_reply':
@@ -635,6 +649,9 @@ export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowH
         case 'send_text':
           if (!block.data.text.trim()) fail('a mensagem está vazia');
           else if (block.data.text.length > 4000) fail('a mensagem passa de 4000 caracteres');
+          break;
+        case 'send_template':
+          if (!block.data.template_id) fail('escolha o modelo de mensagem');
           break;
         case 'wait': {
           const seconds = waitSeconds(block.data);

@@ -84,6 +84,8 @@ export function blockSummary(block: Block, options: WaAgentOptions | undefined, 
   switch (block.type) {
     case 'send_text':
       return block.data.text.trim() || 'Sem texto ainda';
+    case 'send_template':
+      return block.data.template_name.trim() || (block.data.template_id ? 'Modelo escolhido' : 'Escolha o modelo');
     case 'wait': {
       const { amount, unit } = block.data;
       return `${amount} ${amount === 1 ? WAIT_UNIT_SINGULAR[unit] : WAIT_UNIT_LABELS[unit]}`;

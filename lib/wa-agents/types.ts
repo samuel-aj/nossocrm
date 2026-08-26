@@ -401,6 +401,13 @@ const botStepBase = {
 
 export const BotStepSchema = z.discriminatedUnion('type', [
   z.object({ ...botStepBase, type: z.literal('send_text'), text: z.string().min(1).max(4000) }),
+  /** Modelo de mensagem (Configurações → Modelos): do WhatsApp API sai como template pela Meta; geral/QR vai como texto */
+  z.object({
+    ...botStepBase,
+    type: z.literal('send_template'),
+    template_id: z.string().uuid(),
+    template_name: z.string().max(120).optional(),
+  }),
   z.object({ ...botStepBase, type: z.literal('wait'), seconds: z.number().int().min(1).max(604800) }),
   z.object({
     ...botStepBase,

@@ -22,6 +22,7 @@ export const TRIGGER_LABELS: Record<BotTriggerType, string> = {
 /** Rótulos dos tipos de bloco. */
 export const STEP_LABELS: Record<StepType, string> = {
   send_text: 'Mensagem',
+  send_template: 'Modelo de mensagem',
   wait: 'Esperar',
   wait_reply: 'Esperar resposta',
   condition: 'Condição',
@@ -35,6 +36,7 @@ export const STEP_LABELS: Record<StepType, string> = {
 /** Ordem dos tipos na paleta. */
 export const STEP_TYPES: StepType[] = [
   'send_text',
+  'send_template',
   'wait',
   'wait_reply',
   'condition',
@@ -59,6 +61,7 @@ export type BlockKind = 'linear' | 'branch' | 'terminal';
 
 export const BLOCK_KIND: Record<StepType, BlockKind> = {
   send_text: 'linear',
+  send_template: 'linear',
   wait: 'linear',
   wait_reply: 'branch',
   condition: 'branch',
@@ -136,11 +139,14 @@ export type MoveStageData = { stage_id: string };
 export type TagData = { tag: string };
 export type WebhookData = { url: string; secret: string; body_template: string };
 export type HandoffData = { agent_id: string };
+/** Modelo de mensagem escolhido (o nome fica guardado para o resumo no balão). */
+export type TemplateData = { template_id: string; template_name: string };
 export type EndData = Record<string, never>;
 
 /** Um bloco dentro do balão (= um passo do robô). O id do bloco é o id do passo. */
 export type Block =
   | { id: string; type: 'send_text'; data: MessageData }
+  | { id: string; type: 'send_template'; data: TemplateData }
   | { id: string; type: 'wait'; data: WaitData }
   | { id: string; type: 'wait_reply'; data: WaitReplyData }
   | { id: string; type: 'condition'; data: ConditionData }
@@ -209,6 +215,7 @@ const RULE_PREVIEW_LENGTH = 22;
 export function blockOutputs(block: Block): BubbleOutput[] {
   switch (block.type) {
     case 'send_text':
+    case 'send_template':
     case 'wait':
     case 'move_stage':
     case 'add_tag':
