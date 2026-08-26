@@ -2,24 +2,31 @@
  * Autenticação das rotas internas (/api/wa-agents/ingest e /tick), chamadas
  * pelo banco (pg_net) e pelo pg_cron com o header X-Internal-Secret.
  *
- * O segredo é WA_AGENTS_INTERNAL_SECRET, dedicado a este módulo (o mesmo valor
- * gravado em platform_config.wa_agents_internal_secret). Não há mais reserva
- * para CRON_SECRET: um vazamento deste segredo não abre as rotas /api/cron/*.
+ * O segredo esperado é WA_AGENTS_INTERNAL_SECRET (dedicado a este módulo, o
+ * mesmo valor gravado em platform_config.wa_agents_internal_secret). Quando
+ * essa variável não existe, vale CRON_SECRET como reserva: é o valor que a
+ * instalação em produção gravou no banco. Com a variável dedicada definida,
+ * a reserva deixa de valer (um vazamento dela não abre as rotas /api/cron/*).
  */
 import { timingSafeEqual } from 'node:crypto';
 
 let warnedMissing = false;
 
 function expectedSecret(): string {
-  const value = (process.env.WA_AGENTS_INTERNAL_SECRET || '').trim();
-  if (!value && !warnedMissing) {
+  const dedicated = (process.env.WA_AGENTS_INTERNAL_SECRET || '').trim();
+  if (dedicated) return dedicated;
+  const fallback = (process.env.CRON_SECRET || '').trim();
+  if (!fallback && !warnedMissing) {
     warnedMissing = true;
-    console.error('[wa-agents] WA_AGENTS_INTERNAL_SECRET não configurado: as rotas internas respondem 401');
+    console.error('[wa-agents] WA_AGENTS_INTERNAL_SECRET (ou CRON_SECRET) não configurado: as rotas internas respondem 401');
   }
-  return value;
+  return fallback;
 }
 
-/** true quando o header x-internal-secret bate com WA_AGENTS_INTERNAL_SECRET. false se o env não existe. */
+/**
+ * true quando o header x-internal-secret bate com WA_AGENTS_INTERNAL_SECRET
+ * (ou, na falta dela, com CRON_SECRET). false se nenhum dos dois existe.
+ */
 export function verifyInternalSecret(req: Request): boolean {
   const expected = expectedSecret();
   if (!expected) return false;
