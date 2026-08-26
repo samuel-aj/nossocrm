@@ -489,6 +489,58 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
           },
         },
       },
+      '/whatsapp/conversations/ai': {
+        post: {
+          tags: ['WhatsApp'],
+          summary: 'Pausar, retomar ou parar o agente de IA externo numa conversa',
+          description:
+            'Para agentes de IA no n8n/Make: ao encerrar o próprio atendimento, chame com `status: "paused"` e a API passa a recusar novos envios do agente nessa conversa (409 AGENT_PAUSED); o chat do CRM mostra "Agente de IA pausado" com o botão Retomar. `active` retoma; `stopped` para de vez. A conversa é localizada pelo telefone (com as variantes do nono dígito) no número informado e é criada se ainda não existir. 409 NATIVE_AGENT quando a conversa é de um agente nativo do CRM.',
+          security: [{ ApiKeyAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    phone: { type: 'string', description: 'Telefone do contato (E.164 ou só dígitos)' },
+                    status: { type: 'string', enum: ['active', 'paused', 'stopped'] },
+                    connection_id: { type: 'string', description: 'Qual número (GET /whatsapp/connections). Omitido = padrão da org.' },
+                  },
+                  required: ['phone', 'status'],
+                },
+                examples: {
+                  encerrar: { summary: 'Agente encerrou o atendimento', value: { phone: '+5569999999999', status: 'paused' } },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: 'OK',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      ok: { type: 'boolean' },
+                      conversation_id: { type: 'string' },
+                      phone: { type: 'string' },
+                      status: { type: 'string' },
+                    },
+                    required: ['ok', 'conversation_id', 'status'],
+                  },
+                },
+              },
+            },
+            400: { description: 'Corpo inválido', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+            401: { $ref: '#/components/responses/Unauthorized' },
+            404: { description: 'Nenhum número conectado / connection_id inexistente', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+            409: { description: 'Conversa de agente nativo do CRM (NATIVE_AGENT)', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
+        },
+      },
       '/custom-fields': {
         get: {
           tags: ['Catálogo'],
