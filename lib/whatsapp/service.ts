@@ -428,7 +428,7 @@ export async function recordOutboundMessage(
       // só marca a autoria — o status do eco pode já ter avançado (entregue/lida)
       const { data: claimed } = await admin
         .from('wa_messages')
-        .update({ sent_by: input.sentBy, conversation_id: input.conversationId })
+        .update({ sent_by: input.sentBy, conversation_id: input.conversationId, source: input.source ?? 'crm' })
         .eq('organization_id', input.orgId)
         .eq('evolution_message_id', input.providerMessageId)
         .select('*')

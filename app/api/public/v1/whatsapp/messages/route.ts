@@ -104,7 +104,34 @@ export async function POST(request: Request) {
   // AGENTE PAUSADO: um atendente assumiu (ou pausou no chat). O agente não
   // fala por cima do humano; quem precisar mesmo assim manda force: true.
   if (!body.force) {
-    const { data: convRow } = await sb.from('wa_conversations').select('ai_status').eq('id', conv.id).maybeSingle();
+    const { data: convRow } = await sb
+      .from('wa_conversations')
+      .select('ai_status, ai_agent_id')
+      .eq('id', conv.id)
+      .maybeSingle();
+    // Agente NATIVO do CRM cuida desta conversa: a API externa não fala por cima dele
+    if (convRow?.ai_agent_id) {
+      return NextResponse.json(
+        {
+          error: 'Esta conversa é atendida por um agente nativo do CRM. Send force: true to override.',
+          code: 'NATIVE_AGENT',
+          ai_status: convRow.ai_status ?? null,
+          conversation_id: conv.id,
+        },
+        { status: 409 }
+      );
+    }
+    if (convRow?.ai_status === 'stopped' || convRow?.ai_status === 'awaiting_approval') {
+      return NextResponse.json(
+        {
+          error: 'AI agent is stopped for this conversation. Start it again in the CRM chat or send force: true.',
+          code: 'AGENT_STOPPED',
+          ai_status: convRow.ai_status,
+          conversation_id: conv.id,
+        },
+        { status: 409 }
+      );
+    }
     if (convRow?.ai_status === 'paused') {
       return NextResponse.json(
         {

@@ -1,0 +1,122 @@
+/*
+ * Quadro do robô: ajustes por cima do tema do React Flow (claro e escuro).
+ * O React Flow aplica a classe `dark` na raiz quando colorMode="dark".
+ * As variáveis --xy-* são as do @xyflow/react/dist/style.css.
+ */
+.react-flow.wa-bot-canvas {
+  --xy-edge-stroke-default: #94a3b8;
+  --xy-edge-stroke-selected-default: #9333ea;
+  --xy-edge-stroke-width-default: 2;
+  --xy-connectionline-stroke-default: #a855f7;
+  --xy-connectionline-stroke-width-default: 2;
+  --xy-handle-background-color-default: #a855f7;
+  --xy-handle-border-color-default: #ffffff;
+  --xy-background-color-default: #f8fafc;
+  --xy-background-pattern-dots-color-default: #cbd5e1;
+  --xy-minimap-background-color-default: #ffffff;
+  --xy-minimap-mask-background-color-default: rgb(241 245 249 / 0.75);
+  --xy-minimap-mask-stroke-color-default: #c4b5fd;
+  --xy-minimap-mask-stroke-width-default: 1;
+  --xy-controls-button-background-color-default: #ffffff;
+  --xy-controls-button-background-color-hover-default: #f1f5f9;
+  --xy-controls-button-color-default: #334155;
+  --xy-controls-button-color-hover-default: #0f172a;
+  --xy-controls-button-border-color-default: #e2e8f0;
+  --xy-controls-box-shadow-default: 0 1px 3px rgb(15 23 42 / 0.12);
+  --xy-attribution-background-color-default: transparent;
+}
+
+.react-flow.wa-bot-canvas.dark {
+  --xy-edge-stroke-default: #64748b;
+  --xy-edge-stroke-selected-default: #c084fc;
+  --xy-connectionline-stroke-default: #c084fc;
+  --xy-handle-background-color-default: #a855f7;
+  --xy-handle-border-color-default: #0f172a;
+  --xy-background-color-default: transparent;
+  --xy-background-pattern-dots-color-default: #334155;
+  --xy-minimap-background-color-default: #0f172a;
+  --xy-minimap-mask-background-color-default: rgb(2 6 23 / 0.75);
+  --xy-minimap-mask-stroke-color-default: #7c3aed;
+  --xy-controls-button-background-color-default: #1e293b;
+  --xy-controls-button-background-color-hover-default: #334155;
+  --xy-controls-button-color-default: #e2e8f0;
+  --xy-controls-button-color-hover-default: #ffffff;
+  --xy-controls-button-border-color-default: #334155;
+  --xy-controls-box-shadow-default: 0 1px 3px rgb(0 0 0 / 0.5);
+}
+
+/* Nada escapa da moldura arredondada (o React Flow não corta por padrão). */
+.react-flow.wa-bot-canvas {
+  overflow: hidden;
+}
+
+/* Handles maiores e fáceis de pegar. */
+.wa-bot-canvas .react-flow__handle {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+.wa-bot-canvas .react-flow__handle:hover,
+.wa-bot-canvas .react-flow__handle.connectingfrom,
+.wa-bot-canvas .react-flow__handle.connectingto {
+  box-shadow: 0 0 0 4px rgb(168 85 247 / 0.25);
+}
+.wa-bot-canvas .react-flow__handle.wa-handle-in {
+  background-color: #94a3b8;
+}
+.wa-bot-canvas.dark .react-flow__handle.wa-handle-in {
+  background-color: #64748b;
+}
+.wa-bot-canvas .react-flow__handle.wa-handle-in.connectingto,
+.wa-bot-canvas .react-flow__handle.wa-handle-in.valid {
+  background-color: #22c55e;
+}
+
+/* Arestas: realce ao passar o mouse. */
+.wa-bot-canvas .react-flow__edge:hover .react-flow__edge-path {
+  stroke: #a855f7;
+}
+.wa-bot-canvas .react-flow__edge.selected .react-flow__edge-path,
+.wa-bot-canvas .react-flow__edge:focus .react-flow__edge-path,
+.wa-bot-canvas .react-flow__edge:focus-visible .react-flow__edge-path {
+  stroke-width: 3;
+}
+
+/* Nó: sem caixa extra do React Flow (o cartão é o próprio componente). */
+.wa-bot-canvas .react-flow__node {
+  cursor: grab;
+}
+.wa-bot-canvas .react-flow__node.dragging {
+  cursor: grabbing;
+}
+.wa-bot-canvas .react-flow__node:focus,
+.wa-bot-canvas .react-flow__node:focus-visible {
+  outline: none;
+}
+
+/* Controles e minimapa com cantos arredondados. */
+.wa-bot-canvas .react-flow__controls {
+  border-radius: 10px;
+  overflow: hidden;
+}
+.wa-bot-canvas .react-flow__controls-button {
+  width: 30px;
+  height: 30px;
+}
+.wa-bot-canvas .react-flow__minimap {
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--xy-controls-button-border-color-default);
+}
+.wa-bot-canvas .react-flow__attribution {
+  font-size: 9px;
+  opacity: 0.6;
+}
+
+/* Minimapa some em telas pequenas para não cobrir o quadro. */
+@media (max-width: 767px) {
+  .wa-bot-canvas .react-flow__minimap {
+    display: none;
+  }
+}

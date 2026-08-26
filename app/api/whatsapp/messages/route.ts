@@ -11,6 +11,7 @@
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { getConnectionsByOrg } from '@/lib/whatsapp/service';
 import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
+import { getConversationAiInfo } from '@/lib/wa-agents/conversation';
 
 export async function GET(req: Request) {
   const auth = await requireOrgUser();
@@ -59,7 +60,7 @@ export async function GET(req: Request) {
   const variants = brPhoneVariants(phone);
   let convQ = auth.admin
     .from('wa_conversations')
-    .select('id, connection_id, wa_phone, wa_name, contact_id, last_message_at, unread_count, ai_status')
+    .select('id, connection_id, wa_phone, wa_name, contact_id, last_message_at, unread_count, ai_status, ai_agent_id, ai_resume_at, ai_approval')
     .eq('organization_id', auth.user.organizationId)
     .in('wa_phone', variants.length ? variants : [phone]);
   // 'none' = só a conversa órfã (sem número conectado); ausente = unificada
@@ -71,7 +72,10 @@ export async function GET(req: Request) {
     id: string;
     connection_id: string | null;
     contact_id: string | null;
-    ai_status?: 'active' | 'paused' | null;
+    ai_status?: string | null;
+    ai_agent_id?: string | null;
+    ai_resume_at?: string | null;
+    ai_approval?: Record<string, unknown> | null;
   }>;
   // Agente de IA: a conversa (deste contato) em que um agente já atuou
   const aiConv = convs.find(c => c.ai_status) ?? null;
@@ -120,6 +124,18 @@ export async function GET(req: Request) {
       .gt('unread_count', 0);
   }
 
+  // Agente de IA (externo via API pública ou nativo/beta): estado completo da faixa do chat
+  const ai = aiConv
+    ? await getConversationAiInfo(auth.admin, {
+        id: aiConv.id,
+        organization_id: auth.user.organizationId,
+        ai_status: aiConv.ai_status ?? null,
+        ai_agent_id: aiConv.ai_agent_id ?? null,
+        ai_resume_at: aiConv.ai_resume_at ?? null,
+        ai_approval: aiConv.ai_approval ?? null,
+      })
+    : null;
+
   return json({
     connected: conn?.status === 'connected',
     hasConnection: !!conn,
@@ -127,7 +143,7 @@ export async function GET(req: Request) {
     senders,
     numbers,
     conversation: conv ?? null,
-    ai: aiConv ? { conversationId: aiConv.id, status: aiConv.ai_status } : null,
+    ai,
     messages,
   });
 }

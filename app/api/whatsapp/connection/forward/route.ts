@@ -1,17 +1,20 @@
 /**
- * PATCH /api/whatsapp/connection/forward — espelho do webhook (admin).
+ * PATCH /api/whatsapp/connection/forward: espelho do webhook (admin).
  *
- * A Meta entrega os eventos de um número para UM destino por app. Quando o
- * escritório precisa do mesmo número em outro sistema (outro CRM, automação),
- * o NossoCRM fica com o webhook e REPASSA o payload bruto da Meta para esta
- * URL (assinado com o app secret, igual à Meta). Assim os dois recebem tudo,
- * sem um "roubar" o webhook do outro.
+ * O provedor (Meta ou Evolution) entrega os eventos de um número para UM
+ * destino. Quando o escritório precisa do mesmo número em outro sistema (n8n,
+ * outro CRM, automação), o NossoCRM fica com o webhook e REPASSA o payload
+ * bruto para esta URL. Assim os dois recebem tudo, sem um "roubar" o webhook
+ * do outro. Vale para todos os provedores:
+ * - meta_cloud: repasse assinado com o app secret (x-hub-signature-256),
+ *   igual ao que a Meta envia (Edge Function whatsapp-webhook-meta).
+ * - evolution / evolution_business: repasse com X-Webhook-Secret (segredo da
+ *   conexão), X-Connection-Id e X-Evolution-Event (Edge Function whatsapp-webhook).
  *
  * Body: { connectionId: string, url: string | null }  (null/'' = desligar)
  */
 import { requireOrgUser, isOrgAdmin, json } from '@/lib/whatsapp/api';
 import { getConnectionByIdForOrg } from '@/lib/whatsapp/service';
-import { isMetaCloudConnection } from '@/lib/whatsapp';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 
 export async function PATCH(req: Request) {
@@ -27,7 +30,6 @@ export async function PATCH(req: Request) {
 
   const conn = await getConnectionByIdForOrg(auth.admin, auth.user.organizationId, connectionId);
   if (!conn) return json({ error: 'Número não encontrado' }, 404);
-  if (!isMetaCloudConnection(conn)) return json({ error: 'O espelho só existe para números da API oficial' }, 400);
 
   if (url) {
     let parsed: URL;

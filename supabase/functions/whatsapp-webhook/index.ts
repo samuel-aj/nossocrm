@@ -220,10 +220,14 @@ Deno.serve(async (req) => {
   if (!supabaseUrl || !serviceKey) return json(500, { error: "Supabase não configurado no runtime" });
   const supabase = createClient(supabaseUrl, serviceKey);
 
+  // Corpo lido como TEXTO (e não req.json()) só pra guardar o JSON original:
+  // o espelho abaixo repassa exatamente o texto que a Evolution mandou.
   // deno-lint-ignore no-explicit-any
   let payload: any;
+  let rawBody = "";
   try {
-    payload = await req.json();
+    rawBody = await req.text();
+    payload = JSON.parse(rawBody);
   } catch {
     return json(400, { error: "JSON inválido" });
   }
@@ -234,7 +238,7 @@ Deno.serve(async (req) => {
 
   const { data: conn } = await supabase
     .from("wa_connections")
-    .select("id, organization_id, webhook_secret, instance_token, base_url, phone_number")
+    .select("id, organization_id, webhook_secret, instance_token, base_url, phone_number, forward_webhook_url")
     .eq("instance_name", instanceName)
     .maybeSingle();
   if (!conn) return json(200, { ok: true, ignored: "instancia nao vinculada" });
@@ -244,6 +248,43 @@ Deno.serve(async (req) => {
   const pathSecret = getSecretFromPath(req);
   if (!pathSecret || String(conn.webhook_secret) !== String(pathSecret)) {
     return json(401, { error: "secret inválido" });
+  }
+
+  // ESPELHO: outro sistema (n8n, outro CRM, automação) que também precisa dos
+  // eventos deste número. A Evolution entrega pra UM webhook por instância,
+  // então o CRM fica com o webhook e repassa o corpo BRUTO (JSON original)
+  // pra URL salva na conexão. Fire-and-forget: não espera a resposta, não
+  // altera a resposta à Evolution nem a gravação abaixo; falha só vai pro log.
+  // Corpos sem `event` (ping/health) não são espelhados.
+  const espelhoUrl = String(conn.forward_webhook_url ?? "").trim();
+  const espelhoEvento =
+    typeof payload?.event === "string" ? payload.event.replace(/[^\x20-\x7e]/g, "").trim() : "";
+  if (espelhoUrl && espelhoEvento) {
+    const espelho = (async () => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      try {
+        const headers: Record<string, string> = {
+          "content-type": "application/json",
+          "user-agent": "NossoCRM-Webhook-Mirror/1.0",
+          "X-Webhook-Secret": String(conn.webhook_secret ?? ""),
+          "X-Connection-Id": String(conn.id),
+          "X-Evolution-Event": espelhoEvento,
+        };
+        const r = await fetch(espelhoUrl, { method: "POST", headers, body: rawBody, signal: ctrl.signal });
+        console.log(`[wa-espelho] conn=${conn.id} evento=${espelhoEvento} => ${r.status}`);
+      } catch (e) {
+        console.error(`[wa-espelho] conn=${conn.id} falhou:`, e);
+      } finally {
+        clearTimeout(timer);
+      }
+    })();
+    try {
+      // @ts-ignore: EdgeRuntime existe no runtime das Edge Functions da Supabase
+      EdgeRuntime.waitUntil(espelho);
+    } catch {
+      void espelho;
+    }
   }
 
   const orgId = conn.organization_id as string;
