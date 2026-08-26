@@ -4,7 +4,15 @@
  * esteira do encerramento. Nada aqui lança sem registrar a execução.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { generateText, hasToolCall, stepCountIs, tool, type LanguageModel, type ModelMessage } from 'ai';
+import {
+  generateText,
+  hasToolCall,
+  stepCountIs,
+  tool,
+  type LanguageModel,
+  type ModelMessage,
+  type StopCondition,
+} from 'ai';
 import { z } from 'zod';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { getProvider, type SendResult } from '@/lib/whatsapp';
@@ -21,6 +29,7 @@ import {
   messageText,
   MESSAGE_LITE_COLUMNS,
   normalizeAgentRow,
+  transitionActionKeys,
   type ConversationContext,
   type WaMessageLite,
 } from './context';
@@ -77,10 +86,16 @@ export function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/** Duração da trava por conversa: geração + envio das linhas (até 8) + webhooks ativos. */
-export function lockSecondsFor(agent: Pick<AgentRow, 'line_delay_ms' | 'webhooks'>): number {
+/** Duração da trava por conversa: geração + envio das linhas (até 8) + webhooks (por evento e das ações). */
+export function lockSecondsFor(
+  agent: Pick<AgentRow, 'line_delay_ms' | 'webhooks' | 'outcomes' | 'custom_actions'>
+): number {
   const activeWebhooks = agent.webhooks.filter(w => w.active !== false).length;
-  return LOCK_BASE_SECONDS + Math.ceil((8 * agent.line_delay_ms) / 1000) + 25 * activeWebhooks;
+  const actionWebhooks = [...(agent.outcomes ?? []), ...(agent.custom_actions ?? [])].reduce(
+    (n, item) => n + (item.actions ?? []).filter(a => a.type === 'webhook').length,
+    0
+  );
+  return LOCK_BASE_SECONDS + Math.ceil((8 * agent.line_delay_ms) / 1000) + 25 * (activeWebhooks + actionWebhooks);
 }
 
 // ---------------------------------------------------------------------------
@@ -115,7 +130,7 @@ export function buildAgentTools(agent: AgentRow) {
     ...tools,
     executar_acao: tool({
       description:
-        'Executa uma ação configurada no momento em que a situação descrita acontece na conversa (uma vez por ocorrência). NÃO encerra o atendimento: continue conversando normalmente depois.',
+        'Executa uma ação configurada no momento em que a situação descrita acontece na conversa (uma vez por ocorrência). Nas ações marcadas como finais no prompt, escreva a mensagem final ao cliente antes de chamar; as demais não encerram o atendimento.',
       inputSchema: z.object({
         acao: acaoSchema.describe('Chave da ação'),
         detalhes: z.string().describe('O que o cliente disse ou o contexto que motivou a ação, em uma ou duas frases'),
@@ -153,6 +168,18 @@ export async function generateAgentReply(input: {
   system: string;
   messages: ModelMessage[];
 }): Promise<GeneratedReply> {
+  // Ação durante a conversa com transição (parar, passar, aprovação) também encerra a geração:
+  // o texto de um passo seguinte iria para um lead que já não é deste agente
+  const finals = transitionActionKeys(input.agent);
+  const hasTransitionAction: StopCondition<any> = ({ steps }) => {
+    const last = steps[steps.length - 1];
+    if (!last) return false;
+    return last.toolCalls.some(tc => {
+      const call = tc as { toolName: string; input?: unknown };
+      const acao = (call.input as { acao?: unknown } | undefined)?.acao;
+      return call.toolName === 'executar_acao' && finals.has(String(acao ?? ''));
+    });
+  };
   const result = await generateText({
     model: input.model,
     system: input.system,
@@ -160,7 +187,7 @@ export async function generateAgentReply(input: {
     temperature: supportsTemperature(input.agent) ? input.agent.temperature : undefined,
     tools: buildAgentTools(input.agent),
     // Depois de encerrar_atendimento não há passo extra: o texto sobrando iria para o lead
-    stopWhen: [stepCountIs(MAX_STEPS), hasToolCall('encerrar_atendimento')],
+    stopWhen: [stepCountIs(MAX_STEPS), hasToolCall('encerrar_atendimento'), hasTransitionAction],
   });
 
   const toolCalls: CollectedToolCall[] = [];
@@ -520,7 +547,8 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     // 5. Modelo, prompt e histórico
     const resolved = await resolveAgentModel(admin, organizationId, agent);
     modelId = resolved.modelId;
-    const system = buildSystemPrompt({ agent, ctx });
+    // Instrução de apresentação só no primeiro contato pelo pipeline (não nas rodadas seguintes nem após passagem)
+    const system = buildSystemPrompt({ agent, ctx, firstContact: input.trigger === 'deal' });
     const messages = await buildHistoryMessages(admin, ctx, agent.history_limit);
     if (input.forceReply && (messages.length === 0 || messages[messages.length - 1].role === 'assistant')) {
       messages.push({ role: 'user', content: '(o sistema pediu que você inicie/continue o atendimento agora)' });
@@ -562,7 +590,9 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     const requestsTransition = (acts: OutcomeActionsResult) =>
       !!(acts.approvalAgentId || acts.handoffAgentId || acts.stopped);
 
-    // 9a. Ações durante a conversa (executar_acao): executam sem encerrar o atendimento
+    // 9a. Ações durante a conversa (executar_acao): executam sem encerrar o atendimento.
+    // A mesma chave repetida na mesma resposta executa uma vez só.
+    const executedKeys = new Set<string>();
     for (const tc of gen.toolCalls) {
       if (tc.tool !== 'executar_acao') continue;
       const args = (tc.input ?? {}) as { acao?: unknown; detalhes?: unknown };
@@ -573,7 +603,19 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
         pushEvent('custom_action_not_found', { acao, detalhes });
         continue;
       }
-      const acts = await executeCustomAction(admin, { agent, ctx, action: custom, details: detalhes, runEvents: events });
+      if (executedKeys.has(custom.key)) {
+        pushEvent('custom_action_repeated', { acao: custom.key, detalhes });
+        continue;
+      }
+      executedKeys.add(custom.key);
+      const acts = await executeCustomAction(admin, {
+        agent,
+        ctx,
+        action: custom,
+        details: detalhes,
+        runEvents: events,
+        renewLock: renew,
+      });
       await emit('custom_action', { acao: custom.key, label: custom.label, detalhes });
       if (requestsTransition(acts)) {
         transition = {
@@ -595,7 +637,14 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
       if (!outcome) {
         pushEvent('outcome_not_found', { resultado, resumo });
       } else {
-        const acts = await executeOutcomeActions(admin, { agent, ctx, outcome, summary: resumo, runEvents: events });
+        const acts = await executeOutcomeActions(admin, {
+          agent,
+          ctx,
+          outcome,
+          summary: resumo,
+          runEvents: events,
+          renewLock: renew,
+        });
         await emit('finished', { resultado: outcome.key, resultado_label: outcome.label, resumo });
         if (requestsTransition(acts)) {
           transition = { acts, summary: resumo, reason: 'resultado com parada', extra: { resultado: outcome.key, resumo } };
@@ -784,9 +833,11 @@ export async function handleInboundMessage(input: {
         .contains('connection_ids', [conv.connection_id])
         .order('created_at', { ascending: true });
       const candidates = ((candidatesRaw ?? []) as Record<string, unknown>[]).map(normalizeAgentRow);
-      if (candidates.length === 0) return await skip('nenhum agente para este número');
+      // Sem candidato (gatilho 'none' ou palavra-chave sem correspondência): pula sem registrar execução,
+      // senão cada mensagem do número viraria uma linha no histórico
+      if (candidates.length === 0) return { status: 'skipped', reason: 'nenhum agente para este número' };
       const candidate = pickInboundAgent(candidates, text);
-      if (!candidate) return await skip('sem agente para esta mensagem');
+      if (!candidate) return { status: 'skipped', reason: 'sem agente para esta mensagem' };
 
       if (candidate.only_new_conversations) {
         const at = (msgRow as { created_at?: string } | null)?.created_at ?? new Date().toISOString();

@@ -636,22 +636,47 @@ export function buildLeadDataBlock(ctx: ConversationContext): string {
   return lines.join('\n');
 }
 
+/** Tipos de ação que mudam o estado da conversa (parar, passar a outro agente, pedir aprovação). */
+export const TRANSITION_ACTION_TYPES = new Set<string>(['stop', 'handoff', 'approval']);
+
+/** Chaves das ações durante a conversa que carregam transição: o modelo escreve a mensagem final antes de chamá-las. */
+export function transitionActionKeys(agent: Pick<AgentRow, 'custom_actions'>): Set<string> {
+  const keys = new Set<string>();
+  for (const a of agent.custom_actions ?? []) {
+    if (a.key && (a.actions ?? []).some(x => TRANSITION_ACTION_TYPES.has(x.type))) keys.add(a.key);
+  }
+  return keys;
+}
+
 /** Bloco "## AÇÕES DURANTE A CONVERSA" ('' quando o agente não tem ações). */
 export function buildCustomActionsBlock(agent: Pick<AgentRow, 'custom_actions'>): string {
   const actions = (agent.custom_actions ?? []).filter(a => a.key);
   if (actions.length === 0) return '';
+  const finals = transitionActionKeys(agent);
   const lines: string[] = ['## AÇÕES DURANTE A CONVERSA'];
   lines.push('Você tem a ferramenta executar_acao para registrar situações que acontecem no meio do atendimento:');
   for (const a of actions) {
-    lines.push(`- acao=${a.key} (${a.label}): quando ${a.description.trim()}`);
+    const final = finals.has(a.key)
+      ? ' [AÇÃO FINAL: escreva a mensagem final para o cliente antes de chamar; depois dela você não responde mais]'
+      : '';
+    lines.push(`- acao=${a.key} (${a.label}): quando ${a.description.trim()}${final}`);
   }
   lines.push(
-    'Chame executar_acao no momento em que a situação descrita acontecer, uma vez por ocorrência, com "acao" igual à chave e "detalhes" resumindo o que o cliente disse. Depois continue a conversa normalmente: a ação não encerra o atendimento.'
+    'Chame executar_acao no momento em que a situação descrita acontecer, uma vez por ocorrência, com "acao" igual à chave e "detalhes" resumindo o que o cliente disse.'
   );
+  if (actions.some(a => !finals.has(a.key))) {
+    lines.push('Nas ações que não são finais, continue a conversa normalmente depois: a ação não encerra o atendimento.');
+  }
   return lines.join('\n');
 }
 
-export function buildSystemPrompt(input: { agent: AgentRow; ctx: ConversationContext; now?: Date }): string {
+export function buildSystemPrompt(input: {
+  agent: AgentRow;
+  ctx: ConversationContext;
+  now?: Date;
+  /** Primeiro contato iniciado pelo sistema (gatilho por pipeline): o lead ainda não recebeu mensagem */
+  firstContact?: boolean;
+}): string {
   const { agent, ctx } = input;
   const vars = buildPromptVars(input);
   const script = renderTemplate(agent.system_prompt || '', vars as unknown as Record<string, unknown>).trim();
@@ -684,7 +709,8 @@ export function buildSystemPrompt(input: { agent: AgentRow; ctx: ConversationCon
       `- Você acabou de assumir esta conversa vinda do agente ${state.handoff.from_agent_name}. Resumo de passagem: ${state.handoff.summary}. Continue de onde parou, sem se apresentar de novo se já houve apresentação.`
     );
   }
-  if (state.origem === 'pipeline' && leadBlock) {
+  // Só no primeiro contato: nas rodadas seguintes (e após passagem) o lead já recebeu mensagem
+  if (input.firstContact && leadBlock) {
     lines.push(
       '- Você está iniciando a conversa a partir do cadastro deste lead no CRM (ele ainda não recebeu mensagem sua). Apresente-se, mencione em uma linha o motivo do contato com base nos dados acima e faça a primeira pergunta do roteiro que os dados ainda não respondem. Não peça informações que já constam no cadastro.'
     );
@@ -704,7 +730,7 @@ export function buildSystemPrompt(input: { agent: AgentRow; ctx: ConversationCon
   }
   if (actionsBlock) {
     lines.push(
-      '- A ferramenta executar_acao NÃO encerra o atendimento: use-a só para as situações listadas em "AÇÕES DURANTE A CONVERSA" e continue conversando.'
+      '- A ferramenta executar_acao serve só para as situações listadas em "AÇÕES DURANTE A CONVERSA". Nas ações marcadas como finais, escreva a mensagem final ao cliente antes de chamar; nas demais, continue conversando.'
     );
   }
   lines.push(

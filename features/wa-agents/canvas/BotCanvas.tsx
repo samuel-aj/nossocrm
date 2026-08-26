@@ -13,6 +13,7 @@ import {
   Controls,
   MarkerType,
   MiniMap,
+  Panel,
   ReactFlow,
   useReactFlow,
   type Connection,
@@ -45,6 +46,8 @@ const FIT_VIEW_OPTIONS = { padding: 0.2, maxZoom: 1 };
 const DELETE_KEYS = ['Backspace', 'Delete'];
 const SNAP_GRID: [number, number] = [10, 10];
 const CANVAS_STYLE: React.CSSProperties = { position: 'absolute', inset: 0, width: '100%', height: '100%' };
+/** Referência estável: o minimapa não precisa recalcular a cada render do quadro. */
+const minimapNodeColor = (node: FlowNode): string => minimapColor(node.type);
 
 export function BotCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onDropStep, darkMode }: BotCanvasProps) {
   const { screenToFlowPosition } = useReactFlow<FlowNode, FlowEdge>();
@@ -104,6 +107,10 @@ export function BotCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnec
       snapToGrid
       snapGrid={SNAP_GRID}
       zoomOnDoubleClick={false}
+      // A roda do mouse move o quadro (como rolar a página); zoom só com Ctrl + roda ou pinça.
+      panOnScroll
+      zoomOnScroll
+      zoomActivationKeyCode="Control"
       nodeDragThreshold={2}
       onDragOver={onDragOver}
       onDrop={onDrop}
@@ -111,7 +118,13 @@ export function BotCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnec
     >
       <Background variant={BackgroundVariant.Dots} gap={20} size={1.5} />
       <Controls showInteractive={false} aria-label="Controles do quadro" />
-      <MiniMap pannable zoomable nodeColor={(n) => minimapColor(n.type)} nodeStrokeWidth={0} ariaLabel="Mapa do quadro" />
+      <MiniMap pannable zoomable nodeColor={minimapNodeColor} nodeStrokeWidth={0} ariaLabel="Mapa do quadro" />
+      <Panel
+        position="bottom-center"
+        className="pointer-events-none select-none text-[11px] text-slate-500 dark:text-slate-400"
+      >
+        Roda do mouse move o quadro. Ctrl + roda para zoom.
+      </Panel>
     </ReactFlow>
   );
 }

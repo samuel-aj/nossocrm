@@ -14,7 +14,7 @@ import {
   guardRoute,
   pickPresentKeys,
   readJsonBody,
-  validateBotStartStep,
+  validateBotSteps,
   validationError,
 } from '../../_shared';
 
@@ -66,26 +66,34 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return connectionNotFoundError();
     }
 
-    // Passo inicial do quadro precisa existir nos passos (os enviados ou os já salvos)
-    if (present.start_step_id) {
-      let steps: BotStep[] | null = present.steps ?? null;
-      if (!steps) {
+    // Passos e passo inicial: os enviados ou os já salvos (o que faltar vem do banco).
+    // O passo inicial e todo id referenciado precisam existir na lista
+    const sendsSteps = Array.isArray(present.steps);
+    const sendsStart = 'start_step_id' in present;
+    if (sendsSteps || sendsStart) {
+      let steps: BotStep[] = present.steps ?? [];
+      let startStepId: string | null = present.start_step_id ?? null;
+      if (!sendsSteps || !sendsStart) {
         const { data: existing, error: existingError } = await auth.admin
           .from('wa_bots')
-          .select('steps')
+          .select('steps, start_step_id')
           .eq('id', id)
           .eq('organization_id', orgId)
           .maybeSingle();
         if (existingError) throw new Error(existingError.message);
         if (!existing) return json({ error: 'Robô não encontrado' }, 404);
-        steps = [];
-        for (const item of ((existing as { steps?: unknown[] }).steps ?? []) as unknown[]) {
-          const p = BotStepSchema.safeParse(item);
-          if (p.success) steps.push(p.data);
+        const saved = existing as { steps?: unknown[]; start_step_id?: string | null };
+        if (!sendsSteps) {
+          steps = [];
+          for (const item of (saved.steps ?? []) as unknown[]) {
+            const p = BotStepSchema.safeParse(item);
+            if (p.success) steps.push(p.data);
+          }
         }
+        if (!sendsStart) startStepId = saved.start_step_id ?? null;
       }
-      const startError = validateBotStartStep(steps, present.start_step_id);
-      if (startError) return startError;
+      const stepsError = validateBotSteps(steps, startStepId);
+      if (stepsError) return stepsError;
     }
   } catch (err) {
     return json({ error: getErrorMessage(err, 'Falha ao validar o robô') }, 500);

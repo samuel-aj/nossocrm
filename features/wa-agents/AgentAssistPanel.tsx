@@ -161,8 +161,9 @@ export const AgentAssistPanel: React.FC<AgentAssistPanelProps> = ({
       } else {
         applyResult(result, true);
         showToast(MODE_DONE_TOAST[mode], 'success');
+        // O pedido de ajuste só é limpo depois de aplicado (ao confirmar, fica no campo).
+        if (mode === 'adjust') setInstruction('');
       }
-      if (mode === 'adjust') setInstruction('');
     } catch (err) {
       showToast(errorMessage(err, 'Falha ao gerar o roteiro com IA'), 'error');
     }
@@ -172,6 +173,7 @@ export const AgentAssistPanel: React.FC<AgentAssistPanelProps> = ({
     if (!pending) return;
     applyResult(pending.result, true);
     showToast(`${MODE_DONE_TOAST[pending.mode]}: roteiro substituído`, 'success');
+    if (pending.mode === 'adjust') setInstruction('');
     setPending(null);
   };
 
@@ -179,6 +181,7 @@ export const AgentAssistPanel: React.FC<AgentAssistPanelProps> = ({
     if (!pending) return;
     applyResult(pending.result, false);
     showToast('Roteiro mantido; sugestões separadas', 'info');
+    if (pending.mode === 'adjust') setInstruction('');
     setPending(null);
   };
 

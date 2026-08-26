@@ -3,13 +3,15 @@
  *   GET    -> { agent }      AgentPublic (sem api_key)
  *   PATCH  -> { agent }      AgentInputSchema.partial(); api_key: ausente mantém,
  *                            '' ou null limpa, valor mascarado (quatro pontos) ignora;
- *                            custom_actions e triggers aceitos (gatilho por pipeline validado)
+ *                            custom_actions e triggers aceitos (gatilho por pipeline validado;
+ *                            triggers parcial é mesclado por bloco com o salvo)
  *   DELETE -> { ok: true }   desvincula as conversas em andamento e apaga o agente
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
-import { AgentInputSchema, type AgentRow } from '@/lib/wa-agents/types';
+import { normalizeTriggers } from '@/lib/wa-agents/context';
+import { AgentInputSchema, type AgentRow, type AgentTriggers } from '@/lib/wa-agents/types';
 import {
   connectionNotFoundError,
   connectionsBelongToOrg,
@@ -38,6 +40,23 @@ async function fetchAgent(admin: SupabaseClient, orgId: string, id: string): Pro
   return (data as AgentRow | null) ?? null;
 }
 
+/**
+ * PATCH parcial de triggers: mescla cada bloco (inbound/deal) com o que está salvo.
+ * Sem isso os defaults do zod substituiriam o objeto inteiro. Valores que não
+ * são objeto seguem como vieram (o zod rejeita).
+ */
+function mergeTriggers(current: AgentTriggers, incoming: unknown): unknown {
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return incoming;
+  const inc = incoming as Record<string, unknown>;
+  const block = (key: 'inbound' | 'deal') => {
+    const value = inc[key];
+    if (value === undefined) return current[key];
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+    return { ...current[key], ...(value as Record<string, unknown>) };
+  };
+  return { ...inc, inbound: block('inbound'), deal: block('deal') };
+}
+
 export async function GET(_req: Request, ctx: Ctx) {
   const auth = await guardRoute({ admin: true });
   if (!auth.ok) return auth.response;
@@ -63,11 +82,22 @@ export async function PATCH(req: Request, ctx: Ctx) {
   if (!isValidUUID(id)) return json({ error: 'ID inválido' }, 400);
 
   const raw = await readJsonBody(req);
-  const parsed = AgentInputSchema.partial().safeParse(raw);
+  let body = raw;
+  if (raw && typeof raw === 'object' && !Array.isArray(raw) && 'triggers' in raw) {
+    try {
+      const existing = await fetchAgent(auth.admin, orgId, id);
+      if (!existing) return json({ error: 'Agente não encontrado' }, 404);
+      const incoming = (raw as { triggers?: unknown }).triggers;
+      body = { ...raw, triggers: mergeTriggers(normalizeTriggers(existing.triggers), incoming) };
+    } catch (err) {
+      return json({ error: getErrorMessage(err, 'Falha ao carregar o agente') }, 500);
+    }
+  }
+  const parsed = AgentInputSchema.partial().safeParse(body);
   if (!parsed.success) return validationError(parsed.error);
 
   // Só o que veio no corpo (zod v4 aplica defaults mesmo no partial)
-  const present = pickPresentKeys(raw, parsed.data);
+  const present = pickPresentKeys(body, parsed.data);
   const { api_key: apiKeyInput, ...fields } = present;
   const patch: Record<string, unknown> = { ...fields, updated_at: new Date().toISOString() };
   if ('persona_name' in present) patch.persona_name = fields.persona_name ?? null;

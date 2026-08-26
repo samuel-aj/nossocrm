@@ -11,7 +11,10 @@ import type { ZodError } from 'zod';
 import { requireOrgUser, isOrgAdmin, json, type OrgUser } from '@/lib/whatsapp/api';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { isWaAgentsBetaEnabled } from '@/lib/wa-agents/beta';
-import type { AgentPublic, AgentRow, AgentTriggers, BotStep } from '@/lib/wa-agents/types';
+import type { AgentTriggers, BotStep } from '@/lib/wa-agents/types';
+
+/** Versão sem a chave da API (has_api_key): implementação única em types.ts. */
+export { toAgentPublic } from '@/lib/wa-agents/types';
 
 export type GuardResult =
   | { ok: true; user: OrgUser; admin: SupabaseClient; isAdmin: boolean }
@@ -77,12 +80,6 @@ export function searchParamsToObject(req: Request): Record<string, string> {
   return out;
 }
 
-/** Remove a chave da API da linha e informa só se existe (nunca expor api_key). */
-export function toAgentPublic(row: AgentRow): AgentPublic {
-  const { api_key, ...rest } = row;
-  return { ...rest, has_api_key: Boolean(api_key) };
-}
-
 /**
  * Mantém só as chaves que vieram no corpo da requisição. Necessário porque o
  * zod v4 aplica os defaults mesmo em `.partial()`, o que faria um PATCH parcial
@@ -140,10 +137,24 @@ export async function stageBelongsToOrg(
   return (data ?? []).length > 0;
 }
 
+/** true quando o quadro (boards) é da organização e não foi apagado. */
+export async function boardBelongsToOrg(admin: SupabaseClient, orgId: string, boardId: string): Promise<boolean> {
+  const { data, error } = await admin
+    .from('boards')
+    .select('id')
+    .eq('organization_id', orgId)
+    .eq('id', boardId)
+    .is('deleted_at', null)
+    .limit(1);
+  if (error) throw new Error(error.message);
+  return (data ?? []).length > 0;
+}
+
 /**
  * Valida os gatilhos do agente quando o gatilho por pipeline está ligado:
- * etapa obrigatória (e da org) para "entrou numa etapa" e número que inicia
- * a conversa obrigatório e da org. null quando está tudo certo.
+ * quadro (quando informado) da org, etapa obrigatória (e da org) para
+ * "entrou numa etapa" e número que inicia a conversa obrigatório e da org.
+ * null quando está tudo certo.
  */
 export async function validateAgentTriggers(
   admin: SupabaseClient,
@@ -152,6 +163,9 @@ export async function validateAgentTriggers(
 ): Promise<Response | null> {
   const deal = triggers.deal;
   if (!deal.enabled) return null;
+  if (deal.board_id && !(await boardBelongsToOrg(admin, orgId, deal.board_id))) {
+    return validationMessage('Quadro não encontrado nesta organização', 'triggers.deal.board_id');
+  }
   if (deal.event === 'deal_stage_entered') {
     if (!deal.stage_id) return validationMessage('Informe a etapa do gatilho "entrou numa etapa"', 'triggers.deal.stage_id');
     if (!(await stageBelongsToOrg(admin, orgId, deal.stage_id, deal.board_id))) {
@@ -165,11 +179,41 @@ export async function validateAgentTriggers(
   return null;
 }
 
-/** Modo quadro do robô: o passo inicial precisa existir na lista de passos. null quando ok. */
-export function validateBotStartStep(steps: BotStep[], startStepId: string | null | undefined): Response | null {
-  if (!startStepId) return null;
-  if (!steps.some(s => s.id === startStepId)) {
+/** Ids de passos referenciados por um passo (próximo, regras da condição, senão, sem resposta). */
+function botStepReferences(step: BotStep): Array<{ field: string; id: string }> {
+  const refs: Array<{ field: string; id: string }> = [];
+  if (step.next_step_id) refs.push({ field: 'next_step_id', id: step.next_step_id });
+  if (step.type === 'condition') {
+    step.rules.forEach((rule, i) => {
+      if (rule.goto_step_id) refs.push({ field: `rules.${i}.goto_step_id`, id: rule.goto_step_id });
+    });
+    if (step.else_step_id) refs.push({ field: 'else_step_id', id: step.else_step_id });
+  }
+  if (step.type === 'wait_reply' && step.on_timeout_step_id) {
+    refs.push({ field: 'on_timeout_step_id', id: step.on_timeout_step_id });
+  }
+  return refs;
+}
+
+/**
+ * Passos do robô: o passo inicial (modo quadro) e todo id referenciado
+ * (next_step_id, goto_step_id, else_step_id, on_timeout_step_id) precisam
+ * existir na lista de passos. null quando ok.
+ */
+export function validateBotSteps(steps: BotStep[], startStepId: string | null | undefined): Response | null {
+  const ids = new Set(steps.map(s => s.id));
+  if (startStepId && !ids.has(startStepId)) {
     return validationMessage('O passo inicial do quadro não existe na lista de passos', 'start_step_id');
+  }
+  for (let i = 0; i < steps.length; i++) {
+    for (const ref of botStepReferences(steps[i])) {
+      if (!ids.has(ref.id)) {
+        return validationMessage(
+          `O passo "${steps[i].id}" aponta para um passo que não existe ("${ref.id}")`,
+          `steps.${i}.${ref.field}`
+        );
+      }
+    }
   }
   return null;
 }

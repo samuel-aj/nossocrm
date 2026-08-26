@@ -3,8 +3,9 @@
  * do robô (BotInput: passos com next_step_id / goto_step_id / else_step_id /
  * on_timeout_step_id, posição em `ui` e `start_step_id`).
  *
- * Robôs antigos (sem start_step_id) são convertidos em cadeia: cada passo liga
- * ao seguinte da lista, com layout vertical automático (x fixo, y = índice * 170).
+ * Robôs antigos em lista (sem start_step_id, sem `ui` e sem next_step_id) são
+ * convertidos em cadeia: cada passo liga ao seguinte da lista, com layout
+ * vertical automático (x fixo, y = índice * 170).
  */
 import type { XYPosition } from '@xyflow/react';
 import type { BotInput, BotRow, BotStep } from '@/lib/wa-agents/types';
@@ -38,16 +39,34 @@ const LEGACY_GAP_Y = 170;
 /** O gatilho fica à esquerda do primeiro passo. */
 const TRIGGER_OFFSET_X = 360;
 
-/** "sim, quero, pode" -> ['sim', 'quero', 'pode'] (sem repetidos e sem vazios). */
+/**
+ * "sim, quero, pode" -> ['sim', 'quero', 'pode'] (sem repetidos e sem vazios).
+ * Aspas duplas protegem a vírgula: '"sim, quero", pode' -> ['sim, quero', 'pode'].
+ * Uma aspa no meio de uma palavra (5" de tela) é texto comum.
+ */
 export function parseKeywords(text: string): string[] {
-  return Array.from(
-    new Set(
-      text
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean)
-    )
-  );
+  const parts: string[] = [];
+  let current = '';
+  let quoted = false;
+  for (const ch of text) {
+    if (ch === '"' && (quoted || current.trim() === '')) {
+      quoted = !quoted;
+      continue;
+    }
+    if (ch === ',' && !quoted) {
+      parts.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  parts.push(current);
+  return Array.from(new Set(parts.map((s) => s.trim()).filter(Boolean)));
+}
+
+/** Inverso de parseKeywords: palavras com vírgula voltam entre aspas para sobreviver ao próximo parse. */
+export function formatKeywords(keywords: string[]): string {
+  return keywords.map((k) => (k.includes(',') ? `"${k}"` : k)).join(', ');
 }
 
 export function clampInt(value: number, min: number, max: number): number {
@@ -142,7 +161,7 @@ function stepToNode(step: BotStep, position: XYPosition): FlowNode {
         id,
         type: 'condition',
         position,
-        data: { rules: step.rules.map((r) => ({ id: newId(), keywords: r.keywords.join(', ') })) },
+        data: { rules: step.rules.map((r) => ({ id: newId(), keywords: formatKeywords(r.keywords) })) },
       };
     case 'move_stage':
       return { id, type: 'move_stage', position, data: { stage_id: step.stage_id } };
@@ -170,11 +189,13 @@ function makeEdge(source: string, sourceHandle: string, target: string): FlowEdg
 
 /**
  * Converte um robô salvo (ou os passos padrão de um robô novo) em nós e arestas.
- * Sem `start_step_id` (robô em lista), a ordem da lista vira a cadeia de ligações.
+ * Robô em lista (sem `start_step_id`, sem posição `ui` e sem `next_step_id` em
+ * nenhum passo): a ordem da lista vira a cadeia de ligações. Qualquer sinal de
+ * quadro (mesmo salvo com o gatilho solto) preserva as ligações gravadas.
  */
 export function botToFlow(bot: BotRow | null, fallbackSteps: BotStep[]): FlowGraph {
   const steps: BotStep[] = bot ? bot.steps : fallbackSteps;
-  const canvasMode = !!bot?.start_step_id;
+  const canvasMode = !!bot?.start_step_id || steps.some((s) => s.ui !== undefined || s.next_step_id !== undefined);
   const stepIds = new Set(steps.map((s) => s.id));
 
   const stepNodes: FlowNode[] = steps.map((step, index) =>
@@ -183,9 +204,12 @@ export function botToFlow(bot: BotRow | null, fallbackSteps: BotStep[]): FlowGra
 
   const startId = canvasMode ? (bot?.start_step_id ?? null) : (steps[0]?.id ?? null);
   const startNode = startId ? stepNodes.find((n) => n.id === startId) : undefined;
-  const triggerPosition: XYPosition = startNode
-    ? { x: startNode.position.x - TRIGGER_OFFSET_X, y: startNode.position.y }
-    : { x: LEGACY_X - TRIGGER_OFFSET_X, y: 0 };
+  // Posição salva do gatilho tem prioridade; sem ela, fica à esquerda do primeiro passo
+  const triggerPosition: XYPosition = bot?.trigger?.ui
+    ? { x: bot.trigger.ui.x, y: bot.trigger.ui.y }
+    : startNode
+      ? { x: startNode.position.x - TRIGGER_OFFSET_X, y: startNode.position.y }
+      : { x: LEGACY_X - TRIGGER_OFFSET_X, y: 0 };
 
   const nodes: FlowNode[] = [createTriggerNode(bot?.trigger ?? null, triggerPosition), ...stepNodes];
   const edges: FlowEdge[] = [];
@@ -197,9 +221,9 @@ export function botToFlow(bot: BotRow | null, fallbackSteps: BotStep[]): FlowGra
   if (startId) link(TRIGGER_NODE_ID, HANDLE_NEXT, startId);
 
   steps.forEach((step, index) => {
-    // Em lista, o passo seguinte é o próximo do array; no quadro, só o que está ligado.
+    // Em lista, o passo seguinte é o próximo do array (salvo se o passo já disser outro); no quadro, só o que está ligado.
     const listNext = canvasMode ? null : (steps[index + 1]?.id ?? null);
-    const next = canvasMode ? (step.next_step_id ?? null) : listNext;
+    const next = canvasMode ? (step.next_step_id ?? null) : (step.next_step_id ?? listNext);
     switch (step.type) {
       case 'send_text':
       case 'wait':
@@ -346,6 +370,7 @@ export function flowToBot(nodes: FlowNode[], edges: FlowEdge[], header: FlowHead
       type: triggerType,
       board_id: triggerType === 'manual' ? null : trigger?.data.board_id || null,
       stage_id: triggerType === 'deal_stage_entered' ? trigger?.data.stage_id || null : null,
+      ...(trigger ? { ui: { x: Math.round(trigger.position.x), y: Math.round(trigger.position.y) } } : {}),
     },
     steps,
     start_step_id: startId,
@@ -358,8 +383,9 @@ export type FlowIssue = { nodeId?: string; message: string };
 export type FlowValidation = { errors: FlowIssue[]; warnings: FlowIssue[] };
 
 /**
- * Confere o quadro antes de salvar. `errors` impedem o salvamento; `warnings`
- * pedem confirmação (gatilho solto, passos fora do fluxo).
+ * Confere o quadro antes de salvar. `errors` impedem o salvamento (inclusive o
+ * gatilho solto com passos no quadro, que zeraria `start_step_id`); `warnings`
+ * pedem confirmação (robô sem passos, passos fora do fluxo).
  */
 export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowHeader): FlowValidation {
   const errors: FlowIssue[] = [];
@@ -390,16 +416,20 @@ export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowH
   const startId = to(TRIGGER_NODE_ID, HANDLE_NEXT);
   const ordered = orderStepNodes(nodes, edges, startId);
   if (!startId) {
-    warnings.push({
-      nodeId: TRIGGER_NODE_ID,
-      message: ordered.length
-        ? 'O gatilho não está ligado a nenhum passo: ao disparar, o robô não faz nada.'
-        : 'O robô não tem passos.',
-    });
+    // Sem primeiro passo, o robô seria salvo em modo lista e reaberto com as ligações reescritas.
+    if (ordered.length) errors.push({ nodeId: TRIGGER_NODE_ID, message: 'Ligue a saída Então do gatilho ao primeiro passo' });
+    else warnings.push({ nodeId: TRIGGER_NODE_ID, message: 'O robô não tem passos.' });
   }
 
-  ordered.forEach((node, index) => {
-    const label = `${nodeLabel(node)} ${index + 1}`;
+  // Numeração por tipo, na ordem do fluxo ("Mensagem 2"); sem número quando há só um passo do tipo.
+  const totalByType = new Map<string, number>();
+  for (const node of ordered) totalByType.set(node.type ?? '', (totalByType.get(node.type ?? '') ?? 0) + 1);
+  const seenByType = new Map<string, number>();
+  ordered.forEach((node) => {
+    const type = node.type ?? '';
+    const ordinal = (seenByType.get(type) ?? 0) + 1;
+    seenByType.set(type, ordinal);
+    const label = (totalByType.get(type) ?? 0) > 1 ? `${nodeLabel(node)} ${ordinal}` : nodeLabel(node);
     const fail = (message: string) => errors.push({ nodeId: node.id, message: `${label}: ${message}` });
     switch (node.type) {
       case 'send_text':

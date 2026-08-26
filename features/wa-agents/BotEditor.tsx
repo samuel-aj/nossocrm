@@ -25,7 +25,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { useToast } from '@/context/ToastContext';
 import { BotInputSchema, type BotInput, type BotRow } from '@/lib/wa-agents/types';
 import { DEFAULT_BOT_STEPS } from '@/lib/wa-agents/defaults';
-import { useSaveWaBot, useStartWaBot, useWaAgentOptions, useWaAgentsList } from './useWaAgents';
+import { useSaveWaBot, useStartWaBot, useWaAgentOptions, useWaAgentsList, type WaAgentListItem } from './useWaAgents';
 import {
   BTN_ICON,
   BTN_PRIMARY,
@@ -75,6 +75,9 @@ function describeIssue(path: PropertyKey[], message: string): string {
 
 type PendingSave = { payload: BotInput; warnings: string[] };
 
+/** Referência estável enquanto a lista de agentes não chega (evita re-renderizar os nós a cada tecla). */
+const EMPTY_AGENTS: WaAgentListItem[] = [];
+
 const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({ bot, onClose }) => {
   const { showToast } = useToast();
   const { darkMode } = useTheme();
@@ -104,7 +107,8 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
 
   const options = optionsQ.data;
   const connections = options?.connections ?? [];
-  const ctx = useMemo<CanvasContextValue>(() => ({ options, agents: agentsQ.data ?? [] }), [options, agentsQ.data]);
+  const agents = agentsQ.data ?? EMPTY_AGENTS;
+  const ctx = useMemo<CanvasContextValue>(() => ({ options, agents }), [options, agents]);
 
   const patchHeader = (patch: Partial<FlowHeader>) => {
     setHeader((prev) => ({ ...prev, ...patch }));
@@ -311,16 +315,16 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
 
         {optionsQ.error ? <Notice tone="red">{errorMessage(optionsQ.error, 'Falha ao carregar as opções')}</Notice> : null}
 
-        <div className="flex flex-col md:flex-row gap-3 md:h-[calc(100vh-230px)] md:min-h-[560px]">
-          <Palette onAdd={(type) => addStep(type)} />
-          <div ref={canvasRef} className="relative flex-1 min-h-[560px]">
+        <div className="flex flex-col md:flex-row gap-3 h-[640px] md:h-[calc(100vh-260px)] min-h-[520px]">
+          <Palette onAdd={addStep} />
+          <div ref={canvasRef} className="relative flex-1 min-h-[460px]">
             <BotCanvas
               nodes={nodes}
               edges={edges}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
-              onDropStep={(type, position) => addStep(type, position)}
+              onDropStep={addStep}
               darkMode={darkMode}
             />
           </div>

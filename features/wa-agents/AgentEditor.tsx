@@ -1007,6 +1007,7 @@ export const AgentEditor: React.FC<{
         title="Resultados e ações"
         description="Como o agente pode encerrar o atendimento e o que acontece em cada caso."
         icon={<Flag size={16} />}
+        defaultOpen={form.outcomes.length > 0}
       >
         <OutcomesEditor
           value={form.outcomes}

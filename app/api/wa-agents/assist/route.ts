@@ -16,7 +16,7 @@ import { AssistInputSchema } from '@/lib/wa-agents/types';
 import { getErrorMessage, guardRoute, readJsonBody, validationError } from '../_shared';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export async function POST(req: Request) {
   const auth = await guardRoute({ req, admin: true });

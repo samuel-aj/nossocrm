@@ -201,7 +201,15 @@ async function runAction(
  */
 export async function executeActions(
   admin: SupabaseClient,
-  input: { agent: AgentRow; ctx: ConversationContext; actions: EndAction[]; source: ActionSource; runEvents: unknown[] }
+  input: {
+    agent: AgentRow;
+    ctx: ConversationContext;
+    actions: EndAction[];
+    source: ActionSource;
+    runEvents: unknown[];
+    /** Renova a trava da conversa antes de cada ação (webhooks podem demorar) */
+    renewLock?: () => Promise<void>;
+  }
 ): Promise<OutcomeActionsResult> {
   const result: OutcomeActionsResult = {};
   const origin =
@@ -210,6 +218,7 @@ export async function executeActions(
       : { source: 'custom_action', key: input.source.action.key };
   for (const action of input.actions ?? []) {
     const at = new Date().toISOString();
+    if (input.renewLock) await input.renewLock();
     try {
       const note = await runAction(admin, input, action, result);
       input.runEvents.push({ type: 'action', at, action: action.type, ok: true, note, ...origin });
@@ -223,7 +232,14 @@ export async function executeActions(
 /** Ações de um resultado do encerramento. */
 export async function executeOutcomeActions(
   admin: SupabaseClient,
-  input: { agent: AgentRow; ctx: ConversationContext; outcome: Outcome; summary: string; runEvents: unknown[] }
+  input: {
+    agent: AgentRow;
+    ctx: ConversationContext;
+    outcome: Outcome;
+    summary: string;
+    runEvents: unknown[];
+    renewLock?: () => Promise<void>;
+  }
 ): Promise<OutcomeActionsResult> {
   return executeActions(admin, {
     agent: input.agent,
@@ -231,13 +247,21 @@ export async function executeOutcomeActions(
     actions: input.outcome.actions ?? [],
     source: { kind: 'outcome', outcome: input.outcome, summary: input.summary },
     runEvents: input.runEvents,
+    renewLock: input.renewLock,
   });
 }
 
 /** Ações de uma ação durante a conversa (ferramenta executar_acao). */
 export async function executeCustomAction(
   admin: SupabaseClient,
-  input: { agent: AgentRow; ctx: ConversationContext; action: CustomAction; details: string; runEvents: unknown[] }
+  input: {
+    agent: AgentRow;
+    ctx: ConversationContext;
+    action: CustomAction;
+    details: string;
+    runEvents: unknown[];
+    renewLock?: () => Promise<void>;
+  }
 ): Promise<OutcomeActionsResult> {
   return executeActions(admin, {
     agent: input.agent,
@@ -245,5 +269,6 @@ export async function executeCustomAction(
     actions: input.action.actions ?? [],
     source: { kind: 'custom', action: input.action, details: input.details },
     runEvents: input.runEvents,
+    renewLock: input.renewLock,
   });
 }

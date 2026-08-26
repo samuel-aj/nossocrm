@@ -4,6 +4,7 @@
  * CLIENT-SAFE: só zod, tipos e constantes. Nada de Supabase, `ai` ou next/server.
  */
 import { z } from 'zod';
+import { isPublicHttpUrl } from './url';
 
 export const WA_AGENTS_BETA_FLAG = 'wa_agents_beta';
 
@@ -50,6 +51,9 @@ export const AGENT_EVENT_LABELS: Record<AgentEvent, string> = {
 // ---------------------------------------------------------------------------
 // Resultados do encerramento e ações da esteira
 // ---------------------------------------------------------------------------
+/** URL de webhook: http/https para host público (sem localhost, redes privadas ou link-local). */
+export const WebhookUrlSchema = z.string().url().refine(isPublicHttpUrl, 'URL precisa ser pública (http/https)');
+
 export const EndActionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('handoff'), agent_id: z.string().uuid() }),
   z.object({ type: z.literal('approval'), agent_id: z.string().uuid() }),
@@ -66,7 +70,7 @@ export const EndActionSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     type: z.literal('webhook'),
-    url: z.string().url(),
+    url: WebhookUrlSchema,
     secret: z.string().max(200).nullable().optional(),
     body_template: z.string().max(20000).nullable().optional(),
   }),
@@ -94,7 +98,7 @@ export type CustomAction = z.infer<typeof CustomActionSchema>;
 export const AgentWebhookSchema = z.object({
   id: z.string().min(1),
   event: z.enum(AGENT_EVENTS),
-  url: z.string().url(),
+  url: WebhookUrlSchema,
   secret: z.string().max(200).optional().nullable(),
   body_template: z.string().max(20000).optional().nullable(),
   active: z.boolean().default(true),
@@ -218,7 +222,7 @@ export const BotStepSchema = z.discriminatedUnion('type', [
   z.object({
     ...botStepBase,
     type: z.literal('webhook'),
-    url: z.string().url(),
+    url: WebhookUrlSchema,
     secret: z.string().max(200).nullable().optional(),
     body_template: z.string().max(20000).nullable().optional(),
   }),
@@ -232,6 +236,8 @@ export const BotTriggerSchema = z.object({
   type: z.enum(['deal_created', 'deal_stage_entered', 'manual']),
   board_id: z.string().uuid().nullable().optional(),
   stage_id: z.string().uuid().nullable().optional(),
+  /** Posição do nó Gatilho no quadro (persistida como a dos passos) */
+  ui: BotStepUiSchema.optional(),
 });
 export type BotTrigger = z.infer<typeof BotTriggerSchema>;
 
@@ -307,7 +313,7 @@ export type ConversationAiState = {
   dados?: Record<string, unknown>;
   /** passagem de bastão vinda de outro agente */
   handoff?: { from_agent_id: string; from_agent_name: string; summary: string; at: string } | null;
-  /** 'pipeline' quando o agente iniciou a conversa a partir do cadastro no CRM */
+  /** 'pipeline' quando o agente iniciou a conversa a partir do cadastro no CRM (só prioriza esse negócio no contexto) */
   origem?: string | null;
   /** negócio que originou o início pelo pipeline */
   deal_id?: string | null;

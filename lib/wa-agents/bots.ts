@@ -32,8 +32,6 @@ const MAX_STEPS_TOTAL = 500;
 const BOT_LOCK_SECONDS = 120;
 const TIMEOUT_STEP_VAR = '_timeout_step_id';
 const STEPS_TOTAL_VAR = '_steps_total';
-/** Modo quadro: marca que a execução já entrou pelo passo inicial (start_step_id) */
-const STARTED_VAR = '_started';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -287,7 +285,10 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
     // Modo quadro: começa no passo inicial e navega só por ids; modo lista: índice + 1
     const canvas = !!(bot.start_step_id && String(bot.start_step_id).trim());
     let idx = st.run.step_index ?? 0;
-    if (canvas && st.vars[STARTED_VAR] !== true) {
+    // Só entra pelo passo inicial quando a execução é nova: uma execução antiga (criada em modo
+    // lista, antes de o robô virar quadro) retoma de onde parou em vez de recomeçar
+    const fresh = idx === 0 && st.log.length === 0;
+    if (canvas && fresh) {
       const startIdx = stepIndexById(steps, bot.start_step_id);
       if (startIdx < 0) {
         note(st, null, 'passo inicial não encontrado');
@@ -295,9 +296,11 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
         return;
       }
       idx = startIdx;
-      st.vars[STARTED_VAR] = true;
     }
     const next = (step: BotStep): number => nextStepIndex(steps, idx, step, canvas);
+    // Passos já visitados neste processamento (wait/wait_reply encerram o processamento):
+    // voltar a um deles sem espera no meio é laço, e mandaria mensagens em rajada
+    const visited = new Set<number>();
 
     for (let guard = 0; guard < MAX_STEPS_PER_RUN; guard++) {
       const step = steps[idx];
@@ -306,6 +309,17 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
         await saveRun(admin, st, { status: 'done', step_index: idx, wake_at: null }, { release: true });
         return;
       }
+      if (visited.has(idx)) {
+        note(st, step, 'laço sem espera entre passos');
+        await saveRun(
+          admin,
+          st,
+          { status: 'error', step_index: idx, wake_at: null, error: 'laço sem espera entre passos' },
+          { release: true }
+        );
+        return;
+      }
+      visited.add(idx);
 
       // Contador persistente (sobrevive a wait/wait_reply): laço infinito vira erro
       const prevTotal = Number(st.vars[STEPS_TOTAL_VAR]);
@@ -533,8 +547,8 @@ async function handleBotTimeout(admin: SupabaseClient, run: BotRunRow): Promise<
   const bot = await loadBot(admin, run.organization_id, run.bot_id);
   const steps = bot ? parseSteps(bot.steps) : [];
   let timeoutStepId = (st.vars[TIMEOUT_STEP_VAR] as string | null | undefined) ?? null;
-  if (!timeoutStepId && !bot?.start_step_id) {
-    // Modo lista: o passo anterior ao índice salvo é o wait_reply
+  if (!(TIMEOUT_STEP_VAR in st.vars)) {
+    // Execução antiga (sem a variável, gravada em modo lista): o passo anterior ao índice salvo é o wait_reply
     const prev = steps[run.step_index - 1];
     if (prev && prev.type === 'wait_reply') timeoutStepId = prev.on_timeout_step_id ?? null;
   }

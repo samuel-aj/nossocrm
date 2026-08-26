@@ -397,7 +397,7 @@ function MessageNodeView({ id, data, selected }: NodeProps<MessageNode>) {
           maxLength={4000}
         />
       </div>
-      <div className="flex flex-wrap gap-1" aria-label="Variáveis disponíveis">
+      <div className="flex flex-wrap gap-1" role="group" aria-label="Variáveis disponíveis">
         {BOT_VARIABLES.map((v) => (
           <button
             key={v.key}
@@ -525,7 +525,7 @@ function ConditionNodeView({ id, data, selected }: NodeProps<ConditionNode>) {
     >
       <p className={HELP_CLASS}>
         Compara a última resposta do lead (sem acentos, sem diferenciar maiúsculas). A primeira regra que bater decide o
-        caminho.
+        caminho. Separe as palavras por vírgula; use aspas para palavras com vírgula, ex.: "sim, quero".
       </p>
       {data.rules.map((rule, index) => (
         <div key={rule.id} className="relative flex items-center gap-1 -mr-3 pr-4">
@@ -649,7 +649,7 @@ function WebhookNodeView({ id, data, selected }: NodeProps<WebhookNode>) {
         autoComplete="off"
       />
       <input
-        type="text"
+        type="password"
         className={INPUT_CLASS}
         value={data.secret}
         onChange={(e) => updateNodeData(id, { secret: e.target.value })}

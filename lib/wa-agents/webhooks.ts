@@ -11,6 +11,7 @@ import type { ConversationContext } from './context';
 import { errorMessage } from './errors';
 import { renderJsonTemplate } from './template';
 import type { AgentEvent, AgentRow } from './types';
+import { isPublicHttpUrl } from './url';
 
 export type WebhookResult = { id: string; url: string; ok: boolean; status?: number; error?: string };
 
@@ -61,8 +62,12 @@ async function postOnce(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(url, { method: 'POST', headers, body, signal: controller.signal });
+    // Sem seguir redirecionamentos: um 3xx poderia apontar para um host interno
+    const res = await fetch(url, { method: 'POST', headers, body, signal: controller.signal, redirect: 'manual' });
     if (res.ok) return { ok: true, status: res.status, retryable: false };
+    if (res.status >= 300 && res.status < 400) {
+      return { ok: false, status: res.status, error: `redirecionamento não permitido (HTTP ${res.status})`, retryable: false };
+    }
     return { ok: false, status: res.status, error: `HTTP ${res.status}`, retryable: res.status >= 500 };
   } catch (e) {
     return { ok: false, error: errorMessage(e), retryable: true };
@@ -83,10 +88,12 @@ export type PostWebhookInput = {
 
 /**
  * POST com timeout de 10 s, cabeçalhos padrão (X-Webhook-Event, segredo) e
- * uma retentativa após 2 s em erro de rede/5xx. Nunca lança.
+ * uma retentativa após 2 s em erro de rede/5xx. Só URL pública http/https,
+ * sem seguir redirecionamentos. Nunca lança.
  */
 export async function postWebhook(input: PostWebhookInput): Promise<Omit<WebhookResult, 'id'>> {
   try {
+    if (!isPublicHttpUrl(input.url)) return { url: input.url, ok: false, error: 'URL precisa ser pública (http/https)' };
     const bodyValue = input.body_template?.trim()
       ? renderJsonTemplate(input.body_template, input.payload)
       : input.payload;

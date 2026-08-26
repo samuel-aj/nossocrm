@@ -102,7 +102,14 @@ export const DEFAULT_BOT_STEPS: BotStep[] = [
     id: 'passo-5',
     type: 'send_text',
     text: 'Perfeito! Me conta em poucas palavras o que aconteceu que alguém da equipe já assume daqui.',
+    // os dois ramos terminam no mesmo passo (sem isso, o "sim" mandaria também a mensagem do "não")
+    next_step_id: 'passo-7',
   },
-  { id: 'passo-6', type: 'send_text', text: 'Sem problemas. Quando quiser, é só mandar uma mensagem por aqui.' },
+  {
+    id: 'passo-6',
+    type: 'send_text',
+    text: 'Sem problemas. Quando quiser, é só mandar uma mensagem por aqui.',
+    next_step_id: 'passo-7',
+  },
   { id: 'passo-7', type: 'end' },
 ];

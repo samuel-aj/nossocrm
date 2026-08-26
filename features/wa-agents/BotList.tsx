@@ -5,14 +5,21 @@
  * Editar, Testar com um negócio (dispara por telefone) e Excluir.
  */
 import React, { useState } from 'react';
+import dynamic from 'next/dynamic';
 import { Workflow, Plus, Pencil, Trash2, Play, Phone, Zap, Loader2 } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/context/ToastContext';
 import type { BotRow } from '@/lib/wa-agents/types';
 import { useDeleteWaBot, useSaveWaBot, useStartWaBot, useWaAgentOptions, useWaBotsList } from './useWaAgents';
-import { BotEditor, TRIGGER_LABELS } from './BotEditor';
+import { TRIGGER_LABELS } from './canvas/types';
 import { BTN_ICON, BTN_PRIMARY, BTN_SECONDARY, Badge, EmptyState, Field, INPUT_CLASS, Notice, Spinner, Toggle, errorMessage } from './ui';
+
+// O editor (React Flow e seus CSS) só é carregado quando alguém abre um robô.
+const BotEditor = dynamic(() => import('./BotEditor').then((m) => ({ default: m.BotEditor })), {
+  ssr: false,
+  loading: () => <Spinner label="Carregando o editor..." />,
+});
 
 /**
  * Componente React `BotList`.

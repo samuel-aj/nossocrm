@@ -104,6 +104,13 @@ export function Section({
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  // Abre sozinha quando `defaultOpen` passa a valer depois de montada (ex.: a IA preencheu a lista
+  // de uma seção recolhida); nunca fecha sozinha, para não sumir com o que o usuário está editando.
+  const [lastDefaultOpen, setLastDefaultOpen] = useState(defaultOpen);
+  if (defaultOpen !== lastDefaultOpen) {
+    setLastDefaultOpen(defaultOpen);
+    if (defaultOpen) setOpen(true);
+  }
   const bodyId = useId();
   return (
     <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/5 rounded-xl shadow-sm">

@@ -41,11 +41,11 @@ async function markDealStart(
   }
 }
 
-/** Trava do item: pending -> processing. false se outro tick já pegou. */
+/** Trava do item: pending -> processing (processed_at marca quando pegou). false se outro tick já pegou. */
 async function claimDealStart(admin: SupabaseClient, row: Pick<DealStartRow, 'id' | 'organization_id'>): Promise<boolean> {
   const { data } = await admin
     .from('wa_ai_agent_deal_starts')
-    .update({ status: 'processing' })
+    .update({ status: 'processing', processed_at: nowIso() })
     .eq('id', row.id)
     .eq('organization_id', row.organization_id)
     .eq('status', 'pending')
@@ -115,6 +115,7 @@ async function processDealStart(admin: SupabaseClient, row: DealStartRow): Promi
   if (!full.ai_agent_id && full.ai_status) return { status: 'cancelled', reason: 'conversa com agente externo' };
 
   const now = nowIso();
+  // origem/deal_id só priorizam este negócio no contexto; a apresentação vem do gatilho 'deal' da primeira execução
   const state: ConversationAiState = { origem: 'pipeline', deal_id: deal.id };
   const patch: Record<string, unknown> = {
     ai_agent_id: agent.id,
@@ -158,19 +159,29 @@ async function processDealStart(admin: SupabaseClient, row: DealStartRow): Promi
   return { status: 'done', reason: run.status === 'skipped' ? run.reason : undefined };
 }
 
+/** Item preso em 'processing' há mais que isto (worker morreu no meio) vira erro, para não bloquear novos inícios. */
+const PROCESSING_TIMEOUT_MS = 15 * 60 * 1000;
+
 export async function processDealStarts(
   admin: SupabaseClient,
-  opts: { limit?: number; deadlineMs?: number } = {}
+  opts: { limit?: number; deadlineMs?: number; organizationId?: string } = {}
 ): Promise<ProcessDealStartsResult> {
   const limit = opts.limit ?? 5;
   const result: ProcessDealStartsResult = { processed: 0, done: 0, errors: 0, cancelled: 0 };
   try {
-    const { data } = await admin
+    // Itens presos em 'processing': tempo esgotado (filtra pela org quando informada)
+    let stale = admin
       .from('wa_ai_agent_deal_starts')
-      .select('*')
-      .eq('status', 'pending')
-      .order('created_at', { ascending: true })
-      .limit(limit);
+      .update({ status: 'error', error: 'tempo esgotado' })
+      .eq('status', 'processing')
+      .lt('processed_at', new Date(Date.now() - PROCESSING_TIMEOUT_MS).toISOString());
+    if (opts.organizationId) stale = stale.eq('organization_id', opts.organizationId);
+    const { error: staleError } = await stale;
+    if (staleError) console.error('[wa-agents] liberar inícios presos falhou:', staleError.message);
+
+    let pending = admin.from('wa_ai_agent_deal_starts').select('*').eq('status', 'pending');
+    if (opts.organizationId) pending = pending.eq('organization_id', opts.organizationId);
+    const { data } = await pending.order('created_at', { ascending: true }).limit(limit);
 
     for (const row of (data ?? []) as DealStartRow[]) {
       // Orçamento de tempo do tick: o que sobrar fica para o próximo

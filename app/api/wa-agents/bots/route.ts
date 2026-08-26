@@ -12,7 +12,7 @@ import {
   getErrorMessage,
   guardRoute,
   readJsonBody,
-  validateBotStartStep,
+  validateBotSteps,
   validationError,
 } from '../_shared';
 
@@ -40,8 +40,8 @@ export async function POST(req: Request) {
   if (!parsed.success) return validationError(parsed.error);
   const input = parsed.data;
 
-  const startError = validateBotStartStep(input.steps, input.start_step_id);
-  if (startError) return startError;
+  const stepsError = validateBotSteps(input.steps, input.start_step_id);
+  if (stepsError) return stepsError;
 
   try {
     if (input.connection_id && !(await connectionsBelongToOrg(auth.admin, auth.user.organizationId, [input.connection_id]))) {
