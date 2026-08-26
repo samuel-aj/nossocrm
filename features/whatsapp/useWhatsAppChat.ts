@@ -48,7 +48,14 @@ export interface WaChatData {
   provider: string | null;
   /** Todos os números CONECTADOS da org (seletor de envio do chat) */
   senders: WaSender[];
-  conversation: { id: string; wa_phone: string; wa_name: string | null; contact_id: string | null } | null;
+  conversation: {
+    id: string;
+    wa_phone: string;
+    wa_name: string | null;
+    contact_id: string | null;
+    /** Última mensagem RECEBIDA do contato (janela de 24 h da API oficial) */
+    last_inbound_at?: string | null;
+  } | null;
   /** Agente de IA nesta conversa (null = nenhum agente atuou ainda). Externo (API) ou nativo (beta). */
   ai?: ConversationAiInfo | null;
   /** Robô em andamento nesta conversa (null = nenhum) */

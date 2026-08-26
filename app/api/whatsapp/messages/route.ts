@@ -124,6 +124,24 @@ export async function GET(req: Request) {
       .gt('unread_count', 0);
   }
 
+  // Janela de 24 h da API oficial (Meta): conta da ÚLTIMA MENSAGEM RECEBIDA do
+  // contato, olhando todas as conversas consideradas (visão unificada por
+  // telefone). Consulta leve; o chat mostra quanto falta e trava o envio comum
+  // quando ela fecha.
+  let lastInboundAt: string | null = null;
+  if (convs.length > 0) {
+    const { data: lastIn } = await auth.admin
+      .from('wa_messages')
+      .select('created_at, wa_timestamp')
+      .in('conversation_id', convs.map(c => c.id))
+      .eq('direction', 'in')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const row = (lastIn ?? null) as { created_at?: string | null; wa_timestamp?: string | null } | null;
+    lastInboundAt = row?.wa_timestamp || row?.created_at || null;
+  }
+
   // Agente de IA (externo via API pública ou nativo/beta): estado completo da faixa do chat
   const ai = aiConv
     ? await getConversationAiInfo(auth.admin, {
@@ -148,7 +166,7 @@ export async function GET(req: Request) {
     provider: conn?.provider ?? null,
     senders,
     numbers,
-    conversation: conv ?? null,
+    conversation: conv ? { ...conv, last_inbound_at: lastInboundAt } : null,
     ai,
     bot,
     messages,

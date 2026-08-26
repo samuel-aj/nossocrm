@@ -24,6 +24,8 @@ import {
   ChevronUp,
   ChevronDown,
   ClipboardList,
+  Clock,
+  Lock,
   Unplug,
   Pause,
   Trash2,
@@ -34,6 +36,7 @@ import {
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { fillTemplate, templateParams, TEMPLATE_BUTTON_LABEL, type TemplateButton } from '@/lib/messageTemplates';
+import { formatRemaining, getServiceWindow } from '@/lib/whatsapp/serviceWindow';
 import { useWhatsAppChat, type WaChatMessage, type WaMediaKind, type WaSender } from './useWhatsAppChat';
 import { transcodeToMp3 } from './audioTranscode';
 import { useWaAgentsBeta } from '@/hooks/useWaAgentsBeta';
@@ -941,6 +944,32 @@ export function DealWhatsAppChat({
   }, [activeSender]);
   // Modelos APROVADOS do número que vai enviar (cada número tem os seus na Meta)
   const senderIsApi = ['meta_cloud', 'evolution_business'].includes(String(activeSender?.provider ?? '').toLowerCase());
+  // JANELA DE 24 H: só a API oficial da Meta trava (Evolution não tem a regra).
+  // Conta da ÚLTIMA MENSAGEM RECEBIDA do contato: a rota manda a data olhando
+  // todas as conversas do telefone; reserva = mensagens já carregadas.
+  const senderIsMeta = String(activeSender?.provider ?? '').toLowerCase() === 'meta_cloud';
+  const lastInboundAt = useMemo(() => {
+    const fromApi = data?.conversation?.last_inbound_at ?? null;
+    if (fromApi) return fromApi;
+    let latest: string | null = null;
+    for (const m of messages) {
+      if (m.direction !== 'in') continue;
+      const ts = m.wa_timestamp || m.created_at;
+      if (!latest || Date.parse(ts) > Date.parse(latest)) latest = ts;
+    }
+    return latest;
+  }, [data?.conversation?.last_inbound_at, messages]);
+  // Relógio da faixa "fecha em X" (e da trava): tique a cada 30 s, só com a API oficial
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!senderIsMeta) return;
+    setNow(Date.now());
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, [senderIsMeta]);
+  const win = getServiceWindow(lastInboundAt, now);
+  // Fechada: texto/anexo/áudio somem do composer; só um modelo aprovado reabre
+  const windowLocked = senderIsMeta && !win.open;
   const apiTemplates = senderIsApi
     ? (templatesQ.data?.data ?? []).filter(
         t => t.type === 'whatsapp_api' && t.meta_status === 'APPROVED' && t.connectionId === activeSender?.id
@@ -1204,7 +1233,8 @@ export function DealWhatsAppChat({
   const onSend = async () => {
     const t = text.trim();
     // sendGateRef fecha a janela dos awaits (isPending só vira true no render)
-    if ((!t && !attachment) || send.isPending || recording || sendGateRef.current) return;
+    // windowLocked: janela de 24 h fechada (API oficial) — texto/anexo não saem, só modelo
+    if ((!t && !attachment) || send.isPending || recording || sendGateRef.current || windowLocked) return;
     sendGateRef.current = true;
     const releaseGate = () => {
       sendGateRef.current = false;
@@ -1702,10 +1732,18 @@ export function DealWhatsAppChat({
         {templatesOpen && (
           <div className="absolute bottom-full left-3 right-3 mb-1 z-10 max-h-64 overflow-y-auto scrollbar-custom rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card p-1.5 shadow-lg">
             <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Modelos de mensagem
+              {windowLocked ? 'Reiniciar a conversa com um modelo' : 'Modelos de mensagem'}
             </p>
             {templatesQ.isLoading ? (
               <p className="px-3 py-2 text-sm text-slate-400">Carregando...</p>
+            ) : windowLocked ? (
+              /* Janela de 24 h fechada: só modelo da API reabre a conversa — um
+                 modelo geral sairia como texto e a Meta recusaria */
+              apiTemplates.length === 0 ? (
+                <p className="px-3 py-2 text-sm text-slate-400">
+                  Nenhum modelo aprovado para este número. Crie em Configurações → Modelos (WhatsApp API).
+                </p>
+              ) : null
             ) : generalTemplates.length === 0 && apiTemplates.length === 0 ? (
               <p className="px-3 py-2 text-sm text-slate-400">
                 {senderIsApi
@@ -1731,7 +1769,11 @@ export function DealWhatsAppChat({
             )}
             {apiTemplates.length > 0 && (
               <>
-                <p className="px-3 pt-2 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400 border-t border-slate-100 dark:border-white/10 mt-1">
+                <p
+                  className={`px-3 pt-2 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400 ${
+                    windowLocked ? '' : 'border-t border-slate-100 dark:border-white/10 mt-1'
+                  }`}
+                >
                   WhatsApp API · aprovados pela Meta
                 </p>
                 {apiTemplates.map(t => (
@@ -1829,6 +1871,22 @@ export function DealWhatsAppChat({
               )}
               {aiState.status === 'active' ? 'Pausar' : 'Retomar'}
             </button>
+          </div>
+        )}
+
+        {/* API oficial DENTRO da janela de 24 h: quanto falta pra fechar (o
+            relógio atualiza a cada 30 s). Âmbar na última hora. */}
+        {senderIsMeta && win.open && (
+          <div
+            title="Regra do WhatsApp: a API oficial só aceita mensagem livre por 24 h contadas da última mensagem recebida do contato. Depois disso, só um modelo aprovado reabre a conversa."
+            className={`flex items-center gap-1.5 mb-1.5 px-3 py-1.5 rounded-xl border text-xs ${
+              win.remainingMs < 60 * 60 * 1000
+                ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-900/15 text-amber-700 dark:text-amber-300'
+                : 'border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20 text-slate-500 dark:text-slate-400'
+            }`}
+          >
+            <Clock size={13} className="shrink-0" />
+            <span className="truncate">Janela de 24 h aberta: fecha em {formatRemaining(win.remainingMs)}</span>
           </div>
         )}
 
@@ -2013,6 +2071,34 @@ export function DealWhatsAppChat({
                 className="shrink-0 h-9 px-4 inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-bold"
               >
                 {send.isPending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} Enviar modelo
+              </button>
+            </div>
+          </div>
+        ) : windowLocked ? (
+          /* API oficial FORA da janela de 24 h: sem texto/anexo/áudio; só um
+             modelo aprovado reabre a conversa (o popover lista só os da API) */
+          <div className="rounded-xl border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-900/15 p-3">
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">
+              <Lock size={13} /> Janela de 24 h encerrada
+            </span>
+            <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">
+              {lastInboundAt
+                ? 'O contato não manda mensagem há mais de 24 h.'
+                : 'O contato ainda não mandou nenhuma mensagem.'}{' '}
+              Pela regra do WhatsApp, só dá para retomar a conversa enviando um modelo aprovado. Quando ele
+              responder, o chat abre de novo.
+            </p>
+            <div className="flex justify-end mt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setTemplatesOpen(o => !o);
+                  setEmojiOpen(false);
+                  setAttachMenuOpen(false);
+                }}
+                className="shrink-0 h-9 px-4 inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold transition-colors"
+              >
+                <ClipboardList size={15} /> Reiniciar com um modelo
               </button>
             </div>
           </div>

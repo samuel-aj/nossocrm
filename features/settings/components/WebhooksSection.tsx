@@ -9,6 +9,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { cn } from '@/lib/utils/cn';
 import { UserRole } from '@/types/constants';
+import { PipelineWebhooksSection } from './PipelineWebhooksSection';
 
 type InboundSourceRow = {
   id: string;
@@ -164,6 +165,8 @@ export const WebhooksSection: React.FC = () => {
       const { data: epData } = await supabase
         .from('integration_outbound_endpoints')
         .select('id,name,url,secret,active,events')
+        // Só o endpoint do follow-up; as regras do pipeline (kind = 'pipeline') ficam na seção própria
+        .eq('kind', 'followup')
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -339,6 +342,7 @@ export const WebhooksSection: React.FC = () => {
           .from('integration_outbound_endpoints')
           .insert({
             organization_id: profile!.organization_id,
+            kind: 'followup',
             name: 'Follow-up (Webhook)',
             url: followUpUrl.trim(),
             secret,
@@ -474,6 +478,7 @@ export const WebhooksSection: React.FC = () => {
   }
 
   return (
+    <>
     <SettingsSection title="Webhooks" icon={Webhook}>
       <p className="text-sm text-slate-600 dark:text-slate-300 mb-5 leading-relaxed">
         Ative automações sem técnico: escolha onde os leads entram e (opcionalmente) conecte um endpoint
@@ -1253,5 +1258,9 @@ export const WebhooksSection: React.FC = () => {
       />
 
     </SettingsSection>
+
+    {/* Regras de webhook do pipeline (lead criado / mudou de etapa), várias por org */}
+    <PipelineWebhooksSection />
+    </>
   );
 };
