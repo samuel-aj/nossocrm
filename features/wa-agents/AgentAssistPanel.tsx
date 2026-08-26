@@ -100,6 +100,8 @@ export const AgentAssistPanel: React.FC<AgentAssistPanelProps> = ({ provider, mo
   const [feedback, setFeedback] = useState('');
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [showDiff, setShowDiff] = useState(false);
+  // Último aviso também aqui no painel: o toast, no canto da tela, pode passar despercebido.
+  const [notice, setNotice] = useState<{ tone: 'red' | 'amber'; text: string } | null>(null);
 
   const busy = assist.isPending;
   const recent = examples.slice(-ASSIST_EXAMPLES_LIMIT);
@@ -116,6 +118,7 @@ export const AgentAssistPanel: React.FC<AgentAssistPanelProps> = ({ provider, mo
       return;
     }
     const modelId = model.trim();
+    setNotice(null);
     try {
       const result = await assist.mutateAsync({
         mode: 'adjust',
@@ -129,19 +132,25 @@ export const AgentAssistPanel: React.FC<AgentAssistPanelProps> = ({ provider, mo
       });
       const next = result.system_prompt;
       if (!next.trim()) {
-        showToast('A IA não devolveu um roteiro. Tente descrever melhor o problema.', 'error');
+        const message = 'A IA não devolveu um roteiro. Tente descrever melhor o problema.';
+        setNotice({ tone: 'red', text: message });
+        showToast(message, 'error');
         return;
       }
       const diff = diffLines(currentPrompt, next);
       if (diff.added === 0 && diff.removed === 0) {
-        showToast('A IA não mudou nada no roteiro. Tente ser mais específico.', 'info');
+        const message = 'A IA não mudou nada no roteiro. Tente ser mais específico.';
+        setNotice({ tone: 'amber', text: message });
+        showToast(message, 'info');
         return;
       }
       setProposal({ base: currentPrompt, prompt: next, diff, feedback: text });
       setShowDiff(false);
       showToast('Sugestão pronta. Confira a diferença e confirme para substituir.', 'info');
     } catch (err) {
-      showToast(errorMessage(err, 'Falha ao ajustar o roteiro com IA'), 'error');
+      const message = errorMessage(err, 'Falha ao ajustar o roteiro com IA');
+      setNotice({ tone: 'red', text: message });
+      showToast(message, 'error');
     }
   };
 
@@ -150,6 +159,7 @@ export const AgentAssistPanel: React.FC<AgentAssistPanelProps> = ({ provider, mo
     onApply(proposal.prompt);
     setProposal(null);
     setFeedback('');
+    setNotice(null);
     showToast('Roteiro substituído. Salve para valer no atendimento.', 'success');
   };
 
@@ -208,6 +218,12 @@ export const AgentAssistPanel: React.FC<AgentAssistPanelProps> = ({ provider, mo
         <p className={HELP_CLASS} role="status">
           Ajustando o roteiro... isso pode levar alguns segundos.
         </p>
+      ) : null}
+
+      {notice && !busy ? (
+        <div role="alert">
+          <Notice tone={notice.tone}>{notice.text}</Notice>
+        </div>
       ) : null}
 
       {proposal ? (

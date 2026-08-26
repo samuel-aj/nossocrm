@@ -13,15 +13,66 @@ import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { isWaAgentsBetaEnabled } from '@/lib/wa-agents/beta';
 import { normalizeKeyword } from '@/lib/wa-agents/text';
 import {
+  isAllowedMediaMime,
+  isMaskedSecret,
   WA_AGENT_FILES_BUCKET,
+  type AgentInput,
   type AgentMediaKind,
   type AgentMediaRow,
+  type AgentRow,
   type AgentTriggers,
   type BotStep,
+  type EndAction,
 } from '@/lib/wa-agents/types';
 
-/** Versão sem a chave da API (has_api_key): implementação única em types.ts. */
-export { toAgentPublic } from '@/lib/wa-agents/types';
+/** Versões para a UI (sem chave da API, segredos mascarados): implementação única em types.ts. */
+export { toAgentPublic, toBotPublic } from '@/lib/wa-agents/types';
+
+function savedActionSecret(saved: EndAction[] | undefined, index: number, url: string): string | null {
+  const list = saved ?? [];
+  const same = list[index];
+  if (same && same.type === 'webhook' && same.url === url) return same.secret ?? null;
+  const byUrl = list.find(a => a.type === 'webhook' && a.url === url);
+  return byUrl && byUrl.type === 'webhook' ? (byUrl.secret ?? null) : null;
+}
+
+function restoreActionSecrets(actions: EndAction[] | undefined, saved: EndAction[] | undefined): EndAction[] {
+  return (actions ?? []).map((a, i) =>
+    a.type === 'webhook' && isMaskedSecret(a.secret) ? { ...a, secret: savedActionSecret(saved, i, a.url) } : a
+  );
+}
+
+/**
+ * Segredos mascarados que a UI devolveu sem alterar viram o valor salvo:
+ * webhooks por id; ações de resultados/ações durante a conversa pela chave e
+ * posição (ou URL). Sem valor salvo (criação), o segredo fica vazio.
+ */
+export function restoreMaskedSecrets(incoming: Partial<AgentInput>, saved: AgentRow | null): Partial<AgentInput> {
+  const out: Partial<AgentInput> = { ...incoming };
+  if (Array.isArray(incoming.webhooks)) {
+    const byId = new Map((saved?.webhooks ?? []).map(w => [w.id, w]));
+    out.webhooks = incoming.webhooks.map(w => (isMaskedSecret(w.secret) ? { ...w, secret: byId.get(w.id)?.secret ?? null } : w));
+  }
+  if (Array.isArray(incoming.outcomes)) {
+    const byKey = new Map((saved?.outcomes ?? []).map(o => [o.key, o]));
+    out.outcomes = incoming.outcomes.map(o => ({ ...o, actions: restoreActionSecrets(o.actions, byKey.get(o.key)?.actions) }));
+  }
+  if (Array.isArray(incoming.custom_actions)) {
+    const byKey = new Map((saved?.custom_actions ?? []).map(c => [c.key, c]));
+    out.custom_actions = incoming.custom_actions.map(c => ({ ...c, actions: restoreActionSecrets(c.actions, byKey.get(c.key)?.actions) }));
+  }
+  return out;
+}
+
+/** Passos do robô: segredo mascarado do passo webhook volta ao valor salvo (pelo id do passo). */
+export function restoreMaskedBotSecrets(steps: BotStep[], saved: BotStep[] | null | undefined): BotStep[] {
+  const byId = new Map((saved ?? []).map(s => [s.id, s]));
+  return steps.map(s => {
+    if (s.type !== 'webhook' || !isMaskedSecret(s.secret)) return s;
+    const prev = byId.get(s.id);
+    return { ...s, secret: prev && prev.type === 'webhook' ? (prev.secret ?? null) : null };
+  });
+}
 
 export type GuardResult =
   | { ok: true; user: OrgUser; admin: SupabaseClient; isAdmin: boolean }
@@ -147,21 +198,25 @@ export function agentNotFoundError(): Response {
   return json({ error: 'Agente não encontrado', code: 'AGENT_NOT_FOUND' }, 404);
 }
 
+export type HelperIdsResult = { ok: true; ids: string[] } | { ok: false; response: Response };
+
 /**
- * Valida os agentes auxiliares: cada id precisa ser da org, estar ligado e ser
- * diferente do próprio agente (`selfId`, no PATCH). null quando ok.
+ * Valida os agentes auxiliares: cada id precisa ser da org e estar ligado e
+ * ser diferente do próprio agente (`selfId`, no PATCH). Ids que não existem
+ * mais (agente excluído) são descartados em silêncio, senão a lista ficaria
+ * impossível de editar; auxiliar desligado continua sendo erro.
  */
 export async function validateHelperAgentIds(
   admin: SupabaseClient,
   orgId: string,
   ids: string[],
   selfId?: string | null
-): Promise<Response | null> {
+): Promise<HelperIdsResult> {
   const unique = Array.from(new Set(ids.filter(Boolean)));
   if (selfId && unique.includes(selfId)) {
-    return validationMessage('O agente não pode ser auxiliar de si mesmo', 'helper_agent_ids');
+    return { ok: false, response: validationMessage('O agente não pode ser auxiliar de si mesmo', 'helper_agent_ids') };
   }
-  if (unique.length === 0) return null;
+  if (unique.length === 0) return { ok: true, ids: [] };
   const { data, error } = await admin
     .from('wa_ai_agents')
     .select('id, enabled')
@@ -169,11 +224,34 @@ export async function validateHelperAgentIds(
     .in('id', unique);
   if (error) throw new Error(error.message);
   const found = new Map(((data ?? []) as Array<{ id: string; enabled: boolean }>).map(r => [r.id, r.enabled]));
+  const kept: string[] = [];
   for (const id of unique) {
-    if (!found.has(id)) return validationMessage('Agente auxiliar não encontrado nesta organização', 'helper_agent_ids');
-    if (found.get(id) === false) return validationMessage('Agente auxiliar desligado: ligue-o antes de usá-lo', 'helper_agent_ids');
+    if (!found.has(id)) continue;
+    if (found.get(id) === false) {
+      return { ok: false, response: validationMessage('Agente auxiliar desligado: ligue-o antes de usá-lo', 'helper_agent_ids') };
+    }
+    kept.push(id);
   }
-  return null;
+  return { ok: true, ids: kept };
+}
+
+/** Tira `agentId` da lista de auxiliares dos outros agentes da org (agente excluído). */
+export async function removeHelperReferences(admin: SupabaseClient, orgId: string, agentId: string): Promise<void> {
+  const { data, error } = await admin
+    .from('wa_ai_agents')
+    .select('id, helper_agent_ids')
+    .eq('organization_id', orgId)
+    .contains('helper_agent_ids', [agentId]);
+  if (error) throw new Error(error.message);
+  for (const row of (data ?? []) as Array<{ id: string; helper_agent_ids: string[] | null }>) {
+    const next = (row.helper_agent_ids ?? []).filter(x => x !== agentId);
+    const { error: upError } = await admin
+      .from('wa_ai_agents')
+      .update({ helper_agent_ids: next, updated_at: new Date().toISOString() })
+      .eq('organization_id', orgId)
+      .eq('id', row.id);
+    if (upError) throw new Error(upError.message);
+  }
 }
 
 /** Ids únicos, na ordem recebida. */
@@ -181,11 +259,9 @@ export function uniqueIds(ids: string[]): string[] {
   return Array.from(new Set(ids.filter(Boolean)));
 }
 
-/** Mime coerente com a categoria da mídia (documento aceita qualquer tipo). */
+/** Mime aceito para a categoria da mídia (lista fechada por categoria em AGENT_MEDIA_MIMES). */
 export function mediaMimeMatchesKind(kind: AgentMediaKind, mime: string): boolean {
-  const m = (mime || '').toLowerCase();
-  if (kind === 'document' || !m) return true;
-  return m.startsWith(`${kind}/`);
+  return isAllowedMediaMime(kind, mime);
 }
 
 /** true quando já existe outra mídia com o mesmo nome (sem acento/caixa) na lista. */

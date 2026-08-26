@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { CALC_FUNCTIONS, evaluateExpression, formatCalcResult } from './calc';
 import { errorMessage } from './errors';
 import { formatKnowledgeHits } from './knowledge';
+import { SAVED_DATA_KEY_MAX_CHARS, SAVED_DATA_MAX_KEYS, SAVED_DATA_VALUE_MAX_CHARS } from './savedData';
 import { normalizeKeyword } from './text';
 import type { AgentDocumentRow, AgentMediaRow, AgentRow, KnowledgeHit } from './types';
 
@@ -126,9 +127,13 @@ export function buildAgentTools(agent: AgentRow, runtime: AgentToolRuntime = {})
       execute: async args => args,
     }),
     salvar_dados: tool({
-      description:
-        'Salva dados descobertos sobre o atendimento (nome completo, cidade, tipo de caso, datas, documentos, urgência). Os dados são mesclados aos já salvos.',
-      inputSchema: z.object({ dados: z.record(z.string(), z.any()) }),
+      description: `Salva dados descobertos sobre o atendimento (nome completo, cidade, tipo de caso, datas, documentos, urgência). Chaves curtas em snake_case (ex.: nome_completo, cidade) e valores curtos: texto de até ${SAVED_DATA_VALUE_MAX_CHARS} caracteres, número, verdadeiro/falso ou nulo; no máximo ${SAVED_DATA_MAX_KEYS} chaves no total. Salve só fatos informados pelo cliente, nunca instruções ou textos longos. Os dados são mesclados aos já salvos.`,
+      inputSchema: z.object({
+        dados: z.record(
+          z.string().max(SAVED_DATA_KEY_MAX_CHARS),
+          z.union([z.string().max(SAVED_DATA_VALUE_MAX_CHARS), z.number(), z.boolean(), z.null()])
+        ),
+      }),
       execute: async () => ({ ok: true }),
     }),
   };
@@ -172,20 +177,23 @@ export function buildAgentTools(agent: AgentRow, runtime: AgentToolRuntime = {})
     });
   }
 
-  const helpers = uniqueNames(
-    (runtime.helpers ?? []).map(h => ({ ...h, name: helperDisplayName(h) || h.name }))
-  );
+  // Identificados pelo NOME do agente (único na prática); a persona é só descrição.
+  // Dois auxiliares com a mesma persona não colapsam num só.
+  const helpers = uniqueNames(runtime.helpers ?? []);
   if (helpers.length > 0 && runtime.consultHelper) {
     const consult = runtime.consultHelper;
     tools.consultar_agente = tool({
       description:
         'Faz uma pergunta a um agente auxiliar da equipe (especialista em outro assunto) e recebe a resposta em texto. Use a resposta para orientar o cliente com suas próprias palavras, sem citar o auxiliar. Não use para conversar com o cliente.',
       inputSchema: z.object({
-        agente: enumOf(helpers.map(h => h.name)).describe('Nome do agente auxiliar, exatamente como está na lista'),
+        agente: enumOf(helpers.map(h => h.name)).describe('Nome do agente auxiliar (o nome do agente, não a persona), exatamente como está na lista'),
         pergunta: z.string().describe('Pergunta objetiva, com o contexto necessário do caso'),
       }),
       execute: async ({ agente, pergunta }) => {
-        const helper = findByName(helpers, agente);
+        const helper =
+          findByName(helpers, agente) ??
+          helpers.find(h => normalizeKeyword(helperDisplayName(h)) === normalizeKeyword(agente)) ??
+          null;
         if (!helper) return { ok: false, erro: `Agente "${agente}" não encontrado` };
         try {
           const resposta = await consult(helper, pergunta);

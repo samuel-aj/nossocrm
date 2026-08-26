@@ -4,7 +4,9 @@
  * Ações que o agente executa DURANTE a conversa (sem encerrar), como cartões:
  * nome, "quando ativar" e resumo das ações; edição expandida (um por vez).
  * Cada cartão tem "Inserir no roteiro" (marca `[[acao:chave]]` no cursor da
- * aba Roteiro) e um chip arrastável com o mesmo marcador.
+ * aba Roteiro) e um chip com o mesmo marcador. O chip aqui não é arrastável:
+ * a textarea do roteiro está escondida nesta aba (arrastar só na paleta da
+ * aba Roteiro).
  */
 import React, { useState } from 'react';
 import { Plus, Pencil, ChevronUp, Zap, ArrowRight, FileText } from 'lucide-react';
@@ -71,7 +73,7 @@ export const CustomActionsEditor: React.FC<{
       <p className={HELP_CLASS}>
         Situações que o agente reconhece no meio do atendimento, sem encerrar a conversa. Quando a situação descrita
         acontecer, o agente executa as ações uma vez e continua atendendo. Para marcar o momento exato no texto, use
-        "Inserir no roteiro" ou arraste o chip até o ponto certo.
+        "Inserir no roteiro" (ou, na aba Roteiro, arraste o chip da paleta até o ponto certo).
       </p>
 
       {value.length === 0 ? (
@@ -95,7 +97,13 @@ export const CustomActionsEditor: React.FC<{
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-semibold text-slate-900 dark:text-white">{item.label.trim() || 'Sem nome'}</span>
                   {item.key ? (
-                    <TokenChip token={token} tone="purple" title={`Arraste para o roteiro: ${token}`} onInsert={onInsertToken} />
+                    <TokenChip
+                      token={token}
+                      tone="purple"
+                      draggable={false}
+                      title={`Marcador desta ação no roteiro: ${token}. Clique para inserir no cursor; para arrastar, use a paleta da aba Roteiro.`}
+                      onInsert={onInsertToken}
+                    />
                   ) : (
                     <Badge tone="amber">sem chave</Badge>
                   )}

@@ -12,7 +12,13 @@ import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { isAgentFilePath } from '@/lib/wa-agents/files';
 import { DOCUMENT_COLUMNS, loadAgentDocuments, processDocument, resolveDocumentMime } from '@/lib/wa-agents/knowledge';
-import { AgentDocumentInputSchema, type AgentDocumentRow } from '@/lib/wa-agents/types';
+import { getAgentFileInfo } from '@/lib/wa-agents/storage';
+import {
+  AGENT_DOC_MAX_BYTES,
+  AGENT_DOCS_MAX_PER_AGENT,
+  AgentDocumentInputSchema,
+  type AgentDocumentRow,
+} from '@/lib/wa-agents/types';
 import {
   agentBelongsToOrg,
   agentNotFoundError,
@@ -62,8 +68,30 @@ export async function POST(req: Request, ctx: Ctx) {
   const mime = resolveDocumentMime(input.mime, input.name);
   if (!mime) return validationMessage('Tipo de arquivo não suportado (use PDF, DOCX, TXT ou MD)', 'mime');
 
+  let sizeBytes = input.size_bytes;
   try {
     if (!(await agentBelongsToOrg(auth.admin, orgId, id))) return agentNotFoundError();
+
+    // Teto de documentos por agente
+    const { count, error: countError } = await auth.admin
+      .from('wa_ai_agent_documents')
+      .select('id', { count: 'exact', head: true })
+      .eq('organization_id', orgId)
+      .eq('agent_id', id);
+    if (countError) throw new Error(countError.message);
+    if ((count ?? 0) >= AGENT_DOCS_MAX_PER_AGENT) {
+      return validationMessage(`Limite de ${AGENT_DOCS_MAX_PER_AGENT} documentos por agente. Exclua um documento antes de enviar outro.`, 'name');
+    }
+
+    // Tamanho real do objeto no Storage (o valor do corpo não é confiável)
+    const info = await getAgentFileInfo(auth.admin, input.storage_path);
+    if (!info) return validationMessage('Arquivo não encontrado no armazenamento. Envie o arquivo de novo.', 'storage_path');
+    if (typeof info.size === 'number') {
+      if (info.size > AGENT_DOC_MAX_BYTES) {
+        return validationMessage(`Arquivo maior que o limite de ${Math.round(AGENT_DOC_MAX_BYTES / 1024 / 1024)} MB`, 'size_bytes');
+      }
+      sizeBytes = info.size;
+    }
   } catch (err) {
     return json({ error: getErrorMessage(err, 'Falha ao validar o agente') }, 500);
   }
@@ -75,7 +103,7 @@ export async function POST(req: Request, ctx: Ctx) {
       agent_id: id,
       name: input.name.trim(),
       mime,
-      size_bytes: input.size_bytes,
+      size_bytes: sizeBytes,
       storage_path: input.storage_path,
       status: 'processing',
       error: null,

@@ -1,7 +1,8 @@
 /**
  * /api/wa-agents/bots/[id]  (admin)
- *   GET    -> { bot }
- *   PATCH  -> BotInputSchema.partial() -> { bot }  (aceita start_step_id e os campos do quadro)
+ *   GET    -> { bot }  (segredo do passo webhook mascarado)
+ *   PATCH  -> BotInputSchema.partial() -> { bot }  (aceita start_step_id e os campos do quadro;
+ *             segredo mascarado mantém o valor salvo do passo com o mesmo id)
  *   DELETE -> cancela as execuções abertas e apaga o robô -> { ok: true }
  */
 import { json } from '@/lib/whatsapp/api';
@@ -14,6 +15,8 @@ import {
   guardRoute,
   pickPresentKeys,
   readJsonBody,
+  restoreMaskedBotSecrets,
+  toBotPublic,
   validateBotSteps,
   validationError,
 } from '../../_shared';
@@ -38,7 +41,7 @@ export async function GET(_req: Request, ctx: Ctx) {
   if (error) return json({ error: error.message }, 500);
   if (!data) return json({ error: 'Robô não encontrado' }, 404);
 
-  return json({ bot: data as BotRow });
+  return json({ bot: toBotPublic(data as BotRow) });
 }
 
 export async function PATCH(req: Request, ctx: Ctx) {
@@ -67,33 +70,30 @@ export async function PATCH(req: Request, ctx: Ctx) {
     }
 
     // Passos e passo inicial: os enviados ou os já salvos (o que faltar vem do banco).
-    // O passo inicial e todo id referenciado precisam existir na lista
+    // O passo inicial e todo id referenciado precisam existir na lista; segredos
+    // mascarados dos passos webhook voltam ao valor salvo (mesmo id).
     const sendsSteps = Array.isArray(present.steps);
     const sendsStart = 'start_step_id' in present;
     if (sendsSteps || sendsStart) {
-      let steps: BotStep[] = present.steps ?? [];
-      let startStepId: string | null = present.start_step_id ?? null;
-      if (!sendsSteps || !sendsStart) {
-        const { data: existing, error: existingError } = await auth.admin
-          .from('wa_bots')
-          .select('steps, start_step_id')
-          .eq('id', id)
-          .eq('organization_id', orgId)
-          .maybeSingle();
-        if (existingError) throw new Error(existingError.message);
-        if (!existing) return json({ error: 'Robô não encontrado' }, 404);
-        const saved = existing as { steps?: unknown[]; start_step_id?: string | null };
-        if (!sendsSteps) {
-          steps = [];
-          for (const item of (saved.steps ?? []) as unknown[]) {
-            const p = BotStepSchema.safeParse(item);
-            if (p.success) steps.push(p.data);
-          }
-        }
-        if (!sendsStart) startStepId = saved.start_step_id ?? null;
+      const { data: existing, error: existingError } = await auth.admin
+        .from('wa_bots')
+        .select('steps, start_step_id')
+        .eq('id', id)
+        .eq('organization_id', orgId)
+        .maybeSingle();
+      if (existingError) throw new Error(existingError.message);
+      if (!existing) return json({ error: 'Robô não encontrado' }, 404);
+      const saved = existing as { steps?: unknown[]; start_step_id?: string | null };
+      const savedSteps: BotStep[] = [];
+      for (const item of (saved.steps ?? []) as unknown[]) {
+        const p = BotStepSchema.safeParse(item);
+        if (p.success) savedSteps.push(p.data);
       }
+      const steps: BotStep[] = sendsSteps ? restoreMaskedBotSecrets(present.steps ?? [], savedSteps) : savedSteps;
+      const startStepId: string | null = sendsStart ? (present.start_step_id ?? null) : (saved.start_step_id ?? null);
       const stepsError = validateBotSteps(steps, startStepId);
       if (stepsError) return stepsError;
+      if (sendsSteps) patch.steps = steps;
     }
   } catch (err) {
     return json({ error: getErrorMessage(err, 'Falha ao validar o robô') }, 500);
@@ -109,7 +109,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
   if (error) return json({ error: error.message }, 500);
   if (!data) return json({ error: 'Robô não encontrado' }, 404);
 
-  return json({ bot: data as BotRow });
+  return json({ bot: toBotPublic(data as BotRow) });
 }
 
 export async function DELETE(req: Request, ctx: Ctx) {

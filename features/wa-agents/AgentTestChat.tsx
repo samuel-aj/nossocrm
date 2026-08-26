@@ -9,7 +9,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Send, Loader2, Eraser, Wrench } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 import { useTestWaAgent, type WaTestMessage } from './useWaAgents';
-import { BTN_PRIMARY, BTN_SMALL, INPUT_CLASS, errorMessage, newId } from './ui';
+import { BTN_PRIMARY, BTN_SMALL, INPUT_CLASS, Notice, errorMessage, newId } from './ui';
 
 type Entry = {
   id: string;
@@ -85,6 +85,8 @@ export const AgentTestChat: React.FC<{
   const [entries, setEntries] = useState<Entry[]>([]);
   const [state, setState] = useState<Record<string, unknown>>({});
   const [text, setText] = useState('');
+  // Último erro também aqui no painel: o toast, no canto da tela, pode passar despercebido.
+  const [error, setError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -103,6 +105,7 @@ export const AgentTestChat: React.FC<{
     const history: WaTestMessage[] = [...entries, userEntry].map((e) => ({ role: e.role, text: e.text }));
     setEntries((prev) => [...prev, userEntry]);
     setText('');
+    setError(null);
     try {
       const result = await test.mutateAsync({ messages: history, state: Object.keys(state).length ? state : undefined });
       const lines = result.lines.length > 0 ? result.lines : result.text ? [result.text] : [];
@@ -119,7 +122,9 @@ export const AgentTestChat: React.FC<{
       ]);
       setState((prev) => mergeSavedData(prev, result.toolCalls));
     } catch (err) {
-      showToast(errorMessage(err, 'Falha ao testar o agente'), 'error');
+      const message = errorMessage(err, 'Falha ao testar o agente');
+      setError(message);
+      showToast(message, 'error');
     } finally {
       inputRef.current?.focus();
     }
@@ -129,6 +134,7 @@ export const AgentTestChat: React.FC<{
     setEntries([]);
     setState({});
     setText('');
+    setError(null);
     inputRef.current?.focus();
   };
 
@@ -205,6 +211,12 @@ export const AgentTestChat: React.FC<{
         ) : null}
         <div ref={endRef} />
       </div>
+
+      {error ? (
+        <div className="pb-2" role="alert">
+          <Notice tone="red">{error}</Notice>
+        </div>
+      ) : null}
 
       <div className="flex items-end gap-2 pt-2 border-t border-slate-200 dark:border-white/10">
         <textarea

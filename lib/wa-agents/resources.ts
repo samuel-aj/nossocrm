@@ -8,7 +8,7 @@ import { loadReadyDocuments } from './knowledge';
 import type { AgentMediaRow, AgentResources, AgentRow } from './types';
 
 export const MEDIA_COLUMNS =
-  'id, organization_id, agent_id, name, description, kind, mime, size_bytes, storage_path, created_at';
+  'id, organization_id, agent_id, name, description, kind, mime, size_bytes, storage_path, outbox_path, created_at';
 
 /** Mídias de um agente (ordem de cadastro). */
 export async function loadAgentMedia(

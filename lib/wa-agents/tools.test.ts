@@ -132,6 +132,38 @@ describe('buildAgentTools', () => {
   });
 });
 
+describe('consultar_agente e salvar_dados', () => {
+  it('identifica os auxiliares pelo nome do agente (duas personas iguais não colapsam) e aceita a persona como reserva', async () => {
+    const asked: string[] = [];
+    const trabalhista = agent({ id: '33333333-3333-3333-3333-333333333333', name: 'Triagem Trabalhista', persona_name: 'Ana' });
+    const previdenciario = agent({ id: '44444444-4444-4444-4444-444444444444', name: 'Triagem Previdenciário', persona_name: 'Ana' });
+    const tools = buildAgentTools(agent(), {
+      helpers: [trabalhista, previdenciario],
+      consultHelper: async h => {
+        asked.push(h.name);
+        return 'resposta';
+      },
+    });
+    const exec = tools.consultar_agente!.execute as (input: { agente: string; pergunta: string }, opts: unknown) => Promise<unknown>;
+    expect(await exec({ agente: 'Triagem Previdenciário', pergunta: 'x' }, {})).toEqual({
+      ok: true,
+      agente: 'Triagem Previdenciário',
+      resposta: 'resposta',
+    });
+    expect(await exec({ agente: 'ana', pergunta: 'x' }, {})).toMatchObject({ ok: true, agente: 'Triagem Trabalhista' });
+    expect(asked).toEqual(['Triagem Previdenciário', 'Triagem Trabalhista']);
+  });
+
+  it('salvar_dados só aceita valores primitivos curtos', () => {
+    const tools = buildAgentTools(agent());
+    const schema = tools.salvar_dados!.inputSchema as { safeParse: (v: unknown) => { success: boolean } };
+    expect(schema.safeParse({ dados: { nome: 'Ana', idade: 30, urgente: true, obs: null } }).success).toBe(true);
+    expect(schema.safeParse({ dados: { nome: 'x'.repeat(201) } }).success).toBe(false);
+    expect(schema.safeParse({ dados: { aninhado: { a: 1 } } }).success).toBe(false);
+    expect(schema.safeParse({ dados: { ['k'.repeat(41)]: 'v' } }).success).toBe(false);
+  });
+});
+
 describe('utilitários de nomes', () => {
   it('uniqueNames mantém a primeira ocorrência (sem acento/caixa) e findByName acha exato ou normalizado', () => {
     const items = [{ name: 'Tabela' }, { name: 'tabela' }, { name: 'Vídeo' }];

@@ -24,6 +24,7 @@ import {
 import { ArrowLeft, Loader2, Play, Save } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
 import { Modal } from '@/components/ui/Modal';
+import { FocusTrap } from '@/lib/a11y';
 import { useTheme } from '@/context/ThemeContext';
 import { useToast } from '@/context/ToastContext';
 import { BotInputSchema, type BotInput, type BotRow } from '@/lib/wa-agents/types';
@@ -110,6 +111,12 @@ function isTextField(el: Element | null): el is HTMLElement {
 }
 
 type PendingSave = { payload: BotInput; warnings: string[] };
+
+/**
+ * Esc na camada é tratado pelo próprio editor (listener na janela): o trap de
+ * foco recebe um onEscape vazio só para não se desativar com a tecla.
+ */
+const keepTrapOnEscape = () => {};
 
 /** Referência estável enquanto a lista de agentes não chega (evita re-renderizar os nós a cada tecla). */
 const EMPTY_AGENTS: WaAgentListItem[] = [];
@@ -326,172 +333,176 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
   // Só existe no navegador (a lista carrega este componente sem SSR).
   if (typeof document === 'undefined') return null;
 
+  // Camada modal: o foco por teclado fica preso nela (a lista de robôs continua
+  // montada embaixo, invisível). Cliques fora (ex.: fechar uma notificação) seguem valendo.
   return createPortal(
     <CanvasContext.Provider value={ctx}>
-      <div
-        ref={rootRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Editor do robô ${header.name || 'novo'}`}
-        tabIndex={-1}
-        className={OVERLAY_CLASS}
-        style={OVERLAY_STYLE}
-      >
-        <header className="shrink-0 flex flex-wrap items-center gap-2 px-3 py-2 min-h-14 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card shadow-sm">
-          <button
-            type="button"
-            className={BTN_ICON}
-            onClick={handleCancel}
-            aria-label="Voltar para a lista de robôs"
-            title="Voltar (Esc)"
-          >
-            <ArrowLeft size={18} aria-hidden="true" />
-          </button>
-          <input
-            ref={nameRef}
-            id="bot-name"
-            className={NAME_INPUT_CLASS}
-            value={header.name}
-            onChange={(e) => patchHeader({ name: e.target.value })}
-            maxLength={120}
-            placeholder="Nome do robô"
-            aria-label="Nome do robô"
-          />
-          <div className="flex items-center gap-2 pl-1">
-            <span className="text-sm text-slate-600 dark:text-slate-300">{header.enabled ? 'Ligado' : 'Desligado'}</span>
-            <Toggle checked={header.enabled} onChange={(enabled) => patchHeader({ enabled })} label="Robô ligado" />
-          </div>
-          <select
-            id="bot-connection"
-            className={`${INPUT_CLASS} w-auto min-w-[160px] max-w-[260px]`}
-            value={header.connection_id}
-            onChange={(e) => patchHeader({ connection_id: e.target.value })}
-            aria-label="Número que envia as mensagens"
-          >
-            <option value="">Número que envia...</option>
-            {connections.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.label}
-                {c.status === 'connected' ? '' : ' (desconectado)'}
-              </option>
-            ))}
-          </select>
-          <div className="flex items-center gap-2 ml-auto">
-            {dirty ? (
-              <span className="hidden sm:inline text-xs font-medium text-amber-600 dark:text-amber-400">Não salvo</span>
-            ) : null}
-            <button type="button" className={BTN_SECONDARY} onClick={openTest} disabled={save.isPending}>
-              <Play size={16} aria-hidden="true" />
-              Testar
-            </button>
-            <button type="button" className={BTN_PRIMARY} onClick={handleSave} disabled={save.isPending}>
-              {save.isPending ? (
-                <Loader2 size={16} className="animate-spin" aria-hidden="true" />
-              ) : (
-                <Save size={16} aria-hidden="true" />
-              )}
-              Salvar
-            </button>
-          </div>
-        </header>
-
-        {optionsQ.error ? (
-          <div className="shrink-0 px-3 pt-3">
-            <Notice tone="red">{errorMessage(optionsQ.error, 'Falha ao carregar as opções')}</Notice>
-          </div>
-        ) : null}
-
-        <div ref={canvasRef} className="relative flex-1 min-h-0">
-          <Palette onAdd={addStep} />
-          <BotCanvas
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onDropStep={addStep}
-            darkMode={darkMode}
-          />
-        </div>
-
-        <ConfirmModal
-          isOpen={confirmLeave}
-          onClose={() => setConfirmLeave(false)}
-          onConfirm={() => {
-            setConfirmLeave(false);
-            onClose();
-          }}
-          title="Descartar alterações"
-          message="Há alterações não salvas neste robô. Sair sem salvar?"
-          confirmText="Sair sem salvar"
-          variant="danger"
-        />
-
-        <ConfirmModal
-          isOpen={!!pending}
-          onClose={() => setPending(null)}
-          onConfirm={() => {
-            const p = pending;
-            setPending(null);
-            if (p) void persist(p.payload);
-          }}
-          title="Salvar mesmo assim?"
-          message={
-            <ul className="list-disc pl-5 space-y-1">
-              {(pending?.warnings ?? []).map((w) => (
-                <li key={w}>{w}</li>
-              ))}
-            </ul>
-          }
-          confirmText="Salvar mesmo assim"
-          variant="primary"
-        />
-
-        <Modal
-          isOpen={testOpen}
-          onClose={() => setTestOpen(false)}
-          title={`Testar: ${header.name || 'robô'}`}
-          size="md"
-          initialFocus="#bot-test-phone"
+      <FocusTrap active initialFocus={false} onEscape={keepTrapOnEscape} allowOutsideClick>
+        <div
+          ref={rootRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Editor do robô ${header.name || 'novo'}`}
+          tabIndex={-1}
+          className={OVERLAY_CLASS}
+          style={OVERLAY_STYLE}
         >
-          <form
-            className="space-y-4"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void handleStart();
-            }}
-          >
-            <p className="text-sm text-slate-600 dark:text-slate-300">
-              O robô vai enviar as mensagens de verdade para este telefone pelo número <strong>{connectionLabel}</strong>.
-              Use um número seu para testar.
-            </p>
-            <Field label="Telefone com DDD" htmlFor="bot-test-phone" help="Ex.: (11) 99999-9999 ou +5511999999999">
-              <input
-                id="bot-test-phone"
-                type="tel"
-                className={INPUT_CLASS}
-                value={testPhone}
-                onChange={(e) => setTestPhone(e.target.value)}
-                placeholder="+55 11 99999-9999"
-                autoComplete="off"
-              />
-            </Field>
-            <div className="flex justify-end gap-2">
-              <button type="button" className={BTN_SECONDARY} onClick={() => setTestOpen(false)} disabled={start.isPending}>
-                Cancelar
+          <header className="shrink-0 flex flex-wrap items-center gap-2 px-3 py-2 min-h-14 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card shadow-sm">
+            <button
+              type="button"
+              className={BTN_ICON}
+              onClick={handleCancel}
+              aria-label="Voltar para a lista de robôs"
+              title="Voltar (Esc)"
+            >
+              <ArrowLeft size={18} aria-hidden="true" />
+            </button>
+            <input
+              ref={nameRef}
+              id="bot-name"
+              className={NAME_INPUT_CLASS}
+              value={header.name}
+              onChange={(e) => patchHeader({ name: e.target.value })}
+              maxLength={120}
+              placeholder="Nome do robô"
+              aria-label="Nome do robô"
+            />
+            <div className="flex items-center gap-2 pl-1">
+              <span className="text-sm text-slate-600 dark:text-slate-300">{header.enabled ? 'Ligado' : 'Desligado'}</span>
+              <Toggle checked={header.enabled} onChange={(enabled) => patchHeader({ enabled })} label="Robô ligado" />
+            </div>
+            <select
+              id="bot-connection"
+              className={`${INPUT_CLASS} w-auto min-w-[160px] max-w-[260px]`}
+              value={header.connection_id}
+              onChange={(e) => patchHeader({ connection_id: e.target.value })}
+              aria-label="Número que envia as mensagens"
+            >
+              <option value="">Número que envia...</option>
+              {connections.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                  {c.status === 'connected' ? '' : ' (desconectado)'}
+                </option>
+              ))}
+            </select>
+            <div className="flex items-center gap-2 ml-auto">
+              {dirty ? (
+                <span className="hidden sm:inline text-xs font-medium text-amber-600 dark:text-amber-400">Não salvo</span>
+              ) : null}
+              <button type="button" className={BTN_SECONDARY} onClick={openTest} disabled={save.isPending}>
+                <Play size={16} aria-hidden="true" />
+                Testar
               </button>
-              <button type="submit" className={BTN_PRIMARY} disabled={start.isPending || !testPhone.trim()}>
-                {start.isPending ? (
+              <button type="button" className={BTN_PRIMARY} onClick={handleSave} disabled={save.isPending}>
+                {save.isPending ? (
                   <Loader2 size={16} className="animate-spin" aria-hidden="true" />
                 ) : (
-                  <Play size={16} aria-hidden="true" />
+                  <Save size={16} aria-hidden="true" />
                 )}
-                Iniciar robô
+                Salvar
               </button>
             </div>
-          </form>
-        </Modal>
-      </div>
+          </header>
+
+          {optionsQ.error ? (
+            <div className="shrink-0 px-3 pt-3">
+              <Notice tone="red">{errorMessage(optionsQ.error, 'Falha ao carregar as opções')}</Notice>
+            </div>
+          ) : null}
+
+          <div ref={canvasRef} className="relative flex-1 min-h-0">
+            <Palette onAdd={addStep} />
+            <BotCanvas
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              onDropStep={addStep}
+              darkMode={darkMode}
+            />
+          </div>
+
+          <ConfirmModal
+            isOpen={confirmLeave}
+            onClose={() => setConfirmLeave(false)}
+            onConfirm={() => {
+              setConfirmLeave(false);
+              onClose();
+            }}
+            title="Descartar alterações"
+            message="Há alterações não salvas neste robô. Sair sem salvar?"
+            confirmText="Sair sem salvar"
+            variant="danger"
+          />
+
+          <ConfirmModal
+            isOpen={!!pending}
+            onClose={() => setPending(null)}
+            onConfirm={() => {
+              const p = pending;
+              setPending(null);
+              if (p) void persist(p.payload);
+            }}
+            title="Salvar mesmo assim?"
+            message={
+              <ul className="list-disc pl-5 space-y-1">
+                {(pending?.warnings ?? []).map((w) => (
+                  <li key={w}>{w}</li>
+                ))}
+              </ul>
+            }
+            confirmText="Salvar mesmo assim"
+            variant="primary"
+          />
+
+          <Modal
+            isOpen={testOpen}
+            onClose={() => setTestOpen(false)}
+            title={`Testar: ${header.name || 'robô'}`}
+            size="md"
+            initialFocus="#bot-test-phone"
+          >
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void handleStart();
+              }}
+            >
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                O robô vai enviar as mensagens de verdade para este telefone pelo número <strong>{connectionLabel}</strong>.
+                Use um número seu para testar.
+              </p>
+              <Field label="Telefone com DDD" htmlFor="bot-test-phone" help="Ex.: (11) 99999-9999 ou +5511999999999">
+                <input
+                  id="bot-test-phone"
+                  type="tel"
+                  className={INPUT_CLASS}
+                  value={testPhone}
+                  onChange={(e) => setTestPhone(e.target.value)}
+                  placeholder="+55 11 99999-9999"
+                  autoComplete="off"
+                />
+              </Field>
+              <div className="flex justify-end gap-2">
+                <button type="button" className={BTN_SECONDARY} onClick={() => setTestOpen(false)} disabled={start.isPending}>
+                  Cancelar
+                </button>
+                <button type="submit" className={BTN_PRIMARY} disabled={start.isPending || !testPhone.trim()}>
+                  {start.isPending ? (
+                    <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Play size={16} aria-hidden="true" />
+                  )}
+                  Iniciar robô
+                </button>
+              </div>
+            </form>
+          </Modal>
+        </div>
+      </FocusTrap>
     </CanvasContext.Provider>,
     document.body
   );

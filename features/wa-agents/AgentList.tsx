@@ -8,7 +8,7 @@ import React, { useState } from 'react';
 import { Bot, Plus, Pencil, Copy, Trash2, Phone, Cpu } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
 import { useToast } from '@/context/ToastContext';
-import type { AgentInput, AgentPublic } from '@/lib/wa-agents/types';
+import { DEFAULT_AGENT_TRIGGERS, type AgentInput, type AgentPublic } from '@/lib/wa-agents/types';
 import { PROVIDER_LABELS } from '@/lib/wa-agents/catalog';
 import { useDeleteWaAgent, useSaveWaAgent, useWaAgentOptions, useWaAgentsList, type WaAgentListItem } from './useWaAgents';
 import { AgentEditor } from './AgentEditor';
@@ -22,8 +22,14 @@ function asPublic(item: WaAgentListItem): AgentPublic | null {
   return item as AgentPublic;
 }
 
-/** Campos copiáveis de um agente (a chave própria não é copiada). */
+/**
+ * Campos copiáveis de um agente. Não vão na cópia: a chave própria e os
+ * números vinculados (a cópia nasce desligada e sem números). O gatilho por
+ * pipeline vem configurado, mas desligado quando já tem um número que inicia
+ * a conversa, para não disparar em dobro com o original.
+ */
 function toAgentInput(agent: AgentPublic): Partial<AgentInput> {
+  const deal = agent.triggers?.deal;
   return {
     name: `${agent.name} (cópia)`,
     persona_name: agent.persona_name ?? null,
@@ -39,7 +45,14 @@ function toAgentInput(agent: AgentPublic): Partial<AgentInput> {
     human_pause_minutes: agent.human_pause_minutes,
     only_new_conversations: agent.only_new_conversations,
     outcomes: agent.outcomes,
+    custom_actions: agent.custom_actions ?? [],
+    triggers: {
+      inbound: agent.triggers?.inbound ?? DEFAULT_AGENT_TRIGGERS.inbound,
+      deal: { ...DEFAULT_AGENT_TRIGGERS.deal, ...deal, enabled: deal?.connection_id ? false : (deal?.enabled ?? false) },
+    },
     webhooks: agent.webhooks,
+    helper_agent_ids: agent.helper_agent_ids ?? [],
+    tools: agent.tools,
   };
 }
 

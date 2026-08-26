@@ -21,6 +21,7 @@ import type {
   BotRunRow,
   RunRow,
 } from '@/lib/wa-agents/types';
+import { describeZodIssue } from './ui';
 
 export const WA_AGENTS_QUERY_KEY = 'waAgents';
 
@@ -76,7 +77,40 @@ export type WaAssistResult = {
   custom_actions: WaAssistSuggestion[];
 };
 
-/** Chamada padrão às rotas: cookies da sessão + JSON; erro vira Error com a mensagem do servidor. */
+type ApiIssue = { code?: string; path?: Array<string | number>; message?: string };
+type ApiErrorBody = { error?: string; code?: string; issues?: ApiIssue[] };
+
+/** Erro de uma rota /api/wa-agents: mensagem legível mais código e campo (quando é validação). */
+export class WaAgentsApiError extends Error {
+  status: number;
+  code?: string;
+  /** Caminho do campo recusado (ex.: ['helper_agent_ids']), para levar o usuário até ele */
+  path?: Array<string | number>;
+  constructor(message: string, opts: { status: number; code?: string; path?: Array<string | number> }) {
+    super(message);
+    this.name = 'WaAgentsApiError';
+    this.status = opts.status;
+    this.code = opts.code;
+    this.path = opts.path;
+  }
+}
+
+/**
+ * Mensagem de erro da API. Em VALIDATION_ERROR usa o primeiro problema:
+ * regras de negócio (code 'custom') já vêm em pt-BR ("Já existe uma mídia
+ * com este nome neste agente"); problemas do zod ganham o campo e uma
+ * descrição em pt-BR.
+ */
+export function apiErrorMessage(body: ApiErrorBody | null | undefined, status: number): string {
+  const base = body?.error || `Falha (HTTP ${status})`;
+  const issue = body?.code === 'VALIDATION_ERROR' && Array.isArray(body.issues) ? body.issues[0] : undefined;
+  if (!issue || typeof issue.message !== 'string' || !issue.message.trim()) return base;
+  if (issue.code === 'custom') return issue.message;
+  const field = Array.isArray(issue.path) ? issue.path.map(String).join('.') : '';
+  return `${base}${field ? ` (${field})` : ''}: ${describeZodIssue({ code: issue.code, message: issue.message })}`;
+}
+
+/** Chamada padrão às rotas: cookies da sessão + JSON; erro vira WaAgentsApiError com a mensagem do servidor. */
 export async function waAgentsFetch<T>(
   path: string,
   init?: { method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; body?: unknown }
@@ -87,8 +121,15 @@ export async function waAgentsFetch<T>(
     headers: { 'content-type': 'application/json' },
     body: init?.body === undefined ? undefined : JSON.stringify(init.body),
   });
-  const json = (await res.json().catch(() => null)) as (T & { error?: string }) | null;
-  if (!res.ok) throw new Error(json?.error || `Falha (HTTP ${res.status})`);
+  const json = (await res.json().catch(() => null)) as (T & ApiErrorBody) | null;
+  if (!res.ok) {
+    const issue = json?.code === 'VALIDATION_ERROR' && Array.isArray(json.issues) ? json.issues[0] : undefined;
+    throw new WaAgentsApiError(apiErrorMessage(json, res.status), {
+      status: res.status,
+      code: json?.code,
+      path: Array.isArray(issue?.path) ? issue.path : undefined,
+    });
+  }
   return (json ?? ({} as T)) as T;
 }
 

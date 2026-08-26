@@ -19,6 +19,8 @@ const HELPER_MAX_OUTPUT_TOKENS = 800;
 const HELPER_MAX_STEPS = 3;
 const HELPER_ANSWER_MAX_CHARS = 4000;
 const HELPER_KNOWLEDGE_LIMIT = 4;
+/** Prazo da consulta ao auxiliar: uma chamada travada vira texto de erro curto, não derruba a resposta. */
+const HELPER_TIMEOUT_MS = 45_000;
 
 export type ConsultHelperInput = {
   organizationId: string;
@@ -101,6 +103,7 @@ export async function consultHelperAgent(admin: SupabaseClient, input: ConsultHe
       temperature: supportsTemperature(helper) ? helper.temperature : undefined,
       maxOutputTokens: HELPER_MAX_OUTPUT_TOKENS,
       stopWhen: stepCountIs(HELPER_MAX_STEPS),
+      abortSignal: AbortSignal.timeout(HELPER_TIMEOUT_MS),
     });
     const texts = result.steps.map(s => (s.text ?? '').trim()).filter(Boolean);
     const text = (texts.join('\n') || result.text || '').trim();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isPublicHttpUrl } from './url';
+import { isPublicHttpUrl, isPublicIpAddress } from './url';
 
 describe('isPublicHttpUrl', () => {
   it('aceita http/https para hosts públicos', () => {
@@ -48,5 +48,30 @@ describe('isPublicHttpUrl', () => {
     expect(isPublicHttpUrl('http://[fe80::1]/')).toBe(false);
     expect(isPublicHttpUrl('http://[::ffff:127.0.0.1]/')).toBe(false);
     expect(isPublicHttpUrl('http://[2001:4860:4860::8888]/')).toBe(true);
+  });
+
+  it('rejeita CGNAT (100.64.0.0/10) e NAT64 (64:ff9b::/96)', () => {
+    expect(isPublicHttpUrl('http://100.64.0.1/')).toBe(false);
+    expect(isPublicHttpUrl('http://100.127.255.254/')).toBe(false);
+    expect(isPublicHttpUrl('http://100.128.0.1/')).toBe(true);
+    expect(isPublicHttpUrl('http://[64:ff9b::a00:1]/')).toBe(false);
+  });
+});
+
+describe('isPublicIpAddress (endereço resolvido pelo DNS)', () => {
+  it('classifica IPv4 e IPv6 já resolvidos', () => {
+    expect(isPublicIpAddress('8.8.8.8')).toBe(true);
+    expect(isPublicIpAddress('10.0.0.5')).toBe(false);
+    expect(isPublicIpAddress('169.254.169.254')).toBe(false);
+    expect(isPublicIpAddress('100.64.1.1')).toBe(false);
+    expect(isPublicIpAddress('2001:4860:4860::8888')).toBe(true);
+    expect(isPublicIpAddress('::1')).toBe(false);
+    expect(isPublicIpAddress('fe80::1%eth0')).toBe(false);
+    expect(isPublicIpAddress('::ffff:10.0.0.1')).toBe(false);
+    expect(isPublicIpAddress('::ffff:a00:1')).toBe(false);
+    expect(isPublicIpAddress('::ffff:808:808')).toBe(true);
+    expect(isPublicIpAddress('64:ff9b::7f00:1')).toBe(false);
+    expect(isPublicIpAddress('nome.exemplo.com')).toBe(false);
+    expect(isPublicIpAddress('')).toBe(false);
   });
 });

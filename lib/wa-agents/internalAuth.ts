@@ -1,14 +1,25 @@
 /**
  * Autenticação das rotas internas (/api/wa-agents/ingest e /tick), chamadas
  * pelo banco (pg_net) e pelo pg_cron com o header X-Internal-Secret.
+ *
+ * O segredo é WA_AGENTS_INTERNAL_SECRET, dedicado a este módulo (o mesmo valor
+ * gravado em platform_config.wa_agents_internal_secret). Não há mais reserva
+ * para CRON_SECRET: um vazamento deste segredo não abre as rotas /api/cron/*.
  */
 import { timingSafeEqual } from 'node:crypto';
 
+let warnedMissing = false;
+
 function expectedSecret(): string {
-  return (process.env.WA_AGENTS_INTERNAL_SECRET || process.env.CRON_SECRET || '').trim();
+  const value = (process.env.WA_AGENTS_INTERNAL_SECRET || '').trim();
+  if (!value && !warnedMissing) {
+    warnedMissing = true;
+    console.error('[wa-agents] WA_AGENTS_INTERNAL_SECRET não configurado: as rotas internas respondem 401');
+  }
+  return value;
 }
 
-/** true quando o header x-internal-secret bate com o segredo do ambiente. false se o env não existe. */
+/** true quando o header x-internal-secret bate com WA_AGENTS_INTERNAL_SECRET. false se o env não existe. */
 export function verifyInternalSecret(req: Request): boolean {
   const expected = expectedSecret();
   if (!expected) return false;

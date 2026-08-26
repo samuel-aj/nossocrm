@@ -1,10 +1,13 @@
 /**
  * /api/wa-agents/agents/[id]/media/[mediaId]  (admin + beta)
- *   PATCH  -> { media }     { name?, description? } (nome único por agente)
+ *   PATCH  -> { media, system_prompt? }  { name?, description? } (nome único por agente).
+ *             Ao renomear, os marcadores [[midia:nome antigo]] do roteiro são reescritos
+ *             com o nome novo (o roteiro atualizado volta em system_prompt).
  *   DELETE -> { ok: true }  apaga a linha e o arquivo do bucket
  */
 import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
+import { renameMediaMarkers } from '@/lib/wa-agents/context';
 import { loadAgentMedia, MEDIA_COLUMNS } from '@/lib/wa-agents/resources';
 import { AgentMediaPatchSchema, type AgentMediaRow } from '@/lib/wa-agents/types';
 import {
@@ -35,6 +38,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
   const present = pickPresentKeys(raw, parsed.data);
 
   const patch: Record<string, unknown> = {};
+  let previousName: string | null = null;
   try {
     const all = await loadAgentMedia(auth.admin, orgId, id);
     const current = all.find(m => m.id === mediaId);
@@ -45,7 +49,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
       if (mediaNameTaken(all, name, current.id)) {
         return validationMessage('Já existe uma mídia com este nome neste agente', 'name');
       }
-      patch.name = name;
+      if (name !== current.name) {
+        patch.name = name;
+        previousName = current.name;
+      }
     }
     if (typeof present.description === 'string') patch.description = present.description.trim() || null;
   } catch (err) {
@@ -66,7 +73,34 @@ export async function PATCH(req: Request, ctx: Ctx) {
     .maybeSingle();
   if (error) return json({ error: error.message }, 500);
   if (!data) return json({ error: 'Mídia não encontrada' }, 404);
-  return json({ media: data as AgentMediaRow });
+
+  // Renomeou: os marcadores [[midia:nome antigo]] do roteiro passam a apontar para o nome novo
+  let systemPrompt: string | undefined;
+  if (previousName && typeof patch.name === 'string') {
+    try {
+      const { data: agentRow } = await auth.admin
+        .from('wa_ai_agents')
+        .select('system_prompt')
+        .eq('organization_id', orgId)
+        .eq('id', id)
+        .maybeSingle();
+      const script = String((agentRow as { system_prompt?: string | null } | null)?.system_prompt ?? '');
+      const rewritten = renameMediaMarkers(script, previousName, patch.name);
+      if (rewritten !== script) {
+        const { error: scriptError } = await auth.admin
+          .from('wa_ai_agents')
+          .update({ system_prompt: rewritten, updated_at: new Date().toISOString() })
+          .eq('organization_id', orgId)
+          .eq('id', id);
+        if (scriptError) throw new Error(scriptError.message);
+        systemPrompt = rewritten;
+      }
+    } catch (err) {
+      console.error('[wa-agents/media] reescrever marcadores do roteiro falhou:', getErrorMessage(err, 'erro desconhecido'));
+    }
+  }
+
+  return json(systemPrompt !== undefined ? { media: data as AgentMediaRow, system_prompt: systemPrompt } : { media: data as AgentMediaRow });
 }
 
 export async function DELETE(req: Request, ctx: Ctx) {
@@ -94,6 +128,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
     .eq('id', media.id);
   if (error) return json({ error: error.message }, 500);
 
+  // Só o original: a cópia em wa-media fica, porque as mensagens já enviadas apontam para ela
   if (media.storage_path.startsWith(`${orgId}/`)) await removeAgentFiles(auth.admin, [media.storage_path]);
 
   return json({ ok: true });

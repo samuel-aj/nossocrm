@@ -6,7 +6,8 @@
  *   de processamento (consulta a cada 5 s enquanto houver "processando"),
  *   reprocessar e excluir.
  * - Mídias: imagem, vídeo, áudio ou PDF com nome e "quando enviar" editáveis
- *   na hora (PATCH), "Inserir no roteiro" ([[midia:nome]]) e excluir.
+ *   na hora (PATCH), "Inserir no roteiro" ([[midia:nome]]) e excluir. Ao
+ *   renomear, avisa o editor pai para trocar os marcadores já no roteiro.
  *
  * Upload: POST /api/wa-agents/uploads -> uploadToSignedUrl (bucket
  * wa-agent-files) -> POST documents|media. Precisa do agente salvo.
@@ -30,6 +31,7 @@ import {
 import ConfirmModal from '@/components/ConfirmModal';
 import { useToast } from '@/context/ToastContext';
 import { AGENT_DOC_MIMES, type AgentDocumentRow, type AgentMediaRow } from '@/lib/wa-agents/types';
+import { normalizeKeyword } from '@/lib/wa-agents/text';
 import {
   uploadWaAgentFile,
   useAddWaAgentDocument,
@@ -127,13 +129,31 @@ export function mediaKindOf(file: File): WaAgentMediaKind | null {
   return null;
 }
 
-/** Nome único da mídia: o marcador [[midia:nome]] precisa apontar para uma só. */
+/**
+ * Limpa o nome de uma mídia: sem colchetes (quebrariam o marcador
+ * [[midia:nome]], que termina no primeiro "]") e sem espaços repetidos.
+ */
+export function cleanMediaName(raw: string): string {
+  return raw.replace(/[[\]]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+/** true quando `name` já é de outra mídia, comparando como o servidor (sem acento e caixa). */
+export function mediaNameTaken(name: string, existing: string[]): boolean {
+  const key = normalizeKeyword(name);
+  return existing.some((n) => normalizeKeyword(n) === key);
+}
+
+/**
+ * Nome único da mídia: o marcador [[midia:nome]] precisa apontar para uma só.
+ * Compara como o servidor (sem acento e caixa) para não subir o arquivo e ter
+ * o registro recusado depois, o que deixaria o arquivo órfão no bucket.
+ */
 export function uniqueMediaName(base: string, existing: string[]): string {
-  const clean = base.replace(/\s+/g, ' ').trim().slice(0, 80) || 'midia';
-  if (!existing.includes(clean)) return clean;
-  const stem = clean.slice(0, 74);
+  const clean = cleanMediaName(base).slice(0, 80).trim() || 'midia';
+  if (!mediaNameTaken(clean, existing)) return clean;
+  const stem = clean.slice(0, 74).trim();
   let n = 2;
-  while (existing.includes(`${stem} (${n})`)) n++;
+  while (mediaNameTaken(`${stem} (${n})`, existing)) n++;
   return `${stem} (${n})`;
 }
 
@@ -321,16 +341,25 @@ function DocumentRow({
 
 function MediaCard({
   media,
+  otherNames,
   busy,
   onInsert,
   onSave,
+  onRenamed,
   onDelete,
+  onInvalidName,
 }: {
   media: AgentMediaRow;
+  /** Nomes das outras mídias do agente (o nome precisa ser único) */
+  otherNames: string[];
   busy: boolean;
   onInsert: (name: string) => void;
   onSave: (patch: { name?: string; description?: string }) => Promise<unknown>;
+  /** Chamado depois de renomear no servidor (o editor pai atualiza os marcadores do roteiro) */
+  onRenamed?: (oldName: string, newName: string) => void;
   onDelete: () => void;
+  /** Nome recusado antes do PATCH (repetido) */
+  onInvalidName: (message: string) => void;
 }) {
   const [name, setName] = useState(media.name);
   const [description, setDescription] = useState(media.description ?? '');
@@ -339,18 +368,30 @@ function MediaCard({
 
   const commit = () => {
     const patch: { name?: string; description?: string } = {};
-    const nextName = name.replace(/\s+/g, ' ').trim();
+    const nextName = cleanMediaName(name);
     if (!nextName) {
       setName(media.name);
     } else if (nextName !== media.name) {
-      patch.name = nextName;
+      // Mesma regra do servidor (sem acento e caixa), para avisar antes do PATCH.
+      if (mediaNameTaken(nextName, otherNames)) {
+        onInvalidName('Já existe uma mídia com este nome neste agente');
+        setName(media.name);
+      } else {
+        patch.name = nextName;
+        if (nextName !== name) setName(nextName);
+      }
     }
     if (description.trim() !== (media.description ?? '').trim()) patch.description = description.trim();
     if (Object.keys(patch).length === 0) return;
-    onSave(patch).catch(() => {
-      setName(media.name);
-      setDescription(media.description ?? '');
-    });
+    const oldName = media.name;
+    onSave(patch)
+      .then(() => {
+        if (patch.name) onRenamed?.(oldName, patch.name);
+      })
+      .catch(() => {
+        setName(media.name);
+        setDescription(media.description ?? '');
+      });
   };
 
   return (
@@ -421,7 +462,8 @@ function MediaCard({
         <TokenChip
           token={mediaToken(media.name)}
           tone="green"
-          title={`Arraste para o roteiro: ${mediaToken(media.name)}`}
+          draggable={false}
+          title={`Marcador desta mídia no roteiro: ${mediaToken(media.name)}. Clique para inserir no cursor; para arrastar, use a paleta da aba Roteiro.`}
           onInsert={() => onInsert(media.name)}
         />
         {busy ? (
@@ -444,10 +486,12 @@ export const KnowledgePanel: React.FC<{
   agentId: string | null;
   /** Insere `[[midia:nome]]` no cursor do roteiro (o editor pai troca de aba) */
   onInsertMedia: (name: string) => void;
+  /** Mídia renomeada no servidor: o editor pai troca os marcadores [[midia:nome]] do roteiro */
+  onRenameMedia?: (oldName: string, newName: string) => void;
   /** Salva o agente (para liberar os uploads de um agente novo) */
   onRequestSave: () => void;
   saving: boolean;
-}> = ({ agentId, onInsertMedia, onRequestSave, saving }) => {
+}> = ({ agentId, onInsertMedia, onRenameMedia, onRequestSave, saving }) => {
   const { showToast } = useToast();
   const docsQ = useWaAgentDocuments(agentId);
   const mediaQ = useWaAgentMedia(agentId);
@@ -616,7 +660,7 @@ export const KnowledgePanel: React.FC<{
       <Panel
         title="Mídias"
         icon={<Paperclip size={16} />}
-        description="Imagens, vídeos, áudios e PDFs que o agente pode enviar na conversa. Descreva quando enviar cada um ou marque o momento no roteiro com o chip."
+        description="Imagens, vídeos, áudios e PDFs que o agente pode enviar na conversa. Descreva quando enviar cada um ou marque o momento no roteiro com Inserir no roteiro."
       >
         <DropZone
           accept={MEDIA_ACCEPT}
@@ -638,10 +682,13 @@ export const KnowledgePanel: React.FC<{
               <MediaCard
                 key={m.id}
                 media={m}
+                otherNames={media.filter((x) => x.id !== m.id).map((x) => x.name)}
                 busy={busyId === m.id}
                 onInsert={onInsertMedia}
                 onSave={(patch) => runBusy(m.id, () => updateMedia.mutateAsync({ mediaId: m.id, ...patch }), 'Mídia atualizada', 'Falha ao atualizar a mídia')}
+                onRenamed={onRenameMedia}
                 onDelete={() => setConfirm({ kind: 'media', id: m.id, name: m.name })}
+                onInvalidName={(message) => showToast(message, 'error')}
               />
             ))}
           </div>

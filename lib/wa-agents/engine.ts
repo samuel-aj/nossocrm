@@ -38,7 +38,9 @@ import { sendAgentMedia } from './media';
 import { resolveAgentModel, supportsTemperature } from './model';
 import { loadAgentResources } from './resources';
 import { logRun } from './runs';
+import { mergeSavedDataInto, NO_REPLY_TOKEN, sanitizeSavedData } from './savedData';
 import { splitLines } from './split';
+import { normalizeKeyword } from './text';
 import { buildAgentTools, findByName, type AgentToolRuntime } from './tools';
 import { pickInboundAgent } from './triggers';
 import type {
@@ -78,7 +80,7 @@ export type RunAgentInput = {
 
 export type CollectedToolCall = { tool: string; input: unknown; output?: unknown };
 
-export const NO_REPLY_TOKEN = '[SEM_RESPOSTA]';
+export { NO_REPLY_TOKEN };
 const LOCK_BASE_SECONDS = 90;
 const LOCK_RETRY_MS = 2_000;
 const LOCK_WAIT_MAX_MS = 60_000;
@@ -92,6 +94,17 @@ const MAX_STEPS = 6;
 const AUTO_KNOWLEDGE_LIMIT = 3;
 /** Trechos devolvidos pela ferramenta consultar_documentos. */
 const TOOL_KNOWLEDGE_LIMIT = 5;
+/** Consultas a agentes auxiliares por resposta (cada uma é outra chamada ao modelo). */
+export const MAX_HELPER_CALLS_PER_RUN = 2;
+/** Consultas à base de conhecimento (consultar_documentos) por resposta. */
+export const MAX_KNOWLEDGE_CALLS_PER_RUN = 3;
+/** Limite por conversa: execuções por mensagem recebida numa janela de minutos. */
+export const RATE_WINDOW_MINUTES = 10;
+export const RATE_MAX_RUNS = 20;
+/** Orçamento de tokens por organização em 24 h (janela móvel); env WA_AGENTS_DAILY_TOKEN_LIMIT (0 desliga). */
+export const DEFAULT_DAILY_TOKEN_LIMIT = 5_000_000;
+/** Acima do orçamento a conversa pausa por este tempo (a retomada confere de novo). */
+const BUDGET_PAUSE_MINUTES = 60;
 
 export function sleep(ms: number): Promise<void> {
   if (ms <= 0) return Promise.resolve();
@@ -101,10 +114,11 @@ export function sleep(ms: number): Promise<void> {
 /**
  * Duração da trava por conversa: geração + envio das linhas (até 8) + webhooks
  * (por evento e das ações) + consultas a agentes auxiliares (cada uma é outra
- * chamada ao modelo).
+ * chamada ao modelo) + cópia/envio das mídias (`mediaCount`, até 3).
  */
 export function lockSecondsFor(
-  agent: Pick<AgentRow, 'line_delay_ms' | 'webhooks' | 'outcomes' | 'custom_actions'> & Partial<Pick<AgentRow, 'helper_agent_ids'>>
+  agent: Pick<AgentRow, 'line_delay_ms' | 'webhooks' | 'outcomes' | 'custom_actions'> & Partial<Pick<AgentRow, 'helper_agent_ids'>>,
+  opts: { mediaCount?: number } = {}
 ): number {
   const activeWebhooks = agent.webhooks.filter(w => w.active !== false).length;
   const actionWebhooks = [...(agent.outcomes ?? []), ...(agent.custom_actions ?? [])].reduce(
@@ -112,12 +126,57 @@ export function lockSecondsFor(
     0
   );
   const helpers = Math.min((agent.helper_agent_ids ?? []).length, 3);
+  const media = Math.min(Math.max(0, opts.mediaCount ?? 0), 3);
   return (
     LOCK_BASE_SECONDS +
     Math.ceil((8 * agent.line_delay_ms) / 1000) +
     25 * (activeWebhooks + actionWebhooks) +
-    30 * helpers
+    30 * helpers +
+    20 * media
   );
+}
+
+/** Orçamento diário de tokens por org: env WA_AGENTS_DAILY_TOKEN_LIMIT (0 desliga) ou o padrão. */
+export function dailyTokenLimit(): number {
+  const raw = process.env.WA_AGENTS_DAILY_TOKEN_LIMIT;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_DAILY_TOKEN_LIMIT;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : DEFAULT_DAILY_TOKEN_LIMIT;
+}
+
+/** Tokens usados pela org nas últimas 24 h (RPC wa_ai_agent_usage_tokens). Em erro, 0 (não bloqueia). */
+async function orgTokensLast24h(admin: SupabaseClient, organizationId: string): Promise<number> {
+  try {
+    const since = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+    const { data, error } = await admin.rpc('wa_ai_agent_usage_tokens', { p_org: organizationId, p_since: since });
+    if (error) {
+      console.error('[wa-agents] consulta de uso de tokens falhou:', error.message);
+      return 0;
+    }
+    const n = Number(data);
+    return Number.isFinite(n) ? n : 0;
+  } catch (e) {
+    console.error('[wa-agents] consulta de uso de tokens falhou:', errorMessage(e));
+    return 0;
+  }
+}
+
+/** true quando a conversa já teve RATE_MAX_RUNS execuções por mensagem recebida na janela. Em erro, false. */
+async function inboundRateLimited(admin: SupabaseClient, organizationId: string, conversationId: string): Promise<boolean> {
+  try {
+    const since = new Date(Date.now() - RATE_WINDOW_MINUTES * 60_000).toISOString();
+    const { count, error } = await admin
+      .from('wa_ai_agent_runs')
+      .select('id', { count: 'exact', head: true })
+      .eq('organization_id', organizationId)
+      .eq('conversation_id', conversationId)
+      .eq('trigger', 'inbound')
+      .gte('created_at', since);
+    if (error) return false;
+    return (count ?? 0) >= RATE_MAX_RUNS;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -228,7 +287,7 @@ export function segmentText(seg: ReplySegment): string {
   return seg.text.split(NO_REPLY_TOKEN).join('').trim();
 }
 
-/** Dados salvos via salvar_dados (mesclados na ordem das chamadas). */
+/** Dados salvos via salvar_dados (mesclados na ordem das chamadas e saneados: chaves curtas, valores primitivos). */
 export function mergeSavedData(toolCalls: CollectedToolCall[]): Record<string, unknown> | null {
   let merged: Record<string, unknown> | null = null;
   for (const tc of toolCalls) {
@@ -238,7 +297,7 @@ export function mergeSavedData(toolCalls: CollectedToolCall[]): Record<string, u
       merged = { ...(merged ?? {}), ...(dados as Record<string, unknown>) };
     }
   }
-  return merged;
+  return merged ? sanitizeSavedData(merged) : null;
 }
 
 /** Acha o resultado pela chave (fallback: igual ignorando caixa/espaços). */
@@ -301,6 +360,7 @@ async function claimLock(
   const deadline = Date.now() + LOCK_WAIT_MAX_MS;
   for (;;) {
     const { data, error } = await admin.rpc('wa_ai_claim_lock', {
+      p_org: organizationId,
       p_conversation: conversationId,
       p_seconds: seconds,
     });
@@ -561,10 +621,39 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
       }
     }
 
+    // 4b. Orçamento diário de tokens da organização: acima do teto a conversa pausa por 1 h
+    // (a retomada confere de novo) e o webhook 'error' avisa
+    const tokenLimit = dailyTokenLimit();
+    if (tokenLimit > 0) {
+      const used = await orgTokensLast24h(admin, organizationId);
+      if (used >= tokenLimit) {
+        const now = new Date();
+        const resumeAt = new Date(now.getTime() + BUDGET_PAUSE_MINUTES * 60_000).toISOString();
+        await updateConversation(admin, ctx, {
+          ai_status: 'paused',
+          ai_status_changed_at: now.toISOString(),
+          ai_paused_by: null,
+          ai_resume_at: resumeAt,
+        });
+        ctx.conversation.ai_status = 'paused';
+        ctx.conversation.ai_resume_at = resumeAt;
+        await emit('error', {
+          code: 'DAILY_TOKEN_LIMIT',
+          message: `Orçamento de tokens da organização em 24 h esgotado (${used} de ${tokenLimit}); conversa pausada até ${resumeAt}`,
+        });
+        return await finish('skipped', { reason: 'orçamento diário de tokens esgotado' });
+      }
+    }
+
     // 5. Modelo, recursos (documentos, mídias, auxiliares), prompt e histórico
     const resolved = await resolveAgentModel(admin, organizationId, agent);
     modelId = resolved.modelId;
     const resources: AgentResources = await loadAgentResources(admin, organizationId, agent);
+    // Mídias contam na trava (cópia + envio): renova já com a duração nova
+    if (resources.media.length > 0) {
+      lockSeconds = lockSecondsFor(agent, { mediaCount: resources.media.length });
+      await renew();
+    }
     // Trechos da base para a(s) última(s) mensagem(ns) do lead, injetados no prompt
     let knowledge: KnowledgeHit[] = [];
     if (resources.documents.length > 0) {
@@ -584,20 +673,42 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
 
     // Efeitos das ferramentas condicionais. enviar_midia só enfileira: a mídia
     // sai na ordem dos segmentos (texto anterior, mídia, texto seguinte), no passo 7.
+    // Cada mídia vai uma única vez por atendimento (ai_state.midias_enviadas) e
+    // as consultas (auxiliares, base) têm teto por resposta.
     const runCtx = ctx;
     const runAgent = agent;
+    const priorState = (conv.ai_state ?? {}) as ConversationAiState;
+    const mediaSentBefore = new Set((priorState.midias_enviadas ?? []).map(normalizeKeyword));
+    const mediaQueued = new Set<string>();
+    let helperCalls = 0;
+    let knowledgeCalls = 0;
     const runtime: AgentToolRuntime = {
       documents: resources.documents,
       media: resources.media,
       helpers: resources.helpers,
-      searchKnowledge: q => searchKnowledge(admin, { organizationId, agent: runAgent, query: q, limit: TOOL_KNOWLEDGE_LIMIT }),
+      searchKnowledge: async q => {
+        knowledgeCalls += 1;
+        if (knowledgeCalls > MAX_KNOWLEDGE_CALLS_PER_RUN) {
+          throw new Error(`Limite de ${MAX_KNOWLEDGE_CALLS_PER_RUN} consultas à base de conhecimento nesta resposta atingido: responda com o que já tem`);
+        }
+        return searchKnowledge(admin, { organizationId, agent: runAgent, query: q, limit: TOOL_KNOWLEDGE_LIMIT });
+      },
       sendMedia: async media => {
         const conn = runCtx.connection;
         if (!conn) return { ok: false, error: 'conversa sem número vinculado' };
         if (conn.status !== 'connected') return { ok: false, error: 'número desconectado' };
+        const key = normalizeKeyword(media.name);
+        if (mediaSentBefore.has(key) || mediaQueued.has(key)) {
+          return { ok: false, error: `mídia "${media.name}" já enviada neste atendimento; não envie de novo` };
+        }
+        mediaQueued.add(key);
         return { ok: true, note: `mídia "${media.name}" será enviada neste ponto da conversa` };
       },
       consultHelper: async (helper, question) => {
+        helperCalls += 1;
+        if (helperCalls > MAX_HELPER_CALLS_PER_RUN) {
+          return `Limite de ${MAX_HELPER_CALLS_PER_RUN} consultas a agentes auxiliares nesta resposta atingido: responda com o que já tem.`;
+        }
         await renew();
         const answer = await consultHelperAgent(admin, { organizationId, helper, question, ctx: runCtx, askedBy: runAgent });
         await renew();
@@ -646,8 +757,11 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     // 8. Estado da conversa
     const lastIn = pending.length > 0 ? pending[pending.length - 1] : await getLastMessage(admin, ctx, 'in');
     const saved = mergeSavedData(gen.toolCalls);
-    const state: ConversationAiState = { ...((conv.ai_state ?? {}) as ConversationAiState) };
-    if (saved) state.dados = { ...(state.dados ?? {}), ...saved };
+    const state: ConversationAiState = { ...priorState };
+    if (saved) state.dados = mergeSavedDataInto(state.dados, saved);
+    if (mediaSent.length > 0) {
+      state.midias_enviadas = Array.from(new Set([...(state.midias_enviadas ?? []), ...mediaSent]));
+    }
     await updateConversation(admin, ctx, {
       ai_last_processed_at: lastIn?.created_at ?? new Date().toISOString(),
       ai_state: state,
@@ -666,8 +780,10 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
       !!(acts.approvalAgentId || acts.handoffAgentId || acts.stopped);
 
     // 9a. Ações durante a conversa (executar_acao): executam sem encerrar o atendimento.
-    // A mesma chave repetida na mesma resposta executa uma vez só.
-    const executedKeys = new Set<string>();
+    // Uma ação por resposta (a primeira válida); chamada sem "detalhes" é ignorada. O trecho
+    // da mensagem do lead que motivou a ação fica no registro e no webhook (auditoria).
+    const leadExcerpt = (inputText ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    let actionExecuted = false;
     for (const tc of gen.toolCalls) {
       if (tc.tool !== 'executar_acao') continue;
       const args = (tc.input ?? {}) as { acao?: unknown; detalhes?: unknown };
@@ -678,11 +794,15 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
         pushEvent('custom_action_not_found', { acao, detalhes });
         continue;
       }
-      if (executedKeys.has(custom.key)) {
-        pushEvent('custom_action_repeated', { acao: custom.key, detalhes });
+      if (!detalhes) {
+        pushEvent('custom_action_ignored', { acao: custom.key, motivo: 'sem detalhes' });
         continue;
       }
-      executedKeys.add(custom.key);
+      if (actionExecuted) {
+        pushEvent('custom_action_skipped', { acao: custom.key, detalhes, motivo: 'uma ação por resposta' });
+        continue;
+      }
+      actionExecuted = true;
       const acts = await executeCustomAction(admin, {
         agent,
         ctx,
@@ -691,7 +811,7 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
         runEvents: events,
         renewLock: renew,
       });
-      await emit('custom_action', { acao: custom.key, label: custom.label, detalhes });
+      await emit('custom_action', { acao: custom.key, label: custom.label, detalhes, mensagem_lead: leadExcerpt });
       if (requestsTransition(acts)) {
         transition = {
           acts,
@@ -952,6 +1072,13 @@ export async function handleInboundMessage(input: {
 
     if (!agent) return await skip('sem agente');
 
+    // Limite por conversa: acima de RATE_MAX_RUNS execuções na janela, a mensagem é ignorada
+    // (sem webhook, sem invocação e sem registro, senão o registro alimentaria a contagem)
+    if (await inboundRateLimited(admin, organizationId, conversationId)) {
+      console.warn(`[wa-agents] conversa ${conversationId}: acima de ${RATE_MAX_RUNS} execuções em ${RATE_WINDOW_MINUTES} min`);
+      return { status: 'skipped', reason: 'limite de execuções por conversa' };
+    }
+
     // Evento de mensagem recebida
     await dispatchAgentEvent(admin, { agent, event: 'message_received', ctx, extra: { message_id: messageId, text } });
 
@@ -1000,10 +1127,27 @@ export async function resumeDueConversations(
       .order('ai_resume_at', { ascending: true })
       .limit(limit);
 
+    const betaByOrg = new Map<string, boolean>();
     for (const c of (data ?? []) as Array<{ id: string; organization_id: string; ai_agent_id: string }>) {
       // Orçamento de tempo do tick: o que sobrar fica para o próximo
       if (opts.deadlineMs && Date.now() > opts.deadlineMs) break;
       try {
+        // Só orgs com a beta ligada: nas demais nada muda (nem estado, nem webhook). A pausa
+        // perde o relógio para o cron parar de acordar por ela.
+        let beta = betaByOrg.get(c.organization_id);
+        if (beta === undefined) {
+          beta = await isWaAgentsBetaEnabled(admin, c.organization_id);
+          betaByOrg.set(c.organization_id, beta);
+        }
+        if (!beta) {
+          await admin
+            .from('wa_conversations')
+            .update({ ai_resume_at: null })
+            .eq('id', c.id)
+            .eq('organization_id', c.organization_id)
+            .eq('ai_status', 'paused');
+          continue;
+        }
         const { data: upd } = await admin
           .from('wa_conversations')
           .update({ ai_status: 'active', ai_resume_at: null, ai_paused_by: null, ai_status_changed_at: now })

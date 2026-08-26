@@ -19,6 +19,19 @@ export {
 } from './files';
 export { isWaAgentsBetaEnabled } from './beta';
 export { verifyInternalSecret } from './internalAuth';
+export {
+  sanitizeSavedData,
+  sanitizeSavedValue,
+  sanitizeSavedText,
+  normalizeSavedKey,
+  mergeSavedDataInto,
+  SAVED_DATA_MAX_KEYS,
+  SAVED_DATA_KEY_MAX_CHARS,
+  SAVED_DATA_VALUE_MAX_CHARS,
+  SAVED_DATA_MAX_CHARS,
+  type SavedValue,
+} from './savedData';
+export { getAgentFileInfo, isGenericMime, type StoredFileInfo } from './storage';
 export { renderTemplate, renderJsonTemplate, getPath } from './template';
 export { splitLines, isOnlySymbols, MAX_LINES } from './split';
 export { resolveAgentModel, getOrganizationApiKey, supportsTemperature } from './model';
@@ -59,6 +72,7 @@ export {
   resolveDocumentMime,
   embedTexts,
   resolveEmbeddingModel,
+  embeddingProviderOf,
   processDocument,
   searchKnowledge,
   formatKnowledgeHits,
@@ -66,11 +80,21 @@ export {
   loadAgentDocuments,
   loadReadyDocuments,
   deleteDocumentChunks,
+  isProcessingStale,
   DOCUMENT_COLUMNS,
   MAX_DOCUMENT_TEXT_CHARS,
+  MAX_TEXT_FILE_BYTES,
   EMBEDDING_DIMENSIONS,
+  EMBEDDING_MODEL_IDS,
+  MIN_SIMILARITY,
+  PROCESS_TIMEOUT_MS,
+  PROCESSING_STALE_MS,
+  PROCESSING_STALE_ERROR,
   type ChunkOptions,
   type ProcessDocumentResult,
+  type EmbedTextsResult,
+  type EmbeddingModelId,
+  type EmbeddingProvider,
 } from './knowledge';
 export { loadAgentResources, loadAgentMedia, loadHelperAgents, MEDIA_COLUMNS } from './resources';
 export {
@@ -85,6 +109,7 @@ export {
 export {
   sendAgentMedia,
   copyAgentMediaToOutbox,
+  ensureAgentMediaOutbox,
   WA_MEDIA_BUCKET,
   type SendAgentMediaInput,
   type SendAgentMediaResult,
@@ -95,6 +120,7 @@ export {
   dispatchAgentEvent,
   buildWebhookPayload,
   postWebhook,
+  resolvesToPrivateAddress,
   type WebhookResult,
   type WebhookEventName,
   type PostWebhookInput,
@@ -120,11 +146,17 @@ export {
   resumeDueConversations,
   sleep,
   lockSecondsFor,
+  dailyTokenLimit,
   generateAgentReply,
   segmentText,
   findOutcome,
   findCustomAction,
   NO_REPLY_TOKEN,
+  MAX_HELPER_CALLS_PER_RUN,
+  MAX_KNOWLEDGE_CALLS_PER_RUN,
+  RATE_WINDOW_MINUTES,
+  RATE_MAX_RUNS,
+  DEFAULT_DAILY_TOKEN_LIMIT,
   type RunResult,
   type RunAgentInput,
   type CollectedToolCall,

@@ -6,12 +6,13 @@
  * pelas ações do tipo webhook (resultados, ações durante a conversa) e pelo
  * passo webhook dos robôs.
  */
+import { lookup } from 'node:dns/promises';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ConversationContext } from './context';
 import { errorMessage } from './errors';
 import { renderJsonTemplate } from './template';
 import type { AgentEvent, AgentRow } from './types';
-import { isPublicHttpUrl } from './url';
+import { isPublicHttpUrl, isPublicIpAddress } from './url';
 
 export type WebhookResult = { id: string; url: string; ok: boolean; status?: number; error?: string };
 
@@ -20,9 +21,37 @@ export type WebhookEventName = AgentEvent | 'outcome_action' | 'bot_webhook';
 
 const TIMEOUT_MS = 10_000;
 const RETRY_DELAY_MS = 2_000;
+const DNS_TIMEOUT_MS = 5_000;
 
 function wait(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Confere, no servidor, para onde o host da URL resolve: um nome público que
+ * aponta para rede privada, link-local, CGNAT ou NAT64 é recusado (a URL já
+ * passou por isPublicHttpUrl, que só vê o texto). null quando ok; senão o motivo.
+ */
+export async function resolvesToPrivateAddress(rawUrl: string): Promise<string | null> {
+  let host: string;
+  try {
+    host = new URL(rawUrl).hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  } catch {
+    return 'URL inválida';
+  }
+  // IP literal: já validado pelo isPublicHttpUrl
+  if (host.includes(':') || /^[0-9.]+$/.test(host)) return null;
+  try {
+    const addresses = await Promise.race([
+      lookup(host, { all: true }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('tempo esgotado ao resolver o host')), DNS_TIMEOUT_MS)),
+    ]);
+    if (!addresses || addresses.length === 0) return 'host sem endereço';
+    const bad = addresses.find(a => !isPublicIpAddress(a.address));
+    return bad ? `host resolve para endereço não público (${bad.address})` : null;
+  } catch (e) {
+    return `não foi possível resolver o host: ${errorMessage(e)}`;
+  }
 }
 
 /** Payload padrão enviado a todos os webhooks de um evento. */
@@ -88,12 +117,14 @@ export type PostWebhookInput = {
 
 /**
  * POST com timeout de 10 s, cabeçalhos padrão (X-Webhook-Event, segredo) e
- * uma retentativa após 2 s em erro de rede/5xx. Só URL pública http/https,
- * sem seguir redirecionamentos. Nunca lança.
+ * uma retentativa após 2 s em erro de rede/5xx. Só URL pública http/https
+ * (texto e endereço resolvido), sem seguir redirecionamentos. Nunca lança.
  */
 export async function postWebhook(input: PostWebhookInput): Promise<Omit<WebhookResult, 'id'>> {
   try {
     if (!isPublicHttpUrl(input.url)) return { url: input.url, ok: false, error: 'URL precisa ser pública (http/https)' };
+    const dnsError = await resolvesToPrivateAddress(input.url);
+    if (dnsError) return { url: input.url, ok: false, error: `URL recusada: ${dnsError}` };
     const bodyValue = input.body_template?.trim()
       ? renderJsonTemplate(input.body_template, input.payload)
       : input.payload;

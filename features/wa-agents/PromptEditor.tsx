@@ -12,7 +12,7 @@
 import React, { useState } from 'react';
 import { Braces, ListChecks, Paperclip, Image as ImageIcon, Film, Music, FileText, Info } from 'lucide-react';
 import { PROMPT_VARIABLES } from '@/lib/wa-agents/catalog';
-import { HELP_CLASS, Notice, TEXTAREA_CLASS, TokenChip } from './ui';
+import { HELP_CLASS, Notice, PROMPT_TOKEN_MIME, TEXTAREA_CLASS, TokenChip, isPromptTokenDrag } from './ui';
 
 export type PromptPaletteAction = { key: string; label: string };
 export type PromptPaletteMedia = { name: string; kind: 'image' | 'video' | 'audio' | 'document' };
@@ -122,11 +122,33 @@ export const PromptEditor: React.FC<{
 }> = ({ id = 'agent-system-prompt', value, onChange, textareaRef, onInsertToken, actions, media, highlight = false }) => {
   const [dragOver, setDragOver] = useState(false);
 
+  // Só o arrasto de um chip (PROMPT_TOKEN_MIME) é tratado aqui. Texto comum
+  // (mover uma frase da própria textarea, trazer de outra janela) fica com o
+  // padrão do navegador, que também remove o trecho de origem ao mover.
+  // Arquivos são cancelados para não abrirem no navegador.
+  const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer.types ?? []).includes('Files');
+
+  const handleDragOver = (e: React.DragEvent<HTMLTextAreaElement>) => {
+    if (isPromptTokenDrag(e.dataTransfer.types)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      if (!dragOver) setDragOver(true);
+      return;
+    }
+    if (hasFiles(e)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'none';
+    }
+  };
+
   const handleDrop = (e: React.DragEvent<HTMLTextAreaElement>) => {
-    // Sempre cancela o padrão: um arquivo solto aqui não pode abrir no navegador.
-    e.preventDefault();
     setDragOver(false);
-    const token = e.dataTransfer.getData('text/plain').trim();
+    if (!isPromptTokenDrag(e.dataTransfer.types)) {
+      if (hasFiles(e)) e.preventDefault();
+      return;
+    }
+    e.preventDefault();
+    const token = (e.dataTransfer.getData(PROMPT_TOKEN_MIME) || e.dataTransfer.getData('text/plain')).trim();
     if (!token) return;
     const el = e.currentTarget;
     const at = caretIndexFromPoint(el, e.clientX, e.clientY);
@@ -203,12 +225,10 @@ export const PromptEditor: React.FC<{
           rows={26}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          onDragOver={(e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'copy';
-            if (!dragOver) setDragOver(true);
+          onDragOver={handleDragOver}
+          onDragEnter={(e) => {
+            if (isPromptTokenDrag(e.dataTransfer.types)) setDragOver(true);
           }}
-          onDragEnter={() => setDragOver(true)}
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
           aria-label="Roteiro do agente"

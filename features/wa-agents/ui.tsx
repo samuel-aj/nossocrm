@@ -425,8 +425,22 @@ export function TabPanel({
 // ---------------------------------------------------------------- Chips arrastáveis
 
 /**
+ * Tipo MIME próprio do arrasto de um chip: a textarea do roteiro só trata o
+ * drop que o carrega. Texto comum arrastado (seleção da própria textarea,
+ * outra janela) fica com o comportamento nativo do navegador.
+ */
+export const PROMPT_TOKEN_MIME = 'application/x-wa-prompt-token';
+
+/** true quando o arrasto (`dataTransfer.types`) veio de um chip do roteiro. */
+export function isPromptTokenDrag(types: ArrayLike<string> | null | undefined): boolean {
+  return Array.from(types ?? []).includes(PROMPT_TOKEN_MIME);
+}
+
+/**
  * Chip de token do roteiro: clique insere no cursor; arrastar leva o token
- * (dataTransfer 'text/plain') até o ponto do texto onde for solto.
+ * (dataTransfer com PROMPT_TOKEN_MIME e 'text/plain') até o ponto do texto
+ * onde for solto. Com `draggable={false}` (abas em que a textarea do roteiro
+ * está escondida) o chip só insere pelo clique.
  */
 export function TokenChip({
   token,
@@ -435,6 +449,7 @@ export function TokenChip({
   tone = 'slate',
   icon,
   onInsert,
+  draggable = true,
 }: {
   token: string;
   label?: string;
@@ -442,6 +457,8 @@ export function TokenChip({
   tone?: 'slate' | 'purple' | 'green' | 'blue' | 'amber';
   icon?: React.ReactNode;
   onInsert?: (token: string) => void;
+  /** false: sem arrastar (a textarea do roteiro não está visível nesta aba) */
+  draggable?: boolean;
 }) {
   const tones: Record<string, string> = {
     slate:
@@ -457,17 +474,29 @@ export function TokenChip({
   return (
     <button
       type="button"
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData('text/plain', token);
-        e.dataTransfer.effectAllowed = 'copy';
-      }}
+      draggable={draggable}
+      onDragStart={
+        draggable
+          ? (e) => {
+              e.dataTransfer.setData(PROMPT_TOKEN_MIME, token);
+              e.dataTransfer.setData('text/plain', token);
+              e.dataTransfer.effectAllowed = 'copy';
+            }
+          : undefined
+      }
       onClick={() => onInsert?.(token)}
-      title={title ?? `Clique para inserir no cursor ou arraste até o ponto do roteiro: ${token}`}
+      title={
+        title ??
+        (draggable
+          ? `Clique para inserir no cursor ou arraste até o ponto do roteiro: ${token}`
+          : `Clique para inserir no cursor do roteiro: ${token}`)
+      }
       aria-label={`Inserir ${label ?? token} no roteiro`}
-      className={`inline-flex items-center gap-1 max-w-full pl-1 pr-2 py-1 rounded-md text-xs font-mono border cursor-grab active:cursor-grabbing select-none transition-colors ${tones[tone]}`}
+      className={`inline-flex items-center gap-1 max-w-full ${
+        draggable ? 'pl-1 cursor-grab active:cursor-grabbing' : 'pl-2 cursor-pointer'
+      } pr-2 py-1 rounded-md text-xs font-mono border select-none transition-colors ${tones[tone]}`}
     >
-      <GripVertical size={12} className="opacity-50 shrink-0" aria-hidden="true" />
+      {draggable ? <GripVertical size={12} className="opacity-50 shrink-0" aria-hidden="true" /> : null}
       {icon}
       <span className="truncate">{label ?? token}</span>
     </button>
@@ -478,8 +507,15 @@ export function TokenChip({
 
 /**
  * Painel lateral à direita (não modal: a tela atrás continua editável).
- * Renderiza num portal no body; Esc fecha. Fica montado fechado para
- * preservar o estado (ex.: a conversa do chat de teste).
+ * Renderiza num portal no body; Esc fecha (menos com um modal aberto por
+ * cima, que trata o próprio Esc). Fica montado fechado para preservar o
+ * estado (ex.: a conversa do chat de teste).
+ *
+ * Empilhamento: acima da sidebar (z-20) e do cabeçalho (z-40) e ABAIXO das
+ * notificações do ToastContext (z-50), que precisam aparecer por cima do
+ * painel (erros do teste e do "Ajustar com IA"); os modais (z-[9999])
+ * continuam por cima de tudo. No celular para em cima da barra de navegação
+ * inferior, como o editor do robô.
  */
 export function Drawer({
   open,
@@ -504,7 +540,10 @@ export function Drawer({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      // Um modal aberto por cima (descartar alterações, excluir mídia) fecha só a si mesmo.
+      if (document.querySelector('[role="alertdialog"], [role="dialog"][aria-modal="true"]')) return;
+      onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -516,7 +555,7 @@ export function Drawer({
       role="dialog"
       aria-labelledby={titleId}
       aria-hidden={!open}
-      className={`fixed inset-y-0 right-0 z-[9990] w-full ${widthClass} max-w-full flex flex-col bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-white/10 shadow-2xl transition-transform duration-200 ${
+      className={`fixed top-0 bottom-[calc(var(--app-bottom-nav-height,0px)+var(--app-safe-area-bottom,0px))] right-0 z-[45] w-full ${widthClass} max-w-full flex flex-col bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-white/10 shadow-2xl transition-transform duration-200 ${
         open ? 'translate-x-0' : 'translate-x-full invisible'
       }`}
     >

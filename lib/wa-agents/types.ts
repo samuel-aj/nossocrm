@@ -193,10 +193,40 @@ export type AgentRow = AgentInput & {
 export type AgentPublic = Omit<AgentRow, 'api_key'> & { has_api_key: boolean };
 export type AgentMinimal = { id: string; name: string; persona_name: string | null; enabled: boolean };
 
-/** Versão sem a chave (para a UI): a chave vira só `has_api_key`. */
+// ---------------------------------------------------------------------------
+// Segredos (chave da API e segredos de webhook) nunca voltam em claro para a UI
+// ---------------------------------------------------------------------------
+/** Valor que substitui um segredo salvo nas respostas da API. */
+export const SECRET_MASK = '••••••••';
+
+/** true quando o valor é a máscara (a UI devolveu o segredo sem alterar). */
+export function isMaskedSecret(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().startsWith('••••');
+}
+
+function maskSecret(value: string | null | undefined): string | null {
+  return value && value.trim() ? SECRET_MASK : null;
+}
+
+/** Ações da esteira com o segredo do webhook mascarado. */
+export function maskActionSecrets(actions: EndAction[]): EndAction[] {
+  return (actions ?? []).map(a => (a.type === 'webhook' ? { ...a, secret: maskSecret(a.secret) } : a));
+}
+
+/** Webhooks, resultados e ações durante a conversa com os segredos mascarados. */
+export function maskAgentSecrets<T extends Pick<AgentInput, 'webhooks' | 'outcomes' | 'custom_actions'>>(row: T): T {
+  return {
+    ...row,
+    webhooks: (row.webhooks ?? []).map(w => ({ ...w, secret: maskSecret(w.secret) })),
+    outcomes: (row.outcomes ?? []).map(o => ({ ...o, actions: maskActionSecrets(o.actions) })),
+    custom_actions: (row.custom_actions ?? []).map(c => ({ ...c, actions: maskActionSecrets(c.actions) })),
+  };
+}
+
+/** Versão sem a chave (para a UI): a chave vira só `has_api_key`; segredos de webhook mascarados. */
 export function toAgentPublic(row: AgentRow): AgentPublic {
   const { api_key, ...rest } = row;
-  return { ...rest, has_api_key: !!(api_key && api_key.trim()) };
+  return maskAgentSecrets({ ...rest, has_api_key: !!(api_key && api_key.trim()) });
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +236,13 @@ export function toAgentPublic(row: AgentRow): AgentPublic {
 export const WA_AGENT_FILES_BUCKET = 'wa-agent-files';
 /** Tamanho máximo de um arquivo do agente (50 MB, limite do bucket). */
 export const AGENT_FILE_MAX_BYTES = 52428800;
+
+/** Tamanho máximo de um documento da base de conhecimento (15 MB). */
+export const AGENT_DOC_MAX_BYTES = 15 * 1024 * 1024;
+/** Documentos por agente. */
+export const AGENT_DOCS_MAX_PER_AGENT = 20;
+/** Trechos (chunks) por agente, somando todos os documentos. */
+export const AGENT_CHUNKS_MAX_PER_AGENT = 5000;
 
 export const AGENT_DOC_MIMES = [
   'application/pdf',
@@ -229,6 +266,8 @@ export type AgentDocumentRow = {
   status: AgentDocumentStatus;
   error: string | null;
   chunk_count: number;
+  /** Modelo usado nos embeddings dos trechos (ex.: "openai:text-embedding-3-small"); null sem embedding */
+  embedding_model?: string | null;
   created_by?: string | null;
   created_at: string;
   updated_at: string;
@@ -236,6 +275,34 @@ export type AgentDocumentRow = {
 
 export const AGENT_MEDIA_KINDS = ['image', 'video', 'audio', 'document'] as const;
 export type AgentMediaKind = (typeof AGENT_MEDIA_KINDS)[number];
+
+/** Tipos de arquivo aceitos por categoria de mídia (o que o WhatsApp entrega bem). */
+export const AGENT_MEDIA_MIMES: Record<AgentMediaKind, readonly string[]> = {
+  image: ['image/jpeg', 'image/png', 'image/webp'],
+  video: ['video/mp4', 'video/3gpp'],
+  audio: ['audio/mpeg', 'audio/mp3', 'audio/ogg', 'audio/opus', 'audio/mp4', 'audio/aac', 'audio/wav', 'audio/x-wav'],
+  document: [
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/vnd.ms-powerpoint',
+    'text/plain',
+  ],
+};
+
+/** Mime normalizado (sem parâmetros, minúsculas) ou ''. */
+export function normalizeMime(mime: string | null | undefined): string {
+  return (mime ?? '').split(';')[0].trim().toLowerCase();
+}
+
+/** true quando o mime é aceito para a categoria da mídia. */
+export function isAllowedMediaMime(kind: AgentMediaKind, mime: string | null | undefined): boolean {
+  const m = normalizeMime(mime);
+  return !!m && AGENT_MEDIA_MIMES[kind].includes(m);
+}
 
 export type AgentMediaRow = {
   id: string;
@@ -248,6 +315,8 @@ export type AgentMediaRow = {
   mime: string | null;
   size_bytes: number;
   storage_path: string;
+  /** Cópia no bucket wa-media (feita no primeiro envio e reutilizada) */
+  outbox_path?: string | null;
   created_at: string;
 };
 
@@ -271,7 +340,7 @@ export const AgentDocumentInputSchema = z.object({
   name: z.string().min(1).max(160),
   storage_path: z.string().min(1),
   mime: z.string().max(120),
-  size_bytes: z.number().int().min(0).max(AGENT_FILE_MAX_BYTES),
+  size_bytes: z.number().int().min(0).max(AGENT_DOC_MAX_BYTES),
 });
 export type AgentDocumentInput = z.infer<typeof AgentDocumentInputSchema>;
 
@@ -378,6 +447,17 @@ export type BotRow = BotInput & {
   updated_at: string;
 };
 
+/** Robô para a UI: segredo do passo webhook mascarado. */
+export function toBotPublic<T extends { steps?: unknown }>(row: T): T {
+  const steps = Array.isArray(row.steps) ? (row.steps as Array<Record<string, unknown>>) : [];
+  return {
+    ...row,
+    steps: steps.map(s =>
+      s && typeof s === 'object' && s.type === 'webhook' ? { ...s, secret: maskSecret(s.secret as string | null | undefined) } : s
+    ),
+  };
+}
+
 export type BotRunStatus = 'running' | 'waiting_reply' | 'done' | 'error' | 'cancelled';
 export type BotRunRow = {
   id: string;
@@ -436,6 +516,8 @@ export type ConversationAiState = {
   origem?: string | null;
   /** negócio que originou o início pelo pipeline */
   deal_id?: string | null;
+  /** nomes das mídias já enviadas neste atendimento (enviar_midia não repete) */
+  midias_enviadas?: string[];
 };
 
 // ---------------------------------------------------------------------------

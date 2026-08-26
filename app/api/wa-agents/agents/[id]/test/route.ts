@@ -14,7 +14,8 @@ import { testAgentReply } from '@/lib/wa-agents/test';
 import { getErrorMessage, guardRoute, readJsonBody, validationError } from '../../../_shared';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+/** Resposta com auxiliares (cada um é outra chamada ao modelo) e conhecimento passa de 60 s */
+export const maxDuration = 120;
 
 const BodySchema = z.object({
   messages: z

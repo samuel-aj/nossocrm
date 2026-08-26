@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { actionToken, insertToken, mediaToken } from './PromptEditor';
+import { PROMPT_TOKEN_MIME, isPromptTokenDrag } from './ui';
 
 describe('insertToken', () => {
   it('insere no meio de uma palavra com espaços ao redor', () => {
@@ -36,5 +37,14 @@ describe('tokens', () => {
   it('monta os marcadores de ação e mídia', () => {
     expect(actionToken('tem-advogado')).toBe('[[acao:tem-advogado]]');
     expect(mediaToken('Tabela de preços')).toBe('[[midia:Tabela de preços]]');
+  });
+});
+
+describe('isPromptTokenDrag', () => {
+  it('só reconhece o arrasto de um chip (texto comum e arquivos ficam com o navegador)', () => {
+    expect(isPromptTokenDrag([PROMPT_TOKEN_MIME, 'text/plain'])).toBe(true);
+    expect(isPromptTokenDrag(['text/plain'])).toBe(false);
+    expect(isPromptTokenDrag(['Files'])).toBe(false);
+    expect(isPromptTokenDrag(undefined)).toBe(false);
   });
 });

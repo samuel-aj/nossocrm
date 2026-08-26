@@ -1,10 +1,10 @@
 /**
  * /api/wa-agents/agents
- *   GET  -> admin: { agents: AgentPublic[] } (sem api_key, com has_api_key)
+ *   GET  -> admin: { agents: AgentPublic[] } (sem api_key, com has_api_key; segredos de webhook mascarados)
  *           demais membros: { agents: AgentMinimal[] } (só os ligados; menu do chat)
  *   POST -> (admin) cria um agente a partir de AgentInputSchema -> 201 { agent }
  *           (inclui custom_actions, triggers, helper_agent_ids e tools; gatilho por
- *           pipeline e auxiliares validados na org)
+ *           pipeline e auxiliares validados na org; segredo mascarado vira vazio)
  */
 import { json } from '@/lib/whatsapp/api';
 import { AgentInputSchema, type AgentInput, type AgentMinimal, type AgentRow } from '@/lib/wa-agents/types';
@@ -15,6 +15,7 @@ import {
   guardRoute,
   normalizeApiKeyInput,
   readJsonBody,
+  restoreMaskedSecrets,
   toAgentPublic,
   uniqueIds,
   validateAgentTriggers,
@@ -25,7 +26,7 @@ import {
 export const runtime = 'nodejs';
 
 /** Monta a linha de inserção explicitamente (sem espalhar chaves inesperadas). */
-function toInsertRow(input: AgentInput) {
+function toInsertRow(input: AgentInput, helperIds: string[]) {
   return {
     name: input.name,
     persona_name: input.persona_name ?? null,
@@ -45,7 +46,7 @@ function toInsertRow(input: AgentInput) {
     webhooks: input.webhooks,
     custom_actions: input.custom_actions,
     triggers: input.triggers,
-    helper_agent_ids: uniqueIds(input.helper_agent_ids),
+    helper_agent_ids: helperIds,
     tools: input.tools,
   };
 }
@@ -82,15 +83,19 @@ export async function POST(req: Request) {
 
   const parsed = AgentInputSchema.safeParse(await readJsonBody(req));
   if (!parsed.success) return validationError(parsed.error);
+  // Agente novo não tem segredo salvo: valor mascarado vira vazio
+  const input = { ...parsed.data, ...restoreMaskedSecrets(parsed.data, null) } as AgentInput;
 
+  let helperIds: string[] = [];
   try {
-    if (!(await connectionsBelongToOrg(auth.admin, orgId, parsed.data.connection_ids))) {
+    if (!(await connectionsBelongToOrg(auth.admin, orgId, input.connection_ids))) {
       return connectionNotFoundError();
     }
-    const triggersError = await validateAgentTriggers(auth.admin, orgId, parsed.data.triggers);
+    const triggersError = await validateAgentTriggers(auth.admin, orgId, input.triggers);
     if (triggersError) return triggersError;
-    const helpersError = await validateHelperAgentIds(auth.admin, orgId, parsed.data.helper_agent_ids);
-    if (helpersError) return helpersError;
+    const helpers = await validateHelperAgentIds(auth.admin, orgId, uniqueIds(input.helper_agent_ids));
+    if (!helpers.ok) return helpers.response;
+    helperIds = helpers.ids;
   } catch (err) {
     return json({ error: getErrorMessage(err, 'Falha ao validar os números') }, 500);
   }
@@ -98,7 +103,7 @@ export async function POST(req: Request) {
   const { data, error } = await auth.admin
     .from('wa_ai_agents')
     .insert({
-      ...toInsertRow(parsed.data),
+      ...toInsertRow(input, helperIds),
       organization_id: orgId,
       created_by: auth.user.id,
     })

@@ -1,8 +1,11 @@
 /**
  * Envio de uma mídia cadastrada do agente pelo WhatsApp (ferramenta
- * enviar_midia). O arquivo é copiado do bucket privado wa-agent-files para o
- * wa-media (pasta out da org), assim o chat exibe a mensagem como qualquer
- * mídia enviada; a Evolution/Meta baixa por uma URL assinada curta. SERVER.
+ * enviar_midia). O arquivo é copiado NO SERVIDOR do Storage (sem passar pela
+ * memória da função) do bucket privado wa-agent-files para o wa-media (pasta
+ * out da org) uma única vez por mídia; o caminho da cópia fica em
+ * wa_ai_agent_media.outbox_path e é reutilizado nos envios seguintes. Assim o
+ * chat exibe a mensagem como qualquer mídia enviada e a Evolution/Meta baixa
+ * por uma URL assinada curta. SERVER.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getProvider, type OutboundMediaKind, type SendResult } from '@/lib/whatsapp';
@@ -34,9 +37,18 @@ function fileExtension(name: string): string {
   return m ? m[0].toLowerCase() : '';
 }
 
+function outboxPathFor(organizationId: string, media: AgentMediaRow): string {
+  const original = originalFileName(media.storage_path, media.name);
+  const ext = fileExtension(original);
+  const safeName = sanitizeStorageFileName(ext && !media.name.toLowerCase().endsWith(ext) ? `${media.name}${ext}` : media.name);
+  return `${organizationId}/out/${Date.now()}_agente_${safeName}`;
+}
+
 /**
  * Copia o arquivo do bucket wa-agent-files para wa-media/${orgId}/out/... e
- * devolve o caminho novo. Lança em falha.
+ * devolve o caminho novo. Cópia feita pelo Storage (server-side); se o
+ * Storage não aceitar a cópia entre buckets, cai no download + upload.
+ * Lança em falha.
  */
 export async function copyAgentMediaToOutbox(
   admin: SupabaseClient,
@@ -44,17 +56,53 @@ export async function copyAgentMediaToOutbox(
   media: AgentMediaRow
 ): Promise<string> {
   if (!media.storage_path.startsWith(`${organizationId}/`)) throw new Error('Caminho do arquivo inválido');
+  const path = outboxPathFor(organizationId, media);
+
+  const { error: copyError } = await admin.storage
+    .from(WA_AGENT_FILES_BUCKET)
+    .copy(media.storage_path, path, { destinationBucket: WA_MEDIA_BUCKET });
+  if (!copyError) return path;
+  console.error('[wa-agents] cópia da mídia no Storage falhou, tentando download + upload:', copyError.message);
+
   const { data: blob, error: dlError } = await admin.storage.from(WA_AGENT_FILES_BUCKET).download(media.storage_path);
   if (dlError || !blob) throw new Error(`Falha ao ler a mídia: ${dlError?.message ?? 'arquivo não encontrado'}`);
-
-  const original = originalFileName(media.storage_path, media.name);
-  const ext = fileExtension(original);
-  const safeName = sanitizeStorageFileName(ext && !media.name.toLowerCase().endsWith(ext) ? `${media.name}${ext}` : media.name);
-  const path = `${organizationId}/out/${Date.now()}_agente_${safeName}`;
   const { error: upError } = await admin.storage
     .from(WA_MEDIA_BUCKET)
     .upload(path, blob, { contentType: media.mime || blob.type || undefined, upsert: false });
   if (upError) throw new Error(`Falha ao preparar a mídia: ${upError.message}`);
+  return path;
+}
+
+/**
+ * Caminho da cópia da mídia no wa-media: reutiliza `outbox_path` quando o
+ * objeto ainda existe; senão copia e guarda o caminho na mídia (melhor
+ * esforço). Lança em falha da cópia.
+ */
+export async function ensureAgentMediaOutbox(
+  admin: SupabaseClient,
+  organizationId: string,
+  media: AgentMediaRow
+): Promise<string> {
+  const cached = (media.outbox_path ?? '').trim();
+  if (cached && cached.startsWith(`${organizationId}/`)) {
+    try {
+      const { data: exists, error } = await admin.storage.from(WA_MEDIA_BUCKET).exists(cached);
+      if (!error && exists) return cached;
+    } catch (e) {
+      console.error('[wa-agents] conferir cópia da mídia falhou:', errorMessage(e));
+    }
+  }
+  const path = await copyAgentMediaToOutbox(admin, organizationId, media);
+  try {
+    await admin
+      .from('wa_ai_agent_media')
+      .update({ outbox_path: path })
+      .eq('organization_id', organizationId)
+      .eq('id', media.id);
+    media.outbox_path = path;
+  } catch (e) {
+    console.error('[wa-agents] guardar caminho da cópia da mídia falhou:', errorMessage(e));
+  }
   return path;
 }
 
@@ -77,7 +125,7 @@ export async function sendAgentMedia(admin: SupabaseClient, input: SendAgentMedi
   let mediaPath: string;
   let signedUrl: string;
   try {
-    mediaPath = await copyAgentMediaToOutbox(admin, orgId, media);
+    mediaPath = await ensureAgentMediaOutbox(admin, orgId, media);
     const { data: signed, error: signErr } = await admin.storage
       .from(WA_MEDIA_BUCKET)
       .createSignedUrl(mediaPath, SIGNED_URL_SECONDS);

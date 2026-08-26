@@ -3,19 +3,27 @@
  *   GET  -> { media: AgentMediaRow[] } (ordem de cadastro)
  *   POST -> AgentMediaInputSchema { name, description, kind, storage_path, mime, size_bytes }
  *           (storage_path em ${orgId}/agents/${id}/media/; nome único por agente;
- *           mime coerente com a categoria) -> 201 { media }
+ *           mime numa lista fechada por categoria; tipo e tamanho conferidos no
+ *           objeto do Storage, que prevalece sobre o corpo) -> 201 { media }
  */
 import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { isAgentFilePath } from '@/lib/wa-agents/files';
 import { loadAgentMedia, MEDIA_COLUMNS } from '@/lib/wa-agents/resources';
-import { AgentMediaInputSchema, type AgentMediaRow } from '@/lib/wa-agents/types';
+import { getAgentFileInfo, isGenericMime } from '@/lib/wa-agents/storage';
+import {
+  AGENT_FILE_MAX_BYTES,
+  AGENT_MEDIA_MIMES,
+  AgentMediaInputSchema,
+  isAllowedMediaMime,
+  normalizeMime,
+  type AgentMediaRow,
+} from '@/lib/wa-agents/types';
 import {
   agentBelongsToOrg,
   agentNotFoundError,
   getErrorMessage,
   guardRoute,
-  mediaMimeMatchesKind,
   mediaNameTaken,
   readJsonBody,
   validationError,
@@ -58,15 +66,39 @@ export async function POST(req: Request, ctx: Ctx) {
   if (!isAgentFilePath(input.storage_path, orgId, id, 'media')) {
     return validationMessage('Caminho do arquivo inválido para este agente', 'storage_path');
   }
-  if (!mediaMimeMatchesKind(input.kind, input.mime)) {
-    return validationMessage('O tipo do arquivo não combina com a categoria escolhida', 'mime');
+  const bodyMime = normalizeMime(input.mime);
+  if (!isAllowedMediaMime(input.kind, bodyMime)) {
+    return validationMessage(`Tipo de arquivo não aceito para esta categoria. Aceitos: ${AGENT_MEDIA_MIMES[input.kind].join(', ')}`, 'mime');
   }
 
+  let mime = bodyMime;
+  let sizeBytes = input.size_bytes;
   try {
     if (!(await agentBelongsToOrg(auth.admin, orgId, id))) return agentNotFoundError();
     const existing = await loadAgentMedia(auth.admin, orgId, id);
     if (mediaNameTaken(existing, name)) {
       return validationMessage('Já existe uma mídia com este nome neste agente', 'name');
+    }
+
+    // O objeto no Storage manda: tipo e tamanho reais do arquivo enviado
+    const info = await getAgentFileInfo(auth.admin, input.storage_path);
+    if (!info) return validationMessage('Arquivo não encontrado no armazenamento. Envie o arquivo de novo.', 'storage_path');
+    const storedMime = isGenericMime(info.mime) ? null : info.mime;
+    if (storedMime) {
+      if (storedMime !== bodyMime) {
+        return validationMessage(`O tipo do arquivo enviado (${storedMime}) não combina com o informado (${bodyMime})`, 'mime');
+      }
+      if (!isAllowedMediaMime(input.kind, storedMime)) {
+        return validationMessage('O tipo do arquivo enviado não é aceito para esta categoria', 'mime');
+      }
+      mime = storedMime;
+    }
+    if (typeof info.size === 'number') {
+      if (info.size > AGENT_FILE_MAX_BYTES) return validationMessage('Arquivo maior que o limite de 50 MB', 'size_bytes');
+      if (info.size !== input.size_bytes) {
+        return validationMessage('O tamanho do arquivo enviado não combina com o informado', 'size_bytes');
+      }
+      sizeBytes = info.size;
     }
   } catch (err) {
     return json({ error: getErrorMessage(err, 'Falha ao validar a mídia') }, 500);
@@ -80,8 +112,8 @@ export async function POST(req: Request, ctx: Ctx) {
       name,
       description: input.description.trim() || null,
       kind: input.kind,
-      mime: input.mime.trim() || null,
-      size_bytes: input.size_bytes,
+      mime,
+      size_bytes: sizeBytes,
       storage_path: input.storage_path,
     })
     .select(MEDIA_COLUMNS)

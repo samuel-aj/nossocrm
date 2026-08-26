@@ -7,14 +7,22 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ModelMessage } from 'ai';
 import { buildSystemPrompt, type ConversationContext } from './context';
-import { generateAgentReply, NO_REPLY_TOKEN, type ReplySegment } from './engine';
+import {
+  generateAgentReply,
+  MAX_HELPER_CALLS_PER_RUN,
+  MAX_KNOWLEDGE_CALLS_PER_RUN,
+  NO_REPLY_TOKEN,
+  type ReplySegment,
+} from './engine';
 import { errorMessage } from './errors';
 import { consultHelperAgent } from './helpers';
 import { searchKnowledge } from './knowledge';
 import { resolveAgentModel } from './model';
 import { loadAgentResources } from './resources';
 import { logRun } from './runs';
+import { sanitizeSavedData } from './savedData';
 import { splitLines } from './split';
+import { normalizeKeyword } from './text';
 import type { AgentToolRuntime } from './tools';
 import type { AgentRow, KnowledgeHit } from './types';
 
@@ -59,7 +67,7 @@ export function buildTestContext(input: {
       ai_paused_by: null,
       ai_agent_id: input.agent.id,
       ai_resume_at: null,
-      ai_state: { dados: input.state ?? {} },
+      ai_state: { dados: sanitizeSavedData(input.state ?? {}) },
       ai_last_processed_at: null,
       ai_lock_until: null,
       ai_approval: null,
@@ -122,14 +130,35 @@ export async function testAgentReply(
   const system = buildSystemPrompt({ agent, ctx, resources, knowledge });
   const messages = toModelMessages(input.messages);
 
+  // Mesmos tetos por resposta da conversa real (consultas à base e a auxiliares)
+  const mediaQueued = new Set<string>();
+  let helperCalls = 0;
+  let knowledgeCalls = 0;
   const runtime: AgentToolRuntime = {
     documents: resources.documents,
     media: resources.media,
     helpers: resources.helpers,
-    searchKnowledge: q => searchKnowledge(admin, { organizationId, agent, query: q, limit: TOOL_KNOWLEDGE_LIMIT }),
-    // Simulado: nada é enviado
-    sendMedia: async media => ({ ok: true, note: `mídia ${media.name} enviada (simulado)` }),
-    consultHelper: (helper, question) => consultHelperAgent(admin, { organizationId, helper, question, ctx, askedBy: agent }),
+    searchKnowledge: async q => {
+      knowledgeCalls += 1;
+      if (knowledgeCalls > MAX_KNOWLEDGE_CALLS_PER_RUN) {
+        throw new Error(`Limite de ${MAX_KNOWLEDGE_CALLS_PER_RUN} consultas à base de conhecimento nesta resposta atingido: responda com o que já tem`);
+      }
+      return searchKnowledge(admin, { organizationId, agent, query: q, limit: TOOL_KNOWLEDGE_LIMIT });
+    },
+    // Simulado: nada é enviado (mas cada mídia só uma vez por resposta, como na conversa real)
+    sendMedia: async media => {
+      const key = normalizeKeyword(media.name);
+      if (mediaQueued.has(key)) return { ok: false, error: `mídia "${media.name}" já enviada neste atendimento; não envie de novo` };
+      mediaQueued.add(key);
+      return { ok: true, note: `mídia ${media.name} enviada (simulado)` };
+    },
+    consultHelper: async (helper, question) => {
+      helperCalls += 1;
+      if (helperCalls > MAX_HELPER_CALLS_PER_RUN) {
+        return `Limite de ${MAX_HELPER_CALLS_PER_RUN} consultas a agentes auxiliares nesta resposta atingido: responda com o que já tem.`;
+      }
+      return consultHelperAgent(admin, { organizationId, helper, question, ctx, askedBy: agent });
+    },
   };
 
   try {

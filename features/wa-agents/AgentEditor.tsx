@@ -47,6 +47,7 @@ import {
 import { MODEL_CATALOG, PROVIDER_LABELS } from '@/lib/wa-agents/catalog';
 import { DEFAULT_OUTCOMES, DEFAULT_SYSTEM_PROMPT } from '@/lib/wa-agents/defaults';
 import {
+  WaAgentsApiError,
   useSaveWaAgent,
   useWaAgentDocuments,
   useWaAgentMedia,
@@ -731,6 +732,12 @@ export const AgentEditor: React.FC<{
 
   const patch = (p: Partial<AgentFormState>) => setForm((prev) => ({ ...prev, ...p }));
 
+  // Formulário mais recente, para callbacks que chegam depois de uma chamada ao servidor.
+  const formRef = useRef(form);
+  useEffect(() => {
+    formRef.current = form;
+  });
+
   const options = optionsQ.data;
   const connections = options?.connections ?? [];
   const agents = agentsQ.data ?? [];
@@ -783,6 +790,16 @@ export const AgentEditor: React.FC<{
     window.setTimeout(() => setPromptHighlight(false), 1200);
   };
 
+  /** Mídia renomeada: troca `[[midia:antigo]]` por `[[midia:novo]]` no roteiro. */
+  const renameMediaTokens = (oldName: string, newName: string) => {
+    const from = mediaToken(oldName);
+    const to = mediaToken(newName);
+    const current = formRef.current.system_prompt;
+    if (from === to || !current.includes(from)) return;
+    patch({ system_prompt: current.split(from).join(to) });
+    showToast('Marcadores da mídia atualizados no roteiro. Salve para valer.', 'info');
+  };
+
   const handleSave = async (): Promise<boolean> => {
     const friendly = findFriendlyIssue(form, agents);
     if (friendly) {
@@ -790,7 +807,13 @@ export const AgentEditor: React.FC<{
       showToast(friendly.message, 'error');
       return false;
     }
-    const payload = toPayload(form);
+    // Auxiliar já excluído (a exclusão não limpa os outros agentes) some do formulário
+    // e do payload; senão o servidor recusa qualquer mudança nos auxiliares.
+    const helperIds = agentsQ.isSuccess
+      ? form.helper_agent_ids.filter((id) => agents.some((a) => a.id === id))
+      : form.helper_agent_ids;
+    if (helperIds.length !== form.helper_agent_ids.length) patch({ helper_agent_ids: helperIds });
+    const payload = toPayload({ ...form, helper_agent_ids: helperIds });
     const parsed = AgentInputSchema.safeParse(payload);
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
@@ -817,6 +840,9 @@ export const AgentEditor: React.FC<{
       showToast(agentId ? 'Agente salvo' : 'Agente criado. Agora você pode enviar documentos e mídias e testar.', 'success');
       return true;
     } catch (err) {
+      // Validação do servidor: leva até a aba do campo recusado.
+      const root = err instanceof WaAgentsApiError ? String(err.path?.[0] ?? '') : '';
+      if (FIELD_TABS[root]) setTab(FIELD_TABS[root]);
       showToast(errorMessage(err, 'Falha ao salvar o agente'), 'error');
       return false;
     }
@@ -965,6 +991,7 @@ export const AgentEditor: React.FC<{
         <KnowledgePanel
           agentId={agentId}
           onInsertMedia={(name) => insertPromptToken(mediaToken(name))}
+          onRenameMedia={renameMediaTokens}
           onRequestSave={() => void handleSave()}
           saving={save.isPending}
         />
@@ -1309,8 +1336,8 @@ export const AgentEditor: React.FC<{
         </Panel>
       </TabPanel>
 
-      {/* Barra fixa inferior */}
-      <div className="sticky bottom-0 z-10 -mx-1 px-1 pb-1">
+      {/* Barra fixa inferior: no celular para em cima da barra de navegação (BottomNav, z-50). */}
+      <div className="sticky bottom-[calc(var(--app-bottom-nav-height,0px)+var(--app-safe-area-bottom,0px))] z-10 -mx-1 px-1 pb-1">
         <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur border border-slate-200 dark:border-white/10 rounded-xl shadow-lg p-3 flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-3">
             <button

@@ -14,7 +14,8 @@ import { runAgentOnConversation } from '@/lib/wa-agents/engine';
 import { getErrorMessage, guardRoute, readJsonBody, validationError } from '../_shared';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+/** O agente roda em after() dentro deste teto: geração + auxiliares + envio das linhas */
+export const maxDuration = 120;
 
 const BodySchema = z.object({
   conversationId: z.string().uuid(),

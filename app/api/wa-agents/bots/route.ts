@@ -1,8 +1,9 @@
 /**
  * /api/wa-agents/bots  (admin)
- *   GET  -> { bots: BotRow[] }
+ *   GET  -> { bots: BotRow[] }  (segredo do passo webhook mascarado)
  *   POST -> BotInputSchema -> 201 { bot }
- *           (aceita start_step_id e os campos do quadro nos passos: next_step_id, ui, passo webhook)
+ *           (aceita start_step_id e os campos do quadro nos passos: next_step_id, ui, passo webhook;
+ *           segredo mascarado vira vazio)
  */
 import { json } from '@/lib/whatsapp/api';
 import { BotInputSchema, type BotRow } from '@/lib/wa-agents/types';
@@ -12,6 +13,8 @@ import {
   getErrorMessage,
   guardRoute,
   readJsonBody,
+  restoreMaskedBotSecrets,
+  toBotPublic,
   validateBotSteps,
   validationError,
 } from '../_shared';
@@ -29,7 +32,7 @@ export async function GET() {
     .order('created_at', { ascending: true });
   if (error) return json({ error: error.message }, 500);
 
-  return json({ bots: (data ?? []) as BotRow[] });
+  return json({ bots: ((data ?? []) as BotRow[]).map(toBotPublic) });
 }
 
 export async function POST(req: Request) {
@@ -39,8 +42,9 @@ export async function POST(req: Request) {
   const parsed = BotInputSchema.safeParse(await readJsonBody(req));
   if (!parsed.success) return validationError(parsed.error);
   const input = parsed.data;
+  const steps = restoreMaskedBotSecrets(input.steps, null);
 
-  const stepsError = validateBotSteps(input.steps, input.start_step_id);
+  const stepsError = validateBotSteps(steps, input.start_step_id);
   if (stepsError) return stepsError;
 
   try {
@@ -58,7 +62,7 @@ export async function POST(req: Request) {
       enabled: input.enabled,
       connection_id: input.connection_id,
       trigger: input.trigger,
-      steps: input.steps,
+      steps,
       start_step_id: input.start_step_id ?? null,
       organization_id: auth.user.organizationId,
       created_by: auth.user.id,
@@ -67,5 +71,5 @@ export async function POST(req: Request) {
     .single();
   if (error) return json({ error: error.message }, 500);
 
-  return json({ bot: data as BotRow }, 201);
+  return json({ bot: toBotPublic(data as BotRow) }, 201);
 }
