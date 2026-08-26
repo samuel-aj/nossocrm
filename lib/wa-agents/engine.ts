@@ -769,9 +769,26 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
         pushEvent('media_not_found', { nome: seg.name });
         continue;
       }
+      // Áudio não aceita legenda no WhatsApp (Meta e Evolution ignoram): a frase vai como
+      // mensagem de texto separada, ANTES do arquivo; senão ficava só no CRM e o contato
+      // nunca a recebia
+      const captionText = (seg.caption ?? '').trim();
+      const captionAsText = !!captionText && media.kind === 'audio';
+      if (captionAsText) {
+        const capLines = splitLines(captionText);
+        if ((lines.length > 0 || mediaSent.length > 0) && agent.line_delay_ms > 0) await sleep(agent.line_delay_ms);
+        await sendLines(admin, ctx, agent, capLines, { renewLock: renew });
+        lines.push(...capLines);
+      }
       if ((lines.length > 0 || mediaSent.length > 0) && agent.line_delay_ms > 0) await sleep(agent.line_delay_ms);
       await renew();
-      const sent = await sendAgentMedia(admin, { organizationId, agent, ctx, media, caption: seg.caption });
+      const sent = await sendAgentMedia(admin, {
+        organizationId,
+        agent,
+        ctx,
+        media,
+        caption: captionAsText ? undefined : seg.caption,
+      });
       await renew();
       if (sent.ok) {
         mediaSent.push(media.name);
