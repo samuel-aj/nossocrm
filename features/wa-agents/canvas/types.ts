@@ -17,6 +17,7 @@ export const TRIGGER_LABELS: Record<BotTriggerType, string> = {
   deal_created: 'Cadastro no pipeline',
   deal_stage_entered: 'Entrou na etapa',
   manual: 'Manual',
+  agent_followup: 'Follow-up do agente de IA',
 };
 
 /** Rótulos dos tipos de bloco. */
@@ -61,7 +62,7 @@ export type BlockKind = 'linear' | 'branch' | 'terminal';
 
 export const BLOCK_KIND: Record<StepType, BlockKind> = {
   send_text: 'linear',
-  send_template: 'linear',
+  send_template: 'branch',
   wait: 'linear',
   wait_reply: 'branch',
   condition: 'branch',
@@ -140,7 +141,7 @@ export type TagData = { tag: string };
 export type WebhookData = { url: string; secret: string; body_template: string };
 export type HandoffData = { agent_id: string };
 /** Modelo de mensagem escolhido (o nome fica guardado para o resumo no balão). */
-export type TemplateData = { template_id: string; template_name: string };
+export type TemplateData = { template_id: string; template_name: string; buttons: string[]; timeout_minutes: number };
 export type EndData = Record<string, never>;
 
 /** Um bloco dentro do balão (= um passo do robô). O id do bloco é o id do passo. */
@@ -188,6 +189,12 @@ export const HANDLE_TIMEOUT = 'timeout';
 /** Saída "Senão" da Condição. */
 export const HANDLE_ELSE = 'else';
 const RULE_HANDLE_PREFIX = 'rule:';
+const BUTTON_HANDLE_PREFIX = 'btn:';
+
+/** Saída de um botão de resposta rápida do Modelo de mensagem (pela posição do botão). */
+export function buttonHandleId(index: number): string {
+  return `${BUTTON_HANDLE_PREFIX}${index}`;
+}
 
 export function ruleHandleId(ruleId: string): string {
   return `${RULE_HANDLE_PREFIX}${ruleId}`;
@@ -215,12 +222,26 @@ const RULE_PREVIEW_LENGTH = 22;
 export function blockOutputs(block: Block): BubbleOutput[] {
   switch (block.type) {
     case 'send_text':
-    case 'send_template':
     case 'wait':
     case 'move_stage':
     case 'add_tag':
     case 'webhook':
       return [{ handleId: HANDLE_NEXT, label: 'Depois', tone: 'slate' }];
+    case 'send_template':
+      return block.data.buttons.length > 0
+        ? [
+            ...block.data.buttons.map((text, i) => ({
+              handleId: buttonHandleId(i),
+              label: text.trim() || `Botão ${i + 1}`,
+              tone: 'green' as const,
+            })),
+            { handleId: HANDLE_NEXT, label: 'Outra resposta', tone: 'slate' as const },
+            { handleId: HANDLE_TIMEOUT, label: 'Sem resposta', tone: 'amber' as const },
+          ]
+        : [
+            { handleId: HANDLE_NEXT, label: 'Respondeu', tone: 'green' as const },
+            { handleId: HANDLE_TIMEOUT, label: 'Sem resposta', tone: 'amber' as const },
+          ];
     case 'wait_reply':
       return [
         { handleId: HANDLE_NEXT, label: 'Respondeu', tone: 'green' },

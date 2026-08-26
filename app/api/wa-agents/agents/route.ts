@@ -45,6 +45,7 @@ function toInsertRow(input: AgentInput, helperIds: string[]) {
     stop_rules: input.stop_rules,
     max_replies: input.max_replies,
     start_mode: input.start_mode,
+    followups: input.followups,
     outcomes: input.outcomes,
     webhooks: input.webhooks,
     custom_actions: input.custom_actions,

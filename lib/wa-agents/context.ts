@@ -10,6 +10,7 @@ import { renderTemplate } from './template';
 import { formatKnowledgeHits } from './knowledge';
 import { normalizeKeyword } from './text';
 import {
+  AgentFollowupSchema,
   AgentToolsSchema,
   AgentTriggersSchema,
   AgentWebhookSchema,
@@ -21,6 +22,7 @@ import {
   SCRIPT_ACTION_MARKER_RE,
   SCRIPT_MEDIA_MARKER_RE,
   type AgentDocumentRow,
+  type AgentFollowup,
   type AgentMediaRow,
   type AgentProvider,
   type AgentResources,
@@ -189,6 +191,10 @@ export function normalizeAgentRow(raw: Record<string, unknown>): AgentRow {
     stop_rules: String(raw.stop_rules ?? ''),
     max_replies: num(raw.max_replies, 0),
     start_mode: raw.start_mode === 'wait_reply' ? 'wait_reply' : 'speak_first',
+    followups: parseArray<AgentFollowup>(raw.followups, item => {
+      const p = AgentFollowupSchema.safeParse(item);
+      return p.success ? p.data : null;
+    }),
     outcomes: parseArray<Outcome>(raw.outcomes, item => {
       const p = OutcomeSchema.safeParse(item);
       return p.success ? p.data : null;
@@ -849,6 +855,8 @@ export function buildSystemPrompt(input: {
   knowledge?: KnowledgeHit[] | null;
   /** Teto de respostas (max_replies) atingido: esta resposta precisa ser a última e encerrar o atendimento */
   mustClose?: boolean;
+  /** Follow-up por tempo sem resposta: quanto tempo o lead está calado e a instrução da equipe */
+  followup?: { instruction: string; silentFor: string } | null;
 }): string {
   const { agent, ctx } = input;
   const vars = buildPromptVars(input);
@@ -913,6 +921,11 @@ export function buildSystemPrompt(input: {
   if (state.handoff) {
     lines.push(
       `- Você acabou de assumir esta conversa vinda do agente ${state.handoff.from_agent_name}. Resumo de passagem: ${state.handoff.summary}. Continue de onde parou, sem se apresentar de novo se já houve apresentação.`
+    );
+  }
+  if (input.followup) {
+    lines.push(
+      `- FOLLOW-UP: o cliente está sem responder há ${input.followup.silentFor}. Escreva uma mensagem curta de retomada (1 ou 2 linhas), gentil e sem cobrar; não repita o que já foi dito e não se apresente de novo. Termine com a pergunta que ficou em aberto, se houver.${input.followup.instruction ? ` Instrução da equipe para este follow-up: ${input.followup.instruction}` : ''}`
     );
   }
   if (contextoExtra) {

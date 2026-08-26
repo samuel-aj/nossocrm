@@ -76,6 +76,8 @@ export type RunAgentInput = {
   skipBuffer?: boolean;
   triggerMessageId?: string;
   depth?: number;
+  /** Follow-up por tempo sem resposta (trigger 'followup'): instrução da equipe e há quanto tempo o lead está calado */
+  followup?: { instruction: string; silentFor: string };
 };
 
 export type CollectedToolCall = { tool: string; input: unknown; output?: unknown };
@@ -694,10 +696,23 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     const repliesSoFar = Number(priorState.respostas ?? 0) || 0;
     const mustClose = agent.max_replies > 0 && repliesSoFar + 1 >= agent.max_replies;
     // Instrução de apresentação só no primeiro contato pelo pipeline (não nas rodadas seguintes nem após passagem)
-    const system = buildSystemPrompt({ agent, ctx, firstContact: input.trigger === 'deal', resources, knowledge, mustClose });
+    const system = buildSystemPrompt({
+      agent,
+      ctx,
+      firstContact: input.trigger === 'deal',
+      resources,
+      knowledge,
+      mustClose,
+      followup: input.followup ?? null,
+    });
     const messages = await buildHistoryMessages(admin, ctx, agent.history_limit);
     if (input.forceReply && (messages.length === 0 || messages[messages.length - 1].role === 'assistant')) {
-      messages.push({ role: 'user', content: '(o sistema pediu que você inicie/continue o atendimento agora)' });
+      messages.push({
+        role: 'user',
+        content: input.followup
+          ? `(o cliente está sem responder há ${input.followup.silentFor}; o sistema pediu que você mande o follow-up agora)`
+          : '(o sistema pediu que você inicie/continue o atendimento agora)',
+      });
     }
 
     // Efeitos das ferramentas condicionais. enviar_midia só enfileira: a mídia

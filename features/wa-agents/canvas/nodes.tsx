@@ -84,8 +84,11 @@ export function blockSummary(block: Block, options: WaAgentOptions | undefined, 
   switch (block.type) {
     case 'send_text':
       return block.data.text.trim() || 'Sem texto ainda';
-    case 'send_template':
-      return block.data.template_name.trim() || (block.data.template_id ? 'Modelo escolhido' : 'Escolha o modelo');
+    case 'send_template': {
+      const name = block.data.template_name.trim() || (block.data.template_id ? 'Modelo escolhido' : 'Escolha o modelo');
+      const n = block.data.buttons.length;
+      return n > 0 ? `${name} · ${n} ${n === 1 ? 'botão' : 'botões'}` : name;
+    }
     case 'wait': {
       const { amount, unit } = block.data;
       return `${amount} ${amount === 1 ? WAIT_UNIT_SINGULAR[unit] : WAIT_UNIT_LABELS[unit]}`;
@@ -292,7 +295,7 @@ function TriggerNodeView({ id, data, selected }: NodeProps<TriggerNode>) {
           aria-label="Quando o robô dispara"
           onChange={(e) => {
             const t = e.target.value as BotTriggerType;
-            set(t === 'manual' ? { trigger_type: t, board_id: '', stage_id: '' } : { trigger_type: t });
+            set(t === 'manual' || t === 'agent_followup' ? { trigger_type: t, board_id: '', stage_id: '' } : { trigger_type: t });
           }}
         >
           {(Object.keys(TRIGGER_LABELS) as BotTriggerType[]).map((t) => (
@@ -301,7 +304,12 @@ function TriggerNodeView({ id, data, selected }: NodeProps<TriggerNode>) {
             </option>
           ))}
         </select>
-        {data.trigger_type !== 'manual' ? (
+        {data.trigger_type === 'agent_followup' ? (
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Entra em ação quando uma regra de follow-up de um agente de IA aponta para este robô (lead sem responder).
+          </p>
+        ) : null}
+        {data.trigger_type !== 'manual' && data.trigger_type !== 'agent_followup' ? (
           <select
             className={INPUT_CLASS}
             value={data.board_id}

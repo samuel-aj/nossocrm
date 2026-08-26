@@ -31,6 +31,7 @@ import {
   Settings,
   Users,
   Calculator,
+  AlarmClock,
 } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
 import { useToast } from '@/context/ToastContext';
@@ -45,6 +46,7 @@ import {
   type CustomAction,
   type Outcome,
   type AgentStartMode,
+  type AgentFollowup,
 } from '@/lib/wa-agents/types';
 import { MODEL_CATALOG, PROVIDER_LABELS } from '@/lib/wa-agents/catalog';
 import { DEFAULT_OUTCOMES, DEFAULT_STOP_RULES, DEFAULT_SYSTEM_PROMPT } from '@/lib/wa-agents/defaults';
@@ -55,6 +57,7 @@ import {
   useWaAgentMedia,
   useWaAgentOptions,
   useWaAgentsList,
+  useWaBotsList,
   type WaAgentListItem,
   type WaAgentOptions,
 } from './useWaAgents';
@@ -62,6 +65,7 @@ import { OutcomesEditor } from './OutcomesEditor';
 import { CustomActionsEditor } from './CustomActionsEditor';
 import { WebhooksEditor } from './WebhooksEditor';
 import { PromptEditor, insertToken, mediaToken } from './PromptEditor';
+import { FollowupsEditor } from './FollowupsEditor';
 import { KnowledgePanel } from './KnowledgePanel';
 import { AgentTestDrawer } from './AgentTestDrawer';
 import {
@@ -117,6 +121,8 @@ type AgentFormState = {
   only_new_conversations: boolean;
   /** Ao ser ativado pelo chat/pipeline: fala primeiro ou espera a próxima mensagem do contato */
   start_mode: AgentStartMode;
+  /** Régua de follow-ups por tempo sem resposta do lead */
+  followups: AgentFollowup[];
   outcomes: Outcome[];
   custom_actions: CustomAction[];
   triggers: AgentTriggers;
@@ -168,6 +174,7 @@ const FIELD_TABS: Record<string, EditorTab> = {
   max_replies: 'config',
   only_new_conversations: 'config',
   start_mode: 'config',
+  followups: 'gatilhos',
   webhooks: 'config',
   outcomes: 'acoes',
   custom_actions: 'acoes',
@@ -212,6 +219,7 @@ function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInpu
     max_replies: src.max_replies ?? 0,
     only_new_conversations: src.only_new_conversations ?? false,
     start_mode: src.start_mode ?? 'speak_first',
+    followups: src.followups ?? [],
     outcomes: src.outcomes ?? DEFAULT_OUTCOMES,
     custom_actions: src.custom_actions ?? [],
     triggers: normalizeTriggers(src.triggers),
@@ -240,6 +248,7 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
     max_replies: clampField('max_replies', form.max_replies),
     only_new_conversations: form.only_new_conversations,
     start_mode: form.start_mode,
+    followups: form.followups,
     outcomes: form.outcomes,
     custom_actions: form.custom_actions,
     triggers: {
@@ -281,6 +290,7 @@ const FIELD_NAMES: Record<string, string> = {
   human_pause_minutes: 'Pausa após atendente responder',
   max_replies: 'Limite de respostas',
   start_mode: 'Ao ser ativado',
+  followups: 'Follow-ups',
   outcomes: 'Resultados',
   custom_actions: 'Ações durante a conversa',
   triggers: 'Gatilhos',
@@ -715,6 +725,7 @@ export const AgentEditor: React.FC<{
   const { showToast } = useToast();
   const optionsQ = useWaAgentOptions();
   const agentsQ = useWaAgentsList();
+  const botsQ = useWaBotsList();
   const save = useSaveWaAgent();
 
   const [form, setForm] = useState<AgentFormState>(() => buildInitialForm(agent, initial));
@@ -1157,6 +1168,14 @@ export const AgentEditor: React.FC<{
 
         <Panel title="Gatilhos" description={`Quando o agente entra em ação: ${triggerSummary}.`} icon={<Zap size={16} />}>
           <TriggersFields value={form.triggers} onChange={(triggers) => patch({ triggers })} options={options} />
+        </Panel>
+
+        <Panel
+          title="Follow-ups"
+          description="Quando o lead para de responder: o agente retoma sozinho ou um robô entra em ação."
+          icon={<AlarmClock size={16} />}
+        >
+          <FollowupsEditor value={form.followups} onChange={(followups) => patch({ followups })} bots={botsQ.data ?? []} />
         </Panel>
       </TabPanel>
 

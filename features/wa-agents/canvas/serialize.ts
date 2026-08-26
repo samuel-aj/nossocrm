@@ -29,6 +29,7 @@ import {
   WAIT_UNIT_SECONDS,
   bubbleOutputs,
   edgeIdFor,
+  buttonHandleId,
   isLinearType,
   ruleHandleId,
   unitFor,
@@ -124,7 +125,7 @@ export function createBlock(type: StepType, id: string = newId()): Block {
     case 'send_text':
       return { id, type, data: { text: '' } };
     case 'send_template':
-      return { id, type, data: { template_id: '', template_name: '' } };
+      return { id, type, data: { template_id: '', template_name: '', buttons: [], timeout_minutes: 1440 } };
     case 'wait':
       return { id, type, data: { amount: 1, unit: 'h' } };
     case 'wait_reply':
@@ -188,7 +189,16 @@ function stepToBlock(step: BotStep): Block {
     case 'send_text':
       return { id, type: 'send_text', data: { text: step.text } };
     case 'send_template':
-      return { id, type: 'send_template', data: { template_id: step.template_id, template_name: step.template_name ?? '' } };
+      return {
+        id,
+        type: 'send_template',
+        data: {
+          template_id: step.template_id,
+          template_name: step.template_name ?? '',
+          buttons: [...(step.buttons ?? [])],
+          timeout_minutes: step.timeout_minutes ?? 1440,
+        },
+      };
     case 'wait': {
       const unit = unitFor(step.seconds);
       return {
@@ -309,12 +319,16 @@ export function botToFlow(bot: BotRow | null, fallbackSteps: BotStep[]): FlowGra
     const next = canvasMode ? (step.next_step_id ?? null) : (step.next_step_id ?? listNext);
     switch (step.type) {
       case 'send_text':
-      case 'send_template':
       case 'wait':
       case 'move_stage':
       case 'add_tag':
       case 'webhook':
         link(bubble.id, HANDLE_NEXT, next);
+        break;
+      case 'send_template':
+        link(bubble.id, HANDLE_NEXT, next);
+        link(bubble.id, HANDLE_TIMEOUT, step.on_timeout_step_id);
+        (step.buttons ?? []).forEach((_, i) => link(bubble.id, buttonHandleId(i), (step.button_step_ids ?? [])[i] ?? null));
         break;
       case 'wait_reply':
         link(bubble.id, HANDLE_NEXT, next);
@@ -393,6 +407,10 @@ function blockToStep(block: Block, to: (handle: string) => string | null, ui: { 
         type: 'send_template',
         template_id: block.data.template_id,
         template_name: block.data.template_name.trim() || undefined,
+        buttons: block.data.buttons.map((b) => b.trim()),
+        button_step_ids: block.data.buttons.map((_, i) => to(buttonHandleId(i))),
+        timeout_minutes: block.data.timeout_minutes,
+        on_timeout_step_id: to(HANDLE_TIMEOUT),
         next_step_id: to(HANDLE_NEXT),
         ui,
       };
@@ -487,7 +505,7 @@ export function flowToBot(nodes: FlowNode[], edges: FlowEdge[], header: FlowHead
     connection_id: header.connection_id || null,
     trigger: {
       type: triggerType,
-      board_id: triggerType === 'manual' ? null : trigger?.data.board_id || null,
+      board_id: triggerType === 'manual' || triggerType === 'agent_followup' ? null : trigger?.data.board_id || null,
       stage_id: triggerType === 'deal_stage_entered' ? trigger?.data.stage_id || null : null,
       ...(trigger ? { ui: { x: Math.round(trigger.position.x), y: Math.round(trigger.position.y) } } : {}),
     },
@@ -652,6 +670,9 @@ export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowH
           break;
         case 'send_template':
           if (!block.data.template_id) fail('escolha o modelo de mensagem');
+          if (!(block.data.timeout_minutes >= 1) || block.data.timeout_minutes > MAX_REPLY_MINUTES) {
+            fail('o prazo de resposta precisa ficar entre 1 e 43200 minutos (30 dias)');
+          }
           break;
         case 'wait': {
           const seconds = waitSeconds(block.data);

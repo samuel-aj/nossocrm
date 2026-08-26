@@ -352,6 +352,12 @@ function botStepReferences(step: BotStep): Array<{ field: string; id: string }> 
   if (step.type === 'wait_reply' && step.on_timeout_step_id) {
     refs.push({ field: 'on_timeout_step_id', id: step.on_timeout_step_id });
   }
+  if (step.type === 'send_template') {
+    if (step.on_timeout_step_id) refs.push({ field: 'on_timeout_step_id', id: step.on_timeout_step_id });
+    step.button_step_ids.forEach((id, i) => {
+      if (id) refs.push({ field: `button_step_ids.${i}`, id });
+    });
+  }
   return refs;
 }
 
@@ -369,7 +375,7 @@ const BOT_STEP_LABELS: Record<BotStep['type'], string> = {
 };
 
 /** Blocos com uma única saída: podem ficar em qualquer posição do balão. */
-const LINEAR_BOT_STEP_TYPES = new Set<BotStep['type']>(['send_text', 'send_template', 'wait', 'move_stage', 'add_tag', 'webhook']);
+const LINEAR_BOT_STEP_TYPES = new Set<BotStep['type']>(['send_text', 'wait', 'move_stage', 'add_tag', 'webhook']);
 
 /**
  * Passos do robô:

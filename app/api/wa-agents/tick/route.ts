@@ -14,6 +14,7 @@ import { verifyInternalSecret } from '@/lib/wa-agents/internalAuth';
 import { resumeDueConversations } from '@/lib/wa-agents/engine';
 import { processDealStarts } from '@/lib/wa-agents/dealStarts';
 import { processDueBotRuns } from '@/lib/wa-agents/bots';
+import { processFollowups } from '@/lib/wa-agents/followups';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -41,6 +42,11 @@ async function handle(req: Request): Promise<Response> {
       await processDueBotRuns(admin, { limit: 5, deadlineMs });
     } catch (err) {
       console.error('[wa-agents/tick] falha ao processar robôs', err);
+    }
+    try {
+      await processFollowups(admin, { limit: 5, deadlineMs });
+    } catch (err) {
+      console.error('[wa-agents/tick] falha nos follow-ups', err);
     }
   });
 

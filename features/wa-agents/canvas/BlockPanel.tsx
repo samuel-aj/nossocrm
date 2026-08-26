@@ -371,7 +371,14 @@ function WebhookEditor({ block, update }: EditorProps<'webhook'>) {
   );
 }
 
-type TemplateOption = { id: string; name: string; type: 'general' | 'whatsapp_api'; meta_status?: string | null; body: string };
+type TemplateOption = {
+  id: string;
+  name: string;
+  type: 'general' | 'whatsapp_api';
+  meta_status?: string | null;
+  body: string;
+  buttons?: Array<{ type: string; text: string }> | null;
+};
 
 function TemplateEditor({ block, update }: EditorProps<'send_template'>) {
   const templatesQ = useQuery<{ data: TemplateOption[] }>({
@@ -389,7 +396,9 @@ function TemplateEditor({ block, update }: EditorProps<'send_template'>) {
   const chosen = all.find((t) => t.id === block.data.template_id);
   const pick = (id: string) => {
     const t = all.find((x) => x.id === id);
-    update({ ...block, data: { template_id: id, template_name: t?.name ?? '' } });
+    // Só botões de resposta rápida viram saídas (link/telefone não geram resposta)
+    const buttons = (t?.buttons ?? []).filter((b) => b.type === 'QUICK_REPLY').map((b) => b.text);
+    update({ ...block, data: { ...block.data, template_id: id, template_name: t?.name ?? '', buttons } });
   };
   const statusLabel = (status: string | null | undefined) =>
     status === 'APPROVED' ? '' : status === 'REJECTED' ? ' (rejeitado pela Meta)' : ' (aguardando aprovação)';
@@ -435,11 +444,45 @@ function TemplateEditor({ block, update }: EditorProps<'send_template'>) {
           {chosen.body}
         </div>
       ) : null}
+      {chosen && (chosen.buttons ?? []).length > 0 ? (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {(chosen.buttons ?? []).map((b, i) => (
+            <span
+              key={i}
+              className={`px-2 py-0.5 rounded-full text-xs border ${
+                b.type === 'QUICK_REPLY'
+                  ? 'border-emerald-300 text-emerald-700 dark:border-emerald-500/50 dark:text-emerald-300'
+                  : 'border-slate-300 text-slate-500 dark:border-white/20 dark:text-slate-400'
+              }`}
+            >
+              {b.text}
+              {b.type === 'QUICK_REPLY' ? '' : b.type === 'URL' ? ' (link)' : ' (telefone)'}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {chosen && block.data.buttons.length > 0 ? (
+        <p className={HELP_CLASS}>
+          Cada botão de resposta rápida vira uma saída do balão (rodapé). Texto livre sai por "Outra resposta".
+        </p>
+      ) : null}
+      <label htmlFor={`block-${block.id}-timeout`} className={`${LABEL_CLASS} mt-3`}>
+        Aguardar a resposta por (minutos)
+      </label>
+      <NumberField
+        id={`block-${block.id}-timeout`}
+        value={block.data.timeout_minutes}
+        min={1}
+        max={MAX_REPLY_MINUTES}
+        onCommit={(timeout_minutes) => update({ ...block, data: { ...block.data, timeout_minutes } })}
+        ariaLabel="Minutos aguardando resposta"
+      />
       <p className={HELP_CLASS}>
-        Modelo do WhatsApp API sai como template de verdade pela Meta: funciona fora da janela de 24 h e leva os
-        botões aprovados. As variáveis ({'{{contato.nome}}'}, {'{{contato.telefone}}'}, {'{{lead.titulo}}'},{' '}
-        {'{{lead.etapa}}'}) são preenchidas pelo contato e pelo negócio. Num número conectado por QR, vai o texto já
-        preenchido.
+        Depois de enviar, o robô espera a resposta: botão → saída do botão; outra resposta → "Outra resposta"; sem
+        resposta no prazo → "Sem resposta". Modelo do WhatsApp API sai como template de verdade pela Meta (funciona
+        fora da janela de 24 h, com os botões aprovados). As variáveis ({'{{contato.nome}}'}, {'{{contato.telefone}}'},{' '}
+        {'{{lead.titulo}}'}, {'{{lead.etapa}}'}) são preenchidas pelo contato e pelo negócio. Num número por QR, vai o
+        texto já preenchido.
       </p>
     </>
   );

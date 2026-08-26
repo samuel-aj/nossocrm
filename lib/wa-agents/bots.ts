@@ -33,6 +33,8 @@ const MAX_STEPS_TOTAL = 500;
 const BOT_LOCK_SECONDS = 120;
 const TIMEOUT_STEP_VAR = '_timeout_step_id';
 const STEPS_TOTAL_VAR = '_steps_total';
+/** Execução parada num Modelo de mensagem esperando a resposta: ao voltar, o passo roteia (botão/outra resposta) em vez de reenviar */
+const TEMPLATE_ROUTE_VAR = '_template_route_step_id';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -461,10 +463,30 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
           break;
         }
         case 'send_template': {
+          if (st.vars[TEMPLATE_ROUTE_VAR] === step.id) {
+            // Voltou com a resposta do lead: botão de resposta rápida → saída do botão; outra resposta → "Outra resposta"
+            delete st.vars[TEMPLATE_ROUTE_VAR];
+            const reply = normalizeKeyword(String(st.vars.last_reply ?? ''));
+            let hit = reply ? step.buttons.findIndex(b => normalizeKeyword(b) === reply) : -1;
+            if (hit < 0 && reply) {
+              hit = step.buttons.findIndex(b => {
+                const kw = normalizeKeyword(b);
+                return kw.length > 0 && reply.includes(kw);
+              });
+            }
+            const targetId = hit >= 0 ? (step.button_step_ids[hit] ?? null) : (step.next_step_id ?? null);
+            note(st, step, hit >= 0 ? `respondeu pelo botão "${step.buttons[hit]}"` : 'outra resposta');
+            idx = stepIndexById(steps, targetId);
+            break;
+          }
           const tplName = await sendBotTemplate(admin, st, await getConnection(), phone, step.template_id, templateValues);
-          note(st, step, `modelo enviado: ${tplName}`);
-          idx = next(step);
-          break;
+          note(st, step, `modelo enviado: ${tplName}; esperando resposta por até ${step.timeout_minutes} min`);
+          // Espera a resposta (botão ou texto); sem resposta no prazo, segue por "Sem resposta"
+          const wakeAt = new Date(Date.now() + step.timeout_minutes * 60 * 1000).toISOString();
+          st.vars[TIMEOUT_STEP_VAR] = step.on_timeout_step_id ?? null;
+          st.vars[TEMPLATE_ROUTE_VAR] = step.id;
+          await saveRun(admin, st, { status: 'waiting_reply', step_index: idx, wake_at: wakeAt }, { release: true });
+          return;
         }
         case 'wait': {
           const wakeAt = new Date(Date.now() + step.seconds * 1000).toISOString();
@@ -675,6 +697,7 @@ async function handleBotTimeout(admin: SupabaseClient, run: BotRunRow): Promise<
   if (target >= 0) {
     note(st, null, `sem resposta, indo para o passo ${steps[target].id}`);
     delete st.vars[TIMEOUT_STEP_VAR];
+    delete st.vars[TEMPLATE_ROUTE_VAR];
     await saveRun(admin, st, { status: 'running', step_index: target, wake_at: nowIso() });
     await processBotRun(admin, { ...run, status: 'running', step_index: target, log: st.log, vars: st.vars });
     return;

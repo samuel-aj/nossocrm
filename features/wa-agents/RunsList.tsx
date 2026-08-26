@@ -18,6 +18,7 @@ const TRIGGER_LABELS: Record<string, string> = {
   approval: 'Aprovação',
   bot: 'Robô',
   test: 'Teste',
+  followup: 'Follow-up',
 };
 
 const STATUS_LABELS: Record<string, { label: string; tone: 'green' | 'amber' | 'red' | 'slate' | 'blue' }> = {

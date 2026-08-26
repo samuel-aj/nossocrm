@@ -156,6 +156,23 @@ export const DEFAULT_AGENT_TOOLS: AgentTools = { calculator: true };
 export const AI_PROVIDERS = ['openai', 'anthropic', 'google'] as const;
 export type AgentProvider = (typeof AI_PROVIDERS)[number];
 
+/** Follow-up por tempo sem resposta do lead: o agente manda uma mensagem (dentro da janela) ou um robô entra */
+export const AGENT_FOLLOWUP_KINDS = ['agent', 'bot'] as const;
+export type AgentFollowupKind = (typeof AGENT_FOLLOWUP_KINDS)[number];
+export const AgentFollowupSchema = z.object({
+  id: z.string().min(1).max(40),
+  /** minutos sem resposta do lead, contados da última mensagem do agente que ficou sem resposta */
+  after_minutes: z.number().int().min(1).max(43200),
+  kind: z.enum(AGENT_FOLLOWUP_KINDS),
+  /** kind 'agent': instrução extra para o agente escrever o follow-up (opcional) */
+  instruction: z.string().max(2000).default(''),
+  /** kind 'bot': robô que entra em ação (gatilho "Follow-up do agente de IA" ou manual) */
+  bot_id: z.string().uuid().nullable().default(null),
+  /** kind 'agent' num número da API oficial: só dentro da janela de 24 h (fora dela a regra é pulada) */
+  only_in_window: z.boolean().default(true),
+});
+export type AgentFollowup = z.infer<typeof AgentFollowupSchema>;
+
 export const AGENT_START_MODES = ['speak_first', 'wait_reply'] as const;
 export type AgentStartMode = (typeof AGENT_START_MODES)[number];
 
@@ -181,6 +198,8 @@ export const AgentInputSchema = z.object({
   max_replies: z.number().int().min(0).max(500).default(0),
   /** Ao ser ativado pelo chat (Automações) ou pelo pipeline: já manda a primeira mensagem ou espera a próxima mensagem do contato */
   start_mode: z.enum(AGENT_START_MODES).default('speak_first'),
+  /** Régua de follow-ups por tempo sem resposta do lead (em ordem de tempo) */
+  followups: z.array(AgentFollowupSchema).max(10).default([]),
   outcomes: z.array(OutcomeSchema).default([]),
   webhooks: z.array(AgentWebhookSchema).default([]),
   custom_actions: z.array(CustomActionSchema).default([]),
@@ -401,12 +420,21 @@ const botStepBase = {
 
 export const BotStepSchema = z.discriminatedUnion('type', [
   z.object({ ...botStepBase, type: z.literal('send_text'), text: z.string().min(1).max(4000) }),
-  /** Modelo de mensagem (Configurações → Modelos): do WhatsApp API sai como template pela Meta; geral/QR vai como texto */
+  /**
+   * Modelo de mensagem (Configurações → Modelos): do WhatsApp API sai como template pela Meta; geral/QR vai
+   * como texto. Depois de enviar, espera a resposta do lead por até timeout_minutes: botão de resposta rápida
+   * → button_step_ids[i]; outra resposta → next_step_id; sem resposta → on_timeout_step_id.
+   */
   z.object({
     ...botStepBase,
     type: z.literal('send_template'),
     template_id: z.string().uuid(),
     template_name: z.string().max(120).optional(),
+    /** textos dos botões de resposta rápida do modelo (uma saída por botão) */
+    buttons: z.array(z.string().max(60)).max(10).default([]),
+    button_step_ids: z.array(z.string().nullable()).max(10).default([]),
+    timeout_minutes: z.number().int().min(1).max(43200).default(1440),
+    on_timeout_step_id: z.string().optional().nullable(),
   }),
   z.object({ ...botStepBase, type: z.literal('wait'), seconds: z.number().int().min(1).max(604800) }),
   z.object({
@@ -439,7 +467,8 @@ export type BotStep = z.infer<typeof BotStepSchema>;
 export type BotStepType = BotStep['type'];
 
 export const BotTriggerSchema = z.object({
-  type: z.enum(['deal_created', 'deal_stage_entered', 'manual']),
+  /** agent_followup: só entra em ação por uma regra de follow-up de um agente de IA */
+  type: z.enum(['deal_created', 'deal_stage_entered', 'manual', 'agent_followup']),
   board_id: z.string().uuid().nullable().optional(),
   stage_id: z.string().uuid().nullable().optional(),
   /** Posição do nó Gatilho no quadro (persistida como a dos passos) */
@@ -589,6 +618,8 @@ export type ConversationAiState = {
   memoria_desde?: string | null;
   /** contexto adicional escrito pela equipe ao iniciar o agente/robô nesta conversa */
   contexto_extra?: string | null;
+  /** follow-ups já disparados neste ciclo de silêncio (cycle = última mensagem recebida) */
+  followups?: { cycle: string | null; done: string[] } | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -610,7 +641,7 @@ export type DealStartRow = {
 // ---------------------------------------------------------------------------
 // Execuções dos agentes
 // ---------------------------------------------------------------------------
-export type RunTrigger = 'inbound' | 'resume' | 'manual_start' | 'handoff' | 'approval' | 'bot' | 'test' | 'deal';
+export type RunTrigger = 'inbound' | 'resume' | 'manual_start' | 'handoff' | 'approval' | 'bot' | 'test' | 'deal' | 'followup';
 export type RunStatus = 'ok' | 'skipped' | 'error';
 
 /** Evento registrado em `wa_ai_agent_runs.events` */
