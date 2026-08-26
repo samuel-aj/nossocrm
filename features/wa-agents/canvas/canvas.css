@@ -162,3 +162,32 @@
     bottom: 96px;
   }
 }
+
+/* Botão × no meio da seta: desconecta os balões sem excluir nenhum */
+.wa-bot-canvas .wa-edge-disconnect {
+  position: absolute;
+  pointer-events: all;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #64748b;
+  opacity: 0.85;
+  cursor: pointer;
+  transition: opacity 0.15s, color 0.15s, border-color 0.15s;
+}
+.wa-bot-canvas .wa-edge-disconnect:hover,
+.wa-bot-canvas .wa-edge-disconnect.is-selected {
+  opacity: 1;
+  color: #dc2626;
+  border-color: #dc2626;
+}
+.react-flow.wa-bot-canvas.dark .wa-edge-disconnect {
+  background: #0f172a;
+  border-color: #475569;
+  color: #94a3b8;
+}

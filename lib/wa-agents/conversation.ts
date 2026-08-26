@@ -247,7 +247,10 @@ export async function applyConversationAction(
         event = 'started';
         eventAgentId = agent.id;
         extra = { by_user_id: userId };
-        runAfter = { kind: 'agent', trigger: 'manual_start', agentId: agent.id, forceReply: true };
+        // "Ao ser ativado": fala primeiro (padrão) ou fica ativo e responde à próxima mensagem do contato
+        if (agent.start_mode !== 'wait_reply') {
+          runAfter = { kind: 'agent', trigger: 'manual_start', agentId: agent.id, forceReply: true };
+        }
         break;
       }
       case 'approve': {

@@ -156,6 +156,9 @@ export const DEFAULT_AGENT_TOOLS: AgentTools = { calculator: true };
 export const AI_PROVIDERS = ['openai', 'anthropic', 'google'] as const;
 export type AgentProvider = (typeof AI_PROVIDERS)[number];
 
+export const AGENT_START_MODES = ['speak_first', 'wait_reply'] as const;
+export type AgentStartMode = (typeof AGENT_START_MODES)[number];
+
 export const AgentInputSchema = z.object({
   name: z.string().min(1).max(120),
   persona_name: z.string().max(80).nullable().optional(),
@@ -176,6 +179,8 @@ export const AgentInputSchema = z.object({
   stop_rules: z.string().max(4000).default(''),
   /** Teto de respostas do agente por atendimento (0 = sem limite): ao atingir, ele manda a mensagem final e encerra */
   max_replies: z.number().int().min(0).max(500).default(0),
+  /** Ao ser ativado pelo chat (Automações) ou pelo pipeline: já manda a primeira mensagem ou espera a próxima mensagem do contato */
+  start_mode: z.enum(AGENT_START_MODES).default('speak_first'),
   outcomes: z.array(OutcomeSchema).default([]),
   webhooks: z.array(AgentWebhookSchema).default([]),
   custom_actions: z.array(CustomActionSchema).default([]),

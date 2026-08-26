@@ -27,6 +27,7 @@ import {
   type XYPosition,
 } from '@xyflow/react';
 import { CircleHelp, Map as MapIcon, Maximize, Plus } from 'lucide-react';
+import { edgeTypes } from './edges';
 import { minimapColor, nodeTypes } from './nodes';
 import { DND_MIME, NODE_WIDTH, TRIGGER_NODE_ID, isStepType, type FlowEdge, type FlowNode, type StepType } from './types';
 
@@ -73,6 +74,8 @@ const SHORTCUTS: Array<[string, string]> = [
   ['Ctrl/Cmd + V', 'cola (com deslocamento)'],
   ['Ctrl/Cmd + D', 'duplica os balões selecionados'],
   ['Delete / Backspace', 'exclui a seleção'],
+  ['× no meio da seta', 'desconecta os balões (nenhum é excluído)'],
+  ['Clique na seta + Delete', 'também desconecta'],
   ['Roda do mouse', 'move o quadro'],
   ['Ctrl/Cmd + roda', 'zoom'],
   ['Esc', 'fecha o painel / sai do editor'],
@@ -146,6 +149,7 @@ export function BotCanvas({
       onConnect={onConnect}
       onPaneClick={onPaneClick}
       nodeTypes={nodeTypes}
+      edgeTypes={edgeTypes}
       colorMode={darkMode ? 'dark' : 'light'}
       className="wa-bot-canvas"
       style={CANVAS_STYLE}

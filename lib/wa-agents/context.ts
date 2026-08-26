@@ -188,6 +188,7 @@ export function normalizeAgentRow(raw: Record<string, unknown>): AgentRow {
     // linhas anteriores à migração de stop_rules/max_replies ficam com os padrões
     stop_rules: String(raw.stop_rules ?? ''),
     max_replies: num(raw.max_replies, 0),
+    start_mode: raw.start_mode === 'wait_reply' ? 'wait_reply' : 'speak_first',
     outcomes: parseArray<Outcome>(raw.outcomes, item => {
       const p = OutcomeSchema.safeParse(item);
       return p.success ? p.data : null;

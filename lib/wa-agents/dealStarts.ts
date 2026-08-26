@@ -155,6 +155,12 @@ async function processDealStart(admin: SupabaseClient, row: DealStartRow): Promi
     console.error('[wa-agents] webhook de início pelo pipeline falhou:', errorMessage(e));
   }
 
+  // "Ao ser ativado: espera a próxima mensagem": a conversa já está ativa com o agente; ele responde
+  // quando o contato escrever (fluxo normal de mensagem recebida), sem falar primeiro
+  if (agent.start_mode === 'wait_reply') {
+    return { status: 'done', reason: 'agente ativado; responde na próxima mensagem do contato' };
+  }
+
   const run = await runAgentOnConversation({
     organizationId: orgId,
     conversationId: full.id,

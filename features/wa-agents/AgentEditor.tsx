@@ -44,6 +44,7 @@ import {
   type AgentWebhook,
   type CustomAction,
   type Outcome,
+  type AgentStartMode,
 } from '@/lib/wa-agents/types';
 import { MODEL_CATALOG, PROVIDER_LABELS } from '@/lib/wa-agents/catalog';
 import { DEFAULT_OUTCOMES, DEFAULT_STOP_RULES, DEFAULT_SYSTEM_PROMPT } from '@/lib/wa-agents/defaults';
@@ -114,6 +115,8 @@ type AgentFormState = {
   /** Teto de respostas por atendimento (0 = sem limite) */
   max_replies: number | '';
   only_new_conversations: boolean;
+  /** Ao ser ativado pelo chat/pipeline: fala primeiro ou espera a próxima mensagem do contato */
+  start_mode: AgentStartMode;
   outcomes: Outcome[];
   custom_actions: CustomAction[];
   triggers: AgentTriggers;
@@ -164,6 +167,7 @@ const FIELD_TABS: Record<string, EditorTab> = {
   human_pause_minutes: 'config',
   max_replies: 'config',
   only_new_conversations: 'config',
+  start_mode: 'config',
   webhooks: 'config',
   outcomes: 'acoes',
   custom_actions: 'acoes',
@@ -207,6 +211,7 @@ function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInpu
     human_pause_minutes: src.human_pause_minutes ?? 30,
     max_replies: src.max_replies ?? 0,
     only_new_conversations: src.only_new_conversations ?? false,
+    start_mode: src.start_mode ?? 'speak_first',
     outcomes: src.outcomes ?? DEFAULT_OUTCOMES,
     custom_actions: src.custom_actions ?? [],
     triggers: normalizeTriggers(src.triggers),
@@ -234,6 +239,7 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
     human_pause_minutes: clampField('human_pause_minutes', form.human_pause_minutes),
     max_replies: clampField('max_replies', form.max_replies),
     only_new_conversations: form.only_new_conversations,
+    start_mode: form.start_mode,
     outcomes: form.outcomes,
     custom_actions: form.custom_actions,
     triggers: {
@@ -274,6 +280,7 @@ const FIELD_NAMES: Record<string, string> = {
   line_delay_ms: 'Intervalo entre linhas',
   human_pause_minutes: 'Pausa após atendente responder',
   max_replies: 'Limite de respostas',
+  start_mode: 'Ao ser ativado',
   outcomes: 'Resultados',
   custom_actions: 'Ações durante a conversa',
   triggers: 'Gatilhos',
@@ -1367,6 +1374,21 @@ export const AgentEditor: React.FC<{
               />
             </Field>
           </div>
+          <Field
+            label="Ao ser ativado (pelo chat ou pelo pipeline)"
+            htmlFor="agent-start-mode"
+            help="Vale para o botão Automações do chat e para o início pelo pipeline. Por palavra-chave o agente sempre responde à mensagem que o ativou."
+          >
+            <select
+              id="agent-start-mode"
+              className={INPUT_CLASS}
+              value={form.start_mode}
+              onChange={(e) => patch({ start_mode: e.target.value === 'wait_reply' ? 'wait_reply' : 'speak_first' })}
+            >
+              <option value="speak_first">Já envia a primeira mensagem</option>
+              <option value="wait_reply">Espera a próxima mensagem do contato e só então responde</option>
+            </select>
+          </Field>
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Só conversas novas</p>
