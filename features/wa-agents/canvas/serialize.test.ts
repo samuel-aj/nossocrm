@@ -88,7 +88,7 @@ describe('parseKeywords / formatKeywords', () => {
 
   it('carrega palavras com vírgula entre aspas no bloco de condição', () => {
     const steps: BotStep[] = [
-      { id: 'a', type: 'condition', rules: [{ keywords: ['sim, quero'], goto_step_id: 'b' }], else_step_id: 'b', ui: { x: 0, y: 0 } },
+      { id: 'a', type: 'condition', rules: [{ kind: 'reply_contains', keywords: ['sim, quero'], goto_step_id: 'b' }], else_step_id: 'b', ui: { x: 0, y: 0 } },
       { id: 'b', type: 'end', ui: { x: 0, y: 200 } },
     ];
     const { nodes } = botToFlow(bot(steps, 'a'), []);

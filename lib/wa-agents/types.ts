@@ -431,6 +431,26 @@ const botStepBase = {
   ui: BotStepUiSchema.optional(),
 };
 
+/** Tipos de regra da Condição: resposta do lead, rótulo do negócio ou etapa do negócio */
+export const BOT_CONDITION_KINDS = [
+  'reply_contains',
+  'reply_not_contains',
+  'tag_has',
+  'tag_not_has',
+  'stage_is',
+  'stage_not_is',
+] as const;
+export type BotConditionKind = (typeof BOT_CONDITION_KINDS)[number];
+/** Regras antigas (só palavras-chave) continuam válidas: kind ausente = reply_contains */
+export const BotConditionRuleSchema = z.object({
+  kind: z.enum(BOT_CONDITION_KINDS).default('reply_contains'),
+  keywords: z.array(z.string().min(1)).default([]),
+  tag: z.string().max(60).optional(),
+  stage_id: z.string().uuid().optional().nullable(),
+  goto_step_id: z.string().min(1),
+});
+export type BotConditionRule = z.infer<typeof BotConditionRuleSchema>;
+
 export const BotStepSchema = z.discriminatedUnion('type', [
   z.object({ ...botStepBase, type: z.literal('send_text'), text: z.string().min(1).max(4000) }),
   /**
@@ -470,9 +490,7 @@ export const BotStepSchema = z.discriminatedUnion('type', [
   z.object({
     ...botStepBase,
     type: z.literal('condition'),
-    rules: z
-      .array(z.object({ keywords: z.array(z.string().min(1)).min(1), goto_step_id: z.string().min(1) }))
-      .min(1),
+    rules: z.array(BotConditionRuleSchema).min(1),
     else_step_id: z.string().optional().nullable(),
   }),
   z.object({ ...botStepBase, type: z.literal('move_stage'), stage_id: z.string().uuid() }),

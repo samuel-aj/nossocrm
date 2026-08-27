@@ -31,6 +31,7 @@ import {
   edgeIdFor,
   buttonHandleId,
   isLinearType,
+  newConditionRule,
   ruleHandleId,
   unitFor,
   type Block,
@@ -131,7 +132,7 @@ export function createBlock(type: StepType, id: string = newId()): Block {
     case 'wait_reply':
       return { id, type, data: { timeout_minutes: 60 } };
     case 'condition':
-      return { id, type, data: { rules: [{ id: newId(), keywords: '' }] } };
+      return { id, type, data: { rules: [newConditionRule(newId())] } };
     case 'move_stage':
       return { id, type, data: { stage_id: '' } };
     case 'add_tag':
@@ -179,7 +180,7 @@ export function cloneBlock(block: Block, handleMap?: Map<string, string>): Block
     const rules = block.data.rules.map((rule) => {
       const ruleId = newId();
       handleMap?.set(ruleHandleId(rule.id), ruleHandleId(ruleId));
-      return { id: ruleId, keywords: rule.keywords };
+      return { ...rule, id: ruleId };
     });
     return { id, type: 'condition', data: { rules } };
   }
@@ -218,7 +219,15 @@ function stepToBlock(step: BotStep): Block {
       return {
         id,
         type: 'condition',
-        data: { rules: step.rules.map((r) => ({ id: newId(), keywords: formatKeywords(r.keywords) })) },
+        data: {
+          rules: step.rules.map((r) => ({
+            id: newId(),
+            kind: r.kind ?? 'reply_contains',
+            keywords: formatKeywords(r.keywords ?? []),
+            tag: r.tag ?? '',
+            stage_id: r.stage_id ?? '',
+          })),
+        },
       };
     case 'move_stage':
       return { id, type: 'move_stage', data: { stage_id: step.stage_id } };
@@ -441,7 +450,10 @@ function blockToStep(block: Block, to: (handle: string) => string | null, ui: { 
         id,
         type: 'condition',
         rules: block.data.rules.map((r) => ({
-          keywords: parseKeywords(r.keywords),
+          kind: r.kind,
+          keywords: r.kind === 'reply_contains' || r.kind === 'reply_not_contains' ? parseKeywords(r.keywords) : [],
+          tag: r.kind === 'tag_has' || r.kind === 'tag_not_has' ? r.tag.trim() || undefined : undefined,
+          stage_id: r.kind === 'stage_is' || r.kind === 'stage_not_is' ? r.stage_id || null : null,
           goto_step_id: to(ruleHandleId(r.id)) ?? '',
         })),
         else_step_id: to(HANDLE_ELSE),
@@ -706,7 +718,19 @@ export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowH
         case 'condition':
           if (block.data.rules.length === 0) fail('adicione ao menos uma regra');
           block.data.rules.forEach((rule, i) => {
-            if (parseKeywords(rule.keywords).length === 0) fail(`a regra ${i + 1} está sem palavras-chave`);
+            const incomplete =
+              rule.kind === 'reply_contains' || rule.kind === 'reply_not_contains'
+                ? parseKeywords(rule.keywords).length === 0
+                  ? `a regra ${i + 1} está sem palavras-chave`
+                  : null
+                : rule.kind === 'tag_has' || rule.kind === 'tag_not_has'
+                  ? rule.tag.trim()
+                    ? null
+                    : `a regra ${i + 1} está sem rótulo`
+                  : rule.stage_id
+                    ? null
+                    : `a regra ${i + 1} está sem etapa`;
+            if (incomplete) fail(incomplete);
             else if (isLast && !to(bubble.id, ruleHandleId(rule.id))) fail(`ligue a regra ${i + 1} a um balão`);
           });
           break;

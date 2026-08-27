@@ -141,7 +141,37 @@ export type MessageData = { text: string };
 export type WaitData = { amount: number; unit: WaitUnit };
 export type WaitReplyData = { timeout_minutes: number };
 /** Regra em edição: as palavras-chave ficam como texto (separadas por vírgula). */
-export type ConditionRuleDraft = { id: string; keywords: string };
+export type ConditionKind = 'reply_contains' | 'reply_not_contains' | 'tag_has' | 'tag_not_has' | 'stage_is' | 'stage_not_is';
+export const CONDITION_KIND_LABELS: Record<ConditionKind, string> = {
+  reply_contains: 'Resposta contém',
+  reply_not_contains: 'Resposta não contém',
+  tag_has: 'Negócio tem o rótulo',
+  tag_not_has: 'Negócio não tem o rótulo',
+  stage_is: 'Negócio está na etapa',
+  stage_not_is: 'Negócio não está na etapa',
+};
+/** Regra em edição: tipo + o campo que ele usa (palavras-chave, rótulo ou etapa). */
+export type ConditionRuleDraft = { id: string; kind: ConditionKind; keywords: string; tag: string; stage_id: string };
+export function newConditionRule(id: string): ConditionRuleDraft {
+  return { id, kind: 'reply_contains', keywords: '', tag: '', stage_id: '' };
+}
+/** Texto curto da regra para a saída do balão. */
+export function conditionRulePreview(rule: ConditionRuleDraft): string {
+  switch (rule.kind) {
+    case 'reply_contains':
+      return rule.keywords.trim() ? `contém ${rule.keywords.trim()}` : 'contém…';
+    case 'reply_not_contains':
+      return rule.keywords.trim() ? `não contém ${rule.keywords.trim()}` : 'não contém…';
+    case 'tag_has':
+      return rule.tag.trim() ? `tem "${rule.tag.trim()}"` : 'tem o rótulo…';
+    case 'tag_not_has':
+      return rule.tag.trim() ? `sem "${rule.tag.trim()}"` : 'sem o rótulo…';
+    case 'stage_is':
+      return rule.stage_id ? 'está na etapa' : 'está na etapa…';
+    case 'stage_not_is':
+      return rule.stage_id ? 'fora da etapa' : 'fora da etapa…';
+  }
+}
 export type ConditionData = { rules: ConditionRuleDraft[] };
 export type MoveStageData = { stage_id: string };
 export type TagData = { tag: string };
@@ -274,7 +304,7 @@ export function blockOutputs(block: Block): BubbleOutput[] {
     case 'condition':
       return [
         ...block.data.rules.map((rule, i) => {
-          const preview = rule.keywords.trim();
+          const preview = conditionRulePreview(rule);
           const short = preview.length > RULE_PREVIEW_LENGTH ? `${preview.slice(0, RULE_PREVIEW_LENGTH)}...` : preview;
           return {
             handleId: ruleHandleId(rule.id),

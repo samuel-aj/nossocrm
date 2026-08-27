@@ -556,13 +556,31 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
         }
         case 'condition': {
           const reply = normalizeKeyword(String(st.vars.last_reply ?? ''));
+          const dealTags = (deal?.tags ?? []).map(t => normalizeKeyword(t));
+          const dealStage = deal?.stage_id ?? null;
           let target = -1;
           let matched: string | null = null;
           for (const rule of step.rules) {
-            const hit = rule.keywords.find(k => {
-              const kw = normalizeKeyword(k);
-              return kw.length > 0 && reply.includes(kw);
-            });
+            const kind = rule.kind ?? 'reply_contains';
+            let hit: string | null = null;
+            if (kind === 'reply_contains' || kind === 'reply_not_contains') {
+              const found =
+                rule.keywords.find(k => {
+                  const kw = normalizeKeyword(k);
+                  return kw.length > 0 && reply.includes(kw);
+                }) ?? null;
+              if (kind === 'reply_contains') hit = found ? `resposta contém "${found}"` : null;
+              else hit = !found && rule.keywords.length > 0 ? 'resposta não contém as palavras' : null;
+            } else if (kind === 'tag_has' || kind === 'tag_not_has') {
+              const tag = normalizeKeyword(rule.tag ?? '');
+              const has = tag.length > 0 && dealTags.includes(tag);
+              if (kind === 'tag_has') hit = has ? `negócio tem o rótulo "${rule.tag}"` : null;
+              else hit = tag.length > 0 && !has ? `negócio não tem o rótulo "${rule.tag}"` : null;
+            } else {
+              const is = !!rule.stage_id && dealStage === rule.stage_id;
+              if (kind === 'stage_is') hit = is ? 'negócio está na etapa' : null;
+              else hit = rule.stage_id && !is ? 'negócio não está na etapa' : null;
+            }
             if (hit) {
               matched = hit;
               target = stepIndexById(steps, rule.goto_step_id);
@@ -570,8 +588,8 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
             }
           }
           if (matched) {
-            if (target < 0) throw new Error(`passo de destino não encontrado para "${matched}"`);
-            note(st, step, `"${matched}" encontrado, indo para o passo ${steps[target].id}`);
+            if (target < 0) throw new Error(`passo de destino não encontrado (${matched})`);
+            note(st, step, `${matched}: indo para o passo ${steps[target].id}`);
             idx = target;
           } else if (step.else_step_id) {
             const elseIdx = stepIndexById(steps, step.else_step_id);

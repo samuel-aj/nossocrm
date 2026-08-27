@@ -16,6 +16,7 @@ import { useCanvasContext } from './context';
 import { bubbleTitle } from './serialize';
 import {
   BOT_VARIABLES,
+  CONDITION_KIND_LABELS,
   MAX_REPLY_MINUTES,
   MAX_WAIT_SECONDS,
   WAIT_UNIT_LABELS,
@@ -23,8 +24,10 @@ import {
   type Block,
   type BlockOfType,
   type BubbleNode,
+  type ConditionKind,
   type ConditionRuleDraft,
   type WaitUnit,
+  newConditionRule,
 } from './types';
 
 export type BlockPanelProps = {
@@ -229,14 +232,18 @@ function WaitReplyEditor({ block, update }: EditorProps<'wait_reply'>) {
 // ---------------------------------------------------------------- Condição
 
 function ConditionEditor({ block, update }: EditorProps<'condition'>) {
+  const { options } = useCanvasContext();
   const rules = block.data.rules;
   const setRules = (next: ConditionRuleDraft[]) => update({ ...block, data: { rules: next } });
+  const setRule = (id: string, patch: Partial<ConditionRuleDraft>) =>
+    setRules(rules.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   return (
     <>
       <p className={HELP_CLASS}>
-        Compara a última resposta do lead (sem acentos, sem diferenciar maiúsculas). A primeira regra que bater decide o
-        caminho; nenhuma batendo, segue pela saída "Senão". Separe as palavras por vírgula; use aspas para palavras com
-        vírgula, ex.: "sim, quero".
+        A primeira regra que bater decide o caminho; nenhuma batendo, segue pela saída "Senão". Regras de resposta
+        comparam a última mensagem do lead (sem acentos, sem diferenciar maiúsculas; palavras separadas por vírgula, aspas
+        para palavras com vírgula). Regras de rótulo e etapa olham o negócio ligado à conversa (sem negócio: "não tem" e
+        "não está" batem).
       </p>
       {rules.map((rule, index) => (
         <div key={rule.id} className="space-y-1">
@@ -244,14 +251,48 @@ function ConditionEditor({ block, update }: EditorProps<'condition'>) {
             Regra {index + 1}
           </label>
           <div className="flex items-center gap-1">
-            <input
-              id={`block-${block.id}-rule-${rule.id}`}
-              className={INPUT_CLASS}
-              value={rule.keywords}
-              onChange={(e) => setRules(rules.map((r) => (r.id === rule.id ? { ...r, keywords: e.target.value } : r)))}
-              placeholder="sim, quero, pode"
-              aria-label={`Palavras-chave da regra ${index + 1} (separadas por vírgula)`}
-            />
+            <select
+              className={`${INPUT_CLASS} w-44 shrink-0`}
+              value={rule.kind}
+              aria-label={`Tipo da regra ${index + 1}`}
+              onChange={(e) => setRule(rule.id, { kind: e.target.value as ConditionKind })}
+            >
+              {(Object.keys(CONDITION_KIND_LABELS) as ConditionKind[]).map((k) => (
+                <option key={k} value={k}>
+                  {CONDITION_KIND_LABELS[k]}
+                </option>
+              ))}
+            </select>
+            {rule.kind === 'reply_contains' || rule.kind === 'reply_not_contains' ? (
+              <input
+                id={`block-${block.id}-rule-${rule.id}`}
+                className={INPUT_CLASS}
+                value={rule.keywords}
+                onChange={(e) => setRule(rule.id, { keywords: e.target.value })}
+                placeholder="sim, quero, pode"
+                aria-label={`Palavras-chave da regra ${index + 1} (separadas por vírgula)`}
+              />
+            ) : rule.kind === 'tag_has' || rule.kind === 'tag_not_has' ? (
+              <div className="flex-1 min-w-0">
+                <TagInput
+                  id={`block-${block.id}-rule-${rule.id}`}
+                  value={rule.tag}
+                  onChange={(tag) => setRule(rule.id, { tag })}
+                  options={options}
+                  ariaLabel={`Rótulo da regra ${index + 1}`}
+                />
+              </div>
+            ) : (
+              <div className="flex-1 min-w-0">
+                <StageSelect
+                  id={`block-${block.id}-rule-${rule.id}`}
+                  value={rule.stage_id}
+                  onChange={(stage_id) => setRule(rule.id, { stage_id })}
+                  options={options}
+                  ariaLabel={`Etapa da regra ${index + 1}`}
+                />
+              </div>
+            )}
             <button
               type="button"
               className="p-1.5 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-900/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
@@ -268,7 +309,7 @@ function ConditionEditor({ block, update }: EditorProps<'condition'>) {
       <button
         type="button"
         className="inline-flex items-center gap-1 text-xs font-medium text-purple-600 dark:text-purple-300 hover:underline"
-        onClick={() => setRules([...rules, { id: newId(), keywords: '' }])}
+        onClick={() => setRules([...rules, newConditionRule(newId())])}
       >
         <Plus size={12} aria-hidden="true" />
         Adicionar regra
