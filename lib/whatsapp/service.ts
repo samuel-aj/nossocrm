@@ -36,6 +36,38 @@ export interface WaConversationRow {
   wa_phone: string;
   wa_name: string | null;
   last_message_at: string | null;
+  /** Grupo do WhatsApp: wa_phone guarda o JID ("...@g.us") */
+  is_group?: boolean;
+  group_jid?: string | null;
+  participants_count?: number | null;
+}
+
+/** Chave da org "Grupos do WhatsApp no chat" (organization_settings.wa_groups_enabled). Banco sem a coluna = desligado. */
+export async function getWaGroupsEnabled(admin: SupabaseClient, orgId: string): Promise<boolean> {
+  const { data, error } = await admin
+    .from('organization_settings')
+    .select('wa_groups_enabled')
+    .eq('organization_id', orgId)
+    .maybeSingle();
+  if (error) return false;
+  return Boolean((data as { wa_groups_enabled?: boolean | null } | null)?.wa_groups_enabled);
+}
+
+/** Conversa de GRUPO da org (por id). null = não existe, não é grupo ou é de outra org. */
+export async function getGroupConversation(
+  admin: SupabaseClient,
+  orgId: string,
+  conversationId: string
+): Promise<WaConversationRow | null> {
+  if (!conversationId) return null;
+  const { data } = await admin
+    .from('wa_conversations')
+    .select('id, organization_id, connection_id, contact_id, wa_phone, wa_name, last_message_at, is_group, group_jid, participants_count')
+    .eq('id', conversationId)
+    .eq('organization_id', orgId)
+    .eq('is_group', true)
+    .maybeSingle();
+  return (data as WaConversationRow | null) ?? null;
 }
 
 export interface WaMessageRow {
@@ -50,6 +82,9 @@ export interface WaMessageRow {
   media_type?: string | null;
   media_url?: string | null;
   media_mime?: string | null;
+  from_phone?: string | null;
+  /** Grupo: nome (WhatsApp) de quem escreveu a mensagem recebida */
+  sender_name?: string | null;
   /** Responder: mensagem citada (id no CRM + retrato) e marca de encaminhada */
   quoted_message_id?: string | null;
   quoted?: QuotedSnapshot | null;
@@ -70,7 +105,7 @@ export async function getQuotableMessage(
   if (!messageId) return null;
   const { data: msg } = await admin
     .from('wa_messages')
-    .select('id, organization_id, conversation_id, direction, status, body, media_type, media_url, media_mime, evolution_message_id, created_at')
+    .select('id, organization_id, conversation_id, direction, status, body, media_type, media_url, media_mime, from_phone, sender_name, evolution_message_id, created_at')
     .eq('id', messageId)
     .eq('organization_id', orgId)
     .maybeSingle();
@@ -83,8 +118,11 @@ export async function getQuotableMessage(
     .eq('organization_id', orgId)
     .maybeSingle();
   const convPhone = String((conv as { wa_phone?: string } | null)?.wa_phone ?? '');
+  if (!convPhone) return null;
+  // grupo: wa_phone é o JID do grupo, casa exato
+  if (convPhone === phone) return { ...row, conversation_phone: convPhone };
   const variants = new Set([...brPhoneVariants(phone), ...brPhoneVariants(convPhone)]);
-  if (!convPhone || !(variants.has(convPhone) && variants.has(phone))) return null;
+  if (!(variants.has(convPhone) && variants.has(phone))) return null;
   return { ...row, conversation_phone: convPhone };
 }
 

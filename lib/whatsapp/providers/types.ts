@@ -30,6 +30,10 @@ export interface QuotedRef {
   fromMe: boolean;
   /** telefone do interlocutor (E.164) — vira o remoteJid da citação na Evolution */
   remotePhone: string;
+  /** JID completo do chat (grupo: "...@g.us"); quando informado, remotePhone é ignorado */
+  remoteJid?: string;
+  /** Grupo: telefone (E.164) de quem escreveu a mensagem citada (vira `participant`) */
+  participantPhone?: string;
   /** prévia curta da citação (a Evolution/Baileys renderiza a partir dela) */
   text?: string;
 }

@@ -8,6 +8,7 @@
 import { after } from 'next/server';
 import { z } from 'zod';
 import { json } from '@/lib/whatsapp/api';
+import { createStaticAdminClient } from '@/lib/supabase/staticAdminClient';
 import { verifyInternalSecret } from '@/lib/wa-agents/internalAuth';
 import { handleInboundMessage } from '@/lib/wa-agents/engine';
 
@@ -29,6 +30,22 @@ export async function POST(req: Request) {
     return json({ error: 'Dados inválidos', code: 'VALIDATION_ERROR', issues: parsed.error.issues }, 400);
   }
   const { organization_id, conversation_id, message_id } = parsed.data;
+
+  // GRUPOS: agentes de IA e robôs NUNCA respondem em grupo do WhatsApp
+  // (mensagem de grupo chega aqui pelo mesmo gatilho das conversas comuns).
+  try {
+    const { data: conv } = await createStaticAdminClient()
+      .from('wa_conversations')
+      .select('is_group')
+      .eq('id', conversation_id)
+      .eq('organization_id', organization_id)
+      .maybeSingle();
+    if ((conv as { is_group?: boolean } | null)?.is_group) {
+      return json({ accepted: false, ignored: 'group' }, 202);
+    }
+  } catch {
+    // banco sem a coluna (migração pendente): segue como conversa comum
+  }
 
   after(async () => {
     try {

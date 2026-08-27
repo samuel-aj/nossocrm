@@ -40,6 +40,8 @@ export interface WaChatMessage {
   quoted?: WaQuoted | null;
   /** Mensagem encaminhada */
   forwarded?: boolean;
+  /** GRUPO: nome (WhatsApp) de quem escreveu a mensagem recebida */
+  sender_name?: string | null;
 }
 
 /** Número conectado disponível pra ENVIAR (multi-número). */
@@ -64,6 +66,11 @@ export interface WaChatData {
     contact_id: string | null;
     /** Última mensagem RECEBIDA do contato (janela de 24 h da API oficial) */
     last_inbound_at?: string | null;
+    /** GRUPO do WhatsApp (a conversa é o grupo) */
+    is_group?: boolean;
+    group_jid?: string | null;
+    participants_count?: number | null;
+    connection_id?: string | null;
   } | null;
   /** Agente de IA nesta conversa (null = nenhum agente atuou ainda). Externo (API) ou nativo (beta). */
   ai?: ConversationAiInfo | null;
@@ -93,11 +100,21 @@ export interface SendChatPayload {
 export interface ForwardTarget {
   phone: string;
   connectionId?: string | null;
+  /** GRUPO: destino pelo id da conversa (grupo não tem telefone) */
+  conversationId?: string | null;
 }
 
 export interface ForwardResult {
   ok: boolean;
-  results: Array<{ phone: string; connectionId: string | null; ok: boolean; sent: number; failed: number; error?: string }>;
+  results: Array<{
+    phone: string;
+    connectionId: string | null;
+    conversationId?: string | null;
+    ok: boolean;
+    sent: number;
+    failed: number;
+    error?: string;
+  }>;
 }
 
 /** POST /api/whatsapp/forward: reenvia as mensagens (ids) pra cada destino. */
@@ -108,7 +125,11 @@ export async function forwardWhatsAppMessages(messageIds: string[], targets: For
     credentials: 'include',
     body: JSON.stringify({
       messageIds,
-      targets: targets.map(t => ({ phone: t.phone, ...(t.connectionId ? { connectionId: t.connectionId } : {}) })),
+      targets: targets.map(t => ({
+        phone: t.phone,
+        ...(t.connectionId ? { connectionId: t.connectionId } : {}),
+        ...(t.conversationId ? { conversationId: t.conversationId } : {}),
+      })),
     }),
   });
   const json = (await res.json().catch(() => ({}))) as Partial<ForwardResult> & { error?: string };
@@ -119,10 +140,12 @@ export async function forwardWhatsAppMessages(messageIds: string[], targets: For
 /**
  * connectionId restringe o chat a UM número conectado (conversas separadas por
  * número na página Chats). null/omitido = visão unificada do contato.
+ * conversationId = GRUPO do WhatsApp (a conversa é o grupo; sem telefone).
  */
-export function useWhatsAppChat(phoneE164: string | null, connectionId?: string | null) {
+export function useWhatsAppChat(phoneE164: string | null, connectionId?: string | null, conversationId?: string | null) {
   const qc = useQueryClient();
-  const queryKey = ['waChat', phoneE164, connectionId ?? 'all'] as const;
+  const queryKey = ['waChat', conversationId ? `conv:${conversationId}` : phoneE164, connectionId ?? 'all'] as const;
+  const hasTarget = !!phoneE164 || !!conversationId;
   // pausa o polling durante um envio: um refetch no meio apagaria a bolha otimista
   const sendingRef = useRef(false);
 
@@ -136,9 +159,10 @@ export function useWhatsAppChat(phoneE164: string | null, connectionId?: string 
   const query = useQuery<WaChatData>({
     queryKey,
     queryFn: async () => {
-      const url =
-        `/api/whatsapp/messages?phone=${encodeURIComponent(phoneE164!)}` +
-        (connectionId ? `&connectionId=${encodeURIComponent(connectionId)}` : '');
+      const url = conversationId
+        ? `/api/whatsapp/messages?conversationId=${encodeURIComponent(conversationId)}`
+        : `/api/whatsapp/messages?phone=${encodeURIComponent(phoneE164!)}` +
+          (connectionId ? `&connectionId=${encodeURIComponent(connectionId)}` : '');
       const res = await fetch(url, {
         credentials: 'include',
         headers: { accept: 'application/json' },
@@ -159,8 +183,8 @@ export function useWhatsAppChat(phoneE164: string | null, connectionId?: string 
       });
       return data;
     },
-    enabled: !!phoneE164,
-    refetchInterval: () => (!phoneE164 || sendingRef.current ? false : 4000),
+    enabled: hasTarget,
+    refetchInterval: () => (!hasTarget || sendingRef.current ? false : 4000),
     refetchOnWindowFocus: true,
     staleTime: 2000,
   });
@@ -208,9 +232,11 @@ export function useWhatsAppChat(phoneE164: string | null, connectionId?: string 
         headers: { 'content-type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          to: phoneE164,
+          to: phoneE164 ?? '',
           text: p.text || '',
           media,
+          // grupo: o destino é a conversa (o servidor resolve o JID do grupo)
+          ...(conversationId ? { conversationId } : {}),
           ...(p.connectionId ? { connectionId: p.connectionId } : {}),
           ...(p.template ? { template: p.template } : {}),
           ...(p.replyTo ? { replyTo: p.replyTo.id } : {}),

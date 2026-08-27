@@ -15,11 +15,14 @@ import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import {
   getConnectionsByOrg,
   ensureConversation,
+  getGroupConversation,
+  getWaGroupsEnabled,
   recordOutboundMessage,
   replicateOutboundToSiblings,
   type WaConnectionRow,
+  type WaConversationRow,
 } from '@/lib/whatsapp/service';
-import { getProvider, type SendResult } from '@/lib/whatsapp';
+import { getProvider, isMetaCloudConnection, type SendResult } from '@/lib/whatsapp';
 import { outboundKindFromMediaType } from '@/lib/whatsapp/quote';
 import { normalizePhoneE164 } from '@/lib/phone';
 
@@ -58,13 +61,17 @@ export async function POST(req: Request) {
   const messageIds = Array.isArray(body.messageIds)
     ? Array.from(new Set(body.messageIds.filter((v): v is string => typeof v === 'string' && v.length > 0)))
     : [];
-  const targetsRaw = Array.isArray(body.targets) ? (body.targets as Array<{ phone?: unknown; connectionId?: unknown }>) : [];
+  const targetsRaw = Array.isArray(body.targets)
+    ? (body.targets as Array<{ phone?: unknown; connectionId?: unknown; conversationId?: unknown }>)
+    : [];
   const targets = targetsRaw
     .map(t => ({
       phone: normalizePhoneE164(typeof t?.phone === 'string' ? t.phone : ''),
       connectionId: typeof t?.connectionId === 'string' ? t.connectionId.trim() : '',
+      // GRUPO: destino pelo id da conversa (grupo não tem telefone)
+      conversationId: typeof t?.conversationId === 'string' ? t.conversationId.trim() : '',
     }))
-    .filter(t => !!t.phone);
+    .filter(t => !!t.phone || !!t.conversationId);
 
   if (messageIds.length === 0) return json({ error: 'Escolha pelo menos uma mensagem para encaminhar' }, 400);
   if (messageIds.length > MAX_MESSAGES) return json({ error: `Encaminhe no máximo ${MAX_MESSAGES} mensagens por vez` }, 400);
@@ -105,12 +112,46 @@ export async function POST(req: Request) {
     for (const s of signed ?? []) if (s.path && s.signedUrl) signedByPath.set(s.path, s.signedUrl);
   }
 
-  const results: Array<{ phone: string; connectionId: string | null; ok: boolean; sent: number; failed: number; error?: string }> = [];
+  const results: Array<{
+    phone: string;
+    connectionId: string | null;
+    /** GRUPO: id da conversa de destino (o modal casa o nome por aqui) */
+    conversationId?: string | null;
+    ok: boolean;
+    sent: number;
+    failed: number;
+    error?: string;
+  }> = [];
+  const groupsEnabled = targets.some(t => t.conversationId) ? await getWaGroupsEnabled(auth.admin, orgId) : false;
 
   for (const target of targets) {
-    const picked = pickConnection(target.connectionId);
+    // GRUPO: conversa já existe; sai pelo número dela (precisa ser via QR Code)
+    let group: WaConversationRow | null = null;
+    let picked: { conn: WaConnectionRow | null; error?: string };
+    if (target.conversationId) {
+      group = groupsEnabled ? await getGroupConversation(auth.admin, orgId, target.conversationId) : null;
+      const gConn = group?.connection_id ? connections.find(c => c.id === group?.connection_id) ?? null : null;
+      picked = !group
+        ? { conn: null, error: groupsEnabled ? 'Grupo não encontrado' : 'Grupos do WhatsApp estão desligados' }
+        : !gConn || gConn.status !== 'connected'
+          ? { conn: null, error: 'O número deste grupo está desconectado' }
+          : isMetaCloudConnection(gConn)
+            ? { conn: null, error: 'Grupos só funcionam em números conectados por QR Code' }
+            : { conn: gConn };
+    } else {
+      picked = pickConnection(target.connectionId);
+    }
+    const targetPhone = group ? group.group_jid || group.wa_phone : target.phone;
     if (!picked.conn) {
-      results.push({ phone: target.phone, connectionId: target.connectionId || null, ok: false, sent: 0, failed: messages.length, error: picked.error });
+      results.push({
+        phone: targetPhone,
+        connectionId: target.connectionId || null,
+        conversationId: target.conversationId || null,
+        ok: false,
+        sent: 0,
+        failed: messages.length,
+        error: picked.error,
+      });
       continue;
     }
     const conn = picked.conn;
@@ -118,7 +159,7 @@ export async function POST(req: Request) {
     let failed = 0;
     let firstError: string | undefined;
     try {
-      const conv = await ensureConversation(auth.admin, orgId, conn.id, target.phone);
+      const conv = group ?? (await ensureConversation(auth.admin, orgId, conn.id, target.phone));
       const provider = getProvider(conn);
 
       for (const m of messages) {
@@ -130,7 +171,7 @@ export async function POST(req: Request) {
         let result: SendResult;
         if (kind && signedUrl) {
           result = await provider.sendMedia({
-            to: target.phone,
+            to: targetPhone,
             media: signedUrl,
             kind,
             mimeType: m.media_mime ?? undefined,
@@ -138,7 +179,7 @@ export async function POST(req: Request) {
             caption: text || undefined,
           });
         } else if (text) {
-          result = await provider.sendText({ to: target.phone, text });
+          result = await provider.sendText({ to: targetPhone, text });
         } else {
           failed += 1;
           firstError = firstError ?? 'Mensagem sem conteúdo para encaminhar (mídia indisponível)';
@@ -151,7 +192,7 @@ export async function POST(req: Request) {
           text,
           providerMessageId: result.providerMessageId,
           fromPhone: conn.phone_number,
-          toPhone: target.phone,
+          toPhone: targetPhone,
           sentBy: auth.user.id,
           source: 'crm',
           status: result.ok ? 'sent' : 'failed',
@@ -164,12 +205,14 @@ export async function POST(req: Request) {
 
         if (result.ok) {
           sent += 1;
-          await replicateOutboundToSiblings(auth.admin, conn, {
-            toPhone: target.phone,
-            text: recorded.body,
-            providerMessageId: result.providerMessageId,
-            mediaType: kind && signedUrl ? m.media_type : null,
-          });
+          if (!group) {
+            await replicateOutboundToSiblings(auth.admin, conn, {
+              toPhone: targetPhone,
+              text: recorded.body,
+              providerMessageId: result.providerMessageId,
+              mediaType: kind && signedUrl ? m.media_type : null,
+            });
+          }
         } else {
           failed += 1;
           firstError = firstError ?? (result.error || 'Falha no envio');
@@ -180,8 +223,9 @@ export async function POST(req: Request) {
       firstError = firstError ?? (e as Error).message;
     }
     results.push({
-      phone: target.phone,
+      phone: targetPhone,
       connectionId: conn.id,
+      conversationId: group?.id ?? null,
       ok: failed === 0,
       sent,
       failed,

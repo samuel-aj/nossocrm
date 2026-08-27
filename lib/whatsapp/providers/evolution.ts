@@ -32,14 +32,26 @@ import type {
 function buildQuoted(q?: QuotedRef): Record<string, unknown> | undefined {
   if (!q?.providerMessageId) return undefined;
   const digits = toWhatsAppPhone(q.remotePhone);
+  // grupo: remoteJid é o JID do grupo e `participant` diz quem escreveu a citada
+  const remoteJid = q.remoteJid || (digits ? `${digits}@s.whatsapp.net` : '');
+  const partDigits = q.participantPhone ? toWhatsAppPhone(q.participantPhone) : '';
   return {
     key: {
       id: q.providerMessageId,
       fromMe: q.fromMe,
-      ...(digits ? { remoteJid: `${digits}@s.whatsapp.net` } : {}),
+      ...(remoteJid ? { remoteJid } : {}),
+      ...(partDigits ? { participant: `${partDigits}@s.whatsapp.net` } : {}),
     },
     message: { conversation: (q.text || ' ').slice(0, 300) },
   };
+}
+
+/**
+ * "number" no formato da Evolution: um JID (grupo "...@g.us", "@s.whatsapp.net",
+ * "@lid") passa como está; telefone vira só dígitos.
+ */
+function toEvolutionNumber(to: string): string {
+  return /@(g\.us|s\.whatsapp\.net|lid)$/i.test(to) ? to : toWhatsAppPhone(to);
 }
 
 /** Converte um JID do WhatsApp ("5511999999999@s.whatsapp.net") em E.164 ("+5511999999999"). */
@@ -150,7 +162,7 @@ export class EvolutionProvider implements WhatsAppProvider {
   }
 
   async sendText(input: SendTextInput): Promise<SendResult> {
-    const number = toWhatsAppPhone(input.to); // só dígitos, como a Evolution espera
+    const number = toEvolutionNumber(input.to); // só dígitos (ou o JID do grupo), como a Evolution espera
     if (!number) return { ok: false, error: 'Telefone inválido' };
 
     const { ok, status, data } = await this.call<{
@@ -171,7 +183,7 @@ export class EvolutionProvider implements WhatsAppProvider {
   }
 
   async sendMedia(input: SendMediaInput): Promise<SendResult> {
-    const number = toWhatsAppPhone(input.to);
+    const number = toEvolutionNumber(input.to);
     if (!number) return { ok: false, error: 'Telefone inválido' };
 
     let path: string;
@@ -221,7 +233,7 @@ export class EvolutionProvider implements WhatsAppProvider {
   }
 
   async sendTyping(input: { to: string; ms: number }): Promise<void> {
-    const number = toWhatsAppPhone(input.to);
+    const number = toEvolutionNumber(input.to);
     if (!number) return;
     // v2: presença "composing" pelo tempo informado (best-effort: erro aqui nunca derruba o fluxo)
     await this.call('POST', `/chat/sendPresence/${encodeURIComponent(this.instanceName)}`, {

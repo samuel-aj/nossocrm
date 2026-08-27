@@ -32,6 +32,7 @@ import {
   Info,
   Play,
   User,
+  Users,
   Bot,
   Square,
   Reply,
@@ -597,6 +598,23 @@ function FailBadge({ reason }: { reason: string }) {
 
 type BubbleAction = 'reply' | 'forward';
 
+/** GRUPO: cor estável por participante (nome em cima da bolha, como no WhatsApp). */
+const SENDER_COLORS = [
+  'text-emerald-600 dark:text-emerald-400',
+  'text-sky-600 dark:text-sky-400',
+  'text-violet-600 dark:text-violet-400',
+  'text-amber-600 dark:text-amber-400',
+  'text-rose-600 dark:text-rose-400',
+  'text-teal-600 dark:text-teal-400',
+  'text-indigo-600 dark:text-indigo-400',
+  'text-orange-600 dark:text-orange-400',
+];
+function senderColor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return SENDER_COLORS[h % SENDER_COLORS.length];
+}
+
 /** Bloco da mensagem CITADA dentro da bolha (estilo WhatsApp): barra colorida
  *  à esquerda, quem escreveu, prévia e miniatura quando a original é imagem.
  *  Clicável quando a original está carregada ("pular para"). */
@@ -614,7 +632,9 @@ function QuotedBlock({
   onJump?: () => void;
 }) {
   const mine = q.direction === 'out';
-  const title = q.direction === 'out' ? 'Você' : q.direction === 'in' ? contactName || 'Contato' : 'Mensagem';
+  // grupo: a citada de outro participante mostra o nome dele (sender_name da original)
+  const title =
+    q.direction === 'out' ? 'Você' : q.direction === 'in' ? original?.sender_name || contactName || 'Contato' : 'Mensagem';
   const thumb =
     original?.media_url && (original.media_type === 'image' || original.media_type === 'sticker')
       ? original.media_url
@@ -672,6 +692,7 @@ function MessageBubble({
   quotedOriginal = null,
   onJumpToQuoted,
   flash = false,
+  senderName,
 }: {
   m: WaChatMessage;
   searchQuery?: string;
@@ -684,6 +705,8 @@ function MessageBubble({
   onJumpToQuoted?: (id: string) => void;
   /** Destaque temporário (chegou aqui pelo "pular para a original") */
   flash?: boolean;
+  /** GRUPO: quem escreveu (nome colorido em cima da bolha recebida) */
+  senderName?: string;
 }) {
   const isOut = m.direction === 'out';
   const failed = m.status === 'failed';
@@ -857,6 +880,9 @@ function MessageBubble({
             </button>
           </div>
         )}
+        {senderName && (
+          <p className={`mb-0.5 pr-5 text-[11px] font-bold truncate ${senderColor(senderName)}`}>{senderName}</p>
+        )}
         {m.forwarded && (
           <p className={`mb-1 inline-flex items-center gap-1 text-[10px] italic ${isOut ? 'text-emerald-100/90' : 'text-slate-400'}`}>
             <Forward size={11} /> Encaminhada
@@ -979,6 +1005,7 @@ export function DealWhatsAppChat({
   contact,
   templateContext,
   connectionId = null,
+  group = null,
 }: {
   contact: { id: string; name?: string | null; phone?: string | null } | null;
   /** Valores extras pras variáveis dos modelos (lead.titulo, escritorio.nome...) */
@@ -987,9 +1014,13 @@ export function DealWhatsAppChat({
    * número): só as mensagens dele, e o envio sai por ele — o seletor de
    * remetente some. null = visão unificada do contato (card do lead). */
   connectionId?: string | null;
+  /** GRUPO do WhatsApp: a conversa é o grupo (sem contato nem telefone); as
+   * mensagens recebidas mostram quem escreveu; sem agente, robô nem janela de 24 h. */
+  group?: { conversationId: string; name: string; participantsCount?: number | null } | null;
 }) {
-  const phone = useMemo(() => normalizePhoneE164(contact?.phone || ''), [contact?.phone]);
-  const { data, isLoading, error, send } = useWhatsAppChat(phone || null, connectionId);
+  const isGroup = !!group;
+  const phone = useMemo(() => (isGroup ? '' : normalizePhoneE164(contact?.phone || '')), [contact?.phone, isGroup]);
+  const { data, isLoading, error, send } = useWhatsAppChat(phone || null, connectionId, group?.conversationId ?? null);
   const [text, setText] = useState('');
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -1491,11 +1522,12 @@ export function DealWhatsAppChat({
     };
   }, []);
 
-  if (!contact) return <CenterMsg>Este lead não tem contato vinculado.</CenterMsg>;
-  if (!phone)
+  if (!isGroup && !contact) return <CenterMsg>Este lead não tem contato vinculado.</CenterMsg>;
+  if (!isGroup && !phone)
     return <CenterMsg>O contato não tem telefone. Adicione um número pra conversar pelo WhatsApp.</CenterMsg>;
 
-  const contactName = contact.name || data?.conversation?.wa_name || 'Contato';
+  const contactName = group?.name ?? (contact?.name || data?.conversation?.wa_name || 'Contato');
+  const participantsCount = data?.conversation?.participants_count ?? group?.participantsCount ?? null;
 
   const clearAttachment = () => {
     setAttachment(prev => {
@@ -1841,13 +1873,17 @@ export function DealWhatsAppChat({
       {/* Cabeçalho da conversa */}
       <div className="shrink-0 flex items-center gap-2 px-4 py-2.5 border-b border-slate-200 dark:border-white/10 bg-white/60 dark:bg-white/5">
         <span className="w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 flex items-center justify-center">
-          <MessageCircle size={15} />
+          {isGroup ? <Users size={15} /> : <MessageCircle size={15} />}
         </span>
         <div className="min-w-0">
           <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
-            {contact.name || data?.conversation?.wa_name || 'Contato'}
+            {isGroup ? data?.conversation?.wa_name || contactName : contact?.name || data?.conversation?.wa_name || 'Contato'}
           </p>
-          <p className="text-[11px] text-slate-500">{phone}</p>
+          <p className="text-[11px] text-slate-500">
+            {isGroup
+              ? `Grupo do WhatsApp${participantsCount ? ` · ${participantsCount} participantes` : ''}`
+              : phone}
+          </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           {data && !data.connected && (
@@ -1963,11 +1999,12 @@ export function DealWhatsAppChat({
               m={m}
               searchQuery={activeQuery}
               isCurrentMatch={m.id === currentMatchId}
-              contactName={contact.name || data?.conversation?.wa_name || undefined}
+              contactName={isGroup ? undefined : contact?.name || data?.conversation?.wa_name || undefined}
               onAction={notConnected ? undefined : onBubbleAction}
               quotedOriginal={m.quoted_message_id ? messagesById.get(m.quoted_message_id) ?? null : null}
               onJumpToQuoted={jumpToMessage}
               flash={m.id === flashId}
+              senderName={isGroup && m.direction === 'in' ? m.sender_name || m.from_phone || undefined : undefined}
             />
           </div>
         ))}
@@ -2172,7 +2209,7 @@ export function DealWhatsAppChat({
             andamento (pausar/parar/aprovar/cancelar robô); iniciar é pelo botão
             Automações do compositor. Fora do beta: a faixa antiga, só quando um
             agente (externo) já atuou nesta conversa. */}
-        {nativeBanner && (aiState || data?.bot) && (
+        {!isGroup && nativeBanner && (aiState || data?.bot) && (
           <ChatAgentBanner
             ai={aiState}
             bot={data?.bot ?? null}
@@ -2180,7 +2217,7 @@ export function DealWhatsAppChat({
             onAction={action => void runAiAction(action)}
           />
         )}
-        {!nativeBanner && aiState && aiState.status !== 'stopped' && (
+        {!isGroup && !nativeBanner && aiState && aiState.status !== 'stopped' && (
           <div
             className={`flex items-center justify-between gap-2 mb-1.5 px-3 py-1.5 rounded-xl border text-xs ${
               aiState.status === 'active'
@@ -2337,7 +2374,7 @@ export function DealWhatsAppChat({
                   replyTo.direction === 'out' ? 'text-emerald-600 dark:text-emerald-400' : 'text-sky-600 dark:text-sky-400'
                 }`}
               >
-                Respondendo a {replyTo.direction === 'out' ? 'você' : contactName}
+                Respondendo a {replyTo.direction === 'out' ? 'você' : replyTo.sender_name || contactName}
               </p>
               <p className="text-xs text-slate-600 dark:text-slate-300 truncate">{quotedPreviewText(replyTo)}</p>
             </button>
@@ -2587,7 +2624,7 @@ export function DealWhatsAppChat({
             </button>
             {/* AUTOMAÇÕES (beta): iniciar um agente de IA ou um robô nesta conversa, com
                 contexto adicional opcional; também "Limpar memória do agente" */}
-            {waBeta.enabled && data?.conversation && (
+            {!isGroup && waBeta.enabled && data?.conversation && (
               <AutomationsMenu
                 open={automationsOpen}
                 onOpenChange={open => {

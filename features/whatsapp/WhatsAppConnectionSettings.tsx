@@ -23,6 +23,7 @@ import {
   RotateCw,
   Trash2,
   Unplug,
+  Users,
 } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 import { useAuth } from '@/context/AuthContext';
@@ -117,6 +118,34 @@ export function WhatsAppConnectionSettings() {
   // Substitui o antigo boolean: com várias linhas QR, o painel precisa saber
   // exatamente qual conexão está esperando o scan.
   const [qrTargetId, setQrTargetId] = useState<string | null>(null);
+
+  // GRUPOS DO WHATSAPP: chave da org (padrão desligado); só admin liga/desliga.
+  const isAdminRole = profile?.role === 'admin' || profile?.role === 'super_admin';
+  const groupsQ = useQuery<{ enabled: boolean }>({
+    queryKey: ['waGroupsSetting'],
+    queryFn: () => fetchJson<{ enabled: boolean }>('/api/whatsapp/groups'),
+    enabled: isAdminRole,
+    staleTime: 60_000,
+  });
+  const groupsMut = useMutation({
+    mutationFn: (enabled: boolean) =>
+      fetchJson<{ ok: boolean; enabled: boolean }>('/api/whatsapp/groups', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      }),
+    onSuccess: d => {
+      qc.setQueryData(['waGroupsSetting'], { enabled: d.enabled });
+      void qc.invalidateQueries({ queryKey: ['waConversations'] });
+      addToast(
+        d.enabled
+          ? 'Grupos ligados. Os grupos aparecem na página Chats conforme chegam mensagens.'
+          : 'Grupos desligados. Os grupos saem da página Chats.',
+        'success'
+      );
+    },
+    onError: (e: Error) => addToast(e.message || 'Falha ao salvar a configuração de grupos', 'error'),
+  });
 
   const connQ = useQuery<ConnResponse>({
     queryKey: ['waConnection'],
@@ -1251,6 +1280,49 @@ export function WhatsAppConnectionSettings() {
 
           {/* Form de NÚMERO NOVO (a edição renderiza dentro do cartão da linha) */}
           {bizOpen && editingConnId === null && bizCredentialsForm}
+        </div>
+      )}
+
+      {/* GRUPOS DO WHATSAPP: opcional por organização (nem toda org usa);
+          só admin liga/desliga. Só números via QR Code têm grupos. */}
+      {isAdminRole && (
+        <div className="mt-6 rounded-2xl border border-slate-200 dark:border-white/10 p-5">
+          <div className="flex items-start gap-3">
+            <span className="w-9 h-9 shrink-0 rounded-xl bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400 flex items-center justify-center">
+              <Users size={18} />
+            </span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-bold text-slate-900 dark:text-white">Grupos do WhatsApp no chat</p>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={!!groupsQ.data?.enabled}
+                  disabled={groupsQ.isLoading || groupsMut.isPending}
+                  onClick={() => groupsMut.mutate(!groupsQ.data?.enabled)}
+                  title={groupsQ.data?.enabled ? 'Desligar grupos' : 'Ligar grupos'}
+                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 ${
+                    groupsQ.data?.enabled ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-white/20'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                      groupsQ.data?.enabled ? 'translate-x-5' : 'translate-x-0.5'
+                    }`}
+                  />
+                </button>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mt-1">
+                Desligado por padrão: mensagens de grupo são ignoradas. Ligado, os grupos do número conectado
+                por QR Code aparecem na página Chats (filtro "Grupos") para ler e responder por aqui, com o nome
+                de quem escreveu em cada mensagem. Só grupos com mensagem nova depois de ligar aparecem; o
+                histórico anterior não é importado.
+              </p>
+              <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5">
+                A WhatsApp API oficial (Meta) não tem grupos. Agentes de IA e robôs nunca respondem em grupo.
+              </p>
+            </div>
+          </div>
         </div>
       )}
     </div>

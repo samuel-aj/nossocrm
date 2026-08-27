@@ -12,7 +12,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { AlertCircle, Check, Forward, Loader2, MessageCircle, Search, X } from 'lucide-react';
+import { AlertCircle, Check, Forward, Loader2, MessageCircle, Search, Users, X } from 'lucide-react';
 import { useCRM } from '@/context/CRMContext';
 import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
 import { quotedPreviewText } from '@/lib/whatsapp/quote';
@@ -30,6 +30,9 @@ type ConvRow = {
   wa_name: string | null;
   contact_id: string | null;
   last_message_at: string | null;
+  /** GRUPO do WhatsApp (só vem quando a org ligou grupos) */
+  is_group?: boolean | null;
+  participants_count?: number | null;
 };
 
 interface Recipient {
@@ -39,6 +42,10 @@ interface Recipient {
   /** Número conectado da conversa (null = contato sem conversa) */
   connectionId: string | null;
   hasConversation: boolean;
+  /** GRUPO: destino pelo id da conversa */
+  conversationId?: string;
+  isGroup?: boolean;
+  participantsCount?: number | null;
 }
 
 const MAX_LISTED = 200;
@@ -92,6 +99,20 @@ export function ForwardMessageModal({
     const contactById = new Map(contacts.map(c => [c.id, c]));
     // conversas primeiro (a rota já devolve da mais recente pra mais antiga)
     for (const c of convsQ.data?.data ?? []) {
+      if (c.is_group) {
+        // grupo: sem telefone, o destino é a própria conversa
+        byKey.set(`group#${c.id}`, {
+          key: `group#${c.id}`,
+          phone: '',
+          name: (c.wa_name || '').trim() || 'Grupo',
+          connectionId: c.connection_id,
+          hasConversation: true,
+          conversationId: c.id,
+          isGroup: true,
+          participantsCount: c.participants_count ?? null,
+        });
+        continue;
+      }
       const phone = normalizePhoneE164(c.wa_phone);
       if (!phone) continue;
       const key = phoneKey(phone);
@@ -158,12 +179,16 @@ export function ForwardMessageModal({
     setSending(true);
     setError(null);
     try {
-      const targets = Array.from(selected.values()).map(r => ({
-        phone: r.phone,
-        // conversa de número que ainda está conectado sai por ele; senão, pelo padrão do chat
-        connectionId:
-          r.connectionId && senders.some(s => s.id === r.connectionId) ? r.connectionId : defaultConnectionId,
-      }));
+      const targets = Array.from(selected.values()).map(r =>
+        r.isGroup
+          ? { phone: '', conversationId: r.conversationId }
+          : {
+              phone: r.phone,
+              // conversa de número que ainda está conectado sai por ele; senão, pelo padrão do chat
+              connectionId:
+                r.connectionId && senders.some(s => s.id === r.connectionId) ? r.connectionId : defaultConnectionId,
+            }
+      );
       const result = await forwardWhatsAppMessages(
         messages.map(m => m.id),
         targets
@@ -184,7 +209,10 @@ export function ForwardMessageModal({
 
   const preview = messages.length === 1 ? quotedPreviewText(messages[0]) : `${messages.length} mensagens`;
   const failures = (partial?.results ?? []).filter(r => !r.ok);
-  const nameOf = (phone: string) => recipients.find(r => phoneKey(r.phone) === phoneKey(phone))?.name || phone;
+  const nameOf = (f: { phone: string; conversationId?: string | null }) =>
+    (f.conversationId
+      ? recipients.find(r => r.conversationId === f.conversationId)?.name
+      : recipients.find(r => r.phone && phoneKey(r.phone) === phoneKey(f.phone))?.name) || f.phone;
 
   return createPortal(
     <div
@@ -233,9 +261,9 @@ export function ForwardMessageModal({
             </div>
             <ul className="space-y-1.5">
               {failures.map(f => (
-                <li key={`${f.phone}|${f.connectionId ?? ''}`} className="rounded-lg border border-slate-200 dark:border-white/10 px-3 py-2">
-                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">{nameOf(f.phone)}</p>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">{f.phone}</p>
+                <li key={`${f.conversationId ?? f.phone}|${f.connectionId ?? ''}`} className="rounded-lg border border-slate-200 dark:border-white/10 px-3 py-2">
+                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">{nameOf(f)}</p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">{f.conversationId ? 'Grupo' : f.phone}</p>
                   {f.error && <p className="mt-0.5 text-xs text-red-600 dark:text-red-400">{f.error}</p>}
                 </li>
               ))}
@@ -298,12 +326,20 @@ export function ForwardMessageModal({
                               : 'bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-300'
                           }`}
                         >
-                          {r.hasConversation ? <MessageCircle size={16} /> : (r.name.trim().charAt(0) || '?').toUpperCase()}
+                          {r.isGroup ? (
+                            <Users size={16} />
+                          ) : r.hasConversation ? (
+                            <MessageCircle size={16} />
+                          ) : (
+                            (r.name.trim().charAt(0) || '?').toUpperCase()
+                          )}
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">{r.name}</span>
                           <span className="block text-xs text-slate-500 dark:text-slate-400 truncate">
-                            {r.phone}
+                            {r.isGroup
+                              ? `Grupo${r.participantsCount ? ` · ${r.participantsCount} participantes` : ''}`
+                              : r.phone}
                             {via ? ` · via ${via}` : ''}
                           </span>
                         </span>

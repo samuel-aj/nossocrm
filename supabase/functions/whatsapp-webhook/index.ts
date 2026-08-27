@@ -198,6 +198,37 @@ function extractContextInfo(rawMessage: any): {
   return { forwarded: false };
 }
 
+/**
+ * GRUPOS: nome (subject) e tamanho do grupo na Evolution
+ * (GET /group/findGroupInfos/{instance}?groupJid=...). Best-effort: sem
+ * resposta, o grupo entra sem nome e o CRM tenta de novo na próxima mensagem.
+ */
+async function buscarGrupo(
+  evoBaseUrl: string,
+  evoApiToken: string,
+  instanceName: string,
+  groupJid: string,
+): Promise<{ subject?: string; size?: number } | null> {
+  if (!evoBaseUrl || !evoApiToken) return null;
+  try {
+    const r = await fetch(
+      `${evoBaseUrl}/group/findGroupInfos/${encodeURIComponent(instanceName)}?groupJid=${encodeURIComponent(groupJid)}`,
+      { headers: { apikey: evoApiToken } },
+    );
+    if (!r.ok) return null;
+    const j = await r.json();
+    const subject = typeof j?.subject === "string" && j.subject.trim() ? j.subject.trim() : undefined;
+    const size = typeof j?.size === "number"
+      ? j.size
+      : Array.isArray(j?.participants)
+      ? j.participants.length
+      : undefined;
+    return { subject, size };
+  } catch {
+    return null;
+  }
+}
+
 /** Extensão de arquivo a partir do mime (fallback: nome original ou .bin). */
 function extFromMime(mime?: string, fileName?: string): string {
   const m = (mime ?? "").split(";")[0].trim().toLowerCase();
@@ -425,6 +456,19 @@ Deno.serve(async (req) => {
   // --- Mensagens (recebidas e eco de enviadas) ---
   if (event === "messages.upsert") {
     const msgs = Array.isArray(data) ? data : Array.isArray(data?.messages) ? data.messages : [data];
+    // GRUPOS: só entram quando a organização ligou "Grupos do WhatsApp no
+    // chat" (organization_settings.wa_groups_enabled). Banco sem a coluna
+    // (migração pendente) = desligado, como sempre foi.
+    const { data: orgCfg } = await supabase
+      .from("organization_settings")
+      .select("wa_groups_enabled")
+      .eq("organization_id", orgId)
+      .maybeSingle();
+    const gruposLigados = !!orgCfg?.wa_groups_enabled;
+    const evoBase = String(conn.base_url ?? Deno.env.get("EVOLUTION_BASE_URL") ?? "")
+      .replace(/\/+$/, "")
+      .replace(/\/manager$/, "");
+    const evoToken = String(conn.instance_token ?? Deno.env.get("EVOLUTION_API_KEY") ?? "");
     for (const m of msgs) {
       if (!m) continue;
       const key = m.key ?? {};
@@ -432,12 +476,21 @@ Deno.serve(async (req) => {
       const rawJid: string = key.remoteJid ?? "";
       const altJid: string = key.remoteJidAlt ?? m.remoteJidAlt ?? "";
       const remoteJid: string = rawJid.endsWith("@lid") && altJid ? altJid : rawJid;
-      if (remoteJid.endsWith("@g.us") || remoteJid.endsWith("@broadcast") || remoteJid.endsWith("@lid")) continue;
-      const phone = jidToE164(remoteJid);
+      if (remoteJid.endsWith("@broadcast") || remoteJid.endsWith("@lid")) continue;
+      // GRUPO: a "conversa" é o grupo (wa_phone guarda o JID "...@g.us");
+      // quem escreveu vem em key.participant (com @lid, o telefone real em participantAlt)
+      const isGroup = remoteJid.endsWith("@g.us");
+      if (isGroup && !gruposLigados) continue;
+      const phone = isGroup ? remoteJid : jidToE164(remoteJid);
       const providerId = key.id;
       if (!phone || !providerId) continue;
 
       const fromMe = !!key.fromMe;
+      const rawPart: string = key.participant ?? m.participant ?? "";
+      const altPart: string = key.participantAlt ?? m.participantAlt ?? "";
+      const participantJid: string = rawPart.endsWith("@lid") && altPart ? altPart : rawPart;
+      const senderPhone = isGroup ? jidToE164(participantJid) : phone;
+      const senderName: string | null = isGroup && !fromMe ? (m.pushName ?? null) : null;
       const { text, mediaType, mediaMime, fileName, skip } = extractContent(m.message);
       if (skip) continue;
       const ctx = extractContextInfo(m.message);
@@ -451,19 +504,29 @@ Deno.serve(async (req) => {
       // conflitar, relê — primeiro por conexão e, enquanto a trava antiga
       // (org+telefone) existir no banco, cai na conversa única da org
       // (comportamento antigo até a migração rodar).
-      const variants = brPhoneVariants(phone);
+      const variants = isGroup ? [phone] : brPhoneVariants(phone);
       let convId: string | null = null;
       const { data: convList } = await supabase
         .from("wa_conversations")
-        .select("id, contact_id")
+        .select("id, contact_id, wa_name")
         .eq("organization_id", orgId)
         .eq("connection_id", conn.id)
         .in("wa_phone", variants);
       const conv = (convList ?? []).find((c) => c.contact_id) ?? (convList ?? [])[0];
       if (conv) {
         convId = conv.id;
+        // Grupo ainda sem nome no CRM (a busca falhou quando ele entrou): tenta de novo
+        if (isGroup && !conv.wa_name) {
+          const grupo = await buscarGrupo(evoBase, evoToken, instanceName, remoteJid);
+          if (grupo?.subject) {
+            await supabase
+              .from("wa_conversations")
+              .update({ wa_name: grupo.subject, ...(grupo.size !== undefined ? { participants_count: grupo.size } : {}) })
+              .eq("id", conv.id);
+          }
+        }
       }
-      if (!convId) {
+      if (!convId && !isGroup) {
         const { data: orfas } = await supabase
           .from("wa_conversations")
           .select("id, contact_id")
@@ -484,13 +547,17 @@ Deno.serve(async (req) => {
         }
       }
       if (!convId) {
-        const { data: contact } = await supabase
-          .from("contacts")
-          .select("id")
-          .eq("organization_id", orgId)
-          .in("phone", variants)
-          .limit(1)
-          .maybeSingle();
+        // grupo não tem contato no CRM; o nome vem da Evolution (subject)
+        const contact = isGroup
+          ? null
+          : (await supabase
+              .from("contacts")
+              .select("id")
+              .eq("organization_id", orgId)
+              .in("phone", variants)
+              .limit(1)
+              .maybeSingle()).data;
+        const grupo = isGroup ? await buscarGrupo(evoBase, evoToken, instanceName, remoteJid) : null;
         const { data: created, error: convErr } = await supabase
           .from("wa_conversations")
           .insert({
@@ -498,7 +565,10 @@ Deno.serve(async (req) => {
             connection_id: conn.id,
             contact_id: contact?.id ?? null,
             wa_phone: phone,
-            wa_name: m.pushName ?? null,
+            wa_name: isGroup ? grupo?.subject ?? null : m.pushName ?? null,
+            ...(isGroup
+              ? { is_group: true, group_jid: remoteJid, participants_count: grupo?.size ?? null }
+              : {}),
           })
           .select("id")
           .single();
@@ -674,7 +744,8 @@ Deno.serve(async (req) => {
         media_mime: mediaMimeFinal,
         media_url: mediaPath,
         evolution_message_id: providerId,
-        from_phone: fromMe ? null : phone,
+        // grupo: from_phone é de QUEM escreveu (participante); to_phone é o JID do grupo
+        from_phone: fromMe ? null : senderPhone || null,
         to_phone: fromMe ? phone : null,
         wa_timestamp: waTs,
         // webhook de saída: echo = enviada por fora (celular)
@@ -685,11 +756,12 @@ Deno.serve(async (req) => {
         quoted_message_id: quotedMessageId,
         quoted: quotedSnapshot,
         forwarded: ctx.forwarded,
+        sender_name: senderName,
       });
-      // Banco ainda sem as colunas de responder/encaminhar (migração pendente):
-      // grava sem elas em vez de perder a mensagem.
-      if (insErr && /column/i.test(String(insErr.message)) && /quoted|forwarded/i.test(String(insErr.message))) {
-        console.error("[wa-webhook] colunas de responder/encaminhar ausentes; gravando sem elas");
+      // Banco ainda sem as colunas de responder/encaminhar/grupo (migração
+      // pendente): grava sem elas em vez de perder a mensagem.
+      if (insErr && /column/i.test(String(insErr.message)) && /quoted|forwarded|sender_name/i.test(String(insErr.message))) {
+        console.error("[wa-webhook] colunas novas ausentes; gravando sem elas");
         ({ error: insErr } = await supabase.from("wa_messages").insert(baseRow));
       }
       const dup = insErr && String(insErr.message).toLowerCase().includes("duplicate");
@@ -699,7 +771,9 @@ Deno.serve(async (req) => {
       }
       if (dup) continue; // já tínhamos essa mensagem; não mexe na conversa
 
-      const preview = text ? text.slice(0, 140) : mediaType ? `[${mediaType}]` : "";
+      // grupo: prévia com quem escreveu ("Maria: oi"), como no WhatsApp
+      const previewBody = text ? text.slice(0, 140) : mediaType ? `[${mediaType}]` : "";
+      const preview = senderName && previewBody ? `${senderName}: ${previewBody}`.slice(0, 140) : previewBody;
       await supabase
         .from("wa_conversations")
         .update({ last_message_at: waTs, last_message_preview: preview })

@@ -30,6 +30,10 @@ type ConvRow = {
   last_message_at: string | null;
   last_message_preview: string | null;
   unread_count: number | null;
+  /** GRUPO do WhatsApp (só vem quando a org ligou grupos): wa_phone = JID do grupo */
+  is_group?: boolean | null;
+  group_jid?: string | null;
+  participants_count?: number | null;
 };
 
 type ConvInfo = {
@@ -48,10 +52,14 @@ type ChatTarget = {
   contactId: string | null;
   /** Conversa presa a um número conectado (null = visão unificada) */
   connectionId?: string | null;
+  /** GRUPO: abre pelo id da conversa (sem contato nem telefone) */
+  conversationId?: string | null;
+  isGroup?: boolean;
+  participantsCount?: number | null;
 };
 
-/** Filtro da lista, estilo WhatsApp: tudo | só não lidas | só quem tem conversa */
-type ChatFilter = 'all' | 'unread' | 'convs';
+/** Filtro da lista, estilo WhatsApp: tudo | só não lidas | só quem tem conversa | só grupos */
+type ChatFilter = 'all' | 'unread' | 'convs' | 'groups';
 
 type ChatListItem = ChatTarget & {
   key: string;
@@ -63,6 +71,10 @@ type ChatListItem = ChatTarget & {
   lastAt: string | null;
   preview: string;
   unread: number;
+  /** GRUPO do WhatsApp */
+  isGroup?: boolean;
+  conversationId?: string | null;
+  participantsCount?: number | null;
 };
 
 // Paleta de gradientes p/ avatar de iniciais (hash do nome → cor estável)
@@ -208,7 +220,7 @@ export const ChatsPage: React.FC = () => {
   const effectiveConn =
     connsList.length > 1 && connsList.some(c => c.id === connFilter) ? connFilter : 'all';
 
-  const convsQ = useQuery<{ data: ConvRow[] }>({
+  const convsQ = useQuery<{ data: ConvRow[]; groupsEnabled?: boolean }>({
     // Com 'all' a queryKey volta a ser a MESMA do badge do menu lateral
     // (Layout.tsx): um cache só, sem busca duplicada nem contagem defasada.
     queryKey: effectiveConn === 'all' ? ['waConversations'] : ['waConversations', effectiveConn],
@@ -268,6 +280,7 @@ export const ChatsPage: React.FC = () => {
   const convByKey = useMemo(() => {
     const m = new Map<string, ConvInfo>();
     for (const r of convsQ.data?.data ?? []) {
+      if (r.is_group) continue; // grupos têm linhas próprias (groupItems)
       const key = `${r.connection_id ?? 'none'}#${phoneKey(r.wa_phone)}`;
       const item: ConvInfo = {
         connectionId: r.connection_id ?? null,
@@ -308,11 +321,39 @@ export const ChatsPage: React.FC = () => {
     return m;
   }, [convByKey]);
 
+  // GRUPOS do WhatsApp (só chegam com a chave da org ligada): linha própria,
+  // aberta pelo id da conversa; sem contato/lead.
+  const groupsEnabled = !!convsQ.data?.groupsEnabled;
+  const groupItems = useMemo<ChatListItem[]>(() => {
+    const out: ChatListItem[] = [];
+    for (const r of convsQ.data?.data ?? []) {
+      if (!r.is_group) continue;
+      out.push({
+        key: `group#${r.id}`,
+        connectionId: r.connection_id ?? null,
+        phone: r.group_jid || r.wa_phone,
+        name: (r.wa_name || '').trim() || 'Grupo',
+        contactId: null,
+        contact: null,
+        hasConv: true,
+        lastAt: r.last_message_at,
+        preview: r.last_message_preview || '',
+        unread: r.unread_count || 0,
+        isGroup: true,
+        conversationId: r.id,
+        participantsCount: r.participants_count ?? null,
+      });
+    }
+    return out;
+  }, [convsQ.data]);
+
   // Quantas CONVERSAS têm mensagem não lida (número no chip "Não lidas",
   // igual ao WhatsApp: conta conversas, não mensagens)
   const unreadChats = useMemo(
-    () => Array.from(convByKey.values()).filter(c => c.unread > 0).length,
-    [convByKey]
+    () =>
+      Array.from(convByKey.values()).filter(c => c.unread > 0).length +
+      groupItems.filter(g => g.unread > 0).length,
+    [convByKey, groupItems]
   );
 
   // LISTA ÚNICA: contatos do CRM com telefone + conversas NOVAS de números
@@ -394,6 +435,9 @@ export const ChatsPage: React.FC = () => {
       }
     }
 
+    // grupos entram na mesma lista (em cima, por recência, junto das conversas)
+    items.push(...groupItems);
+
     const q = norm(searchQuery.trim());
     const filtered = q
       ? items.filter(c =>
@@ -406,18 +450,22 @@ export const ChatsPage: React.FC = () => {
         ? filtered.filter(c => c.unread > 0)
         : filter === 'convs'
           ? filtered.filter(c => c.hasConv)
-          : filtered;
+          : filter === 'groups'
+            ? filtered.filter(c => c.isGroup)
+            : filtered;
 
     return byTab.sort((a, b) => {
       if (a.hasConv && b.hasConv) return (b.lastAt || '').localeCompare(a.lastAt || '');
       if (a.hasConv !== b.hasConv) return a.hasConv ? -1 : 1;
       return a.name.localeCompare(b.name, 'pt-BR');
     });
-  }, [contacts, convsByPhone, searchQuery, filter]);
+  }, [contacts, convsByPhone, groupItems, searchQuery, filter]);
 
   const openChat = (target: ChatTarget) => setSelected(target);
   const selectedKey = selected
-    ? `${selected.connectionId ?? 'none'}#${phoneKey(selected.phone)}`
+    ? selected.isGroup
+      ? `group#${selected.conversationId}`
+      : `${selected.connectionId ?? 'none'}#${phoneKey(selected.phone)}`
     : null;
 
   // Lead do contato selecionado: prefere um deal ABERTO (nem ganho nem
@@ -439,11 +487,12 @@ export const ChatsPage: React.FC = () => {
 
   // "Marcar como lida": zera a bolinha sem abrir a conversa (reusa o GET de
   // mensagens, que já faz o reset do contador ao visualizar).
-  const handleMarkRead = async (phone: string, connectionId: string | null) => {
+  const handleMarkRead = async (phone: string, connectionId: string | null, conversationId?: string | null) => {
     try {
-      const url =
-        `/api/whatsapp/messages?phone=${encodeURIComponent(phone)}` +
-        (connectionId ? `&connectionId=${encodeURIComponent(connectionId)}` : '');
+      const url = conversationId
+        ? `/api/whatsapp/messages?conversationId=${encodeURIComponent(conversationId)}`
+        : `/api/whatsapp/messages?phone=${encodeURIComponent(phone)}` +
+          (connectionId ? `&connectionId=${encodeURIComponent(connectionId)}` : '');
       const res = await fetch(url, { credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await queryClient.invalidateQueries({ queryKey: ['waConversations'] });
@@ -456,21 +505,22 @@ export const ChatsPage: React.FC = () => {
   // "Marcar como não lida" (igual WhatsApp): arma a bolinha na lista. Se a
   // conversa estiver ABERTA, fecha — senão o próprio polling de leitura
   // zeraria o marcador em seguida. 100% interno: nada vai pro WhatsApp.
-  const handleMarkUnread = async (phone: string, connectionId: string | null) => {
+  const handleMarkUnread = async (phone: string, connectionId: string | null, conversationId?: string | null) => {
     try {
       const res = await fetch('/api/whatsapp/conversations/unread', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ phone, connectionId }),
+        body: JSON.stringify(conversationId ? { conversationId } : { phone, connectionId }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      if (
-        selected &&
-        phoneKey(selected.phone) === phoneKey(phone) &&
-        (selected.connectionId ?? null) === connectionId
-      )
-        setSelected(null);
+      const isSelected = conversationId
+        ? selected?.conversationId === conversationId
+        : !!selected &&
+          !selected.isGroup &&
+          phoneKey(selected.phone) === phoneKey(phone) &&
+          (selected.connectionId ?? null) === connectionId;
+      if (isSelected) setSelected(null);
       await queryClient.invalidateQueries({ queryKey: ['waConversations'] });
       addToast('Conversa marcada como não lida.', 'success');
     } catch {
@@ -703,7 +753,9 @@ export const ChatsPage: React.FC = () => {
                 { id: 'all', label: 'Tudo', title: 'Todas as conversas e contatos' },
                 { id: 'unread', label: 'Não lidas', title: 'Só conversas com mensagem não lida' },
                 { id: 'convs', label: 'Conversas', title: 'Só quem já trocou mensagem' },
-              ] as const
+                // chip "Grupos" só quando a org ligou grupos na tela Conexão
+                ...(groupsEnabled ? [{ id: 'groups', label: 'Grupos', title: 'Só grupos do WhatsApp' }] : []),
+              ] as Array<{ id: ChatFilter; label: string; title: string }>
             ).map(f => {
               const active = filter === f.id;
               return (
@@ -740,7 +792,9 @@ export const ChatsPage: React.FC = () => {
                     ? 'Nenhuma conversa não lida. Tudo em dia!'
                     : filter === 'convs'
                       ? 'Nenhuma conversa ainda.'
-                      : 'Nenhum contato com telefone no CRM.'}
+                      : filter === 'groups'
+                        ? 'Nenhum grupo ainda. Um grupo aparece aqui quando chega mensagem nele depois de ligar os grupos.'
+                        : 'Nenhum contato com telefone no CRM.'}
               </p>
             </div>
           )}
@@ -748,7 +802,7 @@ export const ChatsPage: React.FC = () => {
             // mesma herança do openChat: linha sem conversa sob filtro de
             // número acende quando o chat pinado nesse número está aberto
             const rowConnId = c.connectionId ?? (effectiveConn !== 'all' ? effectiveConn : null);
-            const active = selectedKey === `${rowConnId ?? 'none'}#${phoneKey(c.phone)}`;
+            const active = c.isGroup ? selectedKey === c.key : selectedKey === `${rowConnId ?? 'none'}#${phoneKey(c.phone)}`;
             return (
               // wrapper relative: o botão "marcar como não lida" é IRMÃO da
               // linha (botão dentro de botão é HTML inválido), aparece no hover
@@ -756,23 +810,46 @@ export const ChatsPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() =>
-                  openChat({
-                    phone: c.phone,
-                    name: c.name,
-                    contactId: c.contactId,
-                    connectionId: c.connectionId ?? (effectiveConn !== 'all' ? effectiveConn : null),
-                  })
+                  openChat(
+                    c.isGroup
+                      ? {
+                          phone: c.phone,
+                          name: c.name,
+                          contactId: null,
+                          connectionId: c.connectionId,
+                          conversationId: c.conversationId,
+                          isGroup: true,
+                          participantsCount: c.participantsCount ?? null,
+                        }
+                      : {
+                          phone: c.phone,
+                          name: c.name,
+                          contactId: c.contactId,
+                          connectionId: c.connectionId ?? (effectiveConn !== 'all' ? effectiveConn : null),
+                        }
+                  )
                 }
                 className={`w-full flex items-center gap-3 px-4 py-3 text-left border-b border-slate-50 dark:border-white/5 transition-colors ${
                   active ? 'bg-emerald-50 dark:bg-emerald-900/15' : 'hover:bg-slate-50 dark:hover:bg-white/5'
                 }`}
               >
-                <AvatarCircle name={c.name} src={c.contact?.avatar || undefined} />
+                {c.isGroup ? (
+                  <span className="w-12 h-12 rounded-full bg-slate-200 dark:bg-white/10 text-slate-500 dark:text-slate-300 flex items-center justify-center shrink-0">
+                    <Users size={20} />
+                  </span>
+                ) : (
+                  <AvatarCircle name={c.name} src={c.contact?.avatar || undefined} />
+                )}
                 <span className="flex-1 min-w-0">
                   <span className="flex items-center justify-between gap-2">
                     <span className="flex items-center gap-1.5 min-w-0">
                       <span className="text-sm font-semibold text-slate-900 dark:text-white truncate">{c.name}</span>
-                      {!c.contact && (
+                      {c.isGroup && (
+                        <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-300">
+                          grupo
+                        </span>
+                      )}
+                      {!c.contact && !c.isGroup && (
                         <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
                           sem contato
                         </span>
@@ -855,7 +932,7 @@ export const ChatsPage: React.FC = () => {
                       onClick={e => {
                         e.stopPropagation();
                         setRowMenu(null);
-                        void handleMarkRead(c.phone, c.connectionId ?? (c.hasConv ? 'none' : null));
+                        void handleMarkRead(c.phone, c.connectionId ?? (c.hasConv ? 'none' : null), c.conversationId);
                       }}
                       className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
                     >
@@ -868,7 +945,7 @@ export const ChatsPage: React.FC = () => {
                       onClick={e => {
                         e.stopPropagation();
                         setRowMenu(null);
-                        void handleMarkUnread(c.phone, c.connectionId ?? (c.hasConv ? 'none' : null));
+                        void handleMarkUnread(c.phone, c.connectionId ?? (c.hasConv ? 'none' : null), c.conversationId);
                       }}
                       className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
                     >
@@ -902,7 +979,17 @@ export const ChatsPage: React.FC = () => {
             {/* Barra de CRM: mostra a pipeline/etapa do lead do contato (com
                 atalho pro card) ou oferece criar o lead na hora */}
             <div className="shrink-0 flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card">
-              {selectedDeal ? (
+              {selected.isGroup ? (
+                /* Grupo: não tem contato nem lead; só o rótulo */
+                <span className="flex items-center gap-2 min-w-0 text-xs text-slate-500 dark:text-slate-400">
+                  <Users size={14} className="shrink-0" />
+                  <span className="truncate">
+                    Grupo do WhatsApp
+                    {selected.participantsCount ? ` · ${selected.participantsCount} participantes` : ''}
+                    . Grupos não viram contato nem lead.
+                  </span>
+                </span>
+              ) : selectedDeal ? (
                 <>
                   <span className="flex items-center gap-2 min-w-0 text-xs text-slate-600 dark:text-slate-300">
                     <KanbanSquare size={14} className="text-primary-500 shrink-0" />
@@ -956,9 +1043,20 @@ export const ChatsPage: React.FC = () => {
             <div className="flex-1 min-h-0">
               {/* key={phone} garante reset total do composer/busca ao trocar de conversa */}
               <DealWhatsAppChat
-                key={`${selected.phone}|${selected.connectionId ?? 'all'}`}
+                key={selected.isGroup ? `group|${selected.conversationId}` : `${selected.phone}|${selected.connectionId ?? 'all'}`}
                 connectionId={selected.connectionId ?? null}
-                contact={{ id: selected.contactId || selected.phone, name: selected.name, phone: selected.phone }}
+                contact={
+                  selected.isGroup ? null : { id: selected.contactId || selected.phone, name: selected.name, phone: selected.phone }
+                }
+                group={
+                  selected.isGroup
+                    ? {
+                        conversationId: selected.conversationId as string,
+                        name: selected.name,
+                        participantsCount: selected.participantsCount ?? null,
+                      }
+                    : null
+                }
                 templateContext={{
                   'contato.email': (selected.contactId && contacts.find(c => c.id === selected.contactId)?.email) || '',
                   'lead.titulo': selectedDeal?.title || '',
