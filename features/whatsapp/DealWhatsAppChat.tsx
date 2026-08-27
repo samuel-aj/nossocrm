@@ -732,28 +732,32 @@ function MessageBubble({
     setMenuOpen(false);
     onAction?.(action, m);
   };
-  // Degradê da cor da bolha por trás da seta (estilo WhatsApp Web). Em texto
-  // simples é um degradê reto (esquerda -> direita). Onde esse bloco reto
-  // cortaria algo de cor diferente (citação no topo, foto do áudio), o
-  // degradê é RADIAL a partir do canto: esmaece em todas as direções, sem
-  // linha de corte. Em foto/vídeo/figurinha o esmaecido é escuro. A bolha
+  // Degradê da cor da bolha por trás da seta (estilo WhatsApp Web), SEMPRE na
+  // cor da bolha. Em texto simples é um degradê reto (esquerda -> direita).
+  // Onde esse bloco reto cortaria algo de cor diferente (citação no topo,
+  // foto do áudio, foto/vídeo/figurinha), o degradê é RADIAL a partir do
+  // canto: esmaece em todas as direções, sem linha de corte. O degradê é só
+  // decorativo (não recebe clique); o botão é do tamanho da seta. A bolha
   // nunca muda de tamanho por causa da seta.
-  const chevronOverMedia = m.media_type === 'image' || m.media_type === 'video' || m.media_type === 'sticker';
-  const chevronSoft = m.media_type === 'audio' || !!m.quoted;
+  const chevronSoft =
+    m.media_type === 'audio' ||
+    m.media_type === 'image' ||
+    m.media_type === 'video' ||
+    m.media_type === 'sticker' ||
+    !!m.quoted;
   const chevronTone = isOut
     ? 'text-emerald-50 hover:text-white'
     : 'text-slate-400 hover:text-slate-600 dark:text-slate-300 dark:hover:text-white';
-  const chevronLook = chevronOverMedia
-    ? 'h-9 w-16 pt-1 bg-[radial-gradient(ellipse_at_top_right,rgba(0,0,0,0.55)_25%,transparent_72%)] text-white'
-    : chevronSoft
-      ? `h-9 w-16 pt-1 ${
-          isOut
-            ? 'bg-[radial-gradient(ellipse_at_top_right,#059669_30%,transparent_72%)]'
-            : 'bg-[radial-gradient(ellipse_at_top_right,#ffffff_30%,transparent_72%)] dark:bg-[radial-gradient(ellipse_at_top_right,#334155_30%,transparent_72%)]'
-        } ${chevronTone}`
-      : `h-7 w-14 pt-1 bg-gradient-to-l from-50% to-transparent ${
-          isOut ? 'from-emerald-600' : 'from-white dark:from-slate-700'
-        } ${chevronTone}`;
+  const chevronBackdrop = chevronSoft
+    ? `h-9 w-16 ${
+        isOut
+          ? 'bg-[radial-gradient(ellipse_at_top_right,#059669_30%,transparent_72%)]'
+          : 'bg-[radial-gradient(ellipse_at_top_right,#ffffff_30%,transparent_72%)] dark:bg-[radial-gradient(ellipse_at_top_right,#334155_30%,transparent_72%)]'
+      }`
+    : `h-7 w-14 bg-gradient-to-l from-50% to-transparent ${isOut ? 'from-emerald-600' : 'from-white dark:from-slate-700'}`;
+  const chevronVisible = menuOpen
+    ? 'opacity-100'
+    : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100';
   // Motivo real devolvido pela Meta/Evolution (truncado), ou um texto
   // genérico quando o provedor não explicou — vai no cartão do selo "Erro"
   // Erro do provedor traduzido pra pt-BR (o texto cru da Meta é técnico e em
@@ -805,24 +809,28 @@ function MessageBubble({
         } ${flash ? 'transition-shadow duration-500' : ''}`}
       >
         {canAct && (
-          <button
-            type="button"
-            onClick={e => {
-              e.stopPropagation();
-              if (menuOpen) setMenuOpen(false);
-              else openMenu();
-            }}
-            aria-label="Opções da mensagem"
-            aria-expanded={menuOpen}
-            title="Responder ou encaminhar"
-            // Seta no canto da bolha com degradê por trás (estilo WhatsApp Web),
-            // sem "bolinha"; a cor/altura do degradê depende do conteúdo (acima).
-            className={`absolute top-0 right-0 z-10 rounded-tr-2xl inline-flex items-start justify-end pr-1.5 transition-opacity ${
-              menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
-            } ${chevronLook}`}
-          >
-            <ChevronDown size={18} strokeWidth={2.2} />
-          </button>
+          <>
+            {/* degradê decorativo (não clicável) no canto da bolha */}
+            <span
+              aria-hidden
+              className={`absolute top-0 right-0 z-10 pointer-events-none rounded-tr-2xl transition-opacity ${chevronVisible} ${chevronBackdrop}`}
+            />
+            {/* a seta em si: só ela recebe o clique */}
+            <button
+              type="button"
+              onClick={e => {
+                e.stopPropagation();
+                if (menuOpen) setMenuOpen(false);
+                else openMenu();
+              }}
+              aria-label="Opções da mensagem"
+              aria-expanded={menuOpen}
+              title="Responder ou encaminhar"
+              className={`absolute top-1 right-1.5 z-20 h-5 w-5 inline-flex items-center justify-center rounded transition-opacity focus-visible:opacity-100 ${chevronVisible} ${chevronTone}`}
+            >
+              <ChevronDown size={18} strokeWidth={2.2} />
+            </button>
+          </>
         )}
         {menuOpen && (
           <div
