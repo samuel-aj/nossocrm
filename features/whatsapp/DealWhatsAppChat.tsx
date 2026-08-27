@@ -732,6 +732,20 @@ function MessageBubble({
     setMenuOpen(false);
     onAction?.(action, m);
   };
+  // Onde a seta cabe sem cortar nada: em foto/vídeo/figurinha ela fica por
+  // cima da mídia com um sombreado escuro; no áudio ganha uma faixa própria no
+  // topo (o player ocupa a largura toda, inclusive a foto à direita); no resto
+  // (texto, documento, contato) o degradê é da cor da bolha, sobre a 1ª linha.
+  const chevronOverMedia = m.media_type === 'image' || m.media_type === 'video' || m.media_type === 'sticker';
+  const chevronOwnRow = m.media_type === 'audio';
+  const chevronBubbleTone = isOut
+    ? 'from-emerald-600 text-emerald-50 hover:text-white'
+    : 'from-white dark:from-slate-700 text-slate-400 hover:text-slate-600 dark:text-slate-300 dark:hover:text-white';
+  const chevronLook = chevronOverMedia
+    ? 'h-8 w-16 pt-1 bg-gradient-to-l from-black/45 from-40% to-transparent text-white'
+    : chevronOwnRow
+      ? `h-6 w-14 pt-0.5 bg-gradient-to-l from-50% to-transparent ${chevronBubbleTone}`
+      : `h-7 w-14 pt-1 bg-gradient-to-l from-50% to-transparent ${chevronBubbleTone}`;
   // Motivo real devolvido pela Meta/Evolution (truncado), ou um texto
   // genérico quando o provedor não explicou — vai no cartão do selo "Erro"
   // Erro do provedor traduzido pra pt-BR (o texto cru da Meta é técnico e em
@@ -780,7 +794,7 @@ function MessageBubble({
             : 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-bl-sm border border-slate-200 dark:border-white/10'
         } ${failed ? 'ring-1 ring-red-400/80' : ''} ${
           isCurrentMatch || flash ? 'ring-2 ring-amber-400' : ''
-        } ${flash ? 'transition-shadow duration-500' : ''}`}
+        } ${flash ? 'transition-shadow duration-500' : ''} ${canAct && chevronOwnRow ? 'pt-6' : ''}`}
       >
         {canAct && (
           <button
@@ -793,15 +807,11 @@ function MessageBubble({
             aria-label="Opções da mensagem"
             aria-expanded={menuOpen}
             title="Responder ou encaminhar"
-            // Seta no canto da bolha com degradê da PRÓPRIA cor da bolha por trás
-            // (estilo WhatsApp Web): cobre o fim da primeira linha sem "bolinha".
-            className={`absolute top-0 right-0 z-10 h-7 w-14 rounded-tr-2xl inline-flex items-start justify-end pt-1 pr-1.5 transition-opacity ${
+            // Seta no canto da bolha com degradê por trás (estilo WhatsApp Web),
+            // sem "bolinha"; a cor/altura do degradê depende do conteúdo (acima).
+            className={`absolute top-0 right-0 z-10 rounded-tr-2xl inline-flex items-start justify-end pr-1.5 transition-opacity ${
               menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
-            } bg-gradient-to-l from-50% to-transparent ${
-              isOut
-                ? 'from-emerald-600 text-emerald-50 hover:text-white'
-                : 'from-white dark:from-slate-700 text-slate-400 hover:text-slate-600 dark:text-slate-300 dark:hover:text-white'
-            }`}
+            } ${chevronLook}`}
           >
             <ChevronDown size={18} strokeWidth={2.2} />
           </button>
