@@ -732,22 +732,23 @@ function MessageBubble({
     setMenuOpen(false);
     onAction?.(action, m);
   };
-  // Onde a seta cabe sem cortar nada: no áudio (o player ocupa a largura toda,
-  // inclusive a foto à direita) e quando a bolha COMEÇA por uma citação (fundo
-  // diferente do da bolha) ela ganha uma faixa própria no topo; em foto/vídeo/
-  // figurinha fica por cima da mídia com um sombreado escuro; no resto (texto,
-  // documento, contato) o degradê é da cor da bolha, sobre a 1ª linha.
-  const chevronOwnRow = m.media_type === 'audio' || !!m.quoted;
-  const chevronOverMedia =
-    !chevronOwnRow && (m.media_type === 'image' || m.media_type === 'video' || m.media_type === 'sticker');
-  const chevronBubbleTone = isOut
-    ? 'from-emerald-600 text-emerald-50 hover:text-white'
-    : 'from-white dark:from-slate-700 text-slate-400 hover:text-slate-600 dark:text-slate-300 dark:hover:text-white';
-  const chevronLook = chevronOverMedia
-    ? 'h-8 w-16 pt-1 bg-gradient-to-l from-black/45 from-40% to-transparent text-white'
-    : chevronOwnRow
-      ? `h-6 w-14 pt-0.5 bg-gradient-to-l from-50% to-transparent ${chevronBubbleTone}`
-      : `h-7 w-14 pt-1 bg-gradient-to-l from-50% to-transparent ${chevronBubbleTone}`;
+  // Texto simples: degradê da cor da bolha por trás da seta (estilo WhatsApp
+  // Web). Onde esse bloco cortaria algo de cor diferente (citação no topo,
+  // foto do áudio, foto/vídeo/figurinha), a seta vai SEM bloco, só com uma
+  // sombra suave pra continuar legível. A bolha não muda de tamanho.
+  const chevronOverMedia = m.media_type === 'image' || m.media_type === 'video' || m.media_type === 'sticker';
+  const chevronBare = chevronOverMedia || m.media_type === 'audio' || !!m.quoted;
+  const chevronLook = chevronBare
+    ? `h-7 w-9 pt-1 ${
+        chevronOverMedia || isOut
+          ? 'text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]'
+          : 'text-slate-500 hover:text-slate-800 dark:text-slate-200 dark:hover:text-white drop-shadow-[0_1px_1px_rgba(255,255,255,0.7)] dark:drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]'
+      }`
+    : `h-7 w-14 pt-1 bg-gradient-to-l from-50% to-transparent ${
+        isOut
+          ? 'from-emerald-600 text-emerald-50 hover:text-white'
+          : 'from-white dark:from-slate-700 text-slate-400 hover:text-slate-600 dark:text-slate-300 dark:hover:text-white'
+      }`;
   // Motivo real devolvido pela Meta/Evolution (truncado), ou um texto
   // genérico quando o provedor não explicou — vai no cartão do selo "Erro"
   // Erro do provedor traduzido pra pt-BR (o texto cru da Meta é técnico e em
@@ -796,7 +797,7 @@ function MessageBubble({
             : 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-bl-sm border border-slate-200 dark:border-white/10'
         } ${failed ? 'ring-1 ring-red-400/80' : ''} ${
           isCurrentMatch || flash ? 'ring-2 ring-amber-400' : ''
-        } ${flash ? 'transition-shadow duration-500' : ''} ${canAct && chevronOwnRow ? 'pt-6' : ''}`}
+        } ${flash ? 'transition-shadow duration-500' : ''}`}
       >
         {canAct && (
           <button
