@@ -4,6 +4,7 @@
  *                                     { autoCreate: true } cria a instância da org sozinho
  * DELETE /api/whatsapp/connection  -> desconecta o número da org (logout; admin)
  */
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireOrgUser, isOrgAdmin, json } from '@/lib/whatsapp/api';
 import {
   getConnectionByOrg,
@@ -394,6 +395,36 @@ export async function POST(req: Request) {
   return json({ connection: { ...mask(conn), status }, metaSetup });
 }
 
+/**
+ * Mesmo número pareado de novo (nova linha em wa_connections): as conversas presas à
+ * conexão antiga passam para a nova CONECTADA, senão o chat continuaria tentando enviar
+ * pela instância morta. Devolve quantas conversas mudaram (0 quando não há irmã).
+ */
+async function migrateConversationsToSibling(
+  admin: SupabaseClient,
+  orgId: string,
+  conn: WaConnectionRow
+): Promise<number> {
+  const digits = (conn.phone_number || '').replace(/\D/g, '');
+  if (!digits) return 0;
+  const siblings = (await getConnectionsByOrg(admin, orgId)).filter(
+    c => c.id !== conn.id && c.status === 'connected' && (c.phone_number || '').replace(/\D/g, '') === digits
+  );
+  const target = siblings[0];
+  if (!target) return 0;
+  const { data, error } = await admin
+    .from('wa_conversations')
+    .update({ connection_id: target.id })
+    .eq('organization_id', orgId)
+    .eq('connection_id', conn.id)
+    .select('id');
+  if (error) {
+    console.error('[whatsapp] migrar conversas para a conexão nova falhou:', error.message);
+    return 0;
+  }
+  return data?.length ?? 0;
+}
+
 export async function DELETE(req: Request) {
   const auth = await requireOrgUser();
   if (!auth.ok) return auth.response;
@@ -426,9 +457,10 @@ export async function DELETE(req: Request) {
         await deleteEvolutionInstance(conn.instance_name);
       }
     }
+    const migrated = await migrateConversationsToSibling(auth.admin, auth.user.organizationId, conn);
     const { error } = await auth.admin.from('wa_connections').delete().eq('id', conn.id);
     if (error) return json({ error: `Falha ao excluir a conexão: ${error.message}` }, 500);
-    return json({ ok: true });
+    return json({ ok: true, migrated });
   }
 
   if (isMetaCloudConnection(conn)) {
@@ -461,15 +493,19 @@ export async function DELETE(req: Request) {
     return json({ ok: true });
   }
 
+  // Logout best-effort: instância com sessão morta responde 500 aqui e, antes, isso travava a
+  // desconexão (a conexão ficava "conectada" para sempre). O que manda é o estado no CRM.
+  let logoutError: string | null = null;
   try {
     await getProvider(conn).logout();
   } catch (e) {
-    return json({ error: `Falha ao desconectar: ${(e as Error).message}` }, 502);
+    logoutError = (e as Error).message;
   }
+  const migrated = await migrateConversationsToSibling(auth.admin, auth.user.organizationId, conn);
   await updateConnectionStatus(auth.admin, conn.id, {
     status: 'disconnected',
     phone_number: null,
     profile_name: null,
   });
-  return json({ ok: true });
+  return json({ ok: true, migrated, logoutError });
 }
