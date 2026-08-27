@@ -443,6 +443,8 @@ export const BotStepSchema = z.discriminatedUnion('type', [
     type: z.literal('send_template'),
     template_id: z.string().uuid(),
     template_name: z.string().max(120).optional(),
+    /** corpo do modelo (cópia para o quadro mostrar o texto; a Meta usa o modelo aprovado) */
+    template_body: z.string().max(2000).optional(),
     /** textos dos botões de resposta rápida do modelo (uma saída por botão) */
     buttons: z.array(z.string().max(60)).max(10).default([]),
     button_step_ids: z.array(z.string().nullable()).max(10).default([]),

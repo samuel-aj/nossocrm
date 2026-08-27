@@ -125,7 +125,7 @@ export function createBlock(type: StepType, id: string = newId()): Block {
     case 'send_text':
       return { id, type, data: { text: '' } };
     case 'send_template':
-      return { id, type, data: { template_id: '', template_name: '', buttons: [], timeout_minutes: 1440 } };
+      return { id, type, data: { template_id: '', template_name: '', template_body: '', buttons: [], timeout_minutes: 1440 } };
     case 'wait':
       return { id, type, data: { amount: 1, unit: 'h' } };
     case 'wait_reply':
@@ -199,6 +199,7 @@ function stepToBlock(step: BotStep): Block {
         data: {
           template_id: step.template_id,
           template_name: step.template_name ?? '',
+          template_body: step.template_body ?? '',
           buttons: [...(step.buttons ?? [])],
           timeout_minutes: step.timeout_minutes ?? 1440,
         },
@@ -416,6 +417,7 @@ function blockToStep(block: Block, to: (handle: string) => string | null, ui: { 
         type: 'send_template',
         template_id: block.data.template_id,
         template_name: block.data.template_name.trim() || undefined,
+        template_body: block.data.template_body.trim().slice(0, 2000) || undefined,
         buttons: block.data.buttons.map((b) => b.trim()),
         button_step_ids: block.data.buttons.map((_, i) => to(buttonHandleId(i))),
         timeout_minutes: block.data.timeout_minutes,

@@ -399,7 +399,7 @@ function TemplateEditor({ block, update }: EditorProps<'send_template'>) {
     const t = all.find((x) => x.id === id);
     // Só botões de resposta rápida viram saídas (link/telefone não geram resposta)
     const buttons = (t?.buttons ?? []).filter((b) => b.type === 'QUICK_REPLY').map((b) => b.text);
-    update({ ...block, data: { ...block.data, template_id: id, template_name: t?.name ?? '', buttons } });
+    update({ ...block, data: { ...block.data, template_id: id, template_name: t?.name ?? '', template_body: t?.body ?? '', buttons } });
   };
   const statusLabel = (status: string | null | undefined) =>
     status === 'APPROVED' ? '' : status === 'REJECTED' ? ' (rejeitado pela Meta)' : ' (aguardando aprovação)';

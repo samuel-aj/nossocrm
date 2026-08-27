@@ -150,7 +150,14 @@ export type HandoffData = { agent_id: string };
 export type TypingData = { seconds: number };
 export type StartBotData = { bot_id: string; bot_name: string };
 /** Modelo de mensagem escolhido (o nome fica guardado para o resumo no balão). */
-export type TemplateData = { template_id: string; template_name: string; buttons: string[]; timeout_minutes: number };
+export type TemplateData = {
+  template_id: string;
+  template_name: string;
+  /** corpo do modelo (mostrado no balão) */
+  template_body: string;
+  buttons: string[];
+  timeout_minutes: number;
+};
 export type EndData = Record<string, never>;
 
 /** Um bloco dentro do balão (= um passo do robô). O id do bloco é o id do passo. */

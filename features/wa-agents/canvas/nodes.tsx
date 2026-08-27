@@ -89,7 +89,9 @@ export function blockSummary(block: Block, options: WaAgentOptions | undefined, 
     case 'send_template': {
       const name = block.data.template_name.trim() || (block.data.template_id ? 'Modelo escolhido' : 'Escolha o modelo');
       const n = block.data.buttons.length;
-      return n > 0 ? `${name} · ${n} ${n === 1 ? 'botão' : 'botões'}` : name;
+      const head = n > 0 ? `${name} · ${n} ${n === 1 ? 'botão' : 'botões'}` : name;
+      const body = block.data.template_body.replace(/\s+/g, ' ').trim();
+      return body ? `${head}\n${body.length > 220 ? `${body.slice(0, 220)}…` : body}` : head;
     }
     case 'wait': {
       const { amount, unit } = block.data;

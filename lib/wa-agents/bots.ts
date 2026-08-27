@@ -643,6 +643,16 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
           if (!agent) throw new Error('agente de destino não encontrado');
           if (!agent.enabled) throw new Error('agente de destino desligado');
           const now = nowIso();
+          // Estado atual da conversa: o robô de follow-up devolve ao MESMO agente sem apagar dados
+          // salvos, follow-ups feitos nem memória; agente diferente zera só o contador de respostas
+          const { data: convRow } = await admin
+            .from('wa_conversations')
+            .select('ai_agent_id, ai_state')
+            .eq('organization_id', orgId)
+            .eq('id', conversationId)
+            .maybeSingle();
+          const currentAgentId = (convRow as { ai_agent_id?: string | null } | null)?.ai_agent_id ?? null;
+          const currentState = ((convRow as { ai_state?: Record<string, unknown> | null } | null)?.ai_state ?? {}) as Record<string, unknown>;
           const { error } = await admin
             .from('wa_conversations')
             .update({
@@ -650,7 +660,11 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
               ai_status: 'active',
               ai_status_changed_at: now,
               // o contexto escrito pela equipe ao iniciar o robô segue para o agente
-              ai_state: st.vars.contexto_extra ? { contexto_extra: String(st.vars.contexto_extra) } : {},
+              ai_state: {
+                ...currentState,
+                ...(currentAgentId !== agent.id ? { respostas: 0 } : {}),
+                ...(st.vars.contexto_extra ? { contexto_extra: String(st.vars.contexto_extra) } : {}),
+              },
               ai_approval: null,
               ai_resume_at: null,
               ai_paused_by: null,
