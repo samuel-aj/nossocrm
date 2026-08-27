@@ -36,7 +36,6 @@ import {
   Square,
   Reply,
   Forward,
-  Copy,
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { quotedPreviewText, type QuotedSnapshot } from '@/lib/whatsapp/quote';
@@ -596,7 +595,7 @@ function FailBadge({ reason }: { reason: string }) {
   );
 }
 
-type BubbleAction = 'reply' | 'forward' | 'copy';
+type BubbleAction = 'reply' | 'forward';
 
 /** Bloco da mensagem CITADA dentro da bolha (estilo WhatsApp): barra colorida
  *  à esquerda, quem escreveu, prévia e miniatura quando a original é imagem.
@@ -793,16 +792,18 @@ function MessageBubble({
             }}
             aria-label="Opções da mensagem"
             aria-expanded={menuOpen}
-            title="Responder, encaminhar..."
-            className={`absolute top-1 right-1 z-10 h-6 w-6 rounded-full inline-flex items-center justify-center transition-opacity ${
+            title="Responder ou encaminhar"
+            // Seta no canto da bolha com degradê da PRÓPRIA cor da bolha por trás
+            // (estilo WhatsApp Web): cobre o fim da primeira linha sem "bolinha".
+            className={`absolute top-0 right-0 z-10 h-7 w-14 rounded-tr-2xl inline-flex items-start justify-end pt-1 pr-1.5 transition-opacity ${
               menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
-            } ${
+            } bg-gradient-to-l from-50% to-transparent ${
               isOut
-                ? 'bg-emerald-800/70 text-white hover:bg-emerald-900/80'
-                : 'bg-white/90 text-slate-500 hover:text-slate-800 shadow dark:bg-slate-800/90 dark:text-slate-200 dark:hover:text-white'
+                ? 'from-emerald-600 text-emerald-50 hover:text-white'
+                : 'from-white dark:from-slate-700 text-slate-400 hover:text-slate-600 dark:text-slate-300 dark:hover:text-white'
             }`}
           >
-            <ChevronDown size={14} />
+            <ChevronDown size={18} strokeWidth={2.2} />
           </button>
         )}
         {menuOpen && (
@@ -828,16 +829,6 @@ function MessageBubble({
             >
               <Forward size={16} className="text-sky-500" /> Encaminhar
             </button>
-            {m.body && m.media_type !== 'contact' && (
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => act('copy')}
-                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm hover:bg-slate-100 dark:hover:bg-white/10"
-              >
-                <Copy size={16} className="text-slate-400" /> Copiar texto
-              </button>
-            )}
           </div>
         )}
         {m.forwarded && (
@@ -1509,16 +1500,7 @@ export function DealWhatsAppChat({
       window.setTimeout(() => textareaRef.current?.focus(), 0);
       return;
     }
-    if (action === 'forward') {
-      setForwardMsg(m);
-      return;
-    }
-    if (action === 'copy' && m.body) {
-      navigator.clipboard
-        ?.writeText(m.body)
-        .then(() => showToast('Texto copiado', 'success'))
-        .catch(() => showToast('Não deu para copiar o texto', 'error'));
-    }
+    if (action === 'forward') setForwardMsg(m);
   };
 
   const onPickFile = (f: File | null) => {
