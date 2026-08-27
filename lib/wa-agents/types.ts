@@ -298,6 +298,10 @@ export type AgentDocumentRow = {
   chunk_count: number;
   /** Modelo usado nos embeddings dos trechos (ex.: "openai:text-embedding-3-small"); null sem embedding */
   embedding_model?: string | null;
+  /** Metadados (migração 20260827120000): entram no cabeçalho dos trechos vetorizados e na lista do prompt */
+  title?: string | null;
+  description?: string | null;
+  tags?: string[] | null;
   created_by?: string | null;
   created_at: string;
   updated_at: string;
@@ -366,11 +370,20 @@ export const AgentMediaPatchSchema = z.object({
   description: z.string().max(500).optional(),
 });
 
+/** Metadados editáveis de um documento da base (título, descrição do conteúdo, etiquetas). */
+export const AgentDocumentMetaSchema = z.object({
+  title: z.string().trim().max(160).nullable().optional(),
+  description: z.string().trim().max(1000).nullable().optional(),
+  tags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
+});
+export type AgentDocumentMeta = z.infer<typeof AgentDocumentMetaSchema>;
+
 export const AgentDocumentInputSchema = z.object({
   name: z.string().min(1).max(160),
   storage_path: z.string().min(1),
   mime: z.string().max(120),
   size_bytes: z.number().int().min(0).max(AGENT_DOC_MAX_BYTES),
+  ...AgentDocumentMetaSchema.shape,
 });
 export type AgentDocumentInput = z.infer<typeof AgentDocumentInputSchema>;
 

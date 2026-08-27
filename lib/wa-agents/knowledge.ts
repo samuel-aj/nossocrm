@@ -66,8 +66,20 @@ export type EmbeddingModelId = (typeof EMBEDDING_MODEL_IDS)[EmbeddingProvider];
  */
 export const MIN_SIMILARITY: Record<EmbeddingProvider, number> = { openai: 0.2, google: 0.5 };
 
-export const DOCUMENT_COLUMNS =
-  'id, organization_id, agent_id, name, mime, size_bytes, storage_path, status, error, chunk_count, embedding_model, created_by, created_at, updated_at';
+// '*' em vez da lista fixa: os metadados (title/description/tags) chegam quando a migração
+// 20260827120000 estiver aplicada e ficam undefined antes dela, sem quebrar nada.
+export const DOCUMENT_COLUMNS = '*';
+
+/**
+ * Cabeçalho de contexto do documento, prefixado a cada trecho na hora de vetorizar
+ * ("contextual chunking": o vetor carrega de que documento/assunto o trecho é).
+ */
+export function documentHeader(doc: Pick<AgentDocumentRow, 'name' | 'title' | 'description' | 'tags'>): string {
+  const title = (doc.title ?? '').trim() || doc.name;
+  const description = (doc.description ?? '').trim();
+  const tags = (doc.tags ?? []).map(t => t.trim()).filter(Boolean);
+  return `Documento: ${title}${description ? `. ${description}` : ''}${tags.length ? ` [${tags.join(', ')}]` : ''}`;
+}
 
 /** Promise com prazo: rejeita com uma mensagem clara quando `ms` passa. */
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -531,9 +543,12 @@ export async function processDocument(
     }
 
     remaining('embeddings');
+    // Vetoriza cabeçalho + trecho (o conteúdo gravado continua só o trecho)
+    const header = documentHeader(doc);
+    const toEmbed = chunks.map(c => `${header}\n${c}`);
     let embedded: EmbedTextsResult | null = null;
     try {
-      embedded = await embedTexts(admin, doc.organization_id, chunks, { prefer: profile.model, abortSignal: abort });
+      embedded = await embedTexts(admin, doc.organization_id, toEmbed, { prefer: profile.model, abortSignal: abort });
     } catch (e) {
       // Sem embedding o documento continua útil pela busca por texto
       console.error('[wa-agents] embeddings falharam, seguindo só com busca por texto:', errorMessage(e));
@@ -646,11 +661,11 @@ export async function searchKnowledge(
 /** Texto dos trechos para o modelo (nome do documento quando conhecido). */
 export function formatKnowledgeHits(
   hits: KnowledgeHit[],
-  documents: Array<Pick<AgentDocumentRow, 'id' | 'name'>> = [],
+  documents: Array<Pick<AgentDocumentRow, 'id' | 'name'> & { title?: string | null }> = [],
   maxChars = 6000
 ): string {
   if (hits.length === 0) return '';
-  const names = new Map(documents.map(d => [d.id, d.name]));
+  const names = new Map(documents.map(d => [d.id, (d.title ?? '').trim() || d.name]));
   const lines: string[] = [];
   let total = 0;
   for (const [i, h] of hits.entries()) {

@@ -355,6 +355,23 @@ export function useDeleteWaAgentDocument(agentId: string | null | undefined) {
 }
 
 /** Reprocessa um documento (extrai e indexa de novo). */
+/** Metadados de um documento (título, descrição, etiquetas). */
+export function useUpdateWaAgentDocument(agentId: string | null | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ docId, meta }: { docId: string; meta: { title?: string | null; description?: string | null; tags?: string[] } }) => {
+      const json = await waAgentsFetch<{ document: AgentDocumentRow }>(
+        `/api/wa-agents/agents/${agentId}/documents/${docId}`,
+        { method: 'PATCH', body: meta }
+      );
+      return json.document;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: documentsKey(agentId) });
+    },
+  });
+}
+
 export function useReprocessWaAgentDocument(agentId: string | null | undefined) {
   const qc = useQueryClient();
   return useMutation({

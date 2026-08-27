@@ -30,6 +30,13 @@ import {
 } from '../../../_shared';
 
 export const runtime = 'nodejs';
+
+/** Coluna de metadado ausente = migração 20260827120000 não aplicada: mensagem clara. */
+function metadataColumnHint(message: string): string {
+  return /column .*(title|description|tags).* does not exist/i.test(message)
+    ? 'Metadados de documento precisam da migração 20260827120000_wa_ai_agent_documents_metadata (rode no Supabase).'
+    : message;
+}
 /** Processamento do documento roda depois da resposta (after) e pode demorar */
 export const maxDuration = 300;
 
@@ -109,10 +116,14 @@ export async function POST(req: Request, ctx: Ctx) {
       error: null,
       chunk_count: 0,
       created_by: auth.user.id,
+      // metadados só quando informados (antes da migração 20260827120000 as colunas não existem)
+      ...(input.title !== undefined ? { title: input.title } : {}),
+      ...(input.description !== undefined ? { description: input.description } : {}),
+      ...(input.tags !== undefined ? { tags: input.tags } : {}),
     })
     .select(DOCUMENT_COLUMNS)
     .single();
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: metadataColumnHint(error.message) }, 500);
   const document = data as AgentDocumentRow;
 
   after(async () => {

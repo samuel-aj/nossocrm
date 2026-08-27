@@ -88,6 +88,10 @@ Além do encerramento, o agente pode executar ações **no meio** da conversa: v
 - **Calculadora**: `calcular` para contas (parcelas, prazos, percentuais), sem o modelo "chutar" números.
 - **Marcadores no roteiro**: `[[acao:chave]]` marca o momento exato de uma ação durante a conversa; `[[midia:nome]]` o momento de enviar uma mídia. Os chips do editor podem ser clicados ou arrastados para dentro do texto.
 
+### Base de conhecimento (RAG)
+
+Upload (PDF, DOCX, TXT, MD) → extração de texto → trechos por parágrafo/frase (~900 caracteres, sobreposição de 150) → embeddings (OpenAI text-embedding-3-small ou Google gemini-embedding-001, 1536 dims, com a chave da org) → busca vetorial (`wa_ai_match_chunks`, limiar por provedor) com reserva por texto (`wa_ai_search_chunks`). A pergunta do cliente é buscada automaticamente a cada resposta e o agente ainda tem a ferramenta `consultar_documentos`. **Metadados por documento** (lápis na lista): título, descrição e etiquetas. Eles viram o cabeçalho de cada trecho na hora de vetorizar ("Documento: título. descrição [etiquetas]" + trecho — o vetor sabe de que assunto o trecho é) e entram na lista "Documentos da base de conhecimento" do prompt (o agente sabe o que cada um cobre). Salvar metadados reprocessa o documento. Precisa da migração `20260827120000_wa_ai_agent_documents_metadata` (colunas title/description/tags); sem ela o resto funciona e a edição avisa.
+
 ### Contexto oculto
 
 Sem escrever nada no roteiro, o CRM já injeta: data e hora, nome e telefone do lead, dados do negócio (etapa, valor, rótulos, campos personalizados), histórico da conversa (inclusive o que atendentes humanos escreveram) e os trechos da base de conhecimento. O roteiro fica só com papel, condução, regras e tom.

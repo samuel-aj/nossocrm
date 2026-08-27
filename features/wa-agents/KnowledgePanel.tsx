@@ -26,7 +26,9 @@ import {
   Loader2,
   CircleCheck,
   CircleAlert,
+  Pencil,
   Save,
+  Tags,
 } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
 import { useToast } from '@/context/ToastContext';
@@ -39,6 +41,7 @@ import {
   useDeleteWaAgentDocument,
   useDeleteWaAgentMedia,
   useReprocessWaAgentDocument,
+  useUpdateWaAgentDocument,
   useUpdateWaAgentMedia,
   useWaAgentDocuments,
   useWaAgentMedia,
@@ -281,18 +284,38 @@ function DocumentStatus({ doc }: { doc: AgentDocumentRow }) {
   );
 }
 
+type DocumentMetaDraft = { title: string; description: string; tags: string };
+
 function DocumentRow({
   doc,
   busy,
   onReprocess,
   onDelete,
+  onSaveMeta,
 }: {
   doc: AgentDocumentRow;
   busy: boolean;
   onReprocess: () => void;
   onDelete: () => void;
+  onSaveMeta: (meta: { title: string | null; description: string | null; tags: string[] }) => Promise<unknown>;
 }) {
   const chunks = doc.chunk_count ?? 0;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<DocumentMetaDraft>({ title: '', description: '', tags: '' });
+  const tags = (doc.tags ?? []).filter(Boolean);
+  const openEdit = () => {
+    setDraft({ title: doc.title ?? '', description: doc.description ?? '', tags: tags.join(', ') });
+    setEditing(true);
+  };
+  const saveMeta = async () => {
+    const parsedTags = Array.from(new Set(draft.tags.split(',').map((t) => t.trim()).filter(Boolean))).slice(0, 20);
+    try {
+      await onSaveMeta({ title: draft.title.trim() || null, description: draft.description.trim() || null, tags: parsedTags });
+      setEditing(false);
+    } catch {
+      // o toast já avisou
+    }
+  };
   return (
     <li className="flex items-start gap-3 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 p-3">
       <span className="mt-0.5 p-1.5 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 shrink-0">
@@ -300,8 +323,61 @@ function DocumentRow({
       </span>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-slate-900 dark:text-white truncate" title={doc.name}>
-          {doc.name}
+          {(doc.title ?? '').trim() || doc.name}
+          {(doc.title ?? '').trim() ? <span className="ml-1 text-xs font-normal text-slate-400">({doc.name})</span> : null}
         </p>
+        {!editing && (doc.description ?? '').trim() ? (
+          <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5 line-clamp-2">{doc.description}</p>
+        ) : null}
+        {!editing && tags.length > 0 ? (
+          <p className="flex flex-wrap items-center gap-1 mt-1">
+            <Tags size={12} className="text-slate-400" aria-hidden="true" />
+            {tags.map((t) => (
+              <Badge key={t} tone="slate">
+                {t}
+              </Badge>
+            ))}
+          </p>
+        ) : null}
+        {editing ? (
+          <div className="mt-2 space-y-2 rounded-lg border border-purple-200 dark:border-purple-500/30 bg-purple-50/50 dark:bg-purple-900/10 p-2">
+            <input
+              className={INPUT_CLASS}
+              value={draft.title}
+              maxLength={160}
+              placeholder="Título (como o agente vai chamar este documento)"
+              aria-label="Título do documento"
+              onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+            />
+            <textarea
+              className={TEXTAREA_CLASS}
+              rows={2}
+              value={draft.description}
+              maxLength={1000}
+              placeholder="Descrição: o que este documento cobre (ex.: tabela de honorários 2026; perguntas frequentes sobre BPC)"
+              aria-label="Descrição do documento"
+              onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+            />
+            <input
+              className={INPUT_CLASS}
+              value={draft.tags}
+              placeholder="Etiquetas separadas por vírgula (ex.: honorários, prazos)"
+              aria-label="Etiquetas do documento"
+              onChange={(e) => setDraft({ ...draft, tags: e.target.value })}
+            />
+            <div className="flex items-center justify-between gap-2">
+              <p className={HELP_CLASS}>Título, descrição e etiquetas entram em cada trecho vetorizado: ao salvar, o documento é reprocessado.</p>
+              <div className="flex items-center gap-1 shrink-0">
+                <button type="button" className={BTN_SMALL} onClick={() => setEditing(false)} disabled={busy}>
+                  Cancelar
+                </button>
+                <button type="button" className={BTN_PRIMARY} onClick={() => void saveMeta()} disabled={busy}>
+                  {busy ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Save size={14} aria-hidden="true" />} Salvar
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400 mt-0.5">
           <DocumentStatus doc={doc} />
           <Badge tone="slate">{DOC_EXT_LABEL[doc.mime ?? ''] ?? doc.mime ?? 'arquivo'}</Badge>
@@ -314,6 +390,16 @@ function DocumentRow({
         ) : null}
       </div>
       <div className="flex items-center gap-0.5 shrink-0">
+        <button
+          type="button"
+          className={BTN_ICON}
+          onClick={editing ? () => setEditing(false) : openEdit}
+          disabled={busy}
+          aria-label={`Editar título e descrição de ${doc.name}`}
+          title="Título, descrição e etiquetas (metadados para a busca)"
+        >
+          <Pencil size={14} aria-hidden="true" />
+        </button>
         <button
           type="button"
           className={BTN_ICON}
@@ -498,6 +584,7 @@ export const KnowledgePanel: React.FC<{
   const addDoc = useAddWaAgentDocument(agentId);
   const delDoc = useDeleteWaAgentDocument(agentId);
   const reprocess = useReprocessWaAgentDocument(agentId);
+  const updateDoc = useUpdateWaAgentDocument(agentId);
   const addMedia = useAddWaAgentMedia(agentId);
   const updateMedia = useUpdateWaAgentMedia(agentId);
   const delMedia = useDeleteWaAgentMedia(agentId);
@@ -646,6 +733,18 @@ export const KnowledgePanel: React.FC<{
                   )
                 }
                 onDelete={() => setConfirm({ kind: 'doc', id: doc.id, name: doc.name })}
+                onSaveMeta={(meta) =>
+                  runBusy(
+                    doc.id,
+                    async () => {
+                      await updateDoc.mutateAsync({ docId: doc.id, meta });
+                      // revetoriza com o cabeçalho novo (título/descrição/etiquetas)
+                      if (doc.status === 'ready' || doc.status === 'error') await reprocess.mutateAsync(doc.id);
+                    },
+                    'Metadados salvos. Reprocessando o documento...',
+                    'Falha ao salvar os metadados'
+                  )
+                }
               />
             ))}
           </ul>
