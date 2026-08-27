@@ -7,6 +7,7 @@
  *           pipeline e auxiliares validados na org; segredo mascarado vira vazio)
  */
 import { json } from '@/lib/whatsapp/api';
+import { checkAgentApiKey } from '@/lib/wa-agents/model';
 import { AgentInputSchema, type AgentInput, type AgentMinimal, type AgentRow } from '@/lib/wa-agents/types';
 import {
   connectionNotFoundError,
@@ -104,10 +105,21 @@ export async function POST(req: Request) {
     return json({ error: getErrorMessage(err, 'Falha ao validar os números') }, 500);
   }
 
+  // Ligar exige chave funcionando (própria ou da org): sem ela o agente é salvo DESLIGADO e avisa
+  const row = toInsertRow(input, helperIds);
+  let warning: string | null = null;
+  if (row.enabled) {
+    const check = await checkAgentApiKey(auth.admin, orgId, { provider: input.provider, api_key: row.api_key });
+    if (!check.ok) {
+      row.enabled = false;
+      warning = `${check.error}. O agente foi salvo desligado: configure a chave (Configurações → Integrações ou a chave própria do agente) e ligue de novo.`;
+    }
+  }
+
   const { data, error } = await auth.admin
     .from('wa_ai_agents')
     .insert({
-      ...toInsertRow(input, helperIds),
+      ...row,
       organization_id: orgId,
       created_by: auth.user.id,
     })
@@ -115,5 +127,5 @@ export async function POST(req: Request) {
     .single();
   if (error) return json({ error: error.message }, 500);
 
-  return json({ agent: toAgentPublic(data as AgentRow) }, 201);
+  return json({ agent: toAgentPublic(data as AgentRow), ...(warning ? { warning } : {}) }, 201);
 }

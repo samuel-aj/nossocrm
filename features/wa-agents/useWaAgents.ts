@@ -174,11 +174,12 @@ export type SaveWaAgentVars = { id?: string | null; input: Partial<AgentInput> }
 export function useSaveWaAgent() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, input }: SaveWaAgentVars): Promise<AgentPublic> => {
+    mutationFn: async ({ id, input }: SaveWaAgentVars): Promise<AgentPublic & { warning?: string }> => {
+      // warning: o servidor salvou mas deixou o agente DESLIGADO (chave da IA ausente/recusada)
       const json = id
-        ? await waAgentsFetch<{ agent: AgentPublic }>(`/api/wa-agents/agents/${id}`, { method: 'PATCH', body: input })
-        : await waAgentsFetch<{ agent: AgentPublic }>('/api/wa-agents/agents', { method: 'POST', body: input });
-      return json.agent;
+        ? await waAgentsFetch<{ agent: AgentPublic; warning?: string }>(`/api/wa-agents/agents/${id}`, { method: 'PATCH', body: input })
+        : await waAgentsFetch<{ agent: AgentPublic; warning?: string }>('/api/wa-agents/agents', { method: 'POST', body: input });
+      return { ...json.agent, ...(json.warning ? { warning: json.warning } : {}) };
     },
     onSuccess: () => {
       // Prefixo inteiro: cobre 'list', 'agent' e o ['waAgents', 'minimal'] usado pelo chat.

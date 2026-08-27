@@ -35,10 +35,17 @@ const TIMEOUT_STEP_VAR = '_timeout_step_id';
 const STEPS_TOTAL_VAR = '_steps_total';
 /** Execução parada num Modelo de mensagem esperando a resposta: ao voltar, o passo roteia (botão/outra resposta) em vez de reenviar */
 const TEMPLATE_ROUTE_VAR = '_template_route_step_id';
+/** Robô iniciado por outro robô: profundidade da cadeia (evita A → B → A sem fim) */
+const CHAIN_DEPTH_VAR = '_chain_depth';
+const MAX_CHAIN_DEPTH = 5;
+/** Esperas de até isto acontecem dentro da execução (o relógio do tick é de 30 s e atrasaria) */
+const INLINE_WAIT_MAX_S = 25;
 
 function nowIso(): string {
   return new Date().toISOString();
 }
+
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 function parseSteps(raw: unknown): BotStep[] {
   if (!Array.isArray(raw)) return [];
@@ -489,9 +496,50 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
           return;
         }
         case 'wait': {
+          if (step.seconds <= INLINE_WAIT_MAX_S) {
+            // espera curta: aqui mesmo, sem soltar a execução para o relógio
+            note(st, step, `esperando ${step.seconds}s`);
+            await sleep(step.seconds * 1000);
+            idx = next(step);
+            break;
+          }
           const wakeAt = new Date(Date.now() + step.seconds * 1000).toISOString();
           note(st, step, `esperando ${step.seconds}s`);
           await saveRun(admin, st, { status: 'running', step_index: next(step), wake_at: wakeAt }, { release: true });
+          return;
+        }
+        case 'typing': {
+          const seconds = Math.min(60, Math.max(1, step.seconds));
+          const provider = getProvider(await getConnection());
+          if (provider.sendTyping) {
+            try {
+              await provider.sendTyping({ to: phone, ms: seconds * 1000 });
+            } catch (e) {
+              note(st, step, `presença "digitando" falhou: ${errorMessage(e)}`);
+            }
+          }
+          note(st, step, `digitando por ${seconds}s`);
+          await sleep(Math.min(seconds, INLINE_WAIT_MAX_S) * 1000);
+          idx = next(step);
+          break;
+        }
+        case 'start_bot': {
+          const depth = Number(st.vars[CHAIN_DEPTH_VAR] ?? 0) || 0;
+          if (depth >= MAX_CHAIN_DEPTH) throw new Error(`cadeia de robôs longa demais (limite de ${MAX_CHAIN_DEPTH})`);
+          const created = await createBotRun(admin, {
+            organizationId: orgId,
+            botId: step.bot_id,
+            conversationId,
+            dealId: st.run.deal_id ?? null,
+            contactId: st.run.contact_id ?? null,
+            phone,
+            context: st.vars.contexto_extra ? String(st.vars.contexto_extra) : null,
+            chainDepth: depth + 1,
+          });
+          if (!created.ok || !created.run) throw new Error(`não iniciou o outro robô: ${created.error || 'erro'}`);
+          note(st, step, `encerrado; robô "${step.bot_name || step.bot_id}" iniciado`);
+          await saveRun(admin, st, { status: 'done', step_index: idx + 1, wake_at: null }, { release: true });
+          await runBotRunNow(admin, created.run);
           return;
         }
         case 'wait_reply': {
@@ -756,6 +804,8 @@ export type StartBotRunInput = {
   conversationId?: string | null;
   /** Contexto adicional escrito pela equipe (vira {{contexto_extra}} nas mensagens e segue para o agente na entrega) */
   context?: string | null;
+  /** Iniciado por outro robô: profundidade da cadeia (limite MAX_CHAIN_DEPTH) */
+  chainDepth?: number;
 };
 
 /** Só cria a execução (status 'running', wake_at agora), sem processar. */
@@ -802,7 +852,10 @@ export async function createBotRun(
         status: 'running',
         wake_at: nowIso(),
         step_index: 0,
-        vars: input.context?.trim() ? { contexto_extra: input.context.trim() } : {},
+        vars: {
+          ...(input.context?.trim() ? { contexto_extra: input.context.trim() } : {}),
+          ...(input.chainDepth ? { [CHAIN_DEPTH_VAR]: input.chainDepth } : {}),
+        },
         log: [],
       })
       .select('*')

@@ -872,6 +872,12 @@ export const AgentEditor: React.FC<{
       setHasApiKey(!!saved.has_api_key);
       patch({ api_key: '', clear_api_key: false });
       showToast(agentId ? 'Agente salvo' : 'Agente criado. Agora você pode enviar documentos e mídias e testar.', 'success');
+      if (saved.warning) {
+        // salvo, mas desligado: a chave da IA não está funcionando
+        patch({ enabled: false });
+        setSnapshot({ ...next, enabled: false });
+        showToast(saved.warning, 'warning');
+      }
       return true;
     } catch (err) {
       // Validação do servidor: leva até a aba do campo recusado.

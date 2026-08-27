@@ -108,6 +108,8 @@ export interface WhatsAppProvider {
   logout(): Promise<void>;
   /** Reinicia a sessão da instância sem perder o pareamento (sessão "aberta" mas morta). */
   restart?(): Promise<void>;
+  /** Mostra "digitando..." para o contato por `ms` (best-effort; provedores sem suporte ignoram). */
+  sendTyping?(input: { to: string; ms: number }): Promise<void>;
   /** Normaliza um payload de webhook do provedor em um InboundEvent. */
   parseWebhook(payload: unknown): InboundEvent;
 }

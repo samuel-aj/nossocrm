@@ -82,7 +82,11 @@ export const AgentList: React.FC = () => {
   const handleToggle = async (item: WaAgentListItem, enabled: boolean) => {
     setTogglingId(item.id);
     try {
-      await save.mutateAsync({ id: item.id, input: { enabled } });
+      const saved = await save.mutateAsync({ id: item.id, input: { enabled } });
+      if (saved.warning) {
+        showToast(saved.warning, 'warning');
+        return;
+      }
       showToast(enabled ? 'Agente ligado' : 'Agente desligado', 'success');
     } catch (err) {
       showToast(errorMessage(err, 'Falha ao alterar o agente'), 'error');

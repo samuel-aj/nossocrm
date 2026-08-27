@@ -92,7 +92,8 @@ export function AutomationsMenu({
   const start = () => {
     if (!picked || picked === 'reset' || busy) return;
     const ctx = context.trim();
-    onStart(picked.kind, picked.id, ctx ? ctx.slice(0, CONTEXT_MAX) : undefined);
+    // contexto adicional só para o agente de IA (o robô usa só o card e a conversa)
+    onStart(picked.kind, picked.id, picked.kind === 'agent' && ctx ? ctx.slice(0, CONTEXT_MAX) : undefined);
     onOpenChange(false);
   };
 
@@ -243,7 +244,7 @@ export function AutomationsMenu({
                   ? 'O agente já recebe os dados do card (campos, etapa, histórico da conversa).'
                   : 'O robô usa os dados do card e da conversa.'}
               </p>
-              {showContext ? (
+              {picked.kind === 'agent' && showContext ? (
                 <div className="mt-2">
                   <label htmlFor="automations-context" className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
                     Contexto adicional (opcional)
@@ -262,7 +263,7 @@ export function AutomationsMenu({
                     {context.length}/{CONTEXT_MAX}
                   </p>
                 </div>
-              ) : (
+              ) : picked.kind === 'agent' ? (
                 <button
                   type="button"
                   onClick={() => setShowContext(true)}
@@ -270,7 +271,7 @@ export function AutomationsMenu({
                 >
                   + Adicionar contexto (opcional)
                 </button>
-              )}
+              ) : null}
               <div className="flex items-center justify-end gap-2 mt-3">
                 <button type="button" className={BTN_GHOST} disabled={busy} onClick={() => setPicked(null)}>
                   <ChevronLeft size={13} /> Voltar

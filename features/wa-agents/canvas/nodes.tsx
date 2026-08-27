@@ -49,7 +49,9 @@ import {
   TRIGGER_LABELS,
   WAIT_UNIT_LABELS,
   bubbleOutputs,
+  buttonHandleId,
   edgeIdFor,
+  isButtonHandle,
   isStepType,
   isValidBlockOrder,
   placementProblem,
@@ -77,7 +79,7 @@ export function minimapColor(node: FlowNode): string {
   return first ? NODE_META[first.type].color : '#94a3b8';
 }
 
-const WAIT_UNIT_SINGULAR: Record<WaitUnit, string> = { min: 'minuto', h: 'hora', d: 'dia' };
+const WAIT_UNIT_SINGULAR: Record<WaitUnit, string> = { s: 'segundo', min: 'minuto', h: 'hora', d: 'dia' };
 
 /** Resumo curto de um bloco, mostrado dentro do balão. */
 export function blockSummary(block: Block, options: WaAgentOptions | undefined, agents: WaAgentListItem[]): string {
@@ -95,6 +97,10 @@ export function blockSummary(block: Block, options: WaAgentOptions | undefined, 
     }
     case 'wait_reply':
       return `Aguarda a resposta por até ${block.data.timeout_minutes} min`;
+    case 'typing':
+      return `Digitando por ${block.data.seconds}s`;
+    case 'start_bot':
+      return block.data.bot_name.trim() || (block.data.bot_id ? 'Robô escolhido' : 'Escolha o robô');
     case 'condition': {
       const n = block.data.rules.length;
       return `${n} ${n === 1 ? 'regra' : 'regras'} + Senão`;
@@ -388,7 +394,7 @@ function BlockRow({
   onDragOverRow: (index: number) => void;
   onDropRow: (e: React.DragEvent, index: number) => void;
 }) {
-  const { actions } = useCanvasContext();
+  const { actions, connected } = useCanvasContext();
   const rowRef = useRef<HTMLLIElement>(null);
   const isLast = index === types.length - 1;
   const ref: BlockRef = { bubbleId, blockId: block.id };
@@ -456,6 +462,30 @@ function BlockRow({
           <IssueMark issue={issue} size={12} />
         </div>
         <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-3 whitespace-pre-line break-words">{summary}</p>
+        {block.type === 'send_template' && isLast && block.data.buttons.length > 0 ? (
+          <ul className="mt-1.5 space-y-1" aria-label="Botões do modelo (uma saída por botão)">
+            {block.data.buttons.map((text, i) => {
+              const handleId = buttonHandleId(i);
+              const isConnected = connected.has(edgeIdFor(bubbleId, handleId));
+              return (
+                <li
+                  key={handleId}
+                  className="relative flex items-center justify-between gap-2 rounded-md border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-900/15 pl-2 pr-3 py-1 text-[11px] font-medium text-emerald-800 dark:text-emerald-200"
+                  title={isConnected ? undefined : 'Sem ligação: arraste da bolinha até outro balão'}
+                >
+                  <span className={`truncate ${isConnected ? '' : 'opacity-70'}`}>{text.trim() || `Botão ${i + 1}`}</span>
+                  <Handle
+                    type="source"
+                    position={Position.Right}
+                    id={handleId}
+                    className={isConnected ? undefined : 'wa-handle-loose'}
+                    aria-label={`Saída do botão ${text.trim() || i + 1}${isConnected ? '' : ' (sem ligação)'}`}
+                  />
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
       </div>
       <div className="nodrag wa-block-actions flex flex-col items-center -my-0.5">
         <button
@@ -727,7 +757,7 @@ function BubbleNodeView({ id, data, selected }: NodeProps<BubbleNode>) {
 
       {outputs.length > 0 ? (
         <div className="border-t border-slate-100 dark:border-white/5 py-1">
-          {outputs.map((o) => (
+          {outputs.filter((o) => !isButtonHandle(o.handleId)).map((o) => (
             <OutputRow key={o.handleId} handleId={o.handleId} label={o.label} tone={o.tone} connected={connected.has(edgeIdFor(id, o.handleId))} />
           ))}
         </div>

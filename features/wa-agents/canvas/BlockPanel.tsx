@@ -9,6 +9,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, Trash2, X } from 'lucide-react';
 import { AgentSelect, StageSelect, TagInput } from '../OutcomesEditor';
+import { useWaBotsList } from '../useWaAgents';
 import { BTN_ICON, HELP_CLASS, INPUT_CLASS, newId } from '../ui';
 import { BlockIcon, NODE_META } from './catalog';
 import { useCanvasContext } from './context';
@@ -488,6 +489,62 @@ function TemplateEditor({ block, update }: EditorProps<'send_template'>) {
   );
 }
 
+function TypingEditor({ block, update }: EditorProps<'typing'>) {
+  return (
+    <>
+      <label htmlFor={`block-${block.id}-typing`} className={LABEL_CLASS}>
+        Mostrar "digitando..." por (segundos)
+      </label>
+      <NumberField
+        id={`block-${block.id}-typing`}
+        value={block.data.seconds}
+        min={1}
+        max={60}
+        onCommit={(seconds) => update({ ...block, data: { seconds } })}
+        ariaLabel="Segundos digitando"
+      />
+      <p className={HELP_CLASS}>
+        O contato vê "digitando..." e o robô espera esse tempo antes do próximo bloco (1 a 60 s). Na API oficial da
+        Meta não há presença: vale só a espera.
+      </p>
+    </>
+  );
+}
+
+function StartBotEditor({ block, update }: EditorProps<'start_bot'>) {
+  const botsQ = useWaBotsList();
+  const bots = botsQ.data ?? [];
+  return (
+    <>
+      <label htmlFor={`block-${block.id}-bot`} className={LABEL_CLASS}>
+        Robô que começa
+      </label>
+      <select
+        id={`block-${block.id}-bot`}
+        className={INPUT_CLASS}
+        value={block.data.bot_id}
+        aria-label="Robô que começa"
+        onChange={(e) => {
+          const picked = bots.find((b) => b.id === e.target.value);
+          update({ ...block, data: { bot_id: e.target.value, bot_name: picked?.name ?? '' } });
+        }}
+      >
+        <option value="">{botsQ.isLoading ? 'Carregando...' : 'Escolha o robô'}</option>
+        {bots.map((b) => (
+          <option key={b.id} value={b.id} disabled={!b.enabled}>
+            {b.name}
+            {b.enabled ? '' : ' (desligado)'}
+          </option>
+        ))}
+      </select>
+      <p className={HELP_CLASS}>
+        Este robô termina aqui e o outro começa na mesma conversa (mesmo contato e negócio; o contexto adicional vai
+        junto). Até 5 robôs em cadeia.
+      </p>
+    </>
+  );
+}
+
 function HandoffEditor({ block, update }: EditorProps<'handoff_agent'>) {
   const { agents } = useCanvasContext();
   return (
@@ -515,6 +572,8 @@ function BlockFields({ block, update }: { block: Block; update: (block: Block) =
       return <TemplateEditor block={block} update={update} />;
     case 'wait':
       return <WaitEditor block={block} update={update} />;
+    case 'typing':
+      return <TypingEditor block={block} update={update} />;
     case 'wait_reply':
       return <WaitReplyEditor block={block} update={update} />;
     case 'condition':
@@ -527,6 +586,8 @@ function BlockFields({ block, update }: { block: Block; update: (block: Block) =
       return <WebhookEditor block={block} update={update} />;
     case 'handoff_agent':
       return <HandoffEditor block={block} update={update} />;
+    case 'start_bot':
+      return <StartBotEditor block={block} update={update} />;
     case 'end':
       return <p className={HELP_CLASS}>O robô termina aqui. Nada para configurar.</p>;
   }

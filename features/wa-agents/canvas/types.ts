@@ -24,6 +24,8 @@ export const TRIGGER_LABELS: Record<BotTriggerType, string> = {
 export const STEP_LABELS: Record<StepType, string> = {
   send_text: 'Mensagem',
   send_template: 'Modelo de mensagem',
+  typing: 'Digitando',
+  start_bot: 'Iniciar outro robô',
   wait: 'Esperar',
   wait_reply: 'Esperar resposta',
   condition: 'Condição',
@@ -39,12 +41,14 @@ export const STEP_TYPES: StepType[] = [
   'send_text',
   'send_template',
   'wait',
+  'typing',
   'wait_reply',
   'condition',
   'move_stage',
   'add_tag',
   'webhook',
   'handoff_agent',
+  'start_bot',
   'end',
 ];
 
@@ -64,12 +68,14 @@ export const BLOCK_KIND: Record<StepType, BlockKind> = {
   send_text: 'linear',
   send_template: 'branch',
   wait: 'linear',
+  typing: 'linear',
   wait_reply: 'branch',
   condition: 'branch',
   move_stage: 'linear',
   add_tag: 'linear',
   webhook: 'linear',
   handoff_agent: 'terminal',
+  start_bot: 'terminal',
   end: 'terminal',
 };
 
@@ -114,9 +120,9 @@ export const BOT_VARIABLES: Array<{ key: string; description: string }> = [
   { key: '{{negocio.etapa}}', description: 'etapa atual do negócio' },
 ];
 
-export type WaitUnit = 'min' | 'h' | 'd';
-export const WAIT_UNIT_SECONDS: Record<WaitUnit, number> = { min: 60, h: 3600, d: 86400 };
-export const WAIT_UNIT_LABELS: Record<WaitUnit, string> = { min: 'minutos', h: 'horas', d: 'dias' };
+export type WaitUnit = 's' | 'min' | 'h' | 'd';
+export const WAIT_UNIT_SECONDS: Record<WaitUnit, number> = { s: 1, min: 60, h: 3600, d: 86400 };
+export const WAIT_UNIT_LABELS: Record<WaitUnit, string> = { s: 'segundos', min: 'minutos', h: 'horas', d: 'dias' };
 export const MAX_WAIT_SECONDS = 604800;
 export const MAX_REPLY_MINUTES = 43200;
 
@@ -124,7 +130,8 @@ export const MAX_REPLY_MINUTES = 43200;
 export function unitFor(seconds: number): WaitUnit {
   if (seconds > 0 && seconds % 86400 === 0) return 'd';
   if (seconds > 0 && seconds % 3600 === 0) return 'h';
-  return 'min';
+  if (seconds > 0 && seconds % 60 === 0) return 'min';
+  return 's';
 }
 
 // ---------------------------------------------------------------- Dados dos blocos
@@ -140,6 +147,8 @@ export type MoveStageData = { stage_id: string };
 export type TagData = { tag: string };
 export type WebhookData = { url: string; secret: string; body_template: string };
 export type HandoffData = { agent_id: string };
+export type TypingData = { seconds: number };
+export type StartBotData = { bot_id: string; bot_name: string };
 /** Modelo de mensagem escolhido (o nome fica guardado para o resumo no balão). */
 export type TemplateData = { template_id: string; template_name: string; buttons: string[]; timeout_minutes: number };
 export type EndData = Record<string, never>;
@@ -155,6 +164,8 @@ export type Block =
   | { id: string; type: 'add_tag'; data: TagData }
   | { id: string; type: 'webhook'; data: WebhookData }
   | { id: string; type: 'handoff_agent'; data: HandoffData }
+  | { id: string; type: 'typing'; data: TypingData }
+  | { id: string; type: 'start_bot'; data: StartBotData }
   | { id: string; type: 'end'; data: EndData };
 
 export type BlockOfType<T extends StepType> = Extract<Block, { type: T }>;
@@ -196,6 +207,11 @@ export function buttonHandleId(index: number): string {
   return `${BUTTON_HANDLE_PREFIX}${index}`;
 }
 
+/** Saída de botão: desenhada dentro do bloco (ao lado do botão), não no rodapé do balão. */
+export function isButtonHandle(handleId: string): boolean {
+  return handleId.startsWith(BUTTON_HANDLE_PREFIX);
+}
+
 export function ruleHandleId(ruleId: string): string {
   return `${RULE_HANDLE_PREFIX}${ruleId}`;
 }
@@ -223,6 +239,7 @@ export function blockOutputs(block: Block): BubbleOutput[] {
   switch (block.type) {
     case 'send_text':
     case 'wait':
+    case 'typing':
     case 'move_stage':
     case 'add_tag':
     case 'webhook':
@@ -261,6 +278,7 @@ export function blockOutputs(block: Block): BubbleOutput[] {
         { handleId: HANDLE_ELSE, label: 'Senão', tone: 'amber' },
       ];
     case 'handoff_agent':
+    case 'start_bot':
     case 'end':
       return [];
   }

@@ -140,6 +140,10 @@ export function createBlock(type: StepType, id: string = newId()): Block {
       return { id, type, data: { url: '', secret: '', body_template: '' } };
     case 'handoff_agent':
       return { id, type, data: { agent_id: '' } };
+    case 'typing':
+      return { id, type, data: { seconds: 3 } };
+    case 'start_bot':
+      return { id, type, data: { bot_id: '', bot_name: '' } };
     case 'end':
       return { id, type, data: {} };
   }
@@ -227,6 +231,10 @@ function stepToBlock(step: BotStep): Block {
       };
     case 'handoff_agent':
       return { id, type: 'handoff_agent', data: { agent_id: step.agent_id } };
+    case 'typing':
+      return { id, type: 'typing', data: { seconds: step.seconds } };
+    case 'start_bot':
+      return { id, type: 'start_bot', data: { bot_id: step.bot_id, bot_name: step.bot_name ?? '' } };
     case 'end':
       return { id, type: 'end', data: {} };
   }
@@ -320,6 +328,7 @@ export function botToFlow(bot: BotRow | null, fallbackSteps: BotStep[]): FlowGra
     switch (step.type) {
       case 'send_text':
       case 'wait':
+      case 'typing':
       case 'move_stage':
       case 'add_tag':
       case 'webhook':
@@ -450,6 +459,10 @@ function blockToStep(block: Block, to: (handle: string) => string | null, ui: { 
         next_step_id: to(HANDLE_NEXT),
         ui,
       };
+    case 'typing':
+      return { id, type: 'typing', seconds: block.data.seconds, next_step_id: to(HANDLE_NEXT), ui };
+    case 'start_bot':
+      return { id, type: 'start_bot', bot_id: block.data.bot_id, bot_name: block.data.bot_name.trim() || undefined, ui };
     case 'handoff_agent':
       return { id, type: 'handoff_agent', agent_id: block.data.agent_id, ui };
     case 'end':
@@ -677,7 +690,7 @@ export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowH
         case 'wait': {
           const seconds = waitSeconds(block.data);
           if (!(block.data.amount >= 1) || !(seconds >= 1) || seconds > MAX_WAIT_SECONDS) {
-            fail('informe um tempo entre 1 minuto e 7 dias');
+            fail('informe um tempo entre 1 segundo e 7 dias');
           }
           break;
         }
@@ -704,6 +717,12 @@ export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowH
           break;
         case 'webhook':
           if (!isHttpUrl(block.data.url.trim())) fail('informe uma URL válida, começando com http:// ou https://');
+          break;
+        case 'typing':
+          if (!(block.data.seconds >= 1) || block.data.seconds > 60) fail('informe de 1 a 60 segundos');
+          break;
+        case 'start_bot':
+          if (!block.data.bot_id) fail('escolha o robô');
           break;
         case 'handoff_agent':
           if (!block.data.agent_id) fail('escolha o agente de IA');

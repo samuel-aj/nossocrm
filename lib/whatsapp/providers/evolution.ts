@@ -197,6 +197,17 @@ export class EvolutionProvider implements WhatsAppProvider {
     if (!ok) throw new Error(`Evolution respondeu ${status} ao reiniciar a instância`);
   }
 
+  async sendTyping(input: { to: string; ms: number }): Promise<void> {
+    const number = toWhatsAppPhone(input.to);
+    if (!number) return;
+    // v2: presença "composing" pelo tempo informado (best-effort: erro aqui nunca derruba o fluxo)
+    await this.call('POST', `/chat/sendPresence/${encodeURIComponent(this.instanceName)}`, {
+      number,
+      presence: 'composing',
+      delay: Math.max(500, Math.min(60_000, Math.round(input.ms))),
+    });
+  }
+
   async setWebhook(url: string): Promise<void> {
     // v2: corpo aninhado em "webhook". webhookByEvents=false => um único endpoint.
     await this.call('POST', `/webhook/set/${encodeURIComponent(this.instanceName)}`, {

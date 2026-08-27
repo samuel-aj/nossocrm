@@ -12,11 +12,13 @@ import {
   Clock,
   Flag,
   GitBranch,
+  Keyboard,
   MessageCircle,
   MessageSquareReply,
   MoveRight,
   Tag,
   Webhook,
+  Workflow,
   type LucideIcon,
 } from 'lucide-react';
 import { DND_MIME, STEP_LABELS, STEP_TYPES, type StepType } from './types';
@@ -59,6 +61,7 @@ export const NODE_META: Record<StepType, NodeMeta> = {
     hint: 'Envia um modelo aprovado do WhatsApp API (vale fora das 24 h, com botões)',
   },
   wait: { label: STEP_LABELS.wait, icon: Clock, tone: 'sky', color: '#0ea5e9', hint: 'Aguarda um tempo antes de seguir' },
+  typing: { label: STEP_LABELS.typing, icon: Keyboard, tone: 'sky', color: '#38bdf8', hint: 'Mostra "digitando..." por alguns segundos' },
   wait_reply: {
     label: STEP_LABELS.wait_reply,
     icon: MessageSquareReply,
@@ -88,6 +91,13 @@ export const NODE_META: Record<StepType, NodeMeta> = {
     tone: 'purple',
     color: '#7c3aed',
     hint: 'Um agente de IA assume a conversa',
+  },
+  start_bot: {
+    label: STEP_LABELS.start_bot,
+    icon: Workflow,
+    tone: 'amber',
+    color: '#f59e0b',
+    hint: 'Encerra este robô e inicia outro na mesma conversa',
   },
   end: { label: STEP_LABELS.end, icon: Flag, tone: 'red', color: '#ef4444', hint: 'Encerra o robô' },
 };

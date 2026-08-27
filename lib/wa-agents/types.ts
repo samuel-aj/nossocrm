@@ -436,6 +436,15 @@ export const BotStepSchema = z.discriminatedUnion('type', [
     timeout_minutes: z.number().int().min(1).max(43200).default(1440),
     on_timeout_step_id: z.string().optional().nullable(),
   }),
+  /** "Digitando..." por N segundos (presença composing no número por QR; na API oficial só espera) */
+  z.object({ ...botStepBase, type: z.literal('typing'), seconds: z.number().int().min(1).max(60) }),
+  /** Encerra este robô e inicia outro na mesma conversa (terminal; até 5 em cadeia) */
+  z.object({
+    ...botStepBase,
+    type: z.literal('start_bot'),
+    bot_id: z.string().uuid(),
+    bot_name: z.string().max(120).optional(),
+  }),
   z.object({ ...botStepBase, type: z.literal('wait'), seconds: z.number().int().min(1).max(604800) }),
   z.object({
     ...botStepBase,

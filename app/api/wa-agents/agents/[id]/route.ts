@@ -16,6 +16,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { normalizeTriggers } from '@/lib/wa-agents/context';
+import { checkAgentApiKey } from '@/lib/wa-agents/model';
 import { AgentInputSchema, type AgentRow, type AgentTriggers } from '@/lib/wa-agents/types';
 import {
   connectionNotFoundError,
@@ -142,6 +143,20 @@ export async function PATCH(req: Request, ctx: Ctx) {
     return json({ error: getErrorMessage(err, 'Falha ao validar os números') }, 500);
   }
 
+  // Ligar exige chave funcionando (própria ou da org): senão o agente fica desligado e avisa
+  let warning: string | null = null;
+  if (patch.enabled === true) {
+    const current = existing ?? (await fetchAgent(auth.admin, orgId, id));
+    if (!current) return json({ error: 'Agente não encontrado' }, 404);
+    const provider = typeof patch.provider === 'string' ? (patch.provider as AgentRow['provider']) : current.provider;
+    const apiKey = 'api_key' in patch ? ((patch.api_key as string | null) ?? null) : (current.api_key ?? null);
+    const check = await checkAgentApiKey(auth.admin, orgId, { provider, api_key: apiKey });
+    if (!check.ok) {
+      patch.enabled = false;
+      warning = `${check.error}. O agente ficou desligado: configure a chave (Configurações → Integrações ou a chave própria do agente) e ligue de novo.`;
+    }
+  }
+
   const { data, error } = await auth.admin
     .from('wa_ai_agents')
     .update(patch)
@@ -152,7 +167,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
   if (error) return json({ error: error.message }, 500);
   if (!data) return json({ error: 'Agente não encontrado' }, 404);
 
-  return json({ agent: toAgentPublic(data as AgentRow) });
+  return json({ agent: toAgentPublic(data as AgentRow), ...(warning ? { warning } : {}) });
 }
 
 export async function DELETE(req: Request, ctx: Ctx) {
