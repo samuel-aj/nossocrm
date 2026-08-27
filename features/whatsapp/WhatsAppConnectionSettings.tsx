@@ -481,16 +481,18 @@ export function WhatsAppConnectionSettings() {
   const disconnectMut = useMutation({
     // MULTI-NÚMERO: desconecta (ou EXCLUI, purge) UMA conexão pelo id
     mutationFn: ({ id, purge }: { id: string; purge?: boolean }) =>
-      fetchJson<{ ok: boolean }>(
+      fetchJson<{ ok: boolean; migrated?: number }>(
         `/api/whatsapp/connection?id=${encodeURIComponent(id)}${purge ? '&purge=true' : ''}`,
         { method: 'DELETE' }
       ),
-    onSuccess: (_data, vars) => {
+    onSuccess: (data, vars) => {
+      const moved = data?.migrated ?? 0;
+      const movedMsg = moved > 0 ? ` ${moved} conversa(s) transferida(s) para a conexão ativa.` : '';
       setConfirmDisconnect(null);
       if (vars.purge && qrTargetId === vars.id) setQrTargetId(null);
       qc.invalidateQueries({ queryKey: ['waConnection'] });
       qc.invalidateQueries({ queryKey: ['waConnectionQr'] });
-      addToast(vars.purge ? 'Conexão excluída.' : 'Número desconectado.', 'success');
+      addToast((vars.purge ? 'Conexão excluída.' : 'Número desconectado.') + movedMsg, 'success');
     },
     onError: e => {
       setConfirmDisconnect(null);

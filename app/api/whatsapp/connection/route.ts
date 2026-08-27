@@ -86,7 +86,11 @@ export async function GET() {
       let status = c.status;
       try {
         const live = await getProvider(c).getConnectionState();
-        if (live !== c.status) {
+        // Desconectada NO CRM fica desconectada mesmo que a Evolution diga "open" (instância
+        // zumbi responde open com a sessão morta): senão a tela "reconecta" sozinha e o Excluir
+        // nunca aparece. Reconectar de verdade passa pelo QR/webhook, não por esta leitura.
+        const zombie = c.status === 'disconnected' && live === 'connected';
+        if (live !== c.status && !zombie) {
           await updateConnectionStatus(auth.admin, c.id, { status: live });
           status = live;
         }
@@ -406,23 +410,32 @@ async function migrateConversationsToSibling(
   conn: WaConnectionRow
 ): Promise<number> {
   const digits = (conn.phone_number || '').replace(/\D/g, '');
-  if (!digits) return 0;
-  const siblings = (await getConnectionsByOrg(admin, orgId)).filter(
-    c => c.id !== conn.id && c.status === 'connected' && (c.phone_number || '').replace(/\D/g, '') === digits
-  );
-  const target = siblings[0];
+  const connected = (await getConnectionsByOrg(admin, orgId)).filter(c => c.id !== conn.id && c.status === 'connected');
+  const sameNumber = digits ? connected.filter(c => (c.phone_number || '').replace(/\D/g, '') === digits) : [];
+  // Mesmo número; senão a ÚNICA conexão conectada da org (número repareado ainda sem telefone
+  // gravado, ou conexão antiga já sem telefone depois de desconectar)
+  const target = sameNumber[0] ?? (connected.length === 1 ? connected[0] : undefined);
   if (!target) return 0;
-  const { data, error } = await admin
+  let total = 0;
+  // 1) presas à conexão antiga
+  const { data: moved, error } = await admin
     .from('wa_conversations')
     .update({ connection_id: target.id })
     .eq('organization_id', orgId)
     .eq('connection_id', conn.id)
     .select('id');
-  if (error) {
-    console.error('[whatsapp] migrar conversas para a conexão nova falhou:', error.message);
-    return 0;
-  }
-  return data?.length ?? 0;
+  if (error) console.error('[whatsapp] migrar conversas para a conexão nova falhou:', error.message);
+  else total += moved?.length ?? 0;
+  // 2) órfãs (conexão excluída antes: a FK deixou connection_id nulo) também vão para a que funciona
+  const { data: orphans, error: orphanError } = await admin
+    .from('wa_conversations')
+    .update({ connection_id: target.id })
+    .eq('organization_id', orgId)
+    .is('connection_id', null)
+    .select('id');
+  if (orphanError) console.error('[whatsapp] migrar conversas órfãs falhou:', orphanError.message);
+  else total += orphans?.length ?? 0;
+  return total;
 }
 
 export async function DELETE(req: Request) {
