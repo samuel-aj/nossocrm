@@ -732,12 +732,14 @@ function MessageBubble({
     setMenuOpen(false);
     onAction?.(action, m);
   };
-  // Onde a seta cabe sem cortar nada: em foto/vídeo/figurinha ela fica por
-  // cima da mídia com um sombreado escuro; no áudio ganha uma faixa própria no
-  // topo (o player ocupa a largura toda, inclusive a foto à direita); no resto
-  // (texto, documento, contato) o degradê é da cor da bolha, sobre a 1ª linha.
-  const chevronOverMedia = m.media_type === 'image' || m.media_type === 'video' || m.media_type === 'sticker';
-  const chevronOwnRow = m.media_type === 'audio';
+  // Onde a seta cabe sem cortar nada: no áudio (o player ocupa a largura toda,
+  // inclusive a foto à direita) e quando a bolha COMEÇA por uma citação (fundo
+  // diferente do da bolha) ela ganha uma faixa própria no topo; em foto/vídeo/
+  // figurinha fica por cima da mídia com um sombreado escuro; no resto (texto,
+  // documento, contato) o degradê é da cor da bolha, sobre a 1ª linha.
+  const chevronOwnRow = m.media_type === 'audio' || !!m.quoted;
+  const chevronOverMedia =
+    !chevronOwnRow && (m.media_type === 'image' || m.media_type === 'video' || m.media_type === 'sticker');
   const chevronBubbleTone = isOut
     ? 'from-emerald-600 text-emerald-50 hover:text-white'
     : 'from-white dark:from-slate-700 text-slate-400 hover:text-slate-600 dark:text-slate-300 dark:hover:text-white';
