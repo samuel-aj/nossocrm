@@ -29,6 +29,13 @@ function formatChange(value: number): { text: string; isPositive: boolean } {
  */
 const DashboardPage: React.FC = () => {
   const router = useRouter();
+  // Os Relatórios de Performance ficam NA MESMA página, logo abaixo: os cards
+  // que antes levavam para /reports rolam até a seção (a rota antiga é a reserva)
+  const goToReports = () => {
+    const el = typeof document !== 'undefined' ? document.getElementById('relatorios') : null;
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    else router.push('/dashboard#relatorios');
+  };
   const { activities, lifecycleStages, contacts, boards } = useCRM();
   const { addToast } = useToast();
   const [period, setPeriod] = useState<PeriodFilter>('this_month');
@@ -170,7 +177,7 @@ const DashboardPage: React.FC = () => {
           subtextPositive={winRateChangeInfo.isPositive}
           icon={Target}
           color="bg-emerald-500"
-          onClick={() => router.push('/reports')}
+          onClick={goToReports}
           comparisonLabel={COMPARISON_LABELS[period]}
         />
         <StatCard
@@ -190,7 +197,7 @@ const DashboardPage: React.FC = () => {
         {/* Win Rate Real */}
         <div
           className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm cursor-pointer hover:border-emerald-500/50 transition-colors"
-          onClick={() => router.push('/reports')}
+          onClick={goToReports}
         >
           <div className="flex items-center gap-2 mb-2">
             <div className="p-2 rounded-lg bg-emerald-500/10">
@@ -232,7 +239,7 @@ const DashboardPage: React.FC = () => {
         {/* Ciclo Médio de Vendas */}
         <div
           className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm cursor-pointer hover:border-purple-500/50 transition-colors"
-          onClick={() => router.push('/reports')}
+          onClick={goToReports}
         >
           <div className="flex items-center gap-2 mb-2">
             <div className="p-2 rounded-lg bg-purple-500/10">
@@ -272,7 +279,7 @@ const DashboardPage: React.FC = () => {
         {/* Deals Fechados - Breakdown */}
         <div
           className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm cursor-pointer hover:border-orange-500/50 transition-colors"
-          onClick={() => router.push('/reports')}
+          onClick={goToReports}
         >
           <div className="flex items-center gap-2 mb-2">
             <div className="p-2 rounded-lg bg-orange-500/10">

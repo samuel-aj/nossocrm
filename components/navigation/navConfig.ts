@@ -68,7 +68,8 @@ export const SECONDARY_NAV: SecondaryNavItem[] = [
   { id: 'chats', label: 'Chats', href: '/chats', icon: MessageCircle },
   { id: 'modelos', label: 'Modelos', href: '/modelos', icon: FileText, adminOnly: true },
   { id: 'conexao', label: 'Conexão WhatsApp', href: '/conexao-whatsapp', icon: QrCode, adminOnly: true },
-  { id: 'reports', label: 'Relatórios', href: '/reports', icon: BarChart3 },
+  // Relatórios são uma seção da Visão Geral (mesma página, âncora)
+  { id: 'reports', label: 'Relatórios', href: '/dashboard#relatorios', icon: BarChart3 },
   { id: 'settings', label: 'Configurações', href: '/settings', icon: Settings },
   { id: 'suggestions', label: 'Sugestões', href: '/suggestions', icon: Lightbulb },
   { id: 'tutorial', label: 'Tutorial', href: '/tutorial', icon: GraduationCap },

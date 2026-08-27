@@ -617,7 +617,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
           {[
             { to: '/contacts', icon: Users, label: 'Contatos', prefetch: 'contacts' as const },
-            { to: '/reports', icon: BarChart3, label: 'Relatórios', prefetch: 'reports' as const },
+            // Relatórios são uma seção da Visão Geral: o item rola até ela
+            { to: '/dashboard#relatorios', icon: BarChart3, label: 'Relatórios', prefetch: 'reports' as const },
             { to: '/settings', icon: Settings, label: 'Configurações', prefetch: 'settings' as const },
           ].map((item) => (
             <NavItem

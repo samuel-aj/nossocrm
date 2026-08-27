@@ -32,10 +32,13 @@ const STAGE_COLOR_MAP: Record<string, string> = {
 
 /**
  * Componente React `ReportsPage`.
+ * `embedded`: renderizado como SEÇÃO da Visão Geral (mesma página, logo
+ * abaixo): ganha a âncora #relatorios, um divisor no topo e o título vira h2.
  * @returns {Element} Retorna um valor do tipo `Element`.
  */
-const ReportsPage: React.FC = () => {
+const ReportsPage: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const router = useRouter();
+  const Heading: 'h1' | 'h2' = embedded ? 'h2' : 'h1';
   const { boards, deals: allCrmDeals } = useCRM();
   const { profile } = useAuth();
   const [period, setPeriod] = useState<PeriodFilter>('this_month');
@@ -382,13 +385,18 @@ const ReportsPage: React.FC = () => {
     // min-h (não h fixo!): com altura FIXA o conteúdo transbordava e os cards
     // colavam na borda. Com min-h a página cresce e o padding PADRÃO do app
     // (p-6 do <main>, igual laterais/topo) dá o respiro — sem pb extra aqui.
-    <div className="flex flex-col min-h-[calc(100vh-7rem)] max-md:min-h-0 space-y-4">
+    <div
+      id={embedded ? 'relatorios' : undefined}
+      className={`flex flex-col min-h-[calc(100vh-7rem)] max-md:min-h-0 space-y-4 ${
+        embedded ? 'scroll-mt-4 pt-6 border-t border-slate-200 dark:border-white/10' : ''
+      }`}
+    >
       {/* Header com Filtros */}
       <div className="flex justify-between items-center shrink-0 max-md:flex-wrap max-md:gap-y-3">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900 dark:text-white font-display tracking-tight">
+          <Heading className="text-3xl font-bold text-slate-900 dark:text-white font-display tracking-tight">
             Relatórios de Performance
-          </h1>
+          </Heading>
           <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
             Análise detalhada de vendas e tendências.
           </p>
