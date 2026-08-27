@@ -732,23 +732,28 @@ function MessageBubble({
     setMenuOpen(false);
     onAction?.(action, m);
   };
-  // Texto simples: degradê da cor da bolha por trás da seta (estilo WhatsApp
-  // Web). Onde esse bloco cortaria algo de cor diferente (citação no topo,
-  // foto do áudio, foto/vídeo/figurinha), a seta vai SEM bloco, só com uma
-  // sombra suave pra continuar legível. A bolha não muda de tamanho.
+  // Degradê da cor da bolha por trás da seta (estilo WhatsApp Web). Em texto
+  // simples é um degradê reto (esquerda -> direita). Onde esse bloco reto
+  // cortaria algo de cor diferente (citação no topo, foto do áudio), o
+  // degradê é RADIAL a partir do canto: esmaece em todas as direções, sem
+  // linha de corte. Em foto/vídeo/figurinha o esmaecido é escuro. A bolha
+  // nunca muda de tamanho por causa da seta.
   const chevronOverMedia = m.media_type === 'image' || m.media_type === 'video' || m.media_type === 'sticker';
-  const chevronBare = chevronOverMedia || m.media_type === 'audio' || !!m.quoted;
-  const chevronLook = chevronBare
-    ? `h-7 w-9 pt-1 ${
-        chevronOverMedia || isOut
-          ? 'text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]'
-          : 'text-slate-500 hover:text-slate-800 dark:text-slate-200 dark:hover:text-white drop-shadow-[0_1px_1px_rgba(255,255,255,0.7)] dark:drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]'
-      }`
-    : `h-7 w-14 pt-1 bg-gradient-to-l from-50% to-transparent ${
-        isOut
-          ? 'from-emerald-600 text-emerald-50 hover:text-white'
-          : 'from-white dark:from-slate-700 text-slate-400 hover:text-slate-600 dark:text-slate-300 dark:hover:text-white'
-      }`;
+  const chevronSoft = m.media_type === 'audio' || !!m.quoted;
+  const chevronTone = isOut
+    ? 'text-emerald-50 hover:text-white'
+    : 'text-slate-400 hover:text-slate-600 dark:text-slate-300 dark:hover:text-white';
+  const chevronLook = chevronOverMedia
+    ? 'h-9 w-16 pt-1 bg-[radial-gradient(ellipse_at_top_right,rgba(0,0,0,0.55)_25%,transparent_72%)] text-white'
+    : chevronSoft
+      ? `h-9 w-16 pt-1 ${
+          isOut
+            ? 'bg-[radial-gradient(ellipse_at_top_right,#059669_30%,transparent_72%)]'
+            : 'bg-[radial-gradient(ellipse_at_top_right,#ffffff_30%,transparent_72%)] dark:bg-[radial-gradient(ellipse_at_top_right,#334155_30%,transparent_72%)]'
+        } ${chevronTone}`
+      : `h-7 w-14 pt-1 bg-gradient-to-l from-50% to-transparent ${
+          isOut ? 'from-emerald-600' : 'from-white dark:from-slate-700'
+        } ${chevronTone}`;
   // Motivo real devolvido pela Meta/Evolution (truncado), ou um texto
   // genérico quando o provedor não explicou — vai no cartão do selo "Erro"
   // Erro do provedor traduzido pra pt-BR (o texto cru da Meta é técnico e em
