@@ -169,6 +169,35 @@ function extractContent(rawMessage: any): {
   return {};
 }
 
+/**
+ * RESPONDER/ENCAMINHAR: o Baileys põe em `<tipo>Message.contextInfo` o
+ * `stanzaId` (id da mensagem citada), a `quotedMessage` (conteúdo dela), o
+ * `participant` (JID de quem escreveu a citada) e `isForwarded`/
+ * `forwardingScore` (mensagem encaminhada).
+ */
+// deno-lint-ignore no-explicit-any
+function extractContextInfo(rawMessage: any): {
+  quoted?: { providerId: string; text?: string; mediaType?: string; participant?: string };
+  forwarded: boolean;
+} {
+  const message = unwrapMessage(rawMessage);
+  if (!message || typeof message !== "object") return { forwarded: false };
+  for (const v of Object.values(message)) {
+    // deno-lint-ignore no-explicit-any
+    const ci = (v as any)?.contextInfo;
+    if (!ci || typeof ci !== "object") continue;
+    const forwarded = !!ci.isForwarded || Number(ci.forwardingScore ?? 0) > 0;
+    const stanzaId = typeof ci.stanzaId === "string" ? ci.stanzaId : "";
+    if (!stanzaId) return { forwarded };
+    const c = ci.quotedMessage ? extractContent(ci.quotedMessage) : {};
+    return {
+      quoted: { providerId: stanzaId, text: c.text, mediaType: c.mediaType, participant: ci.participant },
+      forwarded,
+    };
+  }
+  return { forwarded: false };
+}
+
 /** Extensão de arquivo a partir do mime (fallback: nome original ou .bin). */
 function extFromMime(mime?: string, fileName?: string): string {
   const m = (mime ?? "").split(";")[0].trim().toLowerCase();
@@ -411,6 +440,7 @@ Deno.serve(async (req) => {
       const fromMe = !!key.fromMe;
       const { text, mediaType, mediaMime, fileName, skip } = extractContent(m.message);
       if (skip) continue;
+      const ctx = extractContextInfo(m.message);
       const tsRaw = m.messageTimestamp;
       const tsNum = typeof tsRaw === "string" ? parseInt(tsRaw, 10) : tsRaw;
       const waTs = tsNum ? new Date(tsNum * 1000).toISOString() : new Date().toISOString();
@@ -599,9 +629,42 @@ Deno.serve(async (req) => {
         }
       }
 
+      // RESPONDER: acha a mensagem citada no CRM (pelo id do provedor) pra
+      // ligar as duas e guardar o retrato; sem ela no banco, o retrato vem do
+      // conteúdo que o WhatsApp manda junto (quotedMessage).
+      let quotedMessageId: string | null = null;
+      let quotedSnapshot: Record<string, unknown> | null = null;
+      if (ctx.quoted) {
+        const { data: orig } = await supabase
+          .from("wa_messages")
+          .select("id, body, media_type, direction")
+          .eq("organization_id", orgId)
+          .eq("evolution_message_id", ctx.quoted.providerId)
+          .maybeSingle();
+        if (orig) {
+          quotedMessageId = orig.id;
+          quotedSnapshot = {
+            provider_id: ctx.quoted.providerId,
+            body: orig.body ?? null,
+            media_type: orig.media_type ?? null,
+            direction: orig.direction ?? null,
+          };
+        } else {
+          const own = jidToE164(conn.phone_number ?? "");
+          const part = jidToE164(ctx.quoted.participant ?? "");
+          const direction = own && part ? (brPhoneVariants(own).includes(part) ? "out" : "in") : null;
+          quotedSnapshot = {
+            provider_id: ctx.quoted.providerId,
+            body: ctx.quoted.text ?? null,
+            media_type: ctx.quoted.mediaType ?? null,
+            direction,
+          };
+        }
+      }
+
       // idempotente: o índice único (org, evolution_message_id) descarta o eco
       // das mensagens que NÓS enviamos (já gravadas no /send).
-      const { error: insErr } = await supabase.from("wa_messages").insert({
+      const baseRow = {
         organization_id: orgId,
         conversation_id: convId,
         direction: fromMe ? "out" : "in",
@@ -616,7 +679,19 @@ Deno.serve(async (req) => {
         wa_timestamp: waTs,
         // webhook de saída: echo = enviada por fora (celular)
         source: fromMe ? "echo" : "inbound",
+      };
+      let { error: insErr } = await supabase.from("wa_messages").insert({
+        ...baseRow,
+        quoted_message_id: quotedMessageId,
+        quoted: quotedSnapshot,
+        forwarded: ctx.forwarded,
       });
+      // Banco ainda sem as colunas de responder/encaminhar (migração pendente):
+      // grava sem elas em vez de perder a mensagem.
+      if (insErr && /column/i.test(String(insErr.message)) && /quoted|forwarded/i.test(String(insErr.message))) {
+        console.error("[wa-webhook] colunas de responder/encaminhar ausentes; gravando sem elas");
+        ({ error: insErr } = await supabase.from("wa_messages").insert(baseRow));
+      }
       const dup = insErr && String(insErr.message).toLowerCase().includes("duplicate");
       if (insErr && !dup) {
         console.error("[wa-webhook] insert:", insErr.message);

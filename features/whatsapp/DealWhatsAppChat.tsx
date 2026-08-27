@@ -34,8 +34,13 @@ import {
   User,
   Bot,
   Square,
+  Reply,
+  Forward,
+  Copy,
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
+import { quotedPreviewText, type QuotedSnapshot } from '@/lib/whatsapp/quote';
+import { ForwardMessageModal } from './ForwardMessageModal';
 import {
   fillTemplate,
   templateParams,
@@ -591,19 +596,143 @@ function FailBadge({ reason }: { reason: string }) {
   );
 }
 
+type BubbleAction = 'reply' | 'forward' | 'copy';
+
+/** Bloco da mensagem CITADA dentro da bolha (estilo WhatsApp): barra colorida
+ *  à esquerda, quem escreveu, prévia e miniatura quando a original é imagem.
+ *  Clicável quando a original está carregada ("pular para"). */
+function QuotedBlock({
+  q,
+  isOut,
+  contactName,
+  original,
+  onJump,
+}: {
+  q: QuotedSnapshot;
+  isOut: boolean;
+  contactName?: string;
+  original: WaChatMessage | null;
+  onJump?: () => void;
+}) {
+  const mine = q.direction === 'out';
+  const title = q.direction === 'out' ? 'Você' : q.direction === 'in' ? contactName || 'Contato' : 'Mensagem';
+  const thumb =
+    original?.media_url && (original.media_type === 'image' || original.media_type === 'sticker')
+      ? original.media_url
+      : null;
+  return (
+    <div
+      role={onJump ? 'button' : undefined}
+      tabIndex={onJump ? 0 : undefined}
+      onClick={onJump}
+      onKeyDown={e => {
+        if (onJump && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          onJump();
+        }
+      }}
+      title={onJump ? 'Ir para a mensagem original' : undefined}
+      className={`mb-1.5 flex items-stretch gap-2 rounded-lg overflow-hidden border-l-4 ${
+        mine ? 'border-emerald-300' : 'border-sky-400'
+      } ${isOut ? 'bg-black/15' : 'bg-slate-100 dark:bg-white/10'} ${
+        onJump ? 'cursor-pointer hover:brightness-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-400' : ''
+      }`}
+    >
+      <div className="min-w-0 flex-1 px-2 py-1.5">
+        <p
+          className={`text-[11px] font-bold ${
+            mine
+              ? isOut
+                ? 'text-emerald-100'
+                : 'text-emerald-600 dark:text-emerald-400'
+              : isOut
+                ? 'text-sky-100'
+                : 'text-sky-600 dark:text-sky-400'
+          }`}
+        >
+          {title}
+        </p>
+        <p className={`text-xs line-clamp-2 break-words ${isOut ? 'text-emerald-50/90' : 'text-slate-600 dark:text-slate-300'}`}>
+          {quotedPreviewText(q)}
+        </p>
+      </div>
+      {thumb && (
+        // eslint-disable-next-line @next/next/no-img-element -- miniatura da URL assinada do Storage
+        <img src={thumb} alt="" className="h-12 w-12 object-cover shrink-0" />
+      )}
+    </div>
+  );
+}
+
 function MessageBubble({
   m,
   searchQuery = '',
   isCurrentMatch = false,
   contactName,
+  onAction,
+  quotedOriginal = null,
+  onJumpToQuoted,
+  flash = false,
 }: {
   m: WaChatMessage;
   searchQuery?: string;
   isCurrentMatch?: boolean;
   contactName?: string;
+  /** Responder / Encaminhar / Copiar (menu da bolha); ausente = bolha sem ações */
+  onAction?: (action: BubbleAction, m: WaChatMessage) => void;
+  /** A mensagem citada, quando está carregada (miniatura + "pular para") */
+  quotedOriginal?: WaChatMessage | null;
+  onJumpToQuoted?: (id: string) => void;
+  /** Destaque temporário (chegou aqui pelo "pular para a original") */
+  flash?: boolean;
 }) {
   const isOut = m.direction === 'out';
   const failed = m.status === 'failed';
+  // Menu de ações da bolha (▾ no hover, toque longo no celular ou botão
+  // direito), estilo WhatsApp Web. Bolha otimista (temp-) ainda não tem id.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuAbove, setMenuAbove] = useState(false);
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  const pressTimerRef = useRef<number | null>(null);
+  const pressStartRef = useRef<{ x: number; y: number } | null>(null);
+  const canAct = !!onAction && !m.id.startsWith('temp-');
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: Event) => {
+      if (bubbleRef.current && !bubbleRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [menuOpen]);
+  const openMenu = () => {
+    if (!canAct) return;
+    // perto do fim da lista o menu abre pra CIMA (senão some no rodapé)
+    const el = bubbleRef.current;
+    const scroller = el?.closest('.overflow-y-auto');
+    if (el && scroller) {
+      const room = scroller.getBoundingClientRect().bottom - el.getBoundingClientRect().bottom;
+      setMenuAbove(room < 150);
+    }
+    setMenuOpen(true);
+  };
+  const cancelPress = () => {
+    if (pressTimerRef.current) {
+      window.clearTimeout(pressTimerRef.current);
+      pressTimerRef.current = null;
+    }
+    pressStartRef.current = null;
+  };
+  const act = (action: BubbleAction) => {
+    setMenuOpen(false);
+    onAction?.(action, m);
+  };
   // Motivo real devolvido pela Meta/Evolution (truncado), ou um texto
   // genérico quando o provedor não explicou — vai no cartão do selo "Erro"
   // Erro do provedor traduzido pra pt-BR (o texto cru da Meta é técnico e em
@@ -624,12 +753,107 @@ function MessageBubble({
   return (
     <div className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`max-w-[78%] rounded-2xl px-3 py-2 text-sm shadow-sm ${
+        ref={bubbleRef}
+        style={{ WebkitTouchCallout: 'none' }}
+        onPointerDown={e => {
+          // toque longo (celular) abre o menu; mouse usa o ▾ ou o botão direito
+          if (!canAct || e.pointerType === 'mouse') return;
+          pressStartRef.current = { x: e.clientX, y: e.clientY };
+          pressTimerRef.current = window.setTimeout(() => {
+            pressTimerRef.current = null;
+            openMenu();
+          }, 500);
+        }}
+        onPointerMove={e => {
+          const s = pressStartRef.current;
+          if (s && Math.hypot(e.clientX - s.x, e.clientY - s.y) > 10) cancelPress();
+        }}
+        onPointerUp={cancelPress}
+        onPointerCancel={cancelPress}
+        onContextMenu={e => {
+          if (!canAct) return;
+          e.preventDefault();
+          openMenu();
+        }}
+        className={`group relative max-w-[78%] rounded-2xl px-3 py-2 text-sm shadow-sm ${
           isOut
             ? 'bg-emerald-600 text-white rounded-br-sm'
             : 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white rounded-bl-sm border border-slate-200 dark:border-white/10'
-        } ${failed ? 'ring-1 ring-red-400/80' : ''} ${isCurrentMatch ? 'ring-2 ring-amber-400' : ''}`}
+        } ${failed ? 'ring-1 ring-red-400/80' : ''} ${
+          isCurrentMatch || flash ? 'ring-2 ring-amber-400' : ''
+        } ${flash ? 'transition-shadow duration-500' : ''}`}
       >
+        {canAct && (
+          <button
+            type="button"
+            onClick={e => {
+              e.stopPropagation();
+              if (menuOpen) setMenuOpen(false);
+              else openMenu();
+            }}
+            aria-label="Opções da mensagem"
+            aria-expanded={menuOpen}
+            title="Responder, encaminhar..."
+            className={`absolute top-1 right-1 z-10 h-6 w-6 rounded-full inline-flex items-center justify-center transition-opacity ${
+              menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
+            } ${
+              isOut
+                ? 'bg-emerald-800/70 text-white hover:bg-emerald-900/80'
+                : 'bg-white/90 text-slate-500 hover:text-slate-800 shadow dark:bg-slate-800/90 dark:text-slate-200 dark:hover:text-white'
+            }`}
+          >
+            <ChevronDown size={14} />
+          </button>
+        )}
+        {menuOpen && (
+          <div
+            role="menu"
+            className={`absolute ${menuAbove ? 'bottom-full mb-1' : 'top-7'} ${
+              isOut ? 'right-1' : 'left-1'
+            } z-30 w-44 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card p-1.5 shadow-lg text-slate-700 dark:text-slate-200`}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => act('reply')}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm hover:bg-slate-100 dark:hover:bg-white/10"
+            >
+              <Reply size={16} className="text-emerald-500" /> Responder
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => act('forward')}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm hover:bg-slate-100 dark:hover:bg-white/10"
+            >
+              <Forward size={16} className="text-sky-500" /> Encaminhar
+            </button>
+            {m.body && m.media_type !== 'contact' && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => act('copy')}
+                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm hover:bg-slate-100 dark:hover:bg-white/10"
+              >
+                <Copy size={16} className="text-slate-400" /> Copiar texto
+              </button>
+            )}
+          </div>
+        )}
+        {m.forwarded && (
+          <p className={`mb-1 inline-flex items-center gap-1 text-[10px] italic ${isOut ? 'text-emerald-100/90' : 'text-slate-400'}`}>
+            <Forward size={11} /> Encaminhada
+          </p>
+        )}
+        {m.quoted && (
+          <QuotedBlock
+            q={m.quoted}
+            isOut={isOut}
+            contactName={contactName}
+            original={quotedOriginal}
+            onJump={m.quoted_message_id && onJumpToQuoted ? () => onJumpToQuoted(m.quoted_message_id as string) : undefined}
+          />
+        )}
         <MediaContent m={m} contactName={contactName} />
         {m.body && m.media_type !== 'contact' ? (
           searchQuery ? (
@@ -755,6 +979,24 @@ export function DealWhatsAppChat({
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   // Popover Automações (beta): iniciar agente/robô, limpar memória
   const [automationsOpen, setAutomationsOpen] = useState(false);
+  // RESPONDER (citar) e ENCAMINHAR, estilo WhatsApp
+  const [replyTo, setReplyTo] = useState<WaChatMessage | null>(null);
+  const replyToRef = useRef<WaChatMessage | null>(null); // o onstop do gravador roda fora do render
+  const [forwardMsg, setForwardMsg] = useState<WaChatMessage | null>(null);
+  const [flashId, setFlashId] = useState<string | null>(null); // bolha citada em destaque após "pular para"
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    replyToRef.current = replyTo;
+  }, [replyTo]);
+  // Esc cancela a resposta armada
+  useEffect(() => {
+    if (!replyTo) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setReplyTo(null);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [replyTo]);
   // Modelos de mensagem GERAIS (aba Modelos): prontos pra inserir no composer
   // com as variáveis já preenchidas com os dados reais do lead/contato
   const [templatesOpen, setTemplatesOpen] = useState(false);
@@ -959,6 +1201,8 @@ export function DealWhatsAppChat({
   const forceScrollRef = useRef(false); // rola pro fim após envio próprio
 
   const messages = data?.messages ?? [];
+  // Mensagens por id: a bolha de resposta acha a original (miniatura + pular para)
+  const messagesById = useMemo(() => new Map(messages.map(m => [m.id, m])), [messages]);
   // Números conectados + o remetente ATIVO (escolhido ou o padrão). O ref
   // espelha pro onstop do gravador (roda fora do render) enviar pelo certo.
   const senders = data?.senders ?? [];
@@ -1143,6 +1387,10 @@ export function DealWhatsAppChat({
       if (v) URL.revokeObjectURL(v.url);
       return null;
     });
+    // resposta armada e encaminhamento eram da conversa anterior
+    setReplyTo(null);
+    setForwardMsg(null);
+    setFlashId(null);
   }, [phone]);
 
   // ==== Pesquisa de mensagens ====
@@ -1230,11 +1478,47 @@ export function DealWhatsAppChat({
   if (!phone)
     return <CenterMsg>O contato não tem telefone. Adicione um número pra conversar pelo WhatsApp.</CenterMsg>;
 
+  const contactName = contact.name || data?.conversation?.wa_name || 'Contato';
+
   const clearAttachment = () => {
     setAttachment(prev => {
       if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
       return null;
     });
+  };
+
+  /** "Pular para" a mensagem citada: rola até ela e destaca por um instante. */
+  const jumpToMessage = (id: string) => {
+    const el = msgRefs.current.get(id);
+    if (!el) {
+      showToast('A mensagem original não está carregada neste chat', 'error');
+      return;
+    }
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setFlashId(id);
+    window.setTimeout(() => setFlashId(curr => (curr === id ? null : curr)), 1800);
+  };
+
+  /** Menu da bolha: Responder arma a citação no composer; Encaminhar abre o modal. */
+  const onBubbleAction = (action: BubbleAction, m: WaChatMessage) => {
+    if (action === 'reply') {
+      setReplyTo(m);
+      setEmojiOpen(false);
+      setAttachMenuOpen(false);
+      setTemplatesOpen(false);
+      window.setTimeout(() => textareaRef.current?.focus(), 0);
+      return;
+    }
+    if (action === 'forward') {
+      setForwardMsg(m);
+      return;
+    }
+    if (action === 'copy' && m.body) {
+      navigator.clipboard
+        ?.writeText(m.body)
+        .then(() => showToast('Texto copiado', 'success'))
+        .catch(() => showToast('Não deu para copiar o texto', 'error'));
+    }
   };
 
   const onPickFile = (f: File | null) => {
@@ -1269,6 +1553,8 @@ export function DealWhatsAppChat({
     const releaseGate = () => {
       sendGateRef.current = false;
     };
+    // resposta armada vai junto (e volta pro composer se o envio falhar)
+    const replySnapshot = replyTo;
 
     try {
       if (attachment) {
@@ -1286,15 +1572,24 @@ export function DealWhatsAppChat({
         const snapshot = attachment;
         setText('');
         clearAttachment();
+        setReplyTo(null);
         forceScrollRef.current = true;
         send.mutate(
-          { text: t, file, kind, fileName, connectionId: connectionId ?? senderRef.current?.id },
+          {
+            text: t,
+            file,
+            kind,
+            fileName,
+            connectionId: connectionId ?? senderRef.current?.id,
+            replyTo: replySnapshot ?? undefined,
+          },
           {
             onSettled: releaseGate,
             onError: () => {
               // restaura sem clobberar o que o usuário fez enquanto enviava,
               // e recria o preview (o blob URL antigo foi revogado no clear)
               setText(curr => curr || t);
+              setReplyTo(curr => curr ?? replySnapshot);
               setAttachment(curr =>
                 curr
                   ? curr
@@ -1309,12 +1604,16 @@ export function DealWhatsAppChat({
         );
       } else {
         setText('');
+        setReplyTo(null);
         forceScrollRef.current = true;
         send.mutate(
-          { text: t, connectionId: connectionId ?? senderRef.current?.id },
+          { text: t, connectionId: connectionId ?? senderRef.current?.id, replyTo: replySnapshot ?? undefined },
           {
             onSettled: releaseGate,
-            onError: () => setText(curr => curr || t),
+            onError: () => {
+              setText(curr => curr || t);
+              setReplyTo(curr => curr ?? replySnapshot);
+            },
           }
         );
       }
@@ -1369,11 +1668,21 @@ export function DealWhatsAppChat({
         }
       }
       const fileName = `voz_${Date.now()}.${ext}`;
+      // áudio também pode ser resposta a uma mensagem (o onstop roda fora do render: usa o ref)
+      const replySnapshot = replyToRef.current;
+      setReplyTo(null);
       forceScrollRef.current = true;
       send.mutate(
-        { file: blob, kind: 'audio', fileName, connectionId: connectionId ?? senderRef.current?.id },
+        {
+          file: blob,
+          kind: 'audio',
+          fileName,
+          connectionId: connectionId ?? senderRef.current?.id,
+          replyTo: replySnapshot ?? undefined,
+        },
         {
           onError: () => {
+            setReplyTo(curr => curr ?? replySnapshot);
             // não perde a gravação: vira anexo pro usuário reenviar
             setAttachment(curr =>
               curr
@@ -1647,6 +1956,10 @@ export function DealWhatsAppChat({
               searchQuery={activeQuery}
               isCurrentMatch={m.id === currentMatchId}
               contactName={contact.name || data?.conversation?.wa_name || undefined}
+              onAction={notConnected ? undefined : onBubbleAction}
+              quotedOriginal={m.quoted_message_id ? messagesById.get(m.quoted_message_id) ?? null : null}
+              onJumpToQuoted={jumpToMessage}
+              flash={m.id === flashId}
             />
           </div>
         ))}
@@ -2001,6 +2314,41 @@ export function DealWhatsAppChat({
           </div>
         )}
 
+        {/* RESPONDENDO A: citação armada acima do campo (Esc ou × cancela) */}
+        {replyTo && !recording && !voiceNote && !pendingTemplate && !windowLocked && (
+          <div className="mb-2 flex items-stretch gap-2 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20 overflow-hidden">
+            <span className={`w-1 shrink-0 ${replyTo.direction === 'out' ? 'bg-emerald-500' : 'bg-sky-500'}`} />
+            <button
+              type="button"
+              onClick={() => jumpToMessage(replyTo.id)}
+              className="min-w-0 flex-1 py-1.5 text-left"
+              title="Ir para a mensagem"
+            >
+              <p
+                className={`text-[11px] font-bold ${
+                  replyTo.direction === 'out' ? 'text-emerald-600 dark:text-emerald-400' : 'text-sky-600 dark:text-sky-400'
+                }`}
+              >
+                Respondendo a {replyTo.direction === 'out' ? 'você' : contactName}
+              </p>
+              <p className="text-xs text-slate-600 dark:text-slate-300 truncate">{quotedPreviewText(replyTo)}</p>
+            </button>
+            {replyTo.media_url && (replyTo.media_type === 'image' || replyTo.media_type === 'sticker') && (
+              // eslint-disable-next-line @next/next/no-img-element -- miniatura da URL assinada do Storage
+              <img src={replyTo.media_url} alt="" className="h-12 w-12 object-cover shrink-0" />
+            )}
+            <button
+              type="button"
+              onClick={() => setReplyTo(null)}
+              className="shrink-0 px-2.5 text-slate-400 hover:text-red-500 transition-colors"
+              aria-label="Cancelar resposta"
+              title="Cancelar resposta (Esc)"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
+
         {recording ? (
           /* Modo gravação de voz */
           <div className="flex items-center gap-3 max-md:flex-wrap max-md:gap-y-2">
@@ -2262,6 +2610,7 @@ export function DealWhatsAppChat({
               }}
             />
             <textarea
+              ref={textareaRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
@@ -2300,6 +2649,29 @@ export function DealWhatsAppChat({
           </div>
         )}
       </div>
+
+      {/* ENCAMINHAR: escolhe um ou mais contatos/conversas e reenvia */}
+      {forwardMsg && (
+        <ForwardMessageModal
+          messages={[forwardMsg]}
+          defaultConnectionId={connectionId ?? activeSender?.id ?? null}
+          senders={senders}
+          onClose={() => {
+            setForwardMsg(null);
+            // parte pode ter saído antes de uma falha: atualiza os chats abertos
+            void qc.invalidateQueries({ queryKey: ['waChat'] });
+          }}
+          onDone={result => {
+            setForwardMsg(null);
+            const okCount = result.results.filter(r => r.ok).length;
+            showToast(
+              okCount <= 1 ? 'Mensagem encaminhada' : `Mensagem encaminhada para ${okCount} contatos`,
+              'success'
+            );
+            void qc.invalidateQueries({ queryKey: ['waChat'] });
+          }}
+        />
+      )}
     </div>
   );
 }

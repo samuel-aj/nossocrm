@@ -19,10 +19,27 @@ export interface ProviderConfig {
   phoneNumberId?: string | null;
 }
 
+/**
+ * Mensagem CITADA numa resposta (estilo "responder" do WhatsApp). A Evolution
+ * monta o `quoted` (key + message) e a Cloud API da Meta o `context.message_id`.
+ */
+export interface QuotedRef {
+  /** id da mensagem citada no provedor (stanzaId da Evolution / wamid da Meta) */
+  providerMessageId: string;
+  /** true = a mensagem citada foi enviada pelo próprio número conectado */
+  fromMe: boolean;
+  /** telefone do interlocutor (E.164) — vira o remoteJid da citação na Evolution */
+  remotePhone: string;
+  /** prévia curta da citação (a Evolution/Baileys renderiza a partir dela) */
+  text?: string;
+}
+
 export interface SendTextInput {
   /** Telefone do destinatário (E.164 ou só dígitos — o adapter normaliza) */
   to: string;
   text: string;
+  /** Responder: mensagem citada (omitido = mensagem comum) */
+  quoted?: QuotedRef;
 }
 
 export type OutboundMediaKind = 'image' | 'video' | 'document' | 'audio' | 'sticker';
@@ -37,6 +54,8 @@ export interface SendMediaInput {
   fileName?: string;
   /** Legenda (imagem/vídeo/documento) */
   caption?: string;
+  /** Responder: mensagem citada (omitido = mensagem comum) */
+  quoted?: QuotedRef;
 }
 
 export interface SendTemplateInput {
@@ -80,6 +99,10 @@ export interface NormalizedInboundMessage {
   mediaMime?: string;
   /** ISO 8601 */
   timestamp?: string;
+  /** Responder: a mensagem que esta cita (id no provedor + prévia), quando houver */
+  quoted?: { providerMessageId: string; text?: string; mediaType?: string };
+  /** Mensagem marcada como encaminhada pelo provedor */
+  forwarded?: boolean;
 }
 
 /** Evento de webhook já normalizado para um dos tipos que o CRM trata. */

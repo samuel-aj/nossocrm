@@ -11,6 +11,9 @@ import { useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createClient } from '@/lib/supabase/client';
 import type { ConversationAiInfo, ConversationBotInfo } from '@/lib/wa-agents/types';
+import { snapshotFromMessage, type QuotedSnapshot } from '@/lib/whatsapp/quote';
+
+export type WaQuoted = QuotedSnapshot;
 
 export interface WaChatMessage {
   id: string;
@@ -31,6 +34,12 @@ export interface WaChatMessage {
   transcription: string | null;
   /** De qual número conectado a mensagem veio (divisórias por número) */
   connection_id?: string | null;
+  /** Responder: id (no CRM) da mensagem citada, quando ela existe aqui */
+  quoted_message_id?: string | null;
+  /** Responder: retrato da mensagem citada (renderiza mesmo sem a original carregada) */
+  quoted?: WaQuoted | null;
+  /** Mensagem encaminhada */
+  forwarded?: boolean;
 }
 
 /** Número conectado disponível pra ENVIAR (multi-número). */
@@ -76,6 +85,35 @@ export interface SendChatPayload {
   connectionId?: string;
   /** Modelo aprovado da Meta: nome na Meta + idioma + valores dos {{n}} */
   template?: { name: string; language: string; params: string[] };
+  /** Responder: a mensagem citada (desta conversa) */
+  replyTo?: WaChatMessage;
+}
+
+/** Destino de um encaminhamento (telefone + por qual número sai; omitido = padrão da org). */
+export interface ForwardTarget {
+  phone: string;
+  connectionId?: string | null;
+}
+
+export interface ForwardResult {
+  ok: boolean;
+  results: Array<{ phone: string; connectionId: string | null; ok: boolean; sent: number; failed: number; error?: string }>;
+}
+
+/** POST /api/whatsapp/forward: reenvia as mensagens (ids) pra cada destino. */
+export async function forwardWhatsAppMessages(messageIds: string[], targets: ForwardTarget[]): Promise<ForwardResult> {
+  const res = await fetch('/api/whatsapp/forward', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({
+      messageIds,
+      targets: targets.map(t => ({ phone: t.phone, ...(t.connectionId ? { connectionId: t.connectionId } : {}) })),
+    }),
+  });
+  const json = (await res.json().catch(() => ({}))) as Partial<ForwardResult> & { error?: string };
+  if (res.status >= 400) throw new Error(json.error || 'Falha ao encaminhar');
+  return { ok: !!json.ok, results: json.results ?? [] };
 }
 
 /**
@@ -175,6 +213,7 @@ export function useWhatsAppChat(phoneE164: string | null, connectionId?: string 
           media,
           ...(p.connectionId ? { connectionId: p.connectionId } : {}),
           ...(p.template ? { template: p.template } : {}),
+          ...(p.replyTo ? { replyTo: p.replyTo.id } : {}),
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -205,6 +244,10 @@ export function useWhatsAppChat(phoneE164: string | null, connectionId?: string 
         transcription: null,
         // bolha otimista já nasce no número certo (divisória não pisca)
         connection_id: p.connectionId ?? connectionId ?? null,
+        // ...e já com a citação, quando é resposta
+        quoted_message_id: p.replyTo?.id ?? null,
+        quoted: p.replyTo ? snapshotFromMessage(p.replyTo) : null,
+        forwarded: false,
       };
       qc.setQueryData<WaChatData>(queryKey, old =>
         old

@@ -88,6 +88,11 @@ export class MetaCloudProvider implements WhatsAppProvider {
     return { ok: true, providerMessageId: data?.messages?.[0]?.id, raw: data };
   }
 
+  /** "Responder": a Cloud API cita pela `context.message_id` (wamid da original). */
+  private context(quoted?: { providerMessageId: string }): Record<string, unknown> {
+    return quoted?.providerMessageId ? { context: { message_id: quoted.providerMessageId } } : {};
+  }
+
   async sendText(input: SendTextInput): Promise<SendResult> {
     const to = toWhatsAppPhone(input.to);
     if (!to) return { ok: false, error: 'Telefone inválido' };
@@ -96,6 +101,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
       to,
       type: 'text',
       text: { preview_url: true, body: input.text },
+      ...this.context(input.quoted),
     });
   }
 
@@ -209,7 +215,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
         media = { type: 'image', image: { id, ...(input.caption ? { caption: input.caption } : {}) } };
         break;
     }
-    return this.send({ recipient_type: 'individual', to, ...media });
+    return this.send({ recipient_type: 'individual', to, ...media, ...this.context(input.quoted) });
   }
 
   // Cloud API é por credenciais, sem sessão/QR.

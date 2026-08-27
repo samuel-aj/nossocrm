@@ -475,6 +475,12 @@ async function processarEventos(supabase: any, conn: ConnRow, payload: any): Pro
 
         const { text, mediaType, mediaId, mediaMime, fileName, skip } = extractContent(m);
         if (skip) continue;
+        // RESPONDER/ENCAMINHAR: a Cloud API manda `context` { from, id,
+        // forwarded, frequently_forwarded } quando a mensagem cita outra ou
+        // foi encaminhada (só o id da citada; o conteúdo vem do nosso banco).
+        const ctxQuotedId = typeof m.context?.id === "string" ? m.context.id : "";
+        const ctxFrom = waIdToE164(m.context?.from);
+        const forwarded = !!(m.context?.forwarded || m.context?.frequently_forwarded);
         const tsNum = typeof m.timestamp === "string" ? parseInt(m.timestamp, 10) : m.timestamp;
         const waTs = tsNum ? new Date(tsNum * 1000).toISOString() : new Date().toISOString();
         const pushName = isEcho ? null : nameByWaId[String(m.from)] || null;
@@ -596,7 +602,33 @@ async function processarEventos(supabase: any, conn: ConnRow, payload: any): Pro
           }
         }
 
-        const { error: insErr } = await supabase.from("wa_messages").insert({
+        // RESPONDER: liga à mensagem citada quando ela está no CRM; senão
+        // guarda só o id e de quem era (a Meta não manda o conteúdo).
+        let quotedMessageId: string | null = null;
+        let quotedSnapshot: Record<string, unknown> | null = null;
+        if (ctxQuotedId) {
+          const { data: orig } = await supabase
+            .from("wa_messages")
+            .select("id, body, media_type, direction")
+            .eq("organization_id", orgId)
+            .eq("evolution_message_id", ctxQuotedId)
+            .maybeSingle();
+          if (orig) {
+            quotedMessageId = orig.id;
+            quotedSnapshot = {
+              provider_id: ctxQuotedId,
+              body: orig.body ?? null,
+              media_type: orig.media_type ?? null,
+              direction: orig.direction ?? null,
+            };
+          } else {
+            const own = digitosConexao ? `+${digitosConexao}` : "";
+            const direction = own && ctxFrom ? (brPhoneVariants(own).includes(ctxFrom) ? "out" : "in") : null;
+            quotedSnapshot = { provider_id: ctxQuotedId, body: null, media_type: null, direction };
+          }
+        }
+
+        const baseRow = {
           organization_id: orgId,
           conversation_id: convId,
           direction: isEcho ? "out" : "in",
@@ -611,7 +643,19 @@ async function processarEventos(supabase: any, conn: ConnRow, payload: any): Pro
           wa_timestamp: waTs,
           // webhook de saída: echo = enviada por fora (celular/Kommo)
           source: isEcho ? "echo" : "inbound",
+        };
+        let { error: insErr } = await supabase.from("wa_messages").insert({
+          ...baseRow,
+          quoted_message_id: quotedMessageId,
+          quoted: quotedSnapshot,
+          forwarded,
         });
+        // Banco ainda sem as colunas de responder/encaminhar (migração pendente):
+        // grava sem elas em vez de perder a mensagem.
+        if (insErr && /column/i.test(String(insErr.message)) && /quoted|forwarded/i.test(String(insErr.message))) {
+          console.error("[wa-webhook-meta] colunas de responder/encaminhar ausentes; gravando sem elas");
+          ({ error: insErr } = await supabase.from("wa_messages").insert(baseRow));
+        }
         const dup = insErr && String(insErr.message).toLowerCase().includes("duplicate");
         if (insErr && !dup) {
           console.error("[wa-webhook-meta] insert:", insErr.message);

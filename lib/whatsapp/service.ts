@@ -4,6 +4,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { brPhoneVariants } from '@/lib/phone';
+import type { QuotedSnapshot } from '@/lib/whatsapp/quote';
 
 export interface WaConnectionRow {
   /** Espelho: URL de outro sistema que também recebe os webhooks brutos da Meta */
@@ -46,6 +47,45 @@ export interface WaMessageRow {
   body: string | null;
   evolution_message_id: string | null;
   created_at: string;
+  media_type?: string | null;
+  media_url?: string | null;
+  media_mime?: string | null;
+  /** Responder: mensagem citada (id no CRM + retrato) e marca de encaminhada */
+  quoted_message_id?: string | null;
+  quoted?: QuotedSnapshot | null;
+  forwarded?: boolean;
+}
+
+/**
+ * Mensagem que pode ser CITADA numa resposta: precisa ser da org e pertencer a
+ * uma conversa do MESMO telefone (variantes BR), senão null. Devolve a linha
+ * com o telefone da conversa (pro remoteJid da citação).
+ */
+export async function getQuotableMessage(
+  admin: SupabaseClient,
+  orgId: string,
+  messageId: string,
+  phone: string
+): Promise<(WaMessageRow & { conversation_phone: string }) | null> {
+  if (!messageId) return null;
+  const { data: msg } = await admin
+    .from('wa_messages')
+    .select('id, organization_id, conversation_id, direction, status, body, media_type, media_url, media_mime, evolution_message_id, created_at')
+    .eq('id', messageId)
+    .eq('organization_id', orgId)
+    .maybeSingle();
+  if (!msg) return null;
+  const row = msg as WaMessageRow;
+  const { data: conv } = await admin
+    .from('wa_conversations')
+    .select('wa_phone')
+    .eq('id', row.conversation_id)
+    .eq('organization_id', orgId)
+    .maybeSingle();
+  const convPhone = String((conv as { wa_phone?: string } | null)?.wa_phone ?? '');
+  const variants = new Set([...brPhoneVariants(phone), ...brPhoneVariants(convPhone)]);
+  if (!convPhone || !(variants.has(convPhone) && variants.has(phone))) return null;
+  return { ...row, conversation_phone: convPhone };
 }
 
 /** TODAS as conexões da org (multi-número), da mais antiga pra mais nova. */
@@ -436,8 +476,19 @@ export async function recordOutboundMessage(
     mediaType?: string | null;
     mediaUrl?: string | null;
     mediaMime?: string | null;
+    /** Responder: id (no CRM) da mensagem citada + retrato dela; Encaminhar: marca */
+    quotedMessageId?: string | null;
+    quoted?: QuotedSnapshot | null;
+    forwarded?: boolean;
   }
 ): Promise<WaMessageRow> {
+  // Só grava as colunas de responder/encaminhar quando usadas (compatível com
+  // um banco que ainda não tenha a migração, no envio comum).
+  const replyCols = {
+    ...(input.quotedMessageId !== undefined ? { quoted_message_id: input.quotedMessageId } : {}),
+    ...(input.quoted !== undefined ? { quoted: input.quoted } : {}),
+    ...(input.forwarded ? { forwarded: true } : {}),
+  };
   const { data, error } = await admin
     .from('wa_messages')
     .insert({
@@ -455,6 +506,7 @@ export async function recordOutboundMessage(
       sent_by: input.sentBy ?? null,
       source: input.source ?? 'crm',
       error: input.error ?? null,
+      ...replyCols,
     })
     .select('*')
     .single();
@@ -472,7 +524,12 @@ export async function recordOutboundMessage(
       // só marca a autoria — o status do eco pode já ter avançado (entregue/lida)
       const { data: claimed } = await admin
         .from('wa_messages')
-        .update({ sent_by: input.sentBy, conversation_id: input.conversationId, source: input.source ?? 'crm' })
+        .update({
+          sent_by: input.sentBy,
+          conversation_id: input.conversationId,
+          source: input.source ?? 'crm',
+          ...replyCols,
+        })
         .eq('organization_id', input.orgId)
         .eq('evolution_message_id', input.providerMessageId)
         .select('*')

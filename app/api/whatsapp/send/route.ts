@@ -14,10 +14,12 @@ import {
   getConnectionByOrg,
   getConnectionByIdForOrg,
   ensureConversation,
+  getQuotableMessage,
   recordOutboundMessage,
   replicateOutboundToSiblings,
 } from '@/lib/whatsapp/service';
-import { getProvider, type OutboundMediaKind } from '@/lib/whatsapp';
+import { getProvider, type OutboundMediaKind, type QuotedRef } from '@/lib/whatsapp';
+import { clampQuote, quotedPreviewText, snapshotFromMessage } from '@/lib/whatsapp/quote';
 import { normalizePhoneE164 } from '@/lib/phone';
 
 const MEDIA_KINDS: OutboundMediaKind[] = ['image', 'video', 'document', 'audio', 'sticker'];
@@ -37,6 +39,8 @@ export async function POST(req: Request) {
      * o corpo já preenchido, gravado no chat; `params` vão nos {{n}} do modelo.
      */
     template?: { name?: string; language?: string; params?: string[] };
+    /** Responder: id (wa_messages) da mensagem citada — precisa ser deste mesmo telefone */
+    replyTo?: string;
   };
   try {
     body = await req.json();
@@ -48,6 +52,7 @@ export async function POST(req: Request) {
   const media = body.media;
   const mediaKind = media?.kind as OutboundMediaKind | undefined;
   const templateName = (body.template?.name || '').trim();
+  const replyToId = (body.replyTo || '').trim();
 
   if (!to) return json({ error: 'to é obrigatório' }, 400);
   if (!text && !media && !templateName) return json({ error: 'text ou media é obrigatório' }, 400);
@@ -80,6 +85,24 @@ export async function POST(req: Request) {
   const conv = await ensureConversation(auth.admin, auth.user.organizationId, conn.id, to);
   const provider = getProvider(conn);
 
+  // RESPONDER: a mensagem citada tem que ser da org e deste telefone. Sem id
+  // no provedor (ex.: envio que falhou) a citação vai só no CRM, não no
+  // WhatsApp do contato. Modelo (template) não aceita citação na Meta.
+  const quotedRow = replyToId ? await getQuotableMessage(auth.admin, auth.user.organizationId, replyToId, to) : null;
+  if (replyToId && !quotedRow) {
+    return json({ error: 'A mensagem que você está respondendo não está mais nesta conversa.' }, 400);
+  }
+  const quotedSnapshot = quotedRow ? snapshotFromMessage(quotedRow) : null;
+  const quoted: QuotedRef | undefined =
+    quotedRow?.evolution_message_id && !templateName
+      ? {
+          providerMessageId: quotedRow.evolution_message_id,
+          fromMe: quotedRow.direction === 'out',
+          remotePhone: to,
+          text: clampQuote(quotedPreviewText(quotedSnapshot)),
+        }
+      : undefined;
+
   let result;
   const mediaPath = media?.path ?? '';
   if (media && mediaKind) {
@@ -100,6 +123,7 @@ export async function POST(req: Request) {
       mimeType: media.mimeType,
       fileName: media.fileName,
       caption: text || undefined,
+      quoted,
     });
   } else if (templateName && provider.sendTemplate) {
     const params = (body.template?.params ?? []).map(p => String(p ?? '').trim() || '-');
@@ -113,7 +137,7 @@ export async function POST(req: Request) {
     });
   } else {
     // provedor sem envio de modelo (QR/Evolution): vai o texto já preenchido
-    result = await provider.sendText({ to, text: text || `[Modelo: ${templateName}]` });
+    result = await provider.sendText({ to, text: text || `[Modelo: ${templateName}]`, quoted });
   }
 
   const message = await recordOutboundMessage(auth.admin, {
@@ -129,6 +153,7 @@ export async function POST(req: Request) {
     mediaType: media ? mediaKind : null,
     mediaUrl: media ? mediaPath : null,
     mediaMime: media?.mimeType ?? null,
+    ...(quotedRow ? { quotedMessageId: quotedRow.id, quoted: quotedSnapshot } : {}),
   });
 
   // Mesmo número em outra org: o envio aparece lá também

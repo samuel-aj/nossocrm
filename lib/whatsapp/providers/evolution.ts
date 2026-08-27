@@ -21,7 +21,26 @@ import type {
   InboundEvent,
   WaConnectionState,
   NormalizedInboundMessage,
+  QuotedRef,
 } from './types';
+
+/**
+ * Citação ("responder") no formato da Evolution v2: `quoted: { key, message }`.
+ * Com `message` preenchido a Evolution não precisa achar a original no banco
+ * dela; o celular do contato renderiza a prévia a partir de `conversation`.
+ */
+function buildQuoted(q?: QuotedRef): Record<string, unknown> | undefined {
+  if (!q?.providerMessageId) return undefined;
+  const digits = toWhatsAppPhone(q.remotePhone);
+  return {
+    key: {
+      id: q.providerMessageId,
+      fromMe: q.fromMe,
+      ...(digits ? { remoteJid: `${digits}@s.whatsapp.net` } : {}),
+    },
+    message: { conversation: (q.text || ' ').slice(0, 300) },
+  };
+}
 
 /** Converte um JID do WhatsApp ("5511999999999@s.whatsapp.net") em E.164 ("+5511999999999"). */
 export function jidToE164(jid?: string | null): string {
@@ -142,6 +161,7 @@ export class EvolutionProvider implements WhatsAppProvider {
     }>('POST', `/message/sendText/${encodeURIComponent(this.instanceName)}`, {
       number,
       text: input.text,
+      ...(buildQuoted(input.quoted) ? { quoted: buildQuoted(input.quoted) } : {}),
     });
 
     if (!ok) {
@@ -156,13 +176,15 @@ export class EvolutionProvider implements WhatsAppProvider {
 
     let path: string;
     let body: Record<string, unknown>;
+    // "responder" com mídia: mesma citação em qualquer dos três endpoints
+    const quoted = buildQuoted(input.quoted);
     if (input.kind === 'audio') {
       // Mensagem de VOZ (PTT); encoding=true faz a Evolution converter p/ opus
       path = `/message/sendWhatsAppAudio/${encodeURIComponent(this.instanceName)}`;
-      body = { number, audio: input.media, encoding: true };
+      body = { number, audio: input.media, encoding: true, ...(quoted ? { quoted } : {}) };
     } else if (input.kind === 'sticker') {
       path = `/message/sendSticker/${encodeURIComponent(this.instanceName)}`;
-      body = { number, sticker: input.media };
+      body = { number, sticker: input.media, ...(quoted ? { quoted } : {}) };
     } else {
       path = `/message/sendMedia/${encodeURIComponent(this.instanceName)}`;
       body = {
@@ -172,6 +194,7 @@ export class EvolutionProvider implements WhatsAppProvider {
         ...(input.mimeType ? { mimetype: input.mimeType } : {}),
         ...(input.fileName ? { fileName: input.fileName } : {}),
         ...(input.caption ? { caption: input.caption } : {}),
+        ...(quoted ? { quoted } : {}),
       };
     }
 
@@ -265,6 +288,7 @@ export class EvolutionProvider implements WhatsAppProvider {
     const msg = (data.message as Record<string, unknown>) ?? {};
     const { text, mediaType, mediaMime, skip } = extractContent(msg);
     if (skip) return { kind: 'ignored', reason: 'evento sem bolha (reação/protocolo)' };
+    const ctx = extractContextInfo(msg);
 
     const tsRaw = data.messageTimestamp as number | string | undefined;
     const tsNum = typeof tsRaw === 'string' ? parseInt(tsRaw, 10) : tsRaw;
@@ -279,6 +303,8 @@ export class EvolutionProvider implements WhatsAppProvider {
       mediaType,
       mediaMime,
       timestamp,
+      ...(ctx.quoted ? { quoted: ctx.quoted } : {}),
+      ...(ctx.forwarded ? { forwarded: true } : {}),
     };
     if (!message.fromPhone || !message.providerMessageId) {
       return { kind: 'ignored', reason: 'mensagem sem telefone/id' };
@@ -323,6 +349,29 @@ function unwrapMessage(message: Record<string, unknown>): Record<string, unknown
     else break;
   }
   return msg;
+}
+
+/**
+ * Responder/encaminhar: o Baileys põe em `<tipo>Message.contextInfo` o
+ * `stanzaId` (id da mensagem citada), a `quotedMessage` (conteúdo dela) e
+ * `isForwarded`/`forwardingScore` (mensagem encaminhada).
+ */
+function extractContextInfo(rawMsg: Record<string, unknown>): {
+  quoted?: { providerMessageId: string; text?: string; mediaType?: string };
+  forwarded?: boolean;
+} {
+  const msg = unwrapMessage(rawMsg);
+  for (const v of Object.values(msg)) {
+    const ci = (v as { contextInfo?: Record<string, unknown> } | null | undefined)?.contextInfo;
+    if (!ci || typeof ci !== 'object') continue;
+    const forwarded = Boolean(ci.isForwarded) || Number(ci.forwardingScore ?? 0) > 0;
+    const stanzaId = typeof ci.stanzaId === 'string' ? ci.stanzaId : '';
+    if (!stanzaId) return forwarded ? { forwarded } : {};
+    const quotedMsg = (ci.quotedMessage as Record<string, unknown> | undefined) ?? {};
+    const c = extractContent(quotedMsg);
+    return { quoted: { providerMessageId: stanzaId, text: c.text, mediaType: c.mediaType }, forwarded };
+  }
+  return {};
 }
 
 /** Extrai o telefone de um vCard (waid= ou linha TEL). */

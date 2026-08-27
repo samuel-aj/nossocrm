@@ -89,7 +89,7 @@ export async function GET(req: Request) {
     const { data } = await auth.admin
       .from('wa_messages')
       .select(
-        'id, conversation_id, direction, status, body, media_type, media_mime, media_url, from_phone, to_phone, wa_timestamp, created_at, sent_by, error, transcription'
+        'id, conversation_id, direction, status, body, media_type, media_mime, media_url, from_phone, to_phone, wa_timestamp, created_at, sent_by, error, transcription, quoted_message_id, quoted, forwarded'
       )
       .in('conversation_id', convs.map(c => c.id))
       .order('created_at', { ascending: false })
