@@ -50,11 +50,14 @@ import {
   WAIT_UNIT_LABELS,
   bubbleOutputs,
   buttonHandleId,
+  conditionClauseText,
   edgeIdFor,
   isButtonHandle,
   isStepType,
   isValidBlockOrder,
   placementProblem,
+  ruleHandleId,
+  ruleIdFromHandle,
   type Block,
   type BlockRef,
   type BotTriggerType,
@@ -105,7 +108,7 @@ export function blockSummary(block: Block, options: WaAgentOptions | undefined, 
       return block.data.bot_name.trim() || (block.data.bot_id ? 'Robô escolhido' : 'Escolha o robô');
     case 'condition': {
       const n = block.data.rules.length;
-      return `${n} ${n === 1 ? 'regra' : 'regras'} + Senão`;
+      return `${n} ${n === 1 ? 'caminho' : 'caminhos'} + Senão`;
     }
     case 'move_stage': {
       for (const board of options?.boards ?? []) {
@@ -488,6 +491,40 @@ function BlockRow({
             })}
           </ul>
         ) : null}
+        {block.type === 'condition' && isLast ? (
+          <ul className="mt-1.5 space-y-1" aria-label="Caminhos da condição (uma saída por caminho)">
+            {block.data.rules.map((rule, i) => {
+              const handleId = ruleHandleId(rule.id);
+              const isConnected = connected.has(edgeIdFor(bubbleId, handleId));
+              return (
+                <li
+                  key={rule.id}
+                  className="relative rounded-md border border-purple-200 dark:border-purple-500/30 bg-purple-50 dark:bg-purple-900/15 pl-2 pr-3 py-1 text-[11px] text-purple-900 dark:text-purple-100"
+                  title={isConnected ? undefined : 'Sem ligação: arraste da bolinha até outro balão'}
+                >
+                  <span className={`font-semibold ${isConnected ? '' : 'opacity-70'}`}>{rule.label.trim() || `Caminho ${i + 1}`}</span>
+                  <p className="text-[10px] leading-snug text-purple-800/80 dark:text-purple-200/80 break-words">
+                    {rule.clauses.length === 0
+                      ? 'sem condição'
+                      : rule.clauses.map((c, ci) => (
+                          <span key={c.id}>
+                            {ci === 0 ? 'Se ' : rule.match === 'all' ? ' E ' : ' OU '}
+                            {conditionClauseText(c)}
+                          </span>
+                        ))}
+                  </p>
+                  <Handle
+                    type="source"
+                    position={Position.Right}
+                    id={handleId}
+                    className={isConnected ? undefined : 'wa-handle-loose'}
+                    aria-label={`Saída do caminho ${rule.label.trim() || i + 1}${isConnected ? '' : ' (sem ligação)'}`}
+                  />
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
       </div>
       <div className="nodrag wa-block-actions flex flex-col items-center -my-0.5">
         <button
@@ -759,7 +796,7 @@ function BubbleNodeView({ id, data, selected }: NodeProps<BubbleNode>) {
 
       {outputs.length > 0 ? (
         <div className="border-t border-slate-100 dark:border-white/5 py-1">
-          {outputs.filter((o) => !isButtonHandle(o.handleId)).map((o) => (
+          {outputs.filter((o) => !isButtonHandle(o.handleId) && ruleIdFromHandle(o.handleId) === null).map((o) => (
             <OutputRow key={o.handleId} handleId={o.handleId} label={o.label} tone={o.tone} connected={connected.has(edgeIdFor(id, o.handleId))} />
           ))}
         </div>

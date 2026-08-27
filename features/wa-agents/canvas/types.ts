@@ -218,6 +218,13 @@ export function newConditionClause(id: string): ConditionClauseDraft {
 export function newConditionRule(id: string, clauseId: string = `${id}-c1`): ConditionRuleDraft {
   return { id, label: '', match: 'all', clauses: [newConditionClause(clauseId)] };
 }
+/** Texto de uma condição: "Nome do contato contém teste". */
+export function conditionClauseText(c: ConditionClauseDraft): string {
+  const field = c.field === 'custom_field' ? c.key.trim() || 'campo' : CONDITION_FIELD_LABELS[c.field];
+  const value = opNeedsValue(c.op) ? ` ${c.value.trim() || '…'}` : '';
+  return `${field} ${CONDITION_OP_LABELS[c.op]}${value}`;
+}
+
 /** Texto curto do caminho para a saída do balão. */
 export function conditionRulePreview(rule: ConditionRuleDraft): string {
   if (rule.label.trim()) return rule.label.trim();
