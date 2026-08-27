@@ -22,7 +22,15 @@ import { runAgentOnConversation } from './engine';
 import { errorMessage } from './errors';
 import { renderTemplate } from './template';
 import { normalizeKeyword } from './text';
-import { BotStepSchema, type BotLogEntry, type BotRow, type BotRunRow, type BotStep } from './types';
+import {
+  BotStepSchema,
+  type BotConditionClause,
+  type BotConditionRule,
+  type BotLogEntry,
+  type BotRow,
+  type BotRunRow,
+  type BotStep,
+} from './types';
 import { dispatchAgentEvent, postWebhook } from './webhooks';
 
 export { normalizeKeyword };
@@ -270,6 +278,129 @@ async function sendBotTemplate(
   }
   if (!result.ok) throw new Error(`envio do modelo falhou: ${result.error || 'erro desconhecido'}`);
   return tpl.name;
+}
+
+// ---------------------------------------------------------------------------
+// Condição (estilo Typebot/Switch): campo · operador · valor, combinados por E/OU
+// ---------------------------------------------------------------------------
+export type ConditionEnv = {
+  reply: string;
+  tags: string[];
+  stageId: string | null;
+  boardId: string | null;
+  contactName: string;
+  contactPhone: string;
+  dealTitle: string;
+  dealValue: number | null;
+  dealSource: string;
+  customFields: Record<string, unknown>;
+  contextoExtra: string;
+};
+
+function parseNumber(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  const s = String(raw ?? '').trim().replace(/[^\d,.-]/g, '');
+  if (!s) return null;
+  // "1.500,00" (pt-BR) -> 1500.00; "1500.50" -> 1500.50
+  const normalized = s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s;
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : null;
+}
+
+function conditionFieldValue(clause: BotConditionClause, env: ConditionEnv): unknown {
+  switch (clause.field) {
+    case 'reply':
+      return env.reply;
+    case 'tags':
+      return env.tags;
+    case 'stage':
+      return env.stageId ?? '';
+    case 'board':
+      return env.boardId ?? '';
+    case 'contact_name':
+      return env.contactName;
+    case 'contact_phone':
+      return env.contactPhone;
+    case 'deal_title':
+      return env.dealTitle;
+    case 'deal_value':
+      return env.dealValue;
+    case 'deal_source':
+      return env.dealSource;
+    case 'custom_field':
+      return clause.key ? env.customFields[clause.key] : undefined;
+    case 'contexto_extra':
+      return env.contextoExtra;
+  }
+}
+
+/** Uma condição. Textos comparados sem acentos/maiúsculas; ids (etapa/quadro) comparados exatos. */
+export function evalConditionClause(clause: BotConditionClause, env: ConditionEnv): boolean {
+  const raw = conditionFieldValue(clause, env);
+  const list = Array.isArray(raw) ? raw.map(v => String(v ?? '')) : null;
+  const text = list ? list.join(', ') : raw === null || raw === undefined ? '' : String(raw);
+  const exact = clause.field === 'stage' || clause.field === 'board';
+  const norm = (v: string) => (exact ? v.trim() : normalizeKeyword(v));
+  const a = norm(text);
+  const b = norm(clause.value ?? '');
+  switch (clause.op) {
+    case 'is_empty':
+      return list ? list.length === 0 : a.length === 0;
+    case 'not_empty':
+      return list ? list.length > 0 : a.length > 0;
+    case 'contains':
+      return b.length > 0 && (list ? list.some(v => norm(v) === b || norm(v).includes(b)) : a.includes(b));
+    case 'not_contains':
+      return b.length > 0 && !(list ? list.some(v => norm(v) === b || norm(v).includes(b)) : a.includes(b));
+    case 'equals':
+      if (clause.field === 'deal_value') {
+        const x = parseNumber(raw), y = parseNumber(clause.value);
+        return x !== null && y !== null && x === y;
+      }
+      return a === b;
+    case 'not_equals':
+      if (clause.field === 'deal_value') {
+        const x = parseNumber(raw), y = parseNumber(clause.value);
+        return x === null || y === null || x !== y;
+      }
+      return a !== b;
+    case 'starts_with':
+      return b.length > 0 && a.startsWith(b);
+    case 'ends_with':
+      return b.length > 0 && a.endsWith(b);
+    case 'gt': {
+      const x = parseNumber(raw), y = parseNumber(clause.value);
+      return x !== null && y !== null && x > y;
+    }
+    case 'lt': {
+      const x = parseNumber(raw), y = parseNumber(clause.value);
+      return x !== null && y !== null && x < y;
+    }
+  }
+}
+
+/** Um caminho: `clauses` combinadas por E/OU; sem clauses, a regra antiga (kind/keywords/tag/stage_id). */
+export function evalConditionRule(rule: BotConditionRule, env: ConditionEnv): boolean {
+  const clauses = rule.clauses ?? [];
+  if (clauses.length > 0) {
+    return rule.match === 'any' ? clauses.some(c => evalConditionClause(c, env)) : clauses.every(c => evalConditionClause(c, env));
+  }
+  const kind = rule.kind ?? 'reply_contains';
+  const reply = normalizeKeyword(env.reply);
+  if (kind === 'reply_contains' || kind === 'reply_not_contains') {
+    const found = (rule.keywords ?? []).some(k => {
+      const kw = normalizeKeyword(k);
+      return kw.length > 0 && reply.includes(kw);
+    });
+    return kind === 'reply_contains' ? found : (rule.keywords ?? []).length > 0 && !found;
+  }
+  if (kind === 'tag_has' || kind === 'tag_not_has') {
+    const tag = normalizeKeyword(rule.tag ?? '');
+    const has = tag.length > 0 && env.tags.some(t => normalizeKeyword(t) === tag);
+    return kind === 'tag_has' ? has : tag.length > 0 && !has;
+  }
+  const is = !!rule.stage_id && env.stageId === rule.stage_id;
+  return kind === 'stage_is' ? is : !!rule.stage_id && !is;
 }
 
 /**
@@ -555,34 +686,24 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
           return;
         }
         case 'condition': {
-          const reply = normalizeKeyword(String(st.vars.last_reply ?? ''));
-          const dealTags = (deal?.tags ?? []).map(t => normalizeKeyword(t));
-          const dealStage = deal?.stage_id ?? null;
+          const env: ConditionEnv = {
+            reply: String(st.vars.last_reply ?? ''),
+            tags: deal?.tags ?? [],
+            stageId: deal?.stage_id ?? null,
+            boardId: deal?.board_id ?? null,
+            contactName: contact?.name ?? '',
+            contactPhone: contact?.phone ?? phone,
+            dealTitle: deal?.title ?? '',
+            dealValue: deal?.value ?? null,
+            dealSource: deal?.source ?? '',
+            customFields: deal?.custom_fields ?? {},
+            contextoExtra: String(st.vars.contexto_extra ?? ''),
+          };
           let target = -1;
           let matched: string | null = null;
-          for (const rule of step.rules) {
-            const kind = rule.kind ?? 'reply_contains';
-            let hit: string | null = null;
-            if (kind === 'reply_contains' || kind === 'reply_not_contains') {
-              const found =
-                rule.keywords.find(k => {
-                  const kw = normalizeKeyword(k);
-                  return kw.length > 0 && reply.includes(kw);
-                }) ?? null;
-              if (kind === 'reply_contains') hit = found ? `resposta contém "${found}"` : null;
-              else hit = !found && rule.keywords.length > 0 ? 'resposta não contém as palavras' : null;
-            } else if (kind === 'tag_has' || kind === 'tag_not_has') {
-              const tag = normalizeKeyword(rule.tag ?? '');
-              const has = tag.length > 0 && dealTags.includes(tag);
-              if (kind === 'tag_has') hit = has ? `negócio tem o rótulo "${rule.tag}"` : null;
-              else hit = tag.length > 0 && !has ? `negócio não tem o rótulo "${rule.tag}"` : null;
-            } else {
-              const is = !!rule.stage_id && dealStage === rule.stage_id;
-              if (kind === 'stage_is') hit = is ? 'negócio está na etapa' : null;
-              else hit = rule.stage_id && !is ? 'negócio não está na etapa' : null;
-            }
-            if (hit) {
-              matched = hit;
+          for (const [i, rule] of step.rules.entries()) {
+            if (evalConditionRule(rule, env)) {
+              matched = rule.label?.trim() || `caminho ${i + 1}`;
               target = stepIndexById(steps, rule.goto_step_id);
               break;
             }

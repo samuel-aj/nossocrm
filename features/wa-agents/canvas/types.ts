@@ -141,36 +141,92 @@ export type MessageData = { text: string };
 export type WaitData = { amount: number; unit: WaitUnit };
 export type WaitReplyData = { timeout_minutes: number };
 /** Regra em edição: as palavras-chave ficam como texto (separadas por vírgula). */
-export type ConditionKind = 'reply_contains' | 'reply_not_contains' | 'tag_has' | 'tag_not_has' | 'stage_is' | 'stage_not_is';
-export const CONDITION_KIND_LABELS: Record<ConditionKind, string> = {
-  reply_contains: 'Resposta contém',
-  reply_not_contains: 'Resposta não contém',
-  tag_has: 'Negócio tem o rótulo',
-  tag_not_has: 'Negócio não tem o rótulo',
-  stage_is: 'Negócio está na etapa',
-  stage_not_is: 'Negócio não está na etapa',
+export type ConditionField =
+  | 'reply'
+  | 'tags'
+  | 'stage'
+  | 'board'
+  | 'contact_name'
+  | 'contact_phone'
+  | 'deal_title'
+  | 'deal_value'
+  | 'deal_source'
+  | 'custom_field'
+  | 'contexto_extra';
+export type ConditionOp =
+  | 'contains'
+  | 'not_contains'
+  | 'equals'
+  | 'not_equals'
+  | 'starts_with'
+  | 'ends_with'
+  | 'is_empty'
+  | 'not_empty'
+  | 'gt'
+  | 'lt';
+export type ConditionMatch = 'all' | 'any';
+export const CONDITION_FIELD_LABELS: Record<ConditionField, string> = {
+  reply: 'Última resposta do lead',
+  tags: 'Rótulos do negócio',
+  stage: 'Etapa do negócio',
+  board: 'Quadro do negócio',
+  contact_name: 'Nome do contato',
+  contact_phone: 'Telefone do contato',
+  deal_title: 'Título do negócio',
+  deal_value: 'Valor do negócio',
+  deal_source: 'Origem do lead',
+  custom_field: 'Campo personalizado',
+  contexto_extra: 'Contexto adicional',
 };
-/** Regra em edição: tipo + o campo que ele usa (palavras-chave, rótulo ou etapa). */
-export type ConditionRuleDraft = { id: string; kind: ConditionKind; keywords: string; tag: string; stage_id: string };
-export function newConditionRule(id: string): ConditionRuleDraft {
-  return { id, kind: 'reply_contains', keywords: '', tag: '', stage_id: '' };
-}
-/** Texto curto da regra para a saída do balão. */
-export function conditionRulePreview(rule: ConditionRuleDraft): string {
-  switch (rule.kind) {
-    case 'reply_contains':
-      return rule.keywords.trim() ? `contém ${rule.keywords.trim()}` : 'contém…';
-    case 'reply_not_contains':
-      return rule.keywords.trim() ? `não contém ${rule.keywords.trim()}` : 'não contém…';
-    case 'tag_has':
-      return rule.tag.trim() ? `tem "${rule.tag.trim()}"` : 'tem o rótulo…';
-    case 'tag_not_has':
-      return rule.tag.trim() ? `sem "${rule.tag.trim()}"` : 'sem o rótulo…';
-    case 'stage_is':
-      return rule.stage_id ? 'está na etapa' : 'está na etapa…';
-    case 'stage_not_is':
-      return rule.stage_id ? 'fora da etapa' : 'fora da etapa…';
+export const CONDITION_OP_LABELS: Record<ConditionOp, string> = {
+  contains: 'contém',
+  not_contains: 'não contém',
+  equals: 'é igual a',
+  not_equals: 'é diferente de',
+  starts_with: 'começa com',
+  ends_with: 'termina com',
+  is_empty: 'está vazio',
+  not_empty: 'não está vazio',
+  gt: 'é maior que',
+  lt: 'é menor que',
+};
+const TEXT_OPS: ConditionOp[] = ['contains', 'not_contains', 'equals', 'not_equals', 'starts_with', 'ends_with', 'is_empty', 'not_empty'];
+/** Operadores que fazem sentido para o campo. */
+export function conditionOpsFor(field: ConditionField): ConditionOp[] {
+  switch (field) {
+    case 'stage':
+    case 'board':
+      return ['equals', 'not_equals', 'is_empty', 'not_empty'];
+    case 'deal_value':
+      return ['equals', 'not_equals', 'gt', 'lt', 'is_empty', 'not_empty'];
+    case 'tags':
+      return ['contains', 'not_contains', 'is_empty', 'not_empty'];
+    default:
+      return TEXT_OPS;
   }
+}
+export function opNeedsValue(op: ConditionOp): boolean {
+  return op !== 'is_empty' && op !== 'not_empty';
+}
+/** Uma condição em edição: campo · operador · valor (key = chave do campo personalizado). */
+export type ConditionClauseDraft = { id: string; field: ConditionField; key: string; op: ConditionOp; value: string };
+/** Um caminho (saída) da Condição: condições combinadas por E/OU, com nome opcional. */
+export type ConditionRuleDraft = { id: string; label: string; match: ConditionMatch; clauses: ConditionClauseDraft[] };
+export function newConditionClause(id: string): ConditionClauseDraft {
+  return { id, field: 'reply', key: '', op: 'contains', value: '' };
+}
+export function newConditionRule(id: string, clauseId: string = `${id}-c1`): ConditionRuleDraft {
+  return { id, label: '', match: 'all', clauses: [newConditionClause(clauseId)] };
+}
+/** Texto curto do caminho para a saída do balão. */
+export function conditionRulePreview(rule: ConditionRuleDraft): string {
+  if (rule.label.trim()) return rule.label.trim();
+  const c = rule.clauses[0];
+  if (!c) return 'sem condição';
+  const field = c.field === 'custom_field' ? c.key.trim() || 'campo' : CONDITION_FIELD_LABELS[c.field];
+  const value = opNeedsValue(c.op) ? ` ${c.value.trim() || '…'}` : '';
+  const more = rule.clauses.length > 1 ? ` (+${rule.clauses.length - 1})` : '';
+  return `${field} ${CONDITION_OP_LABELS[c.op]}${value}${more}`;
 }
 export type ConditionData = { rules: ConditionRuleDraft[] };
 export type MoveStageData = { stage_id: string };

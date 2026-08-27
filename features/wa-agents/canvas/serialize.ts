@@ -14,7 +14,9 @@
  *   passo liga ao seguinte da lista, com layout vertical automático.
  */
 import type { XYPosition } from '@xyflow/react';
-import type { BotInput, BotLayoutGroup, BotRow, BotStep } from '@/lib/wa-agents/types';
+import type { BotInput, BotLayoutGroup, BotRow, BotStep ,
+  BotConditionRule,
+} from '@/lib/wa-agents/types';
 import { newId } from '../ui';
 import {
   BLOCK_KIND,
@@ -31,11 +33,14 @@ import {
   edgeIdFor,
   buttonHandleId,
   isLinearType,
+  newConditionClause,
   newConditionRule,
+  opNeedsValue,
   ruleHandleId,
   unitFor,
   type Block,
   type BubbleData,
+  type ConditionClauseDraft,
   type BubbleNode,
   type FlowEdge,
   type FlowGraph,
@@ -187,6 +192,23 @@ export function cloneBlock(block: Block, handleMap?: Map<string, string>): Block
   return { ...block, id, data: { ...block.data } } as Block;
 }
 
+/** Regra salva -> condições do quadro. Regras antigas (kind/keywords/tag/stage_id) viram condições equivalentes. */
+function ruleToClauses(r: BotConditionRule): ConditionClauseDraft[] {
+  if (r.clauses && r.clauses.length > 0) {
+    return r.clauses.map((c) => ({ id: newId(), field: c.field, key: c.key ?? '', op: c.op, value: c.value ?? '' }));
+  }
+  const kind = r.kind ?? 'reply_contains';
+  if (kind === 'reply_contains' || kind === 'reply_not_contains') {
+    const keywords = r.keywords ?? [];
+    if (keywords.length === 0) return [newConditionClause(newId())];
+    return keywords.map((k) => ({ id: newId(), field: 'reply' as const, key: '', op: kind === 'reply_contains' ? ('contains' as const) : ('not_contains' as const), value: k }));
+  }
+  if (kind === 'tag_has' || kind === 'tag_not_has') {
+    return [{ id: newId(), field: 'tags', key: '', op: kind === 'tag_has' ? 'contains' : 'not_contains', value: r.tag ?? '' }];
+  }
+  return [{ id: newId(), field: 'stage', key: '', op: kind === 'stage_is' ? 'equals' : 'not_equals', value: r.stage_id ?? '' }];
+}
+
 /** Passo salvo -> bloco do balão. */
 function stepToBlock(step: BotStep): Block {
   const id = step.id;
@@ -222,10 +244,10 @@ function stepToBlock(step: BotStep): Block {
         data: {
           rules: step.rules.map((r) => ({
             id: newId(),
-            kind: r.kind ?? 'reply_contains',
-            keywords: formatKeywords(r.keywords ?? []),
-            tag: r.tag ?? '',
-            stage_id: r.stage_id ?? '',
+            label: r.label ?? '',
+            // várias palavras-chave antigas = qualquer uma (OU); regras novas trazem o próprio match
+            match: r.match ?? ((r.clauses ?? []).length === 0 && (r.kind ?? 'reply_contains') === 'reply_contains' ? 'any' : 'all'),
+            clauses: ruleToClauses(r),
           })),
         },
       };
@@ -450,10 +472,16 @@ function blockToStep(block: Block, to: (handle: string) => string | null, ui: { 
         id,
         type: 'condition',
         rules: block.data.rules.map((r) => ({
-          kind: r.kind,
-          keywords: r.kind === 'reply_contains' || r.kind === 'reply_not_contains' ? parseKeywords(r.keywords) : [],
-          tag: r.kind === 'tag_has' || r.kind === 'tag_not_has' ? r.tag.trim() || undefined : undefined,
-          stage_id: r.kind === 'stage_is' || r.kind === 'stage_not_is' ? r.stage_id || null : null,
+          kind: 'reply_contains' as const,
+          keywords: [],
+          match: r.match,
+          label: r.label.trim() || undefined,
+          clauses: r.clauses.map((c) => ({
+            field: c.field,
+            key: c.field === 'custom_field' ? c.key.trim() || undefined : undefined,
+            op: c.op,
+            value: opNeedsValue(c.op) ? c.value.trim() : '',
+          })),
           goto_step_id: to(ruleHandleId(r.id)) ?? '',
         })),
         else_step_id: to(HANDLE_ELSE),
@@ -718,18 +746,12 @@ export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowH
         case 'condition':
           if (block.data.rules.length === 0) fail('adicione ao menos uma regra');
           block.data.rules.forEach((rule, i) => {
-            const incomplete =
-              rule.kind === 'reply_contains' || rule.kind === 'reply_not_contains'
-                ? parseKeywords(rule.keywords).length === 0
-                  ? `a regra ${i + 1} está sem palavras-chave`
-                  : null
-                : rule.kind === 'tag_has' || rule.kind === 'tag_not_has'
-                  ? rule.tag.trim()
-                    ? null
-                    : `a regra ${i + 1} está sem rótulo`
-                  : rule.stage_id
-                    ? null
-                    : `a regra ${i + 1} está sem etapa`;
+            let incomplete: string | null = rule.clauses.length === 0 ? `o caminho ${i + 1} está sem condição` : null;
+            for (const c of rule.clauses) {
+              if (incomplete) break;
+              if (c.field === 'custom_field' && !c.key.trim()) incomplete = `o caminho ${i + 1}: informe a chave do campo personalizado`;
+              else if (opNeedsValue(c.op) && !c.value.trim()) incomplete = `o caminho ${i + 1}: informe o valor da condição`;
+            }
             if (incomplete) fail(incomplete);
             else if (isLast && !to(bubble.id, ruleHandleId(rule.id))) fail(`ligue a regra ${i + 1} a um balão`);
           });

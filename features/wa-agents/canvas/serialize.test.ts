@@ -93,7 +93,7 @@ describe('parseKeywords / formatKeywords', () => {
     ];
     const { nodes } = botToFlow(bot(steps, 'a'), []);
     const block = bubbles(nodes).flatMap((b) => b.data.blocks).find((b) => b.id === 'a');
-    expect(block?.type === 'condition' && block.data.rules[0].keywords).toBe('"sim, quero"');
+    expect(block?.type === 'condition' && block.data.rules[0].clauses[0].value).toBe('sim, quero');
   });
 });
 

@@ -16,7 +16,8 @@ import { useCanvasContext } from './context';
 import { bubbleTitle } from './serialize';
 import {
   BOT_VARIABLES,
-  CONDITION_KIND_LABELS,
+  CONDITION_FIELD_LABELS,
+  CONDITION_OP_LABELS,
   MAX_REPLY_MINUTES,
   MAX_WAIT_SECONDS,
   WAIT_UNIT_LABELS,
@@ -24,10 +25,15 @@ import {
   type Block,
   type BlockOfType,
   type BubbleNode,
-  type ConditionKind,
+  type ConditionClauseDraft,
+  type ConditionField,
+  type ConditionOp,
   type ConditionRuleDraft,
   type WaitUnit,
+  conditionOpsFor,
+  newConditionClause,
   newConditionRule,
+  opNeedsValue,
 } from './types';
 
 export type BlockPanelProps = {
@@ -231,88 +237,178 @@ function WaitReplyEditor({ block, update }: EditorProps<'wait_reply'>) {
 
 // ---------------------------------------------------------------- Condição
 
+const SMALL_BTN =
+  'p-1.5 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-900/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
+
 function ConditionEditor({ block, update }: EditorProps<'condition'>) {
   const { options } = useCanvasContext();
+  const boards = options?.boards ?? [];
   const rules = block.data.rules;
   const setRules = (next: ConditionRuleDraft[]) => update({ ...block, data: { rules: next } });
   const setRule = (id: string, patch: Partial<ConditionRuleDraft>) =>
     setRules(rules.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const setClause = (ruleId: string, clauseId: string, patch: Partial<ConditionClauseDraft>) =>
+    setRules(
+      rules.map((r) =>
+        r.id === ruleId ? { ...r, clauses: r.clauses.map((c) => (c.id === clauseId ? { ...c, ...patch } : c)) } : r
+      )
+    );
+  const changeField = (ruleId: string, clause: ConditionClauseDraft, field: ConditionField) => {
+    const ops = conditionOpsFor(field);
+    setClause(ruleId, clause.id, { field, op: ops.includes(clause.op) ? clause.op : ops[0], value: '', key: '' });
+  };
+
+  const valueInput = (rule: ConditionRuleDraft, clause: ConditionClauseDraft, index: number) => {
+    const id = `block-${block.id}-${rule.id}-${clause.id}-value`;
+    const label = `Valor da condição ${index + 1}`;
+    if (clause.field === 'stage') {
+      return (
+        <StageSelect id={id} value={clause.value} onChange={(value) => setClause(rule.id, clause.id, { value })} options={options} ariaLabel={label} />
+      );
+    }
+    if (clause.field === 'board') {
+      return (
+        <select id={id} className={INPUT_CLASS} value={clause.value} aria-label={label} onChange={(e) => setClause(rule.id, clause.id, { value: e.target.value })}>
+          <option value="">Escolha o quadro</option>
+          {boards.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </select>
+      );
+    }
+    if (clause.field === 'tags') {
+      return <TagInput id={id} value={clause.value} onChange={(value) => setClause(rule.id, clause.id, { value })} options={options} ariaLabel={label} />;
+    }
+    return (
+      <input
+        id={id}
+        className={INPUT_CLASS}
+        type={clause.field === 'deal_value' ? 'number' : 'text'}
+        step={clause.field === 'deal_value' ? 'any' : undefined}
+        value={clause.value}
+        placeholder={clause.field === 'reply' ? 'ex.: sim' : 'valor'}
+        aria-label={label}
+        onChange={(e) => setClause(rule.id, clause.id, { value: e.target.value })}
+      />
+    );
+  };
+
   return (
     <>
       <p className={HELP_CLASS}>
-        A primeira regra que bater decide o caminho; nenhuma batendo, segue pela saída "Senão". Regras de resposta
-        comparam a última mensagem do lead (sem acentos, sem diferenciar maiúsculas; palavras separadas por vírgula, aspas
-        para palavras com vírgula). Regras de rótulo e etapa olham o negócio ligado à conversa (sem negócio: "não tem" e
-        "não está" batem).
+        Cada caminho vira uma saída do balão. O primeiro caminho cujas condições baterem decide; nenhum batendo, segue por
+        "Senão". Textos são comparados sem acentos e sem diferenciar maiúsculas; rótulo, etapa, valor e campos vêm do
+        negócio ligado à conversa.
       </p>
       {rules.map((rule, index) => (
-        <div key={rule.id} className="space-y-1">
-          <label htmlFor={`block-${block.id}-rule-${rule.id}`} className={LABEL_CLASS}>
-            Regra {index + 1}
-          </label>
+        <div key={rule.id} className="rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-2 space-y-2">
           <div className="flex items-center gap-1">
-            <select
-              className={`${INPUT_CLASS} w-44 shrink-0`}
-              value={rule.kind}
-              aria-label={`Tipo da regra ${index + 1}`}
-              onChange={(e) => setRule(rule.id, { kind: e.target.value as ConditionKind })}
-            >
-              {(Object.keys(CONDITION_KIND_LABELS) as ConditionKind[]).map((k) => (
-                <option key={k} value={k}>
-                  {CONDITION_KIND_LABELS[k]}
-                </option>
-              ))}
-            </select>
-            {rule.kind === 'reply_contains' || rule.kind === 'reply_not_contains' ? (
-              <input
-                id={`block-${block.id}-rule-${rule.id}`}
-                className={INPUT_CLASS}
-                value={rule.keywords}
-                onChange={(e) => setRule(rule.id, { keywords: e.target.value })}
-                placeholder="sim, quero, pode"
-                aria-label={`Palavras-chave da regra ${index + 1} (separadas por vírgula)`}
-              />
-            ) : rule.kind === 'tag_has' || rule.kind === 'tag_not_has' ? (
-              <div className="flex-1 min-w-0">
-                <TagInput
-                  id={`block-${block.id}-rule-${rule.id}`}
-                  value={rule.tag}
-                  onChange={(tag) => setRule(rule.id, { tag })}
-                  options={options}
-                  ariaLabel={`Rótulo da regra ${index + 1}`}
-                />
-              </div>
-            ) : (
-              <div className="flex-1 min-w-0">
-                <StageSelect
-                  id={`block-${block.id}-rule-${rule.id}`}
-                  value={rule.stage_id}
-                  onChange={(stage_id) => setRule(rule.id, { stage_id })}
-                  options={options}
-                  ariaLabel={`Etapa da regra ${index + 1}`}
-                />
-              </div>
-            )}
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 shrink-0">Caminho {index + 1}</span>
+            <input
+              className={`${INPUT_CLASS} flex-1 min-w-0`}
+              value={rule.label}
+              maxLength={60}
+              placeholder="Nome da saída (opcional)"
+              aria-label={`Nome do caminho ${index + 1}`}
+              onChange={(e) => setRule(rule.id, { label: e.target.value })}
+            />
             <button
               type="button"
-              className="p-1.5 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-900/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              aria-label={`Remover regra ${index + 1}`}
-              title={rules.length <= 1 ? 'A condição precisa de ao menos uma regra' : 'Remover regra'}
+              className={SMALL_BTN}
+              aria-label={`Remover caminho ${index + 1}`}
+              title={rules.length <= 1 ? 'A condição precisa de ao menos um caminho' : 'Remover caminho'}
               disabled={rules.length <= 1}
               onClick={() => setRules(rules.filter((r) => r.id !== rule.id))}
             >
               <Trash2 size={14} aria-hidden="true" />
             </button>
           </div>
+          {rule.clauses.map((clause, ci) => (
+            <div key={clause.id} className="space-y-1">
+              {ci > 0 ? (
+                <div className="flex items-center gap-2">
+                  <span className="flex-1 border-t border-slate-200 dark:border-white/10" />
+                  <button
+                    type="button"
+                    className="px-2 py-0.5 rounded-full border border-purple-300 dark:border-purple-500/40 text-[11px] font-bold text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-900/20"
+                    title="Alterna entre E (todas as condições) e OU (qualquer uma)"
+                    aria-label={`Combinação das condições do caminho ${index + 1}: ${rule.match === 'all' ? 'todas (E)' : 'qualquer uma (OU)'}`}
+                    onClick={() => setRule(rule.id, { match: rule.match === 'all' ? 'any' : 'all' })}
+                  >
+                    {rule.match === 'all' ? 'E' : 'OU'}
+                  </button>
+                  <span className="flex-1 border-t border-slate-200 dark:border-white/10" />
+                </div>
+              ) : null}
+              <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-1">
+                <div className="flex flex-wrap items-center gap-1">
+                  <select
+                    className={`${INPUT_CLASS} w-44`}
+                    value={clause.field}
+                    aria-label={`Campo da condição ${ci + 1}`}
+                    onChange={(e) => changeField(rule.id, clause, e.target.value as ConditionField)}
+                  >
+                    {(Object.keys(CONDITION_FIELD_LABELS) as ConditionField[]).map((f) => (
+                      <option key={f} value={f}>
+                        {CONDITION_FIELD_LABELS[f]}
+                      </option>
+                    ))}
+                  </select>
+                  {clause.field === 'custom_field' ? (
+                    <input
+                      className={`${INPUT_CLASS} w-40`}
+                      value={clause.key}
+                      placeholder="chave (ex.: utm_source)"
+                      aria-label={`Chave do campo personalizado da condição ${ci + 1}`}
+                      onChange={(e) => setClause(rule.id, clause.id, { key: e.target.value })}
+                    />
+                  ) : null}
+                  <select
+                    className={`${INPUT_CLASS} w-36`}
+                    value={clause.op}
+                    aria-label={`Operador da condição ${ci + 1}`}
+                    onChange={(e) => setClause(rule.id, clause.id, { op: e.target.value as ConditionOp })}
+                  >
+                    {conditionOpsFor(clause.field).map((op) => (
+                      <option key={op} value={op}>
+                        {CONDITION_OP_LABELS[op]}
+                      </option>
+                    ))}
+                  </select>
+                  {opNeedsValue(clause.op) ? <div className="flex-1 min-w-[10rem]">{valueInput(rule, clause, ci)}</div> : null}
+                </div>
+                <button
+                  type="button"
+                  className={`${SMALL_BTN} self-center`}
+                  aria-label={`Remover condição ${ci + 1} do caminho ${index + 1}`}
+                  title={rule.clauses.length <= 1 ? 'O caminho precisa de ao menos uma condição' : 'Remover condição'}
+                  disabled={rule.clauses.length <= 1}
+                  onClick={() => setRule(rule.id, { clauses: rule.clauses.filter((c) => c.id !== clause.id) })}
+                >
+                  <Trash2 size={14} aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          ))}
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 text-xs font-medium text-purple-600 dark:text-purple-300 hover:underline"
+            onClick={() => setRule(rule.id, { clauses: [...rule.clauses, newConditionClause(newId())] })}
+          >
+            <Plus size={12} aria-hidden="true" />
+            Adicionar condição ({rule.match === 'all' ? 'E' : 'OU'})
+          </button>
         </div>
       ))}
       <button
         type="button"
         className="inline-flex items-center gap-1 text-xs font-medium text-purple-600 dark:text-purple-300 hover:underline"
-        onClick={() => setRules([...rules, newConditionRule(newId())])}
+        onClick={() => setRules([...rules, newConditionRule(newId(), newId())])}
       >
         <Plus size={12} aria-hidden="true" />
-        Adicionar regra
+        Adicionar caminho
       </button>
     </>
   );

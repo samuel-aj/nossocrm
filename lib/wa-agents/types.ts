@@ -441,8 +441,51 @@ export const BOT_CONDITION_KINDS = [
   'stage_not_is',
 ] as const;
 export type BotConditionKind = (typeof BOT_CONDITION_KINDS)[number];
-/** Regras antigas (só palavras-chave) continuam válidas: kind ausente = reply_contains */
+/** Campos e operadores das condições (estilo Typebot/Switch): campo · operador · valor */
+export const BOT_CONDITION_FIELDS = [
+  'reply',
+  'tags',
+  'stage',
+  'board',
+  'contact_name',
+  'contact_phone',
+  'deal_title',
+  'deal_value',
+  'deal_source',
+  'custom_field',
+  'contexto_extra',
+] as const;
+export type BotConditionField = (typeof BOT_CONDITION_FIELDS)[number];
+export const BOT_CONDITION_OPS = [
+  'contains',
+  'not_contains',
+  'equals',
+  'not_equals',
+  'starts_with',
+  'ends_with',
+  'is_empty',
+  'not_empty',
+  'gt',
+  'lt',
+] as const;
+export type BotConditionOp = (typeof BOT_CONDITION_OPS)[number];
+export const BotConditionClauseSchema = z.object({
+  field: z.enum(BOT_CONDITION_FIELDS),
+  /** chave do campo personalizado (field = custom_field) */
+  key: z.string().max(80).optional(),
+  op: z.enum(BOT_CONDITION_OPS),
+  value: z.string().max(500).default(''),
+});
+export type BotConditionClause = z.infer<typeof BotConditionClauseSchema>;
+
+/**
+ * Um caminho da Condição: condições combinadas por E (all) ou OU (any) → goto_step_id.
+ * Regras antigas (kind/keywords/tag/stage_id, sem `clauses`) continuam válidas.
+ */
 export const BotConditionRuleSchema = z.object({
+  match: z.enum(['all', 'any']).default('all'),
+  label: z.string().max(60).optional(),
+  clauses: z.array(BotConditionClauseSchema).max(10).default([]),
   kind: z.enum(BOT_CONDITION_KINDS).default('reply_contains'),
   keywords: z.array(z.string().min(1)).default([]),
   tag: z.string().max(60).optional(),
