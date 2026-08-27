@@ -41,7 +41,6 @@ import {
   Lightbulb,
   GraduationCap,
   Inbox,
-  ClipboardList,
   Sparkles,
   LogOut,
   User,
@@ -366,8 +365,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   // Grupos recolhíveis do menu (WhatsApp, Boards e Ajuda): sanfona com no
   // máximo UM aberto por vez, fechados por padrão; a escolha persiste.
-  const [openNavGroup, setOpenNavGroup] = usePersistedState<'tarefas' | 'whatsapp' | 'boards' | 'ajuda' | null>('nav_open_group', null);
-  const toggleNavGroup = (g: 'tarefas' | 'whatsapp' | 'boards' | 'ajuda') => setOpenNavGroup(cur => (cur === g ? null : g));
+  const [openNavGroup, setOpenNavGroup] = usePersistedState<'whatsapp' | 'boards' | 'ajuda' | null>('nav_open_group', null);
+  const toggleNavGroup = (g: 'whatsapp' | 'boards' | 'ajuda') => setOpenNavGroup(cur => (cur === g ? null : g));
 
   // Pipeline ativa (mesma chave persistida do useBoardsController; o
   // usePersistedState sincroniza as instâncias na mesma aba via evento).
@@ -509,36 +508,22 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         </div>
 
         <nav className="flex-1 p-4 space-y-2 flex flex-col overflow-y-auto" aria-label="Navegação do sistema">
-          {/* GRUPO Tarefas (recolhível): Inbox + Atividades */}
-          {(() => {
-            const taskChildren = [
-              { to: '/inbox', icon: Inbox, label: 'Inbox', prefetch: 'inbox' as RouteName },
-              { to: '/activities', icon: CheckSquare, label: 'Atividades', prefetch: 'activities' as RouteName },
-            ];
-            return (
-              <NavGroup
-                label="Tarefas"
-                icon={ClipboardList}
-                open={openNavGroup === 'tarefas'}
-                onToggle={() => toggleNavGroup('tarefas')}
-                childActive={taskChildren.some(c => pathname === c.to)}
-                collapsed={sidebarCollapsed}
-              >
-                {taskChildren.map(c => (
-                  <NavItem
-                    key={c.to}
-                    to={c.to}
-                    icon={c.icon}
-                    label={c.label}
-                    prefetch={c.prefetch}
-                    clickedPath={clickedPath}
-                    onItemClick={setClickedPath}
-                    collapsed={sidebarCollapsed}
-                  />
-                ))}
-              </NavGroup>
-            );
-          })()}
+          {/* Inbox e Atividades lado a lado no topo (sem grupo, a pedido do Samuel) */}
+          {[
+            { to: '/inbox', icon: Inbox, label: 'Inbox', prefetch: 'inbox' as const },
+            { to: '/activities', icon: CheckSquare, label: 'Atividades', prefetch: 'activities' as const },
+          ].map(item => (
+            <NavItem
+              key={item.to}
+              to={item.to}
+              icon={item.icon}
+              label={item.label}
+              prefetch={item.prefetch}
+              clickedPath={clickedPath}
+              onItemClick={setClickedPath}
+              collapsed={sidebarCollapsed}
+            />
+          ))}
 
           {/* GRUPO WhatsApp (recolhível): Chats + Modelos + Conexão */}
           {(() => {
