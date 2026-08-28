@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ChevronDown, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, Inbox } from 'lucide-react';
 import { DealView, CustomFieldDefinition, Board } from '@/types';
 import {
   computeQualificationView,
@@ -35,6 +35,26 @@ interface QualificationViewProps {
   onMoveDealToStage?: (dealId: string, newStageId: string) => void;
 }
 
+/** Total por etapa no cabeçalho do grupo, sem centavos (é um somatório de
+ *  leitura rápida, não o valor exato de um negócio). */
+const BRL_TOTAL = new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL',
+  maximumFractionDigits: 0,
+});
+const formatTotalBRL = (value: number): string => BRL_TOTAL.format(Number.isFinite(value) ? value : 0);
+
+/** Vazio da lista: mesma moldura pros três casos (filtro fechado, aba
+ *  agrupada sem leads e aba Todos sem nada), em vez de uma frase solta. */
+const ListEmptyState: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+    <span className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-400 dark:bg-white/5 dark:text-slate-500">
+      <Inbox size={20} aria-hidden="true" />
+    </span>
+    <p className="max-w-sm text-sm text-slate-500 dark:text-slate-400">{children}</p>
+  </div>
+);
+
 /** Cabeçalho de coluna clicável pra ordenar a lista; seta indica a coluna e
  *  direção ativas (igual ao padrão já usado em Contatos). */
 const SortableHeader: React.FC<{
@@ -48,17 +68,27 @@ const SortableHeader: React.FC<{
 }> = ({ label, column, currentSort, sortDirection, onSort, className, align = 'left' }) => {
   const isActive = currentSort === column;
   return (
-    <th className={`px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider ${className ?? ''}`}>
+    <th
+      scope="col"
+      aria-sort={isActive ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+      className={`px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider ${
+        isActive ? 'text-slate-700 dark:text-slate-200' : 'text-slate-400 dark:text-slate-500'
+      } ${className ?? ''}`}
+    >
       <button
         type="button"
         onClick={() => onSort(column)}
-        className={`inline-flex items-center gap-1.5 hover:text-slate-700 dark:hover:text-slate-200 transition-colors group focus-visible-ring rounded ${
+        className={`group inline-flex items-center gap-1 rounded transition-colors hover:text-primary-600 dark:hover:text-primary-400 focus-visible-ring ${
           align === 'right' ? 'ml-auto' : ''
         }`}
         aria-label={`Ordenar por ${label}`}
       >
         {label}
-        <span className={`transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-50'}`}>
+        <span
+          className={`transition-opacity ${
+            isActive ? 'text-primary-500 opacity-100' : 'opacity-0 group-hover:opacity-60'
+          }`}
+        >
           {isActive ? (
             sortDirection === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />
           ) : (
@@ -175,7 +205,7 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
           return sign * av.localeCompare(bv, 'pt-BR');
         }
         case 'createdAt': {
-          // Data inválida/ausente vira 0 (mesma tolerância do formatCreatedParts
+          // Data inválida/ausente vira 0 (mesma tolerância do formatCriadoEm
           // em KanbanList.tsx) — sem isso, NaN - NaN quebra o comparator e a
           // ordem do deal afetado fica indefinida em vez de ir pra uma ponta.
           const at = new Date(a.createdAt).getTime();
@@ -262,25 +292,25 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
 
   return (
     <div className="h-full overflow-hidden glass rounded-xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col">
-      <div className="flex items-center gap-1 px-3 py-2 border-b border-slate-200 dark:border-white/5">
+      <div className="flex items-center gap-1 border-b border-slate-200 px-3 py-2 dark:border-white/5">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             type="button"
             onClick={() => setActiveTab(tab.id)}
             aria-pressed={activeTab === tab.id}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors focus-visible-ring ${
+            className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-bold transition-colors focus-visible-ring ${
               activeTab === tab.id
-                ? 'bg-primary-600 text-white shadow-sm'
-                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10'
+                ? 'bg-primary-600 text-white shadow-sm shadow-primary-600/20'
+                : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-white'
             }`}
           >
             {tab.label}
             <span
-              className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+              className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
                 activeTab === tab.id
                   ? 'bg-white/20 text-white'
-                  : 'bg-slate-200 text-slate-600 dark:bg-white/10 dark:text-slate-300'
+                  : 'bg-slate-200/80 text-slate-600 dark:bg-white/10 dark:text-slate-300'
               }`}
             >
               {tab.count}
@@ -291,16 +321,16 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
 
       <div className="flex-1 min-h-0 overflow-auto scrollbar-custom">
         {showClosedFilterNotice ? (
-          <div className="px-6 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
+          <ListEmptyState>
             O filtro de status está em{' '}
             <span className="font-bold">{statusFilter === 'won' ? 'Ganhos' : 'Perdidos'}</span>, e
             estas abas mostram apenas negócios em aberto. Mude o filtro para{' '}
             <span className="font-bold">Em Aberto</span> para ver a Qualificação e o SQL.
-          </div>
+          </ListEmptyState>
         ) : activeTab !== 'todos' && (sqlUnavailable || groups.length === 0) ? (
-          <div className="px-6 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
-            {emptyMessage}
-          </div>
+          <ListEmptyState>{emptyMessage}</ListEmptyState>
+        ) : activeTab === 'todos' && filteredDeals.length === 0 ? (
+          <ListEmptyState>Nenhum negócio neste funil com os filtros atuais.</ListEmptyState>
         ) : (
           <table
             // table-fixed + colgroup: larguras fixas, independentes do
@@ -312,13 +342,16 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
             className="w-full table-fixed max-md:min-w-[50rem] text-left text-sm border-collapse"
           >
             <colgroup>
-              <col className="w-24" />
-              <col className="w-[13%]" />
+              {/* A coluna do sininho de atividade era w-24 (96px) pra um
+                  ícone de 20px, o que abria um vão enorme na esquerda.
+                  O espaço devolvido foi pro nome do negócio. */}
+              <col className="w-12" />
+              <col className="w-[24%]" />
               <col className="w-[15%]" />
-              <col className="w-[14%]" />
-              <col className="w-[13%]" />
               <col className="w-[15%]" />
-              <col className="w-[14%]" />
+              <col className="w-[13%]" />
+              <col className="w-[17%]" />
+              <col className="w-[11%]" />
               {customFieldDefinitions.map((field) => (
                 <col key={field.id} />
               ))}
@@ -326,9 +359,11 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
             {/* Cabeçalho de colunas só na aba Todos; nas abas agrupadas os
                 grupos ficam colados nas abas e dão o contexto sozinhos. */}
             {activeTab === 'todos' && (
-              <thead className="bg-slate-50/80 dark:bg-white/5 border-b border-slate-200 dark:border-white/5 sticky top-0 z-10 backdrop-blur-sm">
+              <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50/90 backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/70">
                 <tr>
-                  <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider"></th>
+                  <th scope="col" className="px-4 py-2.5">
+                    <span className="sr-only">Próxima atividade</span>
+                  </th>
                   <SortableHeader
                     label="Negócio"
                     column="title"
@@ -356,6 +391,8 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                     currentSort={sortColumn}
                     sortDirection={sortDirection}
                     onSort={handleSort}
+                    className="text-right"
+                    align="right"
                   />
                   <SortableHeader
                     label="Responsável"
@@ -393,7 +430,9 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                 título do grupo e os leads dele. */}
             <tbody
               className={
-                activeTab === 'todos' ? 'divide-y divide-slate-100 dark:divide-white/5' : undefined
+                activeTab === 'todos'
+                  ? 'divide-y divide-slate-100/80 dark:divide-white/[0.06]'
+                  : undefined
               }
             >
               {activeTab === 'todos' &&
@@ -423,11 +462,11 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                     {/* Filete na cor da etapa liga o cabeçalho do grupo às
                         linhas dele, deixando claro o que pertence a quem. */}
                     <tr
-                      className={`bg-slate-50/80 dark:bg-white/[0.04] ${
+                      className={`bg-slate-50/90 dark:bg-white/[0.04] ${
                         groupIndex > 0 ? 'border-t border-slate-200/70 dark:border-white/10' : ''
                       }`}
                     >
-                      <td colSpan={totalColumns} className="relative px-4 py-2.5">
+                      <td colSpan={totalColumns} className="relative px-4 py-2">
                         <span
                           aria-hidden="true"
                           className={`absolute inset-y-0 left-0 w-[3px] ${group.stage.color || 'bg-slate-500'}`}
@@ -436,22 +475,27 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                           type="button"
                           onClick={() => toggleGroup(group.stage.id)}
                           aria-expanded={!isCollapsed}
-                          className="flex items-center gap-2 w-full text-left focus-visible-ring rounded-md"
+                          className="flex w-full items-center gap-2 rounded-md py-0.5 text-left transition-colors hover:text-slate-900 dark:hover:text-white focus-visible-ring"
                         >
                           <ChevronDown
                             size={14}
                             aria-hidden="true"
-                            className={`text-slate-400 transition-transform ${
+                            className={`shrink-0 text-slate-400 transition-transform ${
                               isCollapsed ? '-rotate-90' : ''
                             }`}
                           />
                           <span
-                            className={`${group.stage.color || 'bg-slate-500'} text-white text-[11px] font-bold uppercase tracking-wide px-2.5 py-0.5 rounded-full`}
+                            className={`${group.stage.color || 'bg-slate-500'} rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white`}
                           >
                             {group.stage.label}
                           </span>
-                          <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                          <span className="rounded-full bg-slate-200/70 px-1.5 py-0.5 text-[11px] font-bold text-slate-600 dark:bg-white/10 dark:text-slate-300">
                             {group.deals.length}
+                          </span>
+                          {/* Total da etapa: mesma leitura das colunas do
+                              Kanban, que já somam o valor por etapa. */}
+                          <span className="ml-auto pr-1 text-xs font-semibold tabular-nums text-slate-500 dark:text-slate-400">
+                            {formatTotalBRL(group.deals.reduce((sum, d) => sum + (d.value || 0), 0))}
                           </span>
                         </button>
                       </td>
