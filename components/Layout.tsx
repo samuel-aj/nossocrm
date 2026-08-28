@@ -144,7 +144,7 @@ const NavItem = ({
     >
       <Icon size={20} className={`shrink-0 ${isActuallyActive ? 'text-primary-500' : ''}`} aria-hidden="true" />
       <span
-        className={`font-display tracking-wide whitespace-nowrap overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-in-out ${
+        className={`font-display tracking-wide whitespace-nowrap overflow-hidden truncate transition-[max-width,opacity,transform] duration-300 ease-in-out ${
           collapsed ? 'max-w-0 opacity-0 -translate-x-2' : 'max-w-[9rem] opacity-100 translate-x-0'
         }`}
       >
@@ -576,37 +576,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             );
           })()}
 
-          {/* GRUPO Relatórios (recolhível): Visão Geral + Relatórios de Performance */}
-          {(() => {
-            const reportsChildren = [
-              { to: '/dashboard', icon: LayoutDashboard, label: 'Visão Geral', prefetch: 'dashboard' as RouteName },
-              { to: '/reports', icon: BarChart3, label: 'Relatórios de Performance', prefetch: 'reports' as RouteName },
-            ];
-            return (
-              <NavGroup
-                label="Relatórios"
-                icon={BarChart3}
-                open={openNavGroup === 'reports'}
-                onToggle={() => toggleNavGroup('reports')}
-                childActive={reportsChildren.some(c => pathname === c.to)}
-                collapsed={sidebarCollapsed}
-              >
-                {reportsChildren.map(c => (
-                  <NavItem
-                    key={c.to}
-                    to={c.to}
-                    icon={c.icon}
-                    label={c.label}
-                    prefetch={c.prefetch}
-                    clickedPath={clickedPath}
-                    onItemClick={setClickedPath}
-                    collapsed={sidebarCollapsed}
-                  />
-                ))}
-              </NavGroup>
-            );
-          })()}
-
           {/* GRUPO Boards (recolhível): as pipelines da organização, pra
               entrar direto num funil específico */}
           {(() => {
@@ -650,21 +619,56 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             );
           })()}
 
-          {[
-            { to: '/contacts', icon: Users, label: 'Contatos', prefetch: 'contacts' as const },
-            { to: '/settings', icon: Settings, label: 'Configurações', prefetch: 'settings' as const },
-          ].map((item) => (
-            <NavItem
-              key={item.to}
-              to={item.to}
-              icon={item.icon}
-              label={item.label}
-              prefetch={item.prefetch}
-              clickedPath={clickedPath}
-              onItemClick={setClickedPath}
-              collapsed={sidebarCollapsed}
-            />
-          ))}
+          <NavItem
+            to="/contacts"
+            icon={Users}
+            label="Contatos"
+            prefetch="contacts"
+            clickedPath={clickedPath}
+            onItemClick={setClickedPath}
+            collapsed={sidebarCollapsed}
+          />
+
+          {/* GRUPO Relatórios (recolhível): Visão Geral + Performance */}
+          {(() => {
+            const reportsChildren = [
+              { to: '/dashboard', icon: LayoutDashboard, label: 'Visão Geral', prefetch: 'dashboard' as RouteName },
+              { to: '/reports', icon: BarChart3, label: 'Performance', prefetch: 'reports' as RouteName },
+            ];
+            return (
+              <NavGroup
+                label="Relatórios"
+                icon={BarChart3}
+                open={openNavGroup === 'reports'}
+                onToggle={() => toggleNavGroup('reports')}
+                childActive={reportsChildren.some(c => pathname === c.to)}
+                collapsed={sidebarCollapsed}
+              >
+                {reportsChildren.map(c => (
+                  <NavItem
+                    key={c.to}
+                    to={c.to}
+                    icon={c.icon}
+                    label={c.label}
+                    prefetch={c.prefetch}
+                    clickedPath={clickedPath}
+                    onItemClick={setClickedPath}
+                    collapsed={sidebarCollapsed}
+                  />
+                ))}
+              </NavGroup>
+            );
+          })()}
+
+          <NavItem
+            to="/settings"
+            icon={Settings}
+            label="Configurações"
+            prefetch="settings"
+            clickedPath={clickedPath}
+            onItemClick={setClickedPath}
+            collapsed={sidebarCollapsed}
+          />
 
           {/* GRUPO Ajuda (recolhível): Sugestões + Tutorial */}
           {(() => {
