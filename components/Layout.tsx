@@ -365,8 +365,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   // Grupos recolhíveis do menu (WhatsApp, Boards e Ajuda): sanfona com no
   // máximo UM aberto por vez, fechados por padrão; a escolha persiste.
-  const [openNavGroup, setOpenNavGroup] = usePersistedState<'whatsapp' | 'boards' | 'ajuda' | null>('nav_open_group', null);
-  const toggleNavGroup = (g: 'whatsapp' | 'boards' | 'ajuda') => setOpenNavGroup(cur => (cur === g ? null : g));
+  const [openNavGroup, setOpenNavGroup] = usePersistedState<'activities' | 'whatsapp' | 'reports' | 'boards' | 'ajuda' | null>('nav_open_group', null);
+  const toggleNavGroup = (g: 'activities' | 'whatsapp' | 'reports' | 'boards' | 'ajuda') => setOpenNavGroup(cur => (cur === g ? null : g));
 
   // Pipeline ativa (mesma chave persistida do useBoardsController; o
   // usePersistedState sincroniza as instâncias na mesma aba via evento).
@@ -508,22 +508,36 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         </div>
 
         <nav className="flex-1 p-4 space-y-2 flex flex-col overflow-y-auto" aria-label="Navegação do sistema">
-          {/* Inbox e Atividades lado a lado no topo (sem grupo, a pedido do Samuel) */}
-          {[
-            { to: '/inbox', icon: Inbox, label: 'Inbox', prefetch: 'inbox' as const },
-            { to: '/activities', icon: CheckSquare, label: 'Atividades', prefetch: 'activities' as const },
-          ].map(item => (
-            <NavItem
-              key={item.to}
-              to={item.to}
-              icon={item.icon}
-              label={item.label}
-              prefetch={item.prefetch}
-              clickedPath={clickedPath}
-              onItemClick={setClickedPath}
-              collapsed={sidebarCollapsed}
-            />
-          ))}
+          {/* GRUPO Atividades (recolhível): Inbox + Minhas Atividades */}
+          {(() => {
+            const activitiesChildren = [
+              { to: '/inbox', icon: Inbox, label: 'Inbox', prefetch: 'inbox' as RouteName },
+              { to: '/activities', icon: CheckSquare, label: 'Minhas Atividades', prefetch: 'activities' as RouteName },
+            ];
+            return (
+              <NavGroup
+                label="Atividades"
+                icon={CheckSquare}
+                open={openNavGroup === 'activities'}
+                onToggle={() => toggleNavGroup('activities')}
+                childActive={activitiesChildren.some(c => pathname === c.to)}
+                collapsed={sidebarCollapsed}
+              >
+                {activitiesChildren.map(c => (
+                  <NavItem
+                    key={c.to}
+                    to={c.to}
+                    icon={c.icon}
+                    label={c.label}
+                    prefetch={c.prefetch}
+                    clickedPath={clickedPath}
+                    onItemClick={setClickedPath}
+                    collapsed={sidebarCollapsed}
+                  />
+                ))}
+              </NavGroup>
+            );
+          })()}
 
           {/* GRUPO WhatsApp (recolhível): Chats + Modelos + Conexão */}
           {(() => {
@@ -562,15 +576,36 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             );
           })()}
 
-          <NavItem
-            to="/dashboard"
-            icon={LayoutDashboard}
-            label="Visão Geral"
-            prefetch="dashboard"
-            clickedPath={clickedPath}
-            onItemClick={setClickedPath}
-            collapsed={sidebarCollapsed}
-          />
+          {/* GRUPO Relatórios (recolhível): Visão Geral + Relatórios de Performance */}
+          {(() => {
+            const reportsChildren = [
+              { to: '/dashboard', icon: LayoutDashboard, label: 'Visão Geral', prefetch: 'dashboard' as RouteName },
+              { to: '/reports', icon: BarChart3, label: 'Relatórios de Performance', prefetch: 'reports' as RouteName },
+            ];
+            return (
+              <NavGroup
+                label="Relatórios"
+                icon={BarChart3}
+                open={openNavGroup === 'reports'}
+                onToggle={() => toggleNavGroup('reports')}
+                childActive={reportsChildren.some(c => pathname === c.to)}
+                collapsed={sidebarCollapsed}
+              >
+                {reportsChildren.map(c => (
+                  <NavItem
+                    key={c.to}
+                    to={c.to}
+                    icon={c.icon}
+                    label={c.label}
+                    prefetch={c.prefetch}
+                    clickedPath={clickedPath}
+                    onItemClick={setClickedPath}
+                    collapsed={sidebarCollapsed}
+                  />
+                ))}
+              </NavGroup>
+            );
+          })()}
 
           {/* GRUPO Boards (recolhível): as pipelines da organização, pra
               entrar direto num funil específico */}
@@ -617,7 +652,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
           {[
             { to: '/contacts', icon: Users, label: 'Contatos', prefetch: 'contacts' as const },
-            { to: '/reports', icon: BarChart3, label: 'Relatórios', prefetch: 'reports' as const },
             { to: '/settings', icon: Settings, label: 'Configurações', prefetch: 'settings' as const },
           ].map((item) => (
             <NavItem
