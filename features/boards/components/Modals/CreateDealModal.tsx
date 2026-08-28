@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
+import { useOrgMembers } from '@/lib/query/hooks';
 import { Deal, Board, Contact, Company, Product } from '@/types';
 import { X, Building2, User, Mail, Phone, AlertCircle, Loader2, Package, Shuffle } from 'lucide-react';
 import { DebugFillButton } from '@/components/debug/DebugFillButton';
@@ -28,6 +29,12 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
 }) => {
     const { addDeal, activeBoard: contextActiveBoard, activeBoardId: contextActiveBoardId, products } = useCRM();
     const { profile, user } = useAuth();
+    // Super admin só é membro da org com vínculo explícito: visitando uma org
+    // de cliente, o lead que ele cria nasce SEM responsável (em vez de ficar
+    // com alguém que não pertence à org).
+    const { data: orgMembers = [] } = useOrgMembers();
+    const meAsMember = orgMembers.find(m => m.id === user?.id);
+    const meIsMember = meAsMember ? meAsMember.member : true;
 
     // Prioriza props sobre contexto (permite que o Kanban passe o board correto)
     const activeBoard = propActiveBoard || contextActiveBoard;
@@ -175,7 +182,8 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
                 contactId: selectedContact?.id || '',
                 boardId: activeBoardId || activeBoard.id,
                 // '' vira NULL no insert -> o gatilho do banco atribui pelo rodízio
-                ownerId: rodizioAtivo ? '' : (user?.id || ''),
+                // (ou fica sem responsável, quando quem cria não é membro da org)
+                ownerId: rodizioAtivo || !meIsMember ? '' : (user?.id || ''),
                 value: dealValue,
                 items: dealItems,
                 status: firstStage.id,
@@ -186,7 +194,9 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
                 tags: ['Novo'],
                 owner: rodizioAtivo
                     ? { name: 'Distribuição automática', avatar: '' }
-                    : { name: ownerName, avatar: profile?.avatar_url || '' },
+                    : !meIsMember
+                        ? { name: 'Sem responsável', avatar: '' }
+                        : { name: ownerName, avatar: profile?.avatar_url || '' },
                 customFields: {},
                 isWon: false,
                 isLost: false,

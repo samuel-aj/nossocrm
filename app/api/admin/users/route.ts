@@ -84,8 +84,15 @@ export async function GET() {
         | { email?: string; role?: string; created_at?: string; first_name?: string | null; last_name?: string | null; nickname?: string | null }
         | undefined;
       if (!p) return null; // vínculo sem perfil (anomalia): não exibe linha em branco
+      // Super admin (equipe da agência) só é membro com VÍNCULO explícito:
+      // estar navegando nesta org (org ativa aqui) não o coloca na lista.
+      const isSuperAdmin = p.role === UserRole.SUPER_ADMIN;
+      const linked = membershipRoleByUser.has(uid);
+      if (isSuperAdmin && !linked) return null;
       // Papel exibido = papel NESTA org (vínculo); fallback pro papel do perfil.
-      const role = membershipRoleByUser.get(uid) ?? p.role ?? UserRole.VENDEDOR;
+      // Vínculo antigo gravado como super_admin conta como admin da org.
+      const rawRole = membershipRoleByUser.get(uid) ?? p.role ?? UserRole.VENDEDOR;
+      const role = rawRole === UserRole.SUPER_ADMIN ? UserRole.ADMIN : rawRole;
       return {
         id: uid,
         email: p.email ?? null,
@@ -96,6 +103,7 @@ export async function GET() {
         last_name: p.last_name ?? null,
         nickname: p.nickname ?? null,
         status: 'active' as const,
+        is_super_admin: isSuperAdmin,
       };
     })
     .filter((u): u is NonNullable<typeof u> => u !== null)

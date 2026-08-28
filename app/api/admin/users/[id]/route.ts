@@ -70,8 +70,24 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
   // Autorização: o alvo precisa PERTENCER a esta org — org ativa aqui OU vínculo
   // aqui (membro multi-org com a org ativa em outro lugar). Sem isso, 403.
   const hasMembershipHere = (memberships || []).some((m) => m.organization_id === scoped.organization_id);
-  const isMemberHere = target.organization_id === scoped.organization_id || hasMembershipHere;
+  // Super admin (equipe da agência): só é membro com VÍNCULO explícito; a org
+  // ativa dele não conta. E remover daqui NUNCA apaga a conta dele: some só o
+  // vínculo (ele continua super admin de tudo).
+  const targetIsSuperAdmin = target.role === UserRole.SUPER_ADMIN;
+  const isMemberHere = targetIsSuperAdmin
+    ? hasMembershipHere
+    : target.organization_id === scoped.organization_id || hasMembershipHere;
   if (!isMemberHere) return json({ error: 'Forbidden' }, 403);
+
+  if (targetIsSuperAdmin) {
+    const { error: membershipError } = await admin
+      .from('user_organizations')
+      .delete()
+      .eq('user_id', id)
+      .eq('organization_id', scoped.organization_id);
+    if (membershipError) return json({ error: `Falha ao remover: ${membershipError.message}` }, 500);
+    return json({ ok: true, removedMembershipOnly: true });
+  }
 
   const otherOrgs = (memberships || []).filter((m) => m.organization_id !== scoped.organization_id);
 

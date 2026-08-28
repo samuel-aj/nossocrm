@@ -452,6 +452,15 @@ export const UsersPage: React.FC = () => {
                                                 você
                                             </span>
                                         )}
+                                        {/* Super admin da agência adicionado de propósito a esta org */}
+                                        {(user as { is_super_admin?: boolean }).is_super_admin && (
+                                            <span
+                                                className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
+                                                title="Super admin da agência, adicionado como membro desta organização"
+                                            >
+                                                super admin
+                                            </span>
+                                        )}
                                         {user.status === 'pending' && (
                                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
                                                 <Clock className="h-3 w-3" />

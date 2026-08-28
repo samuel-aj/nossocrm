@@ -128,7 +128,7 @@ export async function POST(req: Request) {
     if (existingAuthUser) {
       const { data: existingProfile } = await admin
         .from('profiles')
-        .select('id, organization_id')
+        .select('id, organization_id, role')
         .eq('id', existingAuthUser.id)
         .maybeSingle();
       // Só é reaproveitável (descartar + reenviar) quando: (a) é órfã (login
@@ -152,7 +152,11 @@ export async function POST(req: Request) {
           .eq('user_id', existingAuthUser.id)
           .eq('organization_id', scoped.organization_id)
           .maybeSingle();
-        if (existingLink || existingProfile.organization_id === scoped.organization_id) {
+        // Super admin (equipe da agência): a org ativa dele não conta como
+        // membresia (ele só está navegando aqui); só o vínculo conta. É assim
+        // que ele passa a ser membro de verdade (vendedor/admin) desta org.
+        const isSuperAdmin = existingProfile.role === UserRole.SUPER_ADMIN;
+        if (existingLink || (!isSuperAdmin && existingProfile.organization_id === scoped.organization_id)) {
           return json({ error: 'Este email já é membro desta organização.' }, 400);
         }
         const { error: linkError } = await admin.from('user_organizations').upsert(

@@ -1,8 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { X } from 'lucide-react';
 import { Activity, Deal } from '@/types';
-import { useAuth } from '@/context/AuthContext';
-import { supabase } from '@/lib/supabase/client';
+import { useOrgMembers } from '@/lib/query/hooks';
 import { UserRole } from '@/types/constants';
 
 interface ActivityFormData {
@@ -62,20 +61,13 @@ export const ActivityFormModal: React.FC<ActivityFormModalProps> = ({
   editingActivity,
   deals,
 }) => {
-  const { profile } = useAuth();
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-
-  useEffect(() => {
-    if (!isOpen || !profile?.organization_id) return;
-    const sb = supabase;
-    if (!sb) return;
-    sb.from('profiles')
-      .select('id, display_name, role')
-      .eq('organization_id', profile.organization_id)
-      .then(({ data }) => {
-        if (data) setTeamMembers(data as TeamMember[]);
-      });
-  }, [isOpen, profile?.organization_id]);
+  // Membros da org (org ativa aqui ou vínculo explícito), mesma lista do
+  // responsável do lead: super admin da agência só aparece quando foi
+  // adicionado de propósito à org.
+  const { data: orgMembers = [] } = useOrgMembers();
+  const teamMembers: TeamMember[] = orgMembers
+    .filter(m => m.member)
+    .map(m => ({ id: m.id, display_name: m.name, role: m.role }));
 
   React.useEffect(() => {
     if (!isOpen) return;

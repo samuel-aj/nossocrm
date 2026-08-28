@@ -1,6 +1,6 @@
 'use client';
 
-import { useOrgUsers } from '@/lib/query/hooks';
+import { useOrgMembers } from '@/lib/query/hooks';
 
 function getInitials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -11,14 +11,15 @@ function getInitials(name: string): string {
 
 /**
  * Mostra o avatar (iniciais) do RESPONSÁVEL de um lead a partir do `ownerId`,
- * resolvendo o nome via `useOrgUsers`. Renderiza `null` quando não há
- * responsável OU quando a lista de usuários não está disponível (ex.: usuário
- * não-admin) — sem quebrar o layout do card.
+ * resolvendo o nome via `useOrgMembers` (disponível a qualquer usuário e
+ * inclui super admins da agência, mesmo sem vínculo, só para o NOME). Renderiza
+ * `null` quando não há responsável ou o nome não foi encontrado — sem quebrar
+ * o layout do card.
  */
 export function OwnerBadge({ ownerId, showName = false }: { ownerId?: string | null; showName?: boolean }) {
-  const { byId } = useOrgUsers();
+  const { data: members = [] } = useOrgMembers();
   if (!ownerId) return null;
-  const owner = byId.get(ownerId);
+  const owner = members.find(m => m.id === ownerId);
   if (!owner) return null;
 
   return (

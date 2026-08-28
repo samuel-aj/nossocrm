@@ -1,14 +1,20 @@
 /**
- * Membros da organização (id + nome + role) — acessível a QUALQUER usuário
- * logado, ao contrário de useOrgUsers (admin). Inclui super_admins (agência).
- * Usado pra exibir/atribuir o responsável de um lead.
+ * Membros da organização (id + nome + role + member) — acessível a QUALQUER
+ * usuário logado, ao contrário de useOrgUsers (admin). Inclui super_admins
+ * (agência) para resolver NOMES; só quem tem `member: true` (org ativa aqui
+ * ou vínculo explícito) pode ser escolhido como responsável.
+ * Usado pra exibir/atribuir o responsável de um lead ou atividade.
  */
 import { useQuery } from '@tanstack/react-query';
 
 export interface OrgMember {
   id: string;
   name: string;
+  /** Papel NESTA org (vínculo) ou 'super_admin' quando não é membro */
   role: string;
+  /** true = pertence à org (pode ser responsável); false = só nome (super admin visitando) */
+  member: boolean;
+  isSuperAdmin?: boolean;
 }
 
 export const useOrgMembers = () => {

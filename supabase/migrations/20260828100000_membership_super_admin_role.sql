@@ -1,0 +1,11 @@
+-- Membresia explícita de super admins nas organizações.
+--
+-- Regra (aplicada no app): super admin (equipe da agência) NÃO é membro de uma
+-- org só por estar navegando nela (profiles.organization_id); ele só vira
+-- membro quando alguém o adiciona de propósito (linha em user_organizations,
+-- papel vendedor/admin). Aí pode ser responsável por leads e atividades e
+-- entrar no rodízio; remover da org só apaga o vínculo, nunca a conta.
+--
+-- Vínculos antigos gravados com role 'super_admin' (criação de org pelo super
+-- admin) viram 'admin' da org: o papel global continua em profiles.role.
+UPDATE public.user_organizations SET role = 'admin' WHERE role = 'super_admin';

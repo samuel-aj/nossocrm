@@ -67,8 +67,12 @@ async function listMembers(admin: ReturnType<typeof createStaticAdminClient>, or
   ]);
   if (profilesRes.error) throw new Error(profilesRes.error.message);
 
+  const linkedIds = new Set((membershipsRes.data || []).map(m => m.user_id).filter(Boolean) as string[]);
   const byId = new Map<string, { id: string; name: string; role: string }>();
   for (const p of profilesRes.data || []) {
+    // Super admin (equipe da agência) só entra no rodízio com VÍNCULO explícito
+    // nesta org; estar navegando aqui (org ativa) não o torna membro.
+    if (p.role === UserRole.SUPER_ADMIN && !linkedIds.has(p.id)) continue;
     byId.set(p.id, { id: p.id, name: displayName(p), role: (p.role as string) || UserRole.VENDEDOR });
   }
 
@@ -82,10 +86,11 @@ async function listMembers(admin: ReturnType<typeof createStaticAdminClient>, or
       byId.set(p.id, { id: p.id, name: displayName(p), role: (p.role as string) || UserRole.VENDEDOR });
     }
   }
-  // Papel NESTA org vem do vínculo quando existe
+  // Papel NESTA org vem do vínculo quando existe (vínculo antigo gravado como
+  // super_admin conta como admin da org)
   for (const m of membershipsRes.data || []) {
     const found = byId.get(m.user_id);
-    if (found && m.role) found.role = m.role as string;
+    if (found && m.role) found.role = m.role === UserRole.SUPER_ADMIN ? UserRole.ADMIN : (m.role as string);
   }
 
   return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));

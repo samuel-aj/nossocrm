@@ -1131,7 +1131,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                                 super_admins (agência) ficam de fora das opções,
                                 mas o nome deles ainda resolve no chip se já forem donos */}
                             {orgMembers
-                              .filter(u => u.role !== 'super_admin')
+                              .filter(u => u.member)
                               .map(u => (
                                 <button
                                   key={u.id}
