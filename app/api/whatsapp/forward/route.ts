@@ -22,7 +22,7 @@ import {
   type WaConnectionRow,
   type WaConversationRow,
 } from '@/lib/whatsapp/service';
-import { getProvider, isMetaCloudConnection, type SendResult } from '@/lib/whatsapp';
+import { getProvider, type SendResult } from '@/lib/whatsapp';
 import { outboundKindFromMediaType } from '@/lib/whatsapp/quote';
 import { normalizePhoneE164 } from '@/lib/phone';
 
@@ -135,9 +135,7 @@ export async function POST(req: Request) {
         ? { conn: null, error: groupsEnabled ? 'Grupo não encontrado' : 'Grupos do WhatsApp estão desligados' }
         : !gConn || gConn.status !== 'connected'
           ? { conn: null, error: 'O número deste grupo está desconectado' }
-          : isMetaCloudConnection(gConn)
-            ? { conn: null, error: 'Grupos só funcionam em números conectados por QR Code' }
-            : { conn: gConn };
+          : { conn: gConn };
     } else {
       picked = pickConnection(target.connectionId);
     }
@@ -177,9 +175,10 @@ export async function POST(req: Request) {
             mimeType: m.media_mime ?? undefined,
             fileName: fileNameFromPath(mediaPath as string),
             caption: text || undefined,
+            isGroup: !!group,
           });
         } else if (text) {
-          result = await provider.sendText({ to: targetPhone, text });
+          result = await provider.sendText({ to: targetPhone, text, isGroup: !!group });
         } else {
           failed += 1;
           firstError = firstError ?? 'Mensagem sem conteúdo para encaminhar (mídia indisponível)';

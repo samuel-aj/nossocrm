@@ -44,6 +44,8 @@ export interface SendTextInput {
   text: string;
   /** Responder: mensagem citada (omitido = mensagem comum) */
   quoted?: QuotedRef;
+  /** GRUPO: `to` é o id do grupo (Meta: recipient_type "group"; Evolution: JID "...@g.us") */
+  isGroup?: boolean;
 }
 
 export type OutboundMediaKind = 'image' | 'video' | 'document' | 'audio' | 'sticker';
@@ -60,10 +62,14 @@ export interface SendMediaInput {
   caption?: string;
   /** Responder: mensagem citada (omitido = mensagem comum) */
   quoted?: QuotedRef;
+  /** GRUPO: `to` é o id do grupo */
+  isGroup?: boolean;
 }
 
 export interface SendTemplateInput {
   to: string;
+  /** GRUPO: `to` é o id do grupo (só Meta) */
+  isGroup?: boolean;
   /** Nome do modelo aprovado na Meta */
   name: string;
   /** Código do idioma do modelo (ex.: pt_BR) */

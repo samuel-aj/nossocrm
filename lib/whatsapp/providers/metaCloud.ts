@@ -93,12 +93,24 @@ export class MetaCloudProvider implements WhatsAppProvider {
     return quoted?.providerMessageId ? { context: { message_id: quoted.providerMessageId } } : {};
   }
 
-  async sendText(input: SendTextInput): Promise<SendResult> {
+  /**
+   * Destinatário: telefone (só dígitos) ou, em GRUPO da Groups API, o id do
+   * grupo com recipient_type "group". null = destino inválido.
+   */
+  private recipient(input: { to: string; isGroup?: boolean }): { recipient_type: 'individual' | 'group'; to: string } | null {
+    if (input.isGroup) {
+      const id = (input.to || '').trim();
+      return id ? { recipient_type: 'group', to: id } : null;
+    }
     const to = toWhatsAppPhone(input.to);
-    if (!to) return { ok: false, error: 'Telefone inválido' };
+    return to ? { recipient_type: 'individual', to } : null;
+  }
+
+  async sendText(input: SendTextInput): Promise<SendResult> {
+    const dest = this.recipient(input);
+    if (!dest) return { ok: false, error: input.isGroup ? 'Grupo inválido' : 'Telefone inválido' };
     return this.send({
-      recipient_type: 'individual',
-      to,
+      ...dest,
       type: 'text',
       text: { preview_url: true, body: input.text },
       ...this.context(input.quoted),
@@ -107,11 +119,10 @@ export class MetaCloudProvider implements WhatsAppProvider {
 
   /** Modelo aprovado: único jeito de iniciar conversa fora da janela de 24h. */
   async sendTemplate(input: SendTemplateInput): Promise<SendResult> {
-    const to = toWhatsAppPhone(input.to);
-    if (!to) return { ok: false, error: 'Telefone inválido' };
+    const dest = this.recipient(input);
+    if (!dest) return { ok: false, error: input.isGroup ? 'Grupo inválido' : 'Telefone inválido' };
     return this.send({
-      recipient_type: 'individual',
-      to,
+      ...dest,
       type: 'template',
       template: {
         name: input.name,
@@ -180,8 +191,8 @@ export class MetaCloudProvider implements WhatsAppProvider {
   }
 
   async sendMedia(input: SendMediaInput): Promise<SendResult> {
-    const to = toWhatsAppPhone(input.to);
-    if (!to) return { ok: false, error: 'Telefone inválido' };
+    const dest = this.recipient(input);
+    if (!dest) return { ok: false, error: input.isGroup ? 'Grupo inválido' : 'Telefone inválido' };
 
     // Upload primeiro (validação imediata) e envio por media ID — sem depender
     // da Meta baixar link. Só imagem/vídeo/documento aceitam legenda.
@@ -215,7 +226,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
         media = { type: 'image', image: { id, ...(input.caption ? { caption: input.caption } : {}) } };
         break;
     }
-    return this.send({ recipient_type: 'individual', to, ...media, ...this.context(input.quoted) });
+    return this.send({ ...dest, ...media, ...this.context(input.quoted) });
   }
 
   // Cloud API é por credenciais, sem sessão/QR.

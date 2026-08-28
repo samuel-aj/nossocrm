@@ -36,10 +36,11 @@ export interface WaConversationRow {
   wa_phone: string;
   wa_name: string | null;
   last_message_at: string | null;
-  /** Grupo do WhatsApp: wa_phone guarda o JID ("...@g.us") */
+  /** Grupo do WhatsApp: wa_phone guarda o JID ("...@g.us") ou o id do grupo da Meta */
   is_group?: boolean;
   group_jid?: string | null;
   participants_count?: number | null;
+  group_invite_link?: string | null;
 }
 
 /** Chave da org "Grupos do WhatsApp no chat" (organization_settings.wa_groups_enabled). Banco sem a coluna = desligado. */
@@ -62,7 +63,9 @@ export async function getGroupConversation(
   if (!conversationId) return null;
   const { data } = await admin
     .from('wa_conversations')
-    .select('id, organization_id, connection_id, contact_id, wa_phone, wa_name, last_message_at, is_group, group_jid, participants_count')
+    .select(
+      'id, organization_id, connection_id, contact_id, wa_phone, wa_name, last_message_at, is_group, group_jid, participants_count, group_invite_link'
+    )
     .eq('id', conversationId)
     .eq('organization_id', orgId)
     .eq('is_group', true)

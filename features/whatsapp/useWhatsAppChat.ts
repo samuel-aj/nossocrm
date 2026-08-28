@@ -70,6 +70,7 @@ export interface WaChatData {
     is_group?: boolean;
     group_jid?: string | null;
     participants_count?: number | null;
+    group_invite_link?: string | null;
     connection_id?: string | null;
   } | null;
   /** Agente de IA nesta conversa (null = nenhum agente atuou ainda). Externo (API) ou nativo (beta). */

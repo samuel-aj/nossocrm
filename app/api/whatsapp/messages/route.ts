@@ -137,6 +137,7 @@ export async function GET(req: Request) {
         is_group: true,
         group_jid: group.group_jid ?? group.wa_phone,
         participants_count: group.participants_count ?? null,
+        group_invite_link: group.group_invite_link ?? null,
         last_inbound_at: null,
       },
       ai: null,

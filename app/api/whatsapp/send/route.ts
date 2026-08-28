@@ -22,7 +22,7 @@ import {
   type WaConnectionRow,
   type WaConversationRow,
 } from '@/lib/whatsapp/service';
-import { getProvider, isMetaCloudConnection, type OutboundMediaKind, type QuotedRef } from '@/lib/whatsapp';
+import { getProvider, type OutboundMediaKind, type QuotedRef } from '@/lib/whatsapp';
 import { clampQuote, quotedPreviewText, snapshotFromMessage } from '@/lib/whatsapp/quote';
 import { normalizePhoneE164 } from '@/lib/phone';
 
@@ -84,9 +84,7 @@ export async function POST(req: Request) {
     if (!conn || conn.status !== 'connected') {
       return json({ error: 'O número deste grupo está desconectado. Reconecte na aba Conexão.' }, 409);
     }
-    if (isMetaCloudConnection(conn)) {
-      return json({ error: 'Grupos só funcionam em números conectados por QR Code.' }, 409);
-    }
+    // Meta: grupo da Groups API (recipient_type "group"); Evolution: JID do grupo
     to = group.group_jid || group.wa_phone;
     conv = group;
   } else {
@@ -162,11 +160,13 @@ export async function POST(req: Request) {
       fileName: media.fileName,
       caption: text || undefined,
       quoted,
+      isGroup: !!group,
     });
   } else if (templateName && provider.sendTemplate) {
     const params = (body.template?.params ?? []).map(p => String(p ?? '').trim() || '-');
     result = await provider.sendTemplate({
       to,
+      isGroup: !!group,
       name: templateName,
       language: (body.template?.language || 'pt_BR').trim(),
       components: params.length
@@ -175,7 +175,7 @@ export async function POST(req: Request) {
     });
   } else {
     // provedor sem envio de modelo (QR/Evolution): vai o texto já preenchido
-    result = await provider.sendText({ to, text: text || `[Modelo: ${templateName}]`, quoted });
+    result = await provider.sendText({ to, text: text || `[Modelo: ${templateName}]`, quoted, isGroup: !!group });
   }
 
   const message = await recordOutboundMessage(auth.admin, {

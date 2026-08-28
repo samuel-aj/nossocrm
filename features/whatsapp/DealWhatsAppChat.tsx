@@ -37,6 +37,7 @@ import {
   Square,
   Reply,
   Forward,
+  Link2,
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { quotedPreviewText, type QuotedSnapshot } from '@/lib/whatsapp/quote';
@@ -1033,6 +1034,8 @@ export function DealWhatsAppChat({
   const [forwardMsg, setForwardMsg] = useState<WaChatMessage | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null); // bolha citada em destaque após "pular para"
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // GRUPO: buscando/copiando o link de convite
+  const [inviteBusy, setInviteBusy] = useState(false);
   useEffect(() => {
     replyToRef.current = replyTo;
   }, [replyTo]);
@@ -1548,6 +1551,33 @@ export function DealWhatsAppChat({
     window.setTimeout(() => setFlashId(curr => (curr === id ? null : curr)), 1800);
   };
 
+  /** GRUPO: copia o link de convite (busca no provedor se ainda não estiver guardado). */
+  const copyInviteLink = async () => {
+    if (!group || inviteBusy) return;
+    setInviteBusy(true);
+    try {
+      let link = data?.conversation?.group_invite_link ?? null;
+      if (!link) {
+        const res = await fetch('/api/whatsapp/groups/invite', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ conversationId: group.conversationId }),
+        });
+        const j = (await res.json().catch(() => ({}))) as { inviteLink?: string; error?: string };
+        if (!res.ok || !j.inviteLink) throw new Error(j.error || 'Não deu para obter o link de convite');
+        link = j.inviteLink;
+        void qc.invalidateQueries({ queryKey: ['waChat'] });
+      }
+      await navigator.clipboard.writeText(link);
+      showToast('Link de convite do grupo copiado', 'success');
+    } catch (e) {
+      showToast((e as Error).message || 'Não deu para copiar o link de convite', 'error');
+    } finally {
+      setInviteBusy(false);
+    }
+  };
+
   /** Menu da bolha: Responder arma a citação no composer; Encaminhar abre o modal. */
   const onBubbleAction = (action: BubbleAction, m: WaChatMessage) => {
     if (action === 'reply') {
@@ -1888,6 +1918,18 @@ export function DealWhatsAppChat({
         <div className="ml-auto flex items-center gap-2">
           {data && !data.connected && (
             <span className="text-[11px] text-amber-600 dark:text-amber-400">WhatsApp desconectado</span>
+          )}
+          {isGroup && (
+            <button
+              type="button"
+              onClick={() => void copyInviteLink()}
+              disabled={inviteBusy}
+              className="h-8 px-2 inline-flex items-center gap-1.5 rounded-lg text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors disabled:opacity-60"
+              title="Copiar o link de convite do grupo"
+            >
+              {inviteBusy ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
+              Convite
+            </button>
           )}
           <button
             type="button"

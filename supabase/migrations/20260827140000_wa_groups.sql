@@ -17,7 +17,9 @@ ALTER TABLE public.organization_settings
 ALTER TABLE public.wa_conversations
   ADD COLUMN IF NOT EXISTS is_group BOOLEAN NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS group_jid TEXT,
-  ADD COLUMN IF NOT EXISTS participants_count INTEGER;
+  ADD COLUMN IF NOT EXISTS participants_count INTEGER,
+  -- link de convite (grupos da API oficial da Meta são só por convite; QR também tem)
+  ADD COLUMN IF NOT EXISTS group_invite_link TEXT;
 
 ALTER TABLE public.wa_messages
   ADD COLUMN IF NOT EXISTS sender_name TEXT;

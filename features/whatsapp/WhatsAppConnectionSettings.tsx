@@ -1313,26 +1313,22 @@ export function WhatsAppConnectionSettings() {
                 </button>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mt-1">
-                Desligado por padrão: mensagens de grupo são ignoradas. Ligado, os grupos aparecem na página
-                Chats (filtro "Grupos") para ler e responder por aqui, com o nome de quem escreveu em cada
-                mensagem. Só grupos com mensagem nova depois de ligar aparecem; o histórico anterior não é
-                importado.
+                Desligado por padrão. Ligado, os grupos aparecem em Chats para ler e responder por aqui, com o
+                nome de quem escreveu.
               </p>
-              <div className="mt-2 space-y-1.5 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                <p>
+              <ul className="mt-1.5 space-y-1 text-xs text-slate-500 dark:text-slate-400 leading-relaxed list-disc pl-4">
+                <li>
                   <span className="font-semibold text-slate-700 dark:text-slate-200">Número via QR Code:</span>{' '}
-                  funciona com os grupos comuns do WhatsApp. Qualquer grupo em que o número esteja (ou em que o
-                  cliente coloque o número) chega aqui, sem limite de tamanho.
-                </p>
-                <p>
-                  <span className="font-semibold text-slate-700 dark:text-slate-200">Número da WhatsApp API oficial (Meta):</span>{' '}
-                  não entra em grupos comuns. A Meta só oferece um formato próprio, a Groups API: o grupo é criado
-                  pela empresa, as pessoas entram por link de convite, no máximo 8 participantes, exige Conta
-                  Comercial Oficial (selo) e cobra por mensagem. Esse formato ainda não está disponível no CRM.
-                </p>
-              </div>
+                  grupos comuns do WhatsApp, inclusive os que o cliente te coloca.
+                </li>
+                <li>
+                  <span className="font-semibold text-slate-700 dark:text-slate-200">Número da API oficial (Meta):</span>{' '}
+                  só grupos criados pelo CRM (botão Novo grupo em Chats), por link de convite, até 8 pessoas;
+                  exige Conta Comercial Oficial e cobra por mensagem.
+                </li>
+              </ul>
               <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5">
-                Agentes de IA e robôs nunca respondem em grupo.
+                Agentes de IA e robôs não respondem em grupo.
               </p>
             </div>
           </div>

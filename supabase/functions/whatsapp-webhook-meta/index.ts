@@ -78,9 +78,19 @@ async function curarConexao(supabase: any, supabaseUrl: string, conn: ConnRow): 
     const camposAtuais: string[] = Array.isArray(sub?.fields)
       ? sub.fields.map((f: { name?: string }) => String(f?.name ?? ""))
       : [];
+    // GRUPOS (Groups API): com a chave da org ligada, a assinatura também
+    // precisa dos campos group_* (senão o CRM não fica sabendo de convites,
+    // entradas e saídas). Sem a chave, os conjuntos antigos bastam.
+    const { data: cfgGrupos } = await supabase
+      .from("organization_settings")
+      .select("wa_groups_enabled")
+      .eq("organization_id", conn.organization_id)
+      .maybeSingle();
+    const querGrupos = !!cfgGrupos?.wa_groups_enabled;
     const jaNosso = typeof sub?.callback_url === "string" && sub.callback_url.startsWith(nossoPrefixo) &&
       camposAtuais.includes("messages") &&
-      (camposAtuais.includes("smb_message_echoes") || camposAtuais.includes("message_echoes"));
+      (camposAtuais.includes("smb_message_echoes") || camposAtuais.includes("message_echoes")) &&
+      (!querGrupos || camposAtuais.includes("group_lifecycle_update"));
     console.log(
       `[wa-meta-cura] conn=${conn.id} app_callback=${String(sub?.callback_url ?? "").slice(0, 120)} campos=${camposAtuais.join(",")} ok=${jaNosso}${
         sub ? "" : ` resposta=${JSON.stringify(atual).slice(0, 200)}`
@@ -90,13 +100,19 @@ async function curarConexao(supabase: any, supabaseUrl: string, conn: ConnRow): 
     // campos): o app é compartilhado por todos os números; o roteamento por
     // número é o override da WABA, logo abaixo.
     if (!jaNosso) {
-      for (
-        const fields of [
-          "messages,message_echoes,smb_message_echoes",
-          "messages,smb_message_echoes",
-          "messages,message_echoes",
-        ]
-      ) {
+      const GRUPOS = ",group_lifecycle_update,group_participants_update,group_settings_update,group_status_update";
+      const conjuntos = [
+        ...(querGrupos
+          ? [
+            `messages,message_echoes,smb_message_echoes${GRUPOS}`,
+            `messages,smb_message_echoes${GRUPOS}`,
+          ]
+          : []),
+        "messages,message_echoes,smb_message_echoes",
+        "messages,smb_message_echoes",
+        "messages,message_echoes",
+      ];
+      for (const fields of conjuntos) {
         const r = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${appId}/subscriptions`, {
           method: "POST",
           headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -343,6 +359,27 @@ async function downloadMetaMedia(
   }
 }
 
+/** GRUPOS (Groups API): nome e tamanho do grupo (GET /{group_id}). Best-effort. */
+async function buscarGrupoMeta(
+  token: string,
+  groupId: string,
+): Promise<{ subject?: string; size?: number } | null> {
+  if (!token || !groupId) return null;
+  try {
+    const r = await fetch(
+      `https://graph.facebook.com/${GRAPH_VERSION}/${encodeURIComponent(groupId)}?fields=subject,total_participant_count`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (!r.ok) return null;
+    const j = await r.json();
+    const subject = typeof j?.subject === "string" && j.subject.trim() ? j.subject.trim() : undefined;
+    const total = j?.total_participant_count !== undefined ? Number(j.total_participant_count) : NaN;
+    return { subject, size: Number.isFinite(total) ? total : undefined };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Processa os eventos do payload PARA UMA conexão (org): mensagens, ecos,
  * statuses e mídia, cada um no chat da org dona da conexão.
@@ -352,12 +389,52 @@ async function processarEventos(supabase: any, conn: ConnRow, payload: any): Pro
   const orgId = conn.organization_id as string;
   const token = String(conn.instance_token ?? "");
 
+  // GRUPOS: só entram quando a organização ligou "Grupos do WhatsApp no chat"
+  // (organization_settings.wa_groups_enabled). Banco sem a coluna = desligado.
+  const { data: orgCfg } = await supabase
+    .from("organization_settings")
+    .select("wa_groups_enabled")
+    .eq("organization_id", orgId)
+    .maybeSingle();
+  const gruposLigados = !!orgCfg?.wa_groups_enabled;
+
   const entries = Array.isArray(payload?.entry) ? payload.entry : [];
   for (const entry of entries) {
     const changes = Array.isArray(entry?.changes) ? entry.changes : [];
     for (const change of changes) {
       const value = change?.value ?? {};
       const metadata = value?.metadata ?? {};
+
+      // Eventos de GRUPO (group_lifecycle_update, group_participants_update,
+      // group_settings_update, group_status_update): atualiza nome, link de
+      // convite e tamanho da conversa do grupo. Formato defensivo: a Meta pode
+      // mandar uma lista `groups` ou o grupo direto em `value`.
+      if (typeof change?.field === "string" && change.field.startsWith("group_")) {
+        if (!gruposLigados) continue;
+        // deno-lint-ignore no-explicit-any
+        const grupos: any[] = Array.isArray(value?.groups) ? value.groups : (value?.id || value?.group_id) ? [value] : [];
+        for (const g of grupos) {
+          const gid = String(g?.id ?? g?.group_id ?? "");
+          if (!gid) continue;
+          const patch: Record<string, unknown> = {};
+          if (typeof g?.subject === "string" && g.subject.trim()) patch.wa_name = g.subject.trim();
+          if (typeof g?.invite_link === "string" && g.invite_link) patch.group_invite_link = g.invite_link;
+          const total = g?.total_participant_count !== undefined
+            ? Number(g.total_participant_count)
+            : Array.isArray(g?.participants)
+            ? g.participants.length
+            : NaN;
+          if (Number.isFinite(total)) patch.participants_count = total;
+          if (Object.keys(patch).length === 0) continue;
+          await supabase
+            .from("wa_conversations")
+            .update(patch)
+            .eq("organization_id", orgId)
+            .eq("connection_id", conn.id)
+            .eq("wa_phone", gid);
+        }
+        continue;
+      }
 
       // INSTRUMENTAÇÃO (diagnóstico dos ecos): registra o tipo de evento e o
       // formato, pra sabermos com certeza o que a Meta entrega a este app.
@@ -469,9 +546,16 @@ async function processarEventos(supabase: any, conn: ConnRow, payload: any): Pro
         const fromDigits = String(m.from ?? "").replace(/\D/g, "");
         const isEcho = item.isEcho || (!!digitosConexao && fromDigits === digitosConexao);
         const providerId = m.id;
+        // GRUPO (Groups API): a mensagem vem com `group_id`; a conversa é o grupo
+        // (wa_phone = id do grupo) e quem escreveu está em `from`.
+        const groupId = typeof m.group_id === "string" ? m.group_id : "";
+        if (groupId && !gruposLigados) continue;
+        const isGroup = !!groupId;
         // No eco quem interessa é o destinatário (`to`); na recebida, o remetente.
-        const phone = waIdToE164(isEcho ? m.to : m.from);
+        const phone = isGroup ? groupId : waIdToE164(isEcho ? m.to : m.from);
         if (!providerId || !phone) continue;
+        const senderPhone = isGroup && !isEcho ? waIdToE164(m.from) : null;
+        const senderName: string | null = isGroup && !isEcho ? nameByWaId[String(m.from)] || null : null;
 
         const { text, mediaType, mediaId, mediaMime, fileName, skip } = extractContent(m);
         if (skip) continue;
@@ -491,19 +575,29 @@ async function processarEventos(supabase: any, conn: ConnRow, payload: any): Pro
         // insert conflitar, relê — primeiro por conexão e, enquanto a trava
         // antiga (org+telefone) existir no banco, cai na conversa única da org
         // (comportamento antigo até a migração rodar).
-        const variants = brPhoneVariants(phone);
+        const variants = isGroup ? [phone] : brPhoneVariants(phone);
         let convId: string | null = null;
         const { data: convList } = await supabase
           .from("wa_conversations")
-          .select("id, contact_id")
+          .select("id, contact_id, wa_name")
           .eq("organization_id", orgId)
           .eq("connection_id", conn.id)
           .in("wa_phone", variants);
         const conv = (convList ?? []).find((c) => c.contact_id) ?? (convList ?? [])[0];
         if (conv) {
           convId = conv.id;
+          // Grupo ainda sem nome no CRM: tenta buscar de novo
+          if (isGroup && !conv.wa_name) {
+            const grupo = await buscarGrupoMeta(token, groupId);
+            if (grupo?.subject) {
+              await supabase
+                .from("wa_conversations")
+                .update({ wa_name: grupo.subject, ...(grupo.size !== undefined ? { participants_count: grupo.size } : {}) })
+                .eq("id", conv.id);
+            }
+          }
         }
-        if (!convId) {
+        if (!convId && !isGroup) {
           const { data: orfas } = await supabase
             .from("wa_conversations")
             .select("id, contact_id")
@@ -524,13 +618,17 @@ async function processarEventos(supabase: any, conn: ConnRow, payload: any): Pro
           }
         }
         if (!convId) {
-          const { data: contact } = await supabase
-            .from("contacts")
-            .select("id")
-            .eq("organization_id", orgId)
-            .in("phone", variants)
-            .limit(1)
-            .maybeSingle();
+          // grupo não tem contato no CRM; o nome vem da Meta (subject)
+          const contact = isGroup
+            ? null
+            : (await supabase
+                .from("contacts")
+                .select("id")
+                .eq("organization_id", orgId)
+                .in("phone", variants)
+                .limit(1)
+                .maybeSingle()).data;
+          const grupo = isGroup ? await buscarGrupoMeta(token, groupId) : null;
           const { data: created, error: convErr } = await supabase
             .from("wa_conversations")
             .insert({
@@ -538,7 +636,10 @@ async function processarEventos(supabase: any, conn: ConnRow, payload: any): Pro
               connection_id: conn.id,
               contact_id: contact?.id ?? null,
               wa_phone: phone,
-              wa_name: pushName,
+              wa_name: isGroup ? grupo?.subject ?? null : pushName,
+              ...(isGroup
+                ? { is_group: true, group_jid: groupId, participants_count: grupo?.size ?? null }
+                : {}),
             })
             .select("id")
             .single();
@@ -638,7 +739,8 @@ async function processarEventos(supabase: any, conn: ConnRow, payload: any): Pro
           media_mime: mediaMimeFinal,
           media_url: mediaPath,
           evolution_message_id: providerId,
-          from_phone: isEcho ? null : phone,
+          // grupo: from_phone é de QUEM escreveu (participante); to_phone é o id do grupo
+          from_phone: isEcho ? null : (isGroup ? senderPhone : phone),
           to_phone: isEcho ? phone : null,
           wa_timestamp: waTs,
           // webhook de saída: echo = enviada por fora (celular/Kommo)
@@ -649,11 +751,12 @@ async function processarEventos(supabase: any, conn: ConnRow, payload: any): Pro
           quoted_message_id: quotedMessageId,
           quoted: quotedSnapshot,
           forwarded,
+          sender_name: senderName,
         });
-        // Banco ainda sem as colunas de responder/encaminhar (migração pendente):
-        // grava sem elas em vez de perder a mensagem.
-        if (insErr && /column/i.test(String(insErr.message)) && /quoted|forwarded/i.test(String(insErr.message))) {
-          console.error("[wa-webhook-meta] colunas de responder/encaminhar ausentes; gravando sem elas");
+        // Banco ainda sem as colunas de responder/encaminhar/grupo (migração
+        // pendente): grava sem elas em vez de perder a mensagem.
+        if (insErr && /column/i.test(String(insErr.message)) && /quoted|forwarded|sender_name/i.test(String(insErr.message))) {
+          console.error("[wa-webhook-meta] colunas novas ausentes; gravando sem elas");
           ({ error: insErr } = await supabase.from("wa_messages").insert(baseRow));
         }
         const dup = insErr && String(insErr.message).toLowerCase().includes("duplicate");
@@ -663,7 +766,9 @@ async function processarEventos(supabase: any, conn: ConnRow, payload: any): Pro
         }
         if (dup) continue;
 
-        const preview = text ? text.slice(0, 140) : mediaType ? `[${mediaType}]` : "";
+        // grupo: prévia com quem escreveu ("Maria: oi"), como no WhatsApp
+        const previewBody = text ? text.slice(0, 140) : mediaType ? `[${mediaType}]` : "";
+        const preview = senderName && previewBody ? `${senderName}: ${previewBody}`.slice(0, 140) : previewBody;
         await supabase
           .from("wa_conversations")
           .update({ last_message_at: waTs, last_message_preview: preview })

@@ -225,7 +225,12 @@ export async function setupMetaWebhooks(input: {
     // Sem assinar, a Meta nunca avisa e a mensagem não aparece no chat.
     // Se a Meta recusar um campo de eco (varia por tipo de conta/versão),
     // tenta conjuntos menores — a assinatura nunca falha por inteiro.
+    // Grupos (Groups API): tenta primeiro com os campos group_*; app sem esse
+    // acesso cai nos conjuntos de sempre (a cura periódica reaplica se a org
+    // ligar grupos depois).
+    const GRUPOS = ',group_lifecycle_update,group_participants_update,group_settings_update,group_status_update';
     const conjuntos = [
+      `messages,message_echoes,smb_message_echoes${GRUPOS}`,
       'messages,message_echoes,smb_message_echoes',
       'messages,message_echoes',
       'messages',
