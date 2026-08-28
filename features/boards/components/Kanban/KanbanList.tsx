@@ -56,7 +56,9 @@ const formatCriadoEm = (iso: string): { label: string; full: string } | null => 
   const hoje = new Date();
   const inicioHoje = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate()).getTime();
   const inicioData = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const dias = Math.floor((inicioHoje - inicioData) / 86_400_000);
+  // Math.round (e não floor): em fuso com horário de verão o dia da virada
+  // tem 23h, e o floor comeria um dia na conta a semana inteira.
+  const dias = Math.round((inicioHoje - inicioData) / 86_400_000);
 
   if (dias === 0) return { label: 'Hoje', full };
   if (dias === 1) return { label: 'Ontem', full };
@@ -225,9 +227,13 @@ export const KanbanListRow = React.memo(function KanbanListRow({
       }}
       tabIndex={0}
       aria-label={`Abrir ${deal.title}`}
-      className="group cursor-pointer outline-none transition-colors hover:bg-primary-50/60 focus-visible:bg-primary-50/80 dark:hover:bg-white/[0.045] dark:focus-visible:bg-white/[0.06]"
+      className="group cursor-pointer transition-colors focus-visible-ring hover:bg-primary-50/60 focus-visible:bg-primary-50/80 dark:hover:bg-white/[0.045] dark:focus-visible:bg-white/[0.06]"
     >
-      <td className={`relative ${CELL} w-12`}>
+      {/* Padding próprio (px-2, não o px-4 das outras células): a coluna do
+          ícone é estreita e, com table-fixed, o padding come a largura útil
+          em vez de alargar a coluna — o ícone e o selo "Nd" de atraso
+          vazariam por cima da coluna do lado. */}
+      <td className="relative px-2 py-2.5 align-middle">
         {accentColor ? (
           <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-[3px] ${accentColor}`} />
         ) : (

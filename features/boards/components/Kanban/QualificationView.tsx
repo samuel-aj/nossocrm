@@ -342,10 +342,12 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
             className="w-full table-fixed max-md:min-w-[50rem] text-left text-sm border-collapse"
           >
             <colgroup>
-              {/* A coluna do sininho de atividade era w-24 (96px) pra um
-                  ícone de 20px, o que abria um vão enorme na esquerda.
-                  O espaço devolvido foi pro nome do negócio. */}
-              <col className="w-12" />
+              {/* A coluna do ícone de atividade era w-24 (96px), o que abria
+                  um vão enorme na esquerda. w-16 (64px) menos o px-2 da
+                  célula deixa os mesmos 48px úteis de antes (cabem o ícone
+                  de 20px e o selo "Nd" de atraso), devolvendo 32px pro nome
+                  do negócio. */}
+              <col className="w-16" />
               <col className="w-[24%]" />
               <col className="w-[15%]" />
               <col className="w-[15%]" />
