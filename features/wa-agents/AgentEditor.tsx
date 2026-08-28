@@ -48,7 +48,7 @@ import {
   type AgentStartMode,
   type AgentFollowup,
 } from '@/lib/wa-agents/types';
-import { MODEL_CATALOG, PROVIDER_LABELS } from '@/lib/wa-agents/catalog';
+import { MODEL_CATALOG, PROMPT_VARIABLE_NAMES, PROVIDER_LABELS } from '@/lib/wa-agents/catalog';
 import { DEFAULT_OUTCOMES, DEFAULT_STOP_RULES, DEFAULT_SYSTEM_PROMPT } from '@/lib/wa-agents/defaults';
 import {
   WaAgentsApiError,
@@ -65,6 +65,8 @@ import { OutcomesEditor } from './OutcomesEditor';
 import { CustomActionsEditor } from './CustomActionsEditor';
 import { WebhooksEditor } from './WebhooksEditor';
 import { PromptEditor, insertToken, mediaToken } from './PromptEditor';
+import { HighlightedScript } from './HighlightedScript';
+import type { KnownTokens } from './tokens';
 import { FollowupsEditor } from './FollowupsEditor';
 import { KnowledgePanel } from './KnowledgePanel';
 import { AgentTestDrawer } from './AgentTestDrawer';
@@ -171,9 +173,9 @@ const FIELD_TABS: Record<string, EditorTab> = {
   history_limit: 'config',
   line_delay_ms: 'config',
   human_pause_minutes: 'config',
-  max_replies: 'config',
-  only_new_conversations: 'config',
-  start_mode: 'config',
+  max_replies: 'roteiro',
+  only_new_conversations: 'gatilhos',
+  start_mode: 'gatilhos',
   followups: 'gatilhos',
   webhooks: 'config',
   outcomes: 'acoes',
@@ -916,6 +918,15 @@ export const AgentEditor: React.FC<{
   const knowledgeCount = (docsQ.data?.length ?? 0) + (mediaQ.data?.length ?? 0);
   const countBadge = (n: number) => (n > 0 ? <Badge tone="slate">{n}</Badge> : undefined);
 
+  // Variáveis, ações e mídias que existem de verdade: o roteiro e o "Quando encerrar"
+  // destacam em âmbar o que estiver escrito como token mas não existir.
+  const knownTokens: KnownTokens = {
+    vars: PROMPT_VARIABLE_NAMES,
+    actions: form.custom_actions.filter((a) => a.key).map((a) => a.key),
+    media: (mediaQ.data ?? []).map((m) => m.name),
+    mediaLoaded: mediaQ.isSuccess,
+  };
+
   const tabs: TabDef[] = [
     { id: 'roteiro', label: 'Roteiro', icon: <FileText size={16} aria-hidden="true" /> },
     {
@@ -928,7 +939,7 @@ export const AgentEditor: React.FC<{
       id: 'acoes',
       label: 'Ações',
       icon: <ListChecks size={16} aria-hidden="true" />,
-      badge: countBadge(form.custom_actions.length + form.outcomes.length),
+      badge: countBadge(form.custom_actions.length),
     },
     {
       id: 'gatilhos',
@@ -1021,6 +1032,7 @@ export const AgentEditor: React.FC<{
             onInsertToken={insertPromptToken}
             actions={form.custom_actions.filter((a) => a.key).map((a) => ({ key: a.key, label: a.label }))}
             media={(mediaQ.data ?? []).map((m) => ({ name: m.name, kind: m.kind }))}
+            mediaLoaded={mediaQ.isSuccess}
             highlight={promptHighlight}
           />
         </Panel>
@@ -1035,15 +1047,31 @@ export const AgentEditor: React.FC<{
             htmlFor="agent-stop-rules"
             help="Ex.: encerrar quando tiver nome, cidade e resumo do caso; ou quando a pessoa pedir para falar com alguém da equipe. Ao encerrar, o agente escolhe um dos Resultados da aba Ações."
           >
-            <textarea
+            <HighlightedScript
               id="agent-stop-rules"
-              className={TEXTAREA_CLASS}
+              value={form.stop_rules}
+              onChange={(stop_rules) => patch({ stop_rules })}
+              known={knownTokens}
               rows={7}
               maxLength={4000}
-              value={form.stop_rules}
-              onChange={(e) => patch({ stop_rules: e.target.value })}
-              aria-label="Quando encerrar"
+              ariaLabel="Quando encerrar"
               placeholder="Descreva quando o agente deve encerrar o atendimento e o que dizer na mensagem final."
+            />
+          </Field>
+          <Field
+            label="Limite de respostas por atendimento"
+            htmlFor="agent-max-replies"
+            help="Trava de segurança: 0 = sem limite. Ao atingir o limite, o agente manda a mensagem final e encerra sozinho, mesmo que as regras acima não tenham acontecido."
+          >
+            <input
+              id="agent-max-replies"
+              type="number"
+              min={0}
+              max={500}
+              className={`${INPUT_CLASS} sm:max-w-[200px]`}
+              value={form.max_replies}
+              onChange={(e) => patch({ max_replies: readNumber(e.target.value) })}
+              onBlur={() => patch({ max_replies: clampField('max_replies', form.max_replies) })}
             />
           </Field>
         </Panel>
@@ -1092,10 +1120,29 @@ export const AgentEditor: React.FC<{
         </Panel>
 
         <Panel
-          title="Agentes auxiliares"
-          description="O agente pode consultar estes agentes durante a conversa (ferramenta consultar_agente)."
+          title="Recursos do agente"
+          description="O que ele pode usar durante a conversa, além do roteiro e da base de conhecimento."
           icon={<Users size={16} />}
         >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Calculadora</p>
+              <p className={HELP_CLASS}>
+                Para contas (parcelas, prazos, percentuais) sem o modelo chutar números (ferramenta calcular).
+              </p>
+            </div>
+            <Toggle
+              checked={form.tools.calculator}
+              onChange={(calculator) => patch({ tools: { ...form.tools, calculator } })}
+              label="Calculadora"
+            />
+          </div>
+
+          <div className="pt-3 border-t border-slate-200 dark:border-white/10 space-y-3">
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Agentes auxiliares</p>
+            <p className={HELP_CLASS}>
+              O agente pode consultar estes agentes durante a conversa (ferramenta consultar_agente).
+            </p>
           {agentsQ.isLoading ? (
             <p className={HELP_CLASS}>Carregando agentes...</p>
           ) : helperCandidates.length === 0 ? (
@@ -1120,25 +1167,10 @@ export const AgentEditor: React.FC<{
               )}
             />
           )}
-          <p className={HELP_CLASS}>
-            O auxiliar não fala com o lead: responde só a este agente, com o próprio roteiro e a própria base de
-            conhecimento. Agentes desligados não podem ser auxiliares.
-          </p>
-        </Panel>
-
-        <Panel title="Ferramentas" description="Recursos extras que o agente pode usar na conversa." icon={<Calculator size={16} />}>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Calculadora</p>
-              <p className={HELP_CLASS}>
-                Para contas (parcelas, prazos, percentuais) sem o modelo chutar números (ferramenta calcular).
-              </p>
-            </div>
-            <Toggle
-              checked={form.tools.calculator}
-              onChange={(calculator) => patch({ tools: { ...form.tools, calculator } })}
-              label="Calculadora"
-            />
+            <p className={HELP_CLASS}>
+              O auxiliar não fala com o lead: responde só a este agente, com o próprio roteiro e a própria base de
+              conhecimento. Agentes desligados não podem ser auxiliares.
+            </p>
           </div>
         </Panel>
       </TabPanel>
@@ -1174,6 +1206,36 @@ export const AgentEditor: React.FC<{
 
         <Panel title="Gatilhos" description={`Quando o agente entra em ação: ${triggerSummary}.`} icon={<Zap size={16} />}>
           <TriggersFields value={form.triggers} onChange={(triggers) => patch({ triggers })} options={options} />
+          <div className="pt-3 border-t border-slate-200 dark:border-white/10 space-y-3">
+            <Field
+              label="Ao ser ativado (pelo chat ou pelo pipeline)"
+              htmlFor="agent-start-mode"
+              help="Vale para o botão Automações do chat e para o início pelo pipeline. Por palavra-chave o agente sempre responde à mensagem que o ativou."
+            >
+              <select
+                id="agent-start-mode"
+                className={INPUT_CLASS}
+                value={form.start_mode}
+                onChange={(e) => patch({ start_mode: e.target.value === 'wait_reply' ? 'wait_reply' : 'speak_first' })}
+              >
+                <option value="speak_first">Já envia a primeira mensagem</option>
+                <option value="wait_reply">Espera a próxima mensagem do contato e só então responde</option>
+              </select>
+            </Field>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Só conversas novas</p>
+                <p className={HELP_CLASS}>
+                  Ligado, o agente não entra em conversas que já tiveram mensagens enviadas pela equipe.
+                </p>
+              </div>
+              <Toggle
+                checked={form.only_new_conversations}
+                onChange={(only_new_conversations) => patch({ only_new_conversations })}
+                label="Atender só conversas novas"
+              />
+            </div>
+          </div>
         </Panel>
 
         <Panel
@@ -1312,8 +1374,8 @@ export const AgentEditor: React.FC<{
         </Panel>
 
         <Panel
-          title="Comportamento"
-          description="Tempos de espera, histórico, pausa quando um atendente responde e limite de respostas."
+          title="Ritmo e memória"
+          description="Tempo de espera para agrupar mensagens, ritmo de envio, quanto do histórico ele lê e a pausa quando um atendente responde."
           icon={<SlidersHorizontal size={16} />}
         >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1382,50 +1444,6 @@ export const AgentEditor: React.FC<{
                 onBlur={() => patch({ human_pause_minutes: clampField('human_pause_minutes', form.human_pause_minutes) })}
               />
             </Field>
-            <Field
-              label="Limite de respostas por atendimento"
-              htmlFor="agent-max-replies"
-              help="0 = sem limite. Ao atingir o limite, o agente manda a mensagem final e encerra sozinho: garantia de que ele sempre para."
-            >
-              <input
-                id="agent-max-replies"
-                type="number"
-                min={0}
-                max={500}
-                className={INPUT_CLASS}
-                value={form.max_replies}
-                onChange={(e) => patch({ max_replies: readNumber(e.target.value) })}
-                onBlur={() => patch({ max_replies: clampField('max_replies', form.max_replies) })}
-              />
-            </Field>
-          </div>
-          <Field
-            label="Ao ser ativado (pelo chat ou pelo pipeline)"
-            htmlFor="agent-start-mode"
-            help="Vale para o botão Automações do chat e para o início pelo pipeline. Por palavra-chave o agente sempre responde à mensagem que o ativou."
-          >
-            <select
-              id="agent-start-mode"
-              className={INPUT_CLASS}
-              value={form.start_mode}
-              onChange={(e) => patch({ start_mode: e.target.value === 'wait_reply' ? 'wait_reply' : 'speak_first' })}
-            >
-              <option value="speak_first">Já envia a primeira mensagem</option>
-              <option value="wait_reply">Espera a próxima mensagem do contato e só então responde</option>
-            </select>
-          </Field>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Só conversas novas</p>
-              <p className={HELP_CLASS}>
-                Ligado, o agente não entra em conversas que já tiveram mensagens enviadas pela equipe.
-              </p>
-            </div>
-            <Toggle
-              checked={form.only_new_conversations}
-              onChange={(only_new_conversations) => patch({ only_new_conversations })}
-              label="Atender só conversas novas"
-            />
           </div>
         </Panel>
 

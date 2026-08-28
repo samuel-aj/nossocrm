@@ -33,6 +33,7 @@ export type WaAgentOptions = {
   boards: Array<{ id: string; name: string; stages: Array<{ id: string; label: string; order: number }> }>;
   owners: Array<{ id: string; name: string }>;
   tags: string[];
+  products: Array<{ id: string; name: string }>;
 };
 
 export type WaRunsFilters = {
@@ -213,6 +214,7 @@ export function useWaAgentOptions() {
         boards: json.boards ?? [],
         owners: json.owners ?? [],
         tags: json.tags ?? [],
+        products: json.products ?? [],
       };
       return options;
     },

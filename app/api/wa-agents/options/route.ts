@@ -5,7 +5,8 @@
  *   connections: [{ id, label, provider, status }],
  *   boards:      [{ id, name, stages: [{ id, label, order }] }],
  *   owners:      [{ id, name }],
- *   tags:        string[]
+ *   tags:        string[],
+ *   products:    [{ id, name }]
  * }
  */
 import { json } from '@/lib/whatsapp/api';
@@ -40,7 +41,7 @@ export async function GET() {
   const admin = auth.admin;
   const orgId = auth.user.organizationId;
 
-  const [connections, boardsRes, stagesRes, tagsRes, profilesRes, membersRes] = await Promise.all([
+  const [connections, boardsRes, stagesRes, tagsRes, profilesRes, membersRes, productsRes] = await Promise.all([
     getConnectionsByOrg(admin, orgId),
     admin
       .from('boards')
@@ -56,8 +57,9 @@ export async function GET() {
     admin.from('tags').select('name').eq('organization_id', orgId).order('name', { ascending: true }),
     admin.from('profiles').select(PROFILE_COLUMNS).eq('organization_id', orgId).limit(300),
     admin.from('user_organizations').select('user_id').eq('organization_id', orgId).limit(300),
+    admin.from('products').select('id, name, active').eq('organization_id', orgId).order('name', { ascending: true }).limit(300),
   ]);
-  for (const res of [boardsRes, stagesRes, tagsRes, profilesRes, membersRes]) {
+  for (const res of [boardsRes, stagesRes, tagsRes, profilesRes, membersRes, productsRes]) {
     if (res.error) return json({ error: res.error.message }, 500);
   }
 
@@ -97,6 +99,11 @@ export async function GET() {
     new Set((tagsRes.data ?? []).map(t => String(t.name ?? '').trim()).filter(name => name !== ''))
   );
 
+  // Produtos do catálogo (inativos ficam de fora do seletor de ações)
+  const products = (productsRes.data ?? [])
+    .filter(p => p.active !== false)
+    .map(p => ({ id: String(p.id), name: String(p.name ?? '').trim() || 'Produto' }));
+
   return json({
     connections: connections.map(c => ({
       id: c.id,
@@ -107,5 +114,6 @@ export async function GET() {
     boards,
     owners,
     tags,
+    products,
   });
 }

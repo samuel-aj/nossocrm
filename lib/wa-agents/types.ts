@@ -63,6 +63,8 @@ export const EndActionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('add_tag'), tag: z.string().min(1).max(60) }),
   z.object({ type: z.literal('mark_lost'), loss_reason: z.string().max(200).optional() }),
   z.object({ type: z.literal('assign_owner'), owner_id: z.string().uuid() }),
+  /** Produto do catálogo da org lançado como item do negócio (não duplica) */
+  z.object({ type: z.literal('set_product'), product_id: z.string().uuid() }),
   z.object({
     type: z.literal('create_task'),
     title: z.string().min(1).max(200),
@@ -667,7 +669,9 @@ export type ConversationAiAction =
   /** cancela o robô em andamento nesta conversa */
   | 'cancel_bot'
   /** limpa a memória do agente nesta conversa (ele esquece o que veio antes e para); o chat continua visível */
-  | 'reset_memory';
+  | 'reset_memory'
+  /** grava/acrescenta contexto adicional (ai_state.contexto_extra) sem mexer no estado do agente */
+  | 'set_context';
 
 /** Robô em andamento numa conversa (execução 'running' ou 'waiting_reply') */
 export type ConversationBotInfo = {

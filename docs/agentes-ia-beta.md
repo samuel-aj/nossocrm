@@ -42,7 +42,7 @@ O agente lê o histórico da própria conversa (`wa_messages`), inclusive o que 
 O agente precisa ter um momento claro em que para. Isso mora em dois campos da configuração, sem depender de o roteiro lembrar de dizer:
 
 - **Quando encerrar** (`stop_rules`, aba Roteiro, logo abaixo do roteiro): as regras de encerramento em linguagem natural (ex.: "encerrar quando tiver nome, cidade e resumo do caso" ou "quando a pessoa pedir para falar com alguém da equipe") e o que dizer na mensagem final. O motor injeta o texto no prompt como bloco `# QUANDO ENCERRAR` logo depois do roteiro (com as mesmas variáveis e marcadores `[[acao:...]]`/`[[midia:...]]`) e acrescenta às instruções do sistema que essas regras são **obrigatórias**: assim que uma delas se cumprir, o agente escreve a mensagem final e chama `encerrar_atendimento` na mesma resposta, escolhendo um dos resultados da aba Ações. Agentes novos já vêm com um texto padrão (`DEFAULT_STOP_RULES`); agentes criados antes continuam com a seção de encerramento dentro do próprio roteiro (o campo fica vazio e nada muda para eles até alguém preencher).
-- **Limite de respostas por atendimento** (`max_replies`, aba Configurações; 0 = sem limite): teto de respostas do agente numa mesma conversa, contado em `ai_state.respostas`. Na resposta que atinge o teto, o motor avisa o modelo que aquela é a última mensagem (`LIMITE DE RESPOSTAS ATINGIDO`) e pede a mensagem final com `encerrar_atendimento`, com o resultado mais adequado ao que ele já sabe; sem resultados configurados (ou se o modelo não chamar a ferramenta), o CRM encerra o atendimento sozinho depois dessa resposta. É a garantia de que o agente sempre para.
+- **Limite de respostas por atendimento** (`max_replies`, aba Roteiro, dentro de "Quando encerrar"; 0 = sem limite): teto de respostas do agente numa mesma conversa, contado em `ai_state.respostas`. Na resposta que atinge o teto, o motor avisa o modelo que aquela é a última mensagem (`LIMITE DE RESPOSTAS ATINGIDO`) e pede a mensagem final com `encerrar_atendimento`, com o resultado mais adequado ao que ele já sabe; sem resultados configurados (ou se o modelo não chamar a ferramenta), o CRM encerra o atendimento sozinho depois dessa resposta. É a garantia de que o agente sempre para.
 
 ### Esteira (vários agentes)
 
@@ -51,6 +51,8 @@ O agente encerra chamando a ferramenta `encerrar_atendimento(resultado, resumo)`
 - **Passar para outro agente**: o próximo assume a mesma conversa com um resumo de passagem e responde na hora. A memória é contínua: ele enxerga o mesmo histórico da conversa (limite de mensagens dele) e os dados salvos pelo agente anterior (`salvar_dados`); só o contador de respostas zera.
 - **Pedir aprovação humana**: a conversa fica "aguardando aprovação"; o chat mostra o resumo com **Aprovar** (o próximo agente assume) e **Recusar** (o agente para e o humano assume).
 - **Encerrar**: o agente para e a conversa fica com o atendente.
+
+As demais ações do resultado (e das ações durante a conversa) mexem no negócio: nota, mover etapa, rótulo, marcar perdido, atribuir responsável, **cadastrar produto** (`set_product`: lança um produto do catálogo como item do negócio, sem duplicar se já estiver lá), criar tarefa e chamar webhook.
 
 ### Follow-ups (lead sem responder)
 
@@ -152,6 +154,13 @@ Mensagens enviadas pelo agente têm `source = 'agent'`; pelo robô, `source = 'b
 Sessão (membros da org; escrita só admin): `/api/wa-agents/beta`, `/api/wa-agents/agents[/{id}[/test]]`, `/api/wa-agents/runs`, `/api/wa-agents/bots[/{id}[/start]]`, `/api/wa-agents/bot-runs`, `/api/wa-agents/options`, `/api/wa-agents/conversation` (qualquer membro: pausar/retomar/parar/iniciar/aprovar/recusar/iniciar robô/cancelar robô).
 
 Internas (header `X-Internal-Secret`): `POST /api/wa-agents/ingest`, `POST /api/wa-agents/tick`.
+
+Públicas (header `X-Api-Key`, para n8n/Make — só com a beta ligada na org, senão 409 `AGENTS_OFF`):
+
+- `GET /api/public/v1/whatsapp/agents` e `GET /api/public/v1/whatsapp/bots`: descobrem o `agent_id`/`bot_id`.
+- `POST /api/public/v1/whatsapp/conversations/agent` `{ phone, action: start|pause|resume|stop|context|reset_memory, agent_id?, context?, append?, connection_id? }`: mesma coisa que os botões do chat fazem com o agente nativo. `context` grava `ai_state.contexto_extra` sem reiniciar o atendimento (`append: true` acrescenta ao que já existe).
+- `POST /api/public/v1/whatsapp/conversations/bot` `{ phone, action: start|stop, bot_id?, context?, connection_id? }`: inicia/para um robô na conversa (iniciar para o agente, como no menu Automações).
+- `POST /api/public/v1/whatsapp/conversations/ai` continua sendo do agente EXTERNO (n8n como cérebro).
 
 ## Fora desta versão (próximas)
 

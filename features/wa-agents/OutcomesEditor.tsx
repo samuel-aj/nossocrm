@@ -25,6 +25,7 @@ import {
   Tag,
   CircleX,
   UserCheck,
+  Package,
   CalendarPlus,
   Webhook,
   type LucideIcon,
@@ -44,6 +45,7 @@ export const ACTION_LABELS: Record<ActionType, string> = {
   add_tag: 'Adicionar rótulo',
   mark_lost: 'Marcar como perdido',
   assign_owner: 'Atribuir responsável',
+  set_product: 'Cadastrar produto no negócio',
   create_task: 'Criar tarefa',
   webhook: 'Chamar webhook',
 };
@@ -57,6 +59,7 @@ export const ACTION_ICONS: Record<ActionType, LucideIcon> = {
   add_tag: Tag,
   mark_lost: CircleX,
   assign_owner: UserCheck,
+  set_product: Package,
   create_task: CalendarPlus,
   webhook: Webhook,
 };
@@ -125,6 +128,8 @@ export function defaultAction(
       return { type };
     case 'assign_owner':
       return { type, owner_id: options?.owners[0]?.id ?? '' };
+    case 'set_product':
+      return { type, product_id: options?.products[0]?.id ?? '' };
     case 'create_task':
       return { type, title: '', days: 1 };
     case 'webhook':
@@ -172,6 +177,10 @@ export function describeAction(action: EndAction, agents: WaAgentListItem[], opt
     case 'assign_owner': {
       const owner = options?.owners.find((o) => o.id === action.owner_id);
       return `atribuir a ${owner?.name ?? 'responsável não escolhido'}`;
+    }
+    case 'set_product': {
+      const product = options?.products.find((p) => p.id === action.product_id);
+      return `cadastrar o produto ${product?.name ?? 'não escolhido'}`;
     }
     case 'create_task': {
       const days = action.days ?? 0;
@@ -425,6 +434,23 @@ function ActionFields({
           {(options?.owners ?? []).map((o) => (
             <option key={o.id} value={o.id}>
               {o.name}
+            </option>
+          ))}
+        </select>
+      );
+    case 'set_product':
+      return (
+        <select
+          id={`${idPrefix}-product`}
+          className={INPUT_CLASS}
+          value={action.product_id}
+          onChange={(e) => onChange({ ...action, product_id: e.target.value })}
+          aria-label="Produto"
+        >
+          <option value="">Selecione o produto</option>
+          {(options?.products ?? []).map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
             </option>
           ))}
         </select>

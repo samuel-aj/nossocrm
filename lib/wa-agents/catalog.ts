@@ -54,3 +54,11 @@ export const PROMPT_VARIABLES: Array<{ key: PromptVariableKey; description: stri
   { key: '{{negocio.titulo}}', description: 'Título do negócio ligado à conversa (vazio se não houver)' },
   { key: '{{negocio.etapa}}', description: 'Etapa atual do negócio (vazio se não houver)' },
 ];
+
+/** Nome da variável sem as chaves duplas: '{{nome_lead}}' -> 'nome_lead'. */
+export function promptVariableName(key: string): string {
+  return key.replace(/[{}]/g, '').trim();
+}
+
+/** Só os nomes das variáveis (o editor usa para saber o que é variável de verdade no texto). */
+export const PROMPT_VARIABLE_NAMES: string[] = PROMPT_VARIABLES.map(v => promptVariableName(v.key));

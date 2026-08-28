@@ -541,6 +541,206 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
           },
         },
       },
+      '/whatsapp/agents': {
+        get: {
+          tags: ['WhatsApp'],
+          summary: 'Agentes de IA do CRM',
+          description: 'Lista os agentes de IA nativos da organização. Use o `id` em POST /whatsapp/conversations/agent.',
+          security: [{ ApiKeyAuth: [] }],
+          responses: {
+            200: {
+              description: 'OK',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      data: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            id: { type: 'string' },
+                            name: { type: 'string' },
+                            persona_name: { type: 'string', nullable: true },
+                            enabled: { type: 'boolean' },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            401: { $ref: '#/components/responses/Unauthorized' },
+          },
+        },
+      },
+      '/whatsapp/bots': {
+        get: {
+          tags: ['WhatsApp'],
+          summary: 'Robôs de atendimento',
+          description: 'Lista os robôs da organização. Use o `id` em POST /whatsapp/conversations/bot.',
+          security: [{ ApiKeyAuth: [] }],
+          responses: {
+            200: {
+              description: 'OK',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      data: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            id: { type: 'string' },
+                            name: { type: 'string' },
+                            enabled: { type: 'boolean' },
+                            connection_id: { type: 'string', nullable: true },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            401: { $ref: '#/components/responses/Unauthorized' },
+          },
+        },
+      },
+      '/whatsapp/conversations/agent': {
+        post: {
+          tags: ['WhatsApp'],
+          summary: 'Ligar, desligar ou dar contexto ao agente de IA do CRM numa conversa',
+          description:
+            'Faz por integração o que os botões do chat fazem com o agente NATIVO do CRM: `start` liga o agente na conversa (e ele já fala primeiro, quando configurado assim), `pause` pausa, `resume` retoma, `stop` para de vez, `context` acrescenta contexto que o agente lê (sem reiniciar o atendimento) e `reset_memory` limpa a memória. Para o agente EXTERNO (n8n como cérebro) use /whatsapp/conversations/ai. A conversa é localizada pelo telefone (com as variantes do nono dígito) e criada se não existir. 409 AGENTS_OFF quando os Agentes de IA não estão ligados na organização.',
+          security: [{ ApiKeyAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    phone: { type: 'string', description: 'Telefone do contato (E.164 ou só dígitos)' },
+                    action: { type: 'string', enum: ['start', 'pause', 'resume', 'stop', 'context', 'reset_memory'] },
+                    agent_id: { type: 'string', description: 'Agente a iniciar (GET /whatsapp/agents). Obrigatório em start.' },
+                    context: { type: 'string', description: 'Contexto da equipe que o agente lê (start e context), até 2000 caracteres' },
+                    append: { type: 'boolean', description: 'Em context: acrescenta ao contexto atual em vez de substituir' },
+                    connection_id: { type: 'string', description: 'Qual número (GET /whatsapp/connections). Omitido = padrão da org.' },
+                  },
+                  required: ['phone', 'action'],
+                },
+                examples: {
+                  iniciar: {
+                    summary: 'Iniciar o agente com contexto',
+                    value: {
+                      phone: '+5569999999999',
+                      action: 'start',
+                      agent_id: '00000000-0000-0000-0000-000000000000',
+                      context: 'Lead veio da campanha de revisional; já falou com o time comercial.',
+                    },
+                  },
+                  contexto: {
+                    summary: 'Acrescentar contexto sem reiniciar',
+                    value: { phone: '+5569999999999', action: 'context', context: 'Cliente pediu retorno depois das 18h.', append: true },
+                  },
+                  parar: { summary: 'Parar o agente', value: { phone: '+5569999999999', action: 'stop' } },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: 'OK',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      ok: { type: 'boolean' },
+                      conversation_id: { type: 'string' },
+                      phone: { type: 'string' },
+                      action: { type: 'string' },
+                      ai: { type: 'object', nullable: true, description: 'Estado do agente na conversa' },
+                      bot: { type: 'object', nullable: true, description: 'Robô em andamento na conversa' },
+                    },
+                    required: ['ok', 'conversation_id'],
+                  },
+                },
+              },
+            },
+            400: { description: 'Corpo inválido', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+            401: { $ref: '#/components/responses/Unauthorized' },
+            404: { description: 'Número ou agente não encontrado', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+            409: { description: 'Agentes desligados na org (AGENTS_OFF) ou ação inválida para o estado atual', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
+        },
+      },
+      '/whatsapp/conversations/bot': {
+        post: {
+          tags: ['WhatsApp'],
+          summary: 'Iniciar ou parar um robô de atendimento numa conversa',
+          description:
+            'Mesmo efeito do menu Automações do chat: ao iniciar, o agente de IA daquela conversa é parado (robô e agente não falam juntos); ao parar, só o robô é cancelado. 409 AGENTS_OFF quando os Agentes de IA não estão ligados na organização.',
+          security: [{ ApiKeyAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    phone: { type: 'string', description: 'Telefone do contato (E.164 ou só dígitos)' },
+                    action: { type: 'string', enum: ['start', 'stop'] },
+                    bot_id: { type: 'string', description: 'Robô a iniciar (GET /whatsapp/bots). Obrigatório em start.' },
+                    context: { type: 'string', description: 'Contexto da equipe (fica disponível para o robô e para o agente)' },
+                    connection_id: { type: 'string', description: 'Qual número (GET /whatsapp/connections). Omitido = padrão da org.' },
+                  },
+                  required: ['phone', 'action'],
+                },
+                examples: {
+                  iniciar: {
+                    summary: 'Iniciar o robô de boas-vindas',
+                    value: { phone: '+5569999999999', action: 'start', bot_id: '00000000-0000-0000-0000-000000000000' },
+                  },
+                  parar: { summary: 'Parar o robô', value: { phone: '+5569999999999', action: 'stop' } },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: 'OK',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      ok: { type: 'boolean' },
+                      conversation_id: { type: 'string' },
+                      phone: { type: 'string' },
+                      action: { type: 'string' },
+                      ai: { type: 'object', nullable: true },
+                      bot: { type: 'object', nullable: true },
+                    },
+                    required: ['ok', 'conversation_id'],
+                  },
+                },
+              },
+            },
+            400: { description: 'Corpo inválido', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+            401: { $ref: '#/components/responses/Unauthorized' },
+            404: { description: 'Número ou robô não encontrado', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+            409: { description: 'Agentes desligados na org (AGENTS_OFF) ou nenhum robô em andamento', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
+        },
+      },
       '/custom-fields': {
         get: {
           tags: ['Catálogo'],

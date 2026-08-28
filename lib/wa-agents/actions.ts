@@ -128,6 +128,36 @@ async function runAction(
       if (error) throw new Error(error.message);
       return 'negócio marcado como perdido';
     }
+    case 'set_product': {
+      if (!dealId) return 'sem negócio: produto ignorado';
+      const { data: product } = await admin
+        .from('products')
+        .select('id, name, price')
+        .eq('organization_id', orgId)
+        .eq('id', action.product_id)
+        .maybeSingle();
+      const prod = product as { id: string; name: string; price: number | null } | null;
+      if (!prod) throw new Error('produto não encontrado nesta organização');
+      // Idempotente: o mesmo produto não entra duas vezes no negócio
+      const { data: existing } = await admin
+        .from('deal_items')
+        .select('id')
+        .eq('organization_id', orgId)
+        .eq('deal_id', dealId)
+        .eq('product_id', prod.id)
+        .limit(1);
+      if ((existing ?? []).length > 0) return `produto "${prod.name}" já estava no negócio`;
+      const { error } = await admin.from('deal_items').insert({
+        organization_id: orgId,
+        deal_id: dealId,
+        product_id: prod.id,
+        name: prod.name,
+        quantity: 1,
+        price: prod.price ?? 0,
+      });
+      if (error) throw new Error(error.message);
+      return `produto "${prod.name}" lançado no negócio`;
+    }
     case 'assign_owner': {
       if (!(await ownerBelongsToOrg(admin, orgId, action.owner_id))) {
         throw new Error('responsável não pertence à organização');

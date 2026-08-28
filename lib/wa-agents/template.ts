@@ -3,7 +3,10 @@
  * corpo dos webhooks).
  */
 
-const VAR_RE = /\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g;
+/** Forma de uma variável no texto: `{{a.b.c}}`. Fonte única (a UI destaca com o mesmo padrão). */
+export const VAR_PATTERN = '\\{\\{\\s*([a-zA-Z0-9_.-]+)\\s*\\}\\}';
+
+const VAR_RE = new RegExp(VAR_PATTERN, 'g');
 
 /** Resolve um caminho "a.b.c" dentro de um objeto; undefined se não existir. */
 export function getPath(vars: Record<string, unknown>, path: string): unknown {

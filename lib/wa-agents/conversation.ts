@@ -44,6 +44,8 @@ const STATUSES: ConversationAiStatus[] = ['active', 'paused', 'stopped', 'awaiti
 const ACTIVE_BOT_RUN_STATUSES = ['running', 'waiting_reply'] as const;
 /** Estados em que iniciar um robô precisa parar o agente da conversa */
 const AGENT_LIVE_STATUSES: ConversationAiStatus[] = ['active', 'paused', 'awaiting_approval'];
+/** Teto do contexto adicional guardado: o mesmo que buildSystemPrompt injeta no prompt */
+const CONTEXT_MAX_CHARS = 2000;
 
 /** Lê `ai_approval` (jsonb) com tolerância a lixo. */
 export function parseApproval(raw: unknown): ConversationApproval | null {
@@ -163,8 +165,10 @@ export async function applyConversationAction(
     agentId?: string;
     /** start_bot: robô (wa_bots) a iniciar nesta conversa */
     botId?: string;
-    /** start / start_bot: contexto adicional escrito pela equipe (opcional) */
+    /** start / start_bot / set_context: contexto adicional escrito pela equipe (opcional) */
     context?: string;
+    /** set_context: acrescenta ao contexto que já existe em vez de substituir */
+    appendContext?: boolean;
     userId?: string | null;
   }
 ): Promise<ApplyConversationActionResult> {
@@ -325,6 +329,34 @@ export async function applyConversationAction(
         const cancelled = await cancelActiveBotRuns(admin, organizationId, conversationId);
         if (cancelled === 0) return fail(409, 'Nenhum robô em andamento nesta conversa');
         const ai = await getConversationAiInfo(admin, conv);
+        const bot = await getConversationBotInfo(admin, { organizationId, conversationId });
+        return { ok: true, ai, bot };
+      }
+      case 'set_context': {
+        // Só guarda o contexto da equipe: estado, agente e memória ficam como estão
+        const texto = (input.context ?? '').trim();
+        if (!texto) return fail(400, 'Informe o contexto');
+        if (!conv.ai_status && !conv.ai_agent_id) {
+          return fail(409, 'Nenhum agente nesta conversa. Inicie um agente com o contexto');
+        }
+        // O motor lê e regrava o ai_state INTEIRO enquanto segura a trava da conversa:
+        // gravar por baixo dele seria perdido em silêncio. Com o agente respondendo, recusa.
+        const travadoAte = Date.parse(conv.ai_lock_until ?? '') || 0;
+        if (travadoAte > Date.now()) {
+          return fail(409, 'O agente está respondendo agora; tente de novo em alguns segundos');
+        }
+        const state: ConversationAiState = { ...((conv.ai_state ?? {}) as ConversationAiState) };
+        const anterior = (state.contexto_extra ?? '').trim();
+        const juntos = input.appendContext && anterior ? `${anterior}\n${texto}` : texto;
+        // buildSystemPrompt corta o contexto em 2000 caracteres pelo começo: guardamos o fim
+        state.contexto_extra = juntos.length > CONTEXT_MAX_CHARS ? juntos.slice(-CONTEXT_MAX_CHARS) : juntos;
+        const { error: ctxErr } = await admin
+          .from('wa_conversations')
+          .update({ ai_state: state })
+          .eq('id', conversationId)
+          .eq('organization_id', organizationId);
+        if (ctxErr) return fail(500, ctxErr.message);
+        const ai = await getConversationAiInfo(admin, { ...conv, ai_state: state } as WaConversationFull);
         const bot = await getConversationBotInfo(admin, { organizationId, conversationId });
         return { ok: true, ai, bot };
       }
