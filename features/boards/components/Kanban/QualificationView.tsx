@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { DealView, CustomFieldDefinition, Board } from '@/types';
 import {
   computeQualificationView,
@@ -8,11 +8,18 @@ import {
 import { KanbanListRow, NO_ACTIVITY_STATUS } from './KanbanList';
 import { computeActivityStatusMap } from '@/features/boards/utils/dealActivityStatus';
 import { useActivities } from '@/lib/query/hooks/useActivitiesQuery';
+import { useOrgMembers } from '@/lib/query/hooks';
 
 type QuickAddType = 'CALL' | 'MEETING' | 'EMAIL';
 
 /** Abas da lista: Todos = lista plana clássica; as outras duas agrupadas. */
 type ListTab = 'todos' | QualificationTab;
+
+/** Coluna pela qual a lista pode ser ordenada. Campos fixos usam uma chave
+ *  literal; campos personalizados usam o prefixo `custom:` + a key do campo
+ *  (dinâmico, por isso o tipo é string em vez de union fechada). */
+type SortColumn = string;
+type SortDirection = 'asc' | 'desc';
 
 interface QualificationViewProps {
   board: Board;
@@ -27,6 +34,41 @@ interface QualificationViewProps {
   /** Keyboard-accessible handler to move a deal to a new stage */
   onMoveDealToStage?: (dealId: string, newStageId: string) => void;
 }
+
+/** Cabeçalho de coluna clicável pra ordenar a lista; seta indica a coluna e
+ *  direção ativas (igual ao padrão já usado em Contatos). */
+const SortableHeader: React.FC<{
+  label: string;
+  column: SortColumn;
+  currentSort: SortColumn | null;
+  sortDirection: SortDirection;
+  onSort: (column: SortColumn) => void;
+  className?: string;
+  align?: 'left' | 'right';
+}> = ({ label, column, currentSort, sortDirection, onSort, className, align = 'left' }) => {
+  const isActive = currentSort === column;
+  return (
+    <th className={`px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider ${className ?? ''}`}>
+      <button
+        type="button"
+        onClick={() => onSort(column)}
+        className={`inline-flex items-center gap-1.5 hover:text-slate-700 dark:hover:text-slate-200 transition-colors group focus-visible-ring rounded ${
+          align === 'right' ? 'ml-auto' : ''
+        }`}
+        aria-label={`Ordenar por ${label}`}
+      >
+        {label}
+        <span className={`transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-50'}`}>
+          {isActive ? (
+            sortDirection === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />
+          ) : (
+            <ArrowUpDown size={12} />
+          )}
+        </span>
+      </button>
+    </th>
+  );
+};
 
 /**
  * Visualização em lista do pipeline, com três abas:
@@ -51,6 +93,33 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
   const [collapsedStageIds, setCollapsedStageIds] = useState<ReadonlySet<string>>(
     () => new Set<string>()
   );
+  // Ordenação da lista (reorganizar por coluna): null = ordem natural (a que
+  // já vinha em filteredDeals/nos grupos), até o usuário clicar num cabeçalho.
+  const [sortColumn, setSortColumn] = useState<SortColumn | null>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+
+  // Dropdown de trocar estágio: estado erguido pra cá (igual ao menu de
+  // atividade) pra garantir só UM aberto por vez — abrir o de uma linha
+  // fecha automaticamente o de outra, mesmo quando aberto via teclado
+  // (Enter/Espaço disparam click sem mousedown, então o fechamento por
+  // "clique fora" de cada linha sozinha não pegaria esse caso).
+  const [openStageMenuId, setOpenStageMenuId] = useState<string | null>(null);
+  const handleToggleStageMenu = useCallback((dealId: string) => {
+    setOpenStageMenuId((prev) => (prev === dealId ? null : dealId));
+  }, []);
+  const handleCloseStageMenu = useCallback(() => setOpenStageMenuId(null), []);
+
+  const handleSort = useCallback(
+    (column: SortColumn) => {
+      if (sortColumn === column) {
+        setSortDirection((prevDir) => (prevDir === 'asc' ? 'desc' : 'asc'));
+      } else {
+        setSortColumn(column);
+        setSortDirection('asc');
+      }
+    },
+    [sortColumn]
+  );
 
   const viewData = useMemo(
     () => computeQualificationView(filteredDeals, board),
@@ -58,7 +127,8 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
   );
   const groups = activeTab === 'todos' ? [] : viewData[activeTab];
 
-  // Aba Todos: label da etapa por deal, como na lista clássica.
+  // Aba Todos: label da etapa por deal, como na lista clássica. Também
+  // usado pra ordenar a coluna Estágio por nome da etapa.
   const stageLabelById = useMemo(() => {
     const map = new Map<string, string>();
     for (const s of board.stages || []) {
@@ -66,6 +136,68 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
     }
     return map;
   }, [board.stages]);
+
+  // Nomes p/ ordenar a coluna Responsável (o deal só guarda o ownerId).
+  const { data: orgMembers = [] } = useOrgMembers();
+  const ownerNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of orgMembers) map.set(m.id, m.name);
+    return map;
+  }, [orgMembers]);
+
+  const compareDeals = useCallback(
+    (a: DealView, b: DealView): number => {
+      if (!sortColumn) return 0;
+      const sign = sortDirection === 'asc' ? 1 : -1;
+
+      if (sortColumn.startsWith('custom:')) {
+        const key = sortColumn.slice('custom:'.length);
+        const av = String(a.customFields?.[key] ?? '');
+        const bv = String(b.customFields?.[key] ?? '');
+        return sign * av.localeCompare(bv, 'pt-BR');
+      }
+
+      switch (sortColumn) {
+        case 'title':
+          return sign * a.title.localeCompare(b.title, 'pt-BR');
+        case 'tags':
+          return sign * (a.tags[0] || '').localeCompare(b.tags[0] || '', 'pt-BR');
+        case 'stage': {
+          const av = stageLabelById.get(a.status) || a.status;
+          const bv = stageLabelById.get(b.status) || b.status;
+          return sign * av.localeCompare(bv, 'pt-BR');
+        }
+        case 'value':
+          return sign * (a.value - b.value);
+        case 'owner': {
+          const av = (a.ownerId && ownerNameById.get(a.ownerId)) || '';
+          const bv = (b.ownerId && ownerNameById.get(b.ownerId)) || '';
+          return sign * av.localeCompare(bv, 'pt-BR');
+        }
+        case 'createdAt': {
+          // Data inválida/ausente vira 0 (mesma tolerância do formatCreatedParts
+          // em KanbanList.tsx) — sem isso, NaN - NaN quebra o comparator e a
+          // ordem do deal afetado fica indefinida em vez de ir pra uma ponta.
+          const at = new Date(a.createdAt).getTime();
+          const bt = new Date(b.createdAt).getTime();
+          return sign * ((Number.isNaN(at) ? 0 : at) - (Number.isNaN(bt) ? 0 : bt));
+        }
+        default:
+          return 0;
+      }
+    },
+    [sortColumn, sortDirection, stageLabelById, ownerNameById]
+  );
+
+  const sortedFilteredDeals = useMemo(() => {
+    if (!sortColumn) return filteredDeals;
+    return [...filteredDeals].sort(compareDeals);
+  }, [filteredDeals, sortColumn, compareDeals]);
+
+  const sortedGroups = useMemo(() => {
+    if (!sortColumn) return groups;
+    return groups.map((group) => ({ ...group, deals: [...group.deals].sort(compareDeals) }));
+  }, [groups, sortColumn, compareDeals]);
 
   // Activity status per deal, computed from the shared activities cache.
   const { data: activities = [] } = useActivities();
@@ -197,32 +329,61 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
               <thead className="bg-slate-50/80 dark:bg-white/5 border-b border-slate-200 dark:border-white/5 sticky top-0 z-10 backdrop-blur-sm">
                 <tr>
                   <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider"></th>
-                  <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                    Negócio
-                  </th>
-                  <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                    Empresa
-                  </th>
-                  <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                    Estágio
-                  </th>
-                  <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                    Valor
-                  </th>
-                  <th className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                    Dono
-                  </th>
-                  <th className="px-3 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">
-                    Criado em
-                  </th>
+                  <SortableHeader
+                    label="Negócio"
+                    column="title"
+                    currentSort={sortColumn}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                  <SortableHeader
+                    label="Tag"
+                    column="tags"
+                    currentSort={sortColumn}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                  <SortableHeader
+                    label="Estágio"
+                    column="stage"
+                    currentSort={sortColumn}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                  <SortableHeader
+                    label="Valor"
+                    column="value"
+                    currentSort={sortColumn}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                  <SortableHeader
+                    label="Responsável"
+                    column="owner"
+                    currentSort={sortColumn}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
+                  />
+                  <SortableHeader
+                    label="Criado em"
+                    column="createdAt"
+                    currentSort={sortColumn}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
+                    className="whitespace-nowrap"
+                  />
                   {/* Custom Fields Columns */}
                   {customFieldDefinitions.map((field) => (
-                    <th
+                    <SortableHeader
                       key={field.id}
-                      className="px-6 py-3 font-bold text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right"
-                    >
-                      {field.label}
-                    </th>
+                      label={field.label}
+                      column={`custom:${field.key}`}
+                      currentSort={sortColumn}
+                      sortDirection={sortDirection}
+                      onSort={handleSort}
+                      className="text-right"
+                      align="right"
+                    />
                   ))}
                 </tr>
               </thead>
@@ -236,7 +397,7 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
               }
             >
               {activeTab === 'todos' &&
-                filteredDeals.map((deal) => (
+                sortedFilteredDeals.map((deal) => (
                   <KanbanListRow
                     key={deal.id}
                     deal={deal}
@@ -250,9 +411,12 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                     onQuickAdd={handleQuickAdd}
                     onCloseMenu={handleCloseMenu}
                     onMoveDealToStage={onMoveDealToStage}
+                    isStageMenuOpen={openStageMenuId === deal.id}
+                    onToggleStageMenu={handleToggleStageMenu}
+                    onCloseStageMenu={handleCloseStageMenu}
                   />
                 ))}
-              {groups.map((group, groupIndex) => {
+              {sortedGroups.map((group, groupIndex) => {
                 const isCollapsed = collapsedStageIds.has(group.stage.id);
                 return (
                   <React.Fragment key={group.stage.id}>
@@ -308,6 +472,9 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                           onQuickAdd={handleQuickAdd}
                           onCloseMenu={handleCloseMenu}
                           onMoveDealToStage={onMoveDealToStage}
+                          isStageMenuOpen={openStageMenuId === deal.id}
+                          onToggleStageMenu={handleToggleStageMenu}
+                          onCloseStageMenu={handleCloseStageMenu}
                         />
                       ))}
                   </React.Fragment>
