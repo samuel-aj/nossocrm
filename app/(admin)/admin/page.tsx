@@ -774,19 +774,19 @@ export default function AdminPage() {
                   >
                     <Pencil size={16} />
                   </button>
-                  {collab.id !== profile?.id ? (
-                    <button
-                      onClick={() => handleRemoveCollaborator(collab.id)}
-                      className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-lg transition-colors"
-                      title="Remover acesso Super Admin"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  ) : (
+                  {collab.id === profile?.id && (
                     <span className="text-[10px] px-2 py-1 bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 rounded font-bold">
                       VOCE
                     </span>
                   )}
+                  <button
+                    onClick={() => handleRemoveCollaborator(collab.id)}
+                    disabled={collab.id === profile?.id}
+                    className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-slate-400 disabled:hover:bg-transparent"
+                    title={collab.id === profile?.id ? 'Você não pode remover a si mesmo' : 'Remover acesso Super Admin'}
+                  >
+                    <Trash2 size={16} />
+                  </button>
                 </div>
               </div>
             ))}
