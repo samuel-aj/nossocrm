@@ -46,7 +46,37 @@ export async function GET(req: Request) {
 
   if (error) return json({ error: error.message }, 500);
 
-  return json({ collaborators: superAdmins || [] });
+  const list = superAdmins || [];
+  if (list.length === 0) return json({ collaborators: [] });
+
+  // Orgs em que cada super admin é MEMBRO (vínculo explícito em
+  // user_organizations). Super admin não pertence a nenhuma org por padrão.
+  const [{ data: links, error: linksError }, { data: orgs, error: orgsError }] = await Promise.all([
+    admin
+      .from('user_organizations')
+      .select('user_id, organization_id, role')
+      .in('user_id', list.map(p => p.id)),
+    admin.from('organizations').select('id, name').is('deleted_at', null),
+  ]);
+  if (linksError) return json({ error: linksError.message }, 500);
+  if (orgsError) return json({ error: orgsError.message }, 500);
+
+  const orgName = new Map((orgs || []).map(o => [o.id as string, o.name as string]));
+  const byUser = new Map<string, { organization_id: string; name: string; role: string }[]>();
+  for (const l of links || []) {
+    const name = orgName.get(l.organization_id as string);
+    if (!name) continue; // org excluída
+    const arr = byUser.get(l.user_id as string) || [];
+    arr.push({ organization_id: l.organization_id as string, name, role: l.role as string });
+    byUser.set(l.user_id as string, arr);
+  }
+
+  return json({
+    collaborators: list.map(p => ({
+      ...p,
+      memberships: (byUser.get(p.id) || []).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
+    })),
+  });
 }
 
 /**

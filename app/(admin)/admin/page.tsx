@@ -43,6 +43,21 @@ interface OrgMember {
   created_at: string
 }
 
+/** Org em que um colaborador super admin é MEMBRO (vínculo explícito) */
+interface CollabMembership {
+  organization_id: string
+  name: string
+  role: string
+}
+
+interface Collaborator {
+  id: string
+  email: string
+  name: string
+  created_at: string
+  memberships?: CollabMembership[]
+}
+
 export default function AdminPage() {
   const router = useRouter()
   const { profile, loading: authLoading, signOut, refreshProfile } = useAuth()
@@ -76,10 +91,16 @@ export default function AdminPage() {
   const [saving, setSaving] = useState(false)
 
   // Collaborators (super_admins)
-  const [collaborators, setCollaborators] = useState<{ id: string; email: string; name: string; created_at: string }[]>([])
+  const [collaborators, setCollaborators] = useState<Collaborator[]>([])
   const [newCollabEmail, setNewCollabEmail] = useState('')
   const [addingCollab, setAddingCollab] = useState(false)
   const [switchingOrgId, setSwitchingOrgId] = useState<string | null>(null)
+
+  // Orgs em que cada super admin é membro (modal por colaborador).
+  // Rascunho: orgId -> papel ('' = não é membro).
+  const [membershipCollab, setMembershipCollab] = useState<Collaborator | null>(null)
+  const [membershipDraft, setMembershipDraft] = useState<Record<string, string>>({})
+  const [savingMemberships, setSavingMemberships] = useState(false)
 
   const isSuperAdmin = profile?.role === UserRole.SUPER_ADMIN
 
@@ -150,6 +171,38 @@ export default function AdminPage() {
       fetchCollaborators()
     } catch (err: any) {
       addToast(`Erro: ${err.message}`, 'error')
+    }
+  }
+
+  const openMemberships = (collab: Collaborator) => {
+    const draft: Record<string, string> = {}
+    for (const m of collab.memberships || []) draft[m.organization_id] = m.role
+    setMembershipDraft(draft)
+    setMembershipCollab(collab)
+  }
+
+  const handleSaveMemberships = async () => {
+    if (!membershipCollab) return
+    setSavingMemberships(true)
+    try {
+      const memberships = Object.entries(membershipDraft)
+        .filter(([, role]) => role)
+        .map(([organizationId, role]) => ({ organizationId, role }))
+      const res = await fetch(`/api/superadmin/collaborators/${membershipCollab.id}/memberships`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ memberships }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      addToast('Organizações do colaborador atualizadas', 'success')
+      setMembershipCollab(null)
+      fetchCollaborators()
+    } catch (err: any) {
+      addToast(`Erro: ${err.message}`, 'error')
+    } finally {
+      setSavingMemberships(false)
     }
   }
 
@@ -697,25 +750,123 @@ export default function AdminPage() {
                       {collab.name || collab.email}
                     </p>
                     <p className="text-xs text-slate-500">{collab.email}</p>
+                    {collab.memberships && collab.memberships.length > 0 ? (
+                      <p className="mt-1 flex flex-wrap gap-1">
+                        {collab.memberships.map(m => (
+                          <span
+                            key={m.organization_id}
+                            className="text-[10px] px-1.5 py-0.5 rounded bg-slate-200/70 text-slate-600 dark:bg-white/10 dark:text-slate-300"
+                          >
+                            {m.name} · {m.role === UserRole.ADMIN ? 'Admin' : 'Vendedor'}
+                          </span>
+                        ))}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-[10px] text-slate-400">Não é membro de nenhuma organização</p>
+                    )}
                   </div>
                 </div>
-                {collab.id !== profile?.id ? (
+                <div className="flex items-center gap-1">
                   <button
-                    onClick={() => handleRemoveCollaborator(collab.id)}
-                    className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-lg transition-colors"
-                    title="Remover acesso Super Admin"
+                    onClick={() => openMemberships(collab)}
+                    className="p-2 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-500/10 rounded-lg transition-colors"
+                    title="Organizações em que é membro"
                   >
-                    <Trash2 size={16} />
+                    <Pencil size={16} />
                   </button>
-                ) : (
-                  <span className="text-[10px] px-2 py-1 bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 rounded font-bold">
-                    VOCE
-                  </span>
-                )}
+                  {collab.id !== profile?.id ? (
+                    <button
+                      onClick={() => handleRemoveCollaborator(collab.id)}
+                      className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-lg transition-colors"
+                      title="Remover acesso Super Admin"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  ) : (
+                    <span className="text-[10px] px-2 py-1 bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 rounded font-bold">
+                      VOCE
+                    </span>
+                  )}
+                </div>
               </div>
             ))}
           </div>
         </div>
+
+        {/* Modal: orgs em que o colaborador super admin é membro */}
+        {membershipCollab && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+            <div className="bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+              <div className="px-6 py-4 border-b border-slate-200 dark:border-white/10 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="font-bold text-slate-900 dark:text-white truncate">
+                    Organizações de {membershipCollab.name || membershipCollab.email}
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Marque em quais organizações este super admin é membro. Como membro, ele pode ser responsável por leads e atividades nelas.
+                  </p>
+                </div>
+                <button onClick={() => setMembershipCollab(null)} className="text-slate-400 hover:text-slate-600 shrink-0">
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="p-6 space-y-2 max-h-[60vh] overflow-y-auto">
+                {organizations.length === 0 && (
+                  <p className="text-sm text-slate-500 italic text-center py-4">Nenhuma organização.</p>
+                )}
+                {organizations.map(org => {
+                  const role = membershipDraft[org.id] || ''
+                  const checked = role !== ''
+                  return (
+                    <div
+                      key={org.id}
+                      className={`flex items-center justify-between gap-3 p-3 rounded-xl border transition-colors ${
+                        checked
+                          ? 'border-primary-300 bg-primary-50/60 dark:border-primary-500/40 dark:bg-primary-500/10'
+                          : 'border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/5'
+                      }`}
+                    >
+                      <label className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={e =>
+                            setMembershipDraft(d => ({ ...d, [org.id]: e.target.checked ? UserRole.VENDEDOR : '' }))
+                          }
+                          className="w-4 h-4 accent-primary-600 shrink-0"
+                        />
+                        <span className="min-w-0">
+                          <span className="block text-sm font-medium text-slate-900 dark:text-white truncate">{org.name}</span>
+                          {org.is_active === false && (
+                            <span className="text-[10px] font-bold text-red-500">DESATIVADA</span>
+                          )}
+                        </span>
+                      </label>
+                      <select
+                        value={checked ? role : UserRole.VENDEDOR}
+                        disabled={!checked}
+                        onChange={e => setMembershipDraft(d => ({ ...d, [org.id]: e.target.value }))}
+                        className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-40"
+                      >
+                        <option value={UserRole.VENDEDOR}>Vendedor</option>
+                        <option value={UserRole.ADMIN}>Admin</option>
+                      </select>
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="px-6 pb-6">
+                <button
+                  onClick={handleSaveMemberships}
+                  disabled={savingMemberships}
+                  className="w-full bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-colors"
+                >
+                  {savingMemberships ? 'Salvando...' : 'Salvar'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Organizations List */}
         <div className="space-y-3">

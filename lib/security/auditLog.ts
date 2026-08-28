@@ -8,6 +8,7 @@ type AuditAction =
   | 'superadmin.user.create'
   | 'superadmin.user.promote'
   | 'superadmin.user.demote'
+  | 'superadmin.user.memberships'
   | 'superadmin.setup';
 
 interface AuditEntry {
