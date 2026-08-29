@@ -242,10 +242,17 @@ export function useWaRuns(filters: WaRunsFilters = {}) {
   });
 }
 
-/** Teste de um agente salvo: envia o histórico e recebe a resposta sem disparar nada. */
+/**
+ * Teste de um agente salvo: envia o histórico e recebe a resposta sem disparar
+ * nada. `draft` leva a configuração que está na tela, para testar antes de salvar.
+ */
 export function useTestWaAgent(id: string | null | undefined) {
   return useMutation({
-    mutationFn: async (vars: { messages: WaTestMessage[]; state?: Record<string, unknown> }): Promise<WaTestResult> => {
+    mutationFn: async (vars: {
+      messages: WaTestMessage[];
+      state?: Record<string, unknown>;
+      draft?: Partial<AgentInput>;
+    }): Promise<WaTestResult> => {
       if (!id) throw new Error('Salve o agente antes de testar');
       const json = await waAgentsFetch<Partial<WaTestResult>>(`/api/wa-agents/agents/${id}/test`, {
         method: 'POST',

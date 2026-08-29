@@ -1596,6 +1596,7 @@ export const AgentEditor: React.FC<{
         dirty={dirty}
         saving={save.isPending}
         onSave={handleSave}
+        draft={toPayload(form)}
         onApplyPrompt={(system_prompt) => {
           patch({ system_prompt });
           setTab('roteiro');

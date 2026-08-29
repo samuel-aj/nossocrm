@@ -8,7 +8,7 @@
  */
 import React, { useState } from 'react';
 import { ChevronDown, ChevronUp, Loader2, Save, Sparkles } from 'lucide-react';
-import type { AgentProvider } from '@/lib/wa-agents/types';
+import type { AgentInput, AgentProvider } from '@/lib/wa-agents/types';
 import { AgentTestChat } from './AgentTestChat';
 import { AgentAssistPanel, ASSIST_EXAMPLES_LIMIT } from './AgentAssistPanel';
 import type { WaTestMessage } from './useWaAgents';
@@ -34,7 +34,22 @@ export const AgentTestDrawer: React.FC<{
   onSave: () => Promise<boolean>;
   /** Aplica o roteiro ajustado no formulário */
   onApplyPrompt: (prompt: string) => void;
-}> = ({ open, onClose, agentId, agentName, provider, model, currentPrompt, dirty, saving, onSave, onApplyPrompt }) => {
+  /** Configuração que está na tela: o teste roda com ela, mesmo sem salvar */
+  draft?: Partial<AgentInput>;
+}> = ({
+  open,
+  onClose,
+  agentId,
+  agentName,
+  provider,
+  model,
+  currentPrompt,
+  dirty,
+  saving,
+  onSave,
+  onApplyPrompt,
+  draft,
+}) => {
   const [messages, setMessages] = useState<WaTestMessage[]>([]);
   const [assistOpen, setAssistOpen] = useState(true);
 
@@ -49,7 +64,7 @@ export const AgentTestDrawer: React.FC<{
         <div className="px-4 pt-3">
           <Notice tone="amber">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span>Há alterações não salvas. O teste usa a última versão salva.</span>
+              <span>Há alterações não salvas: o teste já usa o que está na tela; salve para valer no atendimento.</span>
               <button type="button" className={BTN_SMALL} onClick={() => void onSave()} disabled={saving}>
                 {saving ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Save size={14} aria-hidden="true" />}
                 Salvar
@@ -61,7 +76,13 @@ export const AgentTestDrawer: React.FC<{
 
       <div className="flex-1 min-h-0 flex flex-col px-4 pt-3 pb-2">
         {agentId ? (
-          <AgentTestChat agentId={agentId} agentName={agentName} className="flex-1 min-h-0" onMessagesChange={setMessages} />
+          <AgentTestChat
+            agentId={agentId}
+            agentName={agentName}
+            className="flex-1 min-h-0"
+            onMessagesChange={setMessages}
+            draft={draft}
+          />
         ) : (
           <Notice tone="amber">Salve o agente para liberar o teste.</Notice>
         )}

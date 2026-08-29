@@ -28,6 +28,33 @@ import type { AgentRow, KnowledgeHit } from './types';
 
 export type TestMessage = { role: 'user' | 'assistant'; text: string };
 
+/**
+ * Agente salvo + a configuração que está na TELA do editor (rascunho), para o
+ * admin testar antes de salvar. Só as chaves realmente enviadas são aplicadas.
+ *
+ * Regras que o rascunho nunca quebra:
+ * - `id` e `organization_id` continuam sendo os do banco;
+ * - chave da API vazia ou mascarada mantém a salva (o formulário nunca recebe a
+ *   chave de volta); chave nova digitada agora vale no teste, e null cai na
+ *   chave da organização.
+ */
+export function agentWithDraft(
+  saved: AgentRow,
+  draft: Partial<AgentRow> | null | undefined,
+  opts: { presentKeys?: string[]; apiKey?: string | null } = {}
+): AgentRow {
+  if (!draft) return saved;
+  const keys = opts.presentKeys ?? Object.keys(draft);
+  const merged: AgentRow = { ...saved };
+  for (const key of keys) {
+    if (key === 'id' || key === 'organization_id' || key === 'api_key') continue;
+    if (!Object.prototype.hasOwnProperty.call(draft, key)) continue;
+    (merged as Record<string, unknown>)[key] = (draft as Record<string, unknown>)[key];
+  }
+  if (opts.apiKey !== undefined) merged.api_key = opts.apiKey;
+  return merged;
+}
+
 export type TestAgentReplyResult = {
   text: string;
   lines: string[];
