@@ -52,7 +52,7 @@ O agente encerra chamando a ferramenta `encerrar_atendimento(resultado, resumo)`
 - **Pedir aprovação humana**: a conversa fica "aguardando aprovação"; o chat mostra o resumo com **Aprovar** (o próximo agente assume) e **Recusar** (o agente para e o humano assume).
 - **Encerrar**: o agente para e a conversa fica com o atendente.
 
-As demais ações do resultado (e das ações durante a conversa) mexem no negócio: nota, mover etapa, rótulo, marcar perdido, atribuir responsável, **cadastrar produto** (`set_product`: lança um produto do catálogo como item do negócio, sem duplicar se já estiver lá), criar tarefa e chamar webhook.
+As demais ações do resultado (e das ações durante a conversa) mexem no negócio: nota, mover etapa, rótulo, marcar perdido, atribuir responsável, **cadastrar produto** (`set_product`: lança um produto do catálogo como item do negócio, sem duplicar se já estiver lá), **escrever na descrição do lead** (`append_description`: anexa o resumo do encerramento — ou os detalhes da ação durante a conversa — numa linha nova da descrição do negócio, com um texto de abertura opcional), criar tarefa e chamar webhook.
 
 ### Follow-ups (lead sem responder)
 

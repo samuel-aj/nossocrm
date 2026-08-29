@@ -26,6 +26,7 @@ import {
   CircleX,
   UserCheck,
   Package,
+  FileText,
   CalendarPlus,
   Webhook,
   HelpCircle,
@@ -47,6 +48,7 @@ export const ACTION_LABELS: Record<ActionType, string> = {
   mark_lost: 'Marcar como perdido',
   assign_owner: 'Atribuir responsável',
   set_product: 'Cadastrar produto no negócio',
+  append_description: 'Escrever na descrição do lead',
   create_task: 'Criar tarefa',
   webhook: 'Chamar webhook',
 };
@@ -61,6 +63,7 @@ export const ACTION_ICONS: Record<ActionType, LucideIcon> = {
   mark_lost: CircleX,
   assign_owner: UserCheck,
   set_product: Package,
+  append_description: FileText,
   create_task: CalendarPlus,
   webhook: Webhook,
 };
@@ -144,6 +147,8 @@ export function defaultAction(
       return { type, owner_id: options?.owners[0]?.id ?? '' };
     case 'set_product':
       return { type, product_id: options?.products[0]?.id ?? '' };
+    case 'append_description':
+      return { type };
     case 'create_task':
       return { type, title: '', days: 1 };
     case 'webhook':
@@ -196,6 +201,10 @@ export function describeAction(action: EndAction, agents: WaAgentListItem[], opt
       const product = options?.products.find((p) => p.id === action.product_id);
       return `cadastrar o produto ${product?.name ?? 'não escolhido'}`;
     }
+    case 'append_description':
+      return action.prefix?.trim()
+        ? `escrever na descrição do lead começando com "${action.prefix.trim()}"`
+        : 'escrever o resumo na descrição do lead';
     case 'create_task': {
       const days = action.days ?? 0;
       return `criar tarefa ${action.title.trim() ? `"${action.title.trim()}"` : 'sem título'}${
@@ -454,6 +463,18 @@ function ActionFields({
             </option>
           ))}
         </select>
+      );
+    case 'append_description':
+      return (
+        <input
+          id={`${idPrefix}-prefix`}
+          className={INPUT_CLASS}
+          value={action.prefix ?? ''}
+          onChange={(e) => onChange({ ...action, prefix: e.target.value || undefined })}
+          placeholder='Texto antes do resumo (opcional). Ex.: "Pré-atendimento IA:"'
+          maxLength={120}
+          aria-label="Texto antes do resumo na descrição"
+        />
       );
     case 'set_product':
       return (

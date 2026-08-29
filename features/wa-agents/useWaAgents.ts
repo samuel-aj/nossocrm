@@ -356,6 +356,19 @@ export function useDeleteWaAgentDocument(agentId: string | null | undefined) {
   });
 }
 
+/** Link temporário para abrir o arquivo original do documento (bucket privado). */
+export function useOpenWaAgentDocument(agentId: string | null | undefined) {
+  return useMutation({
+    mutationFn: async (docId: string): Promise<string> => {
+      const json = await waAgentsFetch<{ url?: string }>(
+        `/api/wa-agents/agents/${agentId}/documents/${docId}/file`
+      );
+      if (!json.url) throw new Error('Não foi possível abrir o arquivo');
+      return json.url;
+    },
+  });
+}
+
 /** Reprocessa um documento (extrai e indexa de novo). */
 /** Metadados de um documento (título, descrição, etiquetas). */
 export function useUpdateWaAgentDocument(agentId: string | null | undefined) {

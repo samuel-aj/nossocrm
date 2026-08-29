@@ -65,6 +65,8 @@ export const EndActionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('assign_owner'), owner_id: z.string().uuid() }),
   /** Produto do catálogo da org lançado como item do negócio (não duplica) */
   z.object({ type: z.literal('set_product'), product_id: z.string().uuid() }),
+  /** Resumo/detalhes do agente anexados à descrição do negócio (uma linha nova) */
+  z.object({ type: z.literal('append_description'), prefix: z.string().max(120).optional() }),
   z.object({
     type: z.literal('create_task'),
     title: z.string().min(1).max(200),
