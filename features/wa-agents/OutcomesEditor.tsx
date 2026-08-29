@@ -28,6 +28,7 @@ import {
   Package,
   CalendarPlus,
   Webhook,
+  HelpCircle,
   type LucideIcon,
 } from 'lucide-react';
 import type { EndAction, Outcome } from '@/lib/wa-agents/types';
@@ -65,6 +66,19 @@ export const ACTION_ICONS: Record<ActionType, LucideIcon> = {
 };
 
 const ACTION_TYPES = Object.keys(ACTION_LABELS) as ActionType[];
+
+/**
+ * Ação gravada por uma versão MAIS NOVA do CRM (aba antiga aberta, agente
+ * configurado por API): a tela precisa mostrar algo em vez de quebrar. Ícone e
+ * rótulo sempre existem; a ação em si é preservada intacta ao salvar.
+ */
+export function actionIcon(type: string): LucideIcon {
+  return ACTION_ICONS[type as ActionType] ?? HelpCircle;
+}
+
+export function actionLabel(type: string): string {
+  return ACTION_LABELS[type as ActionType] ?? `Ação "${type}" (versão mais nova do CRM)`;
+}
 
 /** Variáveis aceitas no corpo personalizado da ação "Chamar webhook". */
 export const ACTION_WEBHOOK_VARIABLES: Array<{ key: string; description: string }> = [
@@ -190,6 +204,9 @@ export function describeAction(action: EndAction, agents: WaAgentListItem[], opt
     }
     case 'webhook':
       return `chamar webhook ${hostOf(action.url)}`;
+    default:
+      // Tipo gravado por uma versão mais nova do CRM: descreve sem quebrar a tela
+      return actionLabel((action as { type: string }).type).toLowerCase();
   }
 }
 
@@ -216,13 +233,13 @@ export function ActionSummary({
   return (
     <ul className="flex flex-wrap gap-1.5" aria-label="Ações">
       {actions.map((a, i) => {
-        const Icon = ACTION_ICONS[a.type];
+        const Icon = actionIcon(a.type);
         const text = describeAction(a, agents, options);
         return (
           <li
             key={`${a.type}-${i}`}
             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200"
-            title={ACTION_LABELS[a.type]}
+            title={actionLabel(a.type)}
           >
             <Icon size={12} className="text-purple-600 dark:text-purple-400 shrink-0" aria-hidden="true" />
             <span>{text.charAt(0).toUpperCase() + text.slice(1)}</span>
@@ -526,6 +543,14 @@ function ActionFields({
           </details>
         </div>
       );
+    default:
+      // Ação de uma versão mais nova do CRM: sem formulário aqui, mas ela é
+      // preservada como está (só trocar o tipo no seletor a substitui).
+      return (
+        <p className={HELP_CLASS}>
+          Configurada numa versão mais nova do CRM. Recarregue a página para editar; a ação continua valendo como está.
+        </p>
+      );
   }
 }
 
@@ -577,7 +602,7 @@ export const ActionsEditor: React.FC<{
         const aPrefix = `${idPrefix}-action-${aIndex}`;
         const setAction = (a: EndAction) => onChange(value.map((x, i) => (i === aIndex ? a : x)));
         const types = visibleTypes.includes(action.type) ? visibleTypes : [action.type, ...visibleTypes];
-        const Icon = ACTION_ICONS[action.type];
+        const Icon = actionIcon(action.type);
         return (
           <div
             key={aPrefix}
@@ -585,7 +610,7 @@ export const ActionsEditor: React.FC<{
           >
             <span
               className="mt-2 p-1.5 rounded-md bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400"
-              title={ACTION_LABELS[action.type]}
+              title={actionLabel(action.type)}
             >
               <Icon size={14} aria-hidden="true" />
             </span>
@@ -597,7 +622,7 @@ export const ActionsEditor: React.FC<{
             >
               {types.map((t) => (
                 <option key={t} value={t}>
-                  {ACTION_LABELS[t]}
+                  {actionLabel(t)}
                 </option>
               ))}
             </select>
