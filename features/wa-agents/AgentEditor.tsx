@@ -837,6 +837,10 @@ export const AgentEditor: React.FC<{
     const value = form.system_prompt;
     const start = at ?? el?.selectionStart ?? value.length;
     const end = at ?? el?.selectionEnd ?? value.length;
+    // Trocar o value de uma textarea joga o cursor (e a rolagem) para o fim:
+    // guardamos onde a pessoa estava para devolver depois do redesenho.
+    const scrollAntes = el?.scrollTop ?? 0;
+    const solto = at !== undefined;
     const { next, caret } = insertToken(value, token, start, end);
     patch({ system_prompt: next });
     setTab('roteiro');
@@ -844,8 +848,14 @@ export const AgentEditor: React.FC<{
     window.setTimeout(() => {
       const ta = promptRef.current;
       if (!ta) return;
-      ta.focus();
+      // A seleção vem ANTES do foco: focar primeiro faria o navegador rolar até
+      // o cursor que o React deixou no fim do texto.
       ta.setSelectionRange(caret, caret);
+      ta.focus({ preventScroll: true });
+      // Chip solto com o mouse: o ponto já estava à vista, então a rolagem volta
+      // para onde estava. Inserção pelo cursor (clique) segue o navegador, que
+      // leva até o cursor — ele pode estar fora da parte visível.
+      if (solto) ta.scrollTop = scrollAntes;
       ta.scrollIntoView({ block: 'nearest' });
     }, 0);
     window.setTimeout(() => setPromptHighlight(false), 1200);
