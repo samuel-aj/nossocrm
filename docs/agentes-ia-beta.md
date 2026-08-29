@@ -33,6 +33,10 @@ Salvar um agente nunca depende da chave da IA. **Ligar** depende: ao salvar/liga
 
 Cada **quebra de linha** na resposta do modelo vira uma mensagem separada no WhatsApp. O roteiro deve instruir o agente a escrever uma ideia por linha. O motor acrescenta essa regra automaticamente ao prompt.
 
+### "Digitando..." (humanização)
+
+Aba Configurações, painel **Ritmo e memória**: com **Mostrar "digitando..."** ligado (`typing.enabled`), antes de cada linha o CRM manda a presença de digitação no número do lead e espera um tempo proporcional ao TAMANHO daquela linha — `caracteres × ms_per_char`, entre `min_ms` e `max_ms` (padrões 45 ms/caractere, 0,8 s e 8 s). Mensagem maior = mais tempo digitando. Ligado, ele substitui o **Intervalo entre linhas** (somar os dois deixaria o atendimento arrastado); desligado, tudo continua como antes. A presença depende do provedor: a Evolution (QR) mostra o "digitando" de verdade; na API oficial da Meta só a espera acontece. O tempo entra no orçamento da trava da conversa (`lockSecondsFor`).
+
 ### Memória
 
 O agente lê o histórico da própria conversa (`wa_messages`), inclusive o que o atendente humano escreveu (marcado como `[Atendente humano]`), e um estado curto que ele mesmo salva (`salvar_dados`). Não existe tabela de memória separada.

@@ -13,10 +13,12 @@ import {
   AgentFollowupSchema,
   AgentToolsSchema,
   AgentTriggersSchema,
+  AgentTypingSchema,
   AgentWebhookSchema,
   AI_PROVIDERS,
   CustomActionSchema,
   DEFAULT_AGENT_TOOLS,
+  DEFAULT_AGENT_TYPING,
   DEFAULT_AGENT_TRIGGERS,
   OutcomeSchema,
   SCRIPT_ACTION_MARKER_RE,
@@ -28,6 +30,7 @@ import {
   type AgentResources,
   type AgentRow,
   type AgentTools,
+  type AgentTyping,
   type AgentTriggers,
   type AgentWebhook,
   type ConversationAiState,
@@ -159,6 +162,13 @@ export function normalizeTools(raw: unknown): AgentTools {
   return p.success ? p.data : { ...DEFAULT_AGENT_TOOLS };
 }
 
+/** `typing` (jsonb) do agente; linha antiga ou valor inválido vira o padrão (desligado). */
+export function normalizeTyping(raw: unknown): AgentTyping {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ...DEFAULT_AGENT_TYPING };
+  const p = AgentTypingSchema.safeParse(raw);
+  return p.success ? p.data : { ...DEFAULT_AGENT_TYPING };
+}
+
 /** `helper_agent_ids` (uuid[]) como lista de strings únicas; linhas antigas viram []. */
 export function normalizeHelperIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -210,6 +220,7 @@ export function normalizeAgentRow(raw: Record<string, unknown>): AgentRow {
     triggers: normalizeTriggers(raw.triggers),
     helper_agent_ids: normalizeHelperIds(raw.helper_agent_ids),
     tools: normalizeTools(raw.tools),
+    typing: normalizeTyping(raw.typing),
     created_by: (raw.created_by as string | null) ?? null,
     created_at: String(raw.created_at ?? ''),
     updated_at: String(raw.updated_at ?? ''),

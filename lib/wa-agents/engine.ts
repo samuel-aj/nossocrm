@@ -41,6 +41,7 @@ import { logRun } from './runs';
 import { mergeSavedDataInto, NO_REPLY_TOKEN, sanitizeSavedData } from './savedData';
 import { splitLines } from './split';
 import { normalizeKeyword } from './text';
+import { typingDelayMs } from './typing';
 import { buildAgentTools, findByName, type AgentToolRuntime } from './tools';
 import { pickInboundAgent } from './triggers';
 import type {
@@ -119,7 +120,8 @@ export function sleep(ms: number): Promise<void> {
  * chamada ao modelo) + cópia/envio das mídias (`mediaCount`, até 3).
  */
 export function lockSecondsFor(
-  agent: Pick<AgentRow, 'line_delay_ms' | 'webhooks' | 'outcomes' | 'custom_actions'> & Partial<Pick<AgentRow, 'helper_agent_ids'>>,
+  agent: Pick<AgentRow, 'line_delay_ms' | 'webhooks' | 'outcomes' | 'custom_actions'> &
+    Partial<Pick<AgentRow, 'helper_agent_ids' | 'typing'>>,
   opts: { mediaCount?: number } = {}
 ): number {
   const activeWebhooks = agent.webhooks.filter(w => w.active !== false).length;
@@ -129,8 +131,11 @@ export function lockSecondsFor(
   );
   const helpers = Math.min((agent.helper_agent_ids ?? []).length, 3);
   const media = Math.min(Math.max(0, opts.mediaCount ?? 0), 3);
+  // "Digitando" segura a conversa antes de cada linha (até 8): entra no orçamento da trava
+  const typing = agent.typing?.enabled ? Math.ceil((8 * agent.typing.max_ms) / 1000) : 0;
   return (
     LOCK_BASE_SECONDS +
+    typing +
     Math.ceil((8 * agent.line_delay_ms) / 1000) +
     25 * (activeWebhooks + actionWebhooks) +
     30 * helpers +
@@ -481,6 +486,20 @@ async function sendLines(
   if (opts.renewLock) await opts.renewLock();
   for (let i = 0; i < lines.length; i++) {
     const text = lines[i];
+    // "Digitando..." proporcional ao tamanho da linha, antes de ela sair
+    const typingMs = typingDelayMs(text, agent.typing);
+    if (typingMs > 0) {
+      if (provider.sendTyping) {
+        try {
+          await provider.sendTyping({ to, ms: typingMs });
+        } catch (e) {
+          // Presença é enfeite: se o provedor recusar, a espera continua valendo
+          console.error('[wa-agents] presença "digitando" falhou:', errorMessage(e));
+        }
+      }
+      await sleep(typingMs);
+      if (opts.renewLock) await opts.renewLock();
+    }
     let result: SendResult;
     try {
       result = await provider.sendText({ to, text });
@@ -515,7 +534,11 @@ async function sendLines(
       throw new WaAgentError('SEND_FAILED', `Envio falhou na linha ${i + 1}: ${result.error || 'erro desconhecido'}`);
     }
     if (opts.renewLock) await opts.renewLock();
-    if (i < lines.length - 1 && agent.line_delay_ms > 0) await sleep(agent.line_delay_ms);
+    // Com "digitando" ligado, a pausa entre linhas já é o tempo de digitação da
+    // próxima: somar o intervalo fixo deixaria o atendimento arrastado
+    if (i < lines.length - 1 && !agent.typing?.enabled && agent.line_delay_ms > 0) {
+      await sleep(agent.line_delay_ms);
+    }
   }
 }
 

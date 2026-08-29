@@ -39,9 +39,11 @@ import {
   AI_PROVIDERS,
   AgentInputSchema,
   DEFAULT_AGENT_TRIGGERS,
+  DEFAULT_AGENT_TYPING,
   type AgentInput,
   type AgentPublic,
   type AgentTriggers,
+  type AgentTyping,
   type AgentWebhook,
   type CustomAction,
   type Outcome,
@@ -49,6 +51,7 @@ import {
   type AgentFollowup,
 } from '@/lib/wa-agents/types';
 import { MODEL_CATALOG, PROMPT_VARIABLE_NAMES, PROVIDER_LABELS } from '@/lib/wa-agents/catalog';
+import { typingDelayMs, typingSecondsLabel } from '@/lib/wa-agents/typing';
 import { DEFAULT_OUTCOMES, DEFAULT_STOP_RULES, DEFAULT_SYSTEM_PROMPT } from '@/lib/wa-agents/defaults';
 import {
   WaAgentsApiError,
@@ -131,6 +134,7 @@ type AgentFormState = {
   webhooks: AgentWebhook[];
   helper_agent_ids: string[];
   tools: AgentToolsState;
+  typing: AgentTyping;
 };
 
 const CUSTOM_MODEL = '__custom__';
@@ -182,6 +186,7 @@ const FIELD_TABS: Record<string, EditorTab> = {
   custom_actions: 'acoes',
   helper_agent_ids: 'acoes',
   tools: 'acoes',
+  typing: 'config',
 };
 
 // ---------------------------------------------------------------- Formulário
@@ -196,6 +201,11 @@ function normalizeTriggers(src: Partial<AgentTriggers> | null | undefined): Agen
     inbound: { ...DEFAULT_AGENT_TRIGGERS.inbound, ...(src?.inbound ?? {}) },
     deal: { ...DEFAULT_AGENT_TRIGGERS.deal, ...(src?.deal ?? {}) },
   };
+}
+
+/** "Digitando" com os padrões preenchidos (agentes anteriores à coluna `typing`). */
+function normalizeTyping(src: Partial<AgentTyping> | null | undefined): AgentTyping {
+  return { ...DEFAULT_AGENT_TYPING, ...(src ?? {}) };
 }
 
 function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInput>): AgentFormState {
@@ -228,6 +238,7 @@ function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInpu
     webhooks: src.webhooks ?? [],
     helper_agent_ids: src.helper_agent_ids ?? [],
     tools: { calculator: src.tools?.calculator ?? true },
+    typing: normalizeTyping(src.typing),
   };
 }
 
@@ -270,6 +281,7 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
     webhooks: form.webhooks,
     helper_agent_ids: form.helper_agent_ids,
     tools: { calculator: form.tools.calculator },
+    typing: form.typing,
   };
   if (form.clear_api_key) payload.api_key = null;
   else if (form.api_key.trim()) payload.api_key = form.api_key.trim();
@@ -328,6 +340,19 @@ const NUM_LIMITS: Record<NumField, [min: number, max: number]> = {
 function clampField(field: NumField, value: number | ''): number {
   const [min, max] = NUM_LIMITS[field];
   return clampInt(String(value), min, max);
+}
+
+/** Limites do "digitando" (mesmos do AgentTypingSchema); vazio volta ao padrão. */
+const TYPING_LIMITS: Record<keyof Omit<AgentTyping, 'enabled'>, [number, number]> = {
+  ms_per_char: [5, 500],
+  min_ms: [0, 30000],
+  max_ms: [0, 60000],
+};
+
+function clampTyping(field: keyof Omit<AgentTyping, 'enabled'>, raw: string): number {
+  const [min, max] = TYPING_LIMITS[field];
+  if (raw === '') return DEFAULT_AGENT_TYPING[field];
+  return clampInt(raw, min, max);
 }
 
 /** Valor digitado num campo numérico, sem limite: '' fica '' para não travar a digitação. */
@@ -1444,6 +1469,77 @@ export const AgentEditor: React.FC<{
                 onBlur={() => patch({ human_pause_minutes: clampField('human_pause_minutes', form.human_pause_minutes) })}
               />
             </Field>
+          </div>
+
+          <div className="pt-3 border-t border-slate-200 dark:border-white/10 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Mostrar &quot;digitando...&quot;</p>
+                <p className={HELP_CLASS}>
+                  Antes de cada mensagem o contato vê o agente digitando, pelo tempo que uma pessoa levaria para
+                  escrever aquele texto. Substitui o intervalo fixo entre linhas.
+                </p>
+              </div>
+              <Toggle
+                checked={form.typing.enabled}
+                onChange={(enabled) => patch({ typing: { ...form.typing, enabled } })}
+                label="Mostrar digitando"
+              />
+            </div>
+            {form.typing.enabled ? (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <Field
+                    label="Velocidade (ms por caractere)"
+                    htmlFor="agent-typing-speed"
+                    help="45 = ritmo de celular. Maior = digita mais devagar."
+                  >
+                    <input
+                      id="agent-typing-speed"
+                      type="number"
+                      min={5}
+                      max={500}
+                      step={5}
+                      className={INPUT_CLASS}
+                      value={form.typing.ms_per_char}
+                      onChange={(e) =>
+                        patch({ typing: { ...form.typing, ms_per_char: clampTyping('ms_per_char', e.target.value) } })
+                      }
+                    />
+                  </Field>
+                  <Field label="Mínimo por mensagem (ms)" htmlFor="agent-typing-min" help="Piso, mesmo numa linha curta.">
+                    <input
+                      id="agent-typing-min"
+                      type="number"
+                      min={0}
+                      max={30000}
+                      step={100}
+                      className={INPUT_CLASS}
+                      value={form.typing.min_ms}
+                      onChange={(e) => patch({ typing: { ...form.typing, min_ms: clampTyping('min_ms', e.target.value) } })}
+                    />
+                  </Field>
+                  <Field label="Máximo por mensagem (ms)" htmlFor="agent-typing-max" help="Teto, para linha longa não travar a conversa.">
+                    <input
+                      id="agent-typing-max"
+                      type="number"
+                      min={0}
+                      max={60000}
+                      step={500}
+                      className={INPUT_CLASS}
+                      value={form.typing.max_ms}
+                      onChange={(e) => patch({ typing: { ...form.typing, max_ms: clampTyping('max_ms', e.target.value) } })}
+                    />
+                  </Field>
+                </div>
+                <p className={HELP_CLASS}>
+                  Prévia: mensagem curta (40 caracteres) ={' '}
+                  <strong>{typingSecondsLabel(typingDelayMs('x'.repeat(40), form.typing))} s</strong> · média (120) ={' '}
+                  <strong>{typingSecondsLabel(typingDelayMs('x'.repeat(120), form.typing))} s</strong> · longa (240) ={' '}
+                  <strong>{typingSecondsLabel(typingDelayMs('x'.repeat(240), form.typing))} s</strong> digitando.
+                </p>
+              </>
+            ) : null}
           </div>
         </Panel>
 

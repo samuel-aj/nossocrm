@@ -155,6 +155,21 @@ export type AgentTools = z.infer<typeof AgentToolsSchema>;
 export const DEFAULT_AGENT_TOOLS: AgentTools = { calculator: true };
 
 // ---------------------------------------------------------------------------
+// "Digitando..." antes de cada linha (tempo pelo tamanho do texto)
+// ---------------------------------------------------------------------------
+export const AgentTypingSchema = z.object({
+  enabled: z.boolean().default(false),
+  /** velocidade da digitação: quanto mais alto, mais devagar (45 ms/caractere ≈ ritmo de celular) */
+  ms_per_char: z.number().int().min(5).max(500).default(45),
+  /** piso: mesmo numa linha curta ele "digita" por este tempo */
+  min_ms: z.number().int().min(0).max(30000).default(800),
+  /** teto por linha: linha longa não deixa o lead esperando sem fim */
+  max_ms: z.number().int().min(0).max(60000).default(8000),
+});
+export type AgentTyping = z.infer<typeof AgentTypingSchema>;
+export const DEFAULT_AGENT_TYPING: AgentTyping = { enabled: false, ms_per_char: 45, min_ms: 800, max_ms: 8000 };
+
+// ---------------------------------------------------------------------------
 // Agente
 // ---------------------------------------------------------------------------
 export const AI_PROVIDERS = ['openai', 'anthropic', 'google'] as const;
@@ -211,6 +226,8 @@ export const AgentInputSchema = z.object({
   /** Agentes da org que este agente pode consultar durante a conversa (ferramenta consultar_agente) */
   helper_agent_ids: z.array(z.string().uuid()).max(20).default([]),
   tools: AgentToolsSchema.default(DEFAULT_AGENT_TOOLS),
+  /** "Digitando..." antes de cada linha, com o tempo saindo do tamanho do texto */
+  typing: AgentTypingSchema.default(DEFAULT_AGENT_TYPING),
 });
 export type AgentInput = z.infer<typeof AgentInputSchema>;
 
