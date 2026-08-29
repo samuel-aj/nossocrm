@@ -106,10 +106,16 @@ export const HighlightedScript: React.FC<HighlightedScriptProps> = ({
     <div
       className={`relative rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-800 focus-within:ring-2 focus-within:ring-purple-500/20 focus-within:border-purple-500 ${className}`}
     >
+      {/*
+        pointer-events-none é OBRIGATÓRIO: sem ele o espelho entra no teste de
+        posição do navegador e rouba o cursor do arrastar — a barrinha de onde a
+        variável vai cair some e o token acaba no fim do texto.
+      */}
       <pre
         ref={mirrorRef}
         aria-hidden="true"
-        className={`${BOX_CLASS} absolute inset-0 m-0 overflow-hidden whitespace-pre-wrap break-words text-transparent select-none`}
+        data-token-mirror="true"
+        className={`${BOX_CLASS} absolute inset-0 z-0 m-0 overflow-hidden whitespace-pre-wrap break-words text-transparent select-none pointer-events-none`}
         style={box ? { width: box.w, height: box.h } : undefined}
       >
         {parts.map((p, i) => (
@@ -122,7 +128,7 @@ export const HighlightedScript: React.FC<HighlightedScriptProps> = ({
       <textarea
         ref={ref}
         id={id}
-        className={`${BOX_CLASS} relative w-full bg-transparent border-0 outline-none resize-y whitespace-pre-wrap break-words text-slate-900 dark:text-white placeholder:text-slate-400`}
+        className={`${BOX_CLASS} relative z-10 w-full bg-transparent border-0 outline-none resize-y whitespace-pre-wrap break-words text-slate-900 dark:text-white placeholder:text-slate-400`}
         rows={rows}
         value={value}
         maxLength={maxLength}

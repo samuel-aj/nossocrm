@@ -61,14 +61,26 @@ type DocumentWithCaret = Document & {
 export function caretIndexFromPoint(el: HTMLTextAreaElement, x: number, y: number): number | null {
   const doc = el.ownerDocument as DocumentWithCaret;
   const clamp = (n: number) => Math.max(0, Math.min(n, el.value.length));
+  // Um ponto que caia na camada de destaque devolveria a posição DENTRO de um
+  // pedaço colorido, não do roteiro inteiro: nesse caso vale o cursor atual.
+  const noEspelho = (node: Node | null | undefined): boolean => {
+    const start = node?.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element | null);
+    return !!start?.closest?.('[data-token-mirror]');
+  };
   if (typeof doc.caretPositionFromPoint === 'function') {
     const pos = doc.caretPositionFromPoint(x, y);
     // Firefox e Chrome novos devolvem a própria textarea como nó; alguns devolvem o nó de texto interno.
-    if (pos && (pos.offsetNode === el || pos.offsetNode.nodeType === Node.TEXT_NODE)) return clamp(pos.offset);
+    if (pos && !noEspelho(pos.offsetNode) && (pos.offsetNode === el || pos.offsetNode.nodeType === Node.TEXT_NODE)) {
+      return clamp(pos.offset);
+    }
   }
   if (typeof doc.caretRangeFromPoint === 'function') {
     const range = doc.caretRangeFromPoint(x, y);
-    if (range && (range.startContainer === el || range.startContainer.nodeType === Node.TEXT_NODE)) {
+    if (
+      range &&
+      !noEspelho(range.startContainer) &&
+      (range.startContainer === el || range.startContainer.nodeType === Node.TEXT_NODE)
+    ) {
       return clamp(range.startOffset);
     }
   }
