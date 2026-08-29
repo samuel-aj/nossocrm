@@ -10,9 +10,11 @@
  * posição do cursor a partir do ponto onde o chip foi solto.
  */
 import React, { useState } from 'react';
-import { Braces, ListChecks, Paperclip, Image as ImageIcon, Film, Music, FileText, Info } from 'lucide-react';
-import { PROMPT_VARIABLES } from '@/lib/wa-agents/catalog';
-import { HELP_CLASS, Notice, PROMPT_TOKEN_MIME, TEXTAREA_CLASS, TokenChip, isPromptTokenDrag } from './ui';
+import { Braces, ListChecks, Paperclip, Image as ImageIcon, Film, Music, FileText, Info, AlertTriangle } from 'lucide-react';
+import { PROMPT_VARIABLES, PROMPT_VARIABLE_NAMES, promptVariableName } from '@/lib/wa-agents/catalog';
+import { HighlightedScript } from './HighlightedScript';
+import { TOKEN_KIND_LABEL, orphanTokens, type KnownTokens } from './tokens';
+import { HELP_CLASS, Notice, PROMPT_TOKEN_MIME, TokenChip, isPromptTokenDrag } from './ui';
 
 export type PromptPaletteAction = { key: string; label: string };
 export type PromptPaletteMedia = { name: string; kind: 'image' | 'video' | 'audio' | 'document' };
@@ -103,6 +105,41 @@ function PaletteGroup({
   );
 }
 
+/** O que cada cor do roteiro quer dizer + os tokens que não vão puxar nada. */
+function TokenLegend({ orphans }: { orphans: Array<{ kind: 'var' | 'acao' | 'midia'; name: string; text: string }> }) {
+  const item = (cor: string, texto: string) => (
+    <span className="inline-flex items-center gap-1">
+      <span className={`inline-block w-3 h-3 rounded ${cor}`} aria-hidden="true" />
+      {texto}
+    </span>
+  );
+  return (
+    <div className="space-y-1.5">
+      <p className={`${HELP_CLASS} flex flex-wrap items-center gap-x-3 gap-y-1`}>
+        <span className="font-medium">No texto:</span>
+        {item('bg-blue-200/70 dark:bg-blue-400/30', 'variável')}
+        {item('bg-purple-200/70 dark:bg-purple-400/30', 'ação')}
+        {item('bg-green-200/70 dark:bg-green-400/30', 'mídia')}
+        {item('bg-amber-200/80 dark:bg-amber-400/30 ring-1 ring-amber-500/70', 'não existe')}
+      </p>
+      {orphans.length > 0 ? (
+        <p className="text-[11px] text-amber-700 dark:text-amber-300 flex flex-wrap items-center gap-1.5">
+          <AlertTriangle size={13} className="shrink-0" aria-hidden="true" />
+          <span>
+            Sem correspondente no CRM (o agente não vai receber nada no lugar):{' '}
+            {orphans.map((o, i) => (
+              <span key={`${o.kind}-${o.name}`}>
+                {i > 0 ? ', ' : ''}
+                <code className="font-mono">{o.text}</code> ({TOKEN_KIND_LABEL[o.kind]})
+              </span>
+            ))}
+          </span>
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * Componente React `PromptEditor`.
  * @returns {Element} Retorna um valor do tipo `Element`.
@@ -117,10 +154,31 @@ export const PromptEditor: React.FC<{
   onInsertToken: (token: string, at?: number) => void;
   actions: PromptPaletteAction[];
   media: PromptPaletteMedia[];
+  /** false enquanto as mídias do agente não chegaram (não acusa [[midia:...]] de inexistente) */
+  mediaLoaded?: boolean;
   /** Destaque temporário da textarea (após "Inserir no roteiro" de outra aba) */
   highlight?: boolean;
-}> = ({ id = 'agent-system-prompt', value, onChange, textareaRef, onInsertToken, actions, media, highlight = false }) => {
+}> = ({
+  id = 'agent-system-prompt',
+  value,
+  onChange,
+  textareaRef,
+  onInsertToken,
+  actions,
+  media,
+  mediaLoaded = true,
+  highlight = false,
+}) => {
   const [dragOver, setDragOver] = useState(false);
+
+  // O que é token de verdade neste agente (o resto fica em âmbar no texto)
+  const known: KnownTokens = {
+    vars: PROMPT_VARIABLE_NAMES,
+    actions: actions.map((a) => a.key),
+    media: media.map((m) => m.name),
+    mediaLoaded,
+  };
+  const orphans = orphanTokens(value, known);
 
   // Só o arrasto de um chip (PROMPT_TOKEN_MIME) é tratado aqui. Texto comum
   // (mover uma frase da própria textarea, trazer de outra janela) fica com o
@@ -161,9 +219,20 @@ export const PromptEditor: React.FC<{
       <aside className="lg:order-2 space-y-4 lg:sticky lg:top-4 self-start" aria-label="Paleta do roteiro">
         <p className={HELP_CLASS}>Clique para inserir no cursor ou arraste até o ponto certo do texto.</p>
 
-        <PaletteGroup icon={<Braces size={14} aria-hidden="true" />} title="Variáveis">
+        <PaletteGroup
+          icon={<Braces size={14} aria-hidden="true" />}
+          title="Variáveis"
+          help="O CRM troca pelo valor real na hora do atendimento."
+        >
           {PROMPT_VARIABLES.map((v) => (
-            <TokenChip key={v.key} token={v.key} title={`${v.description} (${v.key})`} onInsert={onInsertToken} />
+            <TokenChip
+              key={v.key}
+              token={v.key}
+              label={promptVariableName(v.key)}
+              tone="blue"
+              title={`${v.description} (${v.key})`}
+              onInsert={onInsertToken}
+            />
           ))}
         </PaletteGroup>
 
@@ -212,29 +281,32 @@ export const PromptEditor: React.FC<{
       </aside>
 
       <div className="lg:order-1 min-w-0 space-y-2">
-        <textarea
-          ref={textareaRef}
+        <HighlightedScript
           id={id}
-          className={`${TEXTAREA_CLASS} font-mono text-xs leading-relaxed min-h-[420px] transition-shadow ${
+          value={value}
+          onChange={onChange}
+          known={known}
+          textareaRef={textareaRef}
+          rows={26}
+          maxLength={PROMPT_MAX_LENGTH}
+          ariaLabel="Roteiro do agente"
+          className={`min-h-[420px] transition-shadow ${
             dragOver
-              ? 'ring-2 ring-purple-500 border-purple-500 bg-purple-50/60 dark:bg-purple-900/10'
+              ? 'ring-2 ring-purple-500 border-purple-500'
               : highlight
                 ? 'ring-2 ring-purple-400 border-purple-400'
                 : ''
           }`}
-          rows={26}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
           onDragOver={handleDragOver}
           onDragEnter={(e) => {
             if (isPromptTokenDrag(e.dataTransfer.types)) setDragOver(true);
           }}
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
-          aria-label="Roteiro do agente"
-          maxLength={PROMPT_MAX_LENGTH}
-          spellCheck={false}
         />
+
+        <TokenLegend orphans={orphans} />
+
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className={HELP_CLASS}>
             Lembrete: cada quebra de linha da resposta vira uma mensagem separada no WhatsApp. Uma ideia por linha, no

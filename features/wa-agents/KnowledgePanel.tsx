@@ -29,6 +29,7 @@ import {
   Pencil,
   Save,
   Tags,
+  ExternalLink,
 } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
 import { useToast } from '@/context/ToastContext';
@@ -40,6 +41,7 @@ import {
   useAddWaAgentMedia,
   useDeleteWaAgentDocument,
   useDeleteWaAgentMedia,
+  useOpenWaAgentDocument,
   useReprocessWaAgentDocument,
   useUpdateWaAgentDocument,
   useUpdateWaAgentMedia,
@@ -289,12 +291,14 @@ type DocumentMetaDraft = { title: string; description: string; tags: string };
 function DocumentRow({
   doc,
   busy,
+  onOpen,
   onReprocess,
   onDelete,
   onSaveMeta,
 }: {
   doc: AgentDocumentRow;
   busy: boolean;
+  onOpen: () => void;
   onReprocess: () => void;
   onDelete: () => void;
   onSaveMeta: (meta: { title: string | null; description: string | null; tags: string[] }) => Promise<unknown>;
@@ -390,6 +394,16 @@ function DocumentRow({
         ) : null}
       </div>
       <div className="flex items-center gap-0.5 shrink-0">
+        <button
+          type="button"
+          className={BTN_ICON}
+          onClick={onOpen}
+          disabled={busy}
+          aria-label={`Abrir ${doc.name}`}
+          title="Abrir o arquivo numa aba nova"
+        >
+          <ExternalLink size={14} aria-hidden="true" />
+        </button>
         <button
           type="button"
           className={BTN_ICON}
@@ -585,6 +599,7 @@ export const KnowledgePanel: React.FC<{
   const delDoc = useDeleteWaAgentDocument(agentId);
   const reprocess = useReprocessWaAgentDocument(agentId);
   const updateDoc = useUpdateWaAgentDocument(agentId);
+  const openDoc = useOpenWaAgentDocument(agentId);
   const addMedia = useAddWaAgentMedia(agentId);
   const updateMedia = useUpdateWaAgentMedia(agentId);
   const delMedia = useDeleteWaAgentMedia(agentId);
@@ -727,6 +742,22 @@ export const KnowledgePanel: React.FC<{
                 key={doc.id}
                 doc={doc}
                 busy={busyId === doc.id}
+                onOpen={() => {
+                  // A aba abre ANTES do await (aberta depois, o navegador barra como pop-up)
+                  // e só então recebe a URL assinada.
+                  const aba = window.open('about:blank', '_blank');
+                  if (aba) aba.opener = null;
+                  void runBusy(
+                    doc.id,
+                    async () => {
+                      const url = await openDoc.mutateAsync(doc.id);
+                      if (aba) aba.location.href = url;
+                      else window.open(url, '_blank', 'noopener');
+                    },
+                    '',
+                    'Falha ao abrir o arquivo'
+                  ).catch(() => aba?.close());
+                }}
                 onReprocess={() =>
                   void runBusy(doc.id, () => reprocess.mutateAsync(doc.id), 'Reprocessando o documento...', 'Falha ao reprocessar').catch(
                     () => undefined

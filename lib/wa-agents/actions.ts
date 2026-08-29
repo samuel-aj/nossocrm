@@ -128,6 +128,60 @@ async function runAction(
       if (error) throw new Error(error.message);
       return 'negócio marcado como perdido';
     }
+    case 'append_description': {
+      if (!dealId) return 'sem negócio: descrição ignorada';
+      const texto = summary.trim();
+      if (!texto) return 'sem resumo: descrição ignorada';
+      const prefixo = action.prefix?.trim();
+      const trecho = prefixo ? `${prefixo}\n${texto}` : texto;
+      const { data: atual } = await admin
+        .from('deals')
+        .select('description')
+        .eq('organization_id', orgId)
+        .eq('id', dealId)
+        .maybeSingle();
+      // Mesma regra da API pública (PATCH /deals description_append): anexa numa linha nova
+      const anterior = typeof (atual as { description?: string | null } | null)?.description === 'string'
+        ? ((atual as { description: string }).description ?? '').trim()
+        : '';
+      const { error } = await admin
+        .from('deals')
+        .update({ description: anterior ? `${anterior}\n${trecho}` : trecho, updated_at: now.toISOString() })
+        .eq('organization_id', orgId)
+        .eq('id', dealId);
+      if (error) throw new Error(error.message);
+      return 'descrição do negócio atualizada';
+    }
+    case 'set_product': {
+      if (!dealId) return 'sem negócio: produto ignorado';
+      const { data: product } = await admin
+        .from('products')
+        .select('id, name, price')
+        .eq('organization_id', orgId)
+        .eq('id', action.product_id)
+        .maybeSingle();
+      const prod = product as { id: string; name: string; price: number | null } | null;
+      if (!prod) throw new Error('produto não encontrado nesta organização');
+      // Idempotente: o mesmo produto não entra duas vezes no negócio
+      const { data: existing } = await admin
+        .from('deal_items')
+        .select('id')
+        .eq('organization_id', orgId)
+        .eq('deal_id', dealId)
+        .eq('product_id', prod.id)
+        .limit(1);
+      if ((existing ?? []).length > 0) return `produto "${prod.name}" já estava no negócio`;
+      const { error } = await admin.from('deal_items').insert({
+        organization_id: orgId,
+        deal_id: dealId,
+        product_id: prod.id,
+        name: prod.name,
+        quantity: 1,
+        price: prod.price ?? 0,
+      });
+      if (error) throw new Error(error.message);
+      return `produto "${prod.name}" lançado no negócio`;
+    }
     case 'assign_owner': {
       if (!(await ownerBelongsToOrg(admin, orgId, action.owner_id))) {
         throw new Error('responsável não pertence à organização');

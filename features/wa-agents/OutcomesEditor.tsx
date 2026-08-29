@@ -25,8 +25,11 @@ import {
   Tag,
   CircleX,
   UserCheck,
+  Package,
+  FileText,
   CalendarPlus,
   Webhook,
+  HelpCircle,
   type LucideIcon,
 } from 'lucide-react';
 import type { EndAction, Outcome } from '@/lib/wa-agents/types';
@@ -44,6 +47,8 @@ export const ACTION_LABELS: Record<ActionType, string> = {
   add_tag: 'Adicionar rótulo',
   mark_lost: 'Marcar como perdido',
   assign_owner: 'Atribuir responsável',
+  set_product: 'Cadastrar produto no negócio',
+  append_description: 'Escrever na descrição do lead',
   create_task: 'Criar tarefa',
   webhook: 'Chamar webhook',
 };
@@ -57,11 +62,26 @@ export const ACTION_ICONS: Record<ActionType, LucideIcon> = {
   add_tag: Tag,
   mark_lost: CircleX,
   assign_owner: UserCheck,
+  set_product: Package,
+  append_description: FileText,
   create_task: CalendarPlus,
   webhook: Webhook,
 };
 
 const ACTION_TYPES = Object.keys(ACTION_LABELS) as ActionType[];
+
+/**
+ * Ação gravada por uma versão MAIS NOVA do CRM (aba antiga aberta, agente
+ * configurado por API): a tela precisa mostrar algo em vez de quebrar. Ícone e
+ * rótulo sempre existem; a ação em si é preservada intacta ao salvar.
+ */
+export function actionIcon(type: string): LucideIcon {
+  return ACTION_ICONS[type as ActionType] ?? HelpCircle;
+}
+
+export function actionLabel(type: string): string {
+  return ACTION_LABELS[type as ActionType] ?? `Ação "${type}" (versão mais nova do CRM)`;
+}
 
 /** Variáveis aceitas no corpo personalizado da ação "Chamar webhook". */
 export const ACTION_WEBHOOK_VARIABLES: Array<{ key: string; description: string }> = [
@@ -125,6 +145,10 @@ export function defaultAction(
       return { type };
     case 'assign_owner':
       return { type, owner_id: options?.owners[0]?.id ?? '' };
+    case 'set_product':
+      return { type, product_id: options?.products[0]?.id ?? '' };
+    case 'append_description':
+      return { type };
     case 'create_task':
       return { type, title: '', days: 1 };
     case 'webhook':
@@ -173,6 +197,14 @@ export function describeAction(action: EndAction, agents: WaAgentListItem[], opt
       const owner = options?.owners.find((o) => o.id === action.owner_id);
       return `atribuir a ${owner?.name ?? 'responsável não escolhido'}`;
     }
+    case 'set_product': {
+      const product = options?.products.find((p) => p.id === action.product_id);
+      return `cadastrar o produto ${product?.name ?? 'não escolhido'}`;
+    }
+    case 'append_description':
+      return action.prefix?.trim()
+        ? `escrever na descrição do lead começando com "${action.prefix.trim()}"`
+        : 'escrever o resumo na descrição do lead';
     case 'create_task': {
       const days = action.days ?? 0;
       return `criar tarefa ${action.title.trim() ? `"${action.title.trim()}"` : 'sem título'}${
@@ -181,6 +213,9 @@ export function describeAction(action: EndAction, agents: WaAgentListItem[], opt
     }
     case 'webhook':
       return `chamar webhook ${hostOf(action.url)}`;
+    default:
+      // Tipo gravado por uma versão mais nova do CRM: descreve sem quebrar a tela
+      return actionLabel((action as { type: string }).type).toLowerCase();
   }
 }
 
@@ -207,13 +242,13 @@ export function ActionSummary({
   return (
     <ul className="flex flex-wrap gap-1.5" aria-label="Ações">
       {actions.map((a, i) => {
-        const Icon = ACTION_ICONS[a.type];
+        const Icon = actionIcon(a.type);
         const text = describeAction(a, agents, options);
         return (
           <li
             key={`${a.type}-${i}`}
             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200"
-            title={ACTION_LABELS[a.type]}
+            title={actionLabel(a.type)}
           >
             <Icon size={12} className="text-purple-600 dark:text-purple-400 shrink-0" aria-hidden="true" />
             <span>{text.charAt(0).toUpperCase() + text.slice(1)}</span>
@@ -429,6 +464,35 @@ function ActionFields({
           ))}
         </select>
       );
+    case 'append_description':
+      return (
+        <input
+          id={`${idPrefix}-prefix`}
+          className={INPUT_CLASS}
+          value={action.prefix ?? ''}
+          onChange={(e) => onChange({ ...action, prefix: e.target.value || undefined })}
+          placeholder='Texto antes do resumo (opcional). Ex.: "Pré-atendimento IA:"'
+          maxLength={120}
+          aria-label="Texto antes do resumo na descrição"
+        />
+      );
+    case 'set_product':
+      return (
+        <select
+          id={`${idPrefix}-product`}
+          className={INPUT_CLASS}
+          value={action.product_id}
+          onChange={(e) => onChange({ ...action, product_id: e.target.value })}
+          aria-label="Produto"
+        >
+          <option value="">Selecione o produto</option>
+          {(options?.products ?? []).map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      );
     case 'create_task':
       return (
         <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
@@ -500,6 +564,14 @@ function ActionFields({
           </details>
         </div>
       );
+    default:
+      // Ação de uma versão mais nova do CRM: sem formulário aqui, mas ela é
+      // preservada como está (só trocar o tipo no seletor a substitui).
+      return (
+        <p className={HELP_CLASS}>
+          Configurada numa versão mais nova do CRM. Recarregue a página para editar; a ação continua valendo como está.
+        </p>
+      );
   }
 }
 
@@ -551,7 +623,7 @@ export const ActionsEditor: React.FC<{
         const aPrefix = `${idPrefix}-action-${aIndex}`;
         const setAction = (a: EndAction) => onChange(value.map((x, i) => (i === aIndex ? a : x)));
         const types = visibleTypes.includes(action.type) ? visibleTypes : [action.type, ...visibleTypes];
-        const Icon = ACTION_ICONS[action.type];
+        const Icon = actionIcon(action.type);
         return (
           <div
             key={aPrefix}
@@ -559,7 +631,7 @@ export const ActionsEditor: React.FC<{
           >
             <span
               className="mt-2 p-1.5 rounded-md bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400"
-              title={ACTION_LABELS[action.type]}
+              title={actionLabel(action.type)}
             >
               <Icon size={14} aria-hidden="true" />
             </span>
@@ -571,7 +643,7 @@ export const ActionsEditor: React.FC<{
             >
               {types.map((t) => (
                 <option key={t} value={t}>
-                  {ACTION_LABELS[t]}
+                  {actionLabel(t)}
                 </option>
               ))}
             </select>

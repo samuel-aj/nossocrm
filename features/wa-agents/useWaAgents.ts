@@ -33,6 +33,7 @@ export type WaAgentOptions = {
   boards: Array<{ id: string; name: string; stages: Array<{ id: string; label: string; order: number }> }>;
   owners: Array<{ id: string; name: string }>;
   tags: string[];
+  products: Array<{ id: string; name: string }>;
 };
 
 export type WaRunsFilters = {
@@ -213,6 +214,7 @@ export function useWaAgentOptions() {
         boards: json.boards ?? [],
         owners: json.owners ?? [],
         tags: json.tags ?? [],
+        products: json.products ?? [],
       };
       return options;
     },
@@ -350,6 +352,19 @@ export function useDeleteWaAgentDocument(agentId: string | null | undefined) {
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: documentsKey(agentId) });
+    },
+  });
+}
+
+/** Link temporário para abrir o arquivo original do documento (bucket privado). */
+export function useOpenWaAgentDocument(agentId: string | null | undefined) {
+  return useMutation({
+    mutationFn: async (docId: string): Promise<string> => {
+      const json = await waAgentsFetch<{ url?: string }>(
+        `/api/wa-agents/agents/${agentId}/documents/${docId}/file`
+      );
+      if (!json.url) throw new Error('Não foi possível abrir o arquivo');
+      return json.url;
     },
   });
 }

@@ -39,16 +39,19 @@ import {
   AI_PROVIDERS,
   AgentInputSchema,
   DEFAULT_AGENT_TRIGGERS,
+  DEFAULT_AGENT_TYPING,
   type AgentInput,
   type AgentPublic,
   type AgentTriggers,
+  type AgentTyping,
   type AgentWebhook,
   type CustomAction,
   type Outcome,
   type AgentStartMode,
   type AgentFollowup,
 } from '@/lib/wa-agents/types';
-import { MODEL_CATALOG, PROVIDER_LABELS } from '@/lib/wa-agents/catalog';
+import { MODEL_CATALOG, PROMPT_VARIABLE_NAMES, PROVIDER_LABELS } from '@/lib/wa-agents/catalog';
+import { typingDelayMs, typingSecondsLabel } from '@/lib/wa-agents/typing';
 import { DEFAULT_OUTCOMES, DEFAULT_STOP_RULES, DEFAULT_SYSTEM_PROMPT } from '@/lib/wa-agents/defaults';
 import {
   WaAgentsApiError,
@@ -65,6 +68,8 @@ import { OutcomesEditor } from './OutcomesEditor';
 import { CustomActionsEditor } from './CustomActionsEditor';
 import { WebhooksEditor } from './WebhooksEditor';
 import { PromptEditor, insertToken, mediaToken } from './PromptEditor';
+import { HighlightedScript } from './HighlightedScript';
+import type { KnownTokens } from './tokens';
 import { FollowupsEditor } from './FollowupsEditor';
 import { KnowledgePanel } from './KnowledgePanel';
 import { AgentTestDrawer } from './AgentTestDrawer';
@@ -129,6 +134,7 @@ type AgentFormState = {
   webhooks: AgentWebhook[];
   helper_agent_ids: string[];
   tools: AgentToolsState;
+  typing: AgentTyping;
 };
 
 const CUSTOM_MODEL = '__custom__';
@@ -171,15 +177,16 @@ const FIELD_TABS: Record<string, EditorTab> = {
   history_limit: 'config',
   line_delay_ms: 'config',
   human_pause_minutes: 'config',
-  max_replies: 'config',
-  only_new_conversations: 'config',
-  start_mode: 'config',
+  max_replies: 'roteiro',
+  only_new_conversations: 'gatilhos',
+  start_mode: 'gatilhos',
   followups: 'gatilhos',
   webhooks: 'config',
   outcomes: 'acoes',
   custom_actions: 'acoes',
   helper_agent_ids: 'acoes',
   tools: 'acoes',
+  typing: 'config',
 };
 
 // ---------------------------------------------------------------- Formulário
@@ -194,6 +201,11 @@ function normalizeTriggers(src: Partial<AgentTriggers> | null | undefined): Agen
     inbound: { ...DEFAULT_AGENT_TRIGGERS.inbound, ...(src?.inbound ?? {}) },
     deal: { ...DEFAULT_AGENT_TRIGGERS.deal, ...(src?.deal ?? {}) },
   };
+}
+
+/** "Digitando" com os padrões preenchidos (agentes anteriores à coluna `typing`). */
+function normalizeTyping(src: Partial<AgentTyping> | null | undefined): AgentTyping {
+  return { ...DEFAULT_AGENT_TYPING, ...(src ?? {}) };
 }
 
 function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInput>): AgentFormState {
@@ -226,6 +238,7 @@ function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInpu
     webhooks: src.webhooks ?? [],
     helper_agent_ids: src.helper_agent_ids ?? [],
     tools: { calculator: src.tools?.calculator ?? true },
+    typing: normalizeTyping(src.typing),
   };
 }
 
@@ -268,6 +281,7 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
     webhooks: form.webhooks,
     helper_agent_ids: form.helper_agent_ids,
     tools: { calculator: form.tools.calculator },
+    typing: form.typing,
   };
   if (form.clear_api_key) payload.api_key = null;
   else if (form.api_key.trim()) payload.api_key = form.api_key.trim();
@@ -326,6 +340,19 @@ const NUM_LIMITS: Record<NumField, [min: number, max: number]> = {
 function clampField(field: NumField, value: number | ''): number {
   const [min, max] = NUM_LIMITS[field];
   return clampInt(String(value), min, max);
+}
+
+/** Limites do "digitando" (mesmos do AgentTypingSchema); vazio volta ao padrão. */
+const TYPING_LIMITS: Record<keyof Omit<AgentTyping, 'enabled'>, [number, number]> = {
+  ms_per_char: [5, 500],
+  min_ms: [0, 30000],
+  max_ms: [0, 60000],
+};
+
+function clampTyping(field: keyof Omit<AgentTyping, 'enabled'>, raw: string): number {
+  const [min, max] = TYPING_LIMITS[field];
+  if (raw === '') return DEFAULT_AGENT_TYPING[field];
+  return clampInt(raw, min, max);
 }
 
 /** Valor digitado num campo numérico, sem limite: '' fica '' para não travar a digitação. */
@@ -916,6 +943,15 @@ export const AgentEditor: React.FC<{
   const knowledgeCount = (docsQ.data?.length ?? 0) + (mediaQ.data?.length ?? 0);
   const countBadge = (n: number) => (n > 0 ? <Badge tone="slate">{n}</Badge> : undefined);
 
+  // Variáveis, ações e mídias que existem de verdade: o roteiro e o "Quando encerrar"
+  // destacam em âmbar o que estiver escrito como token mas não existir.
+  const knownTokens: KnownTokens = {
+    vars: PROMPT_VARIABLE_NAMES,
+    actions: form.custom_actions.filter((a) => a.key).map((a) => a.key),
+    media: (mediaQ.data ?? []).map((m) => m.name),
+    mediaLoaded: mediaQ.isSuccess,
+  };
+
   const tabs: TabDef[] = [
     { id: 'roteiro', label: 'Roteiro', icon: <FileText size={16} aria-hidden="true" /> },
     {
@@ -928,7 +964,7 @@ export const AgentEditor: React.FC<{
       id: 'acoes',
       label: 'Ações',
       icon: <ListChecks size={16} aria-hidden="true" />,
-      badge: countBadge(form.custom_actions.length + form.outcomes.length),
+      badge: countBadge(form.custom_actions.length),
     },
     {
       id: 'gatilhos',
@@ -1021,6 +1057,7 @@ export const AgentEditor: React.FC<{
             onInsertToken={insertPromptToken}
             actions={form.custom_actions.filter((a) => a.key).map((a) => ({ key: a.key, label: a.label }))}
             media={(mediaQ.data ?? []).map((m) => ({ name: m.name, kind: m.kind }))}
+            mediaLoaded={mediaQ.isSuccess}
             highlight={promptHighlight}
           />
         </Panel>
@@ -1035,15 +1072,31 @@ export const AgentEditor: React.FC<{
             htmlFor="agent-stop-rules"
             help="Ex.: encerrar quando tiver nome, cidade e resumo do caso; ou quando a pessoa pedir para falar com alguém da equipe. Ao encerrar, o agente escolhe um dos Resultados da aba Ações."
           >
-            <textarea
+            <HighlightedScript
               id="agent-stop-rules"
-              className={TEXTAREA_CLASS}
+              value={form.stop_rules}
+              onChange={(stop_rules) => patch({ stop_rules })}
+              known={knownTokens}
               rows={7}
               maxLength={4000}
-              value={form.stop_rules}
-              onChange={(e) => patch({ stop_rules: e.target.value })}
-              aria-label="Quando encerrar"
+              ariaLabel="Quando encerrar"
               placeholder="Descreva quando o agente deve encerrar o atendimento e o que dizer na mensagem final."
+            />
+          </Field>
+          <Field
+            label="Limite de respostas por atendimento"
+            htmlFor="agent-max-replies"
+            help="Trava de segurança: 0 = sem limite. Ao atingir o limite, o agente manda a mensagem final e encerra sozinho, mesmo que as regras acima não tenham acontecido."
+          >
+            <input
+              id="agent-max-replies"
+              type="number"
+              min={0}
+              max={500}
+              className={`${INPUT_CLASS} sm:max-w-[200px]`}
+              value={form.max_replies}
+              onChange={(e) => patch({ max_replies: readNumber(e.target.value) })}
+              onBlur={() => patch({ max_replies: clampField('max_replies', form.max_replies) })}
             />
           </Field>
         </Panel>
@@ -1092,10 +1145,29 @@ export const AgentEditor: React.FC<{
         </Panel>
 
         <Panel
-          title="Agentes auxiliares"
-          description="O agente pode consultar estes agentes durante a conversa (ferramenta consultar_agente)."
+          title="Recursos do agente"
+          description="O que ele pode usar durante a conversa, além do roteiro e da base de conhecimento."
           icon={<Users size={16} />}
         >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Calculadora</p>
+              <p className={HELP_CLASS}>
+                Para contas (parcelas, prazos, percentuais) sem o modelo chutar números (ferramenta calcular).
+              </p>
+            </div>
+            <Toggle
+              checked={form.tools.calculator}
+              onChange={(calculator) => patch({ tools: { ...form.tools, calculator } })}
+              label="Calculadora"
+            />
+          </div>
+
+          <div className="pt-3 border-t border-slate-200 dark:border-white/10 space-y-3">
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Agentes auxiliares</p>
+            <p className={HELP_CLASS}>
+              O agente pode consultar estes agentes durante a conversa (ferramenta consultar_agente).
+            </p>
           {agentsQ.isLoading ? (
             <p className={HELP_CLASS}>Carregando agentes...</p>
           ) : helperCandidates.length === 0 ? (
@@ -1120,25 +1192,10 @@ export const AgentEditor: React.FC<{
               )}
             />
           )}
-          <p className={HELP_CLASS}>
-            O auxiliar não fala com o lead: responde só a este agente, com o próprio roteiro e a própria base de
-            conhecimento. Agentes desligados não podem ser auxiliares.
-          </p>
-        </Panel>
-
-        <Panel title="Ferramentas" description="Recursos extras que o agente pode usar na conversa." icon={<Calculator size={16} />}>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Calculadora</p>
-              <p className={HELP_CLASS}>
-                Para contas (parcelas, prazos, percentuais) sem o modelo chutar números (ferramenta calcular).
-              </p>
-            </div>
-            <Toggle
-              checked={form.tools.calculator}
-              onChange={(calculator) => patch({ tools: { ...form.tools, calculator } })}
-              label="Calculadora"
-            />
+            <p className={HELP_CLASS}>
+              O auxiliar não fala com o lead: responde só a este agente, com o próprio roteiro e a própria base de
+              conhecimento. Agentes desligados não podem ser auxiliares.
+            </p>
           </div>
         </Panel>
       </TabPanel>
@@ -1174,6 +1231,36 @@ export const AgentEditor: React.FC<{
 
         <Panel title="Gatilhos" description={`Quando o agente entra em ação: ${triggerSummary}.`} icon={<Zap size={16} />}>
           <TriggersFields value={form.triggers} onChange={(triggers) => patch({ triggers })} options={options} />
+          <div className="pt-3 border-t border-slate-200 dark:border-white/10 space-y-3">
+            <Field
+              label="Ao ser ativado (pelo chat ou pelo pipeline)"
+              htmlFor="agent-start-mode"
+              help="Vale para o botão Automações do chat e para o início pelo pipeline. Por palavra-chave o agente sempre responde à mensagem que o ativou."
+            >
+              <select
+                id="agent-start-mode"
+                className={INPUT_CLASS}
+                value={form.start_mode}
+                onChange={(e) => patch({ start_mode: e.target.value === 'wait_reply' ? 'wait_reply' : 'speak_first' })}
+              >
+                <option value="speak_first">Já envia a primeira mensagem</option>
+                <option value="wait_reply">Espera a próxima mensagem do contato e só então responde</option>
+              </select>
+            </Field>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Só conversas novas</p>
+                <p className={HELP_CLASS}>
+                  Ligado, o agente não entra em conversas que já tiveram mensagens enviadas pela equipe.
+                </p>
+              </div>
+              <Toggle
+                checked={form.only_new_conversations}
+                onChange={(only_new_conversations) => patch({ only_new_conversations })}
+                label="Atender só conversas novas"
+              />
+            </div>
+          </div>
         </Panel>
 
         <Panel
@@ -1312,8 +1399,8 @@ export const AgentEditor: React.FC<{
         </Panel>
 
         <Panel
-          title="Comportamento"
-          description="Tempos de espera, histórico, pausa quando um atendente responde e limite de respostas."
+          title="Ritmo e memória"
+          description="Tempo de espera para agrupar mensagens, ritmo de envio, quanto do histórico ele lê e a pausa quando um atendente responde."
           icon={<SlidersHorizontal size={16} />}
         >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1382,50 +1469,77 @@ export const AgentEditor: React.FC<{
                 onBlur={() => patch({ human_pause_minutes: clampField('human_pause_minutes', form.human_pause_minutes) })}
               />
             </Field>
-            <Field
-              label="Limite de respostas por atendimento"
-              htmlFor="agent-max-replies"
-              help="0 = sem limite. Ao atingir o limite, o agente manda a mensagem final e encerra sozinho: garantia de que ele sempre para."
-            >
-              <input
-                id="agent-max-replies"
-                type="number"
-                min={0}
-                max={500}
-                className={INPUT_CLASS}
-                value={form.max_replies}
-                onChange={(e) => patch({ max_replies: readNumber(e.target.value) })}
-                onBlur={() => patch({ max_replies: clampField('max_replies', form.max_replies) })}
-              />
-            </Field>
           </div>
-          <Field
-            label="Ao ser ativado (pelo chat ou pelo pipeline)"
-            htmlFor="agent-start-mode"
-            help="Vale para o botão Automações do chat e para o início pelo pipeline. Por palavra-chave o agente sempre responde à mensagem que o ativou."
-          >
-            <select
-              id="agent-start-mode"
-              className={INPUT_CLASS}
-              value={form.start_mode}
-              onChange={(e) => patch({ start_mode: e.target.value === 'wait_reply' ? 'wait_reply' : 'speak_first' })}
-            >
-              <option value="speak_first">Já envia a primeira mensagem</option>
-              <option value="wait_reply">Espera a próxima mensagem do contato e só então responde</option>
-            </select>
-          </Field>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Só conversas novas</p>
-              <p className={HELP_CLASS}>
-                Ligado, o agente não entra em conversas que já tiveram mensagens enviadas pela equipe.
-              </p>
+
+          <div className="pt-3 border-t border-slate-200 dark:border-white/10 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Mostrar &quot;digitando...&quot;</p>
+                <p className={HELP_CLASS}>
+                  Antes de cada mensagem o contato vê o agente digitando, pelo tempo que uma pessoa levaria para
+                  escrever aquele texto. Substitui o intervalo fixo entre linhas.
+                </p>
+              </div>
+              <Toggle
+                checked={form.typing.enabled}
+                onChange={(enabled) => patch({ typing: { ...form.typing, enabled } })}
+                label="Mostrar digitando"
+              />
             </div>
-            <Toggle
-              checked={form.only_new_conversations}
-              onChange={(only_new_conversations) => patch({ only_new_conversations })}
-              label="Atender só conversas novas"
-            />
+            {form.typing.enabled ? (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <Field
+                    label="Velocidade (ms por caractere)"
+                    htmlFor="agent-typing-speed"
+                    help="45 = ritmo de celular. Maior = digita mais devagar."
+                  >
+                    <input
+                      id="agent-typing-speed"
+                      type="number"
+                      min={5}
+                      max={500}
+                      step={5}
+                      className={INPUT_CLASS}
+                      value={form.typing.ms_per_char}
+                      onChange={(e) =>
+                        patch({ typing: { ...form.typing, ms_per_char: clampTyping('ms_per_char', e.target.value) } })
+                      }
+                    />
+                  </Field>
+                  <Field label="Mínimo por mensagem (ms)" htmlFor="agent-typing-min" help="Piso, mesmo numa linha curta.">
+                    <input
+                      id="agent-typing-min"
+                      type="number"
+                      min={0}
+                      max={30000}
+                      step={100}
+                      className={INPUT_CLASS}
+                      value={form.typing.min_ms}
+                      onChange={(e) => patch({ typing: { ...form.typing, min_ms: clampTyping('min_ms', e.target.value) } })}
+                    />
+                  </Field>
+                  <Field label="Máximo por mensagem (ms)" htmlFor="agent-typing-max" help="Teto, para linha longa não travar a conversa.">
+                    <input
+                      id="agent-typing-max"
+                      type="number"
+                      min={0}
+                      max={60000}
+                      step={500}
+                      className={INPUT_CLASS}
+                      value={form.typing.max_ms}
+                      onChange={(e) => patch({ typing: { ...form.typing, max_ms: clampTyping('max_ms', e.target.value) } })}
+                    />
+                  </Field>
+                </div>
+                <p className={HELP_CLASS}>
+                  Prévia: mensagem curta (40 caracteres) ={' '}
+                  <strong>{typingSecondsLabel(typingDelayMs('x'.repeat(40), form.typing))} s</strong> · média (120) ={' '}
+                  <strong>{typingSecondsLabel(typingDelayMs('x'.repeat(120), form.typing))} s</strong> · longa (240) ={' '}
+                  <strong>{typingSecondsLabel(typingDelayMs('x'.repeat(240), form.typing))} s</strong> digitando.
+                </p>
+              </>
+            ) : null}
           </div>
         </Panel>
 

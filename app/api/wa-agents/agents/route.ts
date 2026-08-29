@@ -53,6 +53,7 @@ function toInsertRow(input: AgentInput, helperIds: string[]) {
     triggers: input.triggers,
     helper_agent_ids: helperIds,
     tools: input.tools,
+    typing: input.typing,
   };
 }
 
