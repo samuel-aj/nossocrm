@@ -13,7 +13,9 @@
  * âmbar = escrito como token mas sem correspondente (não vai puxar nada).
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { caretIndexFromPoint, caretRectAt, indexFromPoint } from './caret';
 import { splitPromptTokens, type KnownTokens, type TokenPart } from './tokens';
+import { PROMPT_TOKEN_MIME, isPromptTokenDrag } from './ui';
 
 /**
  * Fonte/padding compartilhados pela textarea e pelo espelho: precisam bater exatamente.
@@ -47,10 +49,12 @@ export type HighlightedScriptProps = {
   ariaLabel?: string;
   /** classes extras do contêiner (ex.: altura mínima, anel de destaque) */
   className?: string;
-  onDragOver?: React.DragEventHandler<HTMLTextAreaElement>;
-  onDragEnter?: React.DragEventHandler<HTMLTextAreaElement>;
-  onDragLeave?: React.DragEventHandler<HTMLTextAreaElement>;
-  onDrop?: React.DragEventHandler<HTMLTextAreaElement>;
+  /**
+   * Chip solto no texto: `at` é a posição medida no espelho (undefined quando
+   * não deu para medir; aí o chamador usa o cursor atual). Passar isto liga o
+   * arrastar-e-soltar de tokens, com cursor próprio desenhado no ponto exato.
+   */
+  onInsertToken?: (token: string, at?: number) => void;
 };
 
 /**
@@ -68,14 +72,16 @@ export const HighlightedScript: React.FC<HighlightedScriptProps> = ({
   placeholder,
   ariaLabel,
   className = '',
-  onDragOver,
-  onDragEnter,
-  onDragLeave,
-  onDrop,
+  onInsertToken,
 }) => {
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
   const ref = textareaRef ?? innerRef;
   const mirrorRef = useRef<HTMLPreElement | null>(null);
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  /** Arrasto de chip em andamento sobre o campo (pinta a borda) */
+  const [dragging, setDragging] = useState(false);
+  /** Onde o chip vai cair: índice no texto + a barrinha já medida, em coordenadas do contêiner */
+  const [drop, setDrop] = useState<{ at: number; left: number; top: number; height: number } | null>(null);
   // Largura/altura copiadas da textarea: com a mesma caixa, a quebra de linha do
   // espelho é idêntica (inclusive quando aparece a barra de rolagem).
   const [box, setBox] = useState<{ w: number; h: number } | null>(null);
@@ -102,9 +108,70 @@ export const HighlightedScript: React.FC<HighlightedScriptProps> = ({
 
   const parts = splitPromptTokens(value, known);
 
+  // ------------------------------------------------------------------ arrasto
+  /** Posição sob o ponteiro: medida no espelho; se não der, pergunta ao navegador. */
+  const posicaoDoPonto = (x: number, y: number): number | null => {
+    const medida = indexFromPoint(mirrorRef.current, x, y);
+    if (medida !== null) return medida;
+    return ref.current ? caretIndexFromPoint(ref.current, x, y) : null;
+  };
+
+  const arrastando = !!onInsertToken;
+  const temArquivos = (e: React.DragEvent) => Array.from(e.dataTransfer.types ?? []).includes('Files');
+
+  /** Mede a barrinha do cursor para o índice `at` (só é chamada em evento, nunca na renderização). */
+  const medirCaret = (at: number | null): { at: number; left: number; top: number; height: number } | null => {
+    const mirror = mirrorRef.current;
+    const box = boxRef.current;
+    if (at === null || !mirror || !box) return null;
+    const rect = caretRectAt(mirror, at);
+    if (!rect) return null;
+    const base = box.getBoundingClientRect();
+    return { at, left: rect.left - base.left, top: rect.top - base.top, height: rect.height || 14 };
+  };
+
+  const limparArrasto = () => {
+    setDragging(false);
+    setDrop(null);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLTextAreaElement>) => {
+    if (!arrastando) return;
+    if (isPromptTokenDrag(e.dataTransfer.types)) {
+      // Sem preventDefault o navegador recusa o drop
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      setDragging(true);
+      setDrop(medirCaret(posicaoDoPonto(e.clientX, e.clientY)));
+      return;
+    }
+    // Arquivo solto aqui abriria no navegador: cancelamos. Texto comum segue o padrão.
+    if (temArquivos(e)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'none';
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLTextAreaElement>) => {
+    if (!arrastando) return;
+    if (!isPromptTokenDrag(e.dataTransfer.types)) {
+      if (temArquivos(e)) e.preventDefault();
+      limparArrasto();
+      return;
+    }
+    e.preventDefault();
+    const token = (e.dataTransfer.getData(PROMPT_TOKEN_MIME) || e.dataTransfer.getData('text/plain')).trim();
+    const at = posicaoDoPonto(e.clientX, e.clientY) ?? drop?.at ?? null;
+    limparArrasto();
+    if (token) onInsertToken?.(token, at ?? undefined);
+  };
+
   return (
     <div
-      className={`relative rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-800 focus-within:ring-2 focus-within:ring-purple-500/20 focus-within:border-purple-500 ${className}`}
+      ref={boxRef}
+      className={`relative rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-800 focus-within:ring-2 focus-within:ring-purple-500/20 focus-within:border-purple-500 ${
+        dragging ? 'ring-2 ring-purple-500 border-purple-500' : ''
+      } ${className}`}
     >
       {/*
         pointer-events-none é OBRIGATÓRIO: sem ele o espelho entra no teste de
@@ -137,11 +204,21 @@ export const HighlightedScript: React.FC<HighlightedScriptProps> = ({
         spellCheck={false}
         onChange={(e) => onChange(e.target.value)}
         onScroll={sync}
-        onDragOver={onDragOver}
-        onDragEnter={onDragEnter}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={limparArrasto}
+        onDragEnd={limparArrasto}
+        onDrop={handleDrop}
       />
+
+      {/* Cursor de onde o chip vai cair: desenhado por nós, porque a barrinha
+          nativa não aparece de forma confiável com a camada de destaque. */}
+      {drop ? (
+        <span
+          aria-hidden="true"
+          className="absolute z-20 w-0.5 rounded-full bg-purple-600 dark:bg-purple-400 pointer-events-none animate-pulse"
+          style={{ left: drop.left, top: drop.top, height: drop.height }}
+        />
+      ) : null}
     </div>
   );
 };

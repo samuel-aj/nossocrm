@@ -5,16 +5,16 @@
  * ações durante a conversa e mídias). Cada chip pode ser clicado (insere no
  * cursor) ou arrastado até o ponto exato do texto (HTML5 drag and drop).
  *
- * A inserção em si fica com o editor pai (`onInsertToken`), que também é
- * chamado pelas outras abas ("Inserir no roteiro"); aqui só calculamos a
- * posição do cursor a partir do ponto onde o chip foi solto.
+ * A inserção fica com o editor pai (`onInsertToken`), que também é chamado
+ * pelas outras abas ("Inserir no roteiro"). O arrastar-e-soltar (posição exata
+ * e cursor na tela) é do HighlightedScript, que tem a régua de medição.
  */
-import React, { useState } from 'react';
+import React from 'react';
 import { Braces, ListChecks, Paperclip, Image as ImageIcon, Film, Music, FileText, Info, AlertTriangle } from 'lucide-react';
 import { PROMPT_VARIABLES, PROMPT_VARIABLE_NAMES, promptVariableName } from '@/lib/wa-agents/catalog';
 import { HighlightedScript } from './HighlightedScript';
 import { TOKEN_KIND_LABEL, orphanTokens, type KnownTokens } from './tokens';
-import { HELP_CLASS, Notice, PROMPT_TOKEN_MIME, TokenChip, isPromptTokenDrag } from './ui';
+import { HELP_CLASS, Notice, TokenChip } from './ui';
 
 export type PromptPaletteAction = { key: string; label: string };
 export type PromptPaletteMedia = { name: string; kind: 'image' | 'video' | 'audio' | 'document' };
@@ -45,46 +45,6 @@ export function insertToken(value: string, token: string, start: number, end: nu
   const needAfter = after.length > 0 && !/^\s/.test(after);
   const inserted = `${needBefore ? ' ' : ''}${token}${needAfter ? ' ' : ''}`;
   return { next: before + inserted + after, caret: s + inserted.length };
-}
-
-type CaretPosition = { offsetNode: Node; offset: number };
-type DocumentWithCaret = Document & {
-  caretPositionFromPoint?: (x: number, y: number) => CaretPosition | null;
-  caretRangeFromPoint?: (x: number, y: number) => Range | null;
-};
-
-/**
- * Posição do cursor na textarea a partir de um ponto da tela
- * (`caretPositionFromPoint`, com `caretRangeFromPoint` como reserva).
- * Devolve null quando o navegador não sabe responder; o chamador usa o cursor atual.
- */
-export function caretIndexFromPoint(el: HTMLTextAreaElement, x: number, y: number): number | null {
-  const doc = el.ownerDocument as DocumentWithCaret;
-  const clamp = (n: number) => Math.max(0, Math.min(n, el.value.length));
-  // Um ponto que caia na camada de destaque devolveria a posição DENTRO de um
-  // pedaço colorido, não do roteiro inteiro: nesse caso vale o cursor atual.
-  const noEspelho = (node: Node | null | undefined): boolean => {
-    const start = node?.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element | null);
-    return !!start?.closest?.('[data-token-mirror]');
-  };
-  if (typeof doc.caretPositionFromPoint === 'function') {
-    const pos = doc.caretPositionFromPoint(x, y);
-    // Firefox e Chrome novos devolvem a própria textarea como nó; alguns devolvem o nó de texto interno.
-    if (pos && !noEspelho(pos.offsetNode) && (pos.offsetNode === el || pos.offsetNode.nodeType === Node.TEXT_NODE)) {
-      return clamp(pos.offset);
-    }
-  }
-  if (typeof doc.caretRangeFromPoint === 'function') {
-    const range = doc.caretRangeFromPoint(x, y);
-    if (
-      range &&
-      !noEspelho(range.startContainer) &&
-      (range.startContainer === el || range.startContainer.nodeType === Node.TEXT_NODE)
-    ) {
-      return clamp(range.startOffset);
-    }
-  }
-  return null;
 }
 
 const MEDIA_ICONS: Record<PromptPaletteMedia['kind'], React.ReactNode> = {
@@ -181,8 +141,6 @@ export const PromptEditor: React.FC<{
   mediaLoaded = true,
   highlight = false,
 }) => {
-  const [dragOver, setDragOver] = useState(false);
-
   // O que é token de verdade neste agente (o resto fica em âmbar no texto)
   const known: KnownTokens = {
     vars: PROMPT_VARIABLE_NAMES,
@@ -191,39 +149,6 @@ export const PromptEditor: React.FC<{
     mediaLoaded,
   };
   const orphans = orphanTokens(value, known);
-
-  // Só o arrasto de um chip (PROMPT_TOKEN_MIME) é tratado aqui. Texto comum
-  // (mover uma frase da própria textarea, trazer de outra janela) fica com o
-  // padrão do navegador, que também remove o trecho de origem ao mover.
-  // Arquivos são cancelados para não abrirem no navegador.
-  const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer.types ?? []).includes('Files');
-
-  const handleDragOver = (e: React.DragEvent<HTMLTextAreaElement>) => {
-    if (isPromptTokenDrag(e.dataTransfer.types)) {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'copy';
-      if (!dragOver) setDragOver(true);
-      return;
-    }
-    if (hasFiles(e)) {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'none';
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent<HTMLTextAreaElement>) => {
-    setDragOver(false);
-    if (!isPromptTokenDrag(e.dataTransfer.types)) {
-      if (hasFiles(e)) e.preventDefault();
-      return;
-    }
-    e.preventDefault();
-    const token = (e.dataTransfer.getData(PROMPT_TOKEN_MIME) || e.dataTransfer.getData('text/plain')).trim();
-    if (!token) return;
-    const el = e.currentTarget;
-    const at = caretIndexFromPoint(el, e.clientX, e.clientY);
-    onInsertToken(token, at ?? undefined);
-  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_272px] gap-4">
@@ -302,19 +227,8 @@ export const PromptEditor: React.FC<{
           rows={26}
           maxLength={PROMPT_MAX_LENGTH}
           ariaLabel="Roteiro do agente"
-          className={`min-h-[420px] transition-shadow ${
-            dragOver
-              ? 'ring-2 ring-purple-500 border-purple-500'
-              : highlight
-                ? 'ring-2 ring-purple-400 border-purple-400'
-                : ''
-          }`}
-          onDragOver={handleDragOver}
-          onDragEnter={(e) => {
-            if (isPromptTokenDrag(e.dataTransfer.types)) setDragOver(true);
-          }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={handleDrop}
+          className={`min-h-[420px] transition-shadow ${highlight ? 'ring-2 ring-purple-400 border-purple-400' : ''}`}
+          onInsertToken={onInsertToken}
         />
 
         <TokenLegend orphans={orphans} />

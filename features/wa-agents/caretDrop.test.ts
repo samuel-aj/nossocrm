@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { caretIndexFromPoint } from './PromptEditor';
+import { caretIndexFromPoint, indexFromPoint } from './caret';
 
 /**
  * Arrastar um chip até um ponto do roteiro: a posição precisa vir da textarea.
@@ -65,5 +65,26 @@ describe('caretIndexFromPoint', () => {
     doc.caretPositionFromPoint = undefined;
     doc.caretRangeFromPoint = undefined;
     expect(caretIndexFromPoint(textarea, 10, 10)).toBeNull();
+  });
+});
+
+/**
+ * A medição no espelho é a fonte principal (a API do navegador virou reserva).
+ * Sem layout — como aqui — ela precisa devolver null em vez de chutar 0, senão
+ * o token cairia sempre no começo do roteiro.
+ */
+describe('indexFromPoint (medição no espelho)', () => {
+  it('sem espelho devolve null', () => {
+    expect(indexFromPoint(null, 10, 10)).toBeNull();
+  });
+
+  it('espelho vazio devolve null', () => {
+    const vazio = document.createElement('pre');
+    document.body.appendChild(vazio);
+    expect(indexFromPoint(vazio, 10, 10)).toBeNull();
+  });
+
+  it('sem layout (todas as medidas zeradas) devolve null em vez de chutar', () => {
+    expect(indexFromPoint(espelho, 10, 10)).toBeNull();
   });
 });
