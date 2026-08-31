@@ -8,7 +8,9 @@ import {
 import { KanbanListRow, NO_ACTIVITY_STATUS } from './KanbanList';
 import { computeActivityStatusMap } from '@/features/boards/utils/dealActivityStatus';
 import { useActivities } from '@/lib/query/hooks/useActivitiesQuery';
-import { useOrgMembers } from '@/lib/query/hooks';
+import { useOrgMembers, useOrgUsers } from '@/lib/query/hooks';
+import { useCRM } from '@/context/CRMContext';
+import { useAuth } from '@/context/AuthContext';
 
 type QuickAddType = 'CALL' | 'MEETING' | 'EMAIL';
 
@@ -139,8 +141,19 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
   const [openStageMenuId, setOpenStageMenuId] = useState<string | null>(null);
   const handleToggleStageMenu = useCallback((dealId: string) => {
     setOpenStageMenuId((prev) => (prev === dealId ? null : dealId));
+    // Abrir um menu fecha o outro: os dois saem da mesma linha e ficariam
+    // sobrepostos na tela.
+    setOpenOwnerMenuId(null);
   }, []);
   const handleCloseStageMenu = useCallback(() => setOpenStageMenuId(null), []);
+
+  // Dropdown de trocar responsável: mesma mecânica do de estágio.
+  const [openOwnerMenuId, setOpenOwnerMenuId] = useState<string | null>(null);
+  const handleToggleOwnerMenu = useCallback((dealId: string) => {
+    setOpenOwnerMenuId((prev) => (prev === dealId ? null : dealId));
+    setOpenStageMenuId(null);
+  }, []);
+  const handleCloseOwnerMenu = useCallback(() => setOpenOwnerMenuId(null), []);
 
   const handleSort = useCallback(
     (column: SortColumn) => {
@@ -177,6 +190,53 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
     for (const m of orgMembers) map.set(m.id, m.name);
     return map;
   }, [orgMembers]);
+
+  // Trocar responsável pela lista. Mesma regra do card do lead: só admin
+  // reatribui (useOrgUsers().isAdmin); vendedor apenas enxerga.
+  const { isAdmin: canAssignOwner } = useOrgUsers();
+  const { updateDeal, addActivity } = useCRM();
+  const { profile } = useAuth();
+  // Atribuíveis: só quem é membro DESTA org (super admin da agência sem
+  // vínculo resolve nome, mas não vira opção) — igual ao DealDetailModal.
+  // useMemo porque a lista desce pra linhas memoizadas: um array novo a
+  // cada render derrubaria o React.memo de todas elas.
+  const assignableMembers = useMemo(() => orgMembers.filter((m) => m.member), [orgMembers]);
+
+  const autorAtual =
+    profile?.nickname ||
+    profile?.display_name ||
+    profile?.name ||
+    profile?.first_name ||
+    (profile?.email || '').split('@')[0] ||
+    'Usuário';
+
+  const handleChangeOwner = useCallback(
+    (dealId: string, ownerId: string) => {
+      const deal = filteredDeals.find((d) => d.id === dealId);
+      if (!deal || deal.ownerId === ownerId) return;
+
+      updateDeal(dealId, { ownerId });
+
+      // A troca entra na timeline do lead com as mesmas frases do card, pra
+      // não ficar auditada num lugar e silenciosa no outro.
+      const anterior = deal.ownerId ? ownerNameById.get(deal.ownerId) : undefined;
+      const novo = ownerId ? ownerNameById.get(ownerId) : undefined;
+      const titulo = ownerId
+        ? `${autorAtual} definiu ${novo ?? 'outro usuário'} como responsável`
+        : `${autorAtual} removeu ${anterior ? `${anterior} de responsável` : 'o responsável'} do lead`;
+
+      void addActivity({
+        dealId,
+        dealTitle: deal.title,
+        type: 'STATUS_CHANGE',
+        title: titulo,
+        date: new Date().toISOString(),
+        completed: true,
+        user: { name: autorAtual, avatar: profile?.avatar_url || '' },
+      } as Parameters<typeof addActivity>[0]);
+    },
+    [filteredDeals, updateDeal, addActivity, ownerNameById, autorAtual, profile?.avatar_url]
+  );
 
   const compareDeals = useCallback(
     (a: DealView, b: DealView): number => {
@@ -458,6 +518,12 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                     isStageMenuOpen={openStageMenuId === deal.id}
                     onToggleStageMenu={handleToggleStageMenu}
                     onCloseStageMenu={handleCloseStageMenu}
+                    canAssignOwner={canAssignOwner}
+                    assignableMembers={assignableMembers}
+                    isOwnerMenuOpen={openOwnerMenuId === deal.id}
+                    onToggleOwnerMenu={handleToggleOwnerMenu}
+                    onCloseOwnerMenu={handleCloseOwnerMenu}
+                    onChangeOwner={handleChangeOwner}
                   />
                 ))}
               {sortedGroups.map((group, groupIndex) => {
@@ -524,6 +590,12 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                           isStageMenuOpen={openStageMenuId === deal.id}
                           onToggleStageMenu={handleToggleStageMenu}
                           onCloseStageMenu={handleCloseStageMenu}
+                          canAssignOwner={canAssignOwner}
+                          assignableMembers={assignableMembers}
+                          isOwnerMenuOpen={openOwnerMenuId === deal.id}
+                          onToggleOwnerMenu={handleToggleOwnerMenu}
+                          onCloseOwnerMenu={handleCloseOwnerMenu}
+                          onChangeOwner={handleChangeOwner}
                         />
                       ))}
                   </React.Fragment>
