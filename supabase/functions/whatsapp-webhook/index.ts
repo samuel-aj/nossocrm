@@ -565,7 +565,11 @@ Deno.serve(async (req) => {
             connection_id: conn.id,
             contact_id: contact?.id ?? null,
             wa_phone: phone,
-            wa_name: isGroup ? grupo?.subject ?? null : m.pushName ?? null,
+            // No ECO (mensagem que o PRÓPRIO número enviou pelo celular) o
+            // pushName é o nome do escritório, não o de quem está do outro
+            // lado — usá-lo aqui batizava a conversa com o nome da própria
+            // empresa. Sem nome, a lista mostra o número, que é o certo.
+            wa_name: isGroup ? grupo?.subject ?? null : fromMe ? null : m.pushName ?? null,
             ...(isGroup
               ? { is_group: true, group_jid: remoteJid, participants_count: grupo?.size ?? null }
               : {}),
