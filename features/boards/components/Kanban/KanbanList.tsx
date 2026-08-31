@@ -192,6 +192,11 @@ type KanbanListRowProps = {
   onToggleOwnerMenu: (dealId: string) => void;
   onCloseOwnerMenu: () => void;
   onChangeOwner: (dealId: string, ownerId: string) => void;
+  /** Divisória no topo da linha, usada nas abas AGRUPADAS (a aba Todos usa
+   *  o divide-y do tbody). Ela pula a primeira célula de propósito: assim a
+   *  faixa colorida da etapa desce inteira, ligando o grupo, em vez de ser
+   *  cortada por um filete a cada lead. */
+  showDivider?: boolean;
 };
 
 /** Padding padrão das células. py-3 dá a mesma altura de linha com e sem a
@@ -225,7 +230,10 @@ export const KanbanListRow = React.memo(function KanbanListRow({
   onToggleOwnerMenu,
   onCloseOwnerMenu,
   onChangeOwner,
+  showDivider = false,
 }: KanbanListRowProps) {
+  // Mesma cor/opacidade da divisória da aba Todos (divide-slate-200).
+  const CELULA = showDivider ? `${CELL} border-t border-slate-200 dark:border-white/10` : CELL;
   const { triggerRef: stageTriggerRef, menuRef: stageMenuRef, pos: stageMenuPos } = useAnchoredMenu(
     isStageMenuOpen,
     onCloseStageMenu
@@ -290,7 +298,7 @@ export const KanbanListRow = React.memo(function KanbanListRow({
         </div>
       </td>
 
-      <td className={CELL}>
+      <td className={CELULA}>
         <span
           className="block truncate font-semibold text-slate-900 dark:text-white group-hover:text-primary-700 dark:group-hover:text-primary-300 transition-colors"
           title={deal.title}
@@ -304,7 +312,7 @@ export const KanbanListRow = React.memo(function KanbanListRow({
         ) : null}
       </td>
 
-      <td className={CELL}>
+      <td className={CELULA}>
         {deal.tags.length > 0 ? (
           <div className="flex flex-wrap items-center gap-1">
             {deal.tags.slice(0, 2).map((tag, index) => (
@@ -330,7 +338,7 @@ export const KanbanListRow = React.memo(function KanbanListRow({
         )}
       </td>
 
-      <td className={CELL}>
+      <td className={CELULA}>
         {onMoveDealToStage ? (
           <>
             <button
@@ -424,13 +432,13 @@ export const KanbanListRow = React.memo(function KanbanListRow({
         )}
       </td>
 
-      <td className={CELL}>
+      <td className={CELULA}>
         <span className="font-semibold tabular-nums text-slate-800 dark:text-slate-100">
           {formatValor(deal.value)}
         </span>
       </td>
 
-      <td className={CELL}>
+      <td className={CELULA}>
         {canAssignOwner ? (
           <>
             <button
@@ -549,7 +557,7 @@ export const KanbanListRow = React.memo(function KanbanListRow({
         )}
       </td>
 
-      <td className={CELL}>
+      <td className={CELULA}>
         {criado ? (
           <span
             className="whitespace-nowrap text-xs tabular-nums text-slate-500 dark:text-slate-400"
@@ -564,7 +572,7 @@ export const KanbanListRow = React.memo(function KanbanListRow({
 
       {/* Custom Fields Cells */}
       {customFieldDefinitions.map((field) => (
-        <td key={field.id} className={`${CELL} text-right text-sm text-slate-600 dark:text-slate-300`}>
+        <td key={field.id} className={`${CELULA} text-right text-sm text-slate-600 dark:text-slate-300`}>
           {deal.customFields?.[field.key] || <span className="text-slate-300 dark:text-slate-600">—</span>}
         </td>
       ))}

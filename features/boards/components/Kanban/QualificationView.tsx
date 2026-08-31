@@ -574,9 +574,13 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                       </td>
                     </tr>
                     {!isCollapsed &&
-                      group.deals.map((deal) => (
+                      group.deals.map((deal, dealIndex) => (
                         <KanbanListRow
                           key={deal.id}
+                          // Divisória entre os leads do grupo; o primeiro não
+                          // leva, senão vira uma barra logo abaixo do título
+                          // do grupo.
+                          showDivider={dealIndex > 0}
                           deal={deal}
                           stageLabel={group.stage.label}
                           stages={board.stages}
