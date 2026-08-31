@@ -689,10 +689,10 @@ export const ChatsPage: React.FC = () => {
       style={{ paddingBottom: 'calc(var(--app-bottom-nav-height, 0px) + var(--app-safe-area-bottom, 0px))' }}
     >
       {/* ============ COLUNA ESQUERDA: conversas + contatos ============ */}
-      {/* +50px de largura (era 360/380): nome de grupo costuma ter prefixo
+      {/* +65px de largura (era 360/380): nome de grupo costuma ter prefixo
           ("AJ Marketing - ...") e cortava antes de chegar na parte que
           identifica o grupo. */}
-      <aside className={`${selected ? 'hidden md:flex' : 'flex'} w-full md:w-[410px] lg:w-[430px] shrink-0 flex-col border-r border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card`}>
+      <aside className={`${selected ? 'hidden md:flex' : 'flex'} w-full md:w-[425px] lg:w-[445px] shrink-0 flex-col border-r border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card`}>
         {/* Cabeçalho */}
         <div className="shrink-0 px-4 pt-4 pb-3 border-b border-slate-100 dark:border-white/5">
           <div className="flex items-center justify-between gap-2 mb-3">
