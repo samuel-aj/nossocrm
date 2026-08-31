@@ -496,7 +496,7 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
             <tbody
               className={
                 activeTab === 'todos'
-                  ? 'divide-y divide-slate-100/80 dark:divide-white/[0.06]'
+                  ? 'divide-y divide-slate-200 dark:divide-white/10'
                   : undefined
               }
             >
