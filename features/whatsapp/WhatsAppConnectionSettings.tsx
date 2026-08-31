@@ -19,6 +19,8 @@ import {
   Loader2,
   MessageCircle,
   QrCode,
+  Smartphone,
+  X,
   RefreshCw,
   RotateCw,
   Trash2,
@@ -211,6 +213,9 @@ export function WhatsAppConnectionSettings() {
     staleTime: 5 * 60_000,
   });
   const [esBusy, setEsBusy] = useState(false);
+  // Passo de escolha antes do Cadastro Embutido: usar o WhatsApp que o cliente
+  // já tem no celular (coexistência) ou cadastrar um número novo.
+  const [esChoiceOpen, setEsChoiceOpen] = useState(false);
   // Passo único que a Meta exige no painel dela: colar aqui o Configuration ID
   // (criado 1x em Facebook Login for Business > Configurations). Fica no banco.
   const [esConfigIdDraft, setEsConfigIdDraft] = useState('');
@@ -279,9 +284,19 @@ export function WhatsAppConnectionSettings() {
       document.body.appendChild(js);
     });
 
-  const conectarComFacebook = async () => {
+  /**
+   * Abre o Cadastro Embutido da Meta.
+   *
+   * `coexistencia` = número que CONTINUA funcionando no app do WhatsApp
+   * Business do celular (o cliente segue atendendo pelo aparelho e o CRM
+   * enxerga tudo). A Meta chama esse fluxo de `whatsapp_business_app_onboarding`
+   * e ele é outra tela: em vez de cadastrar um número novo, o cliente confirma
+   * um código dentro do próprio app.
+   */
+  const conectarComFacebook = async (coexistencia = false) => {
     const cfg = esQ.data;
     if (!cfg?.configured || !cfg.appId || !cfg.configId) return;
+    setEsChoiceOpen(false);
     setEsBusy(true);
     esAssets.current = {};
     try {
@@ -301,15 +316,30 @@ export function WhatsAppConnectionSettings() {
                 addToast('A Meta não devolveu a conta/número escolhidos. Tente de novo.', 'error');
                 return;
               }
-              const r = await fetchJson<{ ok: boolean; numero?: string | null; recebimentoOk?: boolean; avisoWebhook?: string | null }>(
-                '/api/whatsapp/embedded-signup',
-                { method: 'POST', body: JSON.stringify({ code, wabaId, phoneNumberId }) }
-              );
+              const r = await fetchJson<{
+                ok: boolean;
+                numero?: string | null;
+                recebimentoOk?: boolean;
+                avisoWebhook?: string | null;
+                coexistencia?: boolean;
+                sincronismo?: { contatos: boolean; historico: boolean; erro: string | null } | null;
+              }>('/api/whatsapp/embedded-signup', {
+                method: 'POST',
+                body: JSON.stringify({ code, wabaId, phoneNumberId, coexistence: coexistencia }),
+              });
               qc.invalidateQueries({ queryKey: ['waConnection'] });
               addToast(
                 `Número ${r.numero || ''} conectado! ${r.recebimentoOk ? 'Envio e recebimento prontos.' : `Atenção: ${r.avisoWebhook || 'recebimento pendente'}`}`.trim(),
                 r.recebimentoOk ? 'success' : 'warning'
               );
+              // A Meta só dá 24h pra pedir agenda e histórico do aparelho; se
+              // esse pedido falhar, o admin precisa saber na hora.
+              if (r.coexistencia && r.sincronismo && !(r.sincronismo.contatos && r.sincronismo.historico)) {
+                addToast(
+                  `Conectado, mas a sincronização com o celular falhou (${r.sincronismo.erro || 'motivo não informado'}). Reconecte o número para tentar de novo.`,
+                  'warning'
+                );
+              }
             } catch (e) {
               addToast(`Erro ao concluir a conexão: ${(e as Error).message}`, 'error');
             } finally {
@@ -321,7 +351,13 @@ export function WhatsAppConnectionSettings() {
           config_id: cfg.configId,
           response_type: 'code',
           override_default_response_type: true,
-          extras: { setup: {}, sessionInfoVersion: '3' },
+          extras: {
+            setup: {},
+            sessionInfoVersion: '3',
+            // Só na coexistência: sem isso a Meta abre a tela de cadastrar
+            // número novo, que é o outro caminho.
+            ...(coexistencia ? { featureType: 'whatsapp_business_app_onboarding' } : {}),
+          },
         }
       );
     } catch (e) {
@@ -884,7 +920,7 @@ export function WhatsAppConnectionSettings() {
               {esQ.data?.configured && (
                 <button
                   type="button"
-                  onClick={() => void conectarComFacebook()}
+                  onClick={() => setEsChoiceOpen(true)}
                   disabled={esBusy}
                   className="mt-auto mb-2 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-sm font-bold shadow-lg shadow-sky-600/20 transition-colors disabled:opacity-60"
                 >
@@ -1255,7 +1291,7 @@ export function WhatsAppConnectionSettings() {
             {esQ.data?.configured && (
               <button
                 type="button"
-                onClick={() => void conectarComFacebook()}
+                onClick={() => setEsChoiceOpen(true)}
                 disabled={esBusy}
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-sm font-bold shadow-lg shadow-sky-600/20 transition-colors disabled:opacity-60"
               >
@@ -1329,6 +1365,72 @@ export function WhatsAppConnectionSettings() {
               </ul>
               <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5">
                 Agentes de IA e robôs não respondem em grupo.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Escolha do caminho da API oficial: usar o WhatsApp que o cliente já
+          tem no celular (coexistência) ou cadastrar um número novo. */}
+      {esChoiceOpen && (
+        <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-white/10 dark:bg-dark-card">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-6 py-4 dark:border-white/10">
+              <div>
+                <h3 className="font-bold text-slate-900 dark:text-white">Conectar WhatsApp API</h3>
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  Escolha como este número entra no CRM.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEsChoiceOpen(false)}
+                className="shrink-0 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                aria-label="Fechar"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="space-y-3 p-6">
+              <button
+                type="button"
+                onClick={() => void conectarComFacebook(true)}
+                disabled={esBusy}
+                className="w-full rounded-xl border border-slate-200 p-4 text-left transition-colors hover:border-emerald-400 hover:bg-emerald-50/60 disabled:opacity-60 dark:border-white/10 dark:hover:border-emerald-500/50 dark:hover:bg-emerald-900/10"
+              >
+                <span className="flex items-center gap-2">
+                  <Smartphone size={16} className="shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  <span className="text-sm font-bold text-slate-900 dark:text-white">Conectar meu WhatsApp</span>
+                </span>
+                <span className="mt-1.5 block text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                  Para um número que <strong>já está em uso</strong> no app do WhatsApp Business, no celular. O
+                  aparelho continua funcionando normalmente e o CRM passa a ver as conversas. A Meta pede uma
+                  confirmação dentro do próprio app.
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void conectarComFacebook(false)}
+                disabled={esBusy}
+                className="w-full rounded-xl border border-slate-200 p-4 text-left transition-colors hover:border-sky-400 hover:bg-sky-50/60 disabled:opacity-60 dark:border-white/10 dark:hover:border-sky-500/50 dark:hover:bg-sky-900/10"
+              >
+                <span className="flex items-center gap-2">
+                  <KeyRound size={16} className="shrink-0 text-sky-600 dark:text-sky-400" />
+                  <span className="text-sm font-bold text-slate-900 dark:text-white">Conectar número novo</span>
+                </span>
+                <span className="mt-1.5 block text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                  Para um número que vai ser <strong>usado só pelo CRM</strong>. Ele é registrado na Meta e deixa de
+                  funcionar no app do WhatsApp no celular.
+                </span>
+              </button>
+
+              <p className="pt-1 text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">
+                Em qualquer um dos dois a cobrança por conversa é da Meta. No número que segue no celular, a Meta
+                limita o envio a 20 mensagens por segundo e não permite grupos, mensagens temporárias nem listas de
+                transmissão pelo CRM.
               </p>
             </div>
           </div>

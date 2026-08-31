@@ -229,7 +229,15 @@ export async function setupMetaWebhooks(input: {
     // acesso cai nos conjuntos de sempre (a cura periódica reaplica se a org
     // ligar grupos depois).
     const GRUPOS = ',group_lifecycle_update,group_participants_update,group_settings_update,group_status_update';
+    // COEXISTÊNCIA (número que segue no app do WhatsApp Business no celular):
+    // a Meta exige, além do smb_message_echoes, os campos `history` (conversas
+    // antigas do aparelho) e `smb_app_state_sync` (agenda de contatos dele).
+    // Entram na frente da lista e, se a conta não tiver acesso, os conjuntos
+    // seguintes assumem — a assinatura nunca falha por inteiro.
+    const COEXISTENCIA = ',history,smb_app_state_sync';
     const conjuntos = [
+      `messages,message_echoes,smb_message_echoes${COEXISTENCIA}${GRUPOS}`,
+      `messages,message_echoes,smb_message_echoes${COEXISTENCIA}`,
       `messages,message_echoes,smb_message_echoes${GRUPOS}`,
       'messages,message_echoes,smb_message_echoes',
       'messages,message_echoes',

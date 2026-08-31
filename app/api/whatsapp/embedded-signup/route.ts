@@ -150,7 +150,10 @@ export async function POST(req: Request) {
     code?: string;
     wabaId?: string;
     phoneNumberId?: string;
+    /** true = número que continua no app do WhatsApp Business (coexistência) */
+    coexistence?: boolean;
   } | null;
+  const coexistence = body?.coexistence === true;
   const code = (body?.code || '').trim();
   const wabaId = (body?.wabaId || '').trim().replace(/\D/g, '');
   const phoneNumberId = (body?.phoneNumberId || '').trim().replace(/\D/g, '');
@@ -184,16 +187,19 @@ export async function POST(req: Request) {
     return json({ error: check.error || 'A Meta não reconheceu o número autorizado.' }, 502);
   }
 
-  // 3) registro na Cloud API (números novos exigem; coexistência já vem
-  //    registrada e responde erro inofensivo — por isso best-effort)
-  const reg = await fetch(`${GRAPH()}/${encodeURIComponent(check.phoneNumberId!)}/register`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${businessToken}` },
-    body: JSON.stringify({ messaging_product: 'whatsapp', pin: '000000' }),
-    cache: 'no-store',
-  }).then(r => r.json()).catch(e => ({ error: { message: String(e) } }));
-  if ((reg as { error?: { message?: string } }).error) {
-    console.log('[embedded-signup] register (ok falhar em coexistência):', (reg as { error?: { message?: string } }).error?.message);
+  // 3) registro na Cloud API. Em COEXISTÊNCIA a Meta manda PULAR: o número já
+  //    está registrado pelo app do celular, e chamar /register aqui pode
+  //    derrubar o pareamento com o aparelho.
+  if (!coexistence) {
+    const reg = await fetch(`${GRAPH()}/${encodeURIComponent(check.phoneNumberId!)}/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${businessToken}` },
+      body: JSON.stringify({ messaging_product: 'whatsapp', pin: '000000' }),
+      cache: 'no-store',
+    }).then(r => r.json()).catch(e => ({ error: { message: String(e) } }));
+    if ((reg as { error?: { message?: string } }).error) {
+      console.log('[embedded-signup] register:', (reg as { error?: { message?: string } }).error?.message);
+    }
   }
 
   // 4) grava a conexão (mesma convenção de nomes do fluxo manual) e assina os
@@ -251,10 +257,46 @@ export async function POST(req: Request) {
     profile_name: check.verifiedName || undefined,
   });
 
+  // 5) COEXISTÊNCIA: a Meta dá 24h a partir do onboarding para pedir a agenda
+  //    e o histórico do aparelho. Passou disso, o número precisa ser desligado
+  //    e o cliente refazer tudo — por isso é disparado aqui, na hora.
+  //    O conteúdo chega depois, em lotes, pelos webhooks `smb_app_state_sync`
+  //    e `history`. Best-effort: falhar aqui não desfaz a conexão.
+  const sincronismo: { contatos: boolean; historico: boolean; erro: string | null } = {
+    contatos: false,
+    historico: false,
+    erro: null,
+  };
+  if (coexistence) {
+    for (const tipo of ['smb_app_state_sync', 'history'] as const) {
+      try {
+        const r = await fetch(`${GRAPH()}/${encodeURIComponent(check.phoneNumberId!)}/smb_app_data`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${businessToken}` },
+          body: JSON.stringify({ messaging_product: 'whatsapp', sync_type: tipo }),
+          cache: 'no-store',
+        });
+        const jr = (await r.json().catch(() => ({}))) as { error?: { message?: string } };
+        if (r.ok && !jr.error) {
+          if (tipo === 'history') sincronismo.historico = true;
+          else sincronismo.contatos = true;
+        } else {
+          sincronismo.erro = jr.error?.message || `Meta respondeu ${r.status} em ${tipo}`;
+          console.error('[embedded-signup] sincronismo', tipo, sincronismo.erro);
+        }
+      } catch (e) {
+        sincronismo.erro = (e as Error).message;
+        console.error('[embedded-signup] sincronismo', tipo, sincronismo.erro);
+      }
+    }
+  }
+
   return json({
     ok: true,
     numero: check.displayPhoneNumber || null,
     nome: check.verifiedName || null,
+    coexistencia: coexistence,
+    sincronismo: coexistence ? sincronismo : null,
     recebimentoOk: hooks.override || hooks.appWebhook === 'ok',
     avisoWebhook: hooks.appWebhookError || hooks.overrideError || null,
   });
