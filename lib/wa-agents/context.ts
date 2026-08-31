@@ -12,6 +12,7 @@ import { normalizeKeyword } from './text';
 import {
   AgentFollowupSchema,
   AgentLeadContextSchema,
+  AgentMediaUnderstandingSchema,
   AgentToolsSchema,
   AgentTriggersSchema,
   AgentTypingSchema,
@@ -19,6 +20,7 @@ import {
   AI_PROVIDERS,
   CustomActionSchema,
   DEFAULT_AGENT_LEAD_CONTEXT,
+  DEFAULT_AGENT_MEDIA_UNDERSTANDING,
   DEFAULT_AGENT_TOOLS,
   DEFAULT_AGENT_TYPING,
   DEFAULT_AGENT_TRIGGERS,
@@ -32,6 +34,7 @@ import {
   type AgentResources,
   type AgentRow,
   type AgentLeadContext,
+  type AgentMediaUnderstanding,
   type AgentTools,
   type AgentTyping,
   type AgentTriggers,
@@ -181,6 +184,13 @@ export function normalizeLeadContext(raw: unknown): AgentLeadContext {
   return p.success ? p.data : { ...DEFAULT_AGENT_LEAD_CONTEXT };
 }
 
+/** `media_understanding` (jsonb): mídia recebida virando texto; linha antiga = tudo ligado. */
+export function normalizeMediaUnderstanding(raw: unknown): AgentMediaUnderstanding {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ...DEFAULT_AGENT_MEDIA_UNDERSTANDING };
+  const p = AgentMediaUnderstandingSchema.safeParse(raw);
+  return p.success ? p.data : { ...DEFAULT_AGENT_MEDIA_UNDERSTANDING };
+}
+
 /** `helper_agent_ids` (uuid[]) como lista de strings únicas; linhas antigas viram []. */
 export function normalizeHelperIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -234,6 +244,7 @@ export function normalizeAgentRow(raw: Record<string, unknown>): AgentRow {
     tools: normalizeTools(raw.tools),
     typing: normalizeTyping(raw.typing),
     lead_context: normalizeLeadContext(raw.lead_context),
+    media_understanding: normalizeMediaUnderstanding(raw.media_understanding),
     created_by: (raw.created_by as string | null) ?? null,
     created_at: String(raw.created_at ?? ''),
     updated_at: String(raw.updated_at ?? ''),

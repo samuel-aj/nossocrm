@@ -111,7 +111,9 @@ export async function POST(request: Request) {
   // de pipeline usa para iniciar a conversa e, na falta, o primeiro número em que
   // ele atende. Só então o padrão da organização.
   let alvo = connectionId;
-  if (!alvo && body.agent_id) {
+  // Só ao INICIAR: nas outras ações a conversa já existe e mudar o número de
+  // busca poderia criar uma conversa nova (integrações antigas continuam iguais).
+  if (!alvo && body.action === 'start' && body.agent_id) {
     const { data } = await sb
       .from('wa_ai_agents')
       .select('connection_ids, triggers')

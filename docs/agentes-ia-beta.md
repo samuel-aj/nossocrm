@@ -41,6 +41,12 @@ Aba Configurações, painel **Ritmo e memória**: com **Mostrar "digitando..."**
 
 Aba Roteiro, painel **O que ele sabe do lead** (`lead_context`): a **descrição do negócio** e os **campos personalizados** entram no bloco "DADOS DO LEAD" do prompt e podem ser desligados um a um (ambos ligados por padrão). A descrição cabe até 2.500 caracteres (os outros campos, 600), porque costuma guardar o histórico do lead. Além disso, o campo **`deals.ai_context`** — escrito pela integração no cadastro (`POST /deals { ai_context }`) ou depois (`PATCH /deals/{id}`) — entra sempre, junto do contexto que a equipe escreve ao iniciar o atendimento, no bloco "CONTEXTO ADICIONAL INFORMADO PELA EQUIPE". Serve para deixar o contexto pronto no lead mesmo sem ativar a IA naquele momento.
 
+### Mídia do lead (áudio, imagem, figurinha, documento)
+
+Painel **O que ele sabe do lead** → "Mídia que o lead manda" (`media_understanding`, tudo ligado por padrão). Antes de montar a resposta, o motor pega as mensagens novas com arquivo e as transforma em TEXTO usando a **IA do próprio agente** (chave e modelo dele): áudio transcrito (OpenAI whisper-1; Google ouve o arquivo; **Anthropic não transcreve áudio** e a mensagem segue como "[áudio]"), imagem e figurinha descritas pelo modelo (com a legenda do lead junto), PDF/DOCX/TXT extraídos localmente (`unpdf`/`mammoth`, sem custo de IA).
+
+O texto é gravado em `wa_messages.transcription` — o mesmo campo que o chat mostra — então cada arquivo é processado UMA vez e o atendente humano vê o mesmo que o agente. Limites por resposta: 3 arquivos, 14 MB de áudio, 8 MB de imagem, 10 MB de documento e 4.000 caracteres de texto extraído. Falha nunca derruba o atendimento: fica um evento (`media_error`) na execução e a mensagem segue com o marcador. Cada arquivo entendido aparece como `media_understood` no histórico da execução.
+
 ### Memória
 
 O agente lê o histórico da própria conversa (`wa_messages`), inclusive o que o atendente humano escreveu (marcado como `[Atendente humano]`), e um estado curto que ele mesmo salva (`salvar_dados`). Não existe tabela de memória separada.
@@ -178,4 +184,4 @@ Públicas (header `X-Api-Key`, para n8n/Make — só com a beta ligada na org, s
 
 ## Fora desta versão (próximas)
 
-Áudio/imagem/PDF recebidos (hoje entram como `[áudio]`/`[imagem]`; a transcrição salva no chat, quando existir, é usada), horário de funcionamento, relatórios de custo por agente.
+Horário de funcionamento e relatórios de custo por agente.

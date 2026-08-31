@@ -179,6 +179,20 @@ export const AgentLeadContextSchema = z.object({
   custom_fields: z.boolean().default(true),
 });
 export type AgentLeadContext = z.infer<typeof AgentLeadContextSchema>;
+
+// ---------------------------------------------------------------------------
+// Mídia recebida: áudio, imagem, figurinha e documento viram texto pela IA do agente
+// ---------------------------------------------------------------------------
+export const AgentMediaUnderstandingSchema = z.object({
+  /** Áudio do lead transcrito (OpenAI whisper / Google; Anthropic não transcreve) */
+  audio: z.boolean().default(true),
+  /** Imagem e figurinha descritas pelo modelo do agente */
+  image: z.boolean().default(true),
+  /** PDF, DOCX e texto: o conteúdo é extraído do arquivo */
+  document: z.boolean().default(true),
+});
+export type AgentMediaUnderstanding = z.infer<typeof AgentMediaUnderstandingSchema>;
+export const DEFAULT_AGENT_MEDIA_UNDERSTANDING: AgentMediaUnderstanding = { audio: true, image: true, document: true };
 export const DEFAULT_AGENT_LEAD_CONTEXT: AgentLeadContext = { description: true, custom_fields: true };
 
 // ---------------------------------------------------------------------------
@@ -242,6 +256,8 @@ export const AgentInputSchema = z.object({
   typing: AgentTypingSchema.default(DEFAULT_AGENT_TYPING),
   /** O que do cadastro do lead o agente enxerga (descrição, campos personalizados) */
   lead_context: AgentLeadContextSchema.default(DEFAULT_AGENT_LEAD_CONTEXT),
+  /** Mídia recebida virando texto antes de o agente responder */
+  media_understanding: AgentMediaUnderstandingSchema.default(DEFAULT_AGENT_MEDIA_UNDERSTANDING),
 });
 export type AgentInput = z.infer<typeof AgentInputSchema>;
 

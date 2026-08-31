@@ -40,11 +40,13 @@ import {
   AgentInputSchema,
   DEFAULT_AGENT_TRIGGERS,
   DEFAULT_AGENT_LEAD_CONTEXT,
+  DEFAULT_AGENT_MEDIA_UNDERSTANDING,
   DEFAULT_AGENT_TYPING,
   type AgentInput,
   type AgentPublic,
   type AgentTriggers,
   type AgentLeadContext,
+  type AgentMediaUnderstanding,
   type AgentTyping,
   type AgentWebhook,
   type CustomAction,
@@ -138,6 +140,7 @@ type AgentFormState = {
   tools: AgentToolsState;
   typing: AgentTyping;
   lead_context: AgentLeadContext;
+  media_understanding: AgentMediaUnderstanding;
 };
 
 const CUSTOM_MODEL = '__custom__';
@@ -191,6 +194,7 @@ const FIELD_TABS: Record<string, EditorTab> = {
   tools: 'acoes',
   typing: 'config',
   lead_context: 'roteiro',
+  media_understanding: 'roteiro',
 };
 
 // ---------------------------------------------------------------- Formulário
@@ -244,6 +248,7 @@ function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInpu
     tools: { calculator: src.tools?.calculator ?? true },
     typing: normalizeTyping(src.typing),
     lead_context: { ...DEFAULT_AGENT_LEAD_CONTEXT, ...(src.lead_context ?? {}) },
+    media_understanding: { ...DEFAULT_AGENT_MEDIA_UNDERSTANDING, ...(src.media_understanding ?? {}) },
   };
 }
 
@@ -288,6 +293,7 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
     tools: { calculator: form.tools.calculator },
     typing: form.typing,
     lead_context: form.lead_context,
+    media_understanding: form.media_understanding,
   };
   if (form.clear_api_key) payload.api_key = null;
   else if (form.api_key.trim()) payload.api_key = form.api_key.trim();
@@ -1094,6 +1100,41 @@ export const AgentEditor: React.FC<{
             O contexto enviado no cadastro pela API (<code className="font-mono">ai_context</code>) entra sempre, junto
             do contexto que a equipe escreve ao iniciar o atendimento.
           </p>
+
+          <div className="pt-3 border-t border-slate-200 dark:border-white/10 space-y-3">
+            <div>
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Mídia que o lead manda</p>
+              <p className={HELP_CLASS}>
+                Antes de responder, o agente transforma o arquivo em texto usando a IA dele (o resultado também aparece
+                no chat). Sem isso, ele só vê &quot;[áudio]&quot;, &quot;[imagem]&quot;, &quot;[documento]&quot;.
+              </p>
+            </div>
+            {(
+              [
+                ['audio', 'Ouvir áudios', 'Transcreve o que o lead falou.'],
+                ['image', 'Ver imagens e figurinhas', 'Descreve a imagem e transcreve texto de prints, boletos e documentos fotografados.'],
+                ['document', 'Ler documentos', 'Extrai o texto de PDF, DOCX e arquivos de texto.'],
+              ] as Array<[keyof AgentMediaUnderstanding, string, string]>
+            ).map(([campo, titulo, ajuda]) => (
+              <div key={campo} className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm text-slate-700 dark:text-slate-300">{titulo}</p>
+                  <p className={HELP_CLASS}>{ajuda}</p>
+                </div>
+                <Toggle
+                  checked={form.media_understanding[campo]}
+                  onChange={(v) => patch({ media_understanding: { ...form.media_understanding, [campo]: v } })}
+                  label={titulo}
+                />
+              </div>
+            ))}
+            {form.provider === 'anthropic' && form.media_understanding.audio ? (
+              <Notice tone="amber">
+                A Anthropic não transcreve áudio: com este provedor, o áudio continua chegando como
+                &quot;[áudio]&quot;. Imagens e documentos funcionam normalmente.
+              </Notice>
+            ) : null}
+          </div>
         </Panel>
 
         <Panel

@@ -41,6 +41,7 @@ import { logRun } from './runs';
 import { mergeSavedDataInto, NO_REPLY_TOKEN, sanitizeSavedData } from './savedData';
 import { splitLines } from './split';
 import { normalizeKeyword } from './text';
+import { MEDIA_MESSAGE_COLUMNS, understandMedia, type MediaMessageRow } from './mediaIn';
 import { typingDelayMs } from './typing';
 import { buildAgentTools, findByName, type AgentToolRuntime } from './tools';
 import { pickInboundAgent } from './triggers';
@@ -121,7 +122,7 @@ export function sleep(ms: number): Promise<void> {
  */
 export function lockSecondsFor(
   agent: Pick<AgentRow, 'line_delay_ms' | 'webhooks' | 'outcomes' | 'custom_actions'> &
-    Partial<Pick<AgentRow, 'helper_agent_ids' | 'typing'>>,
+    Partial<Pick<AgentRow, 'helper_agent_ids' | 'typing' | 'media_understanding'>>,
   opts: { mediaCount?: number } = {}
 ): number {
   const activeWebhooks = agent.webhooks.filter(w => w.active !== false).length;
@@ -131,10 +132,13 @@ export function lockSecondsFor(
   );
   const helpers = Math.min((agent.helper_agent_ids ?? []).length, 3);
   const media = Math.min(Math.max(0, opts.mediaCount ?? 0), 3);
+  // Entender a mídia recebida (transcrever/descrever) roda antes da resposta
+  const entenderMidia = agent.media_understanding && (agent.media_understanding.audio || agent.media_understanding.image || agent.media_understanding.document) ? 40 : 0;
   // "Digitando" segura a conversa antes de cada linha (até 8): entra no orçamento da trava
   const typing = agent.typing?.enabled ? Math.ceil((8 * agent.typing.max_ms) / 1000) : 0;
   return (
     LOCK_BASE_SECONDS +
+    entenderMidia +
     typing +
     Math.ceil((8 * agent.line_delay_ms) / 1000) +
     25 * (activeWebhooks + actionWebhooks) +
@@ -359,10 +363,10 @@ async function getPendingInbound(
   admin: SupabaseClient,
   ctx: ConversationContext,
   sinceIso: string
-): Promise<WaMessageLite[]> {
+): Promise<MediaMessageRow[]> {
   const { data } = await admin
     .from('wa_messages')
-    .select(MESSAGE_LITE_COLUMNS)
+    .select(`${MESSAGE_LITE_COLUMNS}, ${MEDIA_MESSAGE_COLUMNS}`)
     .eq('organization_id', ctx.conversation.organization_id)
     .eq('conversation_id', ctx.conversation.id)
     .eq('direction', 'in')
@@ -658,7 +662,19 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     const memoriaDesde = ((conv.ai_state ?? {}) as ConversationAiState).memoria_desde ?? null;
     const since = [conv.ai_last_processed_at, memoriaDesde].filter((v): v is string => !!v).sort().pop() ??
       '1970-01-01T00:00:00.000Z';
-    const pending = await getPendingInbound(admin, ctx, since);
+    let pending = await getPendingInbound(admin, ctx, since);
+    // Áudio, imagem, figurinha e documento que o lead mandou viram TEXTO aqui,
+    // com a IA do próprio agente, antes de o prompt ser montado (o resultado fica
+    // em wa_messages.transcription, que é o que o histórico e o chat leem).
+    if (pending.some(m => m.media_type)) {
+      pending = await understandMedia(admin, {
+        organizationId,
+        agent,
+        messages: pending,
+        onEvent: (type, data) => pushEvent(type, data),
+      });
+      await renew();
+    }
     inputText = pending.map(messageText).filter(Boolean).join('\n') || null;
     if (!input.forceReply) {
       if (pending.length === 0) return await finish('skipped', { reason: 'nada a responder' });
