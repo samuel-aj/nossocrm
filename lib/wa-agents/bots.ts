@@ -17,7 +17,7 @@ import {
 } from '@/lib/whatsapp/service';
 import { addDealTag } from './actions';
 import { isWaAgentsBetaEnabled } from './beta';
-import { loadAgent, loadConversationContext, loadDealContext } from './context';
+import { loadAgent, loadConversationContext, loadDealContext, loadLastInboundProviderId } from './context';
 import { runAgentOnConversation } from './engine';
 import { errorMessage } from './errors';
 import { renderTemplate } from './template';
@@ -547,6 +547,30 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
       return connection;
     };
 
+    // Id da última mensagem do contato: a Cloud API da Meta precisa dele tanto
+    // pro "lido" quanto pro "digitando" (no QR é ignorado). Buscado uma vez só.
+    let lastInboundId: string | null | undefined;
+    const getLastInboundId = async (): Promise<string | null> => {
+      if (lastInboundId === undefined) {
+        lastInboundId = await loadLastInboundProviderId(admin, {
+          organizationId: orgId,
+          conversationId,
+        }).catch(() => null);
+      }
+      return lastInboundId;
+    };
+
+    // Dois tiques azuis antes de o robô falar. Enfeite: falha aqui não para o robô.
+    try {
+      const inboundId = await getLastInboundId();
+      if (inboundId) {
+        const provider = getProvider(await getConnection());
+        if (provider.markRead) await provider.markRead({ to: phone, providerMessageId: inboundId });
+      }
+    } catch (e) {
+      note(st, null, `marcar como lido falhou: ${errorMessage(e)}`);
+    }
+
     const nome = (contact?.name || '').trim();
     const tplVars: Record<string, unknown> = {
       nome,
@@ -675,7 +699,11 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
           const provider = getProvider(await getConnection());
           if (provider.sendTyping) {
             try {
-              await provider.sendTyping({ to: phone, ms: seconds * 1000 });
+              await provider.sendTyping({
+                to: phone,
+                ms: seconds * 1000,
+                providerMessageId: (await getLastInboundId()) ?? undefined,
+              });
             } catch (e) {
               note(st, step, `presença "digitando" falhou: ${errorMessage(e)}`);
             }

@@ -141,8 +141,18 @@ export interface WhatsAppProvider {
   logout(): Promise<void>;
   /** Reinicia a sessão da instância sem perder o pareamento (sessão "aberta" mas morta). */
   restart?(): Promise<void>;
-  /** Mostra "digitando..." para o contato por `ms` (best-effort; provedores sem suporte ignoram). */
-  sendTyping?(input: { to: string; ms: number }): Promise<void>;
+  /**
+   * Mostra "digitando..." para o contato por `ms` (best-effort; provedores sem
+   * suporte ignoram).
+   *
+   * `providerMessageId` = id da ÚLTIMA mensagem recebida do contato. A Cloud
+   * API da Meta não tem presença avulsa: o "digitando" viaja junto com a
+   * marcação de lido de uma mensagem específica, então sem esse id ela não
+   * consegue mostrar nada. O QR (Evolution) ignora o campo e usa só `to`.
+   */
+  sendTyping?(input: { to: string; ms: number; providerMessageId?: string }): Promise<void>;
+  /** Marca a mensagem recebida como LIDA (os dois tiques azuis) — best-effort. */
+  markRead?(input: { to: string; providerMessageId: string }): Promise<void>;
   /** Normaliza um payload de webhook do provedor em um InboundEvent. */
   parseWebhook(payload: unknown): InboundEvent;
 }

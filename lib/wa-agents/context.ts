@@ -217,7 +217,7 @@ export function normalizeAgentRow(raw: Record<string, unknown>): AgentRow {
     system_prompt: String(raw.system_prompt ?? ''),
     buffer_seconds: num(raw.buffer_seconds, 10),
     history_limit: num(raw.history_limit, 40),
-    line_delay_ms: num(raw.line_delay_ms, 1500),
+    line_delay_ms: num(raw.line_delay_ms, 0),
     human_pause_minutes: num(raw.human_pause_minutes, 30),
     only_new_conversations: raw.only_new_conversations === true,
     // linhas anteriores à migração de stop_rules/max_replies ficam com os padrões
@@ -485,6 +485,29 @@ export function messageText(row: Pick<WaMessageLite, 'body' | 'media_type' | 'tr
 
 /** Origens de saída automáticas (agente nativo, API externa, robô): não contam como atendente humano. */
 export const AGENT_SOURCES = new Set(['agent', 'api', 'bot']);
+
+/**
+ * Id, no provedor, da última mensagem que o CONTATO mandou nesta conversa.
+ * É o que a Cloud API da Meta exige pra marcar como lido e pra mostrar o
+ * "digitando..." (não existe presença avulsa lá). null quando não há mensagem
+ * recebida com id do provedor — aí o enfeite simplesmente não acontece.
+ */
+export async function loadLastInboundProviderId(
+  admin: SupabaseClient,
+  scope: { organizationId: string; conversationId: string }
+): Promise<string | null> {
+  const { data } = await admin
+    .from('wa_messages')
+    .select('evolution_message_id')
+    .eq('organization_id', scope.organizationId)
+    .eq('conversation_id', scope.conversationId)
+    .eq('direction', 'in')
+    .not('evolution_message_id', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return ((data as { evolution_message_id?: string | null } | null)?.evolution_message_id ?? null) || null;
+}
 
 /** Últimas `limit` mensagens da conversa, em ordem cronológica. */
 export async function loadRecentMessages(

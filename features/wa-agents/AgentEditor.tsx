@@ -241,7 +241,7 @@ function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInpu
     stop_rules: agent ? (agent.stop_rules ?? '') : (initial?.stop_rules ?? DEFAULT_STOP_RULES),
     buffer_seconds: src.buffer_seconds ?? 10,
     history_limit: src.history_limit ?? 40,
-    line_delay_ms: src.line_delay_ms ?? 1500,
+    line_delay_ms: src.line_delay_ms ?? 0,
     human_pause_minutes: src.human_pause_minutes ?? 30,
     max_replies: src.max_replies ?? 0,
     only_new_conversations: src.only_new_conversations ?? false,
@@ -375,6 +375,40 @@ function clampTyping(field: keyof Omit<AgentTyping, 'enabled'>, raw: string): nu
   const [min, max] = TYPING_LIMITS[field];
   if (raw === '') return DEFAULT_AGENT_TYPING[field];
   return clampInt(raw, min, max);
+}
+
+// ---------------------------------------------------------------------------
+// "Digitando..." na tela em SEGUNDOS (o banco continua guardando milissegundos)
+// ---------------------------------------------------------------------------
+/** ms -> segundos com uma casa decimal, só para exibir/editar. */
+const msEmSegundos = (ms: number): number => Math.round(ms / 100) / 10;
+
+/** Segundos digitados -> ms, já dentro do limite do campo. */
+function segundosEmMs(field: 'min_ms' | 'max_ms', raw: string): number {
+  if (raw === '') return DEFAULT_AGENT_TYPING[field];
+  const s = Number(raw);
+  if (!Number.isFinite(s)) return DEFAULT_AGENT_TYPING[field];
+  const [min, max] = TYPING_LIMITS[field];
+  return Math.round(Math.min(Math.max(s * 1000, min), max));
+}
+
+/** Segundos digitados -> ms, entre `min` e `max` (para campos fora do bloco typing). */
+function segundosEmMsSimples(raw: string, min: number, max: number): number {
+  if (raw === '') return min;
+  const s = Number(raw);
+  if (!Number.isFinite(s)) return min;
+  return Math.round(Math.min(Math.max(s * 1000, min), max));
+}
+
+/** Velocidade em caracteres por segundo (o banco guarda ms por caractere). */
+const charsPorSegundo = (msPorChar: number): number => Math.round(1000 / Math.max(1, msPorChar));
+
+function charsPorSegundoEmMs(raw: string): number {
+  if (raw === '') return DEFAULT_AGENT_TYPING.ms_per_char;
+  const cps = Number(raw);
+  if (!Number.isFinite(cps) || cps <= 0) return DEFAULT_AGENT_TYPING.ms_per_char;
+  const [min, max] = TYPING_LIMITS.ms_per_char;
+  return Math.round(Math.min(Math.max(1000 / cps, min), max));
 }
 
 /** Valor digitado num campo numérico, sem limite: '' fica '' para não travar a digitação. */
@@ -1589,20 +1623,19 @@ export const AgentEditor: React.FC<{
               />
             </Field>
             <Field
-              label="Intervalo entre linhas (ms)"
+              label="Intervalo entre linhas (s)"
               htmlFor="agent-line-delay"
-              help="Pausa entre cada mensagem enviada, para parecer natural. 0 a 10000."
+              help="Pausa fixa entre uma mensagem e outra. 0 = sem pausa (o tempo que o agente leva pra pensar já espaça as mensagens). Ignorado quando o “digitando” está ligado."
             >
               <input
                 id="agent-line-delay"
                 type="number"
                 min={0}
-                max={10000}
-                step={100}
+                max={10}
+                step={0.5}
                 className={INPUT_CLASS}
-                value={form.line_delay_ms}
-                onChange={(e) => patch({ line_delay_ms: readNumber(e.target.value) })}
-                onBlur={() => patch({ line_delay_ms: clampField('line_delay_ms', form.line_delay_ms) })}
+                value={msEmSegundos(typeof form.line_delay_ms === 'number' ? form.line_delay_ms : 0)}
+                onChange={(e) => patch({ line_delay_ms: segundosEmMsSimples(e.target.value, 0, 10_000) })}
               />
             </Field>
             <Field
@@ -1642,45 +1675,45 @@ export const AgentEditor: React.FC<{
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <Field
-                    label="Velocidade (ms por caractere)"
+                    label="Velocidade (caracteres por segundo)"
                     htmlFor="agent-typing-speed"
-                    help="45 = ritmo de celular. Maior = digita mais devagar."
+                    help="22 = ritmo de celular. Menor = digita mais devagar."
                   >
                     <input
                       id="agent-typing-speed"
                       type="number"
-                      min={5}
-                      max={500}
-                      step={5}
+                      min={2}
+                      max={200}
+                      step={1}
                       className={INPUT_CLASS}
-                      value={form.typing.ms_per_char}
+                      value={charsPorSegundo(form.typing.ms_per_char)}
                       onChange={(e) =>
-                        patch({ typing: { ...form.typing, ms_per_char: clampTyping('ms_per_char', e.target.value) } })
+                        patch({ typing: { ...form.typing, ms_per_char: charsPorSegundoEmMs(e.target.value) } })
                       }
                     />
                   </Field>
-                  <Field label="Mínimo por mensagem (ms)" htmlFor="agent-typing-min" help="Piso, mesmo numa linha curta.">
+                  <Field label="Mínimo por mensagem (s)" htmlFor="agent-typing-min" help="Piso, mesmo numa linha curta.">
                     <input
                       id="agent-typing-min"
                       type="number"
                       min={0}
-                      max={30000}
-                      step={100}
+                      max={30}
+                      step={0.5}
                       className={INPUT_CLASS}
-                      value={form.typing.min_ms}
-                      onChange={(e) => patch({ typing: { ...form.typing, min_ms: clampTyping('min_ms', e.target.value) } })}
+                      value={msEmSegundos(form.typing.min_ms)}
+                      onChange={(e) => patch({ typing: { ...form.typing, min_ms: segundosEmMs('min_ms', e.target.value) } })}
                     />
                   </Field>
-                  <Field label="Máximo por mensagem (ms)" htmlFor="agent-typing-max" help="Teto, para linha longa não travar a conversa.">
+                  <Field label="Máximo por mensagem (s)" htmlFor="agent-typing-max" help="Teto, para linha longa não travar a conversa.">
                     <input
                       id="agent-typing-max"
                       type="number"
                       min={0}
-                      max={60000}
-                      step={500}
+                      max={60}
+                      step={0.5}
                       className={INPUT_CLASS}
-                      value={form.typing.max_ms}
-                      onChange={(e) => patch({ typing: { ...form.typing, max_ms: clampTyping('max_ms', e.target.value) } })}
+                      value={msEmSegundos(form.typing.max_ms)}
+                      onChange={(e) => patch({ typing: { ...form.typing, max_ms: segundosEmMs('max_ms', e.target.value) } })}
                     />
                   </Field>
                 </div>

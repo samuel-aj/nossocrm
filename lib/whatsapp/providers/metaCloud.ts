@@ -26,6 +26,8 @@ import type {
 } from './types';
 
 const DEFAULT_GRAPH_VERSION = 'v21.0';
+/** Versão usada só no recibo de leitura / "digitando" (ver readReceipt). */
+const READ_RECEIPT_GRAPH_VERSION = (process.env.META_READ_RECEIPT_GRAPH_VERSION || 'v25.0').trim();
 
 interface MetaSendResponse {
   messages?: Array<{ id?: string }>;
@@ -50,14 +52,14 @@ export class MetaCloudProvider implements WhatsAppProvider {
     this.graphVersion = (process.env.META_GRAPH_VERSION || DEFAULT_GRAPH_VERSION).trim();
   }
 
-  private async send(payload: Record<string, unknown>): Promise<SendResult> {
+  private async send(payload: Record<string, unknown>, version?: string): Promise<SendResult> {
     if (!this.phoneNumberId) return { ok: false, error: 'phone_number_id não configurado' };
     if (!this.token) return { ok: false, error: 'token da Meta não configurado' };
 
     let res: Response;
     try {
       res = await fetch(
-        `https://graph.facebook.com/${this.graphVersion}/${encodeURIComponent(this.phoneNumberId)}/messages`,
+        `https://graph.facebook.com/${version || this.graphVersion}/${encodeURIComponent(this.phoneNumberId)}/messages`,
         {
           method: 'POST',
           headers: {
@@ -86,6 +88,44 @@ export class MetaCloudProvider implements WhatsAppProvider {
       return { ok: false, error: detail, raw: data };
     }
     return { ok: true, providerMessageId: data?.messages?.[0]?.id, raw: data };
+  }
+
+  /**
+   * Marcar como lido e/ou mostrar "digitando...".
+   *
+   * Na Cloud API os dois são o MESMO request: um POST em /messages com
+   * `status: "read"` apontando pra mensagem recebida. Com `typing_indicator`
+   * junto, o contato vê "digitando..." por até 25 segundos (ou até a resposta
+   * sair). Não existe presença avulsa como no QR, por isso o wamid da última
+   * mensagem do contato é obrigatório aqui.
+   */
+  private async readReceipt(providerMessageId: string, typing: boolean): Promise<SendResult> {
+    const id = (providerMessageId || '').trim();
+    if (!id) return { ok: false, error: 'sem id da mensagem recebida' };
+    return this.send(
+      {
+        status: 'read',
+        message_id: id,
+        ...(typing ? { typing_indicator: { type: 'text' } } : {}),
+      },
+      // Versão PRÓPRIA (não a do envio): o "digitando" é recente na Cloud API e
+      // a documentação dela usa v25. Assim o recibo/presença funciona sem mudar
+      // a versão do caminho de ENVIO, que está estável — se a Meta recusar,
+      // quem falha é só o enfeite, nunca a mensagem.
+      READ_RECEIPT_GRAPH_VERSION
+    );
+  }
+
+  async markRead(input: { to: string; providerMessageId: string }): Promise<void> {
+    const r = await this.readReceipt(input.providerMessageId, false);
+    if (!r.ok) throw new Error(r.error || 'Meta recusou a marcação de lido');
+  }
+
+  async sendTyping(input: { to: string; ms: number; providerMessageId?: string }): Promise<void> {
+    // Sem a mensagem de referência a Meta não tem como exibir a presença.
+    if (!input.providerMessageId) return;
+    const r = await this.readReceipt(input.providerMessageId, true);
+    if (!r.ok) throw new Error(r.error || 'Meta recusou o "digitando"');
   }
 
   /** "Responder": a Cloud API cita pela `context.message_id` (wamid da original). */

@@ -236,7 +236,7 @@ export const AgentInputSchema = z.object({
   system_prompt: z.string().max(60000).default(''),
   buffer_seconds: z.number().int().min(0).max(60).default(10),
   history_limit: z.number().int().min(5).max(200).default(40),
-  line_delay_ms: z.number().int().min(0).max(10000).default(1500),
+  line_delay_ms: z.number().int().min(0).max(10000).default(0),
   human_pause_minutes: z.number().int().min(0).max(1440).default(30),
   only_new_conversations: z.boolean().default(false),
   /** Regras explícitas de quando o agente encerra (bloco "QUANDO ENCERRAR" do prompt; obrigatórias) */

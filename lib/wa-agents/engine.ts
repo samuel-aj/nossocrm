@@ -24,6 +24,7 @@ import {
   buildSystemPrompt,
   loadAgent,
   loadConversationContext,
+  loadLastInboundProviderId,
   messageText,
   MESSAGE_LITE_COLUMNS,
   normalizeAgentRow,
@@ -486,6 +487,23 @@ async function sendLines(
   const orgId = ctx.conversation.organization_id;
   const to = ctx.conversation.wa_phone;
 
+  // Id da última mensagem do contato: a Cloud API da Meta precisa dele tanto
+  // pro "lido" quanto pro "digitando". No QR é ignorado.
+  const lastInboundId = await loadLastInboundProviderId(admin, {
+    organizationId: orgId,
+    conversationId: ctx.conversation.id,
+  }).catch(() => null);
+
+  // Os dois tiques azuis ANTES de responder: o contato vê que foi lido, não
+  // uma resposta surgindo do nada. Enfeite — falha aqui nunca trava o envio.
+  if (provider.markRead && lastInboundId) {
+    try {
+      await provider.markRead({ to, providerMessageId: lastInboundId });
+    } catch (e) {
+      console.error('[wa-agents] marcar como lido falhou:', errorMessage(e));
+    }
+  }
+
   // Trava renovada antes e depois de cada envio: o eco do webhook chega com ela ativa
   if (opts.renewLock) await opts.renewLock();
   for (let i = 0; i < lines.length; i++) {
@@ -495,7 +513,7 @@ async function sendLines(
     if (typingMs > 0) {
       if (provider.sendTyping) {
         try {
-          await provider.sendTyping({ to, ms: typingMs });
+          await provider.sendTyping({ to, ms: typingMs, providerMessageId: lastInboundId ?? undefined });
         } catch (e) {
           // Presença é enfeite: se o provedor recusar, a espera continua valendo
           console.error('[wa-agents] presença "digitando" falhou:', errorMessage(e));
