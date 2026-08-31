@@ -35,7 +35,9 @@ const DATA_COMPLETA = new Intl.DateTimeFormat('pt-BR', {
   hour: '2-digit',
   minute: '2-digit',
 });
-const DATA_CURTA = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
+const HORA = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
+const DIA_MES = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit' });
+const DIA_MES_ANO = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
 
 /** Valor do negócio em real, no padrão do resto do CRM (era "$10 000"). */
 const formatValor = (value: number): string => {
@@ -44,26 +46,38 @@ const formatValor = (value: number): string => {
 };
 
 /**
- * Data de criação enxuta: "Hoje", "Ontem", "Há 3 dias" e, a partir de uma
- * semana, a data curta. A data e a hora exatas ficam no title (tooltip), o
- * que libera a coluna e mantém a linha com uma altura só.
+ * Data + hora numa linha só, no mesmo formato do card do Kanban
+ * (`rotuloChegada` em DealCard.tsx): "Hoje - 14:32", "Ontem - 09:15",
+ * "12/08 - 18:40". A data completa fica no title (tooltip).
+ *
+ * Diferença proposital do card: aqui o ANO entra quando o lead é de outro
+ * ano ("12/08/25 - 18:40"). Numa coluna ordenável, dois leads de agostos
+ * diferentes apareceriam idênticos; no card, que mostra um lead por vez,
+ * isso não acontece.
  */
 const formatCriadoEm = (iso: string): { label: string; full: string } | null => {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return null;
   const full = DATA_COMPLETA.format(d);
+  const hora = HORA.format(d);
 
   const hoje = new Date();
   const inicioHoje = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate()).getTime();
   const inicioData = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   // Math.round (e não floor): em fuso com horário de verão o dia da virada
-  // tem 23h, e o floor comeria um dia na conta a semana inteira.
+  // tem 23h, e o floor comeria um dia na conta.
   const dias = Math.round((inicioHoje - inicioData) / 86_400_000);
 
-  if (dias === 0) return { label: 'Hoje', full };
-  if (dias === 1) return { label: 'Ontem', full };
-  if (dias > 1 && dias < 7) return { label: `Há ${dias} dias`, full };
-  return { label: DATA_CURTA.format(d), full };
+  const data =
+    dias === 0
+      ? 'Hoje'
+      : dias === 1
+        ? 'Ontem'
+        : d.getFullYear() === hoje.getFullYear()
+          ? DIA_MES.format(d)
+          : DIA_MES_ANO.format(d);
+
+  return { label: `${data} - ${hora}`, full };
 };
 
 /** Linguagem única de selo pra tabela inteira: mesmo raio, mesma altura e
