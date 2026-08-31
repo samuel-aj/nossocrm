@@ -4,7 +4,7 @@
  * robô). Também expõe o robô em andamento na conversa (ConversationBotInfo).
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { createBotRun } from './bots';
+import { botConnectionIds, createBotRun } from './bots';
 import { loadAgent, loadConversationContext, type WaConversationFull } from './context';
 import { errorMessage } from './errors';
 import type {
@@ -301,14 +301,28 @@ export async function applyConversationAction(
         if (!input.botId) return fail(400, 'Informe o robô');
         const { data: botRow, error: botErr } = await admin
           .from('wa_bots')
-          .select('id, name, enabled')
+          .select('id, name, enabled, connection_id, connection_ids')
           .eq('organization_id', organizationId)
           .eq('id', input.botId)
           .maybeSingle();
         if (botErr) return fail(500, botErr.message);
-        const bot = botRow as { id: string; name: string; enabled: boolean } | null;
+        const bot = botRow as {
+          id: string;
+          name: string;
+          enabled: boolean;
+          connection_id: string | null;
+          connection_ids: string[] | null;
+        } | null;
         if (!bot) return fail(404, 'Robô não encontrado');
         if (!bot.enabled) return fail(409, 'Este robô está desligado');
+        // O robô é exclusivo dos números escolhidos nele
+        const numerosDoBot = botConnectionIds({
+          connection_ids: bot.connection_ids ?? [],
+          connection_id: bot.connection_id,
+        });
+        if (conv.connection_id && numerosDoBot.length > 0 && !numerosDoBot.includes(conv.connection_id)) {
+          return fail(409, `O robô "${bot.name}" não atende o número desta conversa`);
+        }
         await cancelActiveBotRuns(admin, organizationId, conversationId);
         // O robô assume a conversa: agente em andamento (nativo ou externo) para
         if (conv.ai_status && AGENT_LIVE_STATUSES.includes(conv.ai_status)) {

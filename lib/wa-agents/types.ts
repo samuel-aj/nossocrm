@@ -170,6 +170,18 @@ export type AgentTyping = z.infer<typeof AgentTypingSchema>;
 export const DEFAULT_AGENT_TYPING: AgentTyping = { enabled: false, ms_per_char: 45, min_ms: 800, max_ms: 8000 };
 
 // ---------------------------------------------------------------------------
+// O que do cadastro do lead entra no prompt
+// ---------------------------------------------------------------------------
+export const AgentLeadContextSchema = z.object({
+  /** Descrição do negócio (histórico escrito pela equipe, resumos de atendimentos) */
+  description: z.boolean().default(true),
+  /** Campos personalizados do negócio */
+  custom_fields: z.boolean().default(true),
+});
+export type AgentLeadContext = z.infer<typeof AgentLeadContextSchema>;
+export const DEFAULT_AGENT_LEAD_CONTEXT: AgentLeadContext = { description: true, custom_fields: true };
+
+// ---------------------------------------------------------------------------
 // Agente
 // ---------------------------------------------------------------------------
 export const AI_PROVIDERS = ['openai', 'anthropic', 'google'] as const;
@@ -228,6 +240,8 @@ export const AgentInputSchema = z.object({
   tools: AgentToolsSchema.default(DEFAULT_AGENT_TOOLS),
   /** "Digitando..." antes de cada linha, com o tempo saindo do tamanho do texto */
   typing: AgentTypingSchema.default(DEFAULT_AGENT_TYPING),
+  /** O que do cadastro do lead o agente enxerga (descrição, campos personalizados) */
+  lead_context: AgentLeadContextSchema.default(DEFAULT_AGENT_LEAD_CONTEXT),
 });
 export type AgentInput = z.infer<typeof AgentInputSchema>;
 
@@ -242,7 +256,14 @@ export type AgentRow = AgentInput & {
 export type AgentPublic = Omit<AgentRow, 'api_key'> & { has_api_key: boolean };
 export type AgentMinimal = { id: string; name: string; persona_name: string | null; enabled: boolean };
 /** Robô para o menu do chat (qualquer membro da org) */
-export type BotMinimal = { id: string; name: string; enabled: boolean; connection_id: string | null };
+export type BotMinimal = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  connection_id: string | null;
+  /** Números em que o robô atende (o menu do chat só oferece os do número da conversa) */
+  connection_ids: string[];
+};
 
 // ---------------------------------------------------------------------------
 // Segredos (chave da API e segredos de webhook) nunca voltam em claro para a UI
@@ -609,7 +630,13 @@ export function normalizeBotLayout(raw: unknown): BotLayout {
 export const BotInputSchema = z.object({
   name: z.string().min(1).max(120),
   enabled: z.boolean().default(true),
+  /** Compatibilidade: primeiro número da lista (linhas antigas tinham só este campo) */
   connection_id: z.string().uuid().nullable(),
+  /**
+   * Números em que este robô pode agir. O robô é EXCLUSIVO deles: numa conversa
+   * de outro número ele não entra. Vazio = nenhum número escolhido ainda.
+   */
+  connection_ids: z.array(z.string().uuid()).max(20).default([]),
   trigger: BotTriggerSchema,
   steps: z.array(BotStepSchema).default([]),
   /** Modo quadro: id do primeiro passo; ausente = robô em lista (índice + 1) */

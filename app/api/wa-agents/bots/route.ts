@@ -32,7 +32,7 @@ export async function GET() {
     // Menu do chat: qualquer membro vê só id, nome e número dos robôs ligados
     const { data, error } = await auth.admin
       .from('wa_bots')
-      .select('id, name, enabled, connection_id')
+      .select('id, name, enabled, connection_id, connection_ids')
       .eq('organization_id', orgId)
       .eq('enabled', true)
       .order('name', { ascending: true });
@@ -63,7 +63,8 @@ export async function POST(req: Request) {
   if (stepsError) return stepsError;
 
   try {
-    if (input.connection_id && !(await connectionsBelongToOrg(auth.admin, auth.user.organizationId, [input.connection_id]))) {
+    const numeros = input.connection_ids?.length ? input.connection_ids : input.connection_id ? [input.connection_id] : [];
+    if (numeros.length > 0 && !(await connectionsBelongToOrg(auth.admin, auth.user.organizationId, numeros))) {
       return connectionNotFoundError();
     }
   } catch (err) {
@@ -75,7 +76,8 @@ export async function POST(req: Request) {
     .insert({
       name: input.name,
       enabled: input.enabled,
-      connection_id: input.connection_id,
+      connection_id: input.connection_ids?.[0] ?? input.connection_id ?? null,
+      connection_ids: input.connection_ids ?? [],
       trigger: input.trigger,
       steps,
       start_step_id: input.start_step_id ?? null,

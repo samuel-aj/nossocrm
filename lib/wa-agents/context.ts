@@ -11,12 +11,14 @@ import { formatKnowledgeHits } from './knowledge';
 import { normalizeKeyword } from './text';
 import {
   AgentFollowupSchema,
+  AgentLeadContextSchema,
   AgentToolsSchema,
   AgentTriggersSchema,
   AgentTypingSchema,
   AgentWebhookSchema,
   AI_PROVIDERS,
   CustomActionSchema,
+  DEFAULT_AGENT_LEAD_CONTEXT,
   DEFAULT_AGENT_TOOLS,
   DEFAULT_AGENT_TYPING,
   DEFAULT_AGENT_TRIGGERS,
@@ -29,6 +31,7 @@ import {
   type AgentProvider,
   type AgentResources,
   type AgentRow,
+  type AgentLeadContext,
   type AgentTools,
   type AgentTyping,
   type AgentTriggers,
@@ -88,6 +91,8 @@ export type ContextDeal = {
   owner_name: string | null;
   tags: string[];
   description: string | null;
+  /** Contexto para a IA escrito pela integração ao cadastrar o lead (API: ai_context) */
+  ai_context: string | null;
   value: number | null;
   /** Campos personalizados do negócio (chave -> valor) */
   custom_fields: Record<string, unknown>;
@@ -169,6 +174,13 @@ export function normalizeTyping(raw: unknown): AgentTyping {
   return p.success ? p.data : { ...DEFAULT_AGENT_TYPING };
 }
 
+/** `lead_context` (jsonb): o que do cadastro entra no prompt; linha antiga = tudo ligado. */
+export function normalizeLeadContext(raw: unknown): AgentLeadContext {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ...DEFAULT_AGENT_LEAD_CONTEXT };
+  const p = AgentLeadContextSchema.safeParse(raw);
+  return p.success ? p.data : { ...DEFAULT_AGENT_LEAD_CONTEXT };
+}
+
 /** `helper_agent_ids` (uuid[]) como lista de strings únicas; linhas antigas viram []. */
 export function normalizeHelperIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -221,6 +233,7 @@ export function normalizeAgentRow(raw: Record<string, unknown>): AgentRow {
     helper_agent_ids: normalizeHelperIds(raw.helper_agent_ids),
     tools: normalizeTools(raw.tools),
     typing: normalizeTyping(raw.typing),
+    lead_context: normalizeLeadContext(raw.lead_context),
     created_by: (raw.created_by as string | null) ?? null,
     created_at: String(raw.created_at ?? ''),
     updated_at: String(raw.updated_at ?? ''),
@@ -274,7 +287,7 @@ function profileDisplayName(p: ProfileNameRow | null | undefined): string | null
 }
 
 const DEAL_COLUMNS =
-  'id, title, board_id, stage_id, owner_id, tags, description, value, custom_fields, created_at, contact_id';
+  'id, title, board_id, stage_id, owner_id, tags, description, ai_context, value, custom_fields, created_at, contact_id';
 
 type DealRaw = {
   id: string;
@@ -284,6 +297,7 @@ type DealRaw = {
   owner_id: string | null;
   tags: string[] | null;
   description: string | null;
+  ai_context: string | null;
   value: number | string | null;
   custom_fields: Record<string, unknown> | null;
   created_at: string | null;
@@ -379,6 +393,7 @@ export async function loadDealContext(
     owner_name: profileDisplayName(ownerRes.data as ProfileNameRow | null),
     tags: Array.isArray(deal.tags) ? deal.tags : [],
     description: (deal.description ?? '').trim() || null,
+    ai_context: (deal.ai_context ?? '').trim() || null,
     value: valueNum !== null && Number.isFinite(valueNum) ? valueNum : null,
     custom_fields: customFields,
     custom_field_labels: labels,
@@ -610,8 +625,10 @@ export function buildPromptVars(input: { agent: AgentRow; ctx: ConversationConte
 }
 
 /** Limite do bloco de dados do lead no prompt (caracteres). */
-export const LEAD_DATA_MAX_CHARS = 4000;
+export const LEAD_DATA_MAX_CHARS = 6000;
 const LEAD_FIELD_MAX_CHARS = 600;
+/** A descrição costuma guardar o histórico do lead: cabe bem mais que um campo comum. */
+export const LEAD_DESCRIPTION_MAX_CHARS = 2500;
 
 /** Valor de um campo do cadastro em texto curto ('' quando vazio). */
 function fieldText(value: unknown): string {
@@ -642,13 +659,14 @@ function clipText(text: string, max: number): string {
  * responsável, rótulos, descrição, campos personalizados e dados do contato.
  * '' quando não há negócio.
  */
-export function buildLeadDataBlock(ctx: ConversationContext): string {
+export function buildLeadDataBlock(ctx: ConversationContext, opts?: AgentLeadContext): string {
   const deal = ctx.deal;
   if (!deal) return '';
+  const mostrar = { ...DEFAULT_AGENT_LEAD_CONTEXT, ...(opts ?? {}) };
   const items: string[] = [];
-  const push = (label: string, value: unknown) => {
+  const push = (label: string, value: unknown, max = LEAD_FIELD_MAX_CHARS) => {
     const text = fieldText(value);
-    if (text) items.push(`- ${label}: ${clipText(text.replace(/\s*\n\s*/g, ' '), LEAD_FIELD_MAX_CHARS)}`);
+    if (text) items.push(`- ${label}: ${clipText(text.replace(/\s*\n\s*/g, ' '), max)}`);
   };
 
   push('Negócio', deal.title);
@@ -659,15 +677,19 @@ export function buildLeadDataBlock(ctx: ConversationContext): string {
   push('Rótulos', deal.tags);
   push('Origem', deal.source);
   push('Cadastrado em', formatDatePtBr(deal.created_at));
-  push('Descrição', deal.description);
+  // A descrição guarda o histórico do lead (notas da equipe, resumos de atendimentos):
+  // cabe muito mais que um campo comum, e pode ser desligada na configuração do agente.
+  if (mostrar.description) push('Descrição', deal.description, LEAD_DESCRIPTION_MAX_CHARS);
   if (ctx.contact) {
     push('Nome do contato', ctx.contact.name);
     push('E-mail', ctx.contact.email);
     push('Empresa', ctx.contact.company_name);
   }
-  for (const [key, value] of Object.entries(deal.custom_fields ?? {})) {
-    if (!key) continue;
-    push(deal.custom_field_labels[key] || key, value);
+  if (mostrar.custom_fields) {
+    for (const [key, value] of Object.entries(deal.custom_fields ?? {})) {
+      if (!key) continue;
+      push(deal.custom_field_labels[key] || key, value);
+    }
   }
   if (items.length === 0) return '';
 
@@ -897,13 +919,16 @@ export function buildSystemPrompt(input: {
 
   blocks.push(buildContextBlock(vars, ctx));
 
-  const leadBlock = buildLeadDataBlock(ctx);
+  const leadBlock = buildLeadDataBlock(ctx, agent.lead_context);
   if (leadBlock) blocks.push(leadBlock);
 
-  // Contexto escrito pela equipe ao iniciar o agente/robô nesta conversa (opcional)
-  const contextoExtra = (state.contexto_extra ?? '').trim();
+  // Contexto da equipe: o que veio no cadastro do lead (API: ai_context) e o que
+  // foi escrito ao iniciar o agente/robô nesta conversa. Os dois somam.
+  const contextoDoLead = (ctx.deal?.ai_context ?? '').trim();
+  const contextoDaConversa = (state.contexto_extra ?? '').trim();
+  const contextoExtra = [contextoDoLead, contextoDaConversa].filter(Boolean).join('\n');
   if (contextoExtra) {
-    blocks.push(`## CONTEXTO ADICIONAL INFORMADO PELA EQUIPE\n${clipText(contextoExtra, 2000)}`);
+    blocks.push(`## CONTEXTO ADICIONAL INFORMADO PELA EQUIPE\n${clipText(contextoExtra, 3000)}`);
   }
 
   const knowledgeBlock = buildKnowledgeBlock(input.knowledge ?? [], documents);

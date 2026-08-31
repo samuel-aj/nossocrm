@@ -26,6 +26,8 @@ const DealPatchSchema = z.object({
   // line without a GET-merge-PATCH round-trip. Mutually exclusive with
   // `description` (replace).
   description_append: z.string().optional(),
+  /** Contexto para o agente de IA sobre este lead (null limpa) */
+  ai_context: z.string().max(4000).nullable().optional(),
   value: z.number().optional(),
   contact_id: z.string().uuid().optional(),
   client_company_id: z.string().uuid().nullable().optional(),
@@ -214,6 +216,9 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
       const cur = typeof current.description === 'string' ? current.description.trim() : '';
       updates.description = cur ? `${cur}\n${addition}` : addition;
     }
+  }
+  if (parsed.data.ai_context !== undefined) {
+    updates.ai_context = parsed.data.ai_context === null ? null : (parsed.data.ai_context.trim() || null);
   }
   if (parsed.data.value !== undefined) updates.value = Number(parsed.data.value ?? 0);
   if (parsed.data.contact_id !== undefined) updates.contact_id = sanitizeUUID(parsed.data.contact_id);

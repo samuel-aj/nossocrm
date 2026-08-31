@@ -11,7 +11,10 @@
  *     action: "start" | "stop",
  *     bot_id?: "uuid do robô (obrigatório em start; GET /whatsapp/bots)",
  *     context?: "texto que o robô e o agente leem como contexto da equipe",
- *     connection_id?: "uuid do número (GET /whatsapp/connections); omitido = padrão da org" }
+ *     connection_id?: "uuid do número (GET /whatsapp/connections); omitido = o primeiro número do robô" }
+ *
+ * O robô é exclusivo dos números escolhidos nele: pedir outro devolve 409
+ * BOT_CONNECTION_NOT_ALLOWED com a lista permitida.
  */
 import { NextResponse } from 'next/server';
 import { after } from 'next/server';
@@ -22,7 +25,7 @@ import { createStaticAdminClient } from '@/lib/supabase/server';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { isWaAgentsBetaEnabled } from '@/lib/wa-agents/beta';
 import { applyConversationAction } from '@/lib/wa-agents/conversation';
-import { runBotRunNow } from '@/lib/wa-agents/bots';
+import { botConnectionIds, runBotRunNow } from '@/lib/wa-agents/bots';
 import { ensureConversation, getConnectionByIdForOrg, getConnectionByOrg } from '@/lib/whatsapp/service';
 
 export const runtime = 'nodejs';
@@ -80,13 +83,43 @@ export async function POST(request: Request) {
     );
   }
 
-  const conn = connectionId
-    ? await getConnectionByIdForOrg(sb, organizationId, connectionId)
+  // Número: o informado, senão o PRIMEIRO NÚMERO DO ROBÔ (não o padrão da org —
+  // era isso que fazia o robô do número oficial falar pelo número do QR).
+  type BotNumbers = { connection_ids: string[] | null; connection_id: string | null };
+  let alvo = connectionId;
+  if (body.bot_id) {
+    const { data } = await sb
+      .from('wa_bots')
+      .select('connection_id, connection_ids')
+      .eq('organization_id', organizationId)
+      .eq('id', body.bot_id)
+      .maybeSingle();
+    const bot = data as BotNumbers | null;
+    if (!bot) return NextResponse.json({ error: 'Bot not found', code: 'NOT_FOUND' }, { status: 404 });
+    const permitidos = botConnectionIds({
+      connection_ids: bot.connection_ids ?? [],
+      connection_id: bot.connection_id ?? null,
+    });
+    if (alvo && permitidos.length > 0 && !permitidos.includes(alvo)) {
+      return NextResponse.json(
+        {
+          error: 'Este robô não atende esse número. Escolha os números dele na configuração.',
+          code: 'BOT_CONNECTION_NOT_ALLOWED',
+          allowed_connection_ids: permitidos,
+        },
+        { status: 409 }
+      );
+    }
+    if (!alvo) alvo = permitidos[0] ?? '';
+  }
+
+  const conn = alvo
+    ? await getConnectionByIdForOrg(sb, organizationId, alvo)
     : await getConnectionByOrg(sb, organizationId);
   if (!conn) {
     return NextResponse.json(
       {
-        error: connectionId ? 'Connection not found' : 'No WhatsApp number connected in this organization',
+        error: alvo ? 'Connection not found' : 'No WhatsApp number connected in this organization',
         code: 'NO_CONNECTION',
       },
       { status: 404 }

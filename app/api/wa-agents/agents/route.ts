@@ -54,6 +54,7 @@ function toInsertRow(input: AgentInput, helperIds: string[]) {
     helper_agent_ids: helperIds,
     tools: input.tools,
     typing: input.typing,
+    lead_context: input.lead_context,
   };
 }
 

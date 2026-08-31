@@ -34,10 +34,18 @@ import { useTheme } from '@/context/ThemeContext';
 import { useToast } from '@/context/ToastContext';
 import { BotInputSchema, type BotInput, type BotRow } from '@/lib/wa-agents/types';
 import { DEFAULT_BOT_STEPS } from '@/lib/wa-agents/defaults';
-import { useSaveWaBot, useStartWaBot, useWaAgentOptions, useWaAgentsList, type WaAgentListItem } from './useWaAgents';
+import {
+  useSaveWaBot,
+  useStartWaBot,
+  useWaAgentOptions,
+  useWaAgentsList,
+  type WaAgentListItem,
+  type WaAgentOptions,
+} from './useWaAgents';
 import {
   BTN_ICON,
   BTN_PRIMARY,
+  Badge,
   BTN_SECONDARY,
   Field,
   INPUT_CLASS,
@@ -90,6 +98,7 @@ export { STEP_LABELS, TRIGGER_LABELS } from './canvas/types';
 const FIELD_NAMES: Record<string, string> = {
   name: 'Nome',
   connection_id: 'Número',
+  connection_ids: 'Números',
   trigger: 'Gatilho',
   steps: 'Passos',
   start_step_id: 'Primeiro passo',
@@ -183,6 +192,77 @@ function groupIssues(errors: FlowIssue[], warnings: FlowIssue[]): CanvasIssues {
   return { byNode, byBlock };
 }
 
+/**
+ * Números em que o robô atende. Ele é EXCLUSIVO deles: numa conversa de outro
+ * número, iniciar este robô é recusado. Vários podem ser marcados.
+ */
+function BotConnectionsPicker({
+  connections,
+  selected,
+  onChange,
+}: {
+  connections: WaAgentOptions['connections'];
+  selected: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const escolhidos = connections.filter((c) => selected.includes(c.id));
+  const resumo =
+    escolhidos.length === 0
+      ? 'Números que atende...'
+      : escolhidos.length === 1
+        ? escolhidos[0].label
+        : `${escolhidos.length} números`;
+
+  const alternar = (id: string) => {
+    onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        className={`${INPUT_CLASS} w-auto min-w-[160px] max-w-[260px] text-left truncate`}
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="true"
+        title="Em quais números este robô pode agir"
+      >
+        {resumo}
+      </button>
+      {open ? (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} aria-hidden="true" />
+          <div className="absolute z-20 mt-1 w-72 max-h-64 overflow-y-auto rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 shadow-lg p-1">
+            {connections.length === 0 ? (
+              <p className="p-2 text-xs text-slate-500 dark:text-slate-400">Nenhum número conectado.</p>
+            ) : (
+              connections.map((c) => (
+                <label
+                  key={c.id}
+                  className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm cursor-pointer hover:bg-slate-100 dark:hover:bg-white/5"
+                >
+                  <input
+                    type="checkbox"
+                    className="accent-purple-600"
+                    checked={selected.includes(c.id)}
+                    onChange={() => alternar(c.id)}
+                  />
+                  <span className="flex-1 min-w-0 truncate text-slate-900 dark:text-white">{c.label}</span>
+                  {c.status === 'connected' ? null : <Badge tone="amber">Desconectado</Badge>}
+                </label>
+              ))
+            )}
+            <p className="px-2 py-1 text-[11px] text-slate-500 dark:text-slate-400">
+              O robô só age nas conversas destes números.
+            </p>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({ bot, onClose }) => {
   const { showToast } = useToast();
   const { darkMode } = useTheme();
@@ -199,7 +279,7 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
   const [header, setHeader] = useState<FlowHeader>({
     name: bot?.name ?? '',
     enabled: bot?.enabled ?? false,
-    connection_id: bot?.connection_id ?? '',
+    connection_ids: bot?.connection_ids?.length ? bot.connection_ids : bot?.connection_id ? [bot.connection_id] : [],
   });
   const [botId, setBotId] = useState<string | null>(bot?.id ?? null);
   const [dirty, setDirty] = useState(false);
@@ -687,7 +767,10 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
     }
   };
 
-  const connectionLabel = connections.find((c) => c.id === header.connection_id)?.label ?? 'número escolhido';
+  const connectionLabel =
+    header.connection_ids.length === 1
+      ? (connections.find((c) => c.id === header.connection_ids[0])?.label ?? 'número escolhido')
+      : `${header.connection_ids.length} números`;
   const empty = !nodes.some(isBubbleNode);
 
   // Só existe no navegador (a lista carrega este componente sem SSR).
@@ -734,21 +817,11 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
               <span className="text-sm text-slate-600 dark:text-slate-300">{header.enabled ? 'Ligado' : 'Desligado'}</span>
               <Toggle checked={header.enabled} onChange={(enabled) => patchHeader({ enabled })} label="Robô ligado" />
             </div>
-            <select
-              id="bot-connection"
-              className={`${INPUT_CLASS} w-auto min-w-[160px] max-w-[260px]`}
-              value={header.connection_id}
-              onChange={(e) => patchHeader({ connection_id: e.target.value })}
-              aria-label="Número que envia as mensagens"
-            >
-              <option value="">Número que envia...</option>
-              {connections.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.label}
-                  {c.status === 'connected' ? '' : ' (desconectado)'}
-                </option>
-              ))}
-            </select>
+            <BotConnectionsPicker
+              connections={connections}
+              selected={header.connection_ids}
+              onChange={(connection_ids) => patchHeader({ connection_ids })}
+            />
             <div className="flex items-center gap-2 ml-auto">
               {dirty ? (
                 <span className="hidden sm:inline text-xs font-medium text-amber-600 dark:text-amber-400">Não salvo</span>

@@ -283,7 +283,8 @@ export type FlowEdge = Edge;
 export type FlowGraph = { nodes: FlowNode[]; edges: FlowEdge[] };
 
 /** Campos do cabeçalho do editor (fora do quadro). */
-export type FlowHeader = { name: string; enabled: boolean; connection_id: string };
+/** `connection_ids`: números em que o robô pode agir (ele é exclusivo deles). */
+export type FlowHeader = { name: string; enabled: boolean; connection_ids: string[] };
 
 /** Bloco apontado no quadro (painel de propriedades). */
 export type BlockRef = { bubbleId: string; blockId: string };

@@ -209,6 +209,15 @@ type BotTemplateRow = {
 };
 
 /**
+ * Números em que o robô pode agir. Linhas antigas só tinham `connection_id`.
+ */
+export function botConnectionIds(bot: Pick<BotRow, 'connection_ids' | 'connection_id'>): string[] {
+  const lista = (bot.connection_ids ?? []).filter(Boolean);
+  if (lista.length > 0) return lista;
+  return bot.connection_id ? [bot.connection_id] : [];
+}
+
+/**
  * Bloco "Modelo de mensagem": modelo do WhatsApp API sai como TEMPLATE de verdade pela
  * Meta (funciona fora da janela de 24 h e leva os botões aprovados); modelo geral, ou
  * número conectado por QR, vai como texto já preenchido. As variáveis ({{contato.nome}},
@@ -469,19 +478,20 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
         await saveRun(admin, st, { status: 'error', error: 'sem telefone' }, { release: true });
         return;
       }
-      if (!bot.connection_id) {
+      const numeroInicial = botConnectionIds(bot)[0];
+      if (!numeroInicial) {
         note(st, null, 'robô sem número configurado');
         await saveRun(admin, st, { status: 'error', error: 'robô sem número' }, { release: true });
         return;
       }
       // O número precisa ser da organização antes de criar a conversa
-      connection = await getConnectionByIdForOrg(admin, orgId, bot.connection_id);
+      connection = await getConnectionByIdForOrg(admin, orgId, numeroInicial);
       if (!connection) {
         note(st, null, 'número do robô não encontrado nesta organização');
         await saveRun(admin, st, { status: 'error', error: 'número do robô não encontrado' }, { release: true });
         return;
       }
-      const conv = await ensureConversation(admin, orgId, bot.connection_id, phone, contact?.name ?? null);
+      const conv = await ensureConversation(admin, orgId, numeroInicial, phone, contact?.name ?? null);
       st.run = { ...st.run, conversation_id: conv.id, phone, contact_id: contact?.id ?? contactId ?? null };
       await saveRun(admin, st, { conversation_id: conv.id, phone, contact_id: st.run.contact_id });
     } else {
@@ -501,13 +511,27 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
         await saveRun(admin, st, { status: 'error', error: 'conversa sem telefone' }, { release: true });
         return;
       }
+      // O robô é exclusivo dos números escolhidos nele: numa conversa de outro
+      // número ele não fala (antes, o envio saía pelo número da conversa e podia
+      // ir por um número que o robô nem atende).
+      const permitidos = botConnectionIds(bot);
+      if (convConnectionId && permitidos.length > 0 && !permitidos.includes(convConnectionId)) {
+        note(st, null, 'a conversa é de um número que este robô não atende');
+        await saveRun(
+          admin,
+          st,
+          { status: 'error', error: 'robô não atende o número desta conversa' },
+          { release: true }
+        );
+        return;
+      }
     }
     const conversationId = st.run.conversation_id as string;
 
     const getConnection = async (): Promise<WaConnectionRow> => {
       if (connection) return connection;
       const fromConversation = !!convConnectionId;
-      const connectionId = convConnectionId || bot.connection_id;
+      const connectionId = convConnectionId || botConnectionIds(bot)[0];
       if (!connectionId) throw new Error('conversa sem número e robô sem número configurado');
       connection = await getConnectionByIdForOrg(admin, orgId, connectionId);
       if (!connection) {

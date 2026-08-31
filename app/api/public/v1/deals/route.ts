@@ -20,6 +20,9 @@ const ContactInlineSchema = z.object({
 const DealCreateSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
+  // Contexto para o agente de IA sobre este lead (ele lê ao entrar na conversa,
+  // mesmo que ninguém ative a IA agora).
+  ai_context: z.string().max(4000).optional(),
   value: z.number().optional(),
   board_id: z.string().uuid().optional(),
   board_key: z.string().min(1).optional(),
@@ -73,7 +76,7 @@ export async function GET(request: Request) {
 
   let query = sb
     .from('deals')
-    .select('id,title,description,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id', { count: 'exact' })
+    .select('id,title,description,ai_context,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id', { count: 'exact' })
     .eq('organization_id', auth.organizationId)
     .is('deleted_at', null)
     .order('updated_at', { ascending: false });
@@ -121,6 +124,7 @@ export async function GET(request: Request) {
       id: d.id,
       title: d.title,
       description: d.description ?? null,
+      ai_context: d.ai_context ?? null,
       value: Number(d.value ?? 0),
       priority: d.priority ?? 'medium',
       probability: d.probability ?? 0,
@@ -215,7 +219,7 @@ export async function POST(request: Request) {
   if (externalId) {
     const existing = await sb
       .from('deals')
-      .select('id,title,description,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id')
+      .select('id,title,description,ai_context,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id')
       .eq('organization_id', auth.organizationId)
       .eq('external_id', externalId)
       .is('deleted_at', null)
@@ -232,6 +236,7 @@ export async function POST(request: Request) {
         data: {
           ...d,
           description: d.description ?? null,
+          ai_context: d.ai_context ?? null,
           value: Number(d.value ?? 0),
           tags: d.tags ?? [],
           custom_fields: d.custom_fields ?? {},
@@ -383,6 +388,7 @@ export async function POST(request: Request) {
     organization_id: auth.organizationId,
     title: parsed.data.title.trim(),
     description: parsed.data.description?.trim() || null,
+    ai_context: parsed.data.ai_context?.trim() || null,
     value,
     board_id: boardId,
     stage_id: stageId,
@@ -403,7 +409,7 @@ export async function POST(request: Request) {
   const { data, error } = await sb
     .from('deals')
     .insert(insertPayload)
-    .select('id,title,description,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id')
+    .select('id,title,description,ai_context,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id')
     .single();
   if (error) {
     // Race: another request inserted the same external_id between our check above and this insert.
@@ -411,7 +417,7 @@ export async function POST(request: Request) {
     if (externalId && (error as any).code === '23505') {
       const recovered = await sb
         .from('deals')
-        .select('id,title,description,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id')
+        .select('id,title,description,ai_context,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id')
         .eq('organization_id', auth.organizationId)
         .eq('external_id', externalId)
         .is('deleted_at', null)
@@ -427,6 +433,7 @@ export async function POST(request: Request) {
           data: {
             ...d,
             description: d.description ?? null,
+            ai_context: d.ai_context ?? null,
             value: Number(d.value ?? 0),
             tags: d.tags ?? [],
             custom_fields: d.custom_fields ?? {},
@@ -446,7 +453,7 @@ export async function POST(request: Request) {
     if ((error as any).code === '23505') {
       const dup = await sb
         .from('deals')
-        .select('id,title,description,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id')
+        .select('id,title,description,ai_context,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id')
         .eq('organization_id', auth.organizationId)
         .eq('contact_id', contactId)
         .eq('stage_id', stageId)
@@ -467,6 +474,7 @@ export async function POST(request: Request) {
           data: {
             ...d,
             description: d.description ?? null,
+            ai_context: d.ai_context ?? null,
             value: Number(d.value ?? 0),
             tags: d.tags ?? [],
             custom_fields: d.custom_fields ?? {},

@@ -1171,7 +1171,13 @@ export function DealWhatsAppChat({
       return {
         bots: (j?.bots ?? [])
           .filter(b => b.enabled)
-          .map(b => ({ id: b.id, name: b.name, enabled: b.enabled, connection_id: b.connection_id ?? null })),
+          .map(b => ({
+            id: b.id,
+            name: b.name,
+            enabled: b.enabled,
+            connection_id: b.connection_id ?? null,
+            connection_ids: b.connection_ids?.length ? b.connection_ids : b.connection_id ? [b.connection_id] : [],
+          })),
       };
     },
     enabled: waBeta.enabled,
@@ -2594,7 +2600,32 @@ export function DealWhatsAppChat({
               Pela regra do WhatsApp, só dá para retomar a conversa enviando um modelo aprovado. Quando ele
               responder, o chat abre de novo.
             </p>
-            <div className="flex justify-end mt-2">
+            <div className="flex items-center justify-end gap-2 mt-2">
+              {/* Fora da janela dá para iniciar um robô/agente: se o primeiro passo
+                  for um Modelo de mensagem, ele reabre a conversa sozinho. */}
+              {!isGroup && waBeta.enabled && data?.conversation && (
+                <AutomationsMenu
+                  open={automationsOpen}
+                  onOpenChange={open => {
+                    setAutomationsOpen(open);
+                    if (open) {
+                      setEmojiOpen(false);
+                      setAttachMenuOpen(false);
+                      setTemplatesOpen(false);
+                    }
+                  }}
+                  agents={agentsMinimal?.agents ?? []}
+                  bots={(botsMinimal?.bots ?? []).filter(
+                    b => b.connection_ids.length === 0 || !connectionId || b.connection_ids.includes(connectionId)
+                  )}
+                  ai={aiState}
+                  bot={data?.bot ?? null}
+                  busy={aiBusy}
+                  hasHistory={!!aiState || (data?.messages?.length ?? 0) > 0}
+                  onStart={(kind, id, context) => void runAiAction(kind === 'agent' ? 'start' : 'start_bot', id, context)}
+                  onResetMemory={() => void runAiAction('reset_memory')}
+                />
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -2678,7 +2709,10 @@ export function DealWhatsAppChat({
                   }
                 }}
                 agents={agentsMinimal?.agents ?? []}
-                bots={botsMinimal?.bots ?? []}
+                bots={(botsMinimal?.bots ?? []).filter(
+                  // O robô é exclusivo dos números dele: numa conversa de outro número não aparece
+                  b => b.connection_ids.length === 0 || !connectionId || b.connection_ids.includes(connectionId)
+                )}
                 ai={aiState}
                 bot={data?.bot ?? null}
                 busy={aiBusy}

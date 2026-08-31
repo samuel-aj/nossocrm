@@ -557,7 +557,9 @@ export function flowToBot(nodes: FlowNode[], edges: FlowEdge[], header: FlowHead
   return {
     name: header.name.trim(),
     enabled: header.enabled,
-    connection_id: header.connection_id || null,
+    // connection_id continua gravado (primeiro da lista) para o que ainda lê a coluna antiga
+    connection_id: header.connection_ids[0] ?? null,
+    connection_ids: header.connection_ids,
     trigger: {
       type: triggerType,
       board_id: triggerType === 'manual' || triggerType === 'agent_followup' ? null : trigger?.data.board_id || null,
@@ -646,7 +648,7 @@ export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowH
   const to = (source: string, handle: string): string | null => targets.get(edgeIdFor(source, handle)) ?? null;
 
   if (!header.name.trim()) errors.push({ message: 'Dê um nome ao robô' });
-  if (!header.connection_id) errors.push({ message: 'Escolha o número que envia as mensagens' });
+  if (header.connection_ids.length === 0) errors.push({ message: 'Escolha em quais números este robô atende' });
 
   const trigger = nodes.find(isTriggerNode);
   if (trigger && trigger.data.trigger_type === 'deal_stage_entered') {

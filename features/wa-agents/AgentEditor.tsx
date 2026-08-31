@@ -39,10 +39,12 @@ import {
   AI_PROVIDERS,
   AgentInputSchema,
   DEFAULT_AGENT_TRIGGERS,
+  DEFAULT_AGENT_LEAD_CONTEXT,
   DEFAULT_AGENT_TYPING,
   type AgentInput,
   type AgentPublic,
   type AgentTriggers,
+  type AgentLeadContext,
   type AgentTyping,
   type AgentWebhook,
   type CustomAction,
@@ -135,6 +137,7 @@ type AgentFormState = {
   helper_agent_ids: string[];
   tools: AgentToolsState;
   typing: AgentTyping;
+  lead_context: AgentLeadContext;
 };
 
 const CUSTOM_MODEL = '__custom__';
@@ -187,6 +190,7 @@ const FIELD_TABS: Record<string, EditorTab> = {
   helper_agent_ids: 'acoes',
   tools: 'acoes',
   typing: 'config',
+  lead_context: 'roteiro',
 };
 
 // ---------------------------------------------------------------- Formulário
@@ -239,6 +243,7 @@ function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInpu
     helper_agent_ids: src.helper_agent_ids ?? [],
     tools: { calculator: src.tools?.calculator ?? true },
     typing: normalizeTyping(src.typing),
+    lead_context: { ...DEFAULT_AGENT_LEAD_CONTEXT, ...(src.lead_context ?? {}) },
   };
 }
 
@@ -282,6 +287,7 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
     helper_agent_ids: form.helper_agent_ids,
     tools: { calculator: form.tools.calculator },
     typing: form.typing,
+    lead_context: form.lead_context,
   };
   if (form.clear_api_key) payload.api_key = null;
   else if (form.api_key.trim()) payload.api_key = form.api_key.trim();
@@ -1052,6 +1058,42 @@ export const AgentEditor: React.FC<{
             </Field>
           </div>
           {!form.enabled ? <p className={HELP_CLASS}>Desligado, o agente não responde e não pode ser iniciado.</p> : null}
+        </Panel>
+
+        <Panel
+          title="O que ele sabe do lead"
+          description="O CRM injeta sozinho os dados do cadastro (negócio, etapa, contato). Aqui você escolhe o que mais entra."
+          icon={<BookOpen size={16} />}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Descrição do lead</p>
+              <p className={HELP_CLASS}>
+                O texto da descrição do negócio (histórico, resumos de atendimentos anteriores, contexto escrito pela
+                equipe). Desligue se preferir que ele não leia isso.
+              </p>
+            </div>
+            <Toggle
+              checked={form.lead_context.description}
+              onChange={(description) => patch({ lead_context: { ...form.lead_context, description } })}
+              label="Ler a descrição do lead"
+            />
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Campos personalizados</p>
+              <p className={HELP_CLASS}>Os campos do cadastro (motivo do contato, veículo, origem...).</p>
+            </div>
+            <Toggle
+              checked={form.lead_context.custom_fields}
+              onChange={(custom_fields) => patch({ lead_context: { ...form.lead_context, custom_fields } })}
+              label="Ler os campos personalizados do lead"
+            />
+          </div>
+          <p className={HELP_CLASS}>
+            O contexto enviado no cadastro pela API (<code className="font-mono">ai_context</code>) entra sempre, junto
+            do contexto que a equipe escreve ao iniciar o atendimento.
+          </p>
         </Panel>
 
         <Panel

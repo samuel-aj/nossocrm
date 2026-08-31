@@ -65,10 +65,16 @@ export async function PATCH(req: Request, ctx: Ctx) {
   };
 
   try {
-    const connectionId = typeof patch.connection_id === 'string' ? patch.connection_id : null;
-    if (connectionId && !(await connectionsBelongToOrg(auth.admin, orgId, [connectionId]))) {
+    const numeros = Array.isArray(patch.connection_ids)
+      ? (patch.connection_ids as string[])
+      : typeof patch.connection_id === 'string' && patch.connection_id
+        ? [patch.connection_id]
+        : [];
+    if (numeros.length > 0 && !(await connectionsBelongToOrg(auth.admin, orgId, numeros))) {
       return connectionNotFoundError();
     }
+    // A coluna antiga acompanha o primeiro da lista (quem ainda lê connection_id não quebra)
+    if (Array.isArray(patch.connection_ids)) patch.connection_id = (patch.connection_ids as string[])[0] ?? null;
 
     // Passos, passo inicial, balões e ligado/desligado: os enviados ou os já salvos
     // (o que faltar vem do banco). O passo inicial e todo id referenciado precisam

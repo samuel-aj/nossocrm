@@ -37,6 +37,10 @@ Cada **quebra de linha** na resposta do modelo vira uma mensagem separada no Wha
 
 Aba Configurações, painel **Ritmo e memória**: com **Mostrar "digitando..."** ligado (`typing.enabled`), antes de cada linha o CRM manda a presença de digitação no número do lead e espera um tempo proporcional ao TAMANHO daquela linha — `caracteres × ms_per_char`, entre `min_ms` e `max_ms` (padrões 45 ms/caractere, 0,8 s e 8 s). Mensagem maior = mais tempo digitando. Ligado, ele substitui o **Intervalo entre linhas** (somar os dois deixaria o atendimento arrastado); desligado, tudo continua como antes. A presença depende do provedor: a Evolution (QR) mostra o "digitando" de verdade; na API oficial da Meta só a espera acontece. O tempo entra no orçamento da trava da conversa (`lockSecondsFor`).
 
+### O que o agente sabe do lead
+
+Aba Roteiro, painel **O que ele sabe do lead** (`lead_context`): a **descrição do negócio** e os **campos personalizados** entram no bloco "DADOS DO LEAD" do prompt e podem ser desligados um a um (ambos ligados por padrão). A descrição cabe até 2.500 caracteres (os outros campos, 600), porque costuma guardar o histórico do lead. Além disso, o campo **`deals.ai_context`** — escrito pela integração no cadastro (`POST /deals { ai_context }`) ou depois (`PATCH /deals/{id}`) — entra sempre, junto do contexto que a equipe escreve ao iniciar o atendimento, no bloco "CONTEXTO ADICIONAL INFORMADO PELA EQUIPE". Serve para deixar o contexto pronto no lead mesmo sem ativar a IA naquele momento.
+
 ### Memória
 
 O agente lê o histórico da própria conversa (`wa_messages`), inclusive o que o atendente humano escreveu (marcado como `[Atendente humano]`), e um estado curto que ele mesmo salva (`salvar_dados`). Não existe tabela de memória separada.
@@ -107,6 +111,10 @@ Sem escrever nada no roteiro, o CRM já injeta: data e hora, nome e telefone do 
 No painel de teste do agente, descreva o que ele fez de errado ("se apresentou duas vezes", "ofereceu desconto") e a IA reescreve o roteiro aplicando a correção, mantendo o resto igual. Usa a chave de IA da organização.
 
 ## Robôs (sem IA)
+
+**Números do robô** (`connection_ids`): o robô atende SÓ os números marcados na barra do editor (dá para marcar vários). Ele não entra em conversa de outro número — o menu Automações do chat nem oferece, e a API devolve 409 `BOT_CONNECTION_NOT_ALLOWED`. Na API, `connection_id` escolhe por qual número iniciar; omitido, vale o primeiro do robô (antes ia pelo número da conversa/padrão da org, e um robô do número oficial acabava falando pelo QR). Robôs criados antes da mudança seguem com o número único que tinham.
+
+**Fora da janela de 24 h** (API oficial): o bloco "Janela de 24 h encerrada" do chat agora traz o menu **Automações** junto do "Reiniciar com um modelo" — dá para iniciar um robô cujo primeiro passo é um **Modelo de mensagem**, que sai como template aprovado e reabre a conversa. Robô que comece com texto comum continua falhando fora da janela (regra da Meta).
 
 Fluxo de mensagens predefinidas montado num **quadro visual** (estilo Typebot/ManyChat): **balões** com vários blocos empilhados, ligados por setas. Disparado quando um negócio é **criado** (opcionalmente num board) ou **entra numa etapa**, ou na mão. Precisa de um número (conexão) para enviar. O telefone vem do contato do negócio.
 
