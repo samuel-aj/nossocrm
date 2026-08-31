@@ -114,6 +114,8 @@ No painel de teste do agente, descreva o que ele fez de errado ("se apresentou d
 
 **Números do robô** (`connection_ids`): o robô atende SÓ os números marcados na barra do editor (dá para marcar vários). Ele não entra em conversa de outro número — o menu Automações do chat nem oferece, e a API devolve 409 `BOT_CONNECTION_NOT_ALLOWED`. Na API, `connection_id` escolhe por qual número iniciar; omitido, vale o primeiro do robô (antes ia pelo número da conversa/padrão da org, e um robô do número oficial acabava falando pelo QR). Robôs criados antes da mudança seguem com o número único que tinham.
 
+**Número que inicia pelo gatilho**: no nó Gatilho do quadro dá para escolher por qual número a conversa começa quando o robô dispara pelo pipeline (o lead ainda não tem conversa). Vazio = o primeiro número do robô; o escolhido precisa estar entre os números dele. No agente de IA o mesmo campo já existia (aba Gatilhos e números → "Número que inicia a conversa").
+
 **Fora da janela de 24 h** (API oficial): o bloco "Janela de 24 h encerrada" do chat agora traz o menu **Automações** junto do "Reiniciar com um modelo" — dá para iniciar um robô cujo primeiro passo é um **Modelo de mensagem**, que sai como template aprovado e reabre a conversa. Robô que comece com texto comum continua falhando fora da janela (regra da Meta).
 
 Fluxo de mensagens predefinidas montado num **quadro visual** (estilo Typebot/ManyChat): **balões** com vários blocos empilhados, ligados por setas. Disparado quando um negócio é **criado** (opcionalmente num board) ou **entra numa etapa**, ou na mão. Precisa de um número (conexão) para enviar. O telefone vem do contato do negócio.
@@ -170,7 +172,7 @@ Internas (header `X-Internal-Secret`): `POST /api/wa-agents/ingest`, `POST /api/
 Públicas (header `X-Api-Key`, para n8n/Make — só com a beta ligada na org, senão 409 `AGENTS_OFF`):
 
 - `GET /api/public/v1/whatsapp/agents` e `GET /api/public/v1/whatsapp/bots`: descobrem o `agent_id`/`bot_id`.
-- `POST /api/public/v1/whatsapp/conversations/agent` `{ phone, action: start|pause|resume|stop|context|reset_memory, agent_id?, context?, append?, connection_id? }`: mesma coisa que os botões do chat fazem com o agente nativo. `context` grava `ai_state.contexto_extra` sem reiniciar o atendimento (`append: true` acrescenta ao que já existe).
+- `POST /api/public/v1/whatsapp/conversations/agent` `{ phone, action: start|pause|resume|stop|context|reset_memory, agent_id?, context?, append?, connection_id? }` — `connection_id` escolhe por qual número iniciar; omitido, vale o número do gatilho do agente, depois o primeiro número dele, e só então o padrão da org: mesma coisa que os botões do chat fazem com o agente nativo. `context` grava `ai_state.contexto_extra` sem reiniciar o atendimento (`append: true` acrescenta ao que já existe).
 - `POST /api/public/v1/whatsapp/conversations/bot` `{ phone, action: start|stop, bot_id?, context?, connection_id? }`: inicia/para um robô na conversa (iniciar para o agente, como no menu Automações).
 - `POST /api/public/v1/whatsapp/conversations/ai` continua sendo do agente EXTERNO (n8n como cérebro).
 

@@ -26,7 +26,8 @@ import {
   type FlowNode,
 } from './types';
 
-const HEADER: FlowHeader = { name: 'Robô', enabled: true, connection_id: '11111111-1111-4111-8111-111111111111' };
+const NUMERO = '11111111-1111-4111-8111-111111111111';
+const HEADER: FlowHeader = { name: 'Robô', enabled: true, connection_ids: [NUMERO] };
 const DRAFT: FlowHeader = { ...HEADER, enabled: false };
 
 function bot(steps: BotStep[], start_step_id: string | null | undefined, layout?: BotRow['layout']): BotRow {
@@ -35,7 +36,8 @@ function bot(steps: BotStep[], start_step_id: string | null | undefined, layout?
     organization_id: 'org-1',
     name: 'Robô',
     enabled: true,
-    connection_id: HEADER.connection_id,
+    connection_id: NUMERO,
+    connection_ids: [NUMERO],
     trigger: { type: 'manual', board_id: null, stage_id: null },
     steps,
     start_step_id,

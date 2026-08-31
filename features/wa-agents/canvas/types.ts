@@ -136,7 +136,13 @@ export function unitFor(seconds: number): WaitUnit {
 
 // ---------------------------------------------------------------- Dados dos blocos
 
-export type TriggerData = { trigger_type: BotTriggerType; board_id: string; stage_id: string };
+export type TriggerData = {
+  trigger_type: BotTriggerType;
+  board_id: string;
+  stage_id: string;
+  /** Número que inicia a conversa quando o gatilho dispara ('' = primeiro do robô) */
+  connection_id: string;
+};
 export type MessageData = { text: string };
 export type WaitData = { amount: number; unit: WaitUnit };
 export type WaitReplyData = { timeout_minutes: number };

@@ -478,7 +478,14 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
         await saveRun(admin, st, { status: 'error', error: 'sem telefone' }, { release: true });
         return;
       }
-      const numeroInicial = botConnectionIds(bot)[0];
+      // Número que inicia a conversa: o escolhido no gatilho (se for um dos do
+      // robô) ou o primeiro da lista dele.
+      const permitidosInicio = botConnectionIds(bot);
+      const doGatilho = bot.trigger?.connection_id ?? null;
+      const numeroInicial =
+        doGatilho && (permitidosInicio.length === 0 || permitidosInicio.includes(doGatilho))
+          ? doGatilho
+          : permitidosInicio[0];
       if (!numeroInicial) {
         note(st, null, 'robô sem número configurado');
         await saveRun(admin, st, { status: 'error', error: 'robô sem número' }, { release: true });

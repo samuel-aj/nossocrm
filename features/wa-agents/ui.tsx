@@ -6,7 +6,7 @@
  */
 import React, { useEffect, useId, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, ChevronUp, GripVertical, Loader2, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, Copy, GripVertical, Loader2, X } from 'lucide-react';
 
 export const CARD_CLASS =
   'bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/5 rounded-xl p-4 shadow-sm space-y-4';
@@ -429,6 +429,39 @@ export function TabPanel({
  * drop que o carrega. Texto comum arrastado (seleção da própria textarea,
  * outra janela) fica com o comportamento nativo do navegador.
  */
+/**
+ * Chip "ID abc123… ⧉" que copia o id inteiro no clique. É por ele que a
+ * integração (n8n/Make) pega o `agent_id` e o `bot_id` sem precisar chamar a API.
+ */
+export function CopyIdButton({ id, label = 'ID' }: { id: string; label?: string }) {
+  const [copiado, setCopiado] = useState(false);
+  const copiar = async () => {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopiado(true);
+      window.setTimeout(() => setCopiado(false), 1500);
+    } catch {
+      // sem permissão/HTTPS o navegador recusa: o id continua visível para copiar na mão
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={() => void copiar()}
+      title={`Copiar o ${label}: ${id}`}
+      aria-label={`Copiar o ${label} ${id}`}
+      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-mono text-[11px] border transition-colors ${
+        copiado
+          ? 'bg-green-50 border-green-200 text-green-700 dark:bg-green-900/20 dark:border-green-500/30 dark:text-green-300'
+          : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200 dark:bg-white/10 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/20'
+      }`}
+    >
+      {copiado ? <Check size={11} aria-hidden="true" /> : <Copy size={11} aria-hidden="true" />}
+      {copiado ? 'copiado!' : `${label} ${id.slice(0, 8)}…`}
+    </button>
+  );
+}
+
 export const PROMPT_TOKEN_MIME = 'application/x-wa-prompt-token';
 
 /** true quando o arrasto (`dataTransfer.types`) veio de um chip do roteiro. */

@@ -12,7 +12,7 @@ import { DEFAULT_AGENT_TRIGGERS, type AgentInput, type AgentPublic } from '@/lib
 import { PROVIDER_LABELS } from '@/lib/wa-agents/catalog';
 import { useDeleteWaAgent, useSaveWaAgent, useWaAgentOptions, useWaAgentsList, type WaAgentListItem } from './useWaAgents';
 import { AgentEditor } from './AgentEditor';
-import { BTN_ICON, BTN_PRIMARY, Badge, EmptyState, Notice, Spinner, Toggle, errorMessage } from './ui';
+import { BTN_ICON, BTN_PRIMARY, Badge, CopyIdButton, EmptyState, Notice, Spinner, Toggle, errorMessage } from './ui';
 
 type EditorState = { agent: AgentPublic | null; initial?: Partial<AgentInput> };
 
@@ -156,6 +156,7 @@ export const AgentList: React.FC = () => {
                       {item.persona_name ? <Badge tone="purple">Persona: {item.persona_name}</Badge> : null}
                       <Badge tone={item.enabled ? 'green' : 'slate'}>{item.enabled ? 'Ligado' : 'Desligado'}</Badge>
                       {full?.has_api_key ? <Badge tone="blue">Chave própria</Badge> : null}
+                      <CopyIdButton id={item.id} />
                     </div>
                     <div className="mt-2 flex flex-col gap-1 text-xs text-slate-500 dark:text-slate-400">
                       {item.provider || item.model ? (

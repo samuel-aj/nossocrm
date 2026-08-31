@@ -351,6 +351,23 @@ function TriggerNodeView({ id, data, selected }: NodeProps<TriggerNode>) {
             ))}
           </select>
         ) : null}
+        {/* Por qual número a conversa começa quando o gatilho dispara (o lead ainda não tem conversa) */}
+        {data.trigger_type !== 'agent_followup' ? (
+          <select
+            className={INPUT_CLASS}
+            value={data.connection_id}
+            aria-label="Número que inicia a conversa"
+            onChange={(e) => set({ connection_id: e.target.value })}
+          >
+            <option value="">Número que inicia: o primeiro do robô</option>
+            {(options?.connections ?? []).map((c) => (
+              <option key={c.id} value={c.id}>
+                Inicia por {c.label}
+                {c.status === 'connected' ? '' : ' (desconectado)'}
+              </option>
+            ))}
+          </select>
+        ) : null}
         <p className={HELP_CLASS}>{help}</p>
       </div>
       <div className="border-t border-slate-100 dark:border-white/5 py-1">

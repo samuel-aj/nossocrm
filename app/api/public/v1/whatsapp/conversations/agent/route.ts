@@ -12,7 +12,8 @@
  *     agent_id?: "uuid do agente (obrigatório em start; GET /whatsapp/agents)",
  *     context?: "texto que o agente lê como contexto da equipe (start e context)",
  *     append?: true,          // context: acrescenta em vez de substituir
- *     connection_id?: "uuid do número (GET /whatsapp/connections); omitido = padrão da org" }
+ *     connection_id?: "por qual número iniciar (GET /whatsapp/connections); omitido = o número
+ *                     do gatilho do agente, senão o primeiro número dele, senão o padrão da org" }
  *
  * A conversa é localizada pelo telefone (com as variantes do nono dígito) no
  * número informado; se ainda não existir, é criada.
@@ -28,6 +29,7 @@ import { normalizePhone } from '@/lib/public-api/sanitize';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { isWaAgentsBetaEnabled } from '@/lib/wa-agents/beta';
+import { normalizeTriggers } from '@/lib/wa-agents/context';
 import { applyConversationAction } from '@/lib/wa-agents/conversation';
 import { runAgentOnConversation } from '@/lib/wa-agents/engine';
 import { runBotRunNow } from '@/lib/wa-agents/bots';
@@ -105,13 +107,31 @@ export async function POST(request: Request) {
     );
   }
 
-  const conn = connectionId
-    ? await getConnectionByIdForOrg(sb, organizationId, connectionId)
+  // Número: o informado manda. Sem ele, vale o número do agente — o que o gatilho
+  // de pipeline usa para iniciar a conversa e, na falta, o primeiro número em que
+  // ele atende. Só então o padrão da organização.
+  let alvo = connectionId;
+  if (!alvo && body.agent_id) {
+    const { data } = await sb
+      .from('wa_ai_agents')
+      .select('connection_ids, triggers')
+      .eq('organization_id', organizationId)
+      .eq('id', body.agent_id)
+      .maybeSingle();
+    const agente = data as { connection_ids: string[] | null; triggers: unknown } | null;
+    if (agente) {
+      const doGatilho = normalizeTriggers(agente.triggers).deal.connection_id;
+      alvo = doGatilho || agente.connection_ids?.[0] || '';
+    }
+  }
+
+  const conn = alvo
+    ? await getConnectionByIdForOrg(sb, organizationId, alvo)
     : await getConnectionByOrg(sb, organizationId);
   if (!conn) {
     return NextResponse.json(
       {
-        error: connectionId ? 'Connection not found' : 'No WhatsApp number connected in this organization',
+        error: alvo ? 'Connection not found' : 'No WhatsApp number connected in this organization',
         code: 'NO_CONNECTION',
       },
       { status: 404 }

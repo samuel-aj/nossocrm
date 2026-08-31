@@ -170,6 +170,7 @@ function createTriggerNode(trigger: BotRow['trigger'] | null, position: XYPositi
       trigger_type: trigger?.type ?? 'deal_stage_entered',
       board_id: trigger?.board_id ?? '',
       stage_id: trigger?.stage_id ?? '',
+      connection_id: trigger?.connection_id ?? '',
     },
   };
 }
@@ -558,12 +559,14 @@ export function flowToBot(nodes: FlowNode[], edges: FlowEdge[], header: FlowHead
     name: header.name.trim(),
     enabled: header.enabled,
     // connection_id continua gravado (primeiro da lista) para o que ainda lê a coluna antiga
-    connection_id: header.connection_ids[0] ?? null,
-    connection_ids: header.connection_ids,
+    connection_id: (header.connection_ids ?? [])[0] ?? null,
+    connection_ids: header.connection_ids ?? [],
     trigger: {
       type: triggerType,
       board_id: triggerType === 'manual' || triggerType === 'agent_followup' ? null : trigger?.data.board_id || null,
       stage_id: triggerType === 'deal_stage_entered' ? trigger?.data.stage_id || null : null,
+      // Número que inicia a conversa quando o gatilho dispara (vazio = primeiro do robô)
+      connection_id: trigger?.data.connection_id || null,
       ...(trigger ? { ui: { x: Math.round(trigger.position.x), y: Math.round(trigger.position.y) } } : {}),
     },
     steps,
@@ -648,7 +651,17 @@ export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowH
   const to = (source: string, handle: string): string | null => targets.get(edgeIdFor(source, handle)) ?? null;
 
   if (!header.name.trim()) errors.push({ message: 'Dê um nome ao robô' });
-  if (header.connection_ids.length === 0) errors.push({ message: 'Escolha em quais números este robô atende' });
+  const numerosDoRobo = header.connection_ids ?? [];
+  if (numerosDoRobo.length === 0) errors.push({ message: 'Escolha em quais números este robô atende' });
+  // O número que inicia pelo gatilho precisa ser um dos números do robô
+  const gatilho = nodes.find(isTriggerNode);
+  const inicia = gatilho?.data.connection_id;
+  if (inicia && numerosDoRobo.length > 0 && !numerosDoRobo.includes(inicia)) {
+    errors.push({
+      nodeId: gatilho?.id,
+      message: 'O número que inicia a conversa no gatilho não está entre os números do robô',
+    });
+  }
 
   const trigger = nodes.find(isTriggerNode);
   if (trigger && trigger.data.trigger_type === 'deal_stage_entered') {

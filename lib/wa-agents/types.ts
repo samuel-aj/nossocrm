@@ -598,6 +598,11 @@ export const BotTriggerSchema = z.object({
   type: z.enum(['deal_created', 'deal_stage_entered', 'manual', 'agent_followup']),
   board_id: z.string().uuid().nullable().optional(),
   stage_id: z.string().uuid().nullable().optional(),
+  /**
+   * Número que INICIA a conversa quando o gatilho dispara (o lead ainda não tem
+   * conversa). Vazio = o primeiro número do robô. Precisa ser um dos números dele.
+   */
+  connection_id: z.string().uuid().nullable().optional(),
   /** Posição do nó Gatilho no quadro (persistida como a dos passos) */
   ui: BotStepUiSchema.optional(),
 });

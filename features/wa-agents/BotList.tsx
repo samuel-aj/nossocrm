@@ -15,7 +15,20 @@ import { useToast } from '@/context/ToastContext';
 import type { BotRow } from '@/lib/wa-agents/types';
 import { useDeleteWaBot, useSaveWaBot, useStartWaBot, useWaAgentOptions, useWaBotsList } from './useWaAgents';
 import { TRIGGER_LABELS } from './canvas/types';
-import { BTN_ICON, BTN_PRIMARY, BTN_SECONDARY, Badge, EmptyState, Field, INPUT_CLASS, Notice, Spinner, Toggle, errorMessage } from './ui';
+import {
+  BTN_ICON,
+  BTN_PRIMARY,
+  BTN_SECONDARY,
+  Badge,
+  CopyIdButton,
+  EmptyState,
+  Field,
+  INPUT_CLASS,
+  Notice,
+  Spinner,
+  Toggle,
+  errorMessage,
+} from './ui';
 
 // O editor (React Flow e seus CSS) só é carregado quando alguém abre um robô.
 const BotEditor = dynamic(() => import('./BotEditor').then((m) => ({ default: m.BotEditor })), {
@@ -150,6 +163,7 @@ export const BotList: React.FC = () => {
                     <Badge tone="slate">
                       {bot.steps.length} {bot.steps.length === 1 ? 'passo' : 'passos'}
                     </Badge>
+                    <CopyIdButton id={bot.id} />
                   </div>
                   <div className="mt-2 flex flex-col gap-1 text-xs text-slate-500 dark:text-slate-400">
                     <span className="inline-flex items-center gap-1.5">
@@ -158,7 +172,11 @@ export const BotList: React.FC = () => {
                     </span>
                     <span className="inline-flex items-center gap-1.5">
                       <Phone size={12} aria-hidden="true" />
-                      {connectionLabel(bot.connection_id)}
+                      {(bot.connection_ids?.length ? bot.connection_ids : bot.connection_id ? [bot.connection_id] : []).length === 0
+                        ? 'Sem número escolhido'
+                        : (bot.connection_ids?.length ? bot.connection_ids : [bot.connection_id as string])
+                            .map(id => connectionLabel(id))
+                            .join(', ')}
                     </span>
                   </div>
                 </div>
