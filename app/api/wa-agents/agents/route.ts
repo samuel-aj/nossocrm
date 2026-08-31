@@ -37,6 +37,7 @@ function toInsertRow(input: AgentInput, helperIds: string[]) {
     model: input.model,
     temperature: input.temperature,
     api_key: normalizeApiKeyInput(input.api_key) ?? null,
+    audio_api_key: normalizeApiKeyInput(input.audio_api_key) ?? null,
     system_prompt: input.system_prompt,
     buffer_seconds: input.buffer_seconds,
     history_limit: input.history_limit,

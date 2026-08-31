@@ -115,12 +115,16 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
   // Só o que veio no corpo (zod v4 aplica defaults mesmo no partial); segredos mascarados voltam ao salvo
   const present = restoreMaskedSecrets(pickPresentKeys(body, parsed.data), existing);
-  const { api_key: apiKeyInput, ...fields } = present;
+  const { api_key: apiKeyInput, audio_api_key: audioKeyInput, ...fields } = present;
   const patch: Record<string, unknown> = { ...fields, updated_at: new Date().toISOString() };
   if ('persona_name' in present) patch.persona_name = fields.persona_name ?? null;
   if ('api_key' in present) {
     const apiKey = normalizeApiKeyInput(apiKeyInput);
     if (apiKey !== undefined) patch.api_key = apiKey;
+  }
+  if ('audio_api_key' in present) {
+    const audioKey = normalizeApiKeyInput(audioKeyInput);
+    if (audioKey !== undefined) patch.audio_api_key = audioKey;
   }
 
   try {

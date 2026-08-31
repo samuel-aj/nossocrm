@@ -231,6 +231,8 @@ export const AgentInputSchema = z.object({
   temperature: z.number().min(0).max(2).default(0.5),
   /** undefined = não mexe; '' ou null = limpa */
   api_key: z.string().max(500).nullable().optional(),
+  /** Chave da OpenAI usada SÓ para transcrever áudio (provedor que não ouve); mesma regra de undefined/null */
+  audio_api_key: z.string().max(500).nullable().optional(),
   system_prompt: z.string().max(60000).default(''),
   buffer_seconds: z.number().int().min(0).max(60).default(10),
   history_limit: z.number().int().min(5).max(200).default(40),
@@ -265,11 +267,15 @@ export type AgentRow = AgentInput & {
   id: string;
   organization_id: string;
   api_key: string | null;
+  audio_api_key: string | null;
   created_by?: string | null;
   created_at: string;
   updated_at: string;
 };
-export type AgentPublic = Omit<AgentRow, 'api_key'> & { has_api_key: boolean };
+export type AgentPublic = Omit<AgentRow, 'api_key' | 'audio_api_key'> & {
+  has_api_key: boolean;
+  has_audio_api_key: boolean;
+};
 export type AgentMinimal = { id: string; name: string; persona_name: string | null; enabled: boolean };
 /** Robô para o menu do chat (qualquer membro da org) */
 export type BotMinimal = {
@@ -313,8 +319,12 @@ export function maskAgentSecrets<T extends Pick<AgentInput, 'webhooks' | 'outcom
 
 /** Versão sem a chave (para a UI): a chave vira só `has_api_key`; segredos de webhook mascarados. */
 export function toAgentPublic(row: AgentRow): AgentPublic {
-  const { api_key, ...rest } = row;
-  return maskAgentSecrets({ ...rest, has_api_key: !!(api_key && api_key.trim()) });
+  const { api_key, audio_api_key, ...rest } = row;
+  return maskAgentSecrets({
+    ...rest,
+    has_api_key: !!(api_key && api_key.trim()),
+    has_audio_api_key: !!(audio_api_key && audio_api_key.trim()),
+  });
 }
 
 // ---------------------------------------------------------------------------

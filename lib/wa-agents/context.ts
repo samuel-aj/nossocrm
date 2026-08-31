@@ -213,6 +213,7 @@ export function normalizeAgentRow(raw: Record<string, unknown>): AgentRow {
     model: String(raw.model ?? ''),
     temperature: num(raw.temperature, 0.5),
     api_key: (raw.api_key as string | null) ?? null,
+    audio_api_key: (raw.audio_api_key as string | null) ?? null,
     system_prompt: String(raw.system_prompt ?? ''),
     buffer_seconds: num(raw.buffer_seconds, 10),
     history_limit: num(raw.history_limit, 40),

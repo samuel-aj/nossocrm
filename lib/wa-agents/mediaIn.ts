@@ -69,24 +69,50 @@ function fileName(path: string): string {
 }
 
 /**
- * Áudio -> texto. OpenAI usa whisper-1; Google ouve o arquivo direto. Anthropic
- * não transcreve áudio: devolve null (a mensagem segue como "[áudio]").
+ * Quem transcreve o áudio: o whisper-1 da OpenAI (com a chave dedicada do
+ * agente, a dele mesmo ou a da organização) ou o próprio provedor.
  */
+type AudioPlan = { via: 'whisper'; key: string } | { via: 'provider'; key: string };
+
+/**
+ * Decide como transcrever. A chave dedicada do agente ganha de tudo — é o que
+ * dá ouvido a um agente Anthropic. Sem ela: OpenAI e Google usam a própria
+ * chave; Anthropic tenta a chave da OpenAI da organização e, sem nenhuma das
+ * duas, devolve null (a mensagem segue como "[áudio]").
+ */
+export async function planAudio(
+  admin: SupabaseClient,
+  organizationId: string,
+  agent: AgentRow,
+  providerKey: string
+): Promise<AudioPlan | null> {
+  const dedicada = (agent.audio_api_key ?? '').trim();
+  if (dedicada) return { via: 'whisper', key: dedicada };
+  if (agent.provider === 'openai') return { via: 'whisper', key: providerKey };
+  if (agent.provider === 'google') return { via: 'provider', key: providerKey };
+  let orgKey = '';
+  try {
+    orgKey = await getOrganizationApiKey(admin, organizationId, 'openai');
+  } catch {
+    orgKey = '';
+  }
+  return orgKey ? { via: 'whisper', key: orgKey } : null;
+}
+
+/** Áudio -> texto, do jeito que planAudio decidiu. */
 async function transcribeAudio(
-  provider: AgentRow['provider'],
-  apiKey: string,
+  plan: AudioPlan,
   modelId: string,
   bytes: ArrayBuffer,
   mime: string
 ): Promise<string | null> {
-  if (provider === 'anthropic') return null;
-  if (provider === 'openai') {
-    const openai = createOpenAI({ apiKey });
+  if (plan.via === 'whisper') {
+    const openai = createOpenAI({ apiKey: plan.key });
     const result = await transcribe({ model: openai.transcription('whisper-1'), audio: new Uint8Array(bytes) });
     return (result.text || '').trim() || null;
   }
   const result = await generateText({
-    model: getModel('google', apiKey, modelId || 'gemini-2.5-flash'),
+    model: getModel('google', plan.key, modelId || 'gemini-2.5-flash'),
     messages: [
       {
         role: 'user',
@@ -171,6 +197,8 @@ export async function understandMedia(
   }
 
   const prontos = new Map<string, string>();
+  /** Calculado só quando chega o primeiro áudio (evita ler a organização à toa). */
+  let planoAudio: AudioPlan | null | undefined;
   for (const msg of pendentes.slice(0, MAX_MEDIA_PER_RUN)) {
     const kind = msg.media_type as string;
     const quer =
@@ -190,11 +218,16 @@ export async function understandMedia(
 
       if (kind === 'audio') {
         if (tamanho > MAX_AUDIO_BYTES) throw new Error('áudio grande demais');
-        texto = await transcribeAudio(agent.provider, apiKey, agent.model, baixado.bytes, mime);
-        if (!texto && agent.provider === 'anthropic') {
-          onEvent?.('media_skipped', { id: msg.id, tipo: kind, motivo: 'Anthropic não transcreve áudio' });
+        if (planoAudio === undefined) planoAudio = await planAudio(admin, organizationId, agent, apiKey);
+        if (!planoAudio) {
+          onEvent?.('media_skipped', {
+            id: msg.id,
+            tipo: kind,
+            motivo: 'sem chave da OpenAI para transcrever (o provedor deste agente não ouve áudio)',
+          });
           continue;
         }
+        texto = await transcribeAudio(planoAudio, agent.model, baixado.bytes, mime);
       } else if (kind === 'image' || kind === 'sticker') {
         if (tamanho > MAX_IMAGE_BYTES) throw new Error('imagem grande demais');
         texto = await describeImage(agent.provider, apiKey, agent.model, baixado.bytes, mime, kind === 'sticker', caption);

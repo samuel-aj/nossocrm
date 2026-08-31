@@ -117,6 +117,10 @@ type AgentFormState = {
   api_key: string;
   /** Remover a chave própria ao salvar */
   clear_api_key: boolean;
+  /** Chave da OpenAI só para transcrever áudio, digitada agora ('' = não mexe) */
+  audio_api_key: string;
+  /** Remover a chave de áudio ao salvar */
+  clear_audio_api_key: boolean;
   system_prompt: string;
   /** "Quando encerrar": regras de encerramento que o motor injeta no prompt como bloco obrigatório */
   stop_rules: string;
@@ -179,6 +183,7 @@ const FIELD_TABS: Record<string, EditorTab> = {
   model: 'config',
   temperature: 'config',
   api_key: 'config',
+  audio_api_key: 'roteiro',
   buffer_seconds: 'config',
   history_limit: 'config',
   line_delay_ms: 'config',
@@ -229,6 +234,8 @@ function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInpu
     temperature: src.temperature ?? 0.5,
     api_key: '',
     clear_api_key: false,
+    audio_api_key: '',
+    clear_audio_api_key: false,
     system_prompt: src.system_prompt ?? DEFAULT_SYSTEM_PROMPT,
     // Agente existente mantém o que tem (o roteiro antigo já traz o encerramento); novo começa com o padrão
     stop_rules: agent ? (agent.stop_rules ?? '') : (initial?.stop_rules ?? DEFAULT_STOP_RULES),
@@ -297,6 +304,8 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
   };
   if (form.clear_api_key) payload.api_key = null;
   else if (form.api_key.trim()) payload.api_key = form.api_key.trim();
+  if (form.clear_audio_api_key) payload.audio_api_key = null;
+  else if (form.audio_api_key.trim()) payload.audio_api_key = form.audio_api_key.trim();
   return payload;
 }
 
@@ -308,6 +317,7 @@ const FIELD_NAMES: Record<string, string> = {
   model: 'Modelo',
   temperature: 'Temperatura',
   api_key: 'Chave da API',
+  audio_api_key: 'Chave da OpenAI para áudio',
   system_prompt: 'Roteiro',
   stop_rules: 'Quando encerrar',
   buffer_seconds: 'Espera para agrupar mensagens',
@@ -772,6 +782,9 @@ export const AgentEditor: React.FC<{
   const [snapshot, setSnapshot] = useState<Partial<AgentInput>>(() => toPayload(buildInitialForm(agent, initial)));
   const [agentId, setAgentId] = useState<string | null>(agent?.id ?? null);
   const [hasApiKey, setHasApiKey] = useState<boolean>(agent?.has_api_key ?? false);
+  const [hasAudioApiKey, setHasAudioApiKey] = useState<boolean>(agent?.has_audio_api_key ?? false);
+  /** Terá chave para transcrever áudio depois de salvar (digitada agora ou já salva). */
+  const temChaveDeAudio = form.clear_audio_api_key ? false : hasAudioApiKey || !!form.audio_api_key.trim();
   const [tab, setTabState] = useState<EditorTab>('roteiro');
   const [testOpen, setTestOpen] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -916,10 +929,12 @@ export const AgentEditor: React.FC<{
       const saved = await save.mutateAsync({ id: agentId, input });
       const next = { ...payload };
       delete next.api_key;
+      delete next.audio_api_key;
       setSnapshot(next);
       setAgentId(saved.id);
       setHasApiKey(!!saved.has_api_key);
-      patch({ api_key: '', clear_api_key: false });
+      setHasAudioApiKey(!!saved.has_audio_api_key);
+      patch({ api_key: '', clear_api_key: false, audio_api_key: '', clear_audio_api_key: false });
       showToast(agentId ? 'Agente salvo' : 'Agente criado. Agora você pode enviar documentos e mídias e testar.', 'success');
       if (saved.warning) {
         // salvo, mas desligado: a chave da IA não está funcionando
@@ -1128,11 +1143,55 @@ export const AgentEditor: React.FC<{
                 />
               </div>
             ))}
-            {form.provider === 'anthropic' && form.media_understanding.audio ? (
-              <Notice tone="amber">
-                A Anthropic não transcreve áudio: com este provedor, o áudio continua chegando como
-                &quot;[áudio]&quot;. Imagens e documentos funcionam normalmente.
-              </Notice>
+            {form.media_understanding.audio ? (
+              <div className="rounded-lg border border-slate-200 dark:border-white/10 p-3 space-y-3">
+                <Field
+                  label="Chave da OpenAI só para o áudio (opcional)"
+                  htmlFor="agent-audio-api-key"
+                  help={
+                    form.clear_audio_api_key
+                      ? 'A chave de áudio será removida ao salvar.'
+                      : hasAudioApiKey
+                        ? 'Este agente tem uma chave de áudio salva. Digite outra para substituir.'
+                        : 'Usada só para transcrever (whisper-1), qualquer que seja o provedor do agente. Vazio: OpenAI e Google transcrevem com a chave do próprio agente, e a Anthropic tenta a chave da OpenAI da organização.'
+                  }
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <KeyRound size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+                      <input
+                        id="agent-audio-api-key"
+                        type="password"
+                        autoComplete="off"
+                        className={`${INPUT_CLASS} pl-9`}
+                        value={form.audio_api_key}
+                        onChange={(e) => patch({ audio_api_key: e.target.value, clear_audio_api_key: false })}
+                        placeholder={hasAudioApiKey ? 'Chave de áudio configurada' : 'sk-...'}
+                        maxLength={500}
+                        disabled={form.clear_audio_api_key}
+                      />
+                    </div>
+                    {hasAudioApiKey ? (
+                      <button
+                        type="button"
+                        className={BTN_SMALL}
+                        onClick={() =>
+                          patch({ clear_audio_api_key: !form.clear_audio_api_key, audio_api_key: '' })
+                        }
+                      >
+                        {form.clear_audio_api_key ? 'Manter chave' : 'Remover'}
+                      </button>
+                    ) : null}
+                  </div>
+                </Field>
+                {form.provider === 'anthropic' && !temChaveDeAudio ? (
+                  <Notice tone="amber">
+                    A Anthropic não transcreve áudio. Sem uma chave da OpenAI (aqui ou na Central de I.A. da
+                    organização), o áudio continua chegando como &quot;[áudio]&quot; — imagens e documentos
+                    funcionam normalmente.
+                  </Notice>
+                ) : null}
+              </div>
             ) : null}
           </div>
         </Panel>
