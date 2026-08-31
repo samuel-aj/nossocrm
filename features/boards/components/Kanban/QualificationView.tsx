@@ -407,9 +407,11 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
             <colgroup>
               {/* Larguras equilibradas: antes o Negócio levava 24% (vão
                   enorme até a Tag, já que título de lead é curto) e a última
-                  coluna ficava espremida. w-16 no ícone menos o px-2 da
-                  célula deixa 48px úteis (ícone de 20px + selo "Nd"). */}
-              <col className="w-16" />
+                  coluna ficava espremida. A primeira coluna guarda o ícone
+                  de atividade (20px) MAIS o selo de atraso ("5d"): w-[4.5rem]
+                  menos o px-2 da célula deixa 56px úteis, folga suficiente
+                  pro par sem apertar a linha. */}
+              <col className="w-[4.5rem]" />
               <col className="w-[25%]" />
               <col className="w-[14%]" />
               <col className="w-[15%]" />
