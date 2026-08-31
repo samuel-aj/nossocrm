@@ -36,7 +36,7 @@ export async function GET(req: Request) {
   let q = auth.admin
     .from('wa_conversations')
     .select(
-      'id, connection_id, wa_phone, wa_name, contact_id, deal_id, last_message_at, last_message_preview, unread_count, is_group, group_jid, participants_count'
+      'id, connection_id, wa_phone, wa_name, contact_id, deal_id, last_message_at, last_message_preview, unread_count, is_group, group_jid, participants_count, avatar_path'
     )
     .eq('organization_id', auth.user.organizationId);
   if (connectionId) q = q.eq('connection_id', connectionId);
@@ -46,5 +46,26 @@ export async function GET(req: Request) {
     .limit(500);
 
   if (error) return json({ error: error.message }, 500);
-  return json({ data: data || [], groupsEnabled });
+
+  // avatar_path guarda o CAMINHO no bucket privado wa-media (igual a
+  // wa_messages.media_url): a URL é assinada aqui, na leitura.
+  const linhas = (data || []) as Array<Record<string, unknown> & { avatar_path?: string | null }>;
+  const caminhos = Array.from(
+    new Set(linhas.map(r => r.avatar_path).filter((p): p is string => !!p && !p.startsWith('http')))
+  );
+  const assinadas = new Map<string, string>();
+  if (caminhos.length > 0) {
+    const { data: signed } = await auth.admin.storage.from('wa-media').createSignedUrls(caminhos, 3600);
+    for (const s of signed ?? []) {
+      if (s.path && s.signedUrl) assinadas.set(s.path, s.signedUrl);
+    }
+  }
+
+  return json({
+    data: linhas.map(r => ({
+      ...r,
+      avatar_url: r.avatar_path ? (assinadas.get(r.avatar_path) ?? null) : null,
+    })),
+    groupsEnabled,
+  });
 }

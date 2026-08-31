@@ -243,6 +243,26 @@ export class EvolutionProvider implements WhatsAppProvider {
     });
   }
 
+  /**
+   * Foto de perfil do contato (ou do grupo, quando `to` é um JID @g.us).
+   * A URL devolvida pela Evolution EXPIRA em poucas horas — quem chama
+   * precisa baixar e guardar, não salvar a URL.
+   */
+  async fetchProfilePictureUrl(input: { to: string }): Promise<string | null> {
+    const number = toEvolutionNumber(input.to);
+    if (!number) return null;
+    try {
+      const r = await this.call('POST', `/chat/fetchProfilePictureUrl/${encodeURIComponent(this.instanceName)}`, {
+        number,
+      });
+      if (!r.ok) return null;
+      const url = (r.data as { profilePictureUrl?: unknown } | null)?.profilePictureUrl;
+      return typeof url === 'string' && url.startsWith('http') ? url : null;
+    } catch {
+      return null;
+    }
+  }
+
   async setWebhook(url: string): Promise<void> {
     // v2: corpo aninhado em "webhook". webhookByEvents=false => um único endpoint.
     await this.call('POST', `/webhook/set/${encodeURIComponent(this.instanceName)}`, {

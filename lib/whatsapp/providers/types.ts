@@ -153,6 +153,15 @@ export interface WhatsAppProvider {
   sendTyping?(input: { to: string; ms: number; providerMessageId?: string }): Promise<void>;
   /** Marca a mensagem recebida como LIDA (os dois tiques azuis) — best-effort. */
   markRead?(input: { to: string; providerMessageId: string }): Promise<void>;
+  /**
+   * URL da foto de perfil do contato (ou do grupo, passando o JID). null
+   * quando a pessoa não tem foto ou esconde de quem não é contato.
+   *
+   * Só o QR Code implementa: a Cloud API da Meta NÃO expõe a foto de quem
+   * conversa com a empresa (no webhook vem só o nome), então lá o método
+   * nem existe e a lista fica nas iniciais.
+   */
+  fetchProfilePictureUrl?(input: { to: string }): Promise<string | null>;
   /** Normaliza um payload de webhook do provedor em um InboundEvent. */
   parseWebhook(payload: unknown): InboundEvent;
 }

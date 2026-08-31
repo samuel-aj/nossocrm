@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -34,6 +34,8 @@ type ConvRow = {
   is_group?: boolean | null;
   group_jid?: string | null;
   participants_count?: number | null;
+  /** Foto de perfil do contato/grupo, já assinada pela API (null = sem foto) */
+  avatar_url?: string | null;
 };
 
 type ConvInfo = {
@@ -44,6 +46,8 @@ type ConvInfo = {
   lastAt: string | null;
   preview: string;
   unread: number;
+  /** Foto de perfil vinda do WhatsApp (só número por QR Code) */
+  avatarUrl?: string | null;
 };
 
 type ChatTarget = {
@@ -75,6 +79,8 @@ type ChatListItem = ChatTarget & {
   isGroup?: boolean;
   conversationId?: string | null;
   participantsCount?: number | null;
+  /** Foto de perfil vinda do WhatsApp (só número por QR Code) */
+  avatarUrl?: string | null;
 };
 
 // Paleta de gradientes p/ avatar de iniciais (hash do nome → cor estável)
@@ -245,6 +251,38 @@ export const ChatsPage: React.FC = () => {
     staleTime: 5000,
   });
 
+  // Fotos de perfil: busca em lotes pequenos, uma vez por abertura da tela.
+  // Cada chamada devolve quantas faltam; a rotina segue até acabar (com teto,
+  // pra lista grande não virar uma enxurrada de requisições). Enfeite: falhou,
+  // a lista continua nas iniciais.
+  const avatarSyncStarted = useRef(false);
+  useEffect(() => {
+    if (avatarSyncStarted.current) return;
+    if (!convsQ.data?.data?.length) return;
+    avatarSyncStarted.current = true;
+    let cancelado = false;
+    void (async () => {
+      for (let rodada = 0; rodada < 8 && !cancelado; rodada++) {
+        try {
+          const res = await fetch('/api/whatsapp/avatars/sync', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'content-type': 'application/json' },
+          });
+          if (!res.ok) break;
+          const r = (await res.json()) as { comFoto?: number; restantes?: number };
+          if (r.comFoto) queryClient.invalidateQueries({ queryKey: ['waConversations'] });
+          if (!r.restantes) break;
+        } catch {
+          break;
+        }
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, [convsQ.data, queryClient]);
+
   // Conexão salva não vale mais nesta org (trocou de org na aba, número
   // removido, org voltou a ter 1 número): limpa o estado e o storage da aba.
   useEffect(() => {
@@ -297,6 +335,7 @@ export const ChatsPage: React.FC = () => {
         lastAt: r.last_message_at,
         preview: r.last_message_preview || '',
         unread: r.unread_count || 0,
+        avatarUrl: r.avatar_url ?? null,
       };
       const prev = m.get(key);
       if (!prev) {
@@ -308,6 +347,7 @@ export const ChatsPage: React.FC = () => {
         ...newer,
         contactId: newer.contactId ?? prev.contactId ?? item.contactId,
         waName: newer.waName || prev.waName || item.waName,
+        avatarUrl: newer.avatarUrl ?? prev.avatarUrl ?? item.avatarUrl ?? null,
         unread: prev.unread + item.unread,
       });
     }
@@ -349,6 +389,7 @@ export const ChatsPage: React.FC = () => {
         isGroup: true,
         conversationId: r.id,
         participantsCount: r.participants_count ?? null,
+        avatarUrl: r.avatar_url ?? null,
       });
     }
     return out;
@@ -418,6 +459,7 @@ export const ChatsPage: React.FC = () => {
           lastAt: conv.lastAt,
           preview: conv.preview,
           unread: conv.unread,
+          avatarUrl: conv.avatarUrl ?? null,
         });
       }
     }
@@ -438,6 +480,7 @@ export const ChatsPage: React.FC = () => {
           lastAt: conv.lastAt,
           preview: conv.preview,
           unread: conv.unread,
+          avatarUrl: conv.avatarUrl ?? null,
         });
       }
     }
@@ -912,11 +955,18 @@ export const ChatsPage: React.FC = () => {
                 }`}
               >
                 {c.isGroup ? (
-                  <span className="w-12 h-12 rounded-full bg-slate-200 dark:bg-white/10 text-slate-500 dark:text-slate-300 flex items-center justify-center shrink-0">
-                    <Users size={20} />
-                  </span>
+                  c.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={c.avatarUrl} alt="" className="w-12 h-12 rounded-full object-cover shrink-0" />
+                  ) : (
+                    <span className="w-12 h-12 rounded-full bg-slate-200 dark:bg-white/10 text-slate-500 dark:text-slate-300 flex items-center justify-center shrink-0">
+                      <Users size={20} />
+                    </span>
+                  )
                 ) : (
-                  <AvatarCircle name={c.name} src={c.contact?.avatar || undefined} />
+                  // Foto do WhatsApp na frente da do cadastro: é a que a pessoa
+                  // realmente usa e o atendente reconhece na lista.
+                  <AvatarCircle name={c.name} src={c.avatarUrl || c.contact?.avatar || undefined} />
                 )}
                 <span className="flex-1 min-w-0">
                   <span className="flex items-center justify-between gap-2">
