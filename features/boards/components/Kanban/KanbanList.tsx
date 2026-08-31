@@ -232,8 +232,13 @@ export const KanbanListRow = React.memo(function KanbanListRow({
   onChangeOwner,
   showDivider = false,
 }: KanbanListRowProps) {
-  // Mesma cor/opacidade da divisória da aba Todos (divide-slate-200).
-  const CELULA = showDivider ? `${CELL} border-t border-slate-200 dark:border-white/10` : CELL;
+  // Mesma cor/espessura da divisória da aba Todos (divide-slate-200) e, como
+  // lá, atravessando a linha INTEIRA — inclusive a célula do alerta. A faixa
+  // colorida da etapa é um span posicionado dentro da célula, então ela é
+  // pintada por cima do filete e continua descendo sem corte.
+  const DIVISORIA = showDivider ? ' border-t border-slate-200 dark:border-white/10' : '';
+  const CELULA = CELL + DIVISORIA;
+  const CELULA_ALERTA = 'relative px-2 py-3 align-middle' + DIVISORIA;
   const { triggerRef: stageTriggerRef, menuRef: stageMenuRef, pos: stageMenuPos } = useAnchoredMenu(
     isStageMenuOpen,
     onCloseStageMenu
@@ -274,15 +279,15 @@ export const KanbanListRow = React.memo(function KanbanListRow({
           ícone é estreita e, com table-fixed, o padding come a largura útil
           em vez de alargar a coluna — o ícone e o selo "Nd" de atraso
           vazariam por cima da coluna do lado. */}
-      <td className="relative px-2 py-3 align-middle">
+      <td className={CELULA_ALERTA}>
         {accentColor ? (
-          <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-[3px] ${accentColor}`} />
+          <span aria-hidden="true" className={`absolute -top-px bottom-0 left-0 w-[3px] ${accentColor}`} />
         ) : (
           // Filete que aparece no hover: dá o mesmo "trilho" das abas
           // agrupadas sem poluir a lista parada.
           <span
             aria-hidden="true"
-            className="absolute inset-y-0 left-0 w-[3px] bg-primary-500 opacity-0 transition-opacity group-hover:opacity-100"
+            className="absolute -top-px bottom-0 left-0 w-[3px] bg-primary-500 opacity-0 transition-opacity group-hover:opacity-100"
           />
         )}
         <div className="flex items-center justify-center">
