@@ -66,23 +66,14 @@ const formatCriadoEm = (iso: string): { label: string; full: string } | null => 
   return { label: DATA_CURTA.format(d), full };
 };
 
-/** Etiquetas ganham cor própria (estável por nome) pra dar de bater o olho e
- *  distinguir, em vez de um bloco cinza igual pra todas. */
-const TAG_CORES = [
-  'bg-indigo-50 text-indigo-700 ring-indigo-200/70 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-400/20',
-  'bg-emerald-50 text-emerald-700 ring-emerald-200/70 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-400/20',
-  'bg-amber-50 text-amber-700 ring-amber-200/70 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-400/20',
-  'bg-rose-50 text-rose-700 ring-rose-200/70 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-400/20',
-  'bg-sky-50 text-sky-700 ring-sky-200/70 dark:bg-sky-500/10 dark:text-sky-300 dark:ring-sky-400/20',
-  'bg-violet-50 text-violet-700 ring-violet-200/70 dark:bg-violet-500/10 dark:text-violet-300 dark:ring-violet-400/20',
-  'bg-teal-50 text-teal-700 ring-teal-200/70 dark:bg-teal-500/10 dark:text-teal-300 dark:ring-teal-400/20',
-  'bg-orange-50 text-orange-700 ring-orange-200/70 dark:bg-orange-500/10 dark:text-orange-300 dark:ring-orange-400/20',
-];
-const corDaTag = (tag: string): string => {
-  let hash = 0;
-  for (let i = 0; i < tag.length; i++) hash = (hash * 31 + tag.charCodeAt(i)) >>> 0;
-  return TAG_CORES[hash % TAG_CORES.length];
-};
+/** Linguagem única de selo pra tabela inteira: mesmo raio, mesma altura e
+ *  mesma tipografia em Tag e Estágio. Cor aleatória por etiqueta deixava a
+ *  tabela com cara de confete; a cor agora só aparece onde SIGNIFICA algo
+ *  (a etapa do funil, ganho e perdido). */
+const PILL_BASE =
+  'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-semibold leading-none ring-1 ring-inset';
+const PILL_NEUTRO =
+  'bg-primary-50 text-primary-700 ring-primary-100 dark:bg-primary-500/10 dark:text-primary-300 dark:ring-primary-400/20';
 
 /**
  * Posiciona um menu flutuante (React Portal) ancorado num botão-gatilho,
@@ -171,9 +162,9 @@ type KanbanListRowProps = {
   onCloseStageMenu: () => void;
 };
 
-/** Padding padrão das células: linha mais densa que a antiga (px-6 py-3),
- *  sem o vão enorme que sobrava entre as colunas. */
-const CELL = 'px-4 py-2.5 align-middle';
+/** Padding padrão das células. py-3 dá a mesma altura de linha com e sem a
+ *  segunda linha (contato), mantendo o ritmo vertical parelho. */
+const CELL = 'px-4 py-3 align-middle';
 
 /**
  * Linha da lista de deals (usada pela QualificationView em todas as abas).
@@ -210,7 +201,7 @@ export const KanbanListRow = React.memo(function KanbanListRow({
     ? 'bg-emerald-50 text-emerald-700 ring-emerald-200/70 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-400/20'
     : deal.isLost
       ? 'bg-rose-50 text-rose-700 ring-rose-200/70 dark:bg-rose-500/15 dark:text-rose-300 dark:ring-rose-400/20'
-      : 'bg-slate-100/80 text-slate-700 ring-slate-200/70 dark:bg-white/[0.06] dark:text-slate-200 dark:ring-white/10';
+      : 'bg-slate-50 text-slate-700 ring-slate-200 dark:bg-white/[0.06] dark:text-slate-200 dark:ring-white/10';
 
   return (
     <tr
@@ -233,7 +224,7 @@ export const KanbanListRow = React.memo(function KanbanListRow({
           ícone é estreita e, com table-fixed, o padding come a largura útil
           em vez de alargar a coluna — o ícone e o selo "Nd" de atraso
           vazariam por cima da coluna do lado. */}
-      <td className="relative px-2 py-2.5 align-middle">
+      <td className="relative px-2 py-3 align-middle">
         {accentColor ? (
           <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-[3px] ${accentColor}`} />
         ) : (
@@ -278,7 +269,7 @@ export const KanbanListRow = React.memo(function KanbanListRow({
               <span
                 key={`${deal.id}-tag-${index}`}
                 title={tag}
-                className={`max-w-full truncate rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${corDaTag(tag)}`}
+                className={`max-w-full truncate ${PILL_BASE} ${PILL_NEUTRO}`}
               >
                 {tag}
               </span>
@@ -286,7 +277,7 @@ export const KanbanListRow = React.memo(function KanbanListRow({
             {deal.tags.length > 2 && (
               <span
                 title={deal.tags.slice(2).join(', ')}
-                className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500 ring-1 ring-inset ring-slate-200/70 dark:bg-white/[0.06] dark:text-slate-400 dark:ring-white/10"
+                className={`${PILL_BASE} bg-slate-100 text-slate-500 ring-slate-200/70 dark:bg-white/[0.06] dark:text-slate-400 dark:ring-white/10`}
               >
                 +{deal.tags.length - 2}
               </span>
@@ -311,7 +302,7 @@ export const KanbanListRow = React.memo(function KanbanListRow({
               aria-expanded={isStageMenuOpen}
               aria-label={`Estágio: ${stageLabel}. Clique para mudar.`}
               title="Mudar estágio"
-              className={`inline-flex max-w-full items-center gap-1.5 rounded-full py-1 pl-2 pr-1.5 text-xs font-semibold ring-1 ring-inset transition-colors focus-visible-ring hover:brightness-[0.97] dark:hover:brightness-125 ${stagePillClasses}`}
+              className={`max-w-full pr-1.5 transition-colors focus-visible-ring hover:brightness-[0.97] dark:hover:brightness-125 ${PILL_BASE} ${stagePillClasses}`}
             >
               {!deal.isWon && !deal.isLost && (
                 <span
@@ -379,9 +370,7 @@ export const KanbanListRow = React.memo(function KanbanListRow({
               : null}
           </>
         ) : (
-          <span
-            className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-2 py-1 text-xs font-semibold ring-1 ring-inset ${stagePillClasses}`}
-          >
+          <span className={`max-w-full ${PILL_BASE} ${stagePillClasses}`}>
             {!deal.isWon && !deal.isLost && (
               <span
                 aria-hidden="true"
@@ -393,7 +382,7 @@ export const KanbanListRow = React.memo(function KanbanListRow({
         )}
       </td>
 
-      <td className={`${CELL} text-right`}>
+      <td className={CELL}>
         <span className="font-semibold tabular-nums text-slate-800 dark:text-slate-100">
           {formatValor(deal.value)}
         </span>

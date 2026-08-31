@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, Inbox } from 'lucide-react';
+import { ChevronDown, ChevronsUpDown, ArrowUp, ArrowDown, Inbox } from 'lucide-react';
 import { DealView, CustomFieldDefinition, Board } from '@/types';
 import {
   computeQualificationView,
@@ -71,30 +71,33 @@ const SortableHeader: React.FC<{
     <th
       scope="col"
       aria-sort={isActive ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
-      className={`px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider ${
-        isActive ? 'text-slate-700 dark:text-slate-200' : 'text-slate-400 dark:text-slate-500'
+      className={`px-4 py-3 text-[13px] font-semibold ${
+        isActive ? 'text-primary-700 dark:text-primary-300' : 'text-slate-600 dark:text-slate-300'
       } ${className ?? ''}`}
     >
       <button
         type="button"
         onClick={() => onSort(column)}
-        className={`group inline-flex items-center gap-1 rounded transition-colors hover:text-primary-600 dark:hover:text-primary-400 focus-visible-ring ${
+        className={`group inline-flex items-center gap-1.5 rounded transition-colors hover:text-primary-600 dark:hover:text-primary-400 focus-visible-ring ${
           align === 'right' ? 'ml-auto' : ''
         }`}
         aria-label={`Ordenar por ${label}`}
       >
         {label}
-        <span
-          className={`transition-opacity ${
-            isActive ? 'text-primary-500 opacity-100' : 'opacity-0 group-hover:opacity-60'
-          }`}
-        >
-          {isActive ? (
-            sortDirection === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />
+        {/* A seta fica SEMPRE visível (só muda de cor quando ativa): some no
+            hover, o usuário não descobre que a coluna ordena. */}
+        {isActive ? (
+          sortDirection === 'asc' ? (
+            <ArrowUp size={13} className="text-primary-500" />
           ) : (
-            <ArrowUpDown size={12} />
-          )}
-        </span>
+            <ArrowDown size={13} className="text-primary-500" />
+          )
+        ) : (
+          <ChevronsUpDown
+            size={13}
+            className="text-slate-300 transition-colors group-hover:text-slate-500 dark:text-slate-600 dark:group-hover:text-slate-400"
+          />
+        )}
       </button>
     </th>
   );
@@ -342,18 +345,17 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
             className="w-full table-fixed max-md:min-w-[50rem] text-left text-sm border-collapse"
           >
             <colgroup>
-              {/* A coluna do ícone de atividade era w-24 (96px), o que abria
-                  um vão enorme na esquerda. w-16 (64px) menos o px-2 da
-                  célula deixa os mesmos 48px úteis de antes (cabem o ícone
-                  de 20px e o selo "Nd" de atraso), devolvendo 32px pro nome
-                  do negócio. */}
+              {/* Larguras equilibradas: antes o Negócio levava 24% (vão
+                  enorme até a Tag, já que título de lead é curto) e a última
+                  coluna ficava espremida. w-16 no ícone menos o px-2 da
+                  célula deixa 48px úteis (ícone de 20px + selo "Nd"). */}
               <col className="w-16" />
-              <col className="w-[24%]" />
+              <col className="w-[25%]" />
+              <col className="w-[14%]" />
               <col className="w-[15%]" />
-              <col className="w-[15%]" />
-              <col className="w-[13%]" />
-              <col className="w-[17%]" />
-              <col className="w-[11%]" />
+              <col className="w-[12%]" />
+              <col className="w-[18%]" />
+              <col className="w-[16%]" />
               {customFieldDefinitions.map((field) => (
                 <col key={field.id} />
               ))}
@@ -361,9 +363,9 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
             {/* Cabeçalho de colunas só na aba Todos; nas abas agrupadas os
                 grupos ficam colados nas abas e dão o contexto sozinhos. */}
             {activeTab === 'todos' && (
-              <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50/90 backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/70">
+              <thead className="sticky top-0 z-10 border-b border-slate-200/80 bg-primary-50/50 backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.04]">
                 <tr>
-                  <th scope="col" className="px-4 py-2.5">
+                  <th scope="col" className="px-2 py-3">
                     <span className="sr-only">Próxima atividade</span>
                   </th>
                   <SortableHeader
@@ -387,14 +389,15 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                     sortDirection={sortDirection}
                     onSort={handleSort}
                   />
+                  {/* Valor à esquerda como as demais: alinhado à direita ele
+                      encostava no avatar do Responsável e o espaçamento das
+                      colunas ficava irregular. */}
                   <SortableHeader
                     label="Valor"
                     column="value"
                     currentSort={sortColumn}
                     sortDirection={sortDirection}
                     onSort={handleSort}
-                    className="text-right"
-                    align="right"
                   />
                   <SortableHeader
                     label="Responsável"
