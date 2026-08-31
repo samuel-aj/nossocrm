@@ -24,7 +24,7 @@ import {
 export const runtime = 'nodejs';
 
 export async function POST(req: Request) {
-  const auth = await guardRoute({ req, admin: true });
+  const auth = await guardRoute({ req, admin: true, agents: true });
   if (!auth.ok) return auth.response;
   const orgId = auth.user.organizationId;
 

@@ -5,6 +5,7 @@ type AuditAction =
   | 'superadmin.org.update'
   | 'superadmin.org.delete'
   | 'superadmin.org.switch'
+  | 'superadmin.org.ai_agents'
   | 'superadmin.user.create'
   | 'superadmin.user.promote'
   | 'superadmin.user.demote'

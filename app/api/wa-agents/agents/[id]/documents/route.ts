@@ -43,7 +43,7 @@ export const maxDuration = 300;
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function GET(_req: Request, ctx: Ctx) {
-  const auth = await guardRoute({ admin: true });
+  const auth = await guardRoute({ admin: true, agents: true });
   if (!auth.ok) return auth.response;
   const { id } = await ctx.params;
   if (!isValidUUID(id)) return json({ error: 'ID inválido' }, 400);
@@ -59,7 +59,7 @@ export async function GET(_req: Request, ctx: Ctx) {
 }
 
 export async function POST(req: Request, ctx: Ctx) {
-  const auth = await guardRoute({ req, admin: true });
+  const auth = await guardRoute({ req, admin: true, agents: true });
   if (!auth.ok) return auth.response;
   const { id } = await ctx.params;
   if (!isValidUUID(id)) return json({ error: 'ID inválido' }, 400);

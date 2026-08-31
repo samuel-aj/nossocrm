@@ -3,14 +3,14 @@
  *
  * Padrão do projeto: autentica pela sessão (cookie) e opera via client admin
  * (service role) filtrando SEMPRE por organization_id. Mutações exigem mesma
- * origem (CSRF) e quase tudo exige a chave beta ligada na organização
- * (exceto /beta e as rotas internas chamadas pelo banco).
+ * origem (CSRF) e as rotas do AGENTE exigem a liberação do super admin
+ * (robôs são liberados para todas as organizações).
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ZodError } from 'zod';
 import { requireOrgUser, isOrgAdmin, json, type OrgUser } from '@/lib/whatsapp/api';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
-import { isWaAgentsBetaEnabled } from '@/lib/wa-agents/beta';
+import { isAiAgentsApproved } from '@/lib/wa-agents/beta';
 import { normalizeKeyword } from '@/lib/wa-agents/text';
 import {
   isAllowedMediaMime,
@@ -84,8 +84,12 @@ export interface GuardOptions {
   req?: Request;
   /** Exige papel de administrador da organização. */
   admin?: boolean;
-  /** Exige a chave beta ligada na organização (padrão: true). */
-  beta?: boolean;
+  /**
+   * Exige que o AGENTE DE IA esteja liberado para a organização (liberação
+   * feita pelo super admin da agência). Rotas de ROBÔ e as compartilhadas
+   * ficam sem trava — robô é liberado pra todo mundo.
+   */
+  agents?: boolean;
 }
 
 /** Autentica, checa origem/papel/beta e devolve usuário + client admin. */
@@ -103,10 +107,16 @@ export async function guardRoute(opts: GuardOptions = {}): Promise<GuardResult> 
       response: json({ error: 'Apenas administradores podem fazer isso', code: 'FORBIDDEN' }, 403),
     };
   }
-  if (opts.beta !== false) {
-    const enabled = await isWaAgentsBetaEnabled(auth.admin, auth.user.organizationId);
-    if (!enabled) {
-      return { ok: false, response: json({ error: 'Versão beta desativada', code: 'BETA_DISABLED' }, 403) };
+  if (opts.agents) {
+    const liberado = await isAiAgentsApproved(auth.admin, auth.user.organizationId);
+    if (!liberado) {
+      return {
+        ok: false,
+        response: json(
+          { error: 'Agente de IA não liberado para esta organização', code: 'AI_AGENTS_NOT_APPROVED' },
+          403
+        ),
+      };
     }
   }
   return { ok: true, user: auth.user, admin: auth.admin, isAdmin };

@@ -16,7 +16,7 @@ import {
   type WaConnectionRow,
 } from '@/lib/whatsapp/service';
 import { addDealTag } from './actions';
-import { isWaAgentsBetaEnabled } from './beta';
+import { isAiAgentsApproved } from './beta';
 import { loadAgent, loadConversationContext, loadDealContext, loadLastInboundProviderId } from './context';
 import { runAgentOnConversation } from './engine';
 import { errorMessage } from './errors';
@@ -425,11 +425,9 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
   const orgId = run.organization_id;
 
   try {
-    if (!(await isWaAgentsBetaEnabled(admin, orgId))) {
-      note(st, null, 'versão beta desativada');
-      await saveRun(admin, st, { status: 'cancelled', wake_at: null }, { release: true });
-      return;
-    }
+    // Robô roda para QUALQUER organização (saiu da beta). Só o passo
+    // "entregar a agente" depende da liberação do agente de IA, conferida
+    // adiante, no próprio passo.
     const bot = await loadBot(admin, orgId, run.bot_id);
     if (!bot || !bot.enabled) {
       note(st, null, bot ? 'robô desligado' : 'robô não encontrado');
@@ -837,6 +835,11 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
           break;
         }
         case 'handoff_agent': {
+          // O robô é livre, mas ENTREGAR a um agente de IA só vale se a
+          // organização tiver o agente liberado pelo super admin.
+          if (!(await isAiAgentsApproved(admin, orgId))) {
+            throw new Error('agente de IA não liberado para esta organização');
+          }
           const agent = await loadAgent(admin, orgId, step.agent_id);
           if (!agent) throw new Error('agente de destino não encontrado');
           if (!agent.enabled) throw new Error('agente de destino desligado');

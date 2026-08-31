@@ -52,7 +52,7 @@ function withDraft(saved: AgentRow, rawBody: unknown, draft: Partial<AgentRow> |
 }
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const auth = await guardRoute({ req, admin: true });
+  const auth = await guardRoute({ req, admin: true, agents: true });
   if (!auth.ok) return auth.response;
 
   const { id } = await ctx.params;

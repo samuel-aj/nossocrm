@@ -69,10 +69,11 @@ vi.mock('./components/McpSection', () => ({
   ),
 }))
 
-// Versão beta dos agentes: o hook usa react-query (sem provider no teste) e a
-// aba só existe com a chave ligada; aqui fica desligada.
-vi.mock('@/hooks/useWaAgentsBeta', () => ({
-  useWaAgentsBeta: () => ({ enabled: false, isAdmin: false, isLoading: false, setEnabled: async () => {} }),
+// Acesso às automações: o hook usa react-query (sem provider no teste). A aba
+// "Automações" hoje aparece para qualquer admin; o agente de IA é que fica
+// bloqueado até o super admin liberar — aqui, não liberado.
+vi.mock('@/hooks/useWaAgentsAccess', () => ({
+  useWaAgentsAccess: () => ({ agentsApproved: false, isAdmin: false, isLoading: false }),
 }))
 vi.mock('@/features/wa-agents/WaAgentsSettings', () => ({
   WaAgentsSettings: () => null,

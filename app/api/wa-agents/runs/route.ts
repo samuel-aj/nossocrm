@@ -22,7 +22,7 @@ const QuerySchema = z.object({
 });
 
 export async function GET(req: Request) {
-  const auth = await guardRoute({ admin: true });
+  const auth = await guardRoute({ admin: true, agents: true });
   if (!auth.ok) return auth.response;
   const orgId = auth.user.organizationId;
 

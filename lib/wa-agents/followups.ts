@@ -13,7 +13,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getServiceWindow } from '@/lib/whatsapp/serviceWindow';
-import { isWaAgentsBetaEnabled } from './beta';
+import { isAiAgentsApproved } from './beta';
 import { createBotRun, runBotRunNow } from './bots';
 import { loadAgent } from './context';
 import { runAgentOnConversation } from './engine';
@@ -92,7 +92,7 @@ export async function processFollowups(
       if (result.fired >= limit) break;
       let beta = betaByOrg.get(a.organization_id);
       if (beta === undefined) {
-        beta = await isWaAgentsBetaEnabled(admin, a.organization_id);
+        beta = await isAiAgentsApproved(admin, a.organization_id);
         betaByOrg.set(a.organization_id, beta);
       }
       if (!beta) continue;

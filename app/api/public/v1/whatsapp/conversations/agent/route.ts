@@ -28,7 +28,7 @@ import { authPublicApi } from '@/lib/public-api/auth';
 import { normalizePhone } from '@/lib/public-api/sanitize';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { isValidUUID } from '@/lib/supabase/utils';
-import { isWaAgentsBetaEnabled } from '@/lib/wa-agents/beta';
+import { isAiAgentsApproved } from '@/lib/wa-agents/beta';
 import { normalizeTriggers } from '@/lib/wa-agents/context';
 import { applyConversationAction } from '@/lib/wa-agents/conversation';
 import { runAgentOnConversation } from '@/lib/wa-agents/engine';
@@ -100,7 +100,7 @@ export async function POST(request: Request) {
   const sb = createStaticAdminClient();
   const organizationId = auth.organizationId;
 
-  if (!(await isWaAgentsBetaEnabled(sb, organizationId))) {
+  if (!(await isAiAgentsApproved(sb, organizationId))) {
     return NextResponse.json(
       { error: 'Agentes de IA do CRM não estão ligados nesta organização', code: 'AGENTS_OFF' },
       { status: 409 }

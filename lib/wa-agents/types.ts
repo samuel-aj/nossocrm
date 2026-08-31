@@ -7,6 +7,12 @@ import { z } from 'zod';
 import { isPublicHttpUrl } from './url';
 
 export const WA_AGENTS_BETA_FLAG = 'wa_agents_beta';
+/**
+ * Liberação do AGENTE DE IA para a organização — quem liga é o SUPER ADMIN da
+ * agência, não o admin do cliente (o agente é vendido caso a caso). Os ROBÔS
+ * não passam por aqui: são liberados para todo mundo.
+ */
+export const WA_AI_AGENTS_FLAG = 'wa_ai_agents_approved';
 
 // ---------------------------------------------------------------------------
 // Eventos do agente (webhooks e linha do tempo das execuções)

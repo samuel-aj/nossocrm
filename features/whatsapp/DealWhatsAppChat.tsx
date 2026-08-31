@@ -53,7 +53,7 @@ import {
 import { formatRemaining, getServiceWindow } from '@/lib/whatsapp/serviceWindow';
 import { useWhatsAppChat, type WaChatMessage, type WaMediaKind, type WaSender } from './useWhatsAppChat';
 import { transcodeToMp3 } from './audioTranscode';
-import { useWaAgentsBeta } from '@/hooks/useWaAgentsBeta';
+import { useWaAgentsAccess } from '@/hooks/useWaAgentsAccess';
 import { useToast } from '@/context/ToastContext';
 import { ChatAgentBanner } from '@/features/wa-agents/ChatAgentBanner';
 import { AutomationsMenu } from '@/features/wa-agents/AutomationsMenu';
@@ -1141,8 +1141,8 @@ export function DealWhatsAppChat({
   const [aiBusy, setAiBusy] = useState(false);
   // Versão beta (agentes nativos): faixa completa com iniciar/pausar/parar/aprovar.
   // Fora do beta, a faixa antiga (pausar/retomar do agente externo) continua igual.
-  const waBeta = useWaAgentsBeta();
-  const nativeBanner = waBeta.enabled || !!aiState?.native;
+  const waBeta = useWaAgentsAccess();
+  const nativeBanner = waBeta.agentsApproved || !!aiState?.native;
   const { data: agentsMinimal } = useQuery<{ agents: AgentMinimal[] }>({
     queryKey: ['waAgents', 'minimal'],
     queryFn: async () => {
@@ -1154,7 +1154,7 @@ export function DealWhatsAppChat({
       if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`);
       return { agents: j?.agents ?? [] };
     },
-    enabled: waBeta.enabled,
+    enabled: waBeta.agentsApproved,
     staleTime: 60_000,
     retry: false,
   });
@@ -1180,7 +1180,7 @@ export function DealWhatsAppChat({
           })),
       };
     },
-    enabled: waBeta.enabled,
+    enabled: waBeta.agentsApproved,
     staleTime: 60_000,
     retry: false,
   });
@@ -2603,7 +2603,7 @@ export function DealWhatsAppChat({
             <div className="flex items-center justify-end gap-2 mt-2">
               {/* Fora da janela dá para iniciar um robô/agente: se o primeiro passo
                   for um Modelo de mensagem, ele reabre a conversa sozinho. */}
-              {!isGroup && waBeta.enabled && data?.conversation && (
+              {!isGroup && waBeta.agentsApproved && data?.conversation && (
                 <AutomationsMenu
                   open={automationsOpen}
                   onOpenChange={open => {
@@ -2697,7 +2697,7 @@ export function DealWhatsAppChat({
             </button>
             {/* AUTOMAÇÕES (beta): iniciar um agente de IA ou um robô nesta conversa, com
                 contexto adicional opcional; também "Limpar memória do agente" */}
-            {!isGroup && waBeta.enabled && data?.conversation && (
+            {!isGroup && waBeta.agentsApproved && data?.conversation && (
               <AutomationsMenu
                 open={automationsOpen}
                 onOpenChange={open => {

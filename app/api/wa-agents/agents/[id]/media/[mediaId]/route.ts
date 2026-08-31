@@ -26,7 +26,7 @@ export const runtime = 'nodejs';
 type Ctx = { params: Promise<{ id: string; mediaId: string }> };
 
 export async function PATCH(req: Request, ctx: Ctx) {
-  const auth = await guardRoute({ req, admin: true });
+  const auth = await guardRoute({ req, admin: true, agents: true });
   if (!auth.ok) return auth.response;
   const { id, mediaId } = await ctx.params;
   if (!isValidUUID(id) || !isValidUUID(mediaId)) return json({ error: 'ID inválido' }, 400);
@@ -104,7 +104,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
 }
 
 export async function DELETE(req: Request, ctx: Ctx) {
-  const auth = await guardRoute({ req, admin: true });
+  const auth = await guardRoute({ req, admin: true, agents: true });
   if (!auth.ok) return auth.response;
   const { id, mediaId } = await ctx.params;
   if (!isValidUUID(id) || !isValidUUID(mediaId)) return json({ error: 'ID inválido' }, 400);

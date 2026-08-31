@@ -16,7 +16,6 @@ import { AICenterSettings } from './AICenterSettings';
 import { UsersPage } from './UsersPage';
 import { LeadDistributionSettings } from './LeadDistributionSettings';
 import { useAuth } from '@/context/AuthContext';
-import { useWaAgentsBeta } from '@/hooks/useWaAgentsBeta';
 import { WaAgentsSettings } from '@/features/wa-agents/WaAgentsSettings';
 import { Settings as SettingsIcon, Users, Database, Sparkles, Plug, Package, Shuffle, Bot } from 'lucide-react';
 
@@ -210,8 +209,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
   const { profile } = useAuth();
   const pathname = usePathname();
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab || 'general');
-  // Versão beta: aba "Agentes" (agentes de IA e robôs nativos) só com a chave ligada
-  const waBeta = useWaAgentsBeta();
 
   // Get hash from URL for scrolling
   const hash = typeof window !== 'undefined' ? window.location.hash : '';
@@ -247,7 +244,9 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
     ...(isAdminOrSuper ? [{ id: 'products' as SettingsTab, name: 'Produtos/Serviços', icon: Package }] : []),
     ...(isAdminOrSuper ? [{ id: 'integrations' as SettingsTab, name: 'Integrações', icon: Plug }] : []),
     { id: 'ai' as SettingsTab, name: 'Central de I.A', icon: Sparkles },
-    ...(isAdminOrSuper && waBeta.enabled ? [{ id: 'agents' as SettingsTab, name: 'Agentes', icon: Bot }] : []),
+    // Automações (robôs + agente de IA) vale para qualquer admin: o robô é
+    // liberado pra todos e o agente aparece bloqueado até o super admin soltar.
+    ...(isAdminOrSuper ? [{ id: 'agents' as SettingsTab, name: 'Automações', icon: Bot }] : []),
     { id: 'data' as SettingsTab, name: 'Dados', icon: Database },
   ];
 

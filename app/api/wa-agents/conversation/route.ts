@@ -32,7 +32,7 @@ const BodySchema = z.object({
 });
 
 export async function POST(req: Request) {
-  const auth = await guardRoute({ req });
+  const auth = await guardRoute({ req, agents: true });
   if (!auth.ok) return auth.response;
 
   const parsed = BodySchema.safeParse(await readJsonBody(req));

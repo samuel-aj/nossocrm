@@ -22,6 +22,7 @@ import {
   UserPlus,
   Trash2,
   ExternalLink,
+  Bot,
 } from 'lucide-react'
 
 interface Organization {
@@ -96,6 +97,59 @@ export default function AdminPage() {
   const [addingCollab, setAddingCollab] = useState(false)
   const [switchingOrgId, setSwitchingOrgId] = useState<string | null>(null)
 
+  // Liberação do AGENTE DE IA por organização. O robô é liberado pra todo
+  // mundo; o agente é vendido caso a caso, então só o super admin solta.
+  const [aiAgents, setAiAgents] = useState<Record<string, boolean>>({})
+  const [aiAgentsBusy, setAiAgentsBusy] = useState<string | null>(null)
+
+  const fetchAiAgents = useCallback(async (orgs: Organization[]) => {
+    const pares = await Promise.all(
+      orgs.map(async o => {
+        try {
+          const res = await fetch(`/api/superadmin/organizations/${o.id}/ai-agents`, { credentials: 'include' })
+          const data = await res.json()
+          return [o.id, !!data?.enabled] as const
+        } catch {
+          return [o.id, false] as const
+        }
+      })
+    )
+    setAiAgents(Object.fromEntries(pares))
+  }, [])
+
+  const toggleAiAgents = async (org: Organization, enabled: boolean) => {
+    if (
+      !enabled &&
+      !window.confirm(
+        `Bloquear o Agente de IA em "${org.name}"? As conversas que estiverem com agente voltam a ficar sem agente.`
+      )
+    ) {
+      return
+    }
+    setAiAgentsBusy(org.id)
+    try {
+      const res = await fetch(`/api/superadmin/organizations/${org.id}/ai-agents`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ enabled }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setAiAgents(prev => ({ ...prev, [org.id]: !!data.enabled }))
+      addToast(
+        enabled
+          ? `Agente de IA liberado para ${org.name}`
+          : `Agente de IA bloqueado em ${org.name}${data.desvinculadas ? ` (${data.desvinculadas} conversa(s) desvinculada(s))` : ''}`,
+        'success'
+      )
+    } catch (err: any) {
+      addToast(`Erro: ${err.message}`, 'error')
+    } finally {
+      setAiAgentsBusy(null)
+    }
+  }
+
   // Orgs em que cada super admin é membro (modal por colaborador).
   // Rascunho: orgId -> papel ('' = não é membro).
   const [membershipCollab, setMembershipCollab] = useState<Collaborator | null>(null)
@@ -116,13 +170,14 @@ export default function AdminPage() {
       if (data.organizations) {
         setOrganizations(data.organizations)
         setSetupNeeded(false)
+        void fetchAiAgents(data.organizations as Organization[])
       }
     } catch {
       addToast('Erro ao carregar organizações', 'error')
     } finally {
       setLoading(false)
     }
-  }, [addToast])
+  }, [addToast, fetchAiAgents])
 
   const fetchCollaborators = useCallback(async () => {
     try {
@@ -918,6 +973,24 @@ export default function AdminPage() {
               </div>
 
               <div className="flex items-center gap-1">
+                {/* Agente de IA: vendido caso a caso, então quem libera é o
+                    super admin. Robôs não passam por aqui (livres pra todos). */}
+                <button
+                  onClick={() => toggleAiAgents(org, !aiAgents[org.id])}
+                  disabled={aiAgentsBusy === org.id}
+                  className={`p-2 rounded-lg transition-colors disabled:opacity-50 ${
+                    aiAgents[org.id]
+                      ? 'text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-500/10'
+                      : 'text-slate-300 hover:text-purple-500 hover:bg-purple-50 dark:text-slate-600 dark:hover:bg-purple-500/10'
+                  }`}
+                  title={
+                    aiAgents[org.id]
+                      ? 'Agente de IA LIBERADO — clique para bloquear'
+                      : 'Agente de IA bloqueado — clique para liberar'
+                  }
+                >
+                  {aiAgentsBusy === org.id ? <Loader2 size={18} className="animate-spin" /> : <Bot size={18} />}
+                </button>
                 <button
                   onClick={() => handleViewOrg(org)}
                   className="p-2 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-500/10 rounded-lg transition-colors"

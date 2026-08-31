@@ -928,14 +928,14 @@ export function WhatsAppConnectionSettings() {
                   Conectar WhatsApp API
                 </button>
               )}
-              {/* Caminho manual (token/IDs) mantido ENQUANTO o fluxo novo amadurece */}
+              {/* Caminho MANUAL (colar token/IDs na mão): fora de uso desde o
+                  Cadastro Embutido. Fica como link discreto, só pra socorro. */}
               <button
                 type="button"
                 onClick={toggleBizForm}
-                className={`${esQ.data?.configured ? '' : 'mt-auto '}inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors`}
+                className={`${esQ.data?.configured ? '' : 'mt-auto '}text-[11px] text-slate-400 hover:text-sky-600 dark:text-slate-500 dark:hover:text-sky-400 underline underline-offset-2 transition-colors self-start`}
               >
-                <KeyRound size={16} />
-                {bizOpen ? 'Fechar configuração' : esQ.data?.configured ? 'Configurar manualmente' : 'Configurar API oficial'}
+                {bizOpen ? 'Fechar configuração manual' : 'Configurar manualmente (avançado)'}
               </button>
             </div>
           </div>
@@ -1299,18 +1299,15 @@ export function WhatsAppConnectionSettings() {
                 Conectar WhatsApp API
               </button>
             )}
-            {/* Caminho manual (token/IDs) mantido ENQUANTO o fluxo novo amadurece */}
+            {/* Caminho MANUAL: fora de uso, fica como link discreto */}
             <button
               type="button"
               onClick={() =>
                 bizOpen && editingConnId === null ? closeBizForm() : openBizFormFor(null)
               }
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-sky-300 dark:border-sky-500/40 text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20 text-sm font-bold transition-colors"
+              className="text-[11px] text-slate-400 hover:text-sky-600 dark:text-slate-500 dark:hover:text-sky-400 underline underline-offset-2 transition-colors"
             >
-              <KeyRound size={15} />
-              {bizOpen && editingConnId === null
-                ? 'Fechar formulário'
-                : 'Conectar número API oficial (manual)'}
+              {bizOpen && editingConnId === null ? 'Fechar formulário manual' : 'Configurar manualmente (avançado)'}
             </button>
           </div>
 

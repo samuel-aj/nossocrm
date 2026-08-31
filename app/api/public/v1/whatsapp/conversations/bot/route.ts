@@ -23,7 +23,6 @@ import { authPublicApi } from '@/lib/public-api/auth';
 import { normalizePhone } from '@/lib/public-api/sanitize';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { isValidUUID } from '@/lib/supabase/utils';
-import { isWaAgentsBetaEnabled } from '@/lib/wa-agents/beta';
 import { applyConversationAction } from '@/lib/wa-agents/conversation';
 import { botConnectionIds, runBotRunNow } from '@/lib/wa-agents/bots';
 import { ensureConversation, getConnectionByIdForOrg, getConnectionByOrg } from '@/lib/whatsapp/service';
@@ -75,13 +74,6 @@ export async function POST(request: Request) {
 
   const sb = createStaticAdminClient();
   const organizationId = auth.organizationId;
-
-  if (!(await isWaAgentsBetaEnabled(sb, organizationId))) {
-    return NextResponse.json(
-      { error: 'Robôs de atendimento não estão ligados nesta organização', code: 'AGENTS_OFF' },
-      { status: 409 }
-    );
-  }
 
   // Número: o informado, senão o PRIMEIRO NÚMERO DO ROBÔ (não o padrão da org —
   // era isso que fazia o robô do número oficial falar pelo número do QR).

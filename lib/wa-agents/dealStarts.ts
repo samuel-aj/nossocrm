@@ -10,7 +10,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { ensureConversation, getConnectionByIdForOrg } from '@/lib/whatsapp/service';
-import { isWaAgentsBetaEnabled } from './beta';
+import { isAiAgentsApproved } from './beta';
 import { loadAgent, loadConversationContext, type WaConversationFull } from './context';
 import { runAgentOnConversation } from './engine';
 import { errorMessage } from './errors';
@@ -59,7 +59,7 @@ type Outcome = { status: 'done' | 'error' | 'cancelled'; reason?: string };
 async function processDealStart(admin: SupabaseClient, row: DealStartRow): Promise<Outcome> {
   const orgId = row.organization_id;
 
-  if (!(await isWaAgentsBetaEnabled(admin, orgId))) return { status: 'cancelled', reason: 'versão beta desativada' };
+  if (!(await isAiAgentsApproved(admin, orgId))) return { status: 'cancelled', reason: 'agente de IA não liberado para esta organização' };
 
   const agent = await loadAgent(admin, orgId, row.agent_id);
   if (!agent) return { status: 'error', reason: 'agente não encontrado' };

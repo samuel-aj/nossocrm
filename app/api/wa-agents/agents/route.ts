@@ -61,7 +61,7 @@ function toInsertRow(input: AgentInput, helperIds: string[]) {
 }
 
 export async function GET() {
-  const auth = await guardRoute();
+  const auth = await guardRoute({ agents: true });
   if (!auth.ok) return auth.response;
   const orgId = auth.user.organizationId;
 
@@ -86,7 +86,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const auth = await guardRoute({ req, admin: true });
+  const auth = await guardRoute({ req, admin: true, agents: true });
   if (!auth.ok) return auth.response;
   const orgId = auth.user.organizationId;
 

@@ -22,7 +22,7 @@ const EXPIRES = 600;
 type Ctx = { params: Promise<{ id: string; docId: string }> };
 
 export async function GET(req: Request, ctx: Ctx) {
-  const auth = await guardRoute({ req, admin: true });
+  const auth = await guardRoute({ req, admin: true, agents: true });
   if (!auth.ok) return auth.response;
   const { id, docId } = await ctx.params;
   if (!isValidUUID(id) || !isValidUUID(docId)) return json({ error: 'ID inválido' }, 400);

@@ -19,7 +19,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 120;
 
 export async function POST(req: Request) {
-  const auth = await guardRoute({ req, admin: true });
+  const auth = await guardRoute({ req, admin: true, agents: true });
   if (!auth.ok) return auth.response;
 
   const parsed = AssistInputSchema.safeParse(await readJsonBody(req));

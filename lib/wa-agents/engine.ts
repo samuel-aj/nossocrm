@@ -16,7 +16,7 @@ import { createStaticAdminClient } from '@/lib/supabase/server';
 import { getProvider, type SendResult } from '@/lib/whatsapp';
 import { recordOutboundMessage, replicateOutboundToSiblings } from '@/lib/whatsapp/service';
 import { executeCustomAction, executeOutcomeActions, type OutcomeActionsResult } from './actions';
-import { isWaAgentsBetaEnabled } from './beta';
+import { isAiAgentsApproved } from './beta';
 import { handleBotReply } from './bots';
 import {
   AGENT_SOURCES,
@@ -641,9 +641,9 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
   };
 
   try {
-    // Beta desligada no meio do caminho (retomada, passagem, robô): não responde
-    if (!(await isWaAgentsBetaEnabled(admin, organizationId))) {
-      return await finish('skipped', { reason: 'beta desativada' });
+    // Liberação revogada no meio do caminho (retomada, passagem, robô): não responde
+    if (!(await isAiAgentsApproved(admin, organizationId))) {
+      return await finish('skipped', { reason: 'agente de IA não liberado para esta organização' });
     }
     ctx = await loadConversationContext(admin, organizationId, conversationId);
     const agentId = input.agentId ?? ctx.conversation.ai_agent_id;
@@ -1099,8 +1099,8 @@ export async function handleInboundMessage(input: {
   };
 
   try {
-    if (!(await isWaAgentsBetaEnabled(admin, organizationId))) {
-      return { status: 'skipped', reason: 'beta desativada' };
+    if (!(await isAiAgentsApproved(admin, organizationId))) {
+      return { status: 'skipped', reason: 'agente de IA não liberado para esta organização' };
     }
 
     // Robô esperando resposta nesta conversa tem prioridade
@@ -1292,7 +1292,7 @@ export async function resumeDueConversations(
         // perde o relógio para o cron parar de acordar por ela.
         let beta = betaByOrg.get(c.organization_id);
         if (beta === undefined) {
-          beta = await isWaAgentsBetaEnabled(admin, c.organization_id);
+          beta = await isAiAgentsApproved(admin, c.organization_id);
           betaByOrg.set(c.organization_id, beta);
         }
         if (!beta) {

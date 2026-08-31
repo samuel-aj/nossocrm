@@ -72,7 +72,7 @@ function mergeTriggers(current: AgentTriggers, incoming: unknown): unknown {
 const NEEDS_EXISTING = ['triggers', 'webhooks', 'outcomes', 'custom_actions'];
 
 export async function GET(_req: Request, ctx: Ctx) {
-  const auth = await guardRoute({ admin: true });
+  const auth = await guardRoute({ admin: true, agents: true });
   if (!auth.ok) return auth.response;
 
   const { id } = await ctx.params;
@@ -88,7 +88,7 @@ export async function GET(_req: Request, ctx: Ctx) {
 }
 
 export async function PATCH(req: Request, ctx: Ctx) {
-  const auth = await guardRoute({ req, admin: true });
+  const auth = await guardRoute({ req, admin: true, agents: true });
   if (!auth.ok) return auth.response;
   const orgId = auth.user.organizationId;
 
@@ -175,7 +175,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
 }
 
 export async function DELETE(req: Request, ctx: Ctx) {
-  const auth = await guardRoute({ req, admin: true });
+  const auth = await guardRoute({ req, admin: true, agents: true });
   if (!auth.ok) return auth.response;
 
   const { id } = await ctx.params;

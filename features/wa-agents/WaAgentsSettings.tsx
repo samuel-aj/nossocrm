@@ -1,13 +1,16 @@
 'use client';
 
 /**
- * Aba "Agentes" das Configurações: sub-abas Agentes de IA | Robôs | Execuções.
+ * Aba "Automações" das Configurações: sub-abas Agentes de IA | Robôs | Execuções.
  * A sub-aba fica sincronizada com o hash da URL (#agentes, #robos, #execucoes).
+ *
+ * Robôs valem para TODA organização. O agente de IA é vendido caso a caso:
+ * quando o super admin ainda não liberou, a sub-aba dele aparece bloqueada
+ * (e não some, pra equipe saber que existe e poder pedir).
  */
 import React, { useEffect, useState } from 'react';
-import { Bot, Workflow, History } from 'lucide-react';
-import { useWaAgentsBeta } from '@/hooks/useWaAgentsBeta';
-import { WaAgentsBetaCard } from './WaAgentsBetaCard';
+import { Bot, Workflow, History, Lock } from 'lucide-react';
+import { useWaAgentsAccess } from '@/hooks/useWaAgentsAccess';
 import { AgentList } from './AgentList';
 import { BotList } from './BotList';
 import { RunsList } from './RunsList';
@@ -30,7 +33,7 @@ function isSubTab(value: string): value is SubTab {
  * @returns {Element} Retorna um valor do tipo `Element`.
  */
 export const WaAgentsSettings: React.FC = () => {
-  const { enabled, isAdmin, isLoading } = useWaAgentsBeta();
+  const { agentsApproved, isAdmin, isLoading } = useWaAgentsAccess();
   const [subTab, setSubTab] = useState<SubTab>('agentes');
 
   useEffect(() => {
@@ -58,24 +61,17 @@ export const WaAgentsSettings: React.FC = () => {
     <div className="pb-10">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-slate-900 dark:text-white font-display tracking-tight">
-          Agentes de IA e Robôs
+          Automações
         </h1>
         <p className="text-slate-500 dark:text-slate-400 mt-2 text-lg">
-          Atendimento automático no WhatsApp: agentes que conversam com o lead e robôs que enviam mensagens por etapa.
+          Atendimento automático no WhatsApp: robôs que enviam mensagens por etapa e agentes de IA que conversam com o lead.
         </p>
       </div>
 
       {isLoading ? (
         <Spinner />
-      ) : !enabled ? (
-        <div className="space-y-4">
-          <Notice tone="amber">
-            A versão beta está desligada nesta organização. Ligue abaixo para configurar agentes e robôs.
-          </Notice>
-          <WaAgentsBetaCard />
-        </div>
       ) : !isAdmin ? (
-        <Notice tone="blue">Apenas administradores podem configurar agentes e robôs.</Notice>
+        <Notice tone="blue">Apenas administradores podem configurar automações.</Notice>
       ) : (
         <>
           <div className="flex items-center gap-2 mb-6 flex-wrap" role="tablist" aria-label="Seções de Agentes">
@@ -97,12 +93,24 @@ export const WaAgentsSettings: React.FC = () => {
                 >
                   <Icon size={16} aria-hidden="true" />
                   {t.label}
+                  {t.id === 'agentes' && !agentsApproved && (
+                    <Lock size={13} aria-hidden="true" className="text-slate-400" />
+                  )}
                 </button>
               );
             })}
           </div>
 
-          {subTab === 'agentes' && <AgentList />}
+          {subTab === 'agentes' &&
+            (agentsApproved ? (
+              <AgentList />
+            ) : (
+              <Notice tone="amber">
+                O <strong>Agente de IA</strong> ainda não está liberado para esta organização. Ele é habilitado caso a
+                caso pela nossa equipe — fale com o seu contato no Anúncio Jurídico para liberar. Os{' '}
+                <strong>Robôs</strong> continuam disponíveis normalmente na aba ao lado.
+              </Notice>
+            ))}
           {subTab === 'robos' && <BotList />}
           {subTab === 'execucoes' && <RunsList />}
         </>

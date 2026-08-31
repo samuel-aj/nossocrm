@@ -17,7 +17,7 @@ export {
   agentFilePath,
   isAgentFilePath,
 } from './files';
-export { isWaAgentsBetaEnabled } from './beta';
+export { isAiAgentsApproved, isWaAgentsBetaEnabled } from './beta';
 export { verifyInternalSecret } from './internalAuth';
 export {
   sanitizeSavedData,
