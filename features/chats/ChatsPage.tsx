@@ -693,6 +693,11 @@ export const ChatsPage: React.FC = () => {
   }, [selected, convsQ.data]);
   const selectedConvId = selectedConv?.id ?? null;
   const selectedLabelIds = useMemo(() => selectedConv?.label_ids ?? [], [selectedConv]);
+  /** Etiquetas da conversa já resolvidas: id que não existe mais some. */
+  const selectedLabels = useMemo(
+    () => selectedLabelIds.map(id => labelById.get(id)).filter((l): l is WaLabel => !!l),
+    [selectedLabelIds, labelById]
+  );
   /** O que a barra mostra: o dono do lead daquele contato, só leitura. */
   const selectedOwnerEfetivo = selected ? responsavelEfetivo({ contactId: selected.contactId }) : null;
   // Diálogo "Etiquetar conversa": o rascunho fica aqui e só vai pro banco no
@@ -1599,8 +1604,10 @@ export const ChatsPage: React.FC = () => {
               </button>
             </div>
 
-            {/* Barra de CRM: mostra a pipeline/etapa do lead do contato (com
-                atalho pro card) ou oferece criar o lead na hora */}
+            {/* Barra de CRM em UMA linha só: à esquerda o contexto do lead,
+                à direita responsável, etiquetas e a ação. Responsável e
+                etiquetas só entram quando a conversa já existe no banco
+                (contato que nunca trocou mensagem não tem onde guardar). */}
             <div className="shrink-0 flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card">
               {selected.isGroup ? (
                 /* Grupo: não tem contato nem lead; só o rótulo */
@@ -1613,104 +1620,108 @@ export const ChatsPage: React.FC = () => {
                   </span>
                 </span>
               ) : selectedDeal ? (
-                <>
-                  <span className="flex items-center gap-2 min-w-0 text-xs text-slate-600 dark:text-slate-300">
-                    <KanbanSquare size={14} className="text-primary-500 shrink-0" />
-                    <span className="font-bold truncate">{selectedDealBoard?.name ?? 'Board'}</span>
-                    <span className="text-slate-300 dark:text-slate-600 shrink-0">•</span>
-                    <span className="inline-flex items-center gap-1.5 min-w-0">
-                      <span className={`w-2 h-2 rounded-full shrink-0 ${selectedDealStage?.color ?? 'bg-slate-400'}`} />
-                      <span className="truncate">{selectedDealStage?.label ?? 'Etapa'}</span>
-                    </span>
+                <span className="flex items-center gap-2 min-w-0 text-xs text-slate-600 dark:text-slate-300">
+                  <KanbanSquare size={14} className="text-primary-500 shrink-0" />
+                  <span className="font-bold truncate">{selectedDealBoard?.name ?? 'Board'}</span>
+                  <span className="text-slate-300 dark:text-slate-600 shrink-0">•</span>
+                  <span className="inline-flex items-center gap-1.5 min-w-0">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${selectedDealStage?.color ?? 'bg-slate-400'}`} />
+                    <span className="truncate">{selectedDealStage?.label ?? 'Etapa'}</span>
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => router.push(`/boards?deal=${selectedDeal.id}`)}
-                    className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 border border-primary-200 dark:border-primary-500/30 transition-colors"
-                  >
-                    Abrir lead <ExternalLink size={12} />
-                  </button>
-                </>
-              ) : selected.contactId ? (
-                <>
-                  <span className="text-xs text-slate-400 italic truncate">Este contato ainda não tem lead.</span>
-                  <button
-                    type="button"
-                    onClick={openLeadModal}
-                    className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition-colors"
-                  >
-                    <Plus size={13} /> Criar lead
-                  </button>
-                </>
-              ) : (
-                <>
-                  <span className="text-xs text-amber-600 dark:text-amber-400 truncate">
-                    Número sem contato no CRM. Adicione pra criar o lead.
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      openNewContactModal({
-                        name: selected.name !== selected.phone ? selected.name : '',
-                        phone: selected.phone,
-                      })
-                    }
-                    className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition-colors"
-                  >
-                    <UserPlus size={13} /> Adicionar contato
-                  </button>
-                </>
-              )}
-            </div>
-
-            {/* RESPONSÁVEL e ETIQUETAS da conversa. Só aparece quando a
-                conversa já existe no banco: contato que nunca trocou mensagem
-                não tem onde guardar isso. */}
-            {selectedConvId && (
-              <div className="shrink-0 flex items-center gap-2 flex-wrap px-3 py-2 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card">
-                {/* SÓ LEITURA: quem responde pelo chat é o dono do LEAD desse
-                    contato. Pra trocar, troca no lead — aqui não se marca. */}
-                <span
-                  title="Responsável do lead deste contato. Para mudar, troque no lead."
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border ${
-                    selectedOwnerEfetivo
-                      ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'
-                      : 'border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400'
-                  }`}
-                >
-                  <User size={12} />
-                  {selectedOwnerEfetivo
-                    ? nomePorId.get(selectedOwnerEfetivo) || 'Responsável'
-                    : 'Sem responsável'}
                 </span>
+              ) : selected.contactId ? (
+                <span className="min-w-0 text-xs text-slate-400 italic truncate">Este contato ainda não tem lead.</span>
+              ) : (
+                <span className="min-w-0 text-xs text-amber-600 dark:text-amber-400 truncate">
+                  Número sem contato no CRM. Adicione pra criar o lead.
+                </span>
+              )}
 
-                {/* Etiquetas da conversa: só leitura aqui; marcar/desmarcar é
-                    no diálogo, que confirma tudo de uma vez (Cancelar/Salvar),
-                    como no WhatsApp Business. */}
-                {selectedLabelIds.map(id => {
-                  const l = labelById.get(id);
-                  if (!l) return null;
-                  return (
+              <span className="shrink-0 flex items-center gap-1.5">
+                {selectedConvId && (
+                  <>
+                    {/* SÓ LEITURA: quem responde pelo chat é o dono do LEAD
+                        desse contato. Pra trocar, troca no lead. */}
                     <span
-                      key={id}
-                      className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-semibold ring-1 ring-inset ${LABEL_CHIP_CLASS[l.color]}`}
+                      title="Responsável do lead deste contato. Para mudar, troque no lead."
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border ${
+                        selectedOwnerEfetivo
+                          ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'
+                          : 'border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400'
+                      }`}
                     >
-                      <span className={`w-2 h-2 rounded-full ${LABEL_DOT_CLASS[l.color]}`} />
-                      {l.name}
+                      <User size={12} />
+                      {selectedOwnerEfetivo
+                        ? nomePorId.get(selectedOwnerEfetivo) || 'Responsável'
+                        : 'Sem responsável'}
                     </span>
-                  );
-                })}
 
-                <button
-                  type="button"
-                  onClick={abrirDialogoEtiquetas}
-                  disabled={savingConv}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-bold border border-dashed border-slate-300 dark:border-white/15 text-slate-500 dark:text-slate-400 hover:text-primary-600 hover:border-primary-300 transition-colors disabled:opacity-50"
-                >
-                  <Tag size={11} /> Etiquetar
-                </button>
-              </div>
-            )}
+                    {/* Etiquetas: só leitura aqui, e no máximo 3 pra não
+                        estourar a linha. O resto vira "+N" (a lista de
+                        conversas mostra todas). Marcar é no diálogo. */}
+                    {selectedLabels.slice(0, 3).map(l => (
+                      <span
+                        key={l.id}
+                        className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-semibold ring-1 ring-inset max-w-[120px] ${LABEL_CHIP_CLASS[l.color]}`}
+                      >
+                        <span className={`w-2 h-2 shrink-0 rounded-full ${LABEL_DOT_CLASS[l.color]}`} />
+                        <span className="truncate">{l.name}</span>
+                      </span>
+                    ))}
+                    {selectedLabels.length > 3 && (
+                      <span
+                        title={selectedLabels.slice(3).map(l => l.name).join(', ')}
+                        className="inline-flex items-center px-1.5 py-1 rounded-md text-[11px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-white/10"
+                      >
+                        +{selectedLabels.length - 3}
+                      </span>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={abrirDialogoEtiquetas}
+                      disabled={savingConv}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-bold border border-dashed border-slate-300 dark:border-white/15 text-slate-500 dark:text-slate-400 hover:text-primary-600 hover:border-primary-300 transition-colors disabled:opacity-50"
+                    >
+                      <Tag size={11} /> Etiquetar
+                    </button>
+                  </>
+                )}
+
+                {/* A ação da barra fica por ÚLTIMO, colada nas etiquetas */}
+                {!selected.isGroup &&
+                  (selectedDeal ? (
+                    <button
+                      type="button"
+                      onClick={() => router.push(`/boards?deal=${selectedDeal.id}`)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 border border-primary-200 dark:border-primary-500/30 transition-colors"
+                    >
+                      Abrir lead <ExternalLink size={12} />
+                    </button>
+                  ) : selected.contactId ? (
+                    <button
+                      type="button"
+                      onClick={openLeadModal}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition-colors"
+                    >
+                      <Plus size={13} /> Criar lead
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openNewContactModal({
+                          name: selected.name !== selected.phone ? selected.name : '',
+                          phone: selected.phone,
+                        })
+                      }
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition-colors"
+                    >
+                      <UserPlus size={13} /> Adicionar contato
+                    </button>
+                  ))}
+              </span>
+            </div>
 
             <div className="flex-1 min-h-0">
               {/* key={phone} garante reset total do composer/busca ao trocar de conversa */}
