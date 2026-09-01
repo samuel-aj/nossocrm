@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, CheckCheck, ChevronDown, ChevronRight, ExternalLink, KanbanSquare, MessageCircle, MessageSquareDot, Plus, Search, UserPlus, Users, X } from 'lucide-react';
+import { ArrowLeft, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, KanbanSquare, MessageCircle, MessageSquareDot, Plus, Search, UserPlus, Users, X } from 'lucide-react';
 import { useCRM } from '@/context/CRMContext';
 import { useOrgMembers } from '@/lib/query/hooks';
 import { useAnchoredMenu } from '@/hooks/useAnchoredMenu';
@@ -290,11 +290,16 @@ export const ChatsPage: React.FC = () => {
   // Faixa de filtros: some a rolagem e mostra a seta quando sobra conteúdo.
   const filtrosRef = useRef<HTMLDivElement | null>(null);
   const [temMaisFiltros, setTemMaisFiltros] = useState(false);
+  const [temFiltrosAtras, setTemFiltrosAtras] = useState(false);
   const atualizarSetaFiltros = useCallback(() => {
     const el = filtrosRef.current;
     if (!el) return;
     // 2px de folga: arredondamento de subpixel marcaria "tem mais" sem ter.
     setTemMaisFiltros(el.scrollLeft + el.clientWidth < el.scrollWidth - 2);
+    setTemFiltrosAtras(el.scrollLeft > 2);
+  }, []);
+  const rolarFiltros = useCallback((direcao: 1 | -1) => {
+    filtrosRef.current?.scrollBy({ left: 160 * direcao, behavior: 'smooth' });
   }, []);
   // Recalcula quando a largura muda e a cada render da faixa (o chip "Grupos"
   // e o menu de etiqueta entram/saem conforme a organização e os dados).
@@ -1053,7 +1058,7 @@ export const ChatsPage: React.FC = () => {
             <div
               ref={filtrosRef}
               onScroll={atualizarSetaFiltros}
-              className="flex items-center gap-1.5 overflow-x-auto scrollbar-none pr-6"
+              className="flex items-center gap-1.5 overflow-x-auto scrollbar-none"
             >
             {(
               [
@@ -1205,16 +1210,27 @@ export const ChatsPage: React.FC = () => {
             )}
             </div>
 
-            {/* Seta pra rolar: só quando sobra conteúdo à direita, e só no
-                hover — parada, ela seria mais um enfeite na barra. */}
+            {/* Setas pros dois lados, só no hover e só quando há pra onde ir.
+                Sem bolinha: um degradê da cor do painel esmaece os chips na
+                borda e a seta fica por cima, deixando claro que continua. */}
+            {temFiltrosAtras && (
+              <button
+                type="button"
+                onClick={() => rolarFiltros(-1)}
+                aria-label="Ver filtros anteriores"
+                className="absolute left-0 inset-y-0 w-9 flex items-center justify-start pl-0.5 bg-gradient-to-r from-white via-white/90 to-transparent dark:from-dark-card dark:via-dark-card/90 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 opacity-0 group-hover/filtros:opacity-100 focus-visible:opacity-100 transition-opacity"
+              >
+                <ChevronLeft size={16} />
+              </button>
+            )}
             {temMaisFiltros && (
               <button
                 type="button"
-                onClick={() => filtrosRef.current?.scrollBy({ left: 160, behavior: 'smooth' })}
+                onClick={() => rolarFiltros(1)}
                 aria-label="Ver mais filtros"
-                className="absolute right-0 top-1/2 -translate-y-1/2 h-7 w-7 inline-flex items-center justify-center rounded-full bg-white/95 dark:bg-dark-card/95 text-slate-500 dark:text-slate-300 shadow ring-1 ring-slate-200 dark:ring-white/10 opacity-0 group-hover/filtros:opacity-100 focus-visible:opacity-100 transition-opacity"
+                className="absolute right-0 inset-y-0 w-9 flex items-center justify-end pr-0.5 bg-gradient-to-l from-white via-white/90 to-transparent dark:from-dark-card dark:via-dark-card/90 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 opacity-0 group-hover/filtros:opacity-100 focus-visible:opacity-100 transition-opacity"
               >
-                <ChevronRight size={15} />
+                <ChevronRight size={16} />
               </button>
             )}
           </div>
