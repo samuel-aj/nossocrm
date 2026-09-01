@@ -116,6 +116,8 @@ interface CRMContextType {
   // moveDeal removido - use useMoveDeal de @/lib/query/hooks
   deleteDeal: (id: string) => Promise<void>;
   addItemToDeal: (dealId: string, item: Omit<DealItem, 'id'>) => Promise<DealItem | null>;
+  /** Preço/quantidade de um item já adicionado: mexe só no snapshot daquele lead */
+  updateItemInDeal: (dealId: string, itemId: string, updates: { price?: number; quantity?: number }) => Promise<void>;
   removeItemFromDeal: (dealId: string, itemId: string) => Promise<void>;
 
   // Activities
@@ -210,6 +212,7 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     updateDealStatus,
     deleteDeal,
     addItemToDeal,
+    updateItemInDeal,
     removeItemFromDeal,
     refresh: refreshDeals,
   } = useDeals();
@@ -929,6 +932,7 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       updateDeal,
       deleteDeal,
       addItemToDeal,
+      updateItemInDeal,
       removeItemFromDeal,
       activities,
       addActivity,
@@ -1005,6 +1009,7 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       updateDeal,
       deleteDeal,
       addItemToDeal,
+      updateItemInDeal,
       removeItemFromDeal,
       activities,
       addActivity,

@@ -127,6 +127,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     isActivityPending,
     products,
     addItemToDeal,
+    updateItemInDeal,
     removeItemFromDeal,
     customFieldDefinitions,
     activeBoard,
@@ -244,6 +245,12 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
 
   const [selectedProductId, setSelectedProductId] = useState('');
   const [productQuantity, setProductQuantity] = useState(1);
+  // Preço DESTE lead: preenchido com o padrão do produto ao selecionar e
+  // editável antes de adicionar. O cadastro em Configurações não muda.
+  const [productPrice, setProductPrice] = useState('');
+  // Edição inline do preço de um item já adicionado (id do item ou null)
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [editingItemPrice, setEditingItemPrice] = useState('');
   const [showCustomItem, setShowCustomItem] = useState(false);
   const [customItemName, setCustomItemName] = useState('');
   const [customItemPrice, setCustomItemPrice] = useState<string>('0');
@@ -451,6 +458,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     if (!p || p.active === false) return;
     setSelectedProductId(defaultId);
     setProductQuantity(1);
+    setProductPrice(precoParaCampo(p.price));
   }, [activeTab, dealBoard?.defaultProductId, isOpen, productsById, selectedProductId]);
 
   // Pre-compute stage label once for tool prompts (avoid repeated stage lookup).
@@ -661,15 +669,36 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     const product = productsById.get(selectedProductId);
     if (!product) return;
 
+    // Preço DESTE lead: o digitado (se válido) ou o padrão do catálogo.
+    // O produto em Configurações continua com o preço original.
+    const preco = productPrice.trim() === '' ? product.price : parsePreco(productPrice);
+    if (preco === null) {
+      addToast('Preço inválido.', 'warning');
+      return;
+    }
+
     addItemToDeal(deal.id, {
       productId: product.id,
       name: product.name,
-      price: product.price,
+      price: preco,
       quantity: productQuantity,
     });
 
     setSelectedProductId('');
     setProductQuantity(1);
+    setProductPrice('');
+  };
+
+  /** Salva o preço editado inline de um item já adicionado (só neste lead). */
+  const salvarPrecoItem = (itemId: string) => {
+    const preco = parsePreco(editingItemPrice);
+    if (preco === null) {
+      addToast('Preço inválido.', 'warning');
+      return;
+    }
+    updateItemInDeal(deal.id, itemId, { price: preco });
+    setEditingItemId(null);
+    setEditingItemPrice('');
   };
 
   const handleAddCustomItem = () => {
@@ -743,6 +772,18 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     if (fieldType === 'multiselect') return !Array.isArray(value) || value.length === 0;
     return String(value).trim() === '';
   };
+
+  /** "4500,50" ou "4500.50" -> 4500.5; null quando não é um preço válido. */
+  const parsePreco = (raw: string): number | null => {
+    const limpo = raw.trim().replace(/[R$\s]/g, '').replace(/\.(?=\d{3}(?:\D|$))/g, '').replace(',', '.');
+    if (!limpo) return null;
+    const n = Number(limpo);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+
+  /** Número -> texto do campo de preço (vírgula como separador decimal). */
+  const precoParaCampo = (v: number) =>
+    Number(v || 0).toLocaleString('pt-BR', { useGrouping: false, maximumFractionDigits: 2 });
 
   const getCustomFieldDisplayValue = (
     fieldType: string,
@@ -2200,26 +2241,55 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                       <h3 className="text-sm font-bold text-slate-700 dark:text-white mb-3 flex items-center gap-2">
                         <Package size={16} /> Adicionar Produto/Serviço
                       </h3>
-                      <div className="flex gap-3 max-md:flex-wrap">
-                        <select
-                          className="flex-1 max-md:min-w-0 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
-                          value={selectedProductId}
-                          onChange={e => setSelectedProductId(e.target.value)}
-                        >
-                          <option value="">Selecione um item...</option>
-                          {products.map(p => (
-                            <option key={p.id} value={p.id}>
-                              {p.name} - ${p.price}
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          type="number"
-                          min="1"
-                          className="w-20 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
-                          value={productQuantity}
-                          onChange={e => setProductQuantity(parseInt(e.target.value))}
-                        />
+                      <div className="flex gap-3 items-end max-md:flex-wrap">
+                        <div className="flex-1 max-md:min-w-full">
+                          <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                            Produto/Serviço
+                          </label>
+                          <select
+                            className="w-full bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                            value={selectedProductId}
+                            onChange={e => {
+                              const id = e.target.value;
+                              setSelectedProductId(id);
+                              // Preço padrão do catálogo entra sozinho; dá pra editar antes de adicionar
+                              const p = productsById.get(id);
+                              setProductPrice(p ? precoParaCampo(p.price) : '');
+                            }}
+                          >
+                            <option value="">Selecione um item...</option>
+                            {products.map(p => (
+                              <option key={p.id} value={p.id}>
+                                {p.name} - {fmtBRL(p.price)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="w-20 max-md:flex-1">
+                          <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                            Qtd
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            className="w-full bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                            value={productQuantity}
+                            onChange={e => setProductQuantity(parseInt(e.target.value))}
+                          />
+                        </div>
+                        <div className="w-32 max-md:flex-1">
+                          <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                            Preço (R$)
+                          </label>
+                          <input
+                            inputMode="decimal"
+                            placeholder="Preço padrão"
+                            title="Preço só neste lead. O cadastro do produto em Configurações não muda."
+                            className="w-full bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                            value={productPrice}
+                            onChange={e => setProductPrice(e.target.value)}
+                          />
+                        </div>
                         <button
                           onClick={handleAddProduct}
                           disabled={!selectedProductId}
@@ -2228,6 +2298,9 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                           Adicionar
                         </button>
                       </div>
+                      <p className="mt-2 text-[11px] text-slate-400 dark:text-slate-500">
+                        O preço vale só para este lead. O preço padrão do produto, em Configurações, continua o mesmo.
+                      </p>
 
                       <div className="mt-3 flex items-center justify-between gap-3">
                         <div className="text-xs text-slate-500 dark:text-slate-400">
@@ -2315,10 +2388,34 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                                   {item.quantity}
                                 </td>
                                 <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">
-                                  ${item.price.toLocaleString()}
+                                  {editingItemId === item.id ? (
+                                    <input
+                                      autoFocus
+                                      inputMode="decimal"
+                                      aria-label={`Preço de ${item.name} neste lead`}
+                                      className="w-28 bg-white dark:bg-black/20 border border-primary-300 dark:border-primary-500/50 rounded-lg px-2 py-1 text-sm text-right outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                                      value={editingItemPrice}
+                                      onChange={e => setEditingItemPrice(e.target.value)}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter') salvarPrecoItem(item.id);
+                                        if (e.key === 'Escape') { setEditingItemId(null); setEditingItemPrice(''); }
+                                      }}
+                                      onBlur={() => salvarPrecoItem(item.id)}
+                                    />
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => { setEditingItemId(item.id); setEditingItemPrice(precoParaCampo(item.price)); }}
+                                      title="Alterar o preço só neste lead"
+                                      className="group inline-flex items-center gap-1.5 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+                                    >
+                                      {fmtBRL(item.price)}
+                                      <Pencil size={12} className="opacity-0 group-hover:opacity-100 max-md:opacity-60 transition-opacity" />
+                                    </button>
+                                  )}
                                 </td>
                                 <td className="px-4 py-3 text-right font-bold text-slate-900 dark:text-white">
-                                  ${(item.price * item.quantity).toLocaleString()}
+                                  {fmtBRL(item.price * item.quantity)}
                                 </td>
                                 <td className="px-4 py-3 text-center">
                                   <button

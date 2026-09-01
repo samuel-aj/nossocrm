@@ -527,6 +527,42 @@ export const dealsService = {
     }
   },
 
+  /**
+   * Altera preço e/ou quantidade de um item JÁ adicionado ao negócio. Mexe só
+   * na linha de deal_items (o snapshot daquele lead): o preço padrão do
+   * produto em Configurações fica intacto.
+   */
+  async updateItem(
+    dealId: string,
+    itemId: string,
+    updates: { price?: number; quantity?: number }
+  ): Promise<{ error: Error | null }> {
+    try {
+      if (!supabase) {
+        return { error: new Error('Supabase não configurado') };
+      }
+      const patch: Record<string, number> = {};
+      if (updates.price !== undefined) patch.price = updates.price;
+      if (updates.quantity !== undefined) patch.quantity = updates.quantity;
+      if (Object.keys(patch).length === 0) return { error: null };
+
+      const { error } = await supabase
+        .from('deal_items')
+        .update(patch)
+        .eq('id', itemId)
+        .eq('deal_id', sanitizeUUID(dealId));
+
+      if (error) return { error };
+
+      // Update deal value
+      await this.recalculateDealValue(dealId);
+
+      return { error: null };
+    } catch (e) {
+      return { error: e as Error };
+    }
+  },
+
   async removeItem(dealId: string, itemId: string): Promise<{ error: Error | null }> {
     try {
       if (!supabase) {

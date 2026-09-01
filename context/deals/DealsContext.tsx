@@ -26,6 +26,8 @@ interface DealsContextType {
 
   // Items
   addItemToDeal: (dealId: string, item: Omit<DealItem, 'id'>) => Promise<DealItem | null>;
+  /** Preço/quantidade de um item já adicionado: mexe só no snapshot daquele lead */
+  updateItemInDeal: (dealId: string, itemId: string, updates: { price?: number; quantity?: number }) => Promise<void>;
   removeItemFromDeal: (dealId: string, itemId: string) => Promise<void>;
 
   // Refresh
@@ -211,6 +213,40 @@ export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     [queryClient]
   );
 
+  const updateItemInDeal = useCallback(
+    async (dealId: string, itemId: string, updates: { price?: number; quantity?: number }) => {
+      // Optimistic update: UI atualiza instantaneamente; cache é a verdade.
+      const previousLists = queryClient.getQueryData<Deal[]>(queryKeys.deals.lists());
+      const previousView = queryClient.getQueryData<DealView[]>(DEALS_VIEW_KEY);
+      const previousDetail = queryClient.getQueryData<Deal>(queryKeys.deals.detail(dealId));
+
+      const withUpdate = <T extends Deal>(d: T): T => {
+        if (d.id !== dealId) return d;
+        const nextItems = (d.items || []).map((i) => (i.id === itemId ? { ...i, ...updates } : i));
+        const nextValue = nextItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
+        return { ...d, items: nextItems, value: nextValue } as T;
+      };
+
+      queryClient.setQueryData<Deal[]>(queryKeys.deals.lists(), (old) => old?.map(withUpdate));
+      queryClient.setQueryData<DealView[]>(DEALS_VIEW_KEY, (old) => old?.map(withUpdate));
+      queryClient.setQueryData<Deal>(queryKeys.deals.detail(dealId), (old) =>
+        old ? withUpdate(old) : old
+      );
+
+      const { error: updateError } = await dealsService.updateItem(dealId, itemId, updates);
+
+      if (updateError) {
+        console.error('Erro ao alterar item:', updateError.message);
+        // Rollback
+        queryClient.setQueryData(queryKeys.deals.lists(), previousLists);
+        queryClient.setQueryData(DEALS_VIEW_KEY, previousView);
+        queryClient.setQueryData(queryKeys.deals.detail(dealId), previousDetail);
+      }
+      // Sucesso: Realtime UPDATE echo confirma o que o cache já mostra.
+    },
+    [queryClient]
+  );
+
   const removeItemFromDeal = useCallback(async (dealId: string, itemId: string) => {
     // Optimistic remove: UI atualiza instantaneamente.
     const previousLists = queryClient.getQueryData<Deal[]>(queryKeys.deals.lists());
@@ -252,6 +288,7 @@ export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       updateDealStatus,
       deleteDeal,
       addItemToDeal,
+      updateItemInDeal,
       removeItemFromDeal,
       refresh,
     }),
@@ -264,6 +301,7 @@ export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       updateDealStatus,
       deleteDeal,
       addItemToDeal,
+      updateItemInDeal,
       removeItemFromDeal,
       refresh,
     ]
