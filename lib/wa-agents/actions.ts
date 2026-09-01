@@ -6,12 +6,19 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { moveStageByDealId } from '@/lib/public-api/dealsMoveStage';
+import { buildActionSystemVars, resolveActionTexts, resolveAiVarValues } from './actionVars';
 import type { ConversationContext } from './context';
 import { errorMessage } from './errors';
 import type { AgentRow, CustomAction, EndAction, Outcome } from './types';
 import { buildWebhookPayload, postWebhook } from './webhooks';
 
-export type OutcomeActionsResult = { handoffAgentId?: string; approvalAgentId?: string; stopped?: boolean };
+export type OutcomeActionsResult = {
+  handoffAgentId?: string;
+  approvalAgentId?: string;
+  stopped?: boolean;
+  /** Robô que assume a conversa depois que o agente parar (ação "Transferir para um robô") */
+  startBotId?: string;
+};
 
 /**
  * De onde vêm as ações: resultado do encerramento (resumo) ou ação durante a
@@ -238,6 +245,11 @@ async function runAction(
     case 'handoff':
       result.handoffAgentId = action.agent_id;
       return 'passagem para outro agente solicitada';
+    case 'start_bot':
+      // Quem inicia o robô é o motor, DEPOIS de parar o agente e soltar a trava
+      result.startBotId = action.bot_id;
+      result.stopped = true;
+      return 'transferência para robô solicitada';
     case 'approval':
       result.approvalAgentId = action.agent_id;
       return 'aprovação humana solicitada';
@@ -270,11 +282,30 @@ export async function executeActions(
     input.source.kind === 'outcome'
       ? { source: 'outcome', key: input.source.outcome.key }
       : { source: 'custom_action', key: input.source.action.key };
+  const pushEvent = (type: string, extra?: Record<string, unknown>) =>
+    input.runEvents.push({ type, at: new Date().toISOString(), ...origin, ...(extra ?? {}) });
+
+  // Variáveis dos campos de texto: {{ia:nome}} preenchidas numa chamada só e,
+  // por cima, as variáveis do sistema ({{nome_lead}}, {{campos.chave}}...).
+  const systemVars = buildActionSystemVars({
+    agent: input.agent,
+    ctx: input.ctx,
+    summary: sourceSummary(input.source),
+  });
+  if (input.renewLock) await input.renewLock();
+  const aiValues = await resolveAiVarValues(admin, {
+    agent: input.agent,
+    ctx: input.ctx,
+    actions: input.actions ?? [],
+    pushEvent,
+  });
+
   for (const action of input.actions ?? []) {
     const at = new Date().toISOString();
     if (input.renewLock) await input.renewLock();
     try {
-      const note = await runAction(admin, input, action, result);
+      const resolved = resolveActionTexts(action, aiValues, systemVars);
+      const note = await runAction(admin, input, resolved, result);
       input.runEvents.push({ type: 'action', at, action: action.type, ok: true, note, ...origin });
     } catch (e) {
       input.runEvents.push({ type: 'action', at, action: action.type, ok: false, error: errorMessage(e), ...origin });

@@ -62,3 +62,28 @@ export function promptVariableName(key: string): string {
 
 /** Só os nomes das variáveis (o editor usa para saber o que é variável de verdade no texto). */
 export const PROMPT_VARIABLE_NAMES: string[] = PROMPT_VARIABLES.map(v => promptVariableName(v.key));
+
+/**
+ * Variáveis do SISTEMA disponíveis nos campos de texto das ações (além das do
+ * roteiro). Precisa bater com buildActionSystemVars em lib/wa-agents/actionVars.ts.
+ */
+export const ACTION_TEXT_VARIABLES: Array<{ key: string; description: string }> = [
+  { key: '{{nome_lead}}', description: 'Nome do contato (ou o nome do WhatsApp)' },
+  { key: '{{primeiro_nome}}', description: 'Primeiro nome do contato' },
+  { key: '{{telefone}}', description: 'Telefone do contato' },
+  { key: '{{email}}', description: 'E-mail do contato (vazio se não houver)' },
+  { key: '{{empresa}}', description: 'Empresa do contato (vazio se não houver)' },
+  { key: '{{data_hora}}', description: 'Data e hora atuais em Brasília' },
+  { key: '{{nome_agente}}', description: 'Nome da persona do agente' },
+  { key: '{{nome_escritorio}}', description: 'Nome da organização' },
+  { key: '{{negocio.titulo}}', description: 'Título do negócio (lead) da conversa' },
+  { key: '{{negocio.etapa}}', description: 'Etapa atual do negócio' },
+  { key: '{{negocio.quadro}}', description: 'Quadro (pipeline) do negócio' },
+  { key: '{{negocio.valor}}', description: 'Valor do negócio' },
+  { key: '{{negocio.responsavel}}', description: 'Responsável pelo negócio' },
+  { key: '{{resumo}}', description: 'Resumo do atendimento (ou os detalhes da ação)' },
+  { key: '{{campos.chave}}', description: 'Campo personalizado do negócio (troque "chave" pela chave do campo)' },
+];
+
+/** Nomes das variáveis das ações, sem as chaves (para o destaque no texto). */
+export const ACTION_TEXT_VARIABLE_NAMES: string[] = ACTION_TEXT_VARIABLES.map(v => promptVariableName(v.key));

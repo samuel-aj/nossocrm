@@ -16,8 +16,9 @@ import { createStaticAdminClient } from '@/lib/supabase/server';
 import { getProvider, type SendResult } from '@/lib/whatsapp';
 import { recordOutboundMessage, replicateOutboundToSiblings } from '@/lib/whatsapp/service';
 import { executeCustomAction, executeOutcomeActions, type OutcomeActionsResult } from './actions';
+import { ensureAutoLead } from './autoLead';
 import { isAiAgentsApproved } from './beta';
-import { handleBotReply } from './bots';
+import { handleBotReply, startBotRun } from './bots';
 import {
   AGENT_SOURCES,
   buildHistoryMessages,
@@ -584,6 +585,8 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
   let lockValue: string | null = null;
   let lockSeconds = LOCK_BASE_SECONDS;
   let pendingHandoffAgentId: string | null = null;
+  // Robô que assume a conversa (ação "Transferir para um robô"): inicia fora da trava
+  let pendingStartBotId: string | null = null;
 
   const pushEvent = (type: string, extra?: Record<string, unknown>) => {
     events.push({ type, at: new Date().toISOString(), ...(extra ?? {}) });
@@ -675,6 +678,10 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     if (conv.ai_agent_id !== agent.id) {
       return await finish('skipped', { reason: 'agente da conversa mudou' });
     }
+
+    // 4b. Lead automático: contato sem negócio aberto ganha um antes do
+    // atendimento (dentro da trava; a própria função reconfere duplicidade)
+    await ensureAutoLead(admin, { agent, ctx, pushEvent });
 
     // "Limpar memória" (ai_state.memoria_desde): o agente não enxerga nem responde o que veio antes
     const memoriaDesde = ((conv.ai_state ?? {}) as ConversationAiState).memoria_desde ?? null;
@@ -896,7 +903,7 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     let transition: { acts: OutcomeActionsResult; summary: string; reason: string; extra: Record<string, unknown> } | null =
       null;
     const requestsTransition = (acts: OutcomeActionsResult) =>
-      !!(acts.approvalAgentId || acts.handoffAgentId || acts.stopped);
+      !!(acts.approvalAgentId || acts.handoffAgentId || acts.startBotId || acts.stopped);
 
     // 9a. Ações durante a conversa (executar_acao): executam sem encerrar o atendimento.
     // Uma ação por resposta (a primeira válida); chamada sem "detalhes" é ignorada. O trecho
@@ -1029,6 +1036,12 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
         }
       } else if (acts.stopped) {
         await stopConversation(reason, extra);
+        if (acts.startBotId) {
+          // O robô inicia DEPOIS da parada e fora da trava (ele manda mensagens
+          // e pega a própria trava de execução), como a passagem em cadeia.
+          pendingStartBotId = acts.startBotId;
+          pushEvent('transfer_bot_requested', { bot_id: acts.startBotId, ...extra });
+        }
       }
     }
 
@@ -1056,6 +1069,16 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
         skipBuffer: true,
         depth: depth + 1,
       });
+    }
+    // Transferência para robô: o agente já parou; o robô assume a conversa
+    if (pendingStartBotId) {
+      await release();
+      const bot = await startBotRun(admin, {
+        organizationId,
+        botId: pendingStartBotId,
+        conversationId,
+      });
+      if (!bot.ok) console.error('[wa-agents] transferência para robô falhou:', bot.error);
     }
     return res;
   } catch (e) {

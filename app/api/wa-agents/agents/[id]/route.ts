@@ -32,6 +32,7 @@ import {
   toAgentPublic,
   uniqueIds,
   validateAgentTriggers,
+  validateAutoLead,
   validateHelperAgentIds,
   validationError,
 } from '../../_shared';
@@ -137,6 +138,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (present.triggers) {
       const triggersError = await validateAgentTriggers(auth.admin, orgId, present.triggers);
       if (triggersError) return triggersError;
+    }
+    if (present.auto_lead) {
+      const autoLeadError = await validateAutoLead(auth.admin, orgId, present.auto_lead);
+      if (autoLeadError) return autoLeadError;
     }
     if (Array.isArray(present.helper_agent_ids)) {
       const helpers = await validateHelperAgentIds(auth.admin, orgId, uniqueIds(present.helper_agent_ids), id);

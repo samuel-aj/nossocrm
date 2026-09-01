@@ -30,11 +30,13 @@ import {
   CalendarPlus,
   Webhook,
   HelpCircle,
+  Bot,
   type LucideIcon,
 } from 'lucide-react';
-import type { EndAction, Outcome } from '@/lib/wa-agents/types';
+import type { AgentAiVar, BotMinimal, EndAction, Outcome } from '@/lib/wa-agents/types';
 import type { WaAgentListItem, WaAgentOptions } from './useWaAgents';
 import { BTN_ICON, BTN_SMALL, Badge, Field, HELP_CLASS, INPUT_CLASS, SUBCARD_CLASS, TEXTAREA_CLASS } from './ui';
+import { VarField } from './VarField';
 
 export type ActionType = EndAction['type'];
 
@@ -42,6 +44,7 @@ export const ACTION_LABELS: Record<ActionType, string> = {
   handoff: 'Passar para outro agente',
   approval: 'Pedir aprovação humana para passar a outro agente',
   stop: 'Encerrar e entregar ao atendente',
+  start_bot: 'Transferir para um robô',
   note: 'Registrar nota no negócio',
   move_stage: 'Mover para etapa',
   add_tag: 'Adicionar rótulo',
@@ -57,6 +60,7 @@ export const ACTION_ICONS: Record<ActionType, LucideIcon> = {
   handoff: ArrowRightLeft,
   approval: ShieldCheck,
   stop: Hand,
+  start_bot: Bot,
   note: StickyNote,
   move_stage: ArrowRight,
   add_tag: Tag,
@@ -124,7 +128,8 @@ export function defaultAction(
   type: ActionType,
   agents: WaAgentListItem[],
   options: WaAgentOptions | undefined,
-  currentAgentId: string | null | undefined
+  currentAgentId: string | null | undefined,
+  bots: BotMinimal[] = []
 ): EndAction {
   const otherAgent = agents.find((a) => a.id !== currentAgentId)?.id ?? '';
   const firstStage = options?.boards.find((b) => b.stages.length > 0)?.stages[0]?.id ?? '';
@@ -135,6 +140,8 @@ export function defaultAction(
       return { type, agent_id: otherAgent };
     case 'stop':
       return { type };
+    case 'start_bot':
+      return { type, bot_id: bots[0]?.id ?? '' };
     case 'note':
       return { type };
     case 'move_stage':
@@ -173,7 +180,12 @@ function hostOf(url: string): string {
 }
 
 /** Uma ação em texto legível, em minúsculas (para compor frases). */
-export function describeAction(action: EndAction, agents: WaAgentListItem[], options: WaAgentOptions | undefined): string {
+export function describeAction(
+  action: EndAction,
+  agents: WaAgentListItem[],
+  options: WaAgentOptions | undefined,
+  bots: BotMinimal[] = []
+): string {
   const agentName = (id: string) =>
     id ? (agents.find((a) => a.id === id)?.name ?? 'agente não encontrado') : 'agente não escolhido';
   switch (action.type) {
@@ -183,6 +195,10 @@ export function describeAction(action: EndAction, agents: WaAgentListItem[], opt
       return `pedir aprovação para passar a ${agentName(action.agent_id)}`;
     case 'stop':
       return 'encerrar e entregar ao atendente';
+    case 'start_bot': {
+      const bot = bots.find((b) => b.id === action.bot_id);
+      return `transferir para o robô ${bot?.name ?? 'não escolhido'}`;
+    }
     case 'note':
       return action.title ? `registrar nota "${action.title}"` : 'registrar nota no negócio';
     case 'move_stage': {
@@ -220,9 +236,14 @@ export function describeAction(action: EndAction, agents: WaAgentListItem[], opt
 }
 
 /** Lista de ações em uma frase: "Mover para a etapa Qualificado, adicionar rótulo Quente, passar para o agente Fechamento". */
-export function describeActions(actions: EndAction[], agents: WaAgentListItem[], options: WaAgentOptions | undefined): string {
+export function describeActions(
+  actions: EndAction[],
+  agents: WaAgentListItem[],
+  options: WaAgentOptions | undefined,
+  bots: BotMinimal[] = []
+): string {
   if (actions.length === 0) return '';
-  const text = actions.map((a) => describeAction(a, agents, options)).join(', ');
+  const text = actions.map((a) => describeAction(a, agents, options, bots)).join(', ');
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
@@ -231,11 +252,13 @@ export function ActionSummary({
   actions,
   agents,
   options,
+  bots = [],
   emptyText,
 }: {
   actions: EndAction[];
   agents: WaAgentListItem[];
   options: WaAgentOptions | undefined;
+  bots?: BotMinimal[];
   emptyText: string;
 }) {
   if (actions.length === 0) return <p className="text-xs text-slate-500 dark:text-slate-400">{emptyText}</p>;
@@ -243,7 +266,7 @@ export function ActionSummary({
     <ul className="flex flex-wrap gap-1.5" aria-label="Ações">
       {actions.map((a, i) => {
         const Icon = actionIcon(a.type);
-        const text = describeAction(a, agents, options);
+        const text = describeAction(a, agents, options, bots);
         return (
           <li
             key={`${a.type}-${i}`}
@@ -378,6 +401,9 @@ function ActionFields({
   onChange,
   agents,
   options,
+  bots,
+  aiVars,
+  onAiVarsChange,
   currentAgentId,
   idPrefix,
 }: {
@@ -385,6 +411,9 @@ function ActionFields({
   onChange: (a: EndAction) => void;
   agents: WaAgentListItem[];
   options: WaAgentOptions | undefined;
+  bots: BotMinimal[];
+  aiVars: AgentAiVar[];
+  onAiVarsChange: (vars: AgentAiVar[]) => void;
   currentAgentId: string | null | undefined;
   idPrefix: string;
 }) {
@@ -403,16 +432,38 @@ function ActionFields({
       );
     case 'stop':
       return <p className={HELP_CLASS}>O agente para de responder e a conversa fica com a equipe.</p>;
+    case 'start_bot':
+      return (
+        <div className="space-y-1">
+          <select
+            id={`${idPrefix}-bot`}
+            className={INPUT_CLASS}
+            value={action.bot_id}
+            onChange={(e) => onChange({ ...action, bot_id: e.target.value })}
+            aria-label="Robô que assume o atendimento"
+          >
+            <option value="">Selecione o robô</option>
+            {bots.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+                {b.enabled ? '' : ' (desligado)'}
+              </option>
+            ))}
+          </select>
+          <p className={HELP_CLASS}>O agente encerra e este robô assume a conversa na sequência.</p>
+        </div>
+      );
     case 'note':
       return (
-        <input
+        <VarField
           id={`${idPrefix}-title`}
-          className={INPUT_CLASS}
           value={action.title ?? ''}
-          onChange={(e) => onChange({ ...action, title: e.target.value || undefined })}
+          onChange={(title) => onChange({ ...action, title: title || undefined })}
           placeholder="Título da nota (opcional; padrão: Pré-atendimento IA: resultado)"
           maxLength={120}
-          aria-label="Título da nota"
+          ariaLabel="Título da nota"
+          aiVars={aiVars}
+          onAiVarsChange={onAiVarsChange}
         />
       );
     case 'move_stage':
@@ -427,24 +478,28 @@ function ActionFields({
       );
     case 'add_tag':
       return (
-        <TagInput
+        <VarField
           id={`${idPrefix}-tag`}
           value={action.tag}
           onChange={(tag) => onChange({ ...action, tag })}
-          options={options}
+          placeholder="Nome do rótulo"
+          maxLength={60}
           ariaLabel="Rótulo a adicionar"
+          aiVars={aiVars}
+          onAiVarsChange={onAiVarsChange}
         />
       );
     case 'mark_lost':
       return (
-        <input
+        <VarField
           id={`${idPrefix}-loss`}
-          className={INPUT_CLASS}
           value={action.loss_reason ?? ''}
-          onChange={(e) => onChange({ ...action, loss_reason: e.target.value || undefined })}
+          onChange={(loss) => onChange({ ...action, loss_reason: loss || undefined })}
           placeholder="Motivo da perda (opcional)"
           maxLength={200}
-          aria-label="Motivo da perda"
+          ariaLabel="Motivo da perda"
+          aiVars={aiVars}
+          onAiVarsChange={onAiVarsChange}
         />
       );
     case 'assign_owner':
@@ -466,14 +521,15 @@ function ActionFields({
       );
     case 'append_description':
       return (
-        <input
+        <VarField
           id={`${idPrefix}-prefix`}
-          className={INPUT_CLASS}
           value={action.prefix ?? ''}
-          onChange={(e) => onChange({ ...action, prefix: e.target.value || undefined })}
+          onChange={(prefix) => onChange({ ...action, prefix: prefix || undefined })}
           placeholder='Texto antes do resumo (opcional). Ex.: "Pré-atendimento IA:"'
           maxLength={120}
-          aria-label="Texto antes do resumo na descrição"
+          ariaLabel="Texto antes do resumo na descrição"
+          aiVars={aiVars}
+          onAiVarsChange={onAiVarsChange}
         />
       );
     case 'set_product':
@@ -496,14 +552,15 @@ function ActionFields({
     case 'create_task':
       return (
         <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
-          <input
+          <VarField
             id={`${idPrefix}-task-title`}
-            className={INPUT_CLASS}
             value={action.title}
-            onChange={(e) => onChange({ ...action, title: e.target.value })}
+            onChange={(title) => onChange({ ...action, title })}
             placeholder="Título da tarefa"
             maxLength={200}
-            aria-label="Título da tarefa"
+            ariaLabel="Título da tarefa"
+            aiVars={aiVars}
+            onAiVarsChange={onAiVarsChange}
           />
           <div className="flex items-center gap-2">
             <label htmlFor={`${idPrefix}-task-days`} className="text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
@@ -549,15 +606,17 @@ function ActionFields({
               Corpo personalizado (opcional)
             </summary>
             <div className="mt-2 space-y-2">
-              <textarea
+              <VarField
                 id={`${idPrefix}-body`}
-                className={`${TEXTAREA_CLASS} font-mono text-xs`}
-                rows={7}
                 value={action.body_template ?? ''}
-                onChange={(e) => onChange({ ...action, body_template: e.target.value || null })}
+                onChange={(body) => onChange({ ...action, body_template: body || null })}
                 placeholder={ACTION_WEBHOOK_PLACEHOLDER}
-                aria-label="Corpo personalizado do webhook"
                 maxLength={20000}
+                rows={7}
+                ariaLabel="Corpo personalizado do webhook"
+                aiVars={aiVars}
+                onAiVarsChange={onAiVarsChange}
+                extraVars={ACTION_WEBHOOK_VARIABLES.map((v) => ({ key: `{{${v.key}}}`, description: v.description }))}
               />
               <WebhookVariablesHelp />
             </div>
@@ -584,6 +643,11 @@ export const ActionsEditor: React.FC<{
   onChange: (actions: EndAction[]) => void;
   agents: WaAgentListItem[];
   options: WaAgentOptions | undefined;
+  /** Robôs da organização (ação "Transferir para um robô") */
+  bots?: BotMinimal[];
+  /** Variáveis preenchidas pela IA do agente (compartilhadas pelos campos de texto) */
+  aiVars?: AgentAiVar[];
+  onAiVarsChange?: (vars: AgentAiVar[]) => void;
   currentAgentId?: string | null;
   /** Prefixo dos ids dos campos (acessibilidade e chaves do React) */
   idPrefix: string;
@@ -598,6 +662,9 @@ export const ActionsEditor: React.FC<{
   onChange,
   agents,
   options,
+  bots = [],
+  aiVars = [],
+  onAiVarsChange = () => {},
   currentAgentId,
   idPrefix,
   emptyText = 'Sem ações.',
@@ -612,7 +679,7 @@ export const ActionsEditor: React.FC<{
         <button
           type="button"
           className={BTN_SMALL}
-          onClick={() => onChange([...value, defaultAction(defaultType, agents, options, currentAgentId)])}
+          onClick={() => onChange([...value, defaultAction(defaultType, agents, options, currentAgentId, bots)])}
         >
           <Plus size={14} aria-hidden="true" />
           Adicionar ação
@@ -639,7 +706,7 @@ export const ActionsEditor: React.FC<{
               className={INPUT_CLASS}
               value={action.type}
               aria-label={`Tipo da ação ${aIndex + 1}`}
-              onChange={(e) => setAction(defaultAction(e.target.value as ActionType, agents, options, currentAgentId))}
+              onChange={(e) => setAction(defaultAction(e.target.value as ActionType, agents, options, currentAgentId, bots))}
             >
               {types.map((t) => (
                 <option key={t} value={t}>
@@ -653,6 +720,9 @@ export const ActionsEditor: React.FC<{
                 onChange={setAction}
                 agents={agents}
                 options={options}
+                bots={bots}
+                aiVars={aiVars}
+                onAiVarsChange={onAiVarsChange}
                 currentAgentId={currentAgentId}
                 idPrefix={aPrefix}
               />
@@ -747,8 +817,11 @@ export const OutcomesEditor: React.FC<{
   onChange: (value: Outcome[]) => void;
   agents: WaAgentListItem[];
   options: WaAgentOptions | undefined;
+  bots?: BotMinimal[];
+  aiVars?: AgentAiVar[];
+  onAiVarsChange?: (vars: AgentAiVar[]) => void;
   currentAgentId?: string | null;
-}> = ({ value, onChange, agents, options, currentAgentId }) => {
+}> = ({ value, onChange, agents, options, bots = [], aiVars = [], onAiVarsChange = () => {}, currentAgentId }) => {
   const [expanded, setExpanded] = useState<number | null>(null);
 
   const update = (index: number, patch: Partial<Outcome>) => {
@@ -831,6 +904,7 @@ export const OutcomesEditor: React.FC<{
                         actions={outcome.actions}
                         agents={agents}
                         options={options}
+                        bots={bots}
                         emptyText="Sem ações: o agente só encerra e a conversa fica com a equipe."
                       />
                     </div>
@@ -895,6 +969,9 @@ export const OutcomesEditor: React.FC<{
                   onChange={(actions) => update(index, { actions })}
                   agents={agents}
                   options={options}
+                  bots={bots}
+                  aiVars={aiVars}
+                  onAiVarsChange={onAiVarsChange}
                   currentAgentId={currentAgentId}
                   idPrefix={idPrefix}
                   emptyText="Sem ações: o agente só encerra e a conversa fica com a equipe."

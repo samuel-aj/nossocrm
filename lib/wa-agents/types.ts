@@ -64,6 +64,8 @@ export const EndActionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('handoff'), agent_id: z.string().uuid() }),
   z.object({ type: z.literal('approval'), agent_id: z.string().uuid() }),
   z.object({ type: z.literal('stop') }),
+  /** Transfere o atendimento para um robô: o agente para e o robô assume a conversa */
+  z.object({ type: z.literal('start_bot'), bot_id: z.string().uuid() }),
   z.object({ type: z.literal('note'), title: z.string().max(120).optional() }),
   z.object({ type: z.literal('move_stage'), stage_id: z.string().uuid() }),
   z.object({ type: z.literal('add_tag'), tag: z.string().min(1).max(60) }),
@@ -202,6 +204,34 @@ export const DEFAULT_AGENT_MEDIA_UNDERSTANDING: AgentMediaUnderstanding = { audi
 export const DEFAULT_AGENT_LEAD_CONTEXT: AgentLeadContext = { description: true, custom_fields: true };
 
 // ---------------------------------------------------------------------------
+// Lead criado automaticamente quando o contato ainda não tem um
+// ---------------------------------------------------------------------------
+export const AgentAutoLeadSchema = z.object({
+  enabled: z.boolean().default(false),
+  /** Quadro onde o lead nasce (null = primeiro quadro da organização) */
+  board_id: z.string().uuid().nullable().default(null),
+  /** Etapa onde o lead nasce (null = primeira etapa do quadro) */
+  stage_id: z.string().uuid().nullable().default(null),
+});
+export type AgentAutoLead = z.infer<typeof AgentAutoLeadSchema>;
+export const DEFAULT_AGENT_AUTO_LEAD: AgentAutoLead = { enabled: false, board_id: null, stage_id: null };
+
+// ---------------------------------------------------------------------------
+// Variáveis preenchidas pela IA ({{ia:nome}} nos campos das ações)
+// ---------------------------------------------------------------------------
+export const AI_VAR_NAME_RE = /^[a-z0-9_]{1,40}$/;
+export const AgentAiVarSchema = z.object({
+  /** Nome usado no texto: {{ia:nome}} */
+  name: z.string().regex(AI_VAR_NAME_RE, 'use só letras minúsculas, números e _ (até 40)'),
+  /** O que a IA deve preencher, em linguagem natural */
+  instruction: z.string().min(1).max(500),
+  /** Exemplo de resultado (opcional; ajuda a IA a acertar o formato) */
+  example: z.string().max(200).default(''),
+});
+export type AgentAiVar = z.infer<typeof AgentAiVarSchema>;
+export const MAX_AI_VARS_PER_AGENT = 30;
+
+// ---------------------------------------------------------------------------
 // Agente
 // ---------------------------------------------------------------------------
 export const AI_PROVIDERS = ['openai', 'anthropic', 'google'] as const;
@@ -266,6 +296,10 @@ export const AgentInputSchema = z.object({
   lead_context: AgentLeadContextSchema.default(DEFAULT_AGENT_LEAD_CONTEXT),
   /** Mídia recebida virando texto antes de o agente responder */
   media_understanding: AgentMediaUnderstandingSchema.default(DEFAULT_AGENT_MEDIA_UNDERSTANDING),
+  /** Lead criado sozinho quando o contato ainda não tem um aberto */
+  auto_lead: AgentAutoLeadSchema.default(DEFAULT_AGENT_AUTO_LEAD),
+  /** Variáveis preenchidas pela IA usadas nos campos das ações ({{ia:nome}}) */
+  ai_vars: z.array(AgentAiVarSchema).max(MAX_AI_VARS_PER_AGENT).default([]),
 });
 export type AgentInput = z.infer<typeof AgentInputSchema>;
 

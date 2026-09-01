@@ -9,11 +9,11 @@
  *
  * CLIENT-SAFE: só funções puras.
  */
-import { VAR_PATTERN } from '@/lib/wa-agents/template';
+import { AI_VAR_PATTERN, VAR_PATTERN } from '@/lib/wa-agents/template';
 import { normalizeKeyword } from '@/lib/wa-agents/text';
 import { SCRIPT_ACTION_MARKER_RE, SCRIPT_MEDIA_MARKER_RE } from '@/lib/wa-agents/types';
 
-export type TokenKind = 'var' | 'acao' | 'midia';
+export type TokenKind = 'var' | 'iavar' | 'acao' | 'midia';
 
 export type TokenPart =
   | { kind: 'text'; text: string }
@@ -22,6 +22,10 @@ export type TokenPart =
 export type KnownTokens = {
   /** nomes das variáveis SEM as chaves duplas (ex.: 'nome_lead', 'negocio.titulo') */
   vars: string[];
+  /** prefixos de variável dinâmica (ex.: 'campos.'): {{campos.qualquer}} conta como conhecida */
+  varPrefixes?: string[];
+  /** nomes das variáveis preenchidas pela IA deste agente (sem o 'ia:') */
+  aiVars?: string[];
   /** chaves das ações durante a conversa */
   actions: string[];
   /** nomes das mídias do agente */
@@ -49,6 +53,7 @@ export function splitPromptTokens(text: string, known: KnownTokens): TokenPart[]
   if (!text) return [];
   const matches: Match[] = [];
   collect(text, VAR_PATTERN, 'g', 'var', matches);
+  collect(text, AI_VAR_PATTERN, 'gi', 'iavar', matches);
   collect(text, SCRIPT_ACTION_MARKER_RE.source, SCRIPT_ACTION_MARKER_RE.flags, 'acao', matches);
   collect(text, SCRIPT_MEDIA_MARKER_RE.source, SCRIPT_MEDIA_MARKER_RE.flags, 'midia', matches);
   matches.sort((a, b) => a.start - b.start || b.end - a.end);
@@ -56,6 +61,8 @@ export function splitPromptTokens(text: string, known: KnownTokens): TokenPart[]
   // Variável casa pelo nome EXATO (o servidor resolve {{a.b}} por chave literal, com caixa);
   // ação e mídia casam sem acento/caixa, como findByName no servidor.
   const vars = new Set(known.vars.map(v => v.trim()));
+  const varPrefixes = known.varPrefixes ?? [];
+  const aiVars = new Set((known.aiVars ?? []).map(v => v.trim().toLowerCase()));
   const actions = new Set(known.actions.map(a => normalizeKeyword(a)));
   const media = new Set(known.media.map(m => normalizeKeyword(m)));
   const midiasCarregadas = known.mediaLoaded !== false;
@@ -67,10 +74,12 @@ export function splitPromptTokens(text: string, known: KnownTokens): TokenPart[]
     if (m.start > cursor) parts.push({ kind: 'text', text: text.slice(cursor, m.start) });
     const conhecido =
       m.kind === 'var'
-        ? vars.has(m.name)
-        : m.kind === 'acao'
-          ? actions.has(normalizeKeyword(m.name))
-          : !midiasCarregadas || media.has(normalizeKeyword(m.name));
+        ? vars.has(m.name) || varPrefixes.some(p => m.name.startsWith(p) && m.name.length > p.length)
+        : m.kind === 'iavar'
+          ? aiVars.has(m.name.toLowerCase())
+          : m.kind === 'acao'
+            ? actions.has(normalizeKeyword(m.name))
+            : !midiasCarregadas || media.has(normalizeKeyword(m.name));
     parts.push({ kind: m.kind, text: text.slice(m.start, m.end), name: m.name, known: conhecido });
     cursor = m.end;
   }
@@ -85,7 +94,7 @@ export function orphanTokens(text: string, known: KnownTokens): Array<{ kind: To
   for (const p of splitPromptTokens(text, known)) {
     if (p.kind === 'text' || p.known) continue;
     // variável distingue caixa: {{Nome}} e {{nome}} são dois problemas diferentes
-    const id = `${p.kind}:${p.kind === 'var' ? p.name : normalizeKeyword(p.name)}`;
+    const id = `${p.kind}:${p.kind === 'var' ? p.name : p.kind === 'iavar' ? p.name.toLowerCase() : normalizeKeyword(p.name)}`;
     if (seen.has(id)) continue;
     seen.add(id);
     out.push({ kind: p.kind, name: p.name, text: p.text });
@@ -95,6 +104,7 @@ export function orphanTokens(text: string, known: KnownTokens): Array<{ kind: To
 
 export const TOKEN_KIND_LABEL: Record<TokenKind, string> = {
   var: 'variável',
+  iavar: 'variável preenchida pela IA',
   acao: 'ação',
   midia: 'mídia',
 };

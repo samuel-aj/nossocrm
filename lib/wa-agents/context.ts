@@ -10,6 +10,8 @@ import { renderTemplate } from './template';
 import { formatKnowledgeHits } from './knowledge';
 import { normalizeKeyword } from './text';
 import {
+  AgentAiVarSchema,
+  AgentAutoLeadSchema,
   AgentFollowupSchema,
   AgentLeadContextSchema,
   AgentMediaUnderstandingSchema,
@@ -19,6 +21,7 @@ import {
   AgentWebhookSchema,
   AI_PROVIDERS,
   CustomActionSchema,
+  DEFAULT_AGENT_AUTO_LEAD,
   DEFAULT_AGENT_LEAD_CONTEXT,
   DEFAULT_AGENT_MEDIA_UNDERSTANDING,
   DEFAULT_AGENT_TOOLS,
@@ -27,6 +30,8 @@ import {
   OutcomeSchema,
   SCRIPT_ACTION_MARKER_RE,
   SCRIPT_MEDIA_MARKER_RE,
+  type AgentAiVar,
+  type AgentAutoLead,
   type AgentDocumentRow,
   type AgentFollowup,
   type AgentMediaRow,
@@ -191,6 +196,13 @@ export function normalizeMediaUnderstanding(raw: unknown): AgentMediaUnderstandi
   return p.success ? p.data : { ...DEFAULT_AGENT_MEDIA_UNDERSTANDING };
 }
 
+/** `auto_lead` (jsonb): lead automático; linha antiga ou valor inválido = desligado. */
+export function normalizeAutoLead(raw: unknown): AgentAutoLead {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ...DEFAULT_AGENT_AUTO_LEAD };
+  const p = AgentAutoLeadSchema.safeParse(raw);
+  return p.success ? p.data : { ...DEFAULT_AGENT_AUTO_LEAD };
+}
+
 /** `helper_agent_ids` (uuid[]) como lista de strings únicas; linhas antigas viram []. */
 export function normalizeHelperIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -246,6 +258,11 @@ export function normalizeAgentRow(raw: Record<string, unknown>): AgentRow {
     typing: normalizeTyping(raw.typing),
     lead_context: normalizeLeadContext(raw.lead_context),
     media_understanding: normalizeMediaUnderstanding(raw.media_understanding),
+    auto_lead: normalizeAutoLead(raw.auto_lead),
+    ai_vars: parseArray<AgentAiVar>(raw.ai_vars, item => {
+      const p = AgentAiVarSchema.safeParse(item);
+      return p.success ? p.data : null;
+    }),
     created_by: (raw.created_by as string | null) ?? null,
     created_at: String(raw.created_at ?? ''),
     updated_at: String(raw.updated_at ?? ''),

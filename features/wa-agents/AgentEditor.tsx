@@ -32,16 +32,20 @@ import {
   Users,
   Calculator,
   AlarmClock,
+  KanbanSquare,
 } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
 import { useToast } from '@/context/ToastContext';
 import {
   AI_PROVIDERS,
   AgentInputSchema,
+  DEFAULT_AGENT_AUTO_LEAD,
   DEFAULT_AGENT_TRIGGERS,
   DEFAULT_AGENT_LEAD_CONTEXT,
   DEFAULT_AGENT_MEDIA_UNDERSTANDING,
   DEFAULT_AGENT_TYPING,
+  type AgentAiVar,
+  type AgentAutoLead,
   type AgentInput,
   type AgentPublic,
   type AgentTriggers,
@@ -145,6 +149,10 @@ type AgentFormState = {
   typing: AgentTyping;
   lead_context: AgentLeadContext;
   media_understanding: AgentMediaUnderstanding;
+  /** Lead criado sozinho quando o contato não tem negócio aberto */
+  auto_lead: AgentAutoLead;
+  /** Variáveis preenchidas pela IA usadas nos campos das ações */
+  ai_vars: AgentAiVar[];
 };
 
 const CUSTOM_MODEL = '__custom__';
@@ -183,7 +191,7 @@ const FIELD_TABS: Record<string, EditorTab> = {
   model: 'config',
   temperature: 'config',
   api_key: 'config',
-  audio_api_key: 'roteiro',
+  audio_api_key: 'config',
   buffer_seconds: 'config',
   history_limit: 'config',
   line_delay_ms: 'config',
@@ -200,6 +208,8 @@ const FIELD_TABS: Record<string, EditorTab> = {
   typing: 'config',
   lead_context: 'roteiro',
   media_understanding: 'roteiro',
+  auto_lead: 'gatilhos',
+  ai_vars: 'acoes',
 };
 
 // ---------------------------------------------------------------- Formulário
@@ -256,6 +266,8 @@ function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInpu
     typing: normalizeTyping(src.typing),
     lead_context: { ...DEFAULT_AGENT_LEAD_CONTEXT, ...(src.lead_context ?? {}) },
     media_understanding: { ...DEFAULT_AGENT_MEDIA_UNDERSTANDING, ...(src.media_understanding ?? {}) },
+    auto_lead: { ...DEFAULT_AGENT_AUTO_LEAD, ...(src.auto_lead ?? {}) },
+    ai_vars: src.ai_vars ?? [],
   };
 }
 
@@ -301,6 +313,12 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
     typing: form.typing,
     lead_context: form.lead_context,
     media_understanding: form.media_understanding,
+    auto_lead: {
+      enabled: form.auto_lead.enabled,
+      board_id: form.auto_lead.board_id || null,
+      stage_id: form.auto_lead.stage_id || null,
+    },
+    ai_vars: form.ai_vars,
   };
   if (form.clear_api_key) payload.api_key = null;
   else if (form.api_key.trim()) payload.api_key = form.api_key.trim();
@@ -327,6 +345,8 @@ const FIELD_NAMES: Record<string, string> = {
   max_replies: 'Limite de respostas',
   start_mode: 'Ao ser ativado',
   followups: 'Follow-ups',
+  auto_lead: 'Lead automático',
+  ai_vars: 'Variáveis preenchidas pela IA',
   outcomes: 'Resultados',
   custom_actions: 'Ações durante a conversa',
   triggers: 'Gatilhos',
@@ -809,6 +829,14 @@ export const AgentEditor: React.FC<{
   const optionsQ = useWaAgentOptions();
   const agentsQ = useWaAgentsList();
   const botsQ = useWaBotsList();
+  /** Robôs no formato mínimo dos editores de ação (Transferir para um robô). */
+  const botsMinimal = (botsQ.data ?? []).map((b) => ({
+    id: b.id,
+    name: b.name,
+    enabled: b.enabled,
+    connection_id: b.connection_id,
+    connection_ids: b.connection_ids ?? [],
+  }));
   const save = useSaveWaAgent();
 
   const [form, setForm] = useState<AgentFormState>(() => buildInitialForm(agent, initial));
@@ -1177,55 +1205,11 @@ export const AgentEditor: React.FC<{
                 />
               </div>
             ))}
-            {form.media_understanding.audio ? (
-              <div className="rounded-lg border border-slate-200 dark:border-white/10 p-3 space-y-3">
-                <Field
-                  label="Chave da OpenAI só para o áudio (opcional)"
-                  htmlFor="agent-audio-api-key"
-                  help={
-                    form.clear_audio_api_key
-                      ? 'A chave de áudio será removida ao salvar.'
-                      : hasAudioApiKey
-                        ? 'Este agente tem uma chave de áudio salva. Digite outra para substituir.'
-                        : 'Usada só para transcrever (whisper-1), qualquer que seja o provedor do agente. Vazio: OpenAI e Google transcrevem com a chave do próprio agente, e a Anthropic tenta a chave da OpenAI da organização.'
-                  }
-                >
-                  <div className="flex items-center gap-2">
-                    <div className="relative flex-1">
-                      <KeyRound size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
-                      <input
-                        id="agent-audio-api-key"
-                        type="password"
-                        autoComplete="off"
-                        className={`${INPUT_CLASS} pl-9`}
-                        value={form.audio_api_key}
-                        onChange={(e) => patch({ audio_api_key: e.target.value, clear_audio_api_key: false })}
-                        placeholder={hasAudioApiKey ? 'Chave de áudio configurada' : 'sk-...'}
-                        maxLength={500}
-                        disabled={form.clear_audio_api_key}
-                      />
-                    </div>
-                    {hasAudioApiKey ? (
-                      <button
-                        type="button"
-                        className={BTN_SMALL}
-                        onClick={() =>
-                          patch({ clear_audio_api_key: !form.clear_audio_api_key, audio_api_key: '' })
-                        }
-                      >
-                        {form.clear_audio_api_key ? 'Manter chave' : 'Remover'}
-                      </button>
-                    ) : null}
-                  </div>
-                </Field>
-                {form.provider === 'anthropic' && !temChaveDeAudio ? (
-                  <Notice tone="amber">
-                    A Anthropic não transcreve áudio. Sem uma chave da OpenAI (aqui ou na Central de I.A. da
-                    organização), o áudio continua chegando como &quot;[áudio]&quot; — imagens e documentos
-                    funcionam normalmente.
-                  </Notice>
-                ) : null}
-              </div>
+            {form.media_understanding.audio && form.provider === 'anthropic' && !temChaveDeAudio ? (
+              <Notice tone="amber">
+                A Anthropic não transcreve áudio. Configure a chave auxiliar da OpenAI na aba Configurações (ou a chave
+                da OpenAI da organização na Central de I.A.) para o agente ouvir os áudios.
+              </Notice>
             ) : null}
           </div>
         </Panel>
@@ -1311,6 +1295,8 @@ export const AgentEditor: React.FC<{
             onChange={(custom_actions) => patch({ custom_actions })}
             agents={agents}
             options={options}
+            aiVars={form.ai_vars}
+            onAiVarsChange={(ai_vars) => patch({ ai_vars })}
             currentAgentId={agentId}
             onInsertToken={(token) => insertPromptToken(token)}
           />
@@ -1326,6 +1312,9 @@ export const AgentEditor: React.FC<{
             onChange={(outcomes) => patch({ outcomes })}
             agents={agents}
             options={options}
+            bots={botsMinimal}
+            aiVars={form.ai_vars}
+            onAiVarsChange={(ai_vars) => patch({ ai_vars })}
             currentAgentId={agentId}
           />
         </Panel>
@@ -1447,6 +1436,70 @@ export const AgentEditor: React.FC<{
               />
             </div>
           </div>
+        </Panel>
+
+        <Panel
+          title="Lead automático"
+          description="Cria o lead no CRM sozinho quando o contato da conversa ainda não tem um negócio aberto."
+          icon={<KanbanSquare size={16} />}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                Criar lead quando o contato não tiver um
+              </p>
+              <p className={HELP_CLASS}>
+                Ao atender, se o contato não tiver NENHUM negócio aberto, o agente cria um (número sem contato no CRM
+                ganha o contato junto). Se já existir, nada muda: nunca duplica. O responsável segue a distribuição de
+                leads da organização.
+              </p>
+            </div>
+            <Toggle
+              checked={form.auto_lead.enabled}
+              onChange={(enabled) => patch({ auto_lead: { ...form.auto_lead, enabled } })}
+              label="Criar lead automaticamente"
+            />
+          </div>
+          {form.auto_lead.enabled ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-slate-200 dark:border-white/10">
+              <Field label="Quadro" htmlFor="agent-auto-lead-board" help="Onde o lead nasce.">
+                <select
+                  id="agent-auto-lead-board"
+                  className={INPUT_CLASS}
+                  value={form.auto_lead.board_id ?? ''}
+                  onChange={(e) =>
+                    patch({ auto_lead: { ...form.auto_lead, board_id: e.target.value || null, stage_id: null } })
+                  }
+                >
+                  <option value="">Primeiro quadro da organização</option>
+                  {(options?.boards ?? []).map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Etapa" htmlFor="agent-auto-lead-stage" help="Em que etapa ele entra.">
+                <select
+                  id="agent-auto-lead-stage"
+                  className={INPUT_CLASS}
+                  value={form.auto_lead.stage_id ?? ''}
+                  onChange={(e) => patch({ auto_lead: { ...form.auto_lead, stage_id: e.target.value || null } })}
+                >
+                  <option value="">Primeira etapa do quadro</option>
+                  {(
+                    (form.auto_lead.board_id
+                      ? options?.boards.find((b) => b.id === form.auto_lead.board_id)?.stages
+                      : options?.boards[0]?.stages) ?? []
+                  ).map((st) => (
+                    <option key={st.id} value={st.id}>
+                      {st.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+          ) : null}
         </Panel>
 
         <Panel
@@ -1583,6 +1636,58 @@ export const AgentEditor: React.FC<{
             </div>
           </Field>
         </Panel>
+
+        {form.provider !== 'openai' ? (
+          <Panel
+            title="Chave auxiliar da OpenAI (áudio e recursos de voz)"
+            description="Só aparece quando o provedor do agente não é a OpenAI: usada para transcrever os áudios do lead (whisper-1)."
+            icon={<KeyRound size={16} />}
+          >
+            <Field
+              label="Chave da OpenAI só para o áudio (opcional)"
+              htmlFor="agent-audio-api-key"
+              help={
+                form.clear_audio_api_key
+                  ? 'A chave de áudio será removida ao salvar.'
+                  : hasAudioApiKey
+                    ? 'Este agente tem uma chave de áudio salva. Digite outra para substituir.'
+                    : 'Vazio: o Google transcreve com a chave do próprio agente, e a Anthropic tenta a chave da OpenAI da organização (Central de I.A.).'
+              }
+            >
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <KeyRound size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+                  <input
+                    id="agent-audio-api-key"
+                    type="password"
+                    autoComplete="off"
+                    className={`${INPUT_CLASS} pl-9`}
+                    value={form.audio_api_key}
+                    onChange={(e) => patch({ audio_api_key: e.target.value, clear_audio_api_key: false })}
+                    placeholder={hasAudioApiKey ? 'Chave de áudio configurada' : 'sk-...'}
+                    maxLength={500}
+                    disabled={form.clear_audio_api_key}
+                  />
+                </div>
+                {hasAudioApiKey ? (
+                  <button
+                    type="button"
+                    className={BTN_SMALL}
+                    onClick={() => patch({ clear_audio_api_key: !form.clear_audio_api_key, audio_api_key: '' })}
+                  >
+                    {form.clear_audio_api_key ? 'Manter chave' : 'Remover'}
+                  </button>
+                ) : null}
+              </div>
+            </Field>
+            {form.provider === 'anthropic' && !temChaveDeAudio && form.media_understanding.audio ? (
+              <Notice tone="amber">
+                A Anthropic não transcreve áudio. Sem uma chave da OpenAI (aqui ou na Central de I.A. da organização), o
+                áudio continua chegando como &quot;[áudio]&quot; — imagens e documentos funcionam normalmente.
+              </Notice>
+            ) : null}
+          </Panel>
+        ) : null}
 
         <Panel
           title="Ritmo e memória"

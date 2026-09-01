@@ -20,6 +20,7 @@ import {
   type AgentMediaKind,
   type AgentMediaRow,
   type AgentRow,
+  type AgentAutoLead,
   type AgentTriggers,
   type BotLayout,
   type BotStep,
@@ -326,6 +327,22 @@ export async function boardBelongsToOrg(admin: SupabaseClient, orgId: string, bo
  * "entrou numa etapa" e número que inicia a conversa obrigatório e da org.
  * null quando está tudo certo.
  */
+/** auto_lead: quadro e etapa (quando informados) precisam ser da organização. */
+export async function validateAutoLead(
+  admin: SupabaseClient,
+  orgId: string,
+  autoLead: AgentAutoLead
+): Promise<Response | null> {
+  if (!autoLead.enabled) return null;
+  if (autoLead.board_id && !(await boardBelongsToOrg(admin, orgId, autoLead.board_id))) {
+    return validationMessage('Quadro não encontrado nesta organização', 'auto_lead.board_id');
+  }
+  if (autoLead.stage_id && !(await stageBelongsToOrg(admin, orgId, autoLead.stage_id, autoLead.board_id))) {
+    return validationMessage('Etapa não encontrada nesta organização', 'auto_lead.stage_id');
+  }
+  return null;
+}
+
 export async function validateAgentTriggers(
   admin: SupabaseClient,
   orgId: string,

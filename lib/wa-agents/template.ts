@@ -8,6 +8,42 @@ export const VAR_PATTERN = '\\{\\{\\s*([a-zA-Z0-9_.-]+)\\s*\\}\\}';
 
 const VAR_RE = new RegExp(VAR_PATTERN, 'g');
 
+/**
+ * Variável PREENCHIDA PELA IA na hora de executar a ação: `{{ia:nome}}`.
+ * Padrão separado do VAR_PATTERN de propósito: o roteiro NÃO resolve `ia:`
+ * (a IA só preenche nas ações), então um `{{ia:x}}` escrito no roteiro
+ * continua intocado em vez de sumir.
+ */
+export const AI_VAR_PATTERN = '\\{\\{\\s*ia:([a-z0-9_]+)\\s*\\}\\}';
+
+const AI_VAR_RE = new RegExp(AI_VAR_PATTERN, 'gi');
+
+/** Token pronto de uma variável de IA: 'motivo' -> '{{ia:motivo}}'. */
+export function aiVarToken(name: string): string {
+  return `{{ia:${name}}}`;
+}
+
+/** Nomes das variáveis de IA usadas num texto (minúsculos, sem repetição, na ordem). */
+export function extractAiVarNames(text: string | null | undefined): string[] {
+  if (!text) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const m of text.matchAll(new RegExp(AI_VAR_PATTERN, 'gi'))) {
+    const name = (m[1] ?? '').toLowerCase();
+    if (name && !seen.has(name)) {
+      seen.add(name);
+      out.push(name);
+    }
+  }
+  return out;
+}
+
+/** Substitui {{ia:nome}} pelos valores gerados ('' quando a IA não devolveu o nome). */
+export function renderAiVars(text: string, values: Record<string, string>): string {
+  if (!text) return '';
+  return text.replace(AI_VAR_RE, (_m, name: string) => values[name.toLowerCase()] ?? '');
+}
+
 /** Resolve um caminho "a.b.c" dentro de um objeto; undefined se não existir. */
 export function getPath(vars: Record<string, unknown>, path: string): unknown {
   // Primeiro tenta a chave literal (ex.: 'negocio.titulo' pode ser uma chave plana)

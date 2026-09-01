@@ -10,7 +10,7 @@
  */
 import React, { useState } from 'react';
 import { Plus, Pencil, ChevronUp, Zap, ArrowRight, FileText } from 'lucide-react';
-import type { CustomAction } from '@/lib/wa-agents/types';
+import type { AgentAiVar, CustomAction } from '@/lib/wa-agents/types';
 import type { WaAgentListItem, WaAgentOptions } from './useWaAgents';
 import { ActionSummary, ActionsEditor, CardControls, nextExpanded, slugifyKey, type ActionType } from './OutcomesEditor';
 import { actionToken } from './PromptEditor';
@@ -20,7 +20,7 @@ import { BTN_SMALL, Badge, Field, HELP_CLASS, INPUT_CLASS, SUBCARD_CLASS, TEXTAR
  * Ações de encerramento não fazem sentido no meio da conversa: a ação
  * durante a conversa nunca encerra o atendimento (isso é papel dos resultados).
  */
-const HIDDEN_ACTION_TYPES: ActionType[] = ['handoff', 'approval', 'stop'];
+const HIDDEN_ACTION_TYPES: ActionType[] = ['handoff', 'approval', 'stop', 'start_bot'];
 
 /**
  * Componente React `CustomActionsEditor`.
@@ -31,10 +31,12 @@ export const CustomActionsEditor: React.FC<{
   onChange: (value: CustomAction[]) => void;
   agents: WaAgentListItem[];
   options: WaAgentOptions | undefined;
+  aiVars?: AgentAiVar[];
+  onAiVarsChange?: (vars: AgentAiVar[]) => void;
   currentAgentId?: string | null;
   /** Insere o marcador `[[acao:chave]]` no cursor do roteiro (o editor pai troca de aba) */
   onInsertToken?: (token: string) => void;
-}> = ({ value, onChange, agents, options, currentAgentId, onInsertToken }) => {
+}> = ({ value, onChange, agents, options, aiVars = [], onAiVarsChange = () => {}, currentAgentId, onInsertToken }) => {
   const [expanded, setExpanded] = useState<number | null>(null);
 
   const update = (index: number, patch: Partial<CustomAction>) => {
@@ -206,6 +208,8 @@ export const CustomActionsEditor: React.FC<{
                   onChange={(actions) => update(index, { actions })}
                   agents={agents}
                   options={options}
+                  aiVars={aiVars}
+                  onAiVarsChange={onAiVarsChange}
                   currentAgentId={currentAgentId}
                   idPrefix={idPrefix}
                   hiddenTypes={HIDDEN_ACTION_TYPES}

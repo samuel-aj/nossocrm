@@ -27,6 +27,7 @@ const BOX_CLASS = 'px-3 py-2 text-base md:text-xs font-mono leading-relaxed';
 
 const TOKEN_CLASS: Record<string, string> = {
   var: 'rounded bg-blue-200/70 dark:bg-blue-400/30',
+  iavar: 'rounded bg-fuchsia-200/70 dark:bg-fuchsia-400/30',
   acao: 'rounded bg-purple-200/70 dark:bg-purple-400/30',
   midia: 'rounded bg-green-200/70 dark:bg-green-400/30',
   desconhecido: 'rounded bg-amber-200/80 dark:bg-amber-400/30 ring-1 ring-amber-500/70',

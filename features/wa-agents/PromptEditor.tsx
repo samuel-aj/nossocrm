@@ -13,7 +13,7 @@ import React from 'react';
 import { Braces, ListChecks, Paperclip, Image as ImageIcon, Film, Music, FileText, Info, AlertTriangle } from 'lucide-react';
 import { PROMPT_VARIABLES, PROMPT_VARIABLE_NAMES, promptVariableName } from '@/lib/wa-agents/catalog';
 import { HighlightedScript } from './HighlightedScript';
-import { TOKEN_KIND_LABEL, orphanTokens, type KnownTokens } from './tokens';
+import { TOKEN_KIND_LABEL, orphanTokens, type KnownTokens, type TokenKind } from './tokens';
 import { HELP_CLASS, Notice, TokenChip } from './ui';
 
 export type PromptPaletteAction = { key: string; label: string };
@@ -78,7 +78,7 @@ function PaletteGroup({
 }
 
 /** O que cada cor do roteiro quer dizer + os tokens que não vão puxar nada. */
-function TokenLegend({ orphans }: { orphans: Array<{ kind: 'var' | 'acao' | 'midia'; name: string; text: string }> }) {
+function TokenLegend({ orphans }: { orphans: Array<{ kind: TokenKind; name: string; text: string }> }) {
   const item = (cor: string, texto: string) => (
     <span className="inline-flex items-center gap-1">
       <span className={`inline-block w-3 h-3 rounded ${cor}`} aria-hidden="true" />

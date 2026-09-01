@@ -20,6 +20,7 @@ import {
   toAgentPublic,
   uniqueIds,
   validateAgentTriggers,
+  validateAutoLead,
   validateHelperAgentIds,
   validationError,
 } from '../_shared';
@@ -57,6 +58,8 @@ function toInsertRow(input: AgentInput, helperIds: string[]) {
     typing: input.typing,
     lead_context: input.lead_context,
     media_understanding: input.media_understanding,
+    auto_lead: input.auto_lead,
+    ai_vars: input.ai_vars,
   };
 }
 
@@ -102,6 +105,8 @@ export async function POST(req: Request) {
     }
     const triggersError = await validateAgentTriggers(auth.admin, orgId, input.triggers);
     if (triggersError) return triggersError;
+    const autoLeadError = await validateAutoLead(auth.admin, orgId, input.auto_lead);
+    if (autoLeadError) return autoLeadError;
     const helpers = await validateHelperAgentIds(auth.admin, orgId, uniqueIds(input.helper_agent_ids));
     if (!helpers.ok) return helpers.response;
     helperIds = helpers.ids;
