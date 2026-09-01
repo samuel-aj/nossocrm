@@ -3,8 +3,15 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import ConfirmModal from '@/components/ConfirmModal';
-import { Loader2, UserPlus, Crown, Briefcase, KeyRound, Mail, Check, X, Sparkles, Clock, RefreshCw, Trash2, Link, Copy, CheckCircle2 } from 'lucide-react';
+import { Loader2, UserPlus, Crown, Briefcase, KeyRound, Mail, Check, X, Sparkles, Clock, RefreshCw, Trash2, Link, Copy, CheckCircle2, ShieldCheck, KanbanSquare, Phone, Users as UsersIcon } from 'lucide-react';
 import { UserRole } from '@/types/constants';
+import { useCRM } from '@/context/CRMContext';
+import {
+    DEFAULT_VISIBILITY_RULES,
+    normalizeVisibilityRules,
+    type VisibilityRules,
+    type VisibilityScope,
+} from '@/lib/permissions/types';
 
 interface Profile {
     id: string;
@@ -51,6 +58,9 @@ export const UsersPage: React.FC = () => {
     const { profile: currentUserProfile } = useAuth();
     const { addToast } = useToast();
     const [users, setUsers] = useState<Profile[]>([]);
+    // Permissões de visualização por usuário (uma entrada por usuário restringido)
+    const [visRules, setVisRules] = useState<Record<string, VisibilityRules>>({});
+    const [permUser, setPermUser] = useState<Profile | null>(null);
     const [loading, setLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [newUserRole, setNewUserRole] = useState<string>(UserRole.VENDEDOR);
@@ -88,6 +98,23 @@ export const UsersPage: React.FC = () => {
             setLoading(false);
         }
     }, []);
+
+    const fetchVisibilityRules = useCallback(async () => {
+        try {
+            const res = await fetch('/api/org/visibility', { credentials: 'include' });
+            const data = await res.json().catch(() => null);
+            if (!res.ok) return;
+            const map: Record<string, VisibilityRules> = {};
+            for (const r of data?.rules || []) map[r.user_id] = normalizeVisibilityRules(r.rules);
+            setVisRules(map);
+        } catch {
+            // sem regras carregadas a tela segue normal (botão continua funcionando)
+        }
+    }, []);
+
+    useEffect(() => {
+        void fetchVisibilityRules();
+    }, [fetchVisibilityRules]);
 
     const fetchActiveInvites = useCallback(async () => {
         try {
@@ -467,6 +494,15 @@ export const UsersPage: React.FC = () => {
                                                 Pendente
                                             </span>
                                         )}
+                                        {visRules[user.id] && (
+                                            <span
+                                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300"
+                                                title="Este usuário tem permissões de visualização configuradas"
+                                            >
+                                                <ShieldCheck className="h-3 w-3" />
+                                                Acesso restrito
+                                            </span>
+                                        )}
                                     </div>
                                     <div className="flex items-center gap-3 mt-1.5">
                                         <span className={`inline-flex items-center gap-1.5 text-sm ${user.role === UserRole.ADMIN
@@ -505,6 +541,15 @@ export const UsersPage: React.FC = () => {
                                         ) : (
                                             <>
                                                 {/* Resend Invite removed as we don't use email invites anymore */}
+                                                {user.role === UserRole.VENDEDOR && user.status !== 'pending' && (
+                                                    <button
+                                                        onClick={() => setPermUser(user)}
+                                                        className="opacity-0 group-hover:opacity-100 max-md:opacity-100 p-2 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-all"
+                                                        title="Permissões de visualização"
+                                                    >
+                                                        <ShieldCheck className="h-4 w-4" />
+                                                    </button>
+                                                )}
                                                 <button
                                                     onClick={() => handleDeleteUser(user)}
                                                     className="opacity-0 group-hover:opacity-100 max-md:opacity-100 p-2 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
@@ -540,6 +585,24 @@ export const UsersPage: React.FC = () => {
                         Convidar primeiro membro
                     </button>
                 </div>
+            )}
+
+            {permUser && (
+                <VisibilityModal
+                    user={permUser}
+                    members={users.filter(u => u.id !== permUser.id && u.status !== 'pending')}
+                    initial={visRules[permUser.id] ?? null}
+                    onClose={() => setPermUser(null)}
+                    onSaved={(rules) => {
+                        setVisRules(prev => {
+                            const next = { ...prev };
+                            if (rules) next[permUser.id] = rules;
+                            else delete next[permUser.id];
+                            return next;
+                        });
+                        setPermUser(null);
+                    }}
+                />
             )}
 
             {/* Modal */}
@@ -849,6 +912,287 @@ export const UsersPage: React.FC = () => {
                 cancelText="Voltar"
                 variant="danger"
             />
+        </div>
+    );
+};
+
+
+// ---------------------------------------------------------------------------
+// Permissões de visualização de um vendedor (Configurações > Equipe)
+// ---------------------------------------------------------------------------
+const RADIO_CLASS = 'h-4 w-4 accent-primary-600';
+const OPTION_ROW =
+    'flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors border-slate-200 dark:border-white/10 hover:border-primary-300 dark:hover:border-primary-500/40';
+
+function CheckRow({ checked, onToggle, label, sub }: { checked: boolean; onToggle: () => void; label: string; sub?: string }) {
+    return (
+        <label className="flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-white/5 cursor-pointer">
+            <input type="checkbox" className="h-4 w-4 accent-primary-600" checked={checked} onChange={onToggle} />
+            <span className="min-w-0">
+                <span className="block text-sm text-slate-800 dark:text-slate-100 truncate">{label}</span>
+                {sub ? <span className="block text-[11px] text-slate-400 truncate">{sub}</span> : null}
+            </span>
+        </label>
+    );
+}
+
+const VisibilityModal: React.FC<{
+    user: Profile;
+    members: Profile[];
+    initial: VisibilityRules | null;
+    onClose: () => void;
+    onSaved: (rules: VisibilityRules | null) => void;
+}> = ({ user, members, initial, onClose, onSaved }) => {
+    const { addToast } = useToast();
+    const { boards } = useCRM();
+    const base = initial ?? DEFAULT_VISIBILITY_RULES;
+
+    const [scope, setScope] = useState<VisibilityScope>(base.deals.scope);
+    const [teamIds, setTeamIds] = useState<string[]>(base.deals.team_user_ids);
+    const [allBoards, setAllBoards] = useState(base.boards.board_ids === null);
+    const [boardIds, setBoardIds] = useState<string[]>(base.boards.board_ids ?? []);
+    const [allConns, setAllConns] = useState(base.whatsapp.connection_ids === null);
+    const [connIds, setConnIds] = useState<string[]>(base.whatsapp.connection_ids ?? []);
+    const [connections, setConnections] = useState<Array<{ id: string; label: string }>>([]);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        let alive = true;
+        (async () => {
+            try {
+                const res = await fetch('/api/whatsapp/connection', { credentials: 'include' });
+                const data = await res.json().catch(() => null);
+                if (!alive || !res.ok) return;
+                const list = (data?.connections || []) as Array<{
+                    id: string;
+                    profile_name?: string | null;
+                    phone_number?: string | null;
+                    provider?: string | null;
+                }>;
+                setConnections(
+                    list.map(c => ({
+                        id: c.id,
+                        label:
+                            [c.profile_name, c.phone_number].filter(Boolean).join(' · ') ||
+                            c.provider ||
+                            'Número conectado',
+                    }))
+                );
+            } catch {
+                // sem números carregados a seção mostra o aviso de lista vazia
+            }
+        })();
+        return () => {
+            alive = false;
+        };
+    }, []);
+
+    const toggle = (list: string[], setList: (v: string[]) => void, id: string) =>
+        setList(list.includes(id) ? list.filter(x => x !== id) : [...list, id]);
+
+    const save = async () => {
+        if (scope === 'team' && teamIds.length === 0) {
+            addToast('Escolha ao menos um membro da equipe.', 'warning');
+            return;
+        }
+        if (!allBoards && boardIds.length === 0) {
+            addToast('Escolha ao menos um quadro.', 'warning');
+            return;
+        }
+        if (!allConns && connIds.length === 0) {
+            addToast('Escolha ao menos um número.', 'warning');
+            return;
+        }
+        setSaving(true);
+        try {
+            const rules: VisibilityRules = {
+                deals: { scope, team_user_ids: scope === 'team' ? teamIds : [] },
+                boards: { board_ids: allBoards ? null : boardIds },
+                whatsapp: { connection_ids: allConns ? null : connIds },
+            };
+            const res = await fetch(`/api/org/visibility/${user.id}`, {
+                method: 'PUT',
+                credentials: 'include',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ rules }),
+            });
+            const data = await res.json().catch(() => null);
+            if (!res.ok) throw new Error(data?.error || `Falha ao salvar (HTTP ${res.status})`);
+            addToast('Permissões salvas.', 'success');
+            onSaved(data?.rules ?? null);
+        } catch (e) {
+            addToast((e as Error).message, 'error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const activeBoards = boards.filter(b => !(b as { deletedAt?: string | null }).deletedAt);
+
+    return (
+        <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+            onClick={e => {
+                if (e.target === e.currentTarget) onClose();
+            }}
+        >
+            <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-xl w-full shadow-2xl overflow-hidden max-h-[88dvh] flex flex-col animate-in fade-in zoom-in-95 duration-200">
+                <div className="px-6 pt-6 pb-4 border-b border-slate-100 dark:border-white/5">
+                    <div className="flex items-center gap-3">
+                        <span className="h-10 w-10 rounded-xl bg-sky-100 dark:bg-sky-900/30 text-sky-600 dark:text-sky-300 flex items-center justify-center">
+                            <ShieldCheck className="h-5 w-5" />
+                        </span>
+                        <div className="min-w-0">
+                            <h2 className="text-lg font-bold text-slate-900 dark:text-white">Permissões de visualização</h2>
+                            <p className="text-sm text-slate-500 dark:text-slate-400 truncate">{user.email}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="px-6 py-4 space-y-6 overflow-y-auto">
+                    {/* Leads */}
+                    <section>
+                        <p className="flex items-center gap-2 text-sm font-bold text-slate-700 dark:text-slate-200 mb-1">
+                            <UsersIcon className="h-4 w-4 text-primary-500" /> Leads (negócios)
+                        </p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                            Vale nos quadros, nas listas e em tudo que mostra leads. Leads sem responsável ficam sempre
+                            visíveis, para alguém poder assumir.
+                        </p>
+                        <div className="space-y-2">
+                            {(
+                                [
+                                    ['all', 'Todos', 'Vê os leads de todos os vendedores da organização.'],
+                                    ['own', 'Somente próprios', 'Só vê os leads em que ele é o responsável.'],
+                                    ['team', 'Equipe', 'Vê os próprios e os dos membros escolhidos abaixo.'],
+                                ] as Array<[VisibilityScope, string, string]>
+                            ).map(([value, label, help]) => (
+                                <label key={value} className={OPTION_ROW}>
+                                    <input
+                                        type="radio"
+                                        name="vis-scope"
+                                        className={`${RADIO_CLASS} mt-0.5`}
+                                        checked={scope === value}
+                                        onChange={() => setScope(value)}
+                                    />
+                                    <span>
+                                        <span className="block text-sm font-semibold text-slate-800 dark:text-slate-100">{label}</span>
+                                        <span className="block text-xs text-slate-500 dark:text-slate-400">{help}</span>
+                                    </span>
+                                </label>
+                            ))}
+                        </div>
+                        {scope === 'team' && (
+                            <div className="mt-2 rounded-xl border border-slate-200 dark:border-white/10 max-h-44 overflow-y-auto py-1">
+                                {members.length === 0 ? (
+                                    <p className="px-3 py-3 text-xs text-slate-500">Nenhum outro membro na equipe.</p>
+                                ) : (
+                                    members.map(m => (
+                                        <CheckRow
+                                            key={m.id}
+                                            checked={teamIds.includes(m.id)}
+                                            onToggle={() => toggle(teamIds, setTeamIds, m.id)}
+                                            label={m.email}
+                                            sub={m.role === UserRole.ADMIN ? 'Administrador' : 'Vendedor'}
+                                        />
+                                    ))
+                                )}
+                            </div>
+                        )}
+                    </section>
+
+                    {/* Quadros */}
+                    <section>
+                        <p className="flex items-center gap-2 text-sm font-bold text-slate-700 dark:text-slate-200 mb-1">
+                            <KanbanSquare className="h-4 w-4 text-primary-500" /> Quadros (pipelines)
+                        </p>
+                        <div className="space-y-2">
+                            <label className={OPTION_ROW}>
+                                <input type="radio" name="vis-boards" className={`${RADIO_CLASS} mt-0.5`} checked={allBoards} onChange={() => setAllBoards(true)} />
+                                <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">Todos os quadros</span>
+                            </label>
+                            <label className={OPTION_ROW}>
+                                <input type="radio" name="vis-boards" className={`${RADIO_CLASS} mt-0.5`} checked={!allBoards} onChange={() => setAllBoards(false)} />
+                                <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">Somente estes</span>
+                            </label>
+                        </div>
+                        {!allBoards && (
+                            <div className="mt-2 rounded-xl border border-slate-200 dark:border-white/10 max-h-44 overflow-y-auto py-1">
+                                {activeBoards.length === 0 ? (
+                                    <p className="px-3 py-3 text-xs text-slate-500">Nenhum quadro na organização.</p>
+                                ) : (
+                                    activeBoards.map(b => (
+                                        <CheckRow
+                                            key={b.id}
+                                            checked={boardIds.includes(b.id)}
+                                            onToggle={() => toggle(boardIds, setBoardIds, b.id)}
+                                            label={b.name}
+                                        />
+                                    ))
+                                )}
+                            </div>
+                        )}
+                    </section>
+
+                    {/* Números de WhatsApp */}
+                    <section>
+                        <p className="flex items-center gap-2 text-sm font-bold text-slate-700 dark:text-slate-200 mb-1">
+                            <Phone className="h-4 w-4 text-primary-500" /> Números de WhatsApp
+                        </p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                            Controla quais conversas aparecem na página Chats e por quais números ele pode enviar.
+                        </p>
+                        <div className="space-y-2">
+                            <label className={OPTION_ROW}>
+                                <input type="radio" name="vis-conns" className={`${RADIO_CLASS} mt-0.5`} checked={allConns} onChange={() => setAllConns(true)} />
+                                <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">Todos os números</span>
+                            </label>
+                            <label className={OPTION_ROW}>
+                                <input type="radio" name="vis-conns" className={`${RADIO_CLASS} mt-0.5`} checked={!allConns} onChange={() => setAllConns(false)} />
+                                <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">Somente estes</span>
+                            </label>
+                        </div>
+                        {!allConns && (
+                            <div className="mt-2 rounded-xl border border-slate-200 dark:border-white/10 max-h-44 overflow-y-auto py-1">
+                                {connections.length === 0 ? (
+                                    <p className="px-3 py-3 text-xs text-slate-500">Nenhum número conectado na organização.</p>
+                                ) : (
+                                    connections.map(c => (
+                                        <CheckRow
+                                            key={c.id}
+                                            checked={connIds.includes(c.id)}
+                                            onToggle={() => toggle(connIds, setConnIds, c.id)}
+                                            label={c.label}
+                                        />
+                                    ))
+                                )}
+                            </div>
+                        )}
+                    </section>
+
+                    <p className="text-[11px] text-slate-400 dark:text-slate-500">
+                        As permissões valem na interface e no servidor: leads e quadros são cortados na própria leitura do
+                        banco, e as conversas de WhatsApp nas rotas do sistema. Administradores sempre veem tudo.
+                    </p>
+                </div>
+
+                <div className="px-6 py-4 border-t border-slate-100 dark:border-white/5 flex items-center justify-end gap-2">
+                    <button
+                        onClick={onClose}
+                        className="px-4 py-2 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/10"
+                    >
+                        Cancelar
+                    </button>
+                    <button
+                        onClick={() => void save()}
+                        disabled={saving}
+                        className="px-5 py-2 rounded-xl text-sm font-bold text-white bg-primary-600 hover:bg-primary-500 disabled:opacity-50 inline-flex items-center gap-2"
+                    >
+                        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                        Salvar
+                    </button>
+                </div>
+            </div>
         </div>
     );
 };

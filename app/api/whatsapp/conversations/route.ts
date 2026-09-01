@@ -1,6 +1,7 @@
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { getConnectionByOrg, getWaGroupsEnabled } from '@/lib/whatsapp/service';
 import { isColunaLabelIdsAusente } from '@/lib/whatsapp/labels';
+import { connectionAllowed, getVisibilityRules } from '@/lib/permissions/server';
 
 export const runtime = 'nodejs';
 
@@ -34,6 +35,15 @@ export async function GET(req: Request) {
   const connectionId = new URL(req.url).searchParams.get('connectionId');
   const groupsEnabled = await getWaGroupsEnabled(auth.admin, auth.user.organizationId);
 
+  // Permissões de visualização: vendedor restrito só enxerga as conversas dos
+  // NÚMEROS permitidos (a regra vale aqui, no servidor — a rota usa service
+  // role e RLS não alcança).
+  const vis = await getVisibilityRules(auth.admin, auth.user.organizationId, auth.user.id, auth.user.role);
+  const allowedConnIds = vis?.whatsapp.connection_ids ?? null;
+  if (connectionId && !connectionAllowed(vis, connectionId)) {
+    return json({ data: [], groupsEnabled });
+  }
+
   const COLUNAS_BASE =
     'id, connection_id, wa_phone, wa_name, contact_id, deal_id, last_message_at, last_message_preview, unread_count, is_group, group_jid, participants_count, avatar_path';
 
@@ -43,6 +53,8 @@ export async function GET(req: Request) {
       .select(colunas)
       .eq('organization_id', auth.user.organizationId);
     if (connectionId) q = q.eq('connection_id', connectionId);
+    // Restrição por número: conversa sem número (legada) fica de fora também
+    else if (allowedConnIds) q = q.in('connection_id', allowedConnIds);
     if (!groupsEnabled) q = q.eq('is_group', false);
     // Teto ALTO de propósito: com 500 a maior organização (mais de mil
     // conversas) perdia as mais antigas da lista, e o que sai da lista não

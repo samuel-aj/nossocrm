@@ -6,6 +6,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireOrgUser, isOrgAdmin, json } from '@/lib/whatsapp/api';
+import { filterAllowedConnections, getVisibilityRules } from '@/lib/permissions/server';
 import {
   getConnectionByOrg,
   getConnectionsByOrg,
@@ -74,7 +75,9 @@ export async function GET() {
   const auth = await requireOrgUser();
   if (!auth.ok) return auth.response;
 
-  const conns = await getConnectionsByOrg(auth.admin, auth.user.organizationId);
+  // Permissões de visualização: vendedor restrito só vê os números permitidos
+  const vis = await getVisibilityRules(auth.admin, auth.user.organizationId, auth.user.id, auth.user.role);
+  const conns = filterAllowedConnections(vis, await getConnectionsByOrg(auth.admin, auth.user.organizationId));
   if (conns.length === 0) {
     return json({ connected: false, connection: null, metaWebhook: null, connections: [] });
   }

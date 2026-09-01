@@ -10,6 +10,7 @@
  * Geramos uma URL assinada curta e passamos pra Evolution baixar de lá.
  */
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
+import { connectionAllowed, getVisibilityRules } from '@/lib/permissions/server';
 import {
   getConnectionByOrg,
   getConnectionByIdForOrg,
@@ -67,6 +68,9 @@ export async function POST(req: Request) {
     return json({ error: 'media.path e media.kind (image|video|document|audio|sticker) são obrigatórios' }, 400);
   }
 
+  // Permissões de visualização: só envia por número PERMITIDO pro usuário
+  const vis = await getVisibilityRules(auth.admin, auth.user.organizationId, auth.user.id, auth.user.role);
+
   let conn: WaConnectionRow | null = null;
   let conv: WaConversationRow;
   let group: WaConversationRow | null = null;
@@ -84,6 +88,9 @@ export async function POST(req: Request) {
     if (!conn || conn.status !== 'connected') {
       return json({ error: 'O número deste grupo está desconectado. Reconecte na aba Conexão.' }, 409);
     }
+    if (!connectionAllowed(vis, conn.id)) {
+      return json({ error: 'Você não tem acesso a este número.' }, 403);
+    }
     // Meta: grupo da Groups API (recipient_type "group"); Evolution: JID do grupo
     to = group.group_jid || group.wa_phone;
     conv = group;
@@ -96,6 +103,9 @@ export async function POST(req: Request) {
       : await getConnectionByOrg(auth.admin, auth.user.organizationId);
     if (connectionId && !conn) {
       return json({ error: 'Número selecionado não encontrado. Atualize a página e tente de novo.' }, 404);
+    }
+    if (conn && !connectionAllowed(vis, conn.id)) {
+      return json({ error: 'Você não tem acesso a este número.' }, 403);
     }
     // Sem conexão ATIVA não tenta enviar: senão a Evolution devolve um 404 cru
     // de instância inexistente, que confunde o usuário

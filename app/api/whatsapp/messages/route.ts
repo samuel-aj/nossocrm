@@ -15,6 +15,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { getConnectionsByOrg, getGroupConversation, getWaGroupsEnabled } from '@/lib/whatsapp/service';
+import { connectionAllowed, filterAllowedConnections, getVisibilityRules } from '@/lib/permissions/server';
 import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
 import { getConversationAiInfo, getConversationBotInfo } from '@/lib/wa-agents/conversation';
 
@@ -111,8 +112,10 @@ export async function GET(req: Request) {
   const connectionId = url.searchParams.get('connectionId');
 
   // Multi-número: a conexão "padrão" (1ª conectada) mantém o contrato antigo;
-  // senders lista TODOS os números conectados pro seletor de envio do chat.
-  const all = await getConnectionsByOrg(auth.admin, auth.user.organizationId);
+  // senders lista os números conectados PERMITIDOS pro seletor de envio.
+  const vis = await getVisibilityRules(auth.admin, auth.user.organizationId, auth.user.id, auth.user.role);
+  const todas = await getConnectionsByOrg(auth.admin, auth.user.organizationId);
+  const all = filterAllowedConnections(vis, todas);
   const conn = all.find(c => c.status === 'connected') ?? all[0] ?? null;
   const senders = all
     .filter(c => c.status === 'connected')
@@ -150,6 +153,9 @@ export async function GET(req: Request) {
     }
     const group = await getGroupConversation(auth.admin, auth.user.organizationId, conversationId);
     if (!group) return json({ error: 'Grupo não encontrado' }, 404);
+    if (!connectionAllowed(vis, group.connection_id ?? null)) {
+      return json({ error: 'Grupo não encontrado' }, 404);
+    }
     const groupConn = all.find(c => c.id === group.connection_id) ?? null;
     const messages = await loadMessages(auth.admin, [{ id: group.id, connection_id: group.connection_id }]);
     return json({
@@ -186,8 +192,16 @@ export async function GET(req: Request) {
     .eq('organization_id', auth.user.organizationId)
     .in('wa_phone', variants.length ? variants : [phone]);
   // 'none' = só a conversa órfã (sem número conectado); ausente = unificada
-  if (connectionId === 'none') convQ = convQ.is('connection_id', null);
-  else if (connectionId) convQ = convQ.eq('connection_id', connectionId);
+  if (connectionId === 'none') {
+    // conversa sem número: só sem restrição de números
+    if (vis && vis.whatsapp.connection_ids !== null) return json({ error: 'Conversa não encontrada' }, 404);
+    convQ = convQ.is('connection_id', null);
+  } else if (connectionId) {
+    if (!connectionAllowed(vis, connectionId)) return json({ error: 'Conversa não encontrada' }, 404);
+    convQ = convQ.eq('connection_id', connectionId);
+  } else if (vis && vis.whatsapp.connection_ids !== null) {
+    convQ = convQ.in('connection_id', vis.whatsapp.connection_ids);
+  }
   const { data: convList } = await convQ;
 
   const convs = (convList ?? []) as Array<{

@@ -12,6 +12,7 @@
  * texto (nome + telefone). Sem conexão conectada pro destino = erro só dele.
  */
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
+import { filterAllowedConnections, getVisibilityRules } from '@/lib/permissions/server';
 import {
   getConnectionsByOrg,
   ensureConversation,
@@ -89,7 +90,9 @@ export async function POST(req: Request) {
   const messages = (rows ?? []) as ForwardableRow[];
   if (messages.length === 0) return json({ error: 'Mensagens não encontradas' }, 404);
 
-  const connections = await getConnectionsByOrg(auth.admin, orgId);
+  // Permissões de visualização: encaminhar só pelos números permitidos
+  const vis = await getVisibilityRules(auth.admin, orgId, auth.user.id, auth.user.role);
+  const connections = filterAllowedConnections(vis, await getConnectionsByOrg(auth.admin, orgId));
   const connected = connections.filter(c => c.status === 'connected');
   const pickConnection = (connectionId: string): { conn: WaConnectionRow | null; error?: string } => {
     if (connectionId) {
