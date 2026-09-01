@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -438,6 +438,43 @@ export const ChatsPage: React.FC = () => {
   // sem contato (chegando no WhatsApp desde a conexão — histórico antigo do
   // celular nunca é importado). Quem tem conversa fica no topo por recência;
   // contatos sem conversa seguem em ordem alfabética.
+  /**
+   * Responsável do LEAD por contato — a fonte de verdade de quem cuida da
+   * pessoa. A conversa herda esse nome quando ninguém definiu um responsável
+   * direto no chat; assim o filtro funciona sem a equipe ter que preencher
+   * duas vezes, e vale pros leads que já existem (é calculado na leitura,
+   * não copiado pro banco, então nunca desencontra do lead).
+   *
+   * Mesma preferência da barra do lead: negócio ABERTO e, entre vários, o
+   * mais recente.
+   */
+  const ownerDoLeadPorContato = useMemo(() => {
+    const porContato = new Map<string, typeof deals>();
+    for (const d of deals) {
+      if (!d.contactId) continue;
+      const lista = porContato.get(d.contactId) ?? [];
+      lista.push(d);
+      porContato.set(d.contactId, lista);
+    }
+    const m = new Map<string, string>();
+    for (const [contactId, lista] of porContato.entries()) {
+      const abertos = lista.filter(d => !d.isWon && !d.isLost);
+      const pool = abertos.length ? abertos : lista;
+      const escolhido = pool
+        .slice()
+        .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0];
+      if (escolhido?.ownerId) m.set(contactId, escolhido.ownerId);
+    }
+    return m;
+  }, [deals]);
+
+  /** Responsável que vale na conversa: o definido no chat manda; sem ele, o do lead. */
+  const responsavelEfetivo = useCallback(
+    (item: { assignedOwnerId?: string | null; contactId: string | null }): string | null =>
+      item.assignedOwnerId ?? (item.contactId ? ownerDoLeadPorContato.get(item.contactId) ?? null : null),
+    [ownerDoLeadPorContato]
+  );
+
   const chatList = useMemo<ChatListItem[]>(() => {
     // DEDUP por telefone: contatos duplicados (mesmo número) viram UMA linha
     // só — fica o contato VINCULADO à conversa; sem vínculo, o mais antigo.
@@ -540,14 +577,14 @@ export const ChatsPage: React.FC = () => {
             ? filtered.filter(c => c.isGroup)
             : filtered;
 
-    // Responsável e etiqueta: só valem pra quem JÁ tem conversa (contato sem
-    // conversa não tem onde guardar nem responsável nem etiqueta).
+    // Responsável: usa o EFETIVO (o definido no chat ou, sem ele, o dono do
+    // lead do contato) — senão o filtro só encontraria quem foi marcado à mão.
     const byOwner =
       ownerFilter === 'all'
         ? byTab
         : ownerFilter === 'none'
-          ? byTab.filter(c => c.hasConv && !c.assignedOwnerId)
-          : byTab.filter(c => c.assignedOwnerId === ownerFilter);
+          ? byTab.filter(c => c.hasConv && !responsavelEfetivo(c))
+          : byTab.filter(c => responsavelEfetivo(c) === ownerFilter);
 
     const byTag =
       tagFilter === 'all' ? byOwner : byOwner.filter(c => (c.tags ?? []).some(tg => tg === tagFilter));
@@ -557,7 +594,7 @@ export const ChatsPage: React.FC = () => {
       if (a.hasConv !== b.hasConv) return a.hasConv ? -1 : 1;
       return a.name.localeCompare(b.name, 'pt-BR');
     });
-  }, [contacts, convsByPhone, groupItems, searchQuery, filter, ownerFilter, tagFilter]);
+  }, [contacts, convsByPhone, groupItems, searchQuery, filter, ownerFilter, tagFilter, responsavelEfetivo]);
 
   // Etiquetas já usadas nas conversas: alimentam o filtro e a sugestão.
   const etiquetasUsadas = useMemo(() => {
@@ -616,6 +653,10 @@ export const ChatsPage: React.FC = () => {
   const selectedConvId = selectedConv?.id ?? null;
   const selectedConvOwnerId = selectedConv?.assigned_owner_id ?? null;
   const selectedConvTags = useMemo(() => selectedConv?.tags ?? [], [selectedConv]);
+  /** O que a barra mostra: responsável do chat ou, sem ele, o dono do lead. */
+  const selectedOwnerEfetivo = selected
+    ? responsavelEfetivo({ assignedOwnerId: selectedConvOwnerId, contactId: selected.contactId })
+    : null;
 
   // Menu de responsável e campo de nova etiqueta da conversa aberta
   const [convOwnerMenuOpen, setConvOwnerMenuOpen] = useState(false);
@@ -632,6 +673,7 @@ export const ChatsPage: React.FC = () => {
     const pool = open.length ? open : list;
     return pool.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0];
   }, [deals, selected?.contactId]);
+
 
   const selectedDealBoard = useMemo(
     () => (selectedDeal ? boards.find(b => b.id === selectedDeal.boardId) ?? null : null),
@@ -1405,9 +1447,16 @@ export const ChatsPage: React.FC = () => {
                     }`}
                   >
                     <UserPlus size={12} />
-                    {selectedConvOwnerId ? nomePorId.get(selectedConvOwnerId) || 'Responsável' : 'Sem responsável'}
+                    {selectedOwnerEfetivo
+                      ? nomePorId.get(selectedOwnerEfetivo) || 'Responsável'
+                      : 'Sem responsável'}
                     <ChevronDown size={12} />
                   </button>
+                  {/* Herdado do lead: deixa claro que ninguém marcou aqui, veio
+                      de quem é dono do negócio desse contato. */}
+                  {!selectedConvOwnerId && selectedOwnerEfetivo && (
+                    <span className="ml-1.5 text-[10px] text-slate-400 dark:text-slate-500">do lead</span>
+                  )}
                   {convOwnerMenuOpen && (
                     <>
                       <div
@@ -1470,53 +1519,105 @@ export const ChatsPage: React.FC = () => {
                   </span>
                 ))}
 
-                {tagInputOpen ? (
-                  <input
-                    autoFocus
-                    value={tagDraft}
-                    onChange={e => setTagDraft(e.target.value)}
-                    onBlur={() => {
-                      setTagInputOpen(false);
-                      setTagDraft('');
-                    }}
-                    onKeyDown={e => {
-                      if (e.key === 'Escape') {
-                        setTagInputOpen(false);
-                        setTagDraft('');
-                      }
-                      if (e.key === 'Enter') {
-                        const nova = tagDraft.trim();
-                        setTagInputOpen(false);
-                        setTagDraft('');
-                        if (nova && !selectedConvTags.some(x => x.toLowerCase() === nova.toLowerCase())) {
-                          void patchConversation(selectedConvId, { tags: [...selectedConvTags, nova] });
-                        }
-                      }
-                    }}
-                    placeholder="Nome da etiqueta e Enter"
-                    list="chats-etiquetas"
-                    className="w-52 px-2 py-1 rounded-full text-[11px] bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
-                  />
-                ) : (
+                {/* Etiquetar em UM clique: o menu lista as etiquetas que já
+                    existem pra marcar/desmarcar, e só quem precisa de uma nova
+                    digita. Digitar toda vez era o gargalo da versão anterior. */}
+                <div className="relative">
                   <button
                     type="button"
-                    onClick={() => setTagInputOpen(true)}
-                    disabled={savingConv || selectedConvTags.length >= 10}
-                    title={
-                      selectedConvTags.length >= 10
-                        ? 'Limite de 10 etiquetas por conversa'
-                        : 'Adicionar etiqueta'
-                    }
+                    onClick={() => {
+                      setTagInputOpen(o => !o);
+                      setTagDraft('');
+                    }}
+                    disabled={savingConv}
+                    aria-expanded={tagInputOpen}
+                    title="Etiquetas desta conversa"
                     className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-bold border border-dashed border-slate-300 dark:border-white/15 text-slate-500 dark:text-slate-400 hover:text-primary-600 hover:border-primary-300 transition-colors disabled:opacity-50"
                   >
                     <Plus size={11} /> Etiqueta
                   </button>
-                )}
-                <datalist id="chats-etiquetas">
-                  {etiquetasUsadas.map(tg => (
-                    <option key={tg} value={tg} />
-                  ))}
-                </datalist>
+                  {tagInputOpen && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-30"
+                        onClick={() => {
+                          setTagInputOpen(false);
+                          setTagDraft('');
+                        }}
+                        aria-hidden="true"
+                      />
+                      <div className="absolute left-0 top-full mt-1.5 z-40 w-64 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card shadow-xl p-1.5">
+                        {etiquetasUsadas.length > 0 && (
+                          <div className="max-h-56 overflow-y-auto scrollbar-custom">
+                            {etiquetasUsadas.map(tg => {
+                              const marcada = selectedConvTags.some(x => x === tg);
+                              return (
+                                <button
+                                  key={tg}
+                                  type="button"
+                                  onClick={() =>
+                                    void patchConversation(selectedConvId, {
+                                      tags: marcada
+                                        ? selectedConvTags.filter(x => x !== tg)
+                                        : [...selectedConvTags, tg],
+                                    })
+                                  }
+                                  disabled={savingConv || (!marcada && selectedConvTags.length >= 10)}
+                                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-left text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 disabled:opacity-40"
+                                >
+                                  <span
+                                    className={`w-3.5 h-3.5 shrink-0 rounded border flex items-center justify-center ${
+                                      marcada
+                                        ? 'bg-primary-600 border-primary-600 text-white'
+                                        : 'border-slate-300 dark:border-white/20'
+                                    }`}
+                                  >
+                                    {marcada && <CheckCheck size={10} />}
+                                  </span>
+                                  <span className="truncate">{tg}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                        <div className={etiquetasUsadas.length > 0 ? 'mt-1.5 pt-1.5 border-t border-slate-100 dark:border-white/10' : ''}>
+                          <input
+                            autoFocus
+                            value={tagDraft}
+                            onChange={e => setTagDraft(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Escape') {
+                                setTagInputOpen(false);
+                                setTagDraft('');
+                              }
+                              if (e.key === 'Enter') {
+                                const nova = tagDraft.trim();
+                                setTagDraft('');
+                                if (
+                                  nova &&
+                                  selectedConvTags.length < 10 &&
+                                  !selectedConvTags.some(x => x.toLowerCase() === nova.toLowerCase())
+                                ) {
+                                  void patchConversation(selectedConvId, {
+                                    tags: [...selectedConvTags, nova],
+                                  });
+                                }
+                              }
+                            }}
+                            placeholder="Nova etiqueta e Enter"
+                            maxLength={40}
+                            className="w-full px-2 py-1.5 rounded-lg text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
+                          />
+                          {selectedConvTags.length >= 10 && (
+                            <p className="mt-1 text-[10px] text-amber-600 dark:text-amber-400">
+                              Limite de 10 etiquetas por conversa.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             )}
 
