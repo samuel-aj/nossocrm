@@ -1,25 +1,23 @@
 /**
  * PATCH /api/whatsapp/conversations/[id]
- *   { assignedOwnerId?: string | null, tags?: string[] }
+ *   { assignedOwnerId?: string | null, labelIds?: string[] }
  *
  * Responsável e etiquetas da conversa. Qualquer MEMBRO da organização pode
  * mexer (é organização de atendimento: quem está no chat assume a conversa),
  * mas só em conversa da PRÓPRIA organização — o filtro por organization_id
  * está em todas as consultas.
  *
- * O responsável pode ser limpo (null); as etiquetas são texto livre, iguais
- * às do negócio, normalizadas aqui (sem espaço nas pontas, sem repetida).
+ * O responsável pode ser limpo (null). As etiquetas vêm por ID e são
+ * conferidas contra as da organização: id de outra org (ou já apagado) é
+ * descartado, senão a conversa guardaria etiqueta que não existe.
  */
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+import { MAX_LABELS_PER_CHAT } from '@/lib/whatsapp/labels';
 
 export const runtime = 'nodejs';
 
 type Ctx = { params: Promise<{ id: string }> };
-
-/** Teto de etiquetas por conversa: passa disso vira poluição na lista. */
-const MAX_ETIQUETAS = 10;
-const MAX_TAMANHO = 40;
 
 export async function PATCH(req: Request, ctx: Ctx) {
   if (!isAllowedOrigin(req)) return json({ error: 'Forbidden' }, 403);
@@ -65,21 +63,25 @@ export async function PATCH(req: Request, ctx: Ctx) {
     }
   }
 
-  if ('tags' in body) {
-    if (!Array.isArray(body.tags)) return json({ error: 'Etiquetas devem ser uma lista' }, 400);
-    const vistas = new Set<string>();
-    const limpas: string[] = [];
-    for (const bruta of body.tags) {
-      if (typeof bruta !== 'string') continue;
-      const tag = bruta.trim().slice(0, MAX_TAMANHO);
-      if (!tag) continue;
-      const chave = tag.toLowerCase();
-      if (vistas.has(chave)) continue;
-      vistas.add(chave);
-      limpas.push(tag);
-      if (limpas.length >= MAX_ETIQUETAS) break;
+  if ('labelIds' in body) {
+    if (!Array.isArray(body.labelIds)) return json({ error: 'Etiquetas devem ser uma lista' }, 400);
+    const pedidos = Array.from(
+      new Set(body.labelIds.filter((v): v is string => typeof v === 'string' && !!v))
+    ).slice(0, MAX_LABELS_PER_CHAT);
+
+    if (pedidos.length === 0) {
+      patch.label_ids = [];
+    } else {
+      // Só ids que são etiquetas DESTA organização.
+      const { data: validas, error: erroLabels } = await auth.admin
+        .from('wa_labels')
+        .select('id')
+        .eq('organization_id', orgId)
+        .in('id', pedidos);
+      if (erroLabels) return json({ error: erroLabels.message }, 500);
+      const existentes = new Set((validas ?? []).map(l => l.id as string));
+      patch.label_ids = pedidos.filter(id => existentes.has(id));
     }
-    patch.tags = limpas;
   }
 
   if (Object.keys(patch).length === 0) return json({ error: 'Nada para alterar' }, 400);
@@ -89,7 +91,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     .update(patch)
     .eq('organization_id', orgId)
     .eq('id', id)
-    .select('id, assigned_owner_id, tags')
+    .select('id, assigned_owner_id, label_ids')
     .maybeSingle();
   if (error) return json({ error: error.message }, 500);
   if (!data) return json({ error: 'Conversa não encontrada' }, 404);

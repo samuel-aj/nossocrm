@@ -5,10 +5,18 @@ import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, KanbanSquare, MessageCircle, MessageSquareDot, Plus, Search, UserPlus, Users, X } from 'lucide-react';
+import { ArrowLeft, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, KanbanSquare, Loader2, MessageCircle, MessageSquareDot, Plus, Search, Tag, UserPlus, Users, X } from 'lucide-react';
 import { useCRM } from '@/context/CRMContext';
 import { useOrgMembers } from '@/lib/query/hooks';
 import { useAnchoredMenu } from '@/hooks/useAnchoredMenu';
+import {
+  LABEL_CHIP_CLASS,
+  LABEL_COLORS,
+  LABEL_DOT_CLASS,
+  DEFAULT_LABEL_COLOR,
+  type LabelColor,
+  type WaLabel,
+} from '@/lib/whatsapp/labels';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { DealWhatsAppChat } from '@/features/whatsapp/DealWhatsAppChat';
@@ -41,8 +49,8 @@ type ConvRow = {
   avatar_url?: string | null;
   /** Atendente responsável pela conversa (null = sem dono) */
   assigned_owner_id?: string | null;
-  /** Etiquetas da conversa (texto livre, como as do negócio) */
-  tags?: string[] | null;
+  /** Ids das etiquetas da conversa (as etiquetas são da organização) */
+  label_ids?: string[] | null;
 };
 
 type ConvInfo = {
@@ -57,7 +65,7 @@ type ConvInfo = {
   avatarUrl?: string | null;
   conversationId: string | null;
   assignedOwnerId: string | null;
-  tags: string[];
+  labelIds: string[];
 };
 
 type ChatTarget = {
@@ -93,8 +101,8 @@ type ChatListItem = ChatTarget & {
   avatarUrl?: string | null;
   /** Atendente responsável (null = sem dono) */
   assignedOwnerId?: string | null;
-  /** Etiquetas da conversa */
-  tags?: string[];
+  /** Ids das etiquetas da conversa */
+  labelIds?: string[];
 };
 
 // Paleta de gradientes p/ avatar de iniciais (hash do nome → cor estável)
@@ -396,7 +404,7 @@ export const ChatsPage: React.FC = () => {
         avatarUrl: r.avatar_url ?? null,
         conversationId: r.id,
         assignedOwnerId: r.assigned_owner_id ?? null,
-        tags: r.tags ?? [],
+        labelIds: r.label_ids ?? [],
       };
       const prev = m.get(key);
       if (!prev) {
@@ -411,7 +419,7 @@ export const ChatsPage: React.FC = () => {
         avatarUrl: newer.avatarUrl ?? prev.avatarUrl ?? item.avatarUrl ?? null,
         conversationId: newer.conversationId ?? prev.conversationId,
         assignedOwnerId: newer.assignedOwnerId ?? prev.assignedOwnerId ?? null,
-        tags: newer.tags.length ? newer.tags : prev.tags,
+        labelIds: newer.labelIds.length ? newer.labelIds : prev.labelIds,
         unread: prev.unread + item.unread,
       });
     }
@@ -455,7 +463,7 @@ export const ChatsPage: React.FC = () => {
         participantsCount: r.participants_count ?? null,
         avatarUrl: r.avatar_url ?? null,
         assignedOwnerId: r.assigned_owner_id ?? null,
-        tags: r.tags ?? [],
+        labelIds: r.label_ids ?? [],
       });
     }
     return out;
@@ -565,7 +573,7 @@ export const ChatsPage: React.FC = () => {
           avatarUrl: conv.avatarUrl ?? null,
           conversationId: conv.conversationId,
           assignedOwnerId: conv.assignedOwnerId,
-          tags: conv.tags,
+          labelIds: conv.labelIds,
         });
       }
     }
@@ -589,7 +597,7 @@ export const ChatsPage: React.FC = () => {
           avatarUrl: conv.avatarUrl ?? null,
           conversationId: conv.conversationId,
           assignedOwnerId: conv.assignedOwnerId,
-          tags: conv.tags,
+          labelIds: conv.labelIds,
         });
       }
     }
@@ -623,7 +631,7 @@ export const ChatsPage: React.FC = () => {
           : byTab.filter(c => responsavelEfetivo(c) === ownerFilter);
 
     const byTag =
-      tagFilter === 'all' ? byOwner : byOwner.filter(c => (c.tags ?? []).some(tg => tg === tagFilter));
+      tagFilter === 'all' ? byOwner : byOwner.filter(c => (c.labelIds ?? []).includes(tagFilter));
 
     return byTag.sort((a, b) => {
       if (a.hasConv && b.hasConv) return (b.lastAt || '').localeCompare(a.lastAt || '');
@@ -632,18 +640,25 @@ export const ChatsPage: React.FC = () => {
     });
   }, [contacts, convsByPhone, groupItems, searchQuery, filter, ownerFilter, tagFilter, responsavelEfetivo]);
 
-  // Etiquetas já usadas nas conversas: alimentam o filtro e a sugestão.
-  const etiquetasUsadas = useMemo(() => {
-    const s = new Set<string>();
-    for (const r of convsQ.data?.data ?? []) for (const tg of r.tags ?? []) s.add(tg);
-    return Array.from(s).sort((a, b) => a.localeCompare(b, 'pt-BR'));
-  }, [convsQ.data]);
+  // Etiquetas DA ORGANIZAÇÃO (nome + cor): a mesma lista pra equipe inteira,
+  // como no WhatsApp Business. A conversa guarda só os ids.
+  const labelsQ = useQuery<{ labels: WaLabel[] }>({
+    queryKey: ['waLabels'],
+    queryFn: async () => {
+      const res = await fetch('/api/whatsapp/labels', { credentials: 'include' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    },
+    staleTime: 60_000,
+  });
+  const labels = useMemo(() => labelsQ.data?.labels ?? [], [labelsQ.data]);
+  const labelById = useMemo(() => new Map(labels.map(l => [l.id, l])), [labels]);
 
   // Salva responsável/etiquetas da conversa aberta e atualiza a lista.
   const [savingConv, setSavingConv] = useState(false);
   const patchConversation = async (
     conversationId: string,
-    patch: { assignedOwnerId?: string | null; tags?: string[] }
+    patch: { assignedOwnerId?: string | null; labelIds?: string[] }
   ) => {
     setSavingConv(true);
     try {
@@ -688,7 +703,7 @@ export const ChatsPage: React.FC = () => {
   }, [selected, convsQ.data]);
   const selectedConvId = selectedConv?.id ?? null;
   const selectedConvOwnerId = selectedConv?.assigned_owner_id ?? null;
-  const selectedConvTags = useMemo(() => selectedConv?.tags ?? [], [selectedConv]);
+  const selectedLabelIds = useMemo(() => selectedConv?.label_ids ?? [], [selectedConv]);
   /** O que a barra mostra: responsável do chat ou, sem ele, o dono do lead. */
   const selectedOwnerEfetivo = selected
     ? responsavelEfetivo({ assignedOwnerId: selectedConvOwnerId, contactId: selected.contactId })
@@ -696,8 +711,45 @@ export const ChatsPage: React.FC = () => {
 
   // Menu de responsável e campo de nova etiqueta da conversa aberta
   const [convOwnerMenuOpen, setConvOwnerMenuOpen] = useState(false);
-  const [tagInputOpen, setTagInputOpen] = useState(false);
-  const [tagDraft, setTagDraft] = useState('');
+  // Diálogo "Etiquetar conversa": o rascunho fica aqui e só vai pro banco no
+  // Salvar — no WhatsApp Business você marca várias e confirma de uma vez.
+  const [labelDialogOpen, setLabelDialogOpen] = useState(false);
+  const [labelDraft, setLabelDraft] = useState<string[]>([]);
+  const [novaLabelNome, setNovaLabelNome] = useState('');
+  const [novaLabelCor, setNovaLabelCor] = useState<LabelColor>(DEFAULT_LABEL_COLOR);
+  const [criandoLabel, setCriandoLabel] = useState(false);
+
+  const abrirDialogoEtiquetas = useCallback(() => {
+    setLabelDraft(selectedLabelIds);
+    setNovaLabelNome('');
+    setNovaLabelCor(DEFAULT_LABEL_COLOR);
+    setLabelDialogOpen(true);
+  }, [selectedLabelIds]);
+
+  /** Cria a etiqueta na organização e já deixa marcada no rascunho. */
+  const criarEtiqueta = async () => {
+    const nome = novaLabelNome.trim();
+    if (!nome || criandoLabel) return;
+    setCriandoLabel(true);
+    try {
+      const res = await fetch('/api/whatsapp/labels', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: nome, color: novaLabelCor }),
+      });
+      const j = (await res.json().catch(() => ({}))) as { label?: WaLabel; error?: string };
+      if (!res.ok || !j.label) throw new Error(j.error || `Falha (HTTP ${res.status})`);
+      await queryClient.invalidateQueries({ queryKey: ['waLabels'] });
+      setLabelDraft(atual => (atual.includes(j.label!.id) ? atual : [...atual, j.label!.id]));
+      setNovaLabelNome('');
+      setNovaLabelCor(DEFAULT_LABEL_COLOR);
+    } catch (e) {
+      addToast(`Não deu pra criar a etiqueta: ${(e as Error).message}`, 'error');
+    } finally {
+      setCriandoLabel(false);
+    }
+  };
 
   // Lead do contato selecionado: prefere um deal ABERTO (nem ganho nem
   // perdido); entre vários, o mais recente. null = "Criar lead" disponível.
@@ -1156,15 +1208,24 @@ export const ChatsPage: React.FC = () => {
                   setOwnerMenuOpen(false);
                 }}
                 aria-expanded={tagMenuOpen}
-                disabled={etiquetasUsadas.length === 0}
-                title={etiquetasUsadas.length === 0 ? 'Nenhuma conversa tem etiqueta ainda' : undefined}
+                disabled={labels.length === 0}
+                title={labels.length === 0 ? 'Nenhuma etiqueta criada ainda' : undefined}
                 className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold border transition-colors disabled:opacity-50 ${
                   tagFilter !== 'all'
                     ? 'bg-emerald-100 dark:bg-emerald-900/40 border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
                     : 'bg-slate-100 dark:bg-white/5 border-transparent text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10'
                 }`}
               >
-                {tagFilter === 'all' ? 'Etiqueta' : tagFilter}
+                {tagFilter === 'all' ? (
+                  'Etiqueta'
+                ) : (
+                  <span className="inline-flex items-center gap-1.5">
+                    <span
+                      className={`w-2 h-2 rounded-full ${LABEL_DOT_CLASS[labelById.get(tagFilter)?.color ?? DEFAULT_LABEL_COLOR]}`}
+                    />
+                    {labelById.get(tagFilter)?.name ?? 'Etiqueta'}
+                  </span>
+                )}
                 <ChevronDown size={12} />
               </button>
               {tagMenuOpen && tagMenuPos && typeof document !== 'undefined' &&
@@ -1174,21 +1235,36 @@ export const ChatsPage: React.FC = () => {
                     style={{ position: 'fixed', top: tagMenuPos.top, left: tagMenuPos.left, width: 200 }}
                     className="z-[9999] max-h-72 overflow-y-auto scrollbar-custom rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card shadow-2xl p-1.5"
                   >
-                    {['all', ...etiquetasUsadas].map(tg => (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTagFilter('all');
+                        setTagMenuOpen(false);
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium ${
+                        tagFilter === 'all'
+                          ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'
+                          : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'
+                      }`}
+                    >
+                      Todas
+                    </button>
+                    {labels.map(l => (
                       <button
-                        key={tg}
+                        key={l.id}
                         type="button"
                         onClick={() => {
-                          setTagFilter(tg);
+                          setTagFilter(l.id);
                           setTagMenuOpen(false);
                         }}
-                        className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium truncate ${
-                          tagFilter === tg
+                        className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-left ${
+                          tagFilter === l.id
                             ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'
                             : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'
                         }`}
                       >
-                        {tg === 'all' ? 'Todas' : tg}
+                        <span className={`w-2.5 h-2.5 shrink-0 rounded-full ${LABEL_DOT_CLASS[l.color]}`} />
+                        <span className="truncate">{l.name}</span>
                       </button>
                     ))}
                   </div>,
@@ -1572,127 +1648,31 @@ export const ChatsPage: React.FC = () => {
                   )}
                 </div>
 
-                {selectedConvTags.map(tg => (
-                  <span
-                    key={tg}
-                    className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-bold bg-primary-50 text-primary-700 dark:bg-primary-500/10 dark:text-primary-300"
-                  >
-                    {tg}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void patchConversation(selectedConvId, {
-                          tags: selectedConvTags.filter(x => x !== tg),
-                        })
-                      }
-                      disabled={savingConv}
-                      aria-label={`Tirar etiqueta ${tg}`}
-                      className="opacity-60 hover:opacity-100 disabled:opacity-30"
+                {/* Etiquetas da conversa: só leitura aqui; marcar/desmarcar é
+                    no diálogo, que confirma tudo de uma vez (Cancelar/Salvar),
+                    como no WhatsApp Business. */}
+                {selectedLabelIds.map(id => {
+                  const l = labelById.get(id);
+                  if (!l) return null;
+                  return (
+                    <span
+                      key={id}
+                      className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-semibold ring-1 ring-inset ${LABEL_CHIP_CLASS[l.color]}`}
                     >
-                      <X size={11} />
-                    </button>
-                  </span>
-                ))}
+                      <span className={`w-2 h-2 rounded-full ${LABEL_DOT_CLASS[l.color]}`} />
+                      {l.name}
+                    </span>
+                  );
+                })}
 
-                {/* Etiquetar em UM clique: o menu lista as etiquetas que já
-                    existem pra marcar/desmarcar, e só quem precisa de uma nova
-                    digita. Digitar toda vez era o gargalo da versão anterior. */}
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTagInputOpen(o => !o);
-                      setTagDraft('');
-                    }}
-                    disabled={savingConv}
-                    aria-expanded={tagInputOpen}
-                    title="Etiquetas desta conversa"
-                    className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-bold border border-dashed border-slate-300 dark:border-white/15 text-slate-500 dark:text-slate-400 hover:text-primary-600 hover:border-primary-300 transition-colors disabled:opacity-50"
-                  >
-                    <Plus size={11} /> Etiqueta
-                  </button>
-                  {tagInputOpen && (
-                    <>
-                      <div
-                        className="fixed inset-0 z-30"
-                        onClick={() => {
-                          setTagInputOpen(false);
-                          setTagDraft('');
-                        }}
-                        aria-hidden="true"
-                      />
-                      <div className="absolute left-0 top-full mt-1.5 z-40 w-64 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card shadow-xl p-1.5">
-                        {etiquetasUsadas.length > 0 && (
-                          <div className="max-h-56 overflow-y-auto scrollbar-custom">
-                            {etiquetasUsadas.map(tg => {
-                              const marcada = selectedConvTags.some(x => x === tg);
-                              return (
-                                <button
-                                  key={tg}
-                                  type="button"
-                                  onClick={() =>
-                                    void patchConversation(selectedConvId, {
-                                      tags: marcada
-                                        ? selectedConvTags.filter(x => x !== tg)
-                                        : [...selectedConvTags, tg],
-                                    })
-                                  }
-                                  disabled={savingConv || (!marcada && selectedConvTags.length >= 10)}
-                                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-left text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 disabled:opacity-40"
-                                >
-                                  <span
-                                    className={`w-3.5 h-3.5 shrink-0 rounded border flex items-center justify-center ${
-                                      marcada
-                                        ? 'bg-primary-600 border-primary-600 text-white'
-                                        : 'border-slate-300 dark:border-white/20'
-                                    }`}
-                                  >
-                                    {marcada && <CheckCheck size={10} />}
-                                  </span>
-                                  <span className="truncate">{tg}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                        <div className={etiquetasUsadas.length > 0 ? 'mt-1.5 pt-1.5 border-t border-slate-100 dark:border-white/10' : ''}>
-                          <input
-                            autoFocus
-                            value={tagDraft}
-                            onChange={e => setTagDraft(e.target.value)}
-                            onKeyDown={e => {
-                              if (e.key === 'Escape') {
-                                setTagInputOpen(false);
-                                setTagDraft('');
-                              }
-                              if (e.key === 'Enter') {
-                                const nova = tagDraft.trim();
-                                setTagDraft('');
-                                if (
-                                  nova &&
-                                  selectedConvTags.length < 10 &&
-                                  !selectedConvTags.some(x => x.toLowerCase() === nova.toLowerCase())
-                                ) {
-                                  void patchConversation(selectedConvId, {
-                                    tags: [...selectedConvTags, nova],
-                                  });
-                                }
-                              }
-                            }}
-                            placeholder="Nova etiqueta e Enter"
-                            maxLength={40}
-                            className="w-full px-2 py-1.5 rounded-lg text-xs bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
-                          />
-                          {selectedConvTags.length >= 10 && (
-                            <p className="mt-1 text-[10px] text-amber-600 dark:text-amber-400">
-                              Limite de 10 etiquetas por conversa.
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
+                <button
+                  type="button"
+                  onClick={abrirDialogoEtiquetas}
+                  disabled={savingConv}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-bold border border-dashed border-slate-300 dark:border-white/15 text-slate-500 dark:text-slate-400 hover:text-primary-600 hover:border-primary-300 transition-colors disabled:opacity-50"
+                >
+                  <Tag size={11} /> Etiquetar
+                </button>
               </div>
             )}
 
@@ -1931,6 +1911,118 @@ export const ChatsPage: React.FC = () => {
       )}
 
       {/* ============ MODAL: Criar lead (pipeline + etapa) ============ */}
+      {/* Diálogo de etiquetar, no modelo do WhatsApp Business: lista com
+          caixinhas, criar nova ali dentro, e confirmação em bloco. */}
+      {labelDialogOpen && selectedConvId && (
+        <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-white/10 dark:bg-dark-card">
+            <div className="px-5 py-3.5 border-b border-slate-200 dark:border-white/10">
+              <h3 className="font-bold text-slate-900 dark:text-white">Etiquetar conversa</h3>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 truncate">{selected?.name}</p>
+            </div>
+
+            <div className="max-h-[46vh] overflow-y-auto scrollbar-custom px-2 py-2">
+              {labels.length === 0 && (
+                <p className="px-3 py-6 text-center text-xs text-slate-500 dark:text-slate-400">
+                  Nenhuma etiqueta criada ainda. Crie a primeira abaixo.
+                </p>
+              )}
+              {labels.map(l => {
+                const marcada = labelDraft.includes(l.id);
+                return (
+                  <button
+                    key={l.id}
+                    type="button"
+                    onClick={() =>
+                      setLabelDraft(atual =>
+                        marcada ? atual.filter(x => x !== l.id) : [...atual, l.id]
+                      )
+                    }
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
+                  >
+                    <span className={`w-3 h-3 shrink-0 rounded-sm ${LABEL_DOT_CLASS[l.color]}`} />
+                    <span className="flex-1 truncate text-sm text-slate-800 dark:text-slate-100">{l.name}</span>
+                    <span
+                      className={`w-4 h-4 shrink-0 rounded border flex items-center justify-center ${
+                        marcada
+                          ? 'bg-primary-600 border-primary-600 text-white'
+                          : 'border-slate-300 dark:border-white/20'
+                      }`}
+                    >
+                      {marcada && <CheckCheck size={11} />}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Nova etiqueta: nome + cor, criada sem sair do diálogo */}
+            <div className="px-4 py-3 border-t border-slate-200 dark:border-white/10 space-y-2">
+              <div className="flex items-center gap-2">
+                <input
+                  value={novaLabelNome}
+                  onChange={e => setNovaLabelNome(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void criarEtiqueta();
+                    }
+                  }}
+                  placeholder="Nova etiqueta"
+                  maxLength={40}
+                  className="flex-1 px-2.5 py-1.5 rounded-lg text-sm bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => void criarEtiqueta()}
+                  disabled={!novaLabelNome.trim() || criandoLabel}
+                  className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 disabled:opacity-40"
+                >
+                  {criandoLabel ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+                  Criar
+                </button>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {LABEL_COLORS.map(cor => (
+                  <button
+                    key={cor}
+                    type="button"
+                    onClick={() => setNovaLabelCor(cor)}
+                    aria-label={`Cor ${cor}`}
+                    className={`w-5 h-5 rounded-full ${LABEL_DOT_CLASS[cor]} ${
+                      novaLabelCor === cor
+                        ? 'ring-2 ring-offset-2 ring-slate-400 dark:ring-offset-dark-card'
+                        : 'opacity-70 hover:opacity-100'
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-1 px-4 py-3 border-t border-slate-200 dark:border-white/10">
+              <button
+                type="button"
+                onClick={() => setLabelDialogOpen(false)}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/10"
+              >
+                CANCELAR
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLabelDialogOpen(false);
+                  void patchConversation(selectedConvId, { labelIds: labelDraft });
+                }}
+                disabled={savingConv}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20 disabled:opacity-50"
+              >
+                SALVAR
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {leadModalOpen && selected && (
         <div
           className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] flex items-center justify-center p-4"

@@ -46,12 +46,12 @@ export async function GET(req: Request) {
     return q.order('last_message_at', { ascending: false, nullsFirst: false }).limit(500);
   };
 
-  // `tags` (etiquetas da conversa) é coluna nova: enquanto a migração não
-  // rodar no ambiente, busca sem ela em vez de derrubar a lista inteira —
+  // `label_ids` (etiquetas da conversa) é coluna nova: enquanto a migração
+  // não rodar no ambiente, busca sem ela em vez de derrubar a lista inteira —
   // mesmo cuidado que o webhook já tem com colunas recém-criadas.
-  let { data, error } = await buscar(`${COLUNAS_BASE}, tags`);
-  if (error && /column/i.test(error.message) && /tags/i.test(error.message)) {
-    console.warn('[conversations] coluna tags ausente (migração pendente); seguindo sem etiquetas');
+  let { data, error } = await buscar(`${COLUNAS_BASE}, label_ids`);
+  if (error && /column/i.test(error.message) && /label_ids/i.test(error.message)) {
+    console.warn('[conversations] coluna label_ids ausente (migração pendente); seguindo sem etiquetas');
     ({ data, error } = await buscar(COLUNAS_BASE));
   }
 
