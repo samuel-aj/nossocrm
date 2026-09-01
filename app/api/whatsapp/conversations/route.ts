@@ -1,7 +1,7 @@
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { getConnectionByOrg, getWaGroupsEnabled } from '@/lib/whatsapp/service';
 import { isColunaLabelIdsAusente } from '@/lib/whatsapp/labels';
-import { connectionAllowed, getVisibilityRules } from '@/lib/permissions/server';
+import { connectionAllowed, filterConversationsByOwner, getVisibilityRules } from '@/lib/permissions/server';
 
 export const runtime = 'nodejs';
 
@@ -78,7 +78,12 @@ export async function GET(req: Request) {
 
   // avatar_path guarda o CAMINHO no bucket privado wa-media (igual a
   // wa_messages.media_url): a URL é assinada aqui, na leitura.
-  const linhas = (data || []) as unknown as Array<Record<string, unknown> & { avatar_path?: string | null }>;
+  let linhas = (data || []) as unknown as Array<
+    Record<string, unknown> & { avatar_path?: string | null; contact_id?: string | null }
+  >;
+  // Restrição por RESPONSÁVEL (dono do lead do contato, como no filtro dos
+  // Chats): fora da lista permitida, a conversa nem aparece
+  linhas = await filterConversationsByOwner(auth.admin, auth.user.organizationId, vis, auth.user.id, linhas);
   const caminhos = Array.from(
     new Set(linhas.map(r => r.avatar_path).filter((p): p is string => !!p && !p.startsWith('http')))
   );

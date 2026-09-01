@@ -34,15 +34,21 @@ export const VisibilityRulesSchema = z.object({
       connection_ids: z.array(z.string().uuid()).max(50).nullable().default(null),
       /** null = todas as conversas; lista = só conversas com AO MENOS UMA destas etiquetas */
       label_ids: z.array(z.string().uuid()).max(50).nullable().default(null),
+      /**
+       * null = conversas de qualquer responsável; lista = só conversas cujo
+       * RESPONSÁVEL (dono do lead do contato, como no filtro dos Chats) seja o
+       * próprio usuário ou alguém da lista. Sem responsável = sempre visível.
+       */
+      owner_user_ids: z.array(z.string().uuid()).max(100).nullable().default(null),
     })
-    .default({ connection_ids: null, label_ids: null }),
+    .default({ connection_ids: null, label_ids: null, owner_user_ids: null }),
 });
 export type VisibilityRules = z.infer<typeof VisibilityRulesSchema>;
 
 export const DEFAULT_VISIBILITY_RULES: VisibilityRules = {
   deals: { scope: 'all', team_user_ids: [] },
   boards: { board_ids: null },
-  whatsapp: { connection_ids: null, label_ids: null },
+  whatsapp: { connection_ids: null, label_ids: null, owner_user_ids: null },
 };
 
 /** true quando a regra não restringe nada (aí a linha é apagada em vez de salva). */
@@ -51,7 +57,8 @@ export function isUnrestricted(rules: VisibilityRules): boolean {
     rules.deals.scope === 'all' &&
     rules.boards.board_ids === null &&
     rules.whatsapp.connection_ids === null &&
-    rules.whatsapp.label_ids === null
+    rules.whatsapp.label_ids === null &&
+    rules.whatsapp.owner_user_ids === null
   );
 }
 

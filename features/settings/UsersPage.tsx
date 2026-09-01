@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import ConfirmModal from '@/components/ConfirmModal';
-import { Loader2, UserPlus, Crown, Briefcase, KeyRound, Mail, Check, X, Sparkles, Clock, RefreshCw, Trash2, Link, Copy, CheckCircle2, ShieldCheck, KanbanSquare, Phone, Users as UsersIcon } from 'lucide-react';
+import { Loader2, UserPlus, Crown, Briefcase, KeyRound, Mail, Check, X, Sparkles, Clock, RefreshCw, Trash2, Link, Copy, CheckCircle2, ShieldCheck, KanbanSquare, Phone, Users as UsersIcon, EyeOff } from 'lucide-react';
 import { UserRole } from '@/types/constants';
 import { useCRM } from '@/context/CRMContext';
 import {
@@ -495,12 +495,12 @@ export const UsersPage: React.FC = () => {
                                             </span>
                                         )}
                                         {visRules[user.id] && (
-                                            <span
-                                                className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-sky-100 text-sky-600 dark:bg-sky-900/30 dark:text-sky-300"
-                                                title="Acesso restrito: este usuário tem permissões de visualização configuradas"
+                                            <EyeOff
+                                                className="h-3.5 w-3.5 text-amber-500 dark:text-amber-400"
+                                                aria-label="Visualização restrita"
                                             >
-                                                <ShieldCheck className="h-3 w-3" />
-                                            </span>
+                                                <title>Visualização restrita: este usuário tem permissões de visualização configuradas</title>
+                                            </EyeOff>
                                         )}
                                     </div>
                                     <div className="flex items-center gap-3 mt-1.5">
@@ -953,6 +953,9 @@ const VisibilityModal: React.FC<{
     const [allConns, setAllConns] = useState(base.whatsapp.connection_ids === null);
     const [connIds, setConnIds] = useState<string[]>(base.whatsapp.connection_ids ?? []);
     const [connections, setConnections] = useState<Array<{ id: string; label: string }>>([]);
+    // Conversas por RESPONSÁVEL (dono do lead do contato, como no filtro dos Chats)
+    const [allOwners, setAllOwners] = useState(base.whatsapp.owner_user_ids === null);
+    const [ownerIds, setOwnerIds] = useState<string[]>(base.whatsapp.owner_user_ids ?? []);
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
@@ -1008,7 +1011,11 @@ const VisibilityModal: React.FC<{
             const rules: VisibilityRules = {
                 deals: { scope, team_user_ids: scope === 'team' ? teamIds : [] },
                 boards: { board_ids: allBoards ? null : boardIds },
-                whatsapp: { connection_ids: allConns ? null : connIds, label_ids: base.whatsapp.label_ids },
+                whatsapp: {
+                    connection_ids: allConns ? null : connIds,
+                    label_ids: base.whatsapp.label_ids,
+                    owner_user_ids: allOwners ? null : ownerIds,
+                },
             };
             const res = await fetch(`/api/org/visibility/${user.id}`, {
                 method: 'PUT',
@@ -1169,6 +1176,52 @@ const VisibilityModal: React.FC<{
                             </div>
                         )}
 
+                        {/* Conversas por RESPONSÁVEL (o dono do lead do contato, como no filtro dos Chats) */}
+                        <div className="mt-4 pt-3 border-t border-slate-100 dark:border-white/5">
+                            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1">Conversas por responsável</p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                                O responsável do chat é o dono do lead daquele contato, igual ao filtro da página Chats.
+                            </p>
+                            <div className="space-y-2">
+                                <label className={OPTION_ROW}>
+                                    <input type="radio" name="vis-owners" className={`${RADIO_CLASS} mt-0.5`} checked={allOwners} onChange={() => setAllOwners(true)} />
+                                    <span>
+                                        <span className="block text-sm font-semibold text-slate-800 dark:text-slate-100">Todas as conversas</span>
+                                        <span className="block text-xs text-slate-500 dark:text-slate-400">De qualquer responsável, nos números permitidos.</span>
+                                    </span>
+                                </label>
+                                <label className={OPTION_ROW}>
+                                    <input type="radio" name="vis-owners" className={`${RADIO_CLASS} mt-0.5`} checked={!allOwners} onChange={() => setAllOwners(false)} />
+                                    <span>
+                                        <span className="block text-sm font-semibold text-slate-800 dark:text-slate-100">Somente destes responsáveis</span>
+                                        <span className="block text-xs text-slate-500 dark:text-slate-400">
+                                            As dele mesmo, sempre; e as dos escolhidos abaixo. Conversas sem responsável continuam
+                                            visíveis (é assim que um lead novo é assumido).
+                                        </span>
+                                    </span>
+                                </label>
+                            </div>
+                            {!allOwners && (
+                                <div className="mt-2 rounded-xl border border-slate-200 dark:border-white/10 max-h-44 overflow-y-auto py-1">
+                                    <div className="px-3 py-2 text-xs text-slate-400 flex items-center gap-2">
+                                        <Check className="h-3.5 w-3.5 text-emerald-500" /> {user.email} (ele mesmo, sempre incluído)
+                                    </div>
+                                    {members.length === 0 ? (
+                                        <p className="px-3 py-3 text-xs text-slate-500">Nenhum outro membro na equipe.</p>
+                                    ) : (
+                                        members.map(m => (
+                                            <CheckRow
+                                                key={m.id}
+                                                checked={ownerIds.includes(m.id)}
+                                                onToggle={() => toggle(ownerIds, setOwnerIds, m.id)}
+                                                label={m.email}
+                                                sub={m.role === UserRole.ADMIN ? 'Administrador' : 'Vendedor'}
+                                            />
+                                        ))
+                                    )}
+                                </div>
+                            )}
+                        </div>
                     </section>
 
                     <p className="text-[11px] text-slate-400 dark:text-slate-500">

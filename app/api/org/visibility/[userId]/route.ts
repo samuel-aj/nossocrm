@@ -105,6 +105,21 @@ export async function PUT(req: Request, ctx: Ctx) {
     }
   }
 
+  if (rules.whatsapp.owner_user_ids !== null && rules.whatsapp.owner_user_ids.length > 0) {
+    const ids = rules.whatsapp.owner_user_ids;
+    const [{ data: perfisResp }, { data: vinculosResp }] = await Promise.all([
+      auth.admin.from('profiles').select('id').eq('organization_id', orgId).in('id', ids),
+      auth.admin.from('user_organizations').select('user_id').eq('organization_id', orgId).in('user_id', ids),
+    ]);
+    const membrosResp = new Set([
+      ...((perfisResp ?? []) as Array<{ id: string }>).map(x => x.id),
+      ...((vinculosResp ?? []) as Array<{ user_id: string }>).map(x => x.user_id),
+    ]);
+    if (ids.some(id => !membrosResp.has(id))) {
+      return json({ error: 'Responsável não pertence a esta organização' }, 400);
+    }
+  }
+
   if (rules.whatsapp.label_ids !== null) {
     if (rules.whatsapp.label_ids.length === 0) {
       return json({ error: 'Escolha ao menos uma etiqueta (ou deixe "Todas as conversas")' }, 400);

@@ -52,3 +52,63 @@ export function filterAllowedConnections<T extends { id: string }>(
   const allowed = new Set(rules.whatsapp.connection_ids);
   return connections.filter(c => allowed.has(c.id));
 }
+
+/**
+ * Responsável EFETIVO das conversas: o dono do lead do contato, com a mesma
+ * preferência do filtro dos Chats (negócio ABERTO primeiro; entre vários, o
+ * mais recente). Devolve contactId -> ownerId (contato sem lead ou lead sem
+ * dono fica de fora do mapa = sem responsável).
+ */
+export async function effectiveOwnersByContact(
+  admin: SupabaseClient,
+  organizationId: string,
+  contactIds: string[]
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const unique = Array.from(new Set(contactIds.filter(Boolean)));
+  if (unique.length === 0) return map;
+  const { data } = await admin
+    .from('deals')
+    .select('contact_id, owner_id, is_won, is_lost, created_at')
+    .eq('organization_id', organizationId)
+    .in('contact_id', unique)
+    .is('deleted_at', null);
+  const porContato = new Map<string, Array<{ owner_id: string | null; aberto: boolean; created_at: string }>>();
+  for (const d of (data ?? []) as Array<{ contact_id: string; owner_id: string | null; is_won: boolean; is_lost: boolean; created_at: string }>) {
+    const lista = porContato.get(d.contact_id) ?? [];
+    lista.push({ owner_id: d.owner_id, aberto: !d.is_won && !d.is_lost, created_at: d.created_at ?? '' });
+    porContato.set(d.contact_id, lista);
+  }
+  for (const [contactId, lista] of porContato) {
+    const abertos = lista.filter(l => l.aberto);
+    const pool = abertos.length ? abertos : lista;
+    const escolhido = pool.slice().sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))[0];
+    if (escolhido?.owner_id) map.set(contactId, escolhido.owner_id);
+  }
+  return map;
+}
+
+/**
+ * Filtra conversas pela regra de RESPONSÁVEL: fica quem não tem responsável
+ * (contato sem lead, lead sem dono, grupo) ou cujo responsável é o próprio
+ * usuário ou alguém da lista permitida.
+ */
+export async function filterConversationsByOwner<T extends { contact_id?: string | null }>(
+  admin: SupabaseClient,
+  organizationId: string,
+  rules: VisibilityRules | null,
+  userId: string,
+  conversations: T[]
+): Promise<T[]> {
+  if (!rules || rules.whatsapp.owner_user_ids === null) return conversations;
+  const allowed = new Set([userId, ...rules.whatsapp.owner_user_ids]);
+  const owners = await effectiveOwnersByContact(
+    admin,
+    organizationId,
+    conversations.map(c => c.contact_id ?? '').filter(Boolean)
+  );
+  return conversations.filter(c => {
+    const owner = c.contact_id ? owners.get(c.contact_id) : undefined;
+    return !owner || allowed.has(owner);
+  });
+}

@@ -15,7 +15,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { getConnectionsByOrg, getGroupConversation, getWaGroupsEnabled } from '@/lib/whatsapp/service';
-import { connectionAllowed, filterAllowedConnections, getVisibilityRules } from '@/lib/permissions/server';
+import { connectionAllowed, filterAllowedConnections, filterConversationsByOwner, getVisibilityRules } from '@/lib/permissions/server';
 import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
 import { getConversationAiInfo, getConversationBotInfo } from '@/lib/wa-agents/conversation';
 
@@ -217,7 +217,7 @@ export async function GET(req: Request) {
   if (vis?.whatsapp.label_ids) convQ = convQ.overlaps('label_ids', vis.whatsapp.label_ids);
   const { data: convList } = await convQ;
 
-  const convs = (convList ?? []) as Array<{
+  let convs = (convList ?? []) as Array<{
     id: string;
     connection_id: string | null;
     contact_id: string | null;
@@ -226,6 +226,9 @@ export async function GET(req: Request) {
     ai_resume_at?: string | null;
     ai_approval?: Record<string, unknown> | null;
   }>;
+  // Restrição por RESPONSÁVEL (dono do lead do contato, como no filtro dos
+  // Chats): conversa de responsável não permitido não abre nem carrega
+  convs = await filterConversationsByOwner(auth.admin, auth.user.organizationId, vis, auth.user.id, convs);
   // Agente de IA: a conversa (deste contato) em que um agente já atuou
   const aiConv = convs.find(c => c.ai_status) ?? null;
   const conv = convs.find(c => c.contact_id) ?? convs[0] ?? null;
