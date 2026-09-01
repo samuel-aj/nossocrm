@@ -33,23 +33,33 @@ export async function GET(req: Request) {
   const connectionId = new URL(req.url).searchParams.get('connectionId');
   const groupsEnabled = await getWaGroupsEnabled(auth.admin, auth.user.organizationId);
 
-  let q = auth.admin
-    .from('wa_conversations')
-    .select(
-      'id, connection_id, wa_phone, wa_name, contact_id, deal_id, last_message_at, last_message_preview, unread_count, is_group, group_jid, participants_count, avatar_path'
-    )
-    .eq('organization_id', auth.user.organizationId);
-  if (connectionId) q = q.eq('connection_id', connectionId);
-  if (!groupsEnabled) q = q.eq('is_group', false);
-  const { data, error } = await q
-    .order('last_message_at', { ascending: false, nullsFirst: false })
-    .limit(500);
+  const COLUNAS_BASE =
+    'id, connection_id, wa_phone, wa_name, contact_id, deal_id, last_message_at, last_message_preview, unread_count, is_group, group_jid, participants_count, avatar_path, assigned_owner_id';
+
+  const buscar = async (colunas: string) => {
+    let q = auth.admin
+      .from('wa_conversations')
+      .select(colunas)
+      .eq('organization_id', auth.user.organizationId);
+    if (connectionId) q = q.eq('connection_id', connectionId);
+    if (!groupsEnabled) q = q.eq('is_group', false);
+    return q.order('last_message_at', { ascending: false, nullsFirst: false }).limit(500);
+  };
+
+  // `tags` (etiquetas da conversa) é coluna nova: enquanto a migração não
+  // rodar no ambiente, busca sem ela em vez de derrubar a lista inteira —
+  // mesmo cuidado que o webhook já tem com colunas recém-criadas.
+  let { data, error } = await buscar(`${COLUNAS_BASE}, tags`);
+  if (error && /column/i.test(error.message) && /tags/i.test(error.message)) {
+    console.warn('[conversations] coluna tags ausente (migração pendente); seguindo sem etiquetas');
+    ({ data, error } = await buscar(COLUNAS_BASE));
+  }
 
   if (error) return json({ error: error.message }, 500);
 
   // avatar_path guarda o CAMINHO no bucket privado wa-media (igual a
   // wa_messages.media_url): a URL é assinada aqui, na leitura.
-  const linhas = (data || []) as Array<Record<string, unknown> & { avatar_path?: string | null }>;
+  const linhas = (data || []) as unknown as Array<Record<string, unknown> & { avatar_path?: string | null }>;
   const caminhos = Array.from(
     new Set(linhas.map(r => r.avatar_path).filter((p): p is string => !!p && !p.startsWith('http')))
   );

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, CheckCheck, ChevronDown, ExternalLink, KanbanSquare, MessageCircle, MessageSquareDot, Plus, Search, UserPlus, Users, X } from 'lucide-react';
 import { useCRM } from '@/context/CRMContext';
+import { useOrgMembers } from '@/lib/query/hooks';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { DealWhatsAppChat } from '@/features/whatsapp/DealWhatsAppChat';
@@ -36,6 +37,10 @@ type ConvRow = {
   participants_count?: number | null;
   /** Foto de perfil do contato/grupo, já assinada pela API (null = sem foto) */
   avatar_url?: string | null;
+  /** Atendente responsável pela conversa (null = sem dono) */
+  assigned_owner_id?: string | null;
+  /** Etiquetas da conversa (texto livre, como as do negócio) */
+  tags?: string[] | null;
 };
 
 type ConvInfo = {
@@ -48,6 +53,9 @@ type ConvInfo = {
   unread: number;
   /** Foto de perfil vinda do WhatsApp (só número por QR Code) */
   avatarUrl?: string | null;
+  conversationId: string | null;
+  assignedOwnerId: string | null;
+  tags: string[];
 };
 
 type ChatTarget = {
@@ -81,6 +89,10 @@ type ChatListItem = ChatTarget & {
   participantsCount?: number | null;
   /** Foto de perfil vinda do WhatsApp (só número por QR Code) */
   avatarUrl?: string | null;
+  /** Atendente responsável (null = sem dono) */
+  assignedOwnerId?: string | null;
+  /** Etiquetas da conversa */
+  tags?: string[];
 };
 
 // Paleta de gradientes p/ avatar de iniciais (hash do nome → cor estável)
@@ -145,6 +157,10 @@ const AvatarCircle: React.FC<{ name: string; src?: string; size?: string }> = ({
 
 export const ChatsPage: React.FC = () => {
   const { contacts, deals, boards, addContact, addDeal } = useCRM();
+  // Nomes pro filtro e pro seletor de responsável da conversa
+  const { data: orgMembers = [] } = useOrgMembers();
+  const membrosAtribuiveis = useMemo(() => orgMembers.filter(m => m.member), [orgMembers]);
+  const nomePorId = useMemo(() => new Map(orgMembers.map(m => [m.id, m.name])), [orgMembers]);
   const { profile } = useAuth();
   const { addToast } = useToast();
   const router = useRouter();
@@ -251,6 +267,12 @@ export const ChatsPage: React.FC = () => {
     staleTime: 5000,
   });
 
+  // Filtros extras da lista: responsável ('all' | 'none' | id) e etiqueta.
+  const [ownerFilter, setOwnerFilter] = useState<string>('all');
+  const [tagFilter, setTagFilter] = useState<string>('all');
+  const [ownerMenuOpen, setOwnerMenuOpen] = useState(false);
+  const [tagMenuOpen, setTagMenuOpen] = useState(false);
+
   // Fotos de perfil: busca em lotes pequenos, uma vez por abertura da tela.
   // Cada chamada devolve quantas faltam; a rotina segue até acabar (com teto,
   // pra lista grande não virar uma enxurrada de requisições). Enfeite: falhou,
@@ -336,6 +358,9 @@ export const ChatsPage: React.FC = () => {
         preview: r.last_message_preview || '',
         unread: r.unread_count || 0,
         avatarUrl: r.avatar_url ?? null,
+        conversationId: r.id,
+        assignedOwnerId: r.assigned_owner_id ?? null,
+        tags: r.tags ?? [],
       };
       const prev = m.get(key);
       if (!prev) {
@@ -348,6 +373,9 @@ export const ChatsPage: React.FC = () => {
         contactId: newer.contactId ?? prev.contactId ?? item.contactId,
         waName: newer.waName || prev.waName || item.waName,
         avatarUrl: newer.avatarUrl ?? prev.avatarUrl ?? item.avatarUrl ?? null,
+        conversationId: newer.conversationId ?? prev.conversationId,
+        assignedOwnerId: newer.assignedOwnerId ?? prev.assignedOwnerId ?? null,
+        tags: newer.tags.length ? newer.tags : prev.tags,
         unread: prev.unread + item.unread,
       });
     }
@@ -390,6 +418,8 @@ export const ChatsPage: React.FC = () => {
         conversationId: r.id,
         participantsCount: r.participants_count ?? null,
         avatarUrl: r.avatar_url ?? null,
+        assignedOwnerId: r.assigned_owner_id ?? null,
+        tags: r.tags ?? [],
       });
     }
     return out;
@@ -460,6 +490,9 @@ export const ChatsPage: React.FC = () => {
           preview: conv.preview,
           unread: conv.unread,
           avatarUrl: conv.avatarUrl ?? null,
+          conversationId: conv.conversationId,
+          assignedOwnerId: conv.assignedOwnerId,
+          tags: conv.tags,
         });
       }
     }
@@ -481,6 +514,9 @@ export const ChatsPage: React.FC = () => {
           preview: conv.preview,
           unread: conv.unread,
           avatarUrl: conv.avatarUrl ?? null,
+          conversationId: conv.conversationId,
+          assignedOwnerId: conv.assignedOwnerId,
+          tags: conv.tags,
         });
       }
     }
@@ -504,12 +540,55 @@ export const ChatsPage: React.FC = () => {
             ? filtered.filter(c => c.isGroup)
             : filtered;
 
-    return byTab.sort((a, b) => {
+    // Responsável e etiqueta: só valem pra quem JÁ tem conversa (contato sem
+    // conversa não tem onde guardar nem responsável nem etiqueta).
+    const byOwner =
+      ownerFilter === 'all'
+        ? byTab
+        : ownerFilter === 'none'
+          ? byTab.filter(c => c.hasConv && !c.assignedOwnerId)
+          : byTab.filter(c => c.assignedOwnerId === ownerFilter);
+
+    const byTag =
+      tagFilter === 'all' ? byOwner : byOwner.filter(c => (c.tags ?? []).some(tg => tg === tagFilter));
+
+    return byTag.sort((a, b) => {
       if (a.hasConv && b.hasConv) return (b.lastAt || '').localeCompare(a.lastAt || '');
       if (a.hasConv !== b.hasConv) return a.hasConv ? -1 : 1;
       return a.name.localeCompare(b.name, 'pt-BR');
     });
-  }, [contacts, convsByPhone, groupItems, searchQuery, filter]);
+  }, [contacts, convsByPhone, groupItems, searchQuery, filter, ownerFilter, tagFilter]);
+
+  // Etiquetas já usadas nas conversas: alimentam o filtro e a sugestão.
+  const etiquetasUsadas = useMemo(() => {
+    const s = new Set<string>();
+    for (const r of convsQ.data?.data ?? []) for (const tg of r.tags ?? []) s.add(tg);
+    return Array.from(s).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [convsQ.data]);
+
+  // Salva responsável/etiquetas da conversa aberta e atualiza a lista.
+  const [savingConv, setSavingConv] = useState(false);
+  const patchConversation = async (
+    conversationId: string,
+    patch: { assignedOwnerId?: string | null; tags?: string[] }
+  ) => {
+    setSavingConv(true);
+    try {
+      const res = await fetch(`/api/whatsapp/conversations/${conversationId}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      const j = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(j.error || `Falha (HTTP ${res.status})`);
+      await queryClient.invalidateQueries({ queryKey: ['waConversations'] });
+    } catch (e) {
+      addToast(`Não deu pra salvar: ${(e as Error).message}`, 'error');
+    } finally {
+      setSavingConv(false);
+    }
+  };
 
   const openChat = (target: ChatTarget) => setSelected(target);
   const selectedKey = selected
@@ -517,6 +596,31 @@ export const ChatsPage: React.FC = () => {
       ? `group#${selected.conversationId}`
       : `${selected.connectionId ?? 'none'}#${phoneKey(selected.phone)}`
     : null;
+
+  // Linha da conversa aberta: é dela que saem responsável e etiquetas. Vem da
+  // consulta (e não do item da lista) pra refletir na hora o que foi salvo.
+  const selectedConv = useMemo(() => {
+    if (!selected) return null;
+    const rows = convsQ.data?.data ?? [];
+    if (selected.isGroup) return rows.find(r => r.id === selected.conversationId) ?? null;
+    const chave = phoneKey(selected.phone);
+    return (
+      rows.find(
+        r =>
+          !r.is_group &&
+          phoneKey(r.wa_phone) === chave &&
+          (selected.connectionId ? r.connection_id === selected.connectionId : true)
+      ) ?? null
+    );
+  }, [selected, convsQ.data]);
+  const selectedConvId = selectedConv?.id ?? null;
+  const selectedConvOwnerId = selectedConv?.assigned_owner_id ?? null;
+  const selectedConvTags = useMemo(() => selectedConv?.tags ?? [], [selectedConv]);
+
+  // Menu de responsável e campo de nova etiqueta da conversa aberta
+  const [convOwnerMenuOpen, setConvOwnerMenuOpen] = useState(false);
+  const [tagInputOpen, setTagInputOpen] = useState(false);
+  const [tagDraft, setTagDraft] = useState('');
 
   // Lead do contato selecionado: prefere um deal ABERTO (nem ganho nem
   // perdido); entre vários, o mais recente. null = "Criar lead" disponível.
@@ -899,6 +1003,119 @@ export const ChatsPage: React.FC = () => {
             })}
           </div>
 
+          {/* Filtros por RESPONSÁVEL e por ETIQUETA: menus em vez de chips
+              porque a lista de gente e de etiquetas cresce com o uso. */}
+          <div className="flex items-center gap-1.5 mt-2 overflow-x-auto">
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setOwnerMenuOpen(o => !o);
+                  setTagMenuOpen(false);
+                }}
+                aria-expanded={ownerMenuOpen}
+                className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold border transition-colors ${
+                  ownerFilter !== 'all'
+                    ? 'bg-emerald-100 dark:bg-emerald-900/40 border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-slate-100 dark:bg-white/5 border-transparent text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10'
+                }`}
+              >
+                {ownerFilter === 'all'
+                  ? 'Responsável'
+                  : ownerFilter === 'none'
+                    ? 'Sem responsável'
+                    : nomePorId.get(ownerFilter) || 'Responsável'}
+                <ChevronDown size={12} />
+              </button>
+              {ownerMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setOwnerMenuOpen(false)} aria-hidden="true" />
+                  <div className="absolute left-0 top-full mt-1.5 z-40 min-w-[210px] max-h-72 overflow-y-auto scrollbar-custom rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card shadow-xl p-1.5">
+                    {[
+                      { id: 'all', label: 'Todos' },
+                      { id: 'none', label: 'Sem responsável' },
+                      ...membrosAtribuiveis.map(m => ({ id: m.id, label: m.name })),
+                    ].map(o => (
+                      <button
+                        key={o.id}
+                        type="button"
+                        onClick={() => {
+                          setOwnerFilter(o.id);
+                          setOwnerMenuOpen(false);
+                        }}
+                        className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium truncate ${
+                          ownerFilter === o.id
+                            ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'
+                            : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'
+                        }`}
+                      >
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setTagMenuOpen(o => !o);
+                  setOwnerMenuOpen(false);
+                }}
+                aria-expanded={tagMenuOpen}
+                disabled={etiquetasUsadas.length === 0}
+                title={etiquetasUsadas.length === 0 ? 'Nenhuma conversa tem etiqueta ainda' : undefined}
+                className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold border transition-colors disabled:opacity-50 ${
+                  tagFilter !== 'all'
+                    ? 'bg-emerald-100 dark:bg-emerald-900/40 border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-slate-100 dark:bg-white/5 border-transparent text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10'
+                }`}
+              >
+                {tagFilter === 'all' ? 'Etiqueta' : tagFilter}
+                <ChevronDown size={12} />
+              </button>
+              {tagMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setTagMenuOpen(false)} aria-hidden="true" />
+                  <div className="absolute left-0 top-full mt-1.5 z-40 min-w-[190px] max-h-72 overflow-y-auto scrollbar-custom rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card shadow-xl p-1.5">
+                    {['all', ...etiquetasUsadas].map(tg => (
+                      <button
+                        key={tg}
+                        type="button"
+                        onClick={() => {
+                          setTagFilter(tg);
+                          setTagMenuOpen(false);
+                        }}
+                        className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium truncate ${
+                          tagFilter === tg
+                            ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'
+                            : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'
+                        }`}
+                      >
+                        {tg === 'all' ? 'Todas' : tg}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {(ownerFilter !== 'all' || tagFilter !== 'all') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setOwnerFilter('all');
+                  setTagFilter('all');
+                }}
+                className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              >
+                <X size={12} /> Limpar
+              </button>
+            )}
+          </div>
+
         </div>
 
         {/* Lista única: contatos do CRM — com conversa em cima, resto A→Z */}
@@ -1167,6 +1384,139 @@ export const ChatsPage: React.FC = () => {
                 </>
               )}
             </div>
+
+            {/* RESPONSÁVEL e ETIQUETAS da conversa. Só aparece quando a
+                conversa já existe no banco: contato que nunca trocou mensagem
+                não tem onde guardar isso. */}
+            {selectedConvId && (
+              <div className="shrink-0 flex items-center gap-2 flex-wrap px-3 py-2 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card">
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setConvOwnerMenuOpen(o => !o)}
+                    disabled={savingConv}
+                    aria-expanded={convOwnerMenuOpen}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border transition-colors disabled:opacity-50 ${
+                      selectedConvOwnerId
+                        ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'
+                        : 'border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10'
+                    }`}
+                  >
+                    <UserPlus size={12} />
+                    {selectedConvOwnerId ? nomePorId.get(selectedConvOwnerId) || 'Responsável' : 'Sem responsável'}
+                    <ChevronDown size={12} />
+                  </button>
+                  {convOwnerMenuOpen && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-30"
+                        onClick={() => setConvOwnerMenuOpen(false)}
+                        aria-hidden="true"
+                      />
+                      <div className="absolute left-0 top-full mt-1.5 z-40 min-w-[210px] max-h-72 overflow-y-auto scrollbar-custom rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card shadow-xl p-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConvOwnerMenuOpen(false);
+                            void patchConversation(selectedConvId, { assignedOwnerId: null });
+                          }}
+                          className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10"
+                        >
+                          Sem responsável
+                        </button>
+                        {membrosAtribuiveis.map(m => (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => {
+                              setConvOwnerMenuOpen(false);
+                              void patchConversation(selectedConvId, { assignedOwnerId: m.id });
+                            }}
+                            className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium truncate ${
+                              selectedConvOwnerId === m.id
+                                ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'
+                                : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'
+                            }`}
+                          >
+                            {m.name}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {selectedConvTags.map(tg => (
+                  <span
+                    key={tg}
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-bold bg-primary-50 text-primary-700 dark:bg-primary-500/10 dark:text-primary-300"
+                  >
+                    {tg}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void patchConversation(selectedConvId, {
+                          tags: selectedConvTags.filter(x => x !== tg),
+                        })
+                      }
+                      disabled={savingConv}
+                      aria-label={`Tirar etiqueta ${tg}`}
+                      className="opacity-60 hover:opacity-100 disabled:opacity-30"
+                    >
+                      <X size={11} />
+                    </button>
+                  </span>
+                ))}
+
+                {tagInputOpen ? (
+                  <input
+                    autoFocus
+                    value={tagDraft}
+                    onChange={e => setTagDraft(e.target.value)}
+                    onBlur={() => {
+                      setTagInputOpen(false);
+                      setTagDraft('');
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Escape') {
+                        setTagInputOpen(false);
+                        setTagDraft('');
+                      }
+                      if (e.key === 'Enter') {
+                        const nova = tagDraft.trim();
+                        setTagInputOpen(false);
+                        setTagDraft('');
+                        if (nova && !selectedConvTags.some(x => x.toLowerCase() === nova.toLowerCase())) {
+                          void patchConversation(selectedConvId, { tags: [...selectedConvTags, nova] });
+                        }
+                      }
+                    }}
+                    placeholder="Nome da etiqueta e Enter"
+                    list="chats-etiquetas"
+                    className="w-52 px-2 py-1 rounded-full text-[11px] bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setTagInputOpen(true)}
+                    disabled={savingConv || selectedConvTags.length >= 10}
+                    title={
+                      selectedConvTags.length >= 10
+                        ? 'Limite de 10 etiquetas por conversa'
+                        : 'Adicionar etiqueta'
+                    }
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-bold border border-dashed border-slate-300 dark:border-white/15 text-slate-500 dark:text-slate-400 hover:text-primary-600 hover:border-primary-300 transition-colors disabled:opacity-50"
+                  >
+                    <Plus size={11} /> Etiqueta
+                  </button>
+                )}
+                <datalist id="chats-etiquetas">
+                  {etiquetasUsadas.map(tg => (
+                    <option key={tg} value={tg} />
+                  ))}
+                </datalist>
+              </div>
+            )}
 
             <div className="flex-1 min-h-0">
               {/* key={phone} garante reset total do composer/busca ao trocar de conversa */}
