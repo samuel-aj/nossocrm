@@ -1,12 +1,14 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, CheckCheck, ChevronDown, ExternalLink, KanbanSquare, MessageCircle, MessageSquareDot, Plus, Search, UserPlus, Users, X } from 'lucide-react';
+import { ArrowLeft, CheckCheck, ChevronDown, ChevronRight, ExternalLink, KanbanSquare, MessageCircle, MessageSquareDot, Plus, Search, UserPlus, Users, X } from 'lucide-react';
 import { useCRM } from '@/context/CRMContext';
 import { useOrgMembers } from '@/lib/query/hooks';
+import { useAnchoredMenu } from '@/hooks/useAnchoredMenu';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { DealWhatsAppChat } from '@/features/whatsapp/DealWhatsAppChat';
@@ -272,6 +274,35 @@ export const ChatsPage: React.FC = () => {
   const [tagFilter, setTagFilter] = useState<string>('all');
   const [ownerMenuOpen, setOwnerMenuOpen] = useState(false);
   const [tagMenuOpen, setTagMenuOpen] = useState(false);
+  const fecharOwnerMenu = useCallback(() => setOwnerMenuOpen(false), []);
+  const fecharTagMenu = useCallback(() => setTagMenuOpen(false), []);
+  const {
+    triggerRef: ownerTriggerRef,
+    menuRef: ownerMenuRef,
+    pos: ownerMenuPos,
+  } = useAnchoredMenu(ownerMenuOpen, fecharOwnerMenu, { width: 220 });
+  const {
+    triggerRef: tagTriggerRef,
+    menuRef: tagMenuRef,
+    pos: tagMenuPos,
+  } = useAnchoredMenu(tagMenuOpen, fecharTagMenu, { width: 200 });
+
+  // Faixa de filtros: some a rolagem e mostra a seta quando sobra conteúdo.
+  const filtrosRef = useRef<HTMLDivElement | null>(null);
+  const [temMaisFiltros, setTemMaisFiltros] = useState(false);
+  const atualizarSetaFiltros = useCallback(() => {
+    const el = filtrosRef.current;
+    if (!el) return;
+    // 2px de folga: arredondamento de subpixel marcaria "tem mais" sem ter.
+    setTemMaisFiltros(el.scrollLeft + el.clientWidth < el.scrollWidth - 2);
+  }, []);
+  // Recalcula quando a largura muda e a cada render da faixa (o chip "Grupos"
+  // e o menu de etiqueta entram/saem conforme a organização e os dados).
+  useEffect(() => {
+    atualizarSetaFiltros();
+    window.addEventListener('resize', atualizarSetaFiltros);
+    return () => window.removeEventListener('resize', atualizarSetaFiltros);
+  });
 
   // Fotos de perfil: busca em lotes pequenos, uma vez por abertura da tela.
   // Cada chamada devolve quantas faltam; a rotina segue até acabar (com teto,
@@ -1013,11 +1044,17 @@ export const ChatsPage: React.FC = () => {
             )}
           </div>
 
-          {/* Filtros da lista numa linha só: chips (Tudo / Não lidas / Conversas
-              / Grupos) e, ao lado, os menus de Responsável e Etiqueta.
-              SEM overflow-x-auto: ele recorta os menus abertos (era por isso
-              que o dropdown não aparecia). Em tela estreita a linha quebra. */}
-          <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
+          {/* Filtros numa LINHA SÓ (chips + menus de Responsável e Etiqueta):
+              sem quebra, rolando na horizontal quando não cabe, com uma seta
+              que aparece no hover. Os menus são abertos por PORTAL — dentro
+              desta faixa rolável eles seriam recortados e ficariam invisíveis,
+              que foi o bug do dropdown que não abria. */}
+          <div className="relative group/filtros mt-2.5">
+            <div
+              ref={filtrosRef}
+              onScroll={atualizarSetaFiltros}
+              className="flex items-center gap-1.5 overflow-x-auto scrollbar-none pr-6"
+            >
             {(
               [
                 { id: 'all', label: 'Tudo', title: 'Todas as conversas e contatos' },
@@ -1052,6 +1089,7 @@ export const ChatsPage: React.FC = () => {
 
             <div className="relative shrink-0">
               <button
+                ref={ownerTriggerRef}
                 type="button"
                 onClick={() => {
                   setOwnerMenuOpen(o => !o);
@@ -1071,10 +1109,13 @@ export const ChatsPage: React.FC = () => {
                     : nomePorId.get(ownerFilter) || 'Responsável'}
                 <ChevronDown size={12} />
               </button>
-              {ownerMenuOpen && (
-                <>
-                  <div className="fixed inset-0 z-30" onClick={() => setOwnerMenuOpen(false)} aria-hidden="true" />
-                  <div className="absolute left-0 top-full mt-1.5 z-40 min-w-[210px] max-h-72 overflow-y-auto scrollbar-custom rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card shadow-xl p-1.5">
+              {ownerMenuOpen && ownerMenuPos && typeof document !== 'undefined' &&
+                createPortal(
+                  <div
+                    ref={ownerMenuRef}
+                    style={{ position: 'fixed', top: ownerMenuPos.top, left: ownerMenuPos.left, width: 220 }}
+                    className="z-[9999] max-h-72 overflow-y-auto scrollbar-custom rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card shadow-2xl p-1.5"
+                  >
                     {[
                       { id: 'all', label: 'Todos' },
                       { id: 'none', label: 'Sem responsável' },
@@ -1096,13 +1137,14 @@ export const ChatsPage: React.FC = () => {
                         {o.label}
                       </button>
                     ))}
-                  </div>
-                </>
-              )}
+                  </div>,
+                  document.body
+                )}
             </div>
 
             <div className="relative shrink-0">
               <button
+                ref={tagTriggerRef}
                 type="button"
                 onClick={() => {
                   setTagMenuOpen(o => !o);
@@ -1120,10 +1162,13 @@ export const ChatsPage: React.FC = () => {
                 {tagFilter === 'all' ? 'Etiqueta' : tagFilter}
                 <ChevronDown size={12} />
               </button>
-              {tagMenuOpen && (
-                <>
-                  <div className="fixed inset-0 z-30" onClick={() => setTagMenuOpen(false)} aria-hidden="true" />
-                  <div className="absolute left-0 top-full mt-1.5 z-40 min-w-[190px] max-h-72 overflow-y-auto scrollbar-custom rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card shadow-xl p-1.5">
+              {tagMenuOpen && tagMenuPos && typeof document !== 'undefined' &&
+                createPortal(
+                  <div
+                    ref={tagMenuRef}
+                    style={{ position: 'fixed', top: tagMenuPos.top, left: tagMenuPos.left, width: 200 }}
+                    className="z-[9999] max-h-72 overflow-y-auto scrollbar-custom rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card shadow-2xl p-1.5"
+                  >
                     {['all', ...etiquetasUsadas].map(tg => (
                       <button
                         key={tg}
@@ -1141,9 +1186,9 @@ export const ChatsPage: React.FC = () => {
                         {tg === 'all' ? 'Todas' : tg}
                       </button>
                     ))}
-                  </div>
-                </>
-              )}
+                  </div>,
+                  document.body
+                )}
             </div>
 
             {(ownerFilter !== 'all' || tagFilter !== 'all') && (
@@ -1156,6 +1201,20 @@ export const ChatsPage: React.FC = () => {
                 className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
               >
                 <X size={12} /> Limpar
+              </button>
+            )}
+            </div>
+
+            {/* Seta pra rolar: só quando sobra conteúdo à direita, e só no
+                hover — parada, ela seria mais um enfeite na barra. */}
+            {temMaisFiltros && (
+              <button
+                type="button"
+                onClick={() => filtrosRef.current?.scrollBy({ left: 160, behavior: 'smooth' })}
+                aria-label="Ver mais filtros"
+                className="absolute right-0 top-1/2 -translate-y-1/2 h-7 w-7 inline-flex items-center justify-center rounded-full bg-white/95 dark:bg-dark-card/95 text-slate-500 dark:text-slate-300 shadow ring-1 ring-slate-200 dark:ring-white/10 opacity-0 group-hover/filtros:opacity-100 focus-visible:opacity-100 transition-opacity"
+              >
+                <ChevronRight size={15} />
               </button>
             )}
           </div>
