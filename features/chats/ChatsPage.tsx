@@ -1669,10 +1669,27 @@ export const ChatsPage: React.FC = () => {
                     {selectedLabels.slice(0, 3).map(l => (
                       <span
                         key={l.id}
-                        className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-semibold ring-1 ring-inset max-w-[120px] ${LABEL_CHIP_CLASS[l.color]}`}
+                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold ring-1 ring-inset max-w-[130px] ${LABEL_CHIP_CLASS[l.color]}`}
                       >
                         <span className={`w-2 h-2 shrink-0 rounded-full ${LABEL_DOT_CLASS[l.color]}`} />
                         <span className="truncate">{l.name}</span>
+                        {/* X tira a etiqueta SÓ desta conversa (a etiqueta da
+                            organização continua existindo; apagar de vez é a
+                            lixeira do diálogo). */}
+                        <button
+                          type="button"
+                          disabled={savingConv}
+                          onClick={() =>
+                            void patchConversation(selectedConvId, {
+                              labelIds: selectedLabelIds.filter(id => id !== l.id),
+                            })
+                          }
+                          aria-label={`Tirar a etiqueta ${l.name} desta conversa`}
+                          title="Tirar desta conversa"
+                          className="shrink-0 -mr-0.5 rounded-sm opacity-50 hover:opacity-100 disabled:opacity-30 transition-opacity"
+                        >
+                          <X size={11} />
+                        </button>
                       </span>
                     ))}
                     {selectedLabels.length > 3 && (
