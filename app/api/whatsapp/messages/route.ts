@@ -19,7 +19,7 @@ import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
 import { getConversationAiInfo, getConversationBotInfo } from '@/lib/wa-agents/conversation';
 
 const MESSAGE_COLUMNS =
-  'id, conversation_id, direction, status, body, media_type, media_mime, media_url, from_phone, to_phone, wa_timestamp, created_at, sent_by, error, transcription, quoted_message_id, quoted, forwarded, sender_name';
+  'id, conversation_id, direction, status, body, media_type, media_mime, media_url, from_phone, to_phone, wa_timestamp, created_at, sent_by, source, error, transcription, quoted_message_id, quoted, forwarded, sender_name';
 
 /**
  * As 300 mensagens mais RECENTES das conversas (desc + limit, revertidas
@@ -39,11 +39,41 @@ async function loadMessages(
     .in('conversation_id', convs.map(c => c.id))
     .order('created_at', { ascending: false })
     .limit(300);
-  const rows = ((data || []) as Array<Record<string, unknown>>).reverse();
+  // Linhas SEM conteúdo nenhum (sobras de eventos de protocolo, como fixar
+  // mensagem, gravadas antes da correção no webhook): não viram bolha — o
+  // chat mostrava "[mensagem não suportada]" e parecia um erro.
+  const rows = ((data || []) as Array<Record<string, unknown>>)
+    .reverse()
+    .filter(r => r.body || r.media_type || r.transcription || r.quoted);
   // Anota de QUAL número cada mensagem veio (divisórias por número no chat)
   for (const r of rows) {
     r.connection_id = connByConv.get(r.conversation_id as string) ?? null;
     delete r.conversation_id;
+  }
+
+  // Nome de quem enviou pelo CRM (sent_by -> profiles): o chat mostra
+  // "Fulano · CRM" na bolha. Só leitura; mensagens de robô/IA/API/celular
+  // não têm sent_by e nunca são atribuídas a um usuário.
+  const senderIds = Array.from(
+    new Set(rows.map(r => r.sent_by).filter((v): v is string => typeof v === 'string' && !!v))
+  );
+  if (senderIds.length > 0) {
+    const { data: perfis } = await admin
+      .from('profiles')
+      .select('id, name, first_name, last_name, nickname')
+      .in('id', senderIds);
+    const nomes = new Map(
+      ((perfis ?? []) as Array<{ id: string; name: string | null; first_name: string | null; last_name: string | null; nickname: string | null }>).map(p => [
+        p.id,
+        (p.nickname ?? '').trim() ||
+          `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() ||
+          (p.name ?? '').trim() ||
+          null,
+      ])
+    );
+    for (const r of rows) {
+      if (typeof r.sent_by === 'string') r.sent_by_name = nomes.get(r.sent_by) ?? null;
+    }
   }
 
   // media_url guarda o CAMINHO no bucket privado wa-media — assina URLs de

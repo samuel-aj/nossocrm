@@ -38,6 +38,9 @@ import {
   Reply,
   Forward,
   Link2,
+  Sparkles,
+  Plug,
+  Smartphone,
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { quotedPreviewText, type QuotedSnapshot } from '@/lib/whatsapp/quote';
@@ -684,6 +687,37 @@ function QuotedBlock({
   );
 }
 
+/**
+ * Por onde a mensagem SAIU, para o selo discreto na bolha. Só mensagens
+ * enviadas têm origem; recebidas não levam selo. Linha antiga sem `source`
+ * só é atribuída ao CRM quando tem `sent_by` (senão, sem selo — nunca chuta).
+ */
+function origemDaMensagem(
+  m: WaChatMessage
+): { icone: React.ReactNode; rotulo: string; dica: string } | null {
+  if (m.direction !== 'out') return null;
+  const nomeCrm = (m.sent_by_name ?? '').trim();
+  const rotuloCrm = nomeCrm ? `${nomeCrm} · CRM` : 'CRM';
+  switch (m.source ?? '') {
+    case 'bot':
+      return { icone: <Bot size={11} />, rotulo: 'Robô', dica: 'Enviada por um robô (automação)' };
+    case 'agent':
+      return { icone: <Sparkles size={11} />, rotulo: 'Agente de IA', dica: 'Enviada pelo agente de IA' };
+    case 'api':
+      return { icone: <Plug size={11} />, rotulo: 'API', dica: 'Enviada por uma integração via API' };
+    case 'echo':
+      return { icone: <Smartphone size={11} />, rotulo: 'Celular', dica: 'Enviada pelo WhatsApp do celular ou outro aplicativo' };
+    case 'crm':
+      return { icone: <User size={11} />, rotulo: rotuloCrm, dica: 'Enviada por um atendente pelo CRM' };
+    default:
+      // Mensagens antigas (antes do campo source): só com sent_by dá para
+      // afirmar que foi o CRM; o resto fica sem selo.
+      return m.sent_by
+        ? { icone: <User size={11} />, rotulo: rotuloCrm, dica: 'Enviada por um atendente pelo CRM' }
+        : null;
+  }
+}
+
 function MessageBubble({
   m,
   searchQuery = '',
@@ -711,6 +745,7 @@ function MessageBubble({
 }) {
   const isOut = m.direction === 'out';
   const failed = m.status === 'failed';
+  const origem = origemDaMensagem(m);
   // Menu de ações da bolha (▾ no hover, toque longo no celular ou botão
   // direito), estilo WhatsApp Web. Bolha otimista (temp-) ainda não tem id.
   const [menuOpen, setMenuOpen] = useState(false);
@@ -883,6 +918,17 @@ function MessageBubble({
         )}
         {senderName && (
           <p className={`mb-0.5 pr-5 text-[11px] font-bold truncate ${senderColor(senderName)}`}>{senderName}</p>
+        )}
+        {origem && (
+          <p
+            className={`mb-0.5 inline-flex items-center gap-1 text-[10px] font-semibold ${
+              isOut ? 'text-emerald-100/80' : 'text-slate-400'
+            }`}
+            title={origem.dica}
+          >
+            {origem.icone}
+            {origem.rotulo}
+          </p>
         )}
         {m.forwarded && (
           <p className={`mb-1 inline-flex items-center gap-1 text-[10px] italic ${isOut ? 'text-emerald-100/90' : 'text-slate-400'}`}>

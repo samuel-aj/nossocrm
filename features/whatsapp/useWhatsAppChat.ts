@@ -28,6 +28,10 @@ export interface WaChatMessage {
   wa_timestamp: string | null;
   created_at: string;
   sent_by: string | null;
+  /** Nome (perfil) de quem enviou pelo CRM; null nas demais origens */
+  sent_by_name?: string | null;
+  /** Por onde a mensagem saiu: 'crm' | 'bot' | 'agent' | 'api' | 'echo' (celular) */
+  source?: string | null;
   /** Motivo da falha (Meta/Evolution) quando status === 'failed' */
   error: string | null;
   /** Transcrição do áudio (gerada por IA sob demanda, cacheada no banco) */
@@ -267,6 +271,8 @@ export function useWhatsAppChat(phoneE164: string | null, connectionId?: string 
         wa_timestamp: null,
         created_at: new Date().toISOString(),
         sent_by: null,
+        // a bolha otimista já nasce com a origem certa (o refetch confirma)
+        source: 'crm',
         error: null,
         transcription: null,
         // bolha otimista já nasce no número certo (divisória não pisca)

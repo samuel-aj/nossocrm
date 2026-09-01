@@ -157,8 +157,18 @@ function extractContent(rawMessage: any): {
     return { text: `📊 Enquete: ${poll.name}${opts ? `\n${opts}` : ""}` };
   }
 
-  // Eventos de protocolo/reação/voto: não são "mensagens" — não gera bolha
-  if (message.reactionMessage || message.protocolMessage || message.pollUpdateMessage || message.senderKeyDistributionMessage) {
+  // Eventos de protocolo/reação/voto/fixar: não são "mensagens" — não gera
+  // bolha. Fixar/desafixar chega como pinInChatMessage (e "guardar na
+  // conversa" como keepInChatMessage); sem isto viravam linha vazia e o chat
+  // mostrava "[mensagem não suportada]", que parecia um erro.
+  if (
+    message.reactionMessage ||
+    message.protocolMessage ||
+    message.pinInChatMessage ||
+    message.keepInChatMessage ||
+    message.pollUpdateMessage ||
+    message.senderKeyDistributionMessage
+  ) {
     return { skip: true };
   }
   // Só metadados de contexto (sem conteúdo real): também ignora
