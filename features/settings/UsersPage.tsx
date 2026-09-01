@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import ConfirmModal from '@/components/ConfirmModal';
-import { Loader2, UserPlus, Crown, Briefcase, KeyRound, Mail, Check, X, Sparkles, Clock, RefreshCw, Trash2, Link, Copy, CheckCircle2, ShieldCheck, KanbanSquare, Phone, Users as UsersIcon, EyeOff } from 'lucide-react';
+import { Loader2, UserPlus, Crown, Briefcase, KeyRound, Mail, Check, X, Sparkles, Clock, RefreshCw, Trash2, Link, Copy, CheckCircle2, KanbanSquare, Phone, Users as UsersIcon, Eye, EyeOff } from 'lucide-react';
 import { UserRole } from '@/types/constants';
 import { useCRM } from '@/context/CRMContext';
 import {
@@ -496,11 +496,10 @@ export const UsersPage: React.FC = () => {
                                         )}
                                         {visRules[user.id] && (
                                             <span
-                                                className="inline-flex items-center gap-0.5 text-amber-500 dark:text-amber-400"
+                                                className="inline-flex items-center text-amber-500 dark:text-amber-400"
                                                 title="Visualização restrita: este usuário tem permissões de visualização configuradas"
                                                 aria-label="Visualização restrita"
                                             >
-                                                <ShieldCheck className="h-3.5 w-3.5" />
                                                 <EyeOff className="h-3.5 w-3.5" />
                                             </span>
                                         )}
@@ -548,7 +547,7 @@ export const UsersPage: React.FC = () => {
                                                         className="opacity-0 group-hover:opacity-100 max-md:opacity-100 p-2 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-all"
                                                         title="Permissões de visualização"
                                                     >
-                                                        <ShieldCheck className="h-4 w-4" />
+                                                        <Eye className="h-4 w-4" />
                                                     </button>
                                                 )}
                                                 <button
@@ -1052,7 +1051,7 @@ const VisibilityModal: React.FC<{
                 <div className="px-6 pt-6 pb-4 border-b border-slate-100 dark:border-white/5">
                     <div className="flex items-center gap-3">
                         <span className="h-10 w-10 rounded-xl bg-sky-100 dark:bg-sky-900/30 text-sky-600 dark:text-sky-300 flex items-center justify-center">
-                            <ShieldCheck className="h-5 w-5" />
+                            <Eye className="h-5 w-5" />
                         </span>
                         <div className="min-w-0">
                             <h2 className="text-lg font-bold text-slate-900 dark:text-white">Permissões de visualização</h2>
