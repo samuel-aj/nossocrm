@@ -9,7 +9,7 @@
  */
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
-import { isLabelColor, normalizeLabelName } from '@/lib/whatsapp/labels';
+import { isLabelColor, isTabelaAusente, normalizeLabelName } from '@/lib/whatsapp/labels';
 
 export const runtime = 'nodejs';
 
@@ -22,12 +22,18 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
   const { id } = await ctx.params;
 
-  let body: { name?: unknown; color?: unknown };
+  // `null` é JSON válido: req.json() resolve e o catch não pega. Sem esta
+  // conferência o `in` logo abaixo estoura TypeError e vira 500.
+  let bruto: unknown;
   try {
-    body = await req.json();
+    bruto = await req.json();
   } catch {
     return json({ error: 'JSON inválido' }, 400);
   }
+  if (typeof bruto !== 'object' || bruto === null || Array.isArray(bruto)) {
+    return json({ error: 'JSON inválido' }, 400);
+  }
+  const body = bruto as { name?: unknown; color?: unknown };
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if ('name' in body) {
@@ -39,6 +45,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (!isLabelColor(body.color)) return json({ error: 'Cor inválida' }, 400);
     patch.color = body.color;
   }
+  if (Object.keys(patch).length === 1) return json({ error: 'Nada para alterar' }, 400);
 
   const { data, error } = await auth.admin
     .from('wa_labels')
@@ -49,6 +56,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
     .maybeSingle();
 
   if (error) {
+    if (isTabelaAusente(error)) {
+      return json({ error: 'As etiquetas ainda não foram liberadas neste ambiente. Fale com o suporte.' }, 503);
+    }
     if (/duplicate|unique/i.test(error.message)) {
       return json({ error: 'Já existe uma etiqueta com esse nome' }, 409);
     }
@@ -70,7 +80,12 @@ export async function DELETE(req: Request, ctx: Ctx) {
     .delete()
     .eq('organization_id', auth.user.organizationId)
     .eq('id', id);
-  if (error) return json({ error: error.message }, 500);
+  if (error) {
+    if (isTabelaAusente(error)) {
+      return json({ error: 'As etiquetas ainda não foram liberadas neste ambiente. Fale com o suporte.' }, 503);
+    }
+    return json({ error: error.message }, 500);
+  }
 
   return json({ ok: true });
 }

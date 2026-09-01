@@ -13,12 +13,16 @@ import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import {
   DEFAULT_LABEL_COLOR,
   isLabelColor,
-  labelKey,
+  isTabelaAusente,
+  likePattern,
   MAX_LABELS_PER_ORG,
   normalizeLabelName,
 } from '@/lib/whatsapp/labels';
 
 export const runtime = 'nodejs';
+
+/** Banco sem a migração: recado para a pessoa, não a mensagem crua do banco. */
+const ERRO_MIGRACAO = 'As etiquetas ainda não foram liberadas neste ambiente. Fale com o suporte.';
 
 export async function GET(req: Request) {
   if (!isAllowedOrigin(req)) return json({ error: 'Forbidden' }, 403);
@@ -34,7 +38,7 @@ export async function GET(req: Request) {
   // Banco ainda sem a tabela (migração pendente): devolve vazio em vez de
   // derrubar a tela dos Chats inteira.
   if (error) {
-    if (/relation .*wa_labels.* does not exist/i.test(error.message)) {
+    if (isTabelaAusente(error)) {
       console.warn('[labels] tabela wa_labels ausente (migração pendente)');
       return json({ labels: [] });
     }
@@ -60,10 +64,14 @@ export async function POST(req: Request) {
   if (!name) return json({ error: 'Dê um nome para a etiqueta' }, 400);
   const color = isLabelColor(body.color) ? body.color : DEFAULT_LABEL_COLOR;
 
-  const { count } = await auth.admin
+  const { count, error: erroCount } = await auth.admin
     .from('wa_labels')
     .select('id', { count: 'exact', head: true })
     .eq('organization_id', orgId);
+  if (erroCount) {
+    if (isTabelaAusente(erroCount)) return json({ error: ERRO_MIGRACAO }, 503);
+    return json({ error: erroCount.message }, 500);
+  }
   if ((count ?? 0) >= MAX_LABELS_PER_ORG) {
     return json({ error: `Limite de ${MAX_LABELS_PER_ORG} etiquetas por organização` }, 400);
   }
@@ -75,6 +83,7 @@ export async function POST(req: Request) {
     .single();
 
   if (error) {
+    if (isTabelaAusente(error)) return json({ error: ERRO_MIGRACAO }, 503);
     // Índice único por nome (sem caixa): devolve a que já existe, que é o que
     // a pessoa queria — criar duas "Cliente" não ajudaria ninguém.
     if (/duplicate|unique/i.test(error.message)) {
@@ -82,7 +91,7 @@ export async function POST(req: Request) {
         .from('wa_labels')
         .select('id, name, color')
         .eq('organization_id', orgId)
-        .ilike('name', labelKey(name))
+        .ilike('name', likePattern(name))
         .maybeSingle();
       if (existente) return json({ label: existente, jaExistia: true });
       return json({ error: 'Já existe uma etiqueta com esse nome' }, 409);

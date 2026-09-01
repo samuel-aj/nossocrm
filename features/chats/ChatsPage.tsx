@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, KanbanSquare, Loader2, MessageCircle, MessageSquareDot, Plus, Search, Tag, UserPlus, Users, X } from 'lucide-react';
+import { ArrowLeft, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, KanbanSquare, Loader2, MessageCircle, MessageSquareDot, Pencil, Plus, Search, Tag, Trash2, User, UserPlus, Users, X } from 'lucide-react';
 import { useCRM } from '@/context/CRMContext';
 import { useOrgMembers } from '@/lib/query/hooks';
 import { useAnchoredMenu } from '@/hooks/useAnchoredMenu';
@@ -14,9 +14,11 @@ import {
   LABEL_COLORS,
   LABEL_DOT_CLASS,
   DEFAULT_LABEL_COLOR,
+  MAX_LABELS_PER_CHAT,
   type LabelColor,
   type WaLabel,
 } from '@/lib/whatsapp/labels';
+import { FocusTrap } from '@/lib/a11y';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { DealWhatsAppChat } from '@/features/whatsapp/DealWhatsAppChat';
@@ -47,8 +49,6 @@ type ConvRow = {
   participants_count?: number | null;
   /** Foto de perfil do contato/grupo, já assinada pela API (null = sem foto) */
   avatar_url?: string | null;
-  /** Atendente responsável pela conversa (null = sem dono) */
-  assigned_owner_id?: string | null;
   /** Ids das etiquetas da conversa (as etiquetas são da organização) */
   label_ids?: string[] | null;
 };
@@ -64,7 +64,6 @@ type ConvInfo = {
   /** Foto de perfil vinda do WhatsApp (só número por QR Code) */
   avatarUrl?: string | null;
   conversationId: string | null;
-  assignedOwnerId: string | null;
   labelIds: string[];
 };
 
@@ -99,8 +98,6 @@ type ChatListItem = ChatTarget & {
   participantsCount?: number | null;
   /** Foto de perfil vinda do WhatsApp (só número por QR Code) */
   avatarUrl?: string | null;
-  /** Atendente responsável (null = sem dono) */
-  assignedOwnerId?: string | null;
   /** Ids das etiquetas da conversa */
   labelIds?: string[];
 };
@@ -403,7 +400,6 @@ export const ChatsPage: React.FC = () => {
         unread: r.unread_count || 0,
         avatarUrl: r.avatar_url ?? null,
         conversationId: r.id,
-        assignedOwnerId: r.assigned_owner_id ?? null,
         labelIds: r.label_ids ?? [],
       };
       const prev = m.get(key);
@@ -418,7 +414,6 @@ export const ChatsPage: React.FC = () => {
         waName: newer.waName || prev.waName || item.waName,
         avatarUrl: newer.avatarUrl ?? prev.avatarUrl ?? item.avatarUrl ?? null,
         conversationId: newer.conversationId ?? prev.conversationId,
-        assignedOwnerId: newer.assignedOwnerId ?? prev.assignedOwnerId ?? null,
         labelIds: newer.labelIds.length ? newer.labelIds : prev.labelIds,
         unread: prev.unread + item.unread,
       });
@@ -462,7 +457,6 @@ export const ChatsPage: React.FC = () => {
         conversationId: r.id,
         participantsCount: r.participants_count ?? null,
         avatarUrl: r.avatar_url ?? null,
-        assignedOwnerId: r.assigned_owner_id ?? null,
         labelIds: r.label_ids ?? [],
       });
     }
@@ -483,11 +477,11 @@ export const ChatsPage: React.FC = () => {
   // celular nunca é importado). Quem tem conversa fica no topo por recência;
   // contatos sem conversa seguem em ordem alfabética.
   /**
-   * Responsável do LEAD por contato — a fonte de verdade de quem cuida da
-   * pessoa. A conversa herda esse nome quando ninguém definiu um responsável
-   * direto no chat; assim o filtro funciona sem a equipe ter que preencher
-   * duas vezes, e vale pros leads que já existem (é calculado na leitura,
-   * não copiado pro banco, então nunca desencontra do lead).
+   * Responsável do LEAD por contato: a ÚNICA fonte de verdade de quem cuida da
+   * pessoa. Não existe responsável próprio do chat — marcar de novo aqui só
+   * criaria duas verdades pra mesma pergunta e elas iam desencontrar. É
+   * calculado na leitura, não copiado pro banco, então acompanha o lead
+   * sozinho: mudou o dono do negócio, mudou o do chat.
    *
    * Mesma preferência da barra do lead: negócio ABERTO e, entre vários, o
    * mais recente.
@@ -512,10 +506,10 @@ export const ChatsPage: React.FC = () => {
     return m;
   }, [deals]);
 
-  /** Responsável que vale na conversa: o definido no chat manda; sem ele, o do lead. */
+  /** Responsável da conversa: SEMPRE o dono do lead daquele contato. */
   const responsavelEfetivo = useCallback(
-    (item: { assignedOwnerId?: string | null; contactId: string | null }): string | null =>
-      item.assignedOwnerId ?? (item.contactId ? ownerDoLeadPorContato.get(item.contactId) ?? null : null),
+    (item: { contactId: string | null }): string | null =>
+      item.contactId ? ownerDoLeadPorContato.get(item.contactId) ?? null : null,
     [ownerDoLeadPorContato]
   );
 
@@ -572,7 +566,6 @@ export const ChatsPage: React.FC = () => {
           unread: conv.unread,
           avatarUrl: conv.avatarUrl ?? null,
           conversationId: conv.conversationId,
-          assignedOwnerId: conv.assignedOwnerId,
           labelIds: conv.labelIds,
         });
       }
@@ -596,7 +589,6 @@ export const ChatsPage: React.FC = () => {
           unread: conv.unread,
           avatarUrl: conv.avatarUrl ?? null,
           conversationId: conv.conversationId,
-          assignedOwnerId: conv.assignedOwnerId,
           labelIds: conv.labelIds,
         });
       }
@@ -654,12 +646,10 @@ export const ChatsPage: React.FC = () => {
   const labels = useMemo(() => labelsQ.data?.labels ?? [], [labelsQ.data]);
   const labelById = useMemo(() => new Map(labels.map(l => [l.id, l])), [labels]);
 
-  // Salva responsável/etiquetas da conversa aberta e atualiza a lista.
+  // Salva as etiquetas da conversa aberta e atualiza a lista. O responsável
+  // NÃO passa por aqui: ele vem do lead e não se marca no chat.
   const [savingConv, setSavingConv] = useState(false);
-  const patchConversation = async (
-    conversationId: string,
-    patch: { assignedOwnerId?: string | null; labelIds?: string[] }
-  ) => {
+  const patchConversation = async (conversationId: string, patch: { labelIds?: string[] }) => {
     setSavingConv(true);
     try {
       const res = await fetch(`/api/whatsapp/conversations/${conversationId}`, {
@@ -702,15 +692,9 @@ export const ChatsPage: React.FC = () => {
     );
   }, [selected, convsQ.data]);
   const selectedConvId = selectedConv?.id ?? null;
-  const selectedConvOwnerId = selectedConv?.assigned_owner_id ?? null;
   const selectedLabelIds = useMemo(() => selectedConv?.label_ids ?? [], [selectedConv]);
-  /** O que a barra mostra: responsável do chat ou, sem ele, o dono do lead. */
-  const selectedOwnerEfetivo = selected
-    ? responsavelEfetivo({ assignedOwnerId: selectedConvOwnerId, contactId: selected.contactId })
-    : null;
-
-  // Menu de responsável e campo de nova etiqueta da conversa aberta
-  const [convOwnerMenuOpen, setConvOwnerMenuOpen] = useState(false);
+  /** O que a barra mostra: o dono do lead daquele contato, só leitura. */
+  const selectedOwnerEfetivo = selected ? responsavelEfetivo({ contactId: selected.contactId }) : null;
   // Diálogo "Etiquetar conversa": o rascunho fica aqui e só vai pro banco no
   // Salvar — no WhatsApp Business você marca várias e confirma de uma vez.
   const [labelDialogOpen, setLabelDialogOpen] = useState(false);
@@ -750,6 +734,84 @@ export const ChatsPage: React.FC = () => {
       setCriandoLabel(false);
     }
   };
+
+  /** Marca/desmarca no rascunho, respeitando o teto por conversa. */
+  const alternarEtiqueta = useCallback(
+    (id: string) => {
+      setLabelDraft(atual => {
+        if (atual.includes(id)) return atual.filter(x => x !== id);
+        // Recusa aqui em vez de deixar o servidor cortar em silêncio: antes a
+        // tela dizia "salvo" e o banco guardava menos do que foi marcado.
+        if (atual.length >= MAX_LABELS_PER_CHAT) return atual;
+        return [...atual, id];
+      });
+    },
+    []
+  );
+
+  // Renomear / recolorir / apagar etiqueta da organização. Vale pra TODOS os
+  // chats de uma vez, que é o ponto de a etiqueta ser da organização.
+  const [editandoLabelId, setEditandoLabelId] = useState<string | null>(null);
+  const [editNome, setEditNome] = useState('');
+  const [editCor, setEditCor] = useState<LabelColor>(DEFAULT_LABEL_COLOR);
+  const [salvandoLabel, setSalvandoLabel] = useState(false);
+
+  const abrirEdicaoEtiqueta = useCallback((l: WaLabel) => {
+    setEditandoLabelId(l.id);
+    setEditNome(l.name);
+    setEditCor(l.color);
+  }, []);
+
+  const salvarEdicaoEtiqueta = useCallback(async () => {
+    const nome = editNome.trim();
+    if (!editandoLabelId || !nome || salvandoLabel) return;
+    setSalvandoLabel(true);
+    try {
+      const res = await fetch(`/api/whatsapp/labels/${editandoLabelId}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: nome, color: editCor }),
+      });
+      const j = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(j.error || `Falha (HTTP ${res.status})`);
+      await queryClient.invalidateQueries({ queryKey: ['waLabels'] });
+      setEditandoLabelId(null);
+    } catch (e) {
+      addToast(`Não deu pra salvar a etiqueta: ${(e as Error).message}`, 'error');
+    } finally {
+      setSalvandoLabel(false);
+    }
+  }, [editandoLabelId, editNome, editCor, salvandoLabel, queryClient, addToast]);
+
+  const apagarEtiqueta = useCallback(
+    async (l: WaLabel) => {
+      if (salvandoLabel) return;
+      if (!window.confirm(`Apagar a etiqueta "${l.name}"? Ela sai de todas as conversas.`)) return;
+      setSalvandoLabel(true);
+      try {
+        const res = await fetch(`/api/whatsapp/labels/${l.id}`, {
+          method: 'DELETE',
+          credentials: 'include',
+        });
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        if (!res.ok) throw new Error(j.error || `Falha (HTTP ${res.status})`);
+        // O gatilho do banco tira o id das conversas; a lista precisa reler.
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['waLabels'] }),
+          queryClient.invalidateQueries({ queryKey: ['waConversations'] }),
+        ]);
+        setLabelDraft(atual => atual.filter(x => x !== l.id));
+        setTagFilter(atual => (atual === l.id ? 'all' : atual));
+        setEditandoLabelId(atual => (atual === l.id ? null : atual));
+      } catch (e) {
+        addToast(`Não deu pra apagar a etiqueta: ${(e as Error).message}`, 'error');
+      } finally {
+        setSalvandoLabel(false);
+      }
+    },
+    [salvandoLabel, queryClient, addToast]
+  );
 
   // Lead do contato selecionado: prefere um deal ABERTO (nem ganho nem
   // perdido); entre vários, o mais recente. null = "Criar lead" disponível.
@@ -1294,7 +1356,7 @@ export const ChatsPage: React.FC = () => {
                 type="button"
                 onClick={() => rolarFiltros(-1)}
                 aria-label="Ver filtros anteriores"
-                className="absolute left-0 inset-y-0 w-9 flex items-center justify-start pl-0.5 bg-gradient-to-r from-white via-white/90 to-transparent dark:from-dark-card dark:via-dark-card/90 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 opacity-0 group-hover/filtros:opacity-100 focus-visible:opacity-100 transition-opacity"
+                className="absolute left-0 inset-y-0 w-9 flex items-center justify-start pl-0.5 bg-gradient-to-r from-white via-white/90 to-transparent dark:from-dark-card dark:via-dark-card/90 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 opacity-0 pointer-events-none group-hover/filtros:opacity-100 group-hover/filtros:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto transition-opacity"
               >
                 <ChevronLeft size={16} />
               </button>
@@ -1304,7 +1366,7 @@ export const ChatsPage: React.FC = () => {
                 type="button"
                 onClick={() => rolarFiltros(1)}
                 aria-label="Ver mais filtros"
-                className="absolute right-0 inset-y-0 w-9 flex items-center justify-end pr-0.5 bg-gradient-to-l from-white via-white/90 to-transparent dark:from-dark-card dark:via-dark-card/90 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 opacity-0 group-hover/filtros:opacity-100 focus-visible:opacity-100 transition-opacity"
+                className="absolute right-0 inset-y-0 w-9 flex items-center justify-end pr-0.5 bg-gradient-to-l from-white via-white/90 to-transparent dark:from-dark-card dark:via-dark-card/90 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 opacity-0 pointer-events-none group-hover/filtros:opacity-100 group-hover/filtros:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto transition-opacity"
               >
                 <ChevronRight size={16} />
               </button>
@@ -1455,6 +1517,27 @@ export const ChatsPage: React.FC = () => {
                       )}
                     </span>
                   </span>
+                  {/* Etiquetas na PRÓPRIA linha: no WhatsApp Business é aqui
+                      que se bate o olho e se sabe o estado de cada atendimento
+                      sem abrir conversa por conversa. São spans, não criam
+                      botão dentro de botão. */}
+                  {(c.labelIds?.length ?? 0) > 0 && (
+                    <span className="flex flex-wrap items-center gap-1 mt-1">
+                      {(c.labelIds ?? []).map(id => {
+                        const l = labelById.get(id);
+                        if (!l) return null;
+                        return (
+                          <span
+                            key={id}
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold ring-1 ring-inset ${LABEL_CHIP_CLASS[l.color]}`}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full ${LABEL_DOT_CLASS[l.color]}`} />
+                            {l.name}
+                          </span>
+                        );
+                      })}
+                    </span>
+                  )}
                 </span>
               </button>
               {/* Balão do menu da conversa (estilo WhatsApp): `fixed` com a
@@ -1585,68 +1668,21 @@ export const ChatsPage: React.FC = () => {
                 não tem onde guardar isso. */}
             {selectedConvId && (
               <div className="shrink-0 flex items-center gap-2 flex-wrap px-3 py-2 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card">
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setConvOwnerMenuOpen(o => !o)}
-                    disabled={savingConv}
-                    aria-expanded={convOwnerMenuOpen}
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border transition-colors disabled:opacity-50 ${
-                      selectedConvOwnerId
-                        ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'
-                        : 'border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10'
-                    }`}
-                  >
-                    <UserPlus size={12} />
-                    {selectedOwnerEfetivo
-                      ? nomePorId.get(selectedOwnerEfetivo) || 'Responsável'
-                      : 'Sem responsável'}
-                    <ChevronDown size={12} />
-                  </button>
-                  {/* Herdado do lead: deixa claro que ninguém marcou aqui, veio
-                      de quem é dono do negócio desse contato. */}
-                  {!selectedConvOwnerId && selectedOwnerEfetivo && (
-                    <span className="ml-1.5 text-[10px] text-slate-400 dark:text-slate-500">do lead</span>
-                  )}
-                  {convOwnerMenuOpen && (
-                    <>
-                      <div
-                        className="fixed inset-0 z-30"
-                        onClick={() => setConvOwnerMenuOpen(false)}
-                        aria-hidden="true"
-                      />
-                      <div className="absolute left-0 top-full mt-1.5 z-40 min-w-[210px] max-h-72 overflow-y-auto scrollbar-custom rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card shadow-xl p-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setConvOwnerMenuOpen(false);
-                            void patchConversation(selectedConvId, { assignedOwnerId: null });
-                          }}
-                          className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10"
-                        >
-                          Sem responsável
-                        </button>
-                        {membrosAtribuiveis.map(m => (
-                          <button
-                            key={m.id}
-                            type="button"
-                            onClick={() => {
-                              setConvOwnerMenuOpen(false);
-                              void patchConversation(selectedConvId, { assignedOwnerId: m.id });
-                            }}
-                            className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium truncate ${
-                              selectedConvOwnerId === m.id
-                                ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'
-                                : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'
-                            }`}
-                          >
-                            {m.name}
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
+                {/* SÓ LEITURA: quem responde pelo chat é o dono do LEAD desse
+                    contato. Pra trocar, troca no lead — aqui não se marca. */}
+                <span
+                  title="Responsável do lead deste contato. Para mudar, troque no lead."
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border ${
+                    selectedOwnerEfetivo
+                      ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'
+                      : 'border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400'
+                  }`}
+                >
+                  <User size={12} />
+                  {selectedOwnerEfetivo
+                    ? nomePorId.get(selectedOwnerEfetivo) || 'Responsável'
+                    : 'Sem responsável'}
+                </span>
 
                 {/* Etiquetas da conversa: só leitura aqui; marcar/desmarcar é
                     no diálogo, que confirma tudo de uma vez (Cancelar/Salvar),
@@ -1914,113 +1950,226 @@ export const ChatsPage: React.FC = () => {
       {/* Diálogo de etiquetar, no modelo do WhatsApp Business: lista com
           caixinhas, criar nova ali dentro, e confirmação em bloco. */}
       {labelDialogOpen && selectedConvId && (
-        <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-white/10 dark:bg-dark-card">
-            <div className="px-5 py-3.5 border-b border-slate-200 dark:border-white/10">
-              <h3 className="font-bold text-slate-900 dark:text-white">Etiquetar conversa</h3>
-              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 truncate">{selected?.name}</p>
-            </div>
-
-            <div className="max-h-[46vh] overflow-y-auto scrollbar-custom px-2 py-2">
-              {labels.length === 0 && (
-                <p className="px-3 py-6 text-center text-xs text-slate-500 dark:text-slate-400">
-                  Nenhuma etiqueta criada ainda. Crie a primeira abaixo.
-                </p>
-              )}
-              {labels.map(l => {
-                const marcada = labelDraft.includes(l.id);
-                return (
-                  <button
-                    key={l.id}
-                    type="button"
-                    onClick={() =>
-                      setLabelDraft(atual =>
-                        marcada ? atual.filter(x => x !== l.id) : [...atual, l.id]
-                      )
-                    }
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
-                  >
-                    <span className={`w-3 h-3 shrink-0 rounded-sm ${LABEL_DOT_CLASS[l.color]}`} />
-                    <span className="flex-1 truncate text-sm text-slate-800 dark:text-slate-100">{l.name}</span>
-                    <span
-                      className={`w-4 h-4 shrink-0 rounded border flex items-center justify-center ${
-                        marcada
-                          ? 'bg-primary-600 border-primary-600 text-white'
-                          : 'border-slate-300 dark:border-white/20'
-                      }`}
-                    >
-                      {marcada && <CheckCheck size={11} />}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Nova etiqueta: nome + cor, criada sem sair do diálogo */}
-            <div className="px-4 py-3 border-t border-slate-200 dark:border-white/10 space-y-2">
-              <div className="flex items-center gap-2">
-                <input
-                  value={novaLabelNome}
-                  onChange={e => setNovaLabelNome(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      void criarEtiqueta();
-                    }
-                  }}
-                  placeholder="Nova etiqueta"
-                  maxLength={40}
-                  className="flex-1 px-2.5 py-1.5 rounded-lg text-sm bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
-                />
+        <FocusTrap active onEscape={() => setLabelDialogOpen(false)} returnFocus>
+          <div
+            className="fixed inset-0 z-[9998] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"
+            onMouseDown={e => {
+              // Só o clique NO FUNDO fecha: o de dentro do cartão não chega
+              // aqui por causa do stopPropagation logo abaixo.
+              if (e.target === e.currentTarget) setLabelDialogOpen(false);
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Etiquetar conversa"
+              onMouseDown={e => e.stopPropagation()}
+              className="w-full max-w-sm overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-white/10 dark:bg-dark-card"
+            >
+              <div className="flex items-start justify-between gap-3 px-5 py-3.5 border-b border-slate-200 dark:border-white/10">
+                <div className="min-w-0">
+                  <h3 className="font-bold text-slate-900 dark:text-white">Etiquetar conversa</h3>
+                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 truncate">{selected?.name}</p>
+                </div>
                 <button
                   type="button"
-                  onClick={() => void criarEtiqueta()}
-                  disabled={!novaLabelNome.trim() || criandoLabel}
-                  className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 disabled:opacity-40"
+                  onClick={() => setLabelDialogOpen(false)}
+                  aria-label="Fechar"
+                  className="shrink-0 -mr-1 -mt-0.5 p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:text-slate-200 dark:hover:bg-white/10"
                 >
-                  {criandoLabel ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
-                  Criar
+                  <X size={16} />
                 </button>
               </div>
-              <div className="flex items-center gap-1.5">
-                {LABEL_COLORS.map(cor => (
-                  <button
-                    key={cor}
-                    type="button"
-                    onClick={() => setNovaLabelCor(cor)}
-                    aria-label={`Cor ${cor}`}
-                    className={`w-5 h-5 rounded-full ${LABEL_DOT_CLASS[cor]} ${
-                      novaLabelCor === cor
-                        ? 'ring-2 ring-offset-2 ring-slate-400 dark:ring-offset-dark-card'
-                        : 'opacity-70 hover:opacity-100'
-                    }`}
+
+              <div className="max-h-[46vh] overflow-y-auto scrollbar-custom px-2 py-2">
+                {labels.length === 0 && (
+                  <p className="px-3 py-6 text-center text-xs text-slate-500 dark:text-slate-400">
+                    Nenhuma etiqueta criada ainda. Crie a primeira abaixo.
+                  </p>
+                )}
+                {labels.map(l => {
+                  const marcada = labelDraft.includes(l.id);
+                  const noTeto = !marcada && labelDraft.length >= MAX_LABELS_PER_CHAT;
+
+                  // Em edição a linha vira nome + paleta. A linha é um div, e
+                  // quem clica são os filhos: botão dentro de botão é inválido.
+                  if (editandoLabelId === l.id) {
+                    return (
+                      <div key={l.id} className="px-3 py-2.5 space-y-2 rounded-lg bg-slate-50 dark:bg-white/5">
+                        <div className="flex items-center gap-2">
+                          <input
+                            autoFocus
+                            value={editNome}
+                            onChange={e => setEditNome(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                void salvarEdicaoEtiqueta();
+                              }
+                              if (e.key === 'Escape') {
+                                // Escape aqui sai da EDIÇÃO, não do diálogo.
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setEditandoLabelId(null);
+                              }
+                            }}
+                            maxLength={40}
+                            aria-label="Nome da etiqueta"
+                            className="flex-1 px-2.5 py-1.5 rounded-lg text-sm bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => void salvarEdicaoEtiqueta()}
+                            disabled={!editNome.trim() || salvandoLabel}
+                            className="shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-bold text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 disabled:opacity-40"
+                          >
+                            {salvandoLabel ? <Loader2 size={13} className="animate-spin" /> : 'OK'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditandoLabelId(null)}
+                            className="shrink-0 px-2 py-1.5 rounded-lg text-xs font-bold text-slate-500 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:bg-white/10"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {LABEL_COLORS.map(cor => (
+                            <button
+                              key={cor}
+                              type="button"
+                              onClick={() => setEditCor(cor)}
+                              aria-label={`Cor ${cor}`}
+                              className={`w-5 h-5 rounded-full ${LABEL_DOT_CLASS[cor]} ${
+                                editCor === cor
+                                  ? 'ring-2 ring-offset-2 ring-slate-400 dark:ring-offset-dark-card'
+                                  : 'opacity-70 hover:opacity-100'
+                              }`}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={l.id}
+                      className="group/etq flex items-center gap-1 pr-2 rounded-lg hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => alternarEtiqueta(l.id)}
+                        disabled={noTeto}
+                        aria-pressed={marcada}
+                        title={noTeto ? `Máximo de ${MAX_LABELS_PER_CHAT} etiquetas por conversa` : undefined}
+                        className="flex-1 min-w-0 flex items-center gap-3 px-3 py-2.5 text-left disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <span className={`w-3 h-3 shrink-0 rounded-sm ${LABEL_DOT_CLASS[l.color]}`} />
+                        <span className="flex-1 truncate text-sm text-slate-800 dark:text-slate-100">{l.name}</span>
+                        <span
+                          className={`w-4 h-4 shrink-0 rounded border flex items-center justify-center ${
+                            marcada
+                              ? 'bg-primary-600 border-primary-600 text-white'
+                              : 'border-slate-300 dark:border-white/20'
+                          }`}
+                        >
+                          {marcada && <CheckCheck size={11} />}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => abrirEdicaoEtiqueta(l)}
+                        aria-label={`Renomear a etiqueta ${l.name}`}
+                        className="shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 dark:hover:text-slate-200 dark:hover:bg-white/10 opacity-0 group-hover/etq:opacity-100 focus-visible:opacity-100 transition-opacity"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void apagarEtiqueta(l)}
+                        disabled={salvandoLabel}
+                        aria-label={`Apagar a etiqueta ${l.name}`}
+                        className="shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:text-rose-400 dark:hover:bg-rose-900/20 opacity-0 group-hover/etq:opacity-100 focus-visible:opacity-100 transition-opacity disabled:opacity-40"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Nova etiqueta: nome + cor, criada sem sair do diálogo */}
+              <div className="px-4 py-3 border-t border-slate-200 dark:border-white/10 space-y-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    value={novaLabelNome}
+                    onChange={e => setNovaLabelNome(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        void criarEtiqueta();
+                      }
+                    }}
+                    placeholder="Nova etiqueta"
+                    maxLength={40}
+                    className="flex-1 px-2.5 py-1.5 rounded-lg text-sm bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
                   />
-                ))}
+                  <button
+                    type="button"
+                    onClick={() => void criarEtiqueta()}
+                    disabled={!novaLabelNome.trim() || criandoLabel}
+                    className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 disabled:opacity-40"
+                  >
+                    {criandoLabel ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+                    Criar
+                  </button>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {LABEL_COLORS.map(cor => (
+                    <button
+                      key={cor}
+                      type="button"
+                      onClick={() => setNovaLabelCor(cor)}
+                      aria-label={`Cor ${cor}`}
+                      className={`w-5 h-5 rounded-full ${LABEL_DOT_CLASS[cor]} ${
+                        novaLabelCor === cor
+                          ? 'ring-2 ring-offset-2 ring-slate-400 dark:ring-offset-dark-card'
+                          : 'opacity-70 hover:opacity-100'
+                      }`}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-1 px-4 py-3 border-t border-slate-200 dark:border-white/10">
+                <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                  {labelDraft.length}/{MAX_LABELS_PER_CHAT}
+                </span>
+                <span className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setLabelDialogOpen(false)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/10"
+                  >
+                    CANCELAR
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLabelDialogOpen(false);
+                      void patchConversation(selectedConvId, { labelIds: labelDraft });
+                    }}
+                    disabled={savingConv}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20 disabled:opacity-50"
+                  >
+                    SALVAR
+                  </button>
+                </span>
               </div>
             </div>
-
-            <div className="flex items-center justify-end gap-1 px-4 py-3 border-t border-slate-200 dark:border-white/10">
-              <button
-                type="button"
-                onClick={() => setLabelDialogOpen(false)}
-                className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/10"
-              >
-                CANCELAR
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setLabelDialogOpen(false);
-                  void patchConversation(selectedConvId, { labelIds: labelDraft });
-                }}
-                disabled={savingConv}
-                className="px-3 py-1.5 rounded-lg text-xs font-bold text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20 disabled:opacity-50"
-              >
-                SALVAR
-              </button>
-            </div>
           </div>
-        </div>
+        </FocusTrap>
       )}
 
       {leadModalOpen && selected && (

@@ -51,6 +51,37 @@ export function labelKey(name: string): string {
 }
 
 /**
+ * Escapa os curingas do LIKE. Sem isso uma etiqueta chamada "Cliente_A" casa
+ * com "ClienteXA" no `ilike`, e "100%" casa com qualquer nome que comece em
+ * "100" — o PostgREST manda o padrão cru, ele não escapa nada por nós.
+ */
+export function likePattern(name: string): string {
+  return labelKey(name).replace(/[\\%_]/g, ch => `\\${ch}`);
+}
+
+/**
+ * Banco AINDA sem a migração das etiquetas. O PostgREST não devolve a
+ * mensagem do Postgres cru ("relation ... does not exist"): ele barra antes,
+ * no cache de esquema, com PGRST205 e "Could not find the table ... in the
+ * schema cache". Testar só a redação do Postgres faz o fallback nunca
+ * disparar e a tela dos Chats tomar 500.
+ */
+export function isTabelaAusente(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  if (error.code === 'PGRST205' || error.code === '42P01') return true;
+  const msg = error.message ?? '';
+  return /wa_labels/i.test(msg) && /(does not exist|schema cache)/i.test(msg);
+}
+
+/** Mesma ideia da acima, mas para a COLUNA nova em wa_conversations. */
+export function isColunaLabelIdsAusente(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  if (error.code === 'PGRST204' || error.code === '42703') return true;
+  const msg = error.message ?? '';
+  return /label_ids/i.test(msg) && /(does not exist|schema cache|column)/i.test(msg);
+}
+
+/**
  * Classes da bolinha e do selo por cor. Ficam aqui (e não espalhadas na tela)
  * pra etiqueta ter a mesma aparência em qualquer lugar do CRM.
  */

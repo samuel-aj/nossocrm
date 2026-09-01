@@ -1,19 +1,27 @@
 /**
  * PATCH /api/whatsapp/conversations/[id]
- *   { assignedOwnerId?: string | null, labelIds?: string[] }
+ *   { labelIds: string[] }
  *
- * Responsável e etiquetas da conversa. Qualquer MEMBRO da organização pode
- * mexer (é organização de atendimento: quem está no chat assume a conversa),
- * mas só em conversa da PRÓPRIA organização — o filtro por organization_id
- * está em todas as consultas.
+ * Etiquetas da conversa. Qualquer MEMBRO da organização pode mexer (é
+ * organização de atendimento: quem está no chat cuida da conversa), mas só em
+ * conversa da PRÓPRIA organização — o filtro por organization_id está em
+ * todas as consultas.
  *
- * O responsável pode ser limpo (null). As etiquetas vêm por ID e são
- * conferidas contra as da organização: id de outra org (ou já apagado) é
- * descartado, senão a conversa guardaria etiqueta que não existe.
+ * NÃO existe responsável próprio da conversa: quem responde pelo chat é o dono
+ * do LEAD daquele contato, calculado na leitura. Marcar de novo aqui criaria
+ * duas verdades pra mesma pergunta e elas iam desencontrar.
+ *
+ * As etiquetas vêm por ID e são conferidas contra as da organização: id de
+ * outra org (ou já apagado) é descartado, senão a conversa guardaria etiqueta
+ * que não existe.
  */
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
-import { MAX_LABELS_PER_CHAT } from '@/lib/whatsapp/labels';
+import {
+  isColunaLabelIdsAusente,
+  isTabelaAusente,
+  MAX_LABELS_PER_CHAT,
+} from '@/lib/whatsapp/labels';
 
 export const runtime = 'nodejs';
 
@@ -27,75 +35,65 @@ export async function PATCH(req: Request, ctx: Ctx) {
   const { id } = await ctx.params;
   const orgId = auth.user.organizationId;
 
-  let body: { assignedOwnerId?: unknown; tags?: unknown };
+  // `null` e `[1,2]` são JSON VÁLIDOS: req.json() resolve e o catch não pega.
+  // Sem esta conferência, `'labelIds' in body` estoura TypeError e a rota
+  // devolve 500 em vez do 400 previsto.
+  let body: unknown;
   try {
     body = await req.json();
   } catch {
     return json({ error: 'JSON inválido' }, 400);
   }
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return json({ error: 'JSON inválido' }, 400);
+  }
+  const corpo = body as { labelIds?: unknown };
 
-  const patch: Record<string, unknown> = {};
+  if (!('labelIds' in corpo)) return json({ error: 'Nada para alterar' }, 400);
+  if (!Array.isArray(corpo.labelIds)) return json({ error: 'Etiquetas devem ser uma lista' }, 400);
 
-  if ('assignedOwnerId' in body) {
-    const valor = body.assignedOwnerId;
-    if (valor === null || valor === '') {
-      patch.assigned_owner_id = null;
-    } else if (typeof valor === 'string') {
-      // Mesma regra de membresia do resto do CRM: vínculo explícito em
-      // user_organizations OU perfil (não super admin) com esta org ativa.
-      // Super admin da agência sem vínculo resolve o nome mas não assume
-      // conversa — ver /api/org/members.
-      const [{ data: vinculo }, { data: perfil }] = await Promise.all([
-        auth.admin
-          .from('user_organizations')
-          .select('user_id')
-          .eq('organization_id', orgId)
-          .eq('user_id', valor)
-          .maybeSingle(),
-        auth.admin.from('profiles').select('id, role, organization_id').eq('id', valor).maybeSingle(),
-      ]);
-      const p = perfil as { role?: string; organization_id?: string } | null;
-      const ehMembro = !!vinculo || (!!p && p.role !== 'super_admin' && p.organization_id === orgId);
-      if (!ehMembro) return json({ error: 'Responsável não é membro desta organização' }, 400);
-      patch.assigned_owner_id = valor;
-    } else {
-      return json({ error: 'Responsável inválido' }, 400);
-    }
+  const pedidos = Array.from(
+    new Set(corpo.labelIds.filter((v): v is string => typeof v === 'string' && !!v))
+  );
+  // Recusa em vez de cortar em silêncio: a tela dizia "salvo" e o banco
+  // guardava menos etiquetas do que a pessoa tinha marcado.
+  if (pedidos.length > MAX_LABELS_PER_CHAT) {
+    return json({ error: `Máximo de ${MAX_LABELS_PER_CHAT} etiquetas por conversa` }, 400);
   }
 
-  if ('labelIds' in body) {
-    if (!Array.isArray(body.labelIds)) return json({ error: 'Etiquetas devem ser uma lista' }, 400);
-    const pedidos = Array.from(
-      new Set(body.labelIds.filter((v): v is string => typeof v === 'string' && !!v))
-    ).slice(0, MAX_LABELS_PER_CHAT);
-
-    if (pedidos.length === 0) {
-      patch.label_ids = [];
-    } else {
-      // Só ids que são etiquetas DESTA organização.
-      const { data: validas, error: erroLabels } = await auth.admin
-        .from('wa_labels')
-        .select('id')
-        .eq('organization_id', orgId)
-        .in('id', pedidos);
-      if (erroLabels) return json({ error: erroLabels.message }, 500);
-      const existentes = new Set((validas ?? []).map(l => l.id as string));
-      patch.label_ids = pedidos.filter(id => existentes.has(id));
+  let labelIds: string[] = [];
+  if (pedidos.length > 0) {
+    // Só ids que são etiquetas DESTA organização.
+    const { data: validas, error: erroLabels } = await auth.admin
+      .from('wa_labels')
+      .select('id')
+      .eq('organization_id', orgId)
+      .in('id', pedidos);
+    if (erroLabels) {
+      if (isTabelaAusente(erroLabels)) {
+        return json({ error: 'As etiquetas ainda não foram liberadas neste ambiente. Fale com o suporte.' }, 503);
+      }
+      return json({ error: erroLabels.message }, 500);
     }
+    const existentes = new Set((validas ?? []).map(l => l.id as string));
+    labelIds = pedidos.filter(x => existentes.has(x));
   }
-
-  if (Object.keys(patch).length === 0) return json({ error: 'Nada para alterar' }, 400);
 
   const { data, error } = await auth.admin
     .from('wa_conversations')
-    .update(patch)
+    .update({ label_ids: labelIds })
     .eq('organization_id', orgId)
     .eq('id', id)
-    .select('id, assigned_owner_id, label_ids')
+    .select('id, label_ids')
     .maybeSingle();
-  if (error) return json({ error: error.message }, 500);
+
+  if (error) {
+    if (isColunaLabelIdsAusente(error)) {
+      return json({ error: 'As etiquetas ainda não foram liberadas neste ambiente. Fale com o suporte.' }, 503);
+    }
+    return json({ error: error.message }, 500);
+  }
   if (!data) return json({ error: 'Conversa não encontrada' }, 404);
 
   return json({ ok: true, conversation: data });
 }
-

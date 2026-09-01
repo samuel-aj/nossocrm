@@ -1,5 +1,6 @@
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { getConnectionByOrg, getWaGroupsEnabled } from '@/lib/whatsapp/service';
+import { isColunaLabelIdsAusente } from '@/lib/whatsapp/labels';
 
 export const runtime = 'nodejs';
 
@@ -34,7 +35,7 @@ export async function GET(req: Request) {
   const groupsEnabled = await getWaGroupsEnabled(auth.admin, auth.user.organizationId);
 
   const COLUNAS_BASE =
-    'id, connection_id, wa_phone, wa_name, contact_id, deal_id, last_message_at, last_message_preview, unread_count, is_group, group_jid, participants_count, avatar_path, assigned_owner_id';
+    'id, connection_id, wa_phone, wa_name, contact_id, deal_id, last_message_at, last_message_preview, unread_count, is_group, group_jid, participants_count, avatar_path';
 
   const buscar = async (colunas: string) => {
     let q = auth.admin
@@ -43,14 +44,18 @@ export async function GET(req: Request) {
       .eq('organization_id', auth.user.organizationId);
     if (connectionId) q = q.eq('connection_id', connectionId);
     if (!groupsEnabled) q = q.eq('is_group', false);
-    return q.order('last_message_at', { ascending: false, nullsFirst: false }).limit(500);
+    // Teto ALTO de propósito: com 500 a maior organização (mais de mil
+    // conversas) perdia as mais antigas da lista, e o que sai da lista não
+    // pode ser etiquetado nem mostra prévia. Assinar avatar não pesa (a maior
+    // base tem menos de 100 fotos). Acima disso o certo é paginar.
+    return q.order('last_message_at', { ascending: false, nullsFirst: false }).limit(2000);
   };
 
   // `label_ids` (etiquetas da conversa) é coluna nova: enquanto a migração
   // não rodar no ambiente, busca sem ela em vez de derrubar a lista inteira —
   // mesmo cuidado que o webhook já tem com colunas recém-criadas.
   let { data, error } = await buscar(`${COLUNAS_BASE}, label_ids`);
-  if (error && /column/i.test(error.message) && /label_ids/i.test(error.message)) {
+  if (isColunaLabelIdsAusente(error)) {
     console.warn('[conversations] coluna label_ids ausente (migração pendente); seguindo sem etiquetas');
     ({ data, error } = await buscar(COLUNAS_BASE));
   }
