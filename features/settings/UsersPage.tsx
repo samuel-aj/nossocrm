@@ -495,12 +495,14 @@ export const UsersPage: React.FC = () => {
                                             </span>
                                         )}
                                         {visRules[user.id] && (
-                                            <EyeOff
-                                                className="h-3.5 w-3.5 text-amber-500 dark:text-amber-400"
+                                            <span
+                                                className="inline-flex items-center gap-0.5 text-amber-500 dark:text-amber-400"
+                                                title="Visualização restrita: este usuário tem permissões de visualização configuradas"
                                                 aria-label="Visualização restrita"
                                             >
-                                                <title>Visualização restrita: este usuário tem permissões de visualização configuradas</title>
-                                            </EyeOff>
+                                                <ShieldCheck className="h-3.5 w-3.5" />
+                                                <EyeOff className="h-3.5 w-3.5" />
+                                            </span>
                                         )}
                                     </div>
                                     <div className="flex items-center gap-3 mt-1.5">
@@ -967,18 +969,21 @@ const VisibilityModal: React.FC<{
                 if (!alive || !res.ok) return;
                 const list = (data?.connections || []) as Array<{
                     id: string;
-                    profile_name?: string | null;
-                    phone_number?: string | null;
+                    profileName?: string | null;
+                    phoneNumber?: string | null;
                     provider?: string | null;
+                    status?: string | null;
                 }>;
                 const providerLabel = (p?: string | null) =>
                     p === 'meta_cloud' ? 'Número via API oficial' : p ? 'Número via QR Code' : 'Número conectado';
+                // TODOS os números da org entram na lista (conectados e caídos);
+                // nome e número vêm da rota em camelCase (phoneNumber/profileName)
                 setConnections(
                     list.map(c => ({
                         id: c.id,
                         label:
-                            [c.profile_name, c.phone_number].filter(Boolean).join(' · ') ||
-                            providerLabel(c.provider),
+                            ([c.profileName, c.phoneNumber].filter(Boolean).join(' · ') || providerLabel(c.provider)) +
+                            (c.status === 'connected' ? '' : ' (desconectado)'),
                     }))
                 );
             } catch {
