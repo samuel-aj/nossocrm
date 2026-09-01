@@ -35,10 +35,6 @@ ALTER TABLE public.wa_conversations
 CREATE INDEX IF NOT EXISTS idx_wa_conversations_label_ids
   ON public.wa_conversations USING GIN (label_ids);
 
--- Filtrar a lista por responsável (o outro filtro da tela) sem varrer tudo.
-CREATE INDEX IF NOT EXISTS idx_wa_conversations_owner
-  ON public.wa_conversations (organization_id, assigned_owner_id);
-
 -- Apagar a etiqueta tira ela das conversas: sem isso ficariam ids órfãos e o
 -- chat mostraria etiqueta que não existe mais.
 CREATE OR REPLACE FUNCTION public.wa_labels_after_delete()
