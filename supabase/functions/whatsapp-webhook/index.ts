@@ -503,6 +503,11 @@ Deno.serve(async (req) => {
       const senderName: string | null = isGroup && !fromMe ? (m.pushName ?? null) : null;
       const { text, mediaType, mediaMime, fileName, skip } = extractContent(m.message);
       if (skip) continue;
+      // Evento SEM conteúdo nenhum (tipo desconhecido, protocolo novo do
+      // WhatsApp): não cria conversa, não grava linha e, principalmente, não
+      // sobrescreve a prévia da conversa com texto vazio — era isso que
+      // deixava chats ativos exibindo "Sem mensagens" na lista.
+      if (!text && !mediaType) continue;
       const ctx = extractContextInfo(m.message);
       const tsRaw = m.messageTimestamp;
       const tsNum = typeof tsRaw === "string" ? parseInt(tsRaw, 10) : tsRaw;
