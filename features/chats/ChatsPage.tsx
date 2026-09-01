@@ -971,8 +971,11 @@ export const ChatsPage: React.FC = () => {
             )}
           </div>
 
-          {/* Filtros da lista, chips estilo WhatsApp: Tudo / Não lidas N / Conversas */}
-          <div className="flex items-center gap-1.5 mt-2.5 overflow-x-auto">
+          {/* Filtros da lista numa linha só: chips (Tudo / Não lidas / Conversas
+              / Grupos) e, ao lado, os menus de Responsável e Etiqueta.
+              SEM overflow-x-auto: ele recorta os menus abertos (era por isso
+              que o dropdown não aparecia). Em tela estreita a linha quebra. */}
+          <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
             {(
               [
                 { id: 'all', label: 'Tudo', title: 'Todas as conversas e contatos' },
@@ -1001,11 +1004,10 @@ export const ChatsPage: React.FC = () => {
                 </button>
               );
             })}
-          </div>
 
-          {/* Filtros por RESPONSÁVEL e por ETIQUETA: menus em vez de chips
-              porque a lista de gente e de etiquetas cresce com o uso. */}
-          <div className="flex items-center gap-1.5 mt-2 overflow-x-auto">
+            {/* Separador entre os chips e os menus (Responsável / Etiqueta) */}
+            <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-slate-200 dark:bg-white/10" />
+
             <div className="relative shrink-0">
               <button
                 type="button"
