@@ -1469,6 +1469,34 @@ export const ChatsPage: React.FC = () => {
                           {(connsList.find(x => x.id === c.connectionId)?.phoneNumber || 'número').replace('+55', '')}
                         </span>
                       )}
+                      {/* Etiquetas JUNTO do nome/número (modelo WhatsApp
+                          Business): no máximo 2 aqui pra não espremer o nome;
+                          o resto vira "+N" com os nomes no title. */}
+                      {(c.labelIds ?? []).slice(0, 2).map(id => {
+                        const l = labelById.get(id);
+                        if (!l) return null;
+                        return (
+                          <span
+                            key={id}
+                            className={`shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold ring-1 ring-inset max-w-[90px] ${LABEL_CHIP_CLASS[l.color]}`}
+                          >
+                            <span className={`w-1.5 h-1.5 shrink-0 rounded-full ${LABEL_DOT_CLASS[l.color]}`} />
+                            <span className="truncate">{l.name}</span>
+                          </span>
+                        );
+                      })}
+                      {(c.labelIds?.length ?? 0) > 2 && (
+                        <span
+                          title={(c.labelIds ?? [])
+                            .slice(2)
+                            .map(id => labelById.get(id)?.name)
+                            .filter(Boolean)
+                            .join(', ')}
+                          className="shrink-0 px-1 py-0.5 rounded text-[9px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-white/10"
+                        >
+                          +{(c.labelIds?.length ?? 0) - 2}
+                        </span>
+                      )}
                     </span>
                     {c.hasConv && (
                       <span className={`text-[10px] shrink-0 ${c.unread > 0 ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-slate-400'}`}>
@@ -1522,27 +1550,6 @@ export const ChatsPage: React.FC = () => {
                       )}
                     </span>
                   </span>
-                  {/* Etiquetas na PRÓPRIA linha: no WhatsApp Business é aqui
-                      que se bate o olho e se sabe o estado de cada atendimento
-                      sem abrir conversa por conversa. São spans, não criam
-                      botão dentro de botão. */}
-                  {(c.labelIds?.length ?? 0) > 0 && (
-                    <span className="flex flex-wrap items-center gap-1 mt-1">
-                      {(c.labelIds ?? []).map(id => {
-                        const l = labelById.get(id);
-                        if (!l) return null;
-                        return (
-                          <span
-                            key={id}
-                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold ring-1 ring-inset ${LABEL_CHIP_CLASS[l.color]}`}
-                          >
-                            <span className={`w-1.5 h-1.5 rounded-full ${LABEL_DOT_CLASS[l.color]}`} />
-                            {l.name}
-                          </span>
-                        );
-                      })}
-                    </span>
-                  )}
                 </span>
               </button>
               {/* Balão do menu da conversa (estilo WhatsApp): `fixed` com a
