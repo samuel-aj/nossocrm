@@ -706,7 +706,7 @@ function origemDaMensagem(
     case 'api':
       return { icone: <Plug size={11} />, rotulo: 'API', dica: 'Enviada por uma integração via API' };
     case 'echo':
-      return { icone: <Smartphone size={11} />, rotulo: 'Celular', dica: 'Enviada pelo WhatsApp do celular ou outro aplicativo' };
+      return { icone: <Smartphone size={11} />, rotulo: 'Dispositivo Externo', dica: 'Enviada pelo WhatsApp do celular ou por outro aplicativo, fora do CRM' };
     case 'crm':
       return { icone: <User size={11} />, rotulo: rotuloCrm, dica: 'Enviada por um atendente pelo CRM' };
     default:
@@ -921,7 +921,7 @@ function MessageBubble({
         )}
         {origem && (
           <p
-            className={`mb-0.5 inline-flex items-center gap-1 text-[10px] font-semibold ${
+            className={`mb-0.5 mr-2.5 inline-flex items-center gap-1 text-[10px] font-semibold ${
               isOut ? 'text-emerald-100/80' : 'text-slate-400'
             }`}
             title={origem.dica}
