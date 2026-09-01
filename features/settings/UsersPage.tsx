@@ -496,11 +496,10 @@ export const UsersPage: React.FC = () => {
                                         )}
                                         {visRules[user.id] && (
                                             <span
-                                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300"
-                                                title="Este usuário tem permissões de visualização configuradas"
+                                                className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-sky-100 text-sky-600 dark:bg-sky-900/30 dark:text-sky-300"
+                                                title="Acesso restrito: este usuário tem permissões de visualização configuradas"
                                             >
                                                 <ShieldCheck className="h-3 w-3" />
-                                                Acesso restrito
                                             </span>
                                         )}
                                     </div>
@@ -954,6 +953,10 @@ const VisibilityModal: React.FC<{
     const [allConns, setAllConns] = useState(base.whatsapp.connection_ids === null);
     const [connIds, setConnIds] = useState<string[]>(base.whatsapp.connection_ids ?? []);
     const [connections, setConnections] = useState<Array<{ id: string; label: string }>>([]);
+    // Conversas visíveis: todas ou só as com alguma das etiquetas escolhidas
+    const [allLabels, setAllLabels] = useState(base.whatsapp.label_ids === null);
+    const [labelIds, setLabelIds] = useState<string[]>(base.whatsapp.label_ids ?? []);
+    const [waLabels, setWaLabels] = useState<Array<{ id: string; name: string }>>([]);
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
@@ -981,6 +984,14 @@ const VisibilityModal: React.FC<{
             } catch {
                 // sem números carregados a seção mostra o aviso de lista vazia
             }
+            try {
+                const res = await fetch('/api/whatsapp/labels', { credentials: 'include' });
+                const data = await res.json().catch(() => null);
+                if (!alive || !res.ok) return;
+                setWaLabels(((data?.labels || []) as Array<{ id: string; name: string }>).map(l => ({ id: l.id, name: l.name })));
+            } catch {
+                // sem etiquetas carregadas a seção mostra o aviso de lista vazia
+            }
         })();
         return () => {
             alive = false;
@@ -1003,12 +1014,16 @@ const VisibilityModal: React.FC<{
             addToast('Escolha ao menos um número.', 'warning');
             return;
         }
+        if (!allLabels && labelIds.length === 0) {
+            addToast('Escolha ao menos uma etiqueta.', 'warning');
+            return;
+        }
         setSaving(true);
         try {
             const rules: VisibilityRules = {
                 deals: { scope, team_user_ids: scope === 'team' ? teamIds : [] },
                 boards: { board_ids: allBoards ? null : boardIds },
-                whatsapp: { connection_ids: allConns ? null : connIds },
+                whatsapp: { connection_ids: allConns ? null : connIds, label_ids: allLabels ? null : labelIds },
             };
             const res = await fetch(`/api/org/visibility/${user.id}`, {
                 method: 'PUT',
@@ -1168,6 +1183,48 @@ const VisibilityModal: React.FC<{
                                 )}
                             </div>
                         )}
+
+                        {/* Conversas visíveis: filtro por etiqueta do chat */}
+                        <div className="mt-4 pt-3 border-t border-slate-100 dark:border-white/5">
+                            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1">Conversas visíveis</p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                                Além do número, dá para limitar por etiqueta: ele só vê conversas que tenham ao menos uma
+                                das etiquetas escolhidas (as etiquetas são as da página Chats).
+                            </p>
+                            <div className="space-y-2">
+                                <label className={OPTION_ROW}>
+                                    <input type="radio" name="vis-labels" className={`${RADIO_CLASS} mt-0.5`} checked={allLabels} onChange={() => setAllLabels(true)} />
+                                    <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">Todas as conversas</span>
+                                </label>
+                                <label className={OPTION_ROW}>
+                                    <input type="radio" name="vis-labels" className={`${RADIO_CLASS} mt-0.5`} checked={!allLabels} onChange={() => setAllLabels(false)} />
+                                    <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">Somente com estas etiquetas</span>
+                                </label>
+                            </div>
+                            {!allLabels && (
+                                <div className="mt-2 rounded-xl border border-slate-200 dark:border-white/10 max-h-44 overflow-y-auto py-1">
+                                    {waLabels.length === 0 ? (
+                                        <p className="px-3 py-3 text-xs text-slate-500">
+                                            Nenhuma etiqueta criada ainda. Crie etiquetas na página Chats (botão Etiquetar).
+                                        </p>
+                                    ) : (
+                                        waLabels.map(l => (
+                                            <CheckRow
+                                                key={l.id}
+                                                checked={labelIds.includes(l.id)}
+                                                onToggle={() => toggle(labelIds, setLabelIds, l.id)}
+                                                label={l.name}
+                                            />
+                                        ))
+                                    )}
+                                    {waLabels.length > 0 && (
+                                        <p className="px-3 py-2 text-[11px] text-amber-600 dark:text-amber-400">
+                                            Atenção: conversa sem nenhuma etiqueta fica invisível para ele.
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+                        </div>
                     </section>
 
                     <p className="text-[11px] text-slate-400 dark:text-slate-500">

@@ -105,6 +105,20 @@ export async function PUT(req: Request, ctx: Ctx) {
     }
   }
 
+  if (rules.whatsapp.label_ids !== null) {
+    if (rules.whatsapp.label_ids.length === 0) {
+      return json({ error: 'Escolha ao menos uma etiqueta (ou deixe "Todas as conversas")' }, 400);
+    }
+    const { data: labels } = await auth.admin
+      .from('wa_labels')
+      .select('id')
+      .eq('organization_id', orgId)
+      .in('id', rules.whatsapp.label_ids);
+    if ((labels ?? []).length !== rules.whatsapp.label_ids.length) {
+      return json({ error: 'Etiqueta não pertence a esta organização' }, 400);
+    }
+  }
+
   // Sem restrição nenhuma: apaga a linha (padrão de sempre = vê tudo)
   if (isUnrestricted(rules)) {
     const { error } = await auth.admin

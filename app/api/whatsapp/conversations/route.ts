@@ -55,6 +55,8 @@ export async function GET(req: Request) {
     if (connectionId) q = q.eq('connection_id', connectionId);
     // Restrição por número: conversa sem número (legada) fica de fora também
     else if (allowedConnIds) q = q.in('connection_id', allowedConnIds);
+    // Restrição por etiqueta: só conversas com AO MENOS UMA das permitidas
+    if (vis?.whatsapp.label_ids) q = q.overlaps('label_ids', vis.whatsapp.label_ids);
     if (!groupsEnabled) q = q.eq('is_group', false);
     // Teto ALTO de propósito: com 500 a maior organização (mais de mil
     // conversas) perdia as mais antigas da lista, e o que sai da lista não

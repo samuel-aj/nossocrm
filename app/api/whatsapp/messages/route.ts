@@ -156,6 +156,17 @@ export async function GET(req: Request) {
     if (!connectionAllowed(vis, group.connection_id ?? null)) {
       return json({ error: 'Grupo não encontrado' }, 404);
     }
+    if (vis?.whatsapp.label_ids) {
+      const { data: gl } = await auth.admin
+        .from('wa_conversations')
+        .select('label_ids')
+        .eq('id', group.id)
+        .maybeSingle();
+      const ids = ((gl as { label_ids?: string[] | null } | null)?.label_ids ?? []) as string[];
+      if (!ids.some(id => vis.whatsapp.label_ids!.includes(id))) {
+        return json({ error: 'Grupo não encontrado' }, 404);
+      }
+    }
     const groupConn = all.find(c => c.id === group.connection_id) ?? null;
     const messages = await loadMessages(auth.admin, [{ id: group.id, connection_id: group.connection_id }]);
     return json({
@@ -202,6 +213,8 @@ export async function GET(req: Request) {
   } else if (vis && vis.whatsapp.connection_ids !== null) {
     convQ = convQ.in('connection_id', vis.whatsapp.connection_ids);
   }
+  // Restrição por etiqueta: conversa sem etiqueta permitida não abre
+  if (vis?.whatsapp.label_ids) convQ = convQ.overlaps('label_ids', vis.whatsapp.label_ids);
   const { data: convList } = await convQ;
 
   const convs = (convList ?? []) as Array<{

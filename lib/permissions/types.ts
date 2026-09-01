@@ -32,15 +32,17 @@ export const VisibilityRulesSchema = z.object({
   whatsapp: z
     .object({
       connection_ids: z.array(z.string().uuid()).max(50).nullable().default(null),
+      /** null = todas as conversas; lista = só conversas com AO MENOS UMA destas etiquetas */
+      label_ids: z.array(z.string().uuid()).max(50).nullable().default(null),
     })
-    .default({ connection_ids: null }),
+    .default({ connection_ids: null, label_ids: null }),
 });
 export type VisibilityRules = z.infer<typeof VisibilityRulesSchema>;
 
 export const DEFAULT_VISIBILITY_RULES: VisibilityRules = {
   deals: { scope: 'all', team_user_ids: [] },
   boards: { board_ids: null },
-  whatsapp: { connection_ids: null },
+  whatsapp: { connection_ids: null, label_ids: null },
 };
 
 /** true quando a regra não restringe nada (aí a linha é apagada em vez de salva). */
@@ -48,7 +50,8 @@ export function isUnrestricted(rules: VisibilityRules): boolean {
   return (
     rules.deals.scope === 'all' &&
     rules.boards.board_ids === null &&
-    rules.whatsapp.connection_ids === null
+    rules.whatsapp.connection_ids === null &&
+    rules.whatsapp.label_ids === null
   );
 }
 
