@@ -35,17 +35,17 @@
   --xy-edge-stroke-selected-default: var(--color-purple-400);
   --xy-connectionline-stroke-default: var(--color-purple-400);
   --xy-handle-background-color-default: var(--color-purple-500);
-  --xy-handle-border-color-default: #0f172a;
+  --xy-handle-border-color-default: var(--color-dark-card);
   --xy-background-color-default: transparent;
-  --xy-background-pattern-dots-color-default: #334155;
-  --xy-minimap-background-color-default: #0f172a;
-  --xy-minimap-mask-background-color-default: rgb(2 6 23 / 0.75);
+  --xy-background-pattern-dots-color-default: var(--color-dark-border);
+  --xy-minimap-background-color-default: var(--color-dark-card);
+  --xy-minimap-mask-background-color-default: color-mix(in srgb, var(--color-dark-bg) 75%, transparent);
   --xy-minimap-mask-stroke-color-default: var(--color-purple-600);
-  --xy-controls-button-background-color-default: #1e293b;
-  --xy-controls-button-background-color-hover-default: #334155;
+  --xy-controls-button-background-color-default: var(--color-dark-card);
+  --xy-controls-button-background-color-hover-default: var(--color-dark-hover);
   --xy-controls-button-color-default: #e2e8f0;
   --xy-controls-button-color-hover-default: #ffffff;
-  --xy-controls-button-border-color-default: #334155;
+  --xy-controls-button-border-color-default: var(--color-dark-border);
   --xy-controls-box-shadow-default: 0 1px 3px rgb(0 0 0 / 0.5);
   --xy-selection-background-color-default: color-mix(in srgb, var(--color-purple-400) 10%, transparent);
   --xy-selection-border-default: 1px dashed var(--color-purple-400);
@@ -85,7 +85,7 @@
   border-style: dashed;
 }
 .wa-bot-canvas.dark .react-flow__handle.wa-handle-loose {
-  background-color: #0f172a;
+  background-color: var(--color-dark-card);
 }
 
 /* Arestas: realce ao passar o mouse. */
@@ -189,7 +189,7 @@
   border-color: #dc2626;
 }
 .react-flow.wa-bot-canvas.dark .wa-edge-disconnect {
-  background: #0f172a;
-  border-color: #475569;
+  background: var(--color-dark-card);
+  border-color: var(--color-dark-border);
   color: #94a3b8;
 }

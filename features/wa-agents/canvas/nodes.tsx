@@ -283,9 +283,9 @@ function TriggerNodeView({ id, data, selected }: NodeProps<TriggerNode>) {
 
   return (
     <div
-      className={`w-[300px] rounded-xl border bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm transition-shadow ${
+      className={`w-[300px] rounded-xl border bg-white dark:bg-dark-card text-slate-900 dark:text-white shadow-sm transition-shadow ${
         selected
-          ? 'border-purple-500 ring-2 ring-purple-500/30 shadow-lg'
+          ? 'border-primary-500 ring-2 ring-primary-500/30 shadow-lg'
           : issue?.errors.length
             ? 'border-red-400 dark:border-red-500/60'
             : 'border-slate-200 dark:border-white/10'
@@ -432,8 +432,8 @@ function BlockRow({
         selected
           ? 'border-purple-500 bg-purple-50/70 dark:bg-purple-900/20'
           : hasError
-            ? 'border-red-300 dark:border-red-500/50 bg-white dark:bg-slate-900'
-            : 'border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 hover:border-purple-300 dark:hover:border-purple-500/50'
+            ? 'border-red-300 dark:border-red-500/50 bg-white dark:bg-dark-card'
+            : 'border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card hover:border-purple-300 dark:hover:border-purple-500/50'
       }`}
       onClick={() => actions.selectBlock(ref)}
       onKeyDown={(e) => {
@@ -645,9 +645,9 @@ function BubbleNodeView({ id, data, selected }: NodeProps<BubbleNode>) {
 
   return (
     <div
-      className={`relative w-[300px] rounded-xl border bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm transition-shadow ${
+      className={`relative w-[300px] rounded-xl border bg-white dark:bg-dark-card text-slate-900 dark:text-white shadow-sm transition-shadow ${
         selected
-          ? 'border-purple-500 ring-2 ring-purple-500/30 shadow-lg'
+          ? 'border-primary-500 ring-2 ring-primary-500/30 shadow-lg'
           : hasError
             ? 'border-red-400 dark:border-red-500/60'
             : 'border-slate-200 dark:border-white/10'

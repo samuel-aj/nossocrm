@@ -1,34 +1,35 @@
 'use client';
 
 /**
- * Configurações → Aparência: modo (claro/escuro/automático) e tema (paleta).
- * A escolha é individual (user_settings) e aplica na hora, para a pessoa ver
- * o resultado antes mesmo de sair da tela. Roxo é o padrão da plataforma;
- * ninguém muda de tema sem escolher aqui.
+ * Aparência (dentro de Configurações → Geral): modo (claro/escuro/automático)
+ * e tema (paleta). Cada tema tem a própria versão clara e escura; a escolha é
+ * individual (user_settings) e aplica na hora. Roxo é o padrão da plataforma.
  */
 import React from 'react';
-import { Check, Monitor, Moon, Sun } from 'lucide-react';
+import { Check, Monitor, Moon, Palette, Sun, SunMoon } from 'lucide-react';
 import { useTheme } from '@/context/ThemeContext';
 import { THEMES, type AppearanceMode, type ThemeDefinition } from '@/lib/theme/themes';
+import { SettingsCard, SettingsHeader } from './SettingsUi';
 
 const MODES: Array<{ value: AppearanceMode; label: string; hint: string; icon: React.ReactNode }> = [
   { value: 'light', label: 'Claro', hint: 'Fundo claro o tempo todo', icon: <Sun size={18} aria-hidden="true" /> },
   { value: 'dark', label: 'Escuro', hint: 'Fundo escuro o tempo todo', icon: <Moon size={18} aria-hidden="true" /> },
-  { value: 'system', label: 'Automático', hint: 'Acompanha o aparelho', icon: <Monitor size={18} aria-hidden="true" /> },
+  { value: 'system', label: 'Sistema', hint: 'Acompanha o aparelho', icon: <Monitor size={18} aria-hidden="true" /> },
 ];
 
 const GROUPS: Array<{ id: ThemeDefinition['group']; label: string; hint: string }> = [
   { id: 'padrao', label: 'Padrão da plataforma', hint: 'O visual original. Quem não escolher nada fica aqui.' },
-  { id: 'mono', label: 'Monocromáticos', hint: 'Preto, branco e grafite. Refinados, sem cor forte de destaque.' },
+  { id: 'mono', label: 'Monocromáticos', hint: 'Preto, branco e grafite, sem cor forte de destaque.' },
   { id: 'cor', label: 'Com cor', hint: 'Fundos neutros e a cor só nos destaques.' },
 ];
+
+const FALLBACK_LIGHT = { bg: '#f8f7f4', surface: '#fcfcfb', muted: '#f1f0ec', border: '#e5e3dd', borderSubtle: '#ecebe6', hover: '#f1f0ec' };
+const FALLBACK_DARK = { bg: '#0d0b14', surface: '#17132a', muted: '#1f1a36', border: '#2e2450', borderSubtle: '#2e2450', hover: '#3b2f65' };
 
 /** Miniatura do CRM no tema (sidebar, cabeçalho, botão, cartão), no modo indicado. */
 function ThemePreview({ theme, dark }: { theme: ThemeDefinition; dark: boolean }) {
   const side = dark ? theme.dark : theme.light;
-  const s = side.surfaces ?? (dark
-    ? { bg: '#0d0b14', surface: '#17132a', muted: '#1f1a36', border: '#2e2450', borderSubtle: '#2e2450', hover: '#3b2f65' }
-    : { bg: '#f8f7f4', surface: '#fcfcfb', muted: '#f1f0ec', border: '#e5e3dd', borderSubtle: '#ecebe6', hover: '#f1f0ec' });
+  const s = side.surfaces ?? (dark ? FALLBACK_DARK : FALLBACK_LIGHT);
   const text = dark ? 'rgba(255,255,255,0.82)' : 'rgba(15,23,42,0.85)';
   const line = dark ? 'rgba(255,255,255,0.16)' : 'rgba(15,23,42,0.12)';
   const accentText = side.accent[dark ? 400 : 600];
@@ -37,16 +38,15 @@ function ThemePreview({ theme, dark }: { theme: ThemeDefinition; dark: boolean }
   const soft = `color-mix(in srgb, ${side.accent[500]} ${dark ? 16 : 12}%, transparent)`;
   return (
     <div
-      className="h-28 w-full overflow-hidden rounded-lg flex"
+      className="h-24 w-full overflow-hidden rounded-lg flex"
       style={{ background: s.bg, border: `1px solid ${s.border}` }}
       aria-hidden="true"
     >
-      <div className="w-10 shrink-0 p-1.5 flex flex-col gap-1.5" style={{ background: s.surface, borderRight: `1px solid ${s.border}` }}>
+      <div className="w-9 shrink-0 p-1.5 flex flex-col gap-1.5" style={{ background: s.surface, borderRight: `1px solid ${s.border}` }}>
         <span className="h-2.5 w-2.5 rounded-md" style={{ background: side.accent[dark ? 400 : 600] }} />
         <span className="h-2 w-full rounded" style={{ background: soft, boxShadow: `inset 2px 0 0 ${accentText}` }} />
         <span className="h-1.5 w-full rounded" style={{ background: line }} />
         <span className="h-1.5 w-full rounded" style={{ background: line }} />
-        <span className="h-1.5 w-2/3 rounded" style={{ background: line }} />
       </div>
       <div className="flex-1 min-w-0 flex flex-col">
         <div className="flex items-center justify-between gap-2 px-2 py-1.5" style={{ borderBottom: `1px solid ${s.border}`, background: s.surface }}>
@@ -62,12 +62,7 @@ function ThemePreview({ theme, dark }: { theme: ThemeDefinition; dark: boolean }
           </div>
           <div className="rounded-md p-1.5 flex flex-col gap-1" style={{ background: s.surface, border: `1px solid ${s.border}` }}>
             <span className="h-1.5 w-3/4 rounded" style={{ background: text, opacity: 0.8 }} />
-            <span className="h-1.5 w-1/2 rounded" style={{ background: line }} />
             <span className="h-1.5 w-1/3 rounded" style={{ background: accentText }} />
-          </div>
-          <div className="flex gap-1">
-            <span className="h-1.5 w-1/4 rounded" style={{ background: soft }} />
-            <span className="h-1.5 w-1/4 rounded" style={{ background: line }} />
           </div>
         </div>
       </div>
@@ -75,15 +70,11 @@ function ThemePreview({ theme, dark }: { theme: ThemeDefinition; dark: boolean }
   );
 }
 
-/** Três tons do tema: fundo, superfície e acento. */
+/** Três tons do tema no modo indicado: fundo, superfície e acento. */
 function Swatches({ theme, dark }: { theme: ThemeDefinition; dark: boolean }) {
   const side = dark ? theme.dark : theme.light;
-  const s = side.surfaces;
-  const tones = [
-    s?.bg ?? (dark ? '#0d0b14' : '#f8f7f4'),
-    s?.surface ?? (dark ? '#17132a' : '#fcfcfb'),
-    side.accent[dark ? 400 : 600],
-  ];
+  const s = side.surfaces ?? (dark ? FALLBACK_DARK : FALLBACK_LIGHT);
+  const tones = [s.bg, s.surface, side.accent[dark ? 400 : 600]];
   return (
     <span className="inline-flex -space-x-1" aria-hidden="true">
       {tones.map((c, i) => (
@@ -97,26 +88,15 @@ function Swatches({ theme, dark }: { theme: ThemeDefinition; dark: boolean }) {
   );
 }
 
-const CARD_CLASS = 'bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl p-6';
-
-export const AppearanceSettings: React.FC = () => {
+export const AppearanceSettings: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const { mode, setMode, theme, setTheme, darkMode } = useTheme();
 
   return (
-    <div className="pb-10 space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold text-slate-900 dark:text-white font-display tracking-tight">Aparência</h1>
-        <p className="text-slate-500 dark:text-slate-400 mt-2 text-lg">
-          Como o CRM aparece para você. Vale só para a sua conta, em qualquer aparelho.
-        </p>
-      </div>
+    <div className={embedded ? 'space-y-6' : 'pb-10 space-y-6'}>
+      {!embedded ? <SettingsHeader title="Aparência" description="Como o CRM aparece para você, em qualquer aparelho." /> : null}
 
-      <section className={CARD_CLASS} aria-labelledby="appearance-mode-title">
-        <h2 id="appearance-mode-title" className="text-base font-semibold text-slate-900 dark:text-white">
-          Modo
-        </h2>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 mb-4">Claro, escuro ou seguindo o aparelho.</p>
-        <div role="radiogroup" aria-label="Modo" className="grid grid-cols-3 gap-2 max-w-xl">
+      <SettingsCard title="Aparência" description="Claro, escuro ou seguindo o aparelho. Vale só para a sua conta." icon={SunMoon}>
+        <div role="radiogroup" aria-label="Aparência" className="grid grid-cols-3 gap-2 max-w-xl">
           {MODES.map((m) => {
             const active = mode === m.value;
             return (
@@ -140,15 +120,13 @@ export const AppearanceSettings: React.FC = () => {
             );
           })}
         </div>
-      </section>
+      </SettingsCard>
 
-      <section className={CARD_CLASS} aria-labelledby="appearance-theme-title">
-        <h2 id="appearance-theme-title" className="text-base font-semibold text-slate-900 dark:text-white">
-          Tema
-        </h2>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 mb-5">
-          A cor de destaque e as superfícies. Sucesso, erro e alerta mantêm as próprias cores em qualquer tema.
-        </p>
+      <SettingsCard
+        title="Tema"
+        description="A identidade visual. Cada tema tem a própria versão clara e escura; sucesso, erro e alerta não mudam."
+        icon={Palette}
+      >
         <div className="space-y-7">
           {GROUPS.map((g) => {
             const items = THEMES.filter((t) => t.group === g.id);
@@ -162,7 +140,6 @@ export const AppearanceSettings: React.FC = () => {
                 <div role="radiogroup" aria-label={g.label} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                   {items.map((t) => {
                     const active = theme === t.id;
-                    const previewDark = t.preferredMode ? t.preferredMode === 'dark' : darkMode;
                     return (
                       <button
                         key={t.id}
@@ -176,11 +153,10 @@ export const AppearanceSettings: React.FC = () => {
                             : 'border-slate-200 dark:border-white/10 hover:border-slate-300 dark:hover:border-white/20 bg-white dark:bg-slate-900/40'
                         }`}
                       >
-                        <ThemePreview theme={t} dark={previewDark} />
+                        <ThemePreview theme={t} dark={darkMode} />
                         <div className="mt-3 flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <p className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-                              <Swatches theme={t} dark={previewDark} />
                               <span className="truncate">{t.name}</span>
                               {t.isDefault ? (
                                 <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
@@ -189,6 +165,14 @@ export const AppearanceSettings: React.FC = () => {
                               ) : null}
                             </p>
                             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{t.description}</p>
+                            <p className="mt-2 flex items-center gap-3 text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                              <span className="inline-flex items-center gap-1.5">
+                                <Swatches theme={t} dark={false} /> Claro
+                              </span>
+                              <span className="inline-flex items-center gap-1.5">
+                                <Swatches theme={t} dark /> Escuro
+                              </span>
+                            </p>
                           </div>
                           <span
                             className={`mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full shrink-0 transition-opacity bg-primary-600 text-white ${
@@ -207,7 +191,7 @@ export const AppearanceSettings: React.FC = () => {
             );
           })}
         </div>
-      </section>
+      </SettingsCard>
     </div>
   );
 };

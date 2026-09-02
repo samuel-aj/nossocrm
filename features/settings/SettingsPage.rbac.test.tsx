@@ -18,6 +18,19 @@ vi.mock('@/context/AuthContext', () => ({
   useAuth: vi.fn(),
 }))
 
+// Aparência (dentro de Geral) lê o tema do ThemeContext (sem provider no teste).
+vi.mock('@/context/ThemeContext', () => ({
+  useTheme: () => ({
+    darkMode: false,
+    toggleDarkMode: vi.fn(),
+    mode: 'light',
+    setMode: vi.fn(),
+    theme: 'roxo',
+    setTheme: vi.fn(),
+    applyServerPrefs: vi.fn(),
+  }),
+}))
+
 vi.mock('@/context/ToastContext', () => ({
   useToast: () => ({ addToast: vi.fn(), showToast: vi.fn() }),
 }))
@@ -113,7 +126,8 @@ describe('SettingsPage RBAC', () => {
 
     // Preferências pessoais seguem visíveis
     expect(screen.getByText(/página inicial/i)).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: /aparência/i })).toBeInTheDocument()
+    // Aparência mora dentro de Geral
+    expect(screen.getByRole('heading', { name: /^Aparência$/i })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /ia e automações/i })).toBeInTheDocument()
   })
 

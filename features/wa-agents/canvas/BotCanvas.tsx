@@ -182,7 +182,7 @@ export function BotCanvas({
         <MiniMap pannable zoomable nodeColor={minimapNodeColor} nodeStrokeWidth={0} ariaLabel="Mapa do quadro" />
       ) : null}
 
-      <Panel position="top-right" className="flex items-center gap-0.5 p-1 rounded-lg bg-white/95 dark:bg-slate-900/95 backdrop-blur border border-slate-200 dark:border-white/10 shadow">
+      <Panel position="top-right" className="flex items-center gap-0.5 p-1 rounded-lg bg-white/95 dark:bg-dark-card/95 backdrop-blur border border-slate-200 dark:border-white/10 shadow">
         <button
           type="button"
           className={TOOL_BTN}
@@ -231,7 +231,7 @@ export function BotCanvas({
 
       {empty ? (
         <Panel position="top-center" className="pointer-events-none mt-3">
-          <div className="pointer-events-auto max-w-xs px-4 py-3 rounded-xl border border-dashed border-purple-300 dark:border-purple-500/50 bg-white/95 dark:bg-slate-900/95 backdrop-blur shadow text-center">
+          <div className="pointer-events-auto max-w-xs px-4 py-3 rounded-xl border border-dashed border-purple-300 dark:border-purple-500/50 bg-white/95 dark:bg-dark-card/95 backdrop-blur shadow text-center">
             <p className="text-sm font-medium text-slate-800 dark:text-white">O quadro está vazio</p>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               Arraste um bloco da paleta ou clique em + para começar. O primeiro balão já sai ligado ao gatilho.

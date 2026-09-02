@@ -23,9 +23,9 @@ import {
   LEGACY_DARK_KEY,
   MODE_STORAGE_KEY,
   THEME_STORAGE_KEY,
-  getTheme,
   isAppearanceMode,
   isThemeId,
+  normalizeThemeId,
   type AppearanceMode,
   type ThemeId,
 } from '@/lib/theme/themes';
@@ -79,7 +79,7 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [systemDark, setSystemDark] = React.useState<boolean>(true);
 
   const mode: AppearanceMode = modeStored ?? (legacyDark ? 'dark' : 'light');
-  const theme: ThemeId = isThemeId(themeStored) ? themeStored : DEFAULT_THEME;
+  const theme: ThemeId = normalizeThemeId(themeStored);
   const darkMode = mode === 'system' ? systemDark : mode === 'dark';
 
   // Acompanha a preferência do sistema (só importa no modo "sistema").
@@ -123,27 +123,18 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const setTheme = useCallback(
     (next: ThemeId) => {
-      const value = isThemeId(next) ? next : DEFAULT_THEME;
+      const value = normalizeThemeId(next);
       setThemeStored(value);
-      // Tema "escuro por natureza" (Preto) ou "claro" (Branco) leva a aparência junto;
-      // a pessoa pode trocar a aparência depois e o tema se adapta.
-      const preferred = getTheme(value).preferredMode;
-      if (preferred) {
-        setModeStored(preferred);
-        setLegacyDark(preferred === 'dark');
-        changeListener?.({ theme: value, mode: preferred });
-        return;
-      }
       changeListener?.({ theme: value });
     },
-    [setThemeStored, setModeStored, setLegacyDark]
+    [setThemeStored]
   );
 
   const toggleDarkMode = useCallback(() => setMode(darkMode ? 'light' : 'dark'), [darkMode, setMode]);
 
   const applyServerPrefs = useCallback(
     (prefs: { theme: ThemeId | null; mode: AppearanceMode | null }) => {
-      if (prefs.theme && isThemeId(prefs.theme)) setThemeStored(prefs.theme);
+      if (prefs.theme) setThemeStored(normalizeThemeId(prefs.theme));
       if (prefs.mode && isAppearanceMode(prefs.mode)) {
         setModeStored(prefs.mode);
         if (prefs.mode !== 'system') setLegacyDark(prefs.mode === 'dark');

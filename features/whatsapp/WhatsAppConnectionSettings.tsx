@@ -8,6 +8,7 @@
  * escolher por qual número enviar). QR (Baileys) segue 1 por org. Super admin
  * vê sempre as conexões da organização ATIVA — cada cliente tem as suas.
  */
+import { CopyId } from '@/components/ui/CopyId';
 import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -1092,25 +1093,7 @@ export function WhatsAppConnectionSettings() {
                             Reconfigurar webhook
                           </button>
                         )}
-                        {rowIdVisible && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void navigator.clipboard.writeText(c.id).then(
-                                () => addToast('Connection ID copiado. É o connection_id do n8n/agente de IA.', 'success'),
-                                () => addToast(`Connection ID: ${c.id}`, 'info')
-                              );
-                            }}
-                            title={
-                              rowEditable
-                                ? `ID desta conexão para integrações (n8n, agente de IA). Clique pra copiar: ${c.id}`
-                                : `ID desta conexão para integrações (n8n, agente de IA). Para receber em outro sistema as mensagens já tratadas pelo CRM, use Configurações > Integrações > Webhooks (Follow-up), eventos whatsapp.message.received e whatsapp.message.sent, e filtre por connection.id. Clique pra copiar: ${c.id}`
-                            }
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 text-xs font-bold hover:bg-slate-50 dark:hover:bg-white/10 transition-colors"
-                          >
-                            <Copy size={14} /> ID da conexão <span className="font-mono font-normal">{c.id.slice(0, 8)}…</span>
-                          </button>
-                        )}
+                        {rowIdVisible && <CopyId value={c.id} label="ID do WhatsApp" />}
                         {rowMirrorVisible && (
                           <button
                             type="button"

@@ -8,9 +8,9 @@
  * classe nenhuma. As cores semânticas (verde de sucesso, vermelho de erro,
  * âmbar de alerta, azul de informação) não são tocadas.
  *
- * Cada tema tem um lado claro e um lado escuro; alguns "preferem" um modo
- * (Preto é escuro, Branco é claro) e ao serem escolhidos levam a aparência
- * junto, mas a pessoa pode trocar a aparência depois e o tema se adapta.
+ * Aparência (claro/escuro/sistema) e tema são independentes: cada tema tem a
+ * própria versão clara e escura. Grafite + Claro = branco e cinza claro com
+ * detalhes grafite; Grafite + Escuro = preto e grafite com detalhes claros.
  *
  * O tema "roxo" é a identidade da plataforma e o padrão de todo mundo: ele
  * não emite CSS nenhum (fica exatamente o visual atual).
@@ -19,9 +19,20 @@
  * prévias da tela de Aparência.
  */
 
-export const THEME_IDS = ['roxo', 'preto', 'preto-branco', 'grafite', 'branco', 'branco-preto', 'midnight', 'azul'] as const;
+export const THEME_IDS = ['roxo', 'grafite', 'mono', 'midnight', 'azul'] as const;
 export type ThemeId = (typeof THEME_IDS)[number];
 export const DEFAULT_THEME: ThemeId = 'roxo';
+
+/** Ids de temas antigos (separados por luminosidade) que viraram um tema só. */
+export const LEGACY_THEME_IDS: Record<string, ThemeId> = {
+  preto: 'grafite',
+  branco: 'grafite',
+  'preto-branco': 'mono',
+  'branco-preto': 'mono',
+  esmeralda: 'azul',
+  ambar: 'roxo',
+  rosa: 'roxo',
+};
 
 export const APPEARANCE_MODES = ['light', 'dark', 'system'] as const;
 export type AppearanceMode = (typeof APPEARANCE_MODES)[number];
@@ -34,6 +45,12 @@ export const LEGACY_DARK_KEY = 'crm_dark_mode';
 
 export function isThemeId(v: unknown): v is ThemeId {
   return typeof v === 'string' && (THEME_IDS as readonly string[]).includes(v);
+}
+/** Tema válido a partir de qualquer valor salvo (ids antigos são convertidos; o resto vira o padrão). */
+export function normalizeThemeId(v: unknown): ThemeId {
+  if (isThemeId(v)) return v;
+  if (typeof v === 'string' && v in LEGACY_THEME_IDS) return LEGACY_THEME_IDS[v];
+  return DEFAULT_THEME;
 }
 export function isAppearanceMode(v: unknown): v is AppearanceMode {
   return typeof v === 'string' && (APPEARANCE_MODES as readonly string[]).includes(v);
@@ -65,8 +82,6 @@ export type ThemeDefinition = {
   name: string;
   description: string;
   group: 'padrao' | 'mono' | 'cor';
-  /** Ao escolher o tema, a aparência vai para este modo (a pessoa pode trocar depois) */
-  preferredMode?: 'light' | 'dark';
   light: ThemeSide;
   dark: ThemeSide;
   /**
@@ -94,7 +109,7 @@ const NEUTRAL_GRAYS: Scale = {
 };
 
 // ---------------------------------------------------------------------------
-// Escalas neutras
+// Escalas de acento
 // ---------------------------------------------------------------------------
 
 /** Acento grafite para fundo claro (botões grafite com texto branco). */
@@ -160,21 +175,6 @@ const WHITE_DARK: Scale = {
   950: '#1c1c21',
 };
 
-/** Acento prateado para fundo grafite (botões prata com texto escuro). */
-const SILVER_SOFT_DARK: Scale = {
-  50: '#fafafa',
-  100: '#f4f4f5',
-  200: '#e4e4e7',
-  300: '#dcdce0',
-  400: '#d4d4d8',
-  500: '#b9b9c0',
-  600: '#a1a1aa',
-  700: '#8e8e98',
-  800: '#3f3f47',
-  900: '#2e2e34',
-  950: '#1f1f24',
-};
-
 const BLUE: Scale = {
   50: '#eff6ff',
   100: '#dbeafe',
@@ -238,16 +238,6 @@ const PURE_BLACK_SURFACES: Surfaces = {
   hover: '#1c1c1c',
 };
 
-/** Escuro grafite: mais suave que o preto, vários níveis de cinza. */
-const GRAPHITE_SURFACES: Surfaces = {
-  bg: '#17171a',
-  surface: '#212125',
-  muted: '#2a2a2f',
-  border: '#35353b',
-  borderSubtle: 'rgba(255,255,255,0.06)',
-  hover: '#2e2e34',
-};
-
 /** Escuro neutro para os temas coloridos (a cor fica só nos destaques). */
 const NEUTRAL_DARK_SURFACES: Surfaces = {
   bg: '#0b0b0e',
@@ -272,6 +262,20 @@ const MIDNIGHT_SURFACES: Surfaces = {
 // Temas
 // ---------------------------------------------------------------------------
 
+const ROXO_ACCENT: Scale = {
+  50: '#f5f3ff',
+  100: '#ede9fe',
+  200: '#ddd6fe',
+  300: '#c4b5fd',
+  400: '#a78bfa',
+  500: '#8b5cf6',
+  600: '#7c3aed',
+  700: '#6d28d9',
+  800: '#5b21b6',
+  900: '#4c1d95',
+  950: '#2e1065',
+};
+
 export const THEMES: ThemeDefinition[] = [
   {
     id: 'roxo',
@@ -280,94 +284,37 @@ export const THEMES: ThemeDefinition[] = [
     group: 'padrao',
     isDefault: true,
     light: {
-      accent: {
-        50: '#f5f3ff',
-        100: '#ede9fe',
-        200: '#ddd6fe',
-        300: '#c4b5fd',
-        400: '#a78bfa',
-        500: '#8b5cf6',
-        600: '#7c3aed',
-        700: '#6d28d9',
-        800: '#5b21b6',
-        900: '#4c1d95',
-        950: '#2e1065',
-      },
+      accent: ROXO_ACCENT,
       surfaces: { bg: '#f8f7f4', surface: '#fcfcfb', muted: '#f1f0ec', border: '#e5e3dd', borderSubtle: '#ecebe6', hover: '#f1f0ec' },
     },
     dark: {
-      accent: {
-        50: '#f5f3ff',
-        100: '#ede9fe',
-        200: '#ddd6fe',
-        300: '#c4b5fd',
-        400: '#a78bfa',
-        500: '#8b5cf6',
-        600: '#7c3aed',
-        700: '#6d28d9',
-        800: '#5b21b6',
-        900: '#4c1d95',
-        950: '#2e1065',
-      },
+      accent: ROXO_ACCENT,
       surfaces: { bg: '#0d0b14', surface: '#17132a', muted: '#1f1a36', border: '#2e2450', borderSubtle: 'rgba(120,100,180,0.25)', hover: '#3b2f65' },
     },
   },
   {
-    id: 'preto',
-    neutralGrays: true,
-    name: 'Preto',
-    description: 'Quase preto, cartões grafite, destaques em cinza claro.',
-    group: 'mono',
-    preferredMode: 'dark',
-    light: { accent: GRAPHITE_LIGHT, surfaces: WHITE_SURFACES },
-    dark: { accent: SILVER_DARK, surfaces: BLACK_SURFACES },
-  },
-  {
-    id: 'preto-branco',
-    neutralGrays: true,
-    name: 'Preto & Branco',
-    description: 'Preto puro com o branco como cor principal.',
-    group: 'mono',
-    preferredMode: 'dark',
-    light: { accent: INK_LIGHT, surfaces: WHITE_SURFACES },
-    dark: { accent: WHITE_DARK, onAccent: '#0a0a0a', surfaces: PURE_BLACK_SURFACES },
-  },
-  {
     id: 'grafite',
-    neutralGrays: true,
     name: 'Grafite',
-    description: 'Cinzas em camadas e acento prateado.',
+    description: 'Claro: branco com detalhes grafite. Escuro: preto e grafite com detalhes claros.',
     group: 'mono',
-    preferredMode: 'dark',
-    light: { accent: GRAPHITE_LIGHT, surfaces: WHITE_SURFACES },
-    dark: { accent: SILVER_SOFT_DARK, onAccent: '#0f0f12', surfaces: GRAPHITE_SURFACES },
-  },
-  {
-    id: 'branco',
     neutralGrays: true,
-    name: 'Branco',
-    description: 'Branco limpo, texto grafite, bordas sutis.',
-    group: 'mono',
-    preferredMode: 'light',
     light: { accent: GRAPHITE_LIGHT, surfaces: WHITE_SURFACES },
     dark: { accent: SILVER_DARK, surfaces: BLACK_SURFACES },
   },
   {
-    id: 'branco-preto',
-    neutralGrays: true,
-    name: 'Branco & Preto',
-    description: 'Branco com botões e seleções em preto.',
+    id: 'mono',
+    name: 'Preto & Branco',
+    description: 'Contraste alto: botões pretos no claro, brancos no escuro.',
     group: 'mono',
-    preferredMode: 'light',
+    neutralGrays: true,
     light: { accent: INK_LIGHT, surfaces: { ...WHITE_SURFACES, border: '#dedee2' } },
     dark: { accent: WHITE_DARK, onAccent: '#0a0a0a', surfaces: PURE_BLACK_SURFACES },
   },
   {
     id: 'midnight',
     name: 'Midnight',
-    description: 'Azul-marinho profundo com acento azul suave.',
+    description: 'Azul suave nos destaques; escuro em azul-marinho.',
     group: 'cor',
-    preferredMode: 'dark',
     light: { accent: MIDNIGHT_ACCENT, surfaces: WHITE_SURFACES },
     dark: { accent: MIDNIGHT_ACCENT, surfaces: MIDNIGHT_SURFACES },
   },
@@ -465,4 +412,4 @@ export function buildThemeCss(): string {
  * localStorage e aplica `data-theme` e a classe `dark` no <html>. Sem ele a
  * página abriria roxa/escura por um instante para quem escolheu outro visual.
  */
-export const THEME_INIT_SCRIPT = `(function(){try{var r=document.documentElement;function g(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}}var t=g(${JSON.stringify(THEME_STORAGE_KEY)});if(typeof t==='string'&&t!==${JSON.stringify(DEFAULT_THEME)}&&${JSON.stringify(THEME_IDS)}.indexOf(t)>=0){r.setAttribute('data-theme',t)}var m=g(${JSON.stringify(MODE_STORAGE_KEY)});var d=g(${JSON.stringify(LEGACY_DARK_KEY)});var dark;if(m==='system'){dark=window.matchMedia('(prefers-color-scheme: dark)').matches}else if(m==='light'){dark=false}else if(m==='dark'){dark=true}else{dark=(d===null||d===undefined)?true:!!d}r.classList.toggle('dark',dark)}catch(e){}})();`;
+export const THEME_INIT_SCRIPT = `(function(){try{var r=document.documentElement;function g(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}}var L=${JSON.stringify(LEGACY_THEME_IDS)};var t=g(${JSON.stringify(THEME_STORAGE_KEY)});if(typeof t==='string'&&L[t]){t=L[t]}if(typeof t==='string'&&t!==${JSON.stringify(DEFAULT_THEME)}&&${JSON.stringify(THEME_IDS)}.indexOf(t)>=0){r.setAttribute('data-theme',t)}var m=g(${JSON.stringify(MODE_STORAGE_KEY)});var d=g(${JSON.stringify(LEGACY_DARK_KEY)});var dark;if(m==='system'){dark=window.matchMedia('(prefers-color-scheme: dark)').matches}else if(m==='light'){dark=false}else if(m==='dark'){dark=true}else{dark=(d===null||d===undefined)?true:!!d}r.classList.toggle('dark',dark)}catch(e){}})();`;

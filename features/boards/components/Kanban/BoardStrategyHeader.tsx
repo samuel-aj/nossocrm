@@ -130,14 +130,14 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
     // aparecendo quando aberto.
     <div className={`relative mb-4 group/header z-20 ${isEditing ? '' : 'max-md:hidden'}`}>
       {/* Background Glow Effect (Subtle) */}
-      <div className="absolute -inset-1 bg-gradient-to-r from-blue-500/5 via-purple-500/5 to-orange-500/5 rounded-xl blur-xl opacity-50 group-hover/header:opacity-100 transition-opacity duration-700"></div>
+      <div className="absolute -inset-1 bg-gradient-to-r from-primary-500/5 via-transparent to-primary-500/5 rounded-xl blur-xl opacity-50 group-hover/header:opacity-100 transition-opacity duration-700"></div>
 
-      <div className="relative px-5 py-3 bg-white dark:bg-[#0B1120] rounded-lg border border-slate-100 dark:border-white/5 shadow-sm transition-all duration-300 hover:shadow-md">
+      <div className="relative px-5 py-3 bg-white dark:bg-dark-card rounded-lg border border-slate-100 dark:border-white/5 shadow-sm transition-all duration-300 hover:shadow-md">
         {/* Edit Button - Only visible on hover */}
         {!isEditing && (
           <button
             onClick={() => setIsEditing(true)}
-            className="absolute top-2 right-2 p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded-full transition-all opacity-0 group-hover/header:opacity-100"
+            className="absolute top-2 right-2 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-white/10 rounded-full transition-all opacity-0 group-hover/header:opacity-100"
             title="Editar Estratégia"
           >
             <Edit2 size={12} />
@@ -173,7 +173,7 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
                 </button>
                 <button
                   onClick={handleSave}
-                  className="px-4 py-1.5 bg-slate-900 dark:bg-white text-white dark:text-black text-xs font-bold rounded-lg hover:shadow-lg hover:-translate-y-0.5 transition-all"
+                  className="px-4 py-1.5 bg-primary-600 hover:bg-primary-700 text-white text-xs font-bold rounded-lg transition-colors"
                 >
                   Salvar Alterações
                 </button>
@@ -188,7 +188,7 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
                 </label>
                 <div className="relative">
                   <textarea
-                    className="w-full h-24 bg-slate-50 dark:bg-white/5 rounded-xl p-4 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500/20 resize-none leading-relaxed border border-slate-200 dark:border-white/5 transition-all"
+                    className="w-full h-24 bg-slate-50 dark:bg-white/5 rounded-xl p-4 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500/20 resize-none leading-relaxed border border-slate-200 dark:border-white/5 transition-all"
                     placeholder="Descreva as regras para a IA: Quem deve entrar aqui? Quais critérios de qualidade? (ex: Apenas leads B2B com budget > 50k)"
                     value={editedBoard.entryTrigger || ''}
                     onChange={e => setEditedBoard({ ...editedBoard, entryTrigger: e.target.value })}
@@ -209,7 +209,7 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
 
                   {/* KPI Inputs */}
                   <div className="flex gap-4">
-                    <div className="flex-1 bg-slate-50 dark:bg-white/5 rounded-xl p-3 border border-slate-200 dark:border-white/5 focus-within:ring-2 focus-within:ring-blue-500/20 transition-all">
+                    <div className="flex-1 bg-slate-50 dark:bg-white/5 rounded-xl p-3 border border-slate-200 dark:border-white/5 focus-within:ring-2 focus-within:ring-primary-500/20 transition-all">
                       <div className="flex items-center gap-2 mb-1">
                         <input
                           className="flex-1 bg-transparent text-xl font-bold text-slate-900 dark:text-white placeholder:text-slate-300 dark:placeholder:text-slate-700 focus:outline-none"
@@ -223,7 +223,7 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
                           }
                         />
                         <select
-                          className="bg-transparent text-[10px] font-bold uppercase text-slate-400 focus:text-blue-500 focus:outline-none cursor-pointer"
+                          className="bg-transparent text-[10px] font-bold uppercase text-slate-400 focus:text-primary-500 focus:outline-none cursor-pointer"
                           value={editedBoard.goal?.type || 'number'}
                           onChange={e =>
                             setEditedBoard({
@@ -241,7 +241,7 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
                         </select>
                       </div>
                       <input
-                        className="w-full bg-transparent text-xs font-medium text-slate-500 focus:text-blue-600 focus:outline-none transition-colors border-b border-transparent focus:border-blue-200 pb-0.5"
+                        className="w-full bg-transparent text-xs font-medium text-slate-500 focus:text-primary-600 focus:outline-none transition-colors border-b border-transparent focus:border-primary-300 pb-0.5"
                         placeholder="Nome do KPI"
                         value={editedBoard.goal?.kpi || ''}
                         onChange={e =>
@@ -267,7 +267,7 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
 
                   {/* Goal Context */}
                   <textarea
-                    className="w-full h-24 bg-transparent border border-slate-200 dark:border-white/10 rounded-lg p-3 text-xs text-slate-600 dark:text-slate-300 focus:outline-none focus:border-blue-500/50 resize-none transition-all"
+                    className="w-full h-24 bg-transparent border border-slate-200 dark:border-white/10 rounded-lg p-3 text-xs text-slate-600 dark:text-slate-300 focus:outline-none focus:border-primary-500/50 resize-none transition-all"
                     placeholder="Por que essa meta existe? Qual o contexto estratégico?"
                     value={editedBoard.goal?.description || ''}
                     onChange={e =>
@@ -290,7 +290,7 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
                     <div className="space-y-1">
                       <label className="text-[10px] text-slate-400 font-medium">Nome</label>
                       <input
-                        className="w-full bg-transparent border-b border-slate-200 dark:border-white/10 py-1 text-sm font-bold text-slate-900 dark:text-white focus:outline-none focus:border-purple-500 transition-colors placeholder:text-slate-300"
+                        className="w-full bg-transparent border-b border-slate-200 dark:border-white/10 py-1 text-sm font-bold text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors placeholder:text-slate-300"
                         placeholder="Ex: Ana"
                         value={editedBoard.agentPersona?.name || ''}
                         onChange={e =>
@@ -304,7 +304,7 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
                     <div className="space-y-1">
                       <label className="text-[10px] text-slate-400 font-medium">Cargo</label>
                       <input
-                        className="w-full bg-transparent border-b border-slate-200 dark:border-white/10 py-1 text-xs text-slate-500 focus:outline-none focus:border-purple-500 transition-colors placeholder:text-slate-300"
+                        className="w-full bg-transparent border-b border-slate-200 dark:border-white/10 py-1 text-xs text-slate-500 focus:outline-none focus:border-primary-500 transition-colors placeholder:text-slate-300"
                         placeholder="Ex: Vendedora"
                         value={editedBoard.agentPersona?.role || ''}
                         onChange={e =>
@@ -319,7 +319,7 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
 
                   {/* Agent Behavior */}
                   <textarea
-                    className="w-full h-24 bg-transparent border border-slate-200 dark:border-white/10 rounded-lg p-3 text-xs text-slate-600 dark:text-slate-300 focus:outline-none focus:border-purple-500/50 resize-none transition-all"
+                    className="w-full h-24 bg-transparent border border-slate-200 dark:border-white/10 rounded-lg p-3 text-xs text-slate-600 dark:text-slate-300 focus:outline-none focus:border-primary-500/50 resize-none transition-all"
                     placeholder="Como o agente deve agir? (Tom de voz, postura...)"
                     value={editedBoard.agentPersona?.behavior || ''}
                     onChange={e =>
@@ -336,11 +336,12 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
         ) : (
           // --- VIEW MODE (Compact & Premium) ---
           <>
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
-              {/* GOAL (Hero Section) - Spans 4 cols */}
-              <div className="md:col-span-4 flex flex-col justify-center border-r border-slate-100 dark:border-white/5 pr-6 relative">
+            <div className="flex flex-col md:flex-row gap-6 md:items-center">
+              {/* GOAL (Hero Section) */}
+              {board.goal && (
+              <div className="md:flex-[4] md:min-w-0 flex flex-col justify-center md:border-r border-slate-100 dark:border-white/5 md:pr-6 relative last:border-r-0 last:pr-0">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="flex h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse"></span>
+                  <span className="flex h-1.5 w-1.5 rounded-full bg-primary-500 animate-pulse"></span>
                   <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400">
                     Objetivo
                   </span>
@@ -358,29 +359,31 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
                 {/* Sleek Progress Bar */}
                 <div className="relative h-1 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden mb-1">
                   <div
-                    className="absolute top-0 left-0 h-full bg-gradient-to-r from-blue-600 to-blue-400 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.5)] transition-all duration-1000 ease-out"
+                    className="absolute top-0 left-0 h-full bg-gradient-to-r from-primary-600 to-primary-400 rounded-full transition-all duration-1000 ease-out"
                     style={{ width: `${progress}% ` }}
                   ></div>
                 </div>
                 <div className="flex justify-between text-[9px] font-medium text-slate-400 uppercase tracking-wider">
                   <span>{calculatedProgress.display} Concluído</span>
                   <div className="group/goal relative cursor-help">
-                    <span className="border-b border-dotted border-slate-600 hover:text-blue-400 transition-colors">
+                    <span className="border-b border-dotted border-slate-600 hover:text-primary-500 transition-colors">
                       Detalhes
                     </span>
                     {/* Tooltip for Goal Description */}
-                    <div className="absolute left-0 top-full mt-2 hidden group-hover/goal:block w-80 p-4 bg-slate-900 text-slate-300 text-xs rounded-lg shadow-2xl z-[100] border border-slate-700 max-h-64 overflow-y-auto">
+                    <div className="absolute left-0 top-full mt-2 hidden group-hover/goal:block w-80 p-4 bg-slate-900 dark:bg-dark-card text-slate-200 text-xs rounded-lg shadow-2xl z-[100] border border-slate-700 dark:border-dark-border max-h-64 overflow-y-auto">
                       {board.goal?.description}
                     </div>
                   </div>
                 </div>
               </div>
+              )}
 
-              {/* AGENT - Spans 3 cols */}
-              <div className="md:col-span-3 flex flex-col justify-center px-4 border-r border-slate-100 dark:border-white/5 relative">
+              {/* AGENT */}
+              {board.agentPersona && (
+              <div className="md:flex-[3] md:min-w-0 flex flex-col justify-center md:px-4 md:border-r border-slate-100 dark:border-white/5 relative last:border-r-0">
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex items-center gap-2">
-                    <Bot size={12} className="text-purple-500" />
+                    <Bot size={12} className="text-primary-500" />
                     <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400">
                       Agente
                     </span>
@@ -388,7 +391,7 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
                   {board.agentPersona && (
                     <button
                       onClick={() => setIsGlobalAIOpen(true)}
-                      className="text-[10px] font-bold text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 px-2 py-0.5 rounded flex items-center gap-1 transition-colors"
+                      className="text-[10px] font-bold text-primary-600 dark:text-primary-400 hover:bg-primary-500/10 px-2 py-0.5 rounded flex items-center gap-1 transition-colors"
                     >
                       <MessageSquare size={12} /> Falar
                     </button>
@@ -396,7 +399,7 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
                 </div>
 
                 <div className="group/agent relative">
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-0.5 group-hover/agent:text-purple-400 transition-colors cursor-default truncate">
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-0.5 group-hover/agent:text-primary-500 transition-colors cursor-default truncate">
                     {board.agentPersona?.name}
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400 font-medium truncate">
@@ -404,15 +407,17 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
                   </p>
 
                   {/* Tooltip for Agent Behavior */}
-                  <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 hidden group-hover/agent:block w-80 p-4 bg-slate-900 text-slate-300 text-xs rounded-lg shadow-2xl z-[100] border border-slate-700 max-h-64 overflow-y-auto">
-                    <p className="font-semibold text-purple-300 mb-1">Comportamento</p>"
+                  <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 hidden group-hover/agent:block w-80 p-4 bg-slate-900 dark:bg-dark-card text-slate-200 text-xs rounded-lg shadow-2xl z-[100] border border-slate-700 dark:border-dark-border max-h-64 overflow-y-auto">
+                    <p className="font-semibold text-primary-300 mb-1">Comportamento</p>"
                     {board.agentPersona?.behavior}"
                   </div>
                 </div>
               </div>
+              )}
 
-              {/* TRIGGER - Spans 5 cols */}
-              <div className="md:col-span-5 flex flex-col justify-center pl-4 relative">
+              {/* TRIGGER */}
+              {board.entryTrigger && (
+              <div className="md:flex-[5] md:min-w-0 flex flex-col justify-center md:pl-4 relative">
                 <div className="flex items-center gap-2 mb-1">
                   <DoorOpen size={12} className="text-orange-500" />
                   <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400">
@@ -425,11 +430,12 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
                     {board.entryTrigger}
                   </p>
                   {/* Tooltip for Full Trigger */}
-                  <div className="absolute right-0 top-full mt-2 hidden group-hover/trigger:block w-80 p-4 bg-slate-900 text-slate-300 text-xs rounded-lg shadow-2xl z-[100] border border-slate-700 max-h-64 overflow-y-auto">
+                  <div className="absolute right-0 top-full mt-2 hidden group-hover/trigger:block w-80 p-4 bg-slate-900 dark:bg-dark-card text-slate-200 text-xs rounded-lg shadow-2xl z-[100] border border-slate-700 dark:border-dark-border max-h-64 overflow-y-auto">
                     {board.entryTrigger}
                   </div>
                 </div>
               </div>
+              )}
             </div>
           </>
         )}

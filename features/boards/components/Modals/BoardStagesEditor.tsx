@@ -8,12 +8,19 @@
  * as configurações completas dela (nome, cor, estágio do contato, ID) num
  * modal por cima. O componente só edita a lista `stages` que o modal do board
  * já mantinha; a lógica do board não muda.
+ *
+ * Por que o modal da etapa vai num portal e o pai recebe `onOverlayOpenChange`:
+ * o modal do board prende o foco (focus-trap) dentro do próprio contêiner.
+ * O menu "..." (portal do radix) e o modal da etapa ficam FORA desse
+ * contêiner — sem avisar o pai, o trap devolvia o foco e fechava tudo na hora.
  */
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowLeftToLine, ArrowRightToLine, Copy, GripVertical, Pencil, Plus, Trash2 } from 'lucide-react';
-import { CopyId } from '@/components/ui/CopyId';
+import { CopyId, copyIdToClipboard } from '@/components/ui/CopyId';
 import { KebabMenu } from '@/components/ui/KebabMenu';
 import { Modal } from '@/components/ui/Modal';
+import { useToast } from '@/context/ToastContext';
 import type { BoardStage, LifecycleStage } from '@/types';
 
 export const STAGE_COLORS = [
@@ -39,7 +46,7 @@ export function BoardStagesEditor({
   lifecycleStages,
   showIds,
   onManageLifecycle,
-  onStageModalOpenChange,
+  onOverlayOpenChange,
 }: {
   stages: BoardStage[];
   onChange: (stages: BoardStage[]) => void;
@@ -47,20 +54,25 @@ export function BoardStagesEditor({
   /** Board existente: as etapas já têm ID de verdade (para integrações) */
   showIds: boolean;
   onManageLifecycle?: () => void;
-  /** Avisa o modal pai quando o modal da etapa abre (para soltar o foco preso) */
-  onStageModalOpenChange?: (open: boolean) => void;
+  /** true enquanto o menu "..." ou o modal da etapa estiver aberto (o pai solta o foco preso) */
+  onOverlayOpenChange?: (open: boolean) => void;
 }) {
+  const { addToast } = useToast();
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const armed = useRef(false);
   const stripRef = useRef<HTMLDivElement | null>(null);
   const scrollDir = useRef<0 | -1 | 1>(0);
   const rafRef = useRef<number | null>(null);
 
+  useEffect(() => setMounted(true), []);
+
   useEffect(() => {
-    onStageModalOpenChange?.(editing !== null);
-  }, [editing, onStageModalOpenChange]);
+    onOverlayOpenChange?.(editing !== null || menuOpen);
+  }, [editing, menuOpen, onOverlayOpenChange]);
 
   // Rolagem automática enquanto arrasta perto das bordas
   useEffect(() => {
@@ -102,6 +114,9 @@ export function BoardStagesEditor({
     next.splice(index + 1, 0, { ...s, id: crypto.randomUUID(), label: `${s.label} (cópia)` });
     onChange(next);
   };
+  const copyStageId = async (id: string) => {
+    if (await copyIdToClipboard(id)) addToast('ID da etapa copiado.', 'success');
+  };
 
   const finishDrag = () => {
     setDragging(null);
@@ -128,6 +143,100 @@ export function BoardStagesEditor({
 
   const current = editing ? stages.find((s) => s.id === editing) ?? null : null;
   const currentIndex = current ? stages.findIndex((s) => s.id === current.id) : -1;
+
+  const stageModal = (
+    <Modal isOpen={current !== null} onClose={() => setEditing(null)} title={current ? `Etapa ${currentIndex + 1}` : 'Etapa'} size="md">
+      {current ? (
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="stage-label" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+              Nome da etapa
+            </label>
+            <input
+              id="stage-label"
+              autoFocus
+              type="text"
+              value={current.label}
+              onChange={(e) => update(current.id, { label: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  setEditing(null);
+                }
+              }}
+              placeholder="Nome da etapa"
+              className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 outline-none"
+            />
+          </div>
+          <div>
+            <p className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Cor</p>
+            <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Cor da etapa">
+              {STAGE_COLORS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  role="radio"
+                  aria-checked={c === current.color}
+                  aria-label={c.replace('bg-', '').replace('-500', '')}
+                  onClick={() => update(current.id, { color: c })}
+                  className={`h-7 w-7 rounded-full ${c} transition-transform hover:scale-110 ${
+                    c === current.color ? 'ring-2 ring-offset-2 ring-slate-500 dark:ring-offset-slate-900' : ''
+                  }`}
+                />
+              ))}
+            </div>
+          </div>
+          <div>
+            <label htmlFor="stage-lifecycle" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+              Ao entrar nesta etapa, promover o contato para
+            </label>
+            <select
+              id="stage-lifecycle"
+              value={current.linkedLifecycleStage || ''}
+              onChange={(e) => update(current.id, { linkedLifecycleStage: e.target.value || undefined })}
+              className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 outline-none"
+            >
+              <option value="">Sem automação</option>
+              {lifecycleStages.map((ls) => (
+                <option key={ls.id} value={ls.id}>
+                  {ls.name}
+                </option>
+              ))}
+            </select>
+            {onManageLifecycle ? (
+              <button
+                type="button"
+                onClick={onManageLifecycle}
+                className="mt-1.5 text-xs font-medium text-slate-500 hover:text-primary-600 dark:text-slate-400 dark:hover:text-primary-300 transition-colors"
+              >
+                Gerenciar estágios do contato
+              </button>
+            ) : null}
+          </div>
+          <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-100 dark:border-white/5">
+            <div className="flex items-center gap-2">
+              {showIds ? <CopyId value={current.id} label="ID da etapa" /> : null}
+              <button
+                type="button"
+                onClick={() => remove(current.id)}
+                disabled={stages.length <= MIN_STAGES}
+                className="inline-flex items-center gap-1 text-xs font-medium text-red-600 dark:text-red-400 hover:underline disabled:opacity-40 disabled:no-underline"
+              >
+                <Trash2 size={13} aria-hidden="true" /> Remover etapa
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setEditing(null)}
+              className="px-3.5 py-2 rounded-lg text-sm font-semibold bg-primary-600 hover:bg-primary-700 text-white transition-colors focus-visible-ring"
+            >
+              Concluir
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </Modal>
+  );
 
   return (
     <div>
@@ -172,6 +281,8 @@ export function BoardStagesEditor({
             <React.Fragment key={stage.id}>
               {showBefore ? <span className="w-0.5 shrink-0 self-stretch rounded-full bg-primary-500" aria-hidden="true" /> : null}
               <div
+                // Só o cartão arrasta, e só quando o arrasto começou na alça (`armed`):
+                // clique no nome ou no menu nunca vira arrasto.
                 draggable
                 onDragStart={(e) => {
                   if (!armed.current) {
@@ -210,10 +321,14 @@ export function BoardStagesEditor({
                     type="button"
                     aria-label={`Arrastar etapa ${stage.label}`}
                     title="Arraste para reordenar"
-                    onPointerDown={() => {
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
                       armed.current = true;
                     }}
                     onPointerUp={() => {
+                      armed.current = false;
+                    }}
+                    onPointerCancel={() => {
                       armed.current = false;
                     }}
                     className="shrink-0 p-1 cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 dark:text-slate-600 dark:hover:text-slate-300"
@@ -225,9 +340,13 @@ export function BoardStagesEditor({
                   <KebabMenu
                     label={`Mais ações: ${stage.label}`}
                     size={15}
+                    onOpenChange={setMenuOpen}
                     className="p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-white/10 transition-colors"
                     items={[
                       { label: 'Editar etapa', icon: <Pencil size={14} aria-hidden="true" />, onSelect: () => setEditing(stage.id) },
+                      ...(showIds
+                        ? [{ label: 'Copiar ID da etapa', icon: <Copy size={14} aria-hidden="true" />, onSelect: () => void copyStageId(stage.id) }]
+                        : []),
                       { label: 'Mover para o início', icon: <ArrowLeftToLine size={14} aria-hidden="true" />, disabled: index === 0, onSelect: () => move(index, 0) },
                       { label: 'Mover para o fim', icon: <ArrowRightToLine size={14} aria-hidden="true" />, disabled: index === stages.length - 1, onSelect: () => move(index, stages.length - 1) },
                       { label: 'Duplicar', icon: <Copy size={14} aria-hidden="true" />, onSelect: () => duplicate(stage, index) },
@@ -267,98 +386,8 @@ export function BoardStagesEditor({
         </button>
       </div>
 
-      {/* Configurações da etapa */}
-      <Modal isOpen={current !== null} onClose={() => setEditing(null)} title={current ? `Etapa ${currentIndex + 1}` : 'Etapa'} size="md">
-        {current ? (
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="stage-label" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                Nome da etapa
-              </label>
-              <input
-                id="stage-label"
-                autoFocus
-                type="text"
-                value={current.label}
-                onChange={(e) => update(current.id, { label: e.target.value })}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    setEditing(null);
-                  }
-                }}
-                placeholder="Nome da etapa"
-                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 outline-none"
-              />
-            </div>
-            <div>
-              <p className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Cor</p>
-              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Cor da etapa">
-                {STAGE_COLORS.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    role="radio"
-                    aria-checked={c === current.color}
-                    aria-label={c.replace('bg-', '').replace('-500', '')}
-                    onClick={() => update(current.id, { color: c })}
-                    className={`h-7 w-7 rounded-full ${c} transition-transform hover:scale-110 ${
-                      c === current.color ? 'ring-2 ring-offset-2 ring-slate-500 dark:ring-offset-slate-900' : ''
-                    }`}
-                  />
-                ))}
-              </div>
-            </div>
-            <div>
-              <label htmlFor="stage-lifecycle" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                Ao entrar nesta etapa, promover o contato para
-              </label>
-              <select
-                id="stage-lifecycle"
-                value={current.linkedLifecycleStage || ''}
-                onChange={(e) => update(current.id, { linkedLifecycleStage: e.target.value || undefined })}
-                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 outline-none"
-              >
-                <option value="">Sem automação</option>
-                {lifecycleStages.map((ls) => (
-                  <option key={ls.id} value={ls.id}>
-                    {ls.name}
-                  </option>
-                ))}
-              </select>
-              {onManageLifecycle ? (
-                <button
-                  type="button"
-                  onClick={onManageLifecycle}
-                  className="mt-1.5 text-xs font-medium text-slate-500 hover:text-primary-600 dark:text-slate-400 dark:hover:text-primary-300 transition-colors"
-                >
-                  Gerenciar estágios do contato
-                </button>
-              ) : null}
-            </div>
-            <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-100 dark:border-white/5">
-              <div className="flex items-center gap-2">
-                {showIds ? <CopyId value={current.id} label="ID da etapa" /> : null}
-                <button
-                  type="button"
-                  onClick={() => remove(current.id)}
-                  disabled={stages.length <= MIN_STAGES}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-red-600 dark:text-red-400 hover:underline disabled:opacity-40 disabled:no-underline"
-                >
-                  <Trash2 size={13} aria-hidden="true" /> Remover etapa
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={() => setEditing(null)}
-                className="px-3.5 py-2 rounded-lg text-sm font-semibold bg-primary-600 hover:bg-primary-700 text-white transition-colors focus-visible-ring"
-              >
-                Concluir
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </Modal>
+      {/* Modal da etapa fora do DOM do modal do board (portal): nada de foco preso nem recorte */}
+      {mounted ? createPortal(stageModal, document.body) : null}
     </div>
   );
 }

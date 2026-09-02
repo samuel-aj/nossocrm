@@ -45,7 +45,9 @@ export const FocusTrap: React.FC<FocusTrapProps> = ({
   initialFocus,
   returnFocus = true,
   clickOutsideDeactivates = false,
-  allowOutsideClick = false,
+  // true por padrão: menus e balões do radix vivem num portal FORA do modal;
+  // com false o focus-trap engolia o clique neles (menu "..." dentro de modal).
+  allowOutsideClick = true,
 }) => {
   const getInitialFocus = (): string | HTMLElement | (() => HTMLElement | null) | false | undefined => {
     if (initialFocus === false) {

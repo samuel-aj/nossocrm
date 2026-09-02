@@ -4,6 +4,10 @@
  * Menu "..." de ações secundárias (mover, duplicar, excluir, copiar...).
  * Renderiza num portal acima dos modais (z-[10000]). Compartilhado pelas
  * telas de Configurações, agentes de IA e editor de boards.
+ *
+ * Dentro de um modal com foco preso, avise o modal pelo `onOpenChange` para
+ * ele soltar o foco enquanto o menu está aberto (o conteúdo fica num portal,
+ * fora do contêiner do modal).
  */
 import React from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
@@ -25,16 +29,26 @@ export function KebabMenu({
   label = 'Mais ações',
   size = 16,
   className,
+  onOpenChange,
 }: {
   items: KebabItem[];
   label?: string;
   size?: number;
   className?: string;
+  onOpenChange?: (open: boolean) => void;
 }) {
   return (
-    <DropdownMenu.Root modal={false}>
+    <DropdownMenu.Root modal={false} onOpenChange={onOpenChange}>
       <DropdownMenu.Trigger asChild>
-        <button type="button" className={className ?? KEBAB_TRIGGER_CLASS} aria-label={label} title="Mais ações">
+        <button
+          type="button"
+          className={className ?? KEBAB_TRIGGER_CLASS}
+          aria-label={label}
+          title="Mais ações"
+          // O gatilho do menu nunca inicia um arrasto do cartão em que está
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
           <MoreHorizontal size={size} aria-hidden="true" />
         </button>
       </DropdownMenu.Trigger>

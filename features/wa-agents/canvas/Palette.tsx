@@ -13,7 +13,7 @@ import { BlockCatalog } from './catalog';
 import type { StepType } from './types';
 
 const SURFACE =
-  'bg-white/95 dark:bg-slate-900/95 backdrop-blur border border-slate-200 dark:border-white/10 rounded-xl shadow-lg';
+  'bg-white/95 dark:bg-dark-card/95 backdrop-blur border border-slate-200 dark:border-white/10 rounded-xl shadow-lg';
 const TOGGLE =
   'p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-white/10 transition-colors';
 

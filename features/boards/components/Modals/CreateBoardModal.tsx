@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useId } from 'react';
-import { Plus, GripVertical, Trash2, ChevronDown, Settings, Copy, Check, Eye, EyeOff, FolderOpen } from 'lucide-react';
-import { Board, BoardStage, ContactStage } from '@/types';
+import { Plus, GripVertical, Trash2, ChevronDown, Settings, Copy, Check, Eye, EyeOff, FolderOpen, Target } from 'lucide-react';
+import { Board, BoardGoal, BoardStage, ContactStage } from '@/types';
 import { BOARD_TEMPLATES, BoardTemplateType } from '@/lib/templates/board-templates';
 import { LifecycleSettingsModal } from '@/features/settings/components/LifecycleSettingsModal';
 import { useCRM } from '@/context/CRMContext';
@@ -139,6 +139,8 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
   const [hiddenFieldGroups, setHiddenFieldGroups] = useState<string[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<BoardTemplateType | ''>('');
   const [stages, setStages] = useState<BoardStage[]>([]);
+  // Objetivo (meta) do board: opcional. null = sem objetivo (o cabeçalho de estratégia não aparece).
+  const [goal, setGoal] = useState<BoardGoal | null>(null);
   const [isLifecycleModalOpen, setIsLifecycleModalOpen] = useState(false);
   // Modal da etapa (por cima deste): solta o foco preso enquanto estiver aberto
   const [isStageModalOpen, setIsStageModalOpen] = useState(false);
@@ -163,6 +165,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
         setHiddenFieldGroups(editingBoard.hiddenFieldGroups || []);
         setSelectedTemplate(editingBoard.template || '');
         setStages(editingBoard.stages);
+        setGoal(editingBoard.goal ?? null);
       } else {
         // Restore draft (so we can close modal immediately on save and re-open on error without losing inputs)
         try {
@@ -184,6 +187,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
               setHiddenFieldGroups(Array.isArray(draft.hiddenFieldGroups) ? draft.hiddenFieldGroups : []);
               setSelectedTemplate((draft.selectedTemplate as BoardTemplateType) ?? '');
               setStages(Array.isArray(draft.stages) ? draft.stages : []);
+              setGoal(draft.goal && typeof draft.goal === 'object' ? (draft.goal as BoardGoal) : null);
               return;
             }
           }
@@ -191,6 +195,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
           // ignore
         }
         // Reset for new board
+        setGoal(null);
         setName('');
         setBoardKey('');
         setKeyTouched(false);
@@ -334,6 +339,10 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
       hiddenFieldGroups,
       template: selectedTemplate || 'CUSTOM',
       stages,
+      // Sem objetivo: null explícito limpa no banco (o service só grava o que vem definido)
+      goal: (goal
+        ? { ...goal, description: goal.description.trim() || goal.kpi.trim() || 'Objetivo do board' }
+        : null) as any,
       isDefault: false
     };
     // Persist draft before closing (so we can restore on error)
@@ -355,6 +364,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
           hiddenFieldGroups,
           selectedTemplate,
           stages,
+          goal,
         })
       );
     } catch {
@@ -507,8 +517,97 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                 lifecycleStages={lifecycleStages}
                 showIds={!!editingBoard}
                 onManageLifecycle={() => setIsLifecycleModalOpen(true)}
-                onStageModalOpenChange={setIsStageModalOpen}
+                onOverlayOpenChange={setIsStageModalOpen}
               />
+
+              {/* Objetivo (opcional): só aparece no kanban quando existir */}
+              <div className="rounded-xl border border-slate-200 dark:border-white/10 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="p-1.5 rounded-lg bg-primary-500/10 text-primary-600 dark:text-primary-400">
+                      <Target size={14} aria-hidden="true" />
+                    </span>
+                    <div>
+                      <p className="text-sm font-medium text-slate-800 dark:text-slate-200">Objetivo do board</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        {goal ? 'A meta aparece no topo do kanban com o progresso automático.' : 'Opcional. Sem objetivo, nada aparece no topo do kanban.'}
+                      </p>
+                    </div>
+                  </div>
+                  {goal ? (
+                    <button
+                      type="button"
+                      onClick={() => setGoal(null)}
+                      className="inline-flex items-center gap-1 text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
+                    >
+                      <Trash2 size={13} aria-hidden="true" /> Remover objetivo
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setGoal({ description: '', kpi: '', targetValue: '', type: 'number' })}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-primary-700 dark:text-primary-300 hover:bg-primary-500/10 transition-colors focus-visible-ring"
+                    >
+                      <Plus size={14} aria-hidden="true" /> Adicionar objetivo
+                    </button>
+                  )}
+                </div>
+                {goal ? (
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <label htmlFor="board-goal-target" className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                        Meta
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          id="board-goal-target"
+                          type="text"
+                          value={goal.targetValue}
+                          onChange={(e) => setGoal({ ...goal, targetValue: e.target.value })}
+                          placeholder="Ex.: 50"
+                          className="flex-1 min-w-0 px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 outline-none"
+                        />
+                        <select
+                          aria-label="Tipo da meta"
+                          value={goal.type || 'number'}
+                          onChange={(e) => setGoal({ ...goal, type: e.target.value as BoardGoal['type'] })}
+                          className="w-28 px-2 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 outline-none"
+                        >
+                          <option value="number">Qtd.</option>
+                          <option value="currency">R$</option>
+                          <option value="percentage">%</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label htmlFor="board-goal-kpi" className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                        Nome do indicador
+                      </label>
+                      <input
+                        id="board-goal-kpi"
+                        type="text"
+                        value={goal.kpi}
+                        onChange={(e) => setGoal({ ...goal, kpi: e.target.value })}
+                        placeholder="Ex.: Leads qualificados no mês"
+                        className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="board-goal-desc" className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                        Contexto
+                      </label>
+                      <input
+                        id="board-goal-desc"
+                        type="text"
+                        value={goal.description}
+                        onChange={(e) => setGoal({ ...goal, description: e.target.value })}
+                        placeholder="Por que essa meta existe"
+                        className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 outline-none"
+                      />
+                    </div>
+                  </div>
+                ) : null}
+              </div>
 
               {/* Pouco usado no dia a dia: chave, estágio gerenciado, produto padrão, grupos de campos, próximo board, ganho/perdido */}
               <Disclosure label="Configurações avançadas">

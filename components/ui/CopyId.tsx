@@ -4,10 +4,21 @@
  * ID técnico copiável, sem expor o valor: mostra só "⧉ ID da etapa" e, ao
  * clicar, copia o ID real e confirma com "✓ ID copiado". Padrão para toda
  * entidade do CRM (board, etapa, agente, robô, conexão do WhatsApp, produto...).
- * O ID inteiro fica no `title` para quem precisar conferir.
+ * O código nunca aparece na tela, nem no tooltip.
  */
 import React, { useState } from 'react';
 import { Check, Copy } from 'lucide-react';
+
+/** Copia um ID; se a área de transferência estiver bloqueada, abre um prompt com o valor selecionado. */
+export async function copyIdToClipboard(value: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    window.prompt('Copie o ID:', value);
+    return false;
+  }
+}
 
 export function CopyId({
   value,
@@ -25,20 +36,16 @@ export function CopyId({
   const [copied, setCopied] = useState(false);
   const copy = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Sem permissão ou fora de HTTPS: o title mantém o valor à mão
-      window.prompt('Copie o ID:', value);
-    }
+    const ok = await copyIdToClipboard(value);
+    if (!ok) return;
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
   };
   return (
     <button
       type="button"
       onClick={(e) => void copy(e)}
-      title={`Copiar: ${value}`}
+      title={`Copiar ${label}`}
       aria-label={copied ? 'ID copiado' : `Copiar ${label}`}
       className={`inline-flex items-center gap-1 rounded-md border transition-colors select-none ${
         size === 'xs' ? 'px-1.5 py-0.5 text-[11px]' : 'px-2 py-1 text-xs'

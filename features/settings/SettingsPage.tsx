@@ -2,8 +2,8 @@
 
 /**
  * Configurações do CRM. As categorias ficam no TOPO (sem sidebar interna):
- * Geral | Aparência | CRM | Distribuição | Equipe | Produtos/Serviços |
- * IA e Automações | Integrações | Dados. Cada categoria só reorganiza o que
+ * Geral (com Aparência) | CRM | Produtos/Serviços | IA e Automações |
+ * Integrações | Equipe | Distribuição | Dados. Cada categoria só reorganiza o que
  * já existia; as rotas antigas (/settings/ai, /settings/agentes,
  * /settings/integracoes, /settings/products) e os hashes continuam valendo.
  */
@@ -31,7 +31,6 @@ import {
   Plug,
   Package,
   Shuffle,
-  Palette,
   KanbanSquare,
   Webhook,
   KeyRound,
@@ -40,7 +39,7 @@ import {
   Compass,
 } from 'lucide-react';
 
-type SettingsTab = 'general' | 'appearance' | 'crm' | 'distribution' | 'users' | 'products' | 'ai' | 'integrations' | 'data';
+type SettingsTab = 'general' | 'crm' | 'distribution' | 'users' | 'products' | 'ai' | 'integrations' | 'data';
 
 // ---------------------------------------------------------------- Geral
 
@@ -51,7 +50,7 @@ const GeneralSettings: React.FC = () => {
 
   return (
     <div className="pb-10 space-y-6">
-      <SettingsHeader title="Geral" description="O básico da organização e da sua navegação." />
+      <SettingsHeader title="Geral" description="O básico da organização, a sua navegação e a aparência do CRM para você." />
       <SettingsCard title="Escritório" icon={Building2}>
         <SettingsRow
           title="Nome do escritório"
@@ -85,6 +84,7 @@ const GeneralSettings: React.FC = () => {
           }
         />
       </SettingsCard>
+      <AppearanceSettings embedded />
     </div>
   );
 };
@@ -187,8 +187,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
       setActiveTab('users');
     } else if (pathname?.includes('/settings/distribuicao')) {
       setActiveTab('distribution');
-    } else if (pathname?.includes('/settings/aparencia')) {
-      setActiveTab('appearance');
     } else if (pathname?.includes('/settings/crm')) {
       setActiveTab('crm');
     } else {
@@ -211,20 +209,17 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
 
   const tabs: Array<{ id: SettingsTab; name: string; icon: typeof SettingsIcon }> = [
     { id: 'general', name: 'Geral', icon: SettingsIcon },
-    { id: 'appearance', name: 'Aparência', icon: Palette },
     ...(isAdminOrSuper ? [{ id: 'crm' as const, name: 'CRM', icon: KanbanSquare }] : []),
-    ...(isAdminOrSuper ? [{ id: 'distribution' as const, name: 'Distribuição', icon: Shuffle }] : []),
-    ...(isAdminOrSuper ? [{ id: 'users' as const, name: 'Equipe', icon: Users }] : []),
     ...(isAdminOrSuper ? [{ id: 'products' as const, name: 'Produtos/Serviços', icon: Package }] : []),
     { id: 'ai', name: 'IA e Automações', icon: Sparkles },
     ...(isAdminOrSuper ? [{ id: 'integrations' as const, name: 'Integrações', icon: Plug }] : []),
+    ...(isAdminOrSuper ? [{ id: 'users' as const, name: 'Equipe', icon: Users }] : []),
+    ...(isAdminOrSuper ? [{ id: 'distribution' as const, name: 'Distribuição', icon: Shuffle }] : []),
     { id: 'data', name: 'Dados', icon: Database },
   ];
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'appearance':
-        return <AppearanceSettings />;
       case 'crm':
         return <CrmSettings />;
       case 'distribution':

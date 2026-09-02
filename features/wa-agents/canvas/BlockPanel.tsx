@@ -746,7 +746,7 @@ export function BlockPanel({ bubble, block, index, update, onClose, onRemove }: 
     <aside
       role="region"
       aria-label={`Propriedades do bloco ${meta.label}`}
-      className="wa-block-panel absolute inset-x-0 bottom-0 z-20 max-h-[65%] flex flex-col rounded-t-2xl border-t border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 shadow-2xl md:static md:inset-auto md:max-h-none md:h-full md:w-[340px] md:shrink-0 md:rounded-none md:border-t-0 md:border-l md:shadow-none"
+      className="wa-block-panel absolute inset-x-0 bottom-0 z-20 max-h-[65%] flex flex-col rounded-t-2xl border-t border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card shadow-2xl md:static md:inset-auto md:max-h-none md:h-full md:w-[340px] md:shrink-0 md:rounded-none md:border-t-0 md:border-l md:shadow-none"
     >
       <div className="flex items-start gap-2 px-3 py-2.5 border-b border-slate-200 dark:border-white/10">
         <BlockIcon type={block.type} size={16} />
