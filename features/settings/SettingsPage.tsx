@@ -9,6 +9,7 @@ import { ApiKeysSection } from './components/ApiKeysSection';
 import { WebhooksSection } from './components/WebhooksSection';
 import { McpSection } from './components/McpSection';
 import { DataStorageSettings } from './components/DataStorageSettings';
+import AppearanceSettings from './components/AppearanceSettings';
 import { ProductsCatalogManager } from './components/ProductsCatalogManager';
 import { UserRole } from '@/types/constants';
 import { AICenterSettings } from './AICenterSettings';
@@ -17,9 +18,9 @@ import { UsersPage } from './UsersPage';
 import { LeadDistributionSettings } from './LeadDistributionSettings';
 import { useAuth } from '@/context/AuthContext';
 import { WaAgentsSettings } from '@/features/wa-agents/WaAgentsSettings';
-import { Settings as SettingsIcon, Users, Database, Sparkles, Plug, Package, Shuffle, Bot } from 'lucide-react';
+import { Settings as SettingsIcon, Users, Database, Sparkles, Plug, Package, Shuffle, Bot, Palette } from 'lucide-react';
 
-type SettingsTab = 'general' | 'products' | 'integrations' | 'ai' | 'data' | 'users' | 'distribution' | 'agents';
+type SettingsTab = 'general' | 'appearance' | 'products' | 'integrations' | 'ai' | 'data' | 'users' | 'distribution' | 'agents';
 
 interface GeneralSettingsProps {
   hash?: string;
@@ -225,6 +226,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
       setActiveTab('integrations');
     } else if (pathname?.includes('/settings/data')) {
       setActiveTab('data');
+    } else if (pathname?.includes('/settings/aparencia')) {
+      setActiveTab('appearance');
     } else if (pathname?.includes('/settings/users')) {
       setActiveTab('users');
     } else if (pathname?.includes('/settings/distribuicao')) {
@@ -237,6 +240,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
   const isAdminOrSuper = profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN;
   const tabs = [
     { id: 'general' as SettingsTab, name: 'Geral', icon: SettingsIcon },
+    // Aparência é pessoal (modo + tema por usuário): aparece para qualquer papel.
+    { id: 'appearance' as SettingsTab, name: 'Aparência', icon: Palette },
     // Distribuição logo no começo: como última aba ela caía fora da área
     // visível da fileira (que rola na horizontal) e ninguém achava.
     ...(isAdminOrSuper ? [{ id: 'distribution' as SettingsTab, name: 'Distribuição', icon: Shuffle }] : []),
@@ -254,6 +259,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
     switch (activeTab) {
       case 'agents':
         return <WaAgentsSettings />;
+      case 'appearance':
+        return <AppearanceSettings />;
       case 'products':
         return <ProductsSettings />;
       case 'integrations':

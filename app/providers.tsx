@@ -4,6 +4,7 @@ import { QueryProvider } from '@/lib/query'
 import { ToastProvider } from '@/context/ToastContext'
 import { ThemeProvider } from '@/context/ThemeContext'
 import { AuthProvider } from '@/context/AuthContext'
+import ThemeSync from '@/components/ThemeSync'
 
 /**
  * Providers globais montados UMA vez no root layout.
@@ -28,6 +29,7 @@ export default function RootProviders({ children }: { children: React.ReactNode 
       <ToastProvider>
         <ThemeProvider>
           <AuthProvider>
+            <ThemeSync />
             {children}
           </AuthProvider>
         </ThemeProvider>

@@ -1,3 +1,4 @@
+import { THEME_INIT_SCRIPT, buildThemeCss } from '@/lib/theme/themes'
 import type { Metadata, Viewport } from 'next'
 import { Rubik } from 'next/font/google'
 import './globals.css'
@@ -28,6 +29,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="pt-BR" className="dark" suppressHydrationWarning>
+      <head>
+        {/* Temas (paletas): variáveis de cor por data-theme; roxo (padrão) não gera nada */}
+        <style id="crm-themes" dangerouslySetInnerHTML={{ __html: buildThemeCss() }} />
+        {/* Aplica tema e claro/escuro salvos ANTES da hidratação (sem piscar) */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className={`${rubik.variable} font-sans antialiased bg-[var(--color-bg)] text-[var(--color-text-primary)]`}>
         <ServiceWorkerRegister />
         <ChunkErrorReload />
