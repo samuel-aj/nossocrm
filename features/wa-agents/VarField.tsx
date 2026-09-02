@@ -17,8 +17,13 @@
  * variável pode ser usada em várias ações e a instrução é uma só.
  */
 import React, { useMemo, useRef, useState } from 'react';
-import { Braces, Sparkles, Trash2 } from 'lucide-react';
-import { ACTION_TEXT_VARIABLES, promptVariableName } from '@/lib/wa-agents/catalog';
+import { Braces, Search, Sparkles, Trash2 } from 'lucide-react';
+import {
+  ACTION_TEXT_VARIABLE_GROUPS,
+  promptVariableName,
+  type VariableGroup,
+  type VariableOption,
+} from '@/lib/wa-agents/catalog';
 import { aiVarToken } from '@/lib/wa-agents/template';
 import { AI_VAR_NAME_RE, MAX_AI_VARS_PER_AGENT, type AgentAiVar } from '@/lib/wa-agents/types';
 import { HighlightedScript } from './HighlightedScript';
@@ -40,6 +45,10 @@ export type VarFieldProps = {
   onAiVarsChange: (vars: AgentAiVar[]) => void;
   /** Variáveis extras deste campo (ex.: as do payload do webhook) */
   extraVars?: Array<{ key: string; description: string }>;
+  /** Grupos de variáveis do menu (substitui os grupos padrão das ações) */
+  groups?: VariableGroup[];
+  /** Texto do botão de inserir ("Inserir variável"); sem texto, só o ícone */
+  insertLabel?: string;
 };
 
 type MenuState = { open: boolean; triggerPos: number | null };
@@ -73,21 +82,27 @@ export const VarField: React.FC<VarFieldProps> = ({
   aiVars,
   onAiVarsChange,
   extraVars,
+  groups,
+  insertLabel,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [menu, setMenu] = useState<MenuState>({ open: false, triggerPos: null });
   const [popover, setPopover] = useState<PopoverState>({ mode: 'closed' });
   const [draft, setDraft] = useState<AgentAiVar>({ name: '', instruction: '', example: '' });
   const [draftError, setDraftError] = useState<string | null>(null);
+  /** Busca digitada no menu aberto pelo botão (o menu do `{` filtra pelo texto do campo) */
+  const [busca, setBusca] = useState('');
 
-  const systemVars = useMemo(
-    () => [...ACTION_TEXT_VARIABLES, ...(extraVars ?? [])],
-    [extraVars]
-  );
+  const varGroups: VariableGroup[] = useMemo(() => {
+    const base = groups ?? ACTION_TEXT_VARIABLE_GROUPS;
+    if (!extraVars || extraVars.length === 0) return base;
+    return [...base, { label: 'Outras', vars: extraVars }];
+  }, [groups, extraVars]);
+  const systemVars: VariableOption[] = useMemo(() => varGroups.flatMap(g => g.vars), [varGroups]);
   const known: KnownTokens = useMemo(
     () => ({
       vars: systemVars.map(v => promptVariableName(v.key)),
-      varPrefixes: ['campos.'],
+      varPrefixes: ['campos.', 'deal.custom_fields.'],
       aiVars: aiVars.map(v => v.name),
       actions: [],
       media: [],
@@ -99,19 +114,24 @@ export const VarField: React.FC<VarFieldProps> = ({
   // Filtro do autocomplete: a sequência de caracteres de nome logo depois do
   // `{` que abriu o menu (sem ler o cursor durante o render).
   const filtro = useMemo(() => {
-    if (!menu.open || menu.triggerPos === null) return '';
+    if (!menu.open) return '';
+    if (menu.triggerPos === null) return busca.trim().toLowerCase();
     const resto = value.slice(menu.triggerPos + 1);
     const m = /^[a-zA-Z0-9_.:{]*/.exec(resto)?.[0] ?? '';
     return m.replace(/^\{+/, '').toLowerCase();
-  }, [menu, value]);
+  }, [menu, value, busca]);
 
-  const sistemaFiltrado = systemVars.filter(
-    v => !filtro || v.key.toLowerCase().includes(filtro) || v.description.toLowerCase().includes(filtro)
-  );
+  const casa = (v: VariableOption) =>
+    !filtro || v.key.toLowerCase().includes(filtro) || v.description.toLowerCase().includes(filtro);
+  const gruposFiltrados = varGroups.map(g => ({ ...g, vars: g.vars.filter(casa) })).filter(g => g.vars.length > 0);
   const filtroIa = filtro.replace(/^ia:?/, '');
   const iaFiltradas = aiVars.filter(v => !filtro || v.name.includes(filtroIa) || `ia:${v.name}`.includes(filtro));
+  const nadaEncontrado = gruposFiltrados.length === 0 && iaFiltradas.length === 0;
 
-  const fecharMenu = () => setMenu({ open: false, triggerPos: null });
+  const fecharMenu = () => {
+    setMenu({ open: false, triggerPos: null });
+    setBusca('');
+  };
 
   /** Insere um token: substitui `{`+filtro digitados (quando o menu veio do teclado) ou entra no cursor. */
   const inserir = (token: string) => {
@@ -294,28 +314,50 @@ export const VarField: React.FC<VarFieldProps> = ({
         <button
           type="button"
           className={`${BTN_SMALL} shrink-0`}
-          title="Adicionar variável"
-          aria-label="Adicionar variável"
+          title={insertLabel ?? 'Inserir variável'}
+          aria-label={insertLabel ?? 'Inserir variável'}
           aria-expanded={menu.open}
-          onClick={() => setMenu(m => (m.open ? { open: false, triggerPos: null } : { open: true, triggerPos: null }))}
+          onClick={() => (menu.open ? fecharMenu() : setMenu({ open: true, triggerPos: null }))}
         >
           <Braces size={14} aria-hidden="true" />
+          {insertLabel ? <span>{insertLabel}</span> : null}
         </button>
       </div>
 
       {menu.open ? (
         <>
           <div className="fixed inset-0 z-30" onClick={fecharMenu} aria-hidden="true" />
-          <div className="absolute right-0 top-full mt-1 z-40 w-80 max-h-72 overflow-y-auto scrollbar-custom rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 shadow-xl p-1.5">
-            <p className="px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-              Variáveis disponíveis
-            </p>
-            {sistemaFiltrado.map(v => (
-              <button key={v.key} type="button" className={MENU_ITEM_CLASS} onClick={() => inserir(v.key)}>
-                <code className="font-mono text-[11px] text-blue-700 dark:text-blue-300">{v.key}</code>
-                <span className="block text-[11px] text-slate-500 dark:text-slate-400">{v.description}</span>
-              </button>
+          <div className="absolute right-0 top-full mt-1 z-40 w-80 max-w-[calc(100vw-2rem)] max-h-80 overflow-y-auto scrollbar-custom rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 shadow-xl p-1.5">
+            {menu.triggerPos === null ? (
+              <div className="relative mb-1">
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+                <input
+                  autoFocus
+                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg pl-8 pr-2 py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:border-purple-500"
+                  placeholder="Buscar variável"
+                  aria-label="Buscar variável"
+                  value={busca}
+                  onChange={e => setBusca(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Escape') fecharMenu();
+                  }}
+                />
+              </div>
+            ) : null}
+            {gruposFiltrados.map(g => (
+              <div key={g.label}>
+                <p className="px-2.5 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{g.label}</p>
+                {g.vars.map(v => (
+                  <button key={v.key} type="button" className={MENU_ITEM_CLASS} onClick={() => inserir(v.key)}>
+                    <span className="block text-slate-800 dark:text-slate-100">{v.description}</span>
+                    <code className="block font-mono text-[11px] text-blue-700 dark:text-blue-300">{v.key}</code>
+                  </button>
+                ))}
+              </div>
             ))}
+            {nadaEncontrado ? (
+              <p className="px-2.5 py-2 text-xs text-slate-500 dark:text-slate-400">Nenhuma variável com esse nome.</p>
+            ) : null}
             {iaFiltradas.length > 0 ? (
               <p className="px-2.5 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                 Preenchidas pela IA

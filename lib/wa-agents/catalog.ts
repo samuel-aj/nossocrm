@@ -87,3 +87,105 @@ export const ACTION_TEXT_VARIABLES: Array<{ key: string; description: string }> 
 
 /** Nomes das variáveis das ações, sem as chaves (para o destaque no texto). */
 export const ACTION_TEXT_VARIABLE_NAMES: string[] = ACTION_TEXT_VARIABLES.map(v => promptVariableName(v.key));
+
+export type VariableOption = { key: string; description: string };
+/** Grupo do menu "Inserir variável" (Contato, Lead, Atendimento...). */
+export type VariableGroup = { label: string; vars: VariableOption[] };
+
+function pick(keys: string[]): VariableOption[] {
+  return keys.map(k => ACTION_TEXT_VARIABLES.find(v => v.key === k)).filter((v): v is VariableOption => !!v);
+}
+
+/** As mesmas variáveis dos campos de texto das ações, agrupadas para o menu. */
+export const ACTION_TEXT_VARIABLE_GROUPS: VariableGroup[] = [
+  { label: 'Contato', vars: pick(['{{nome_lead}}', '{{primeiro_nome}}', '{{telefone}}', '{{email}}', '{{empresa}}']) },
+  {
+    label: 'Lead',
+    vars: pick([
+      '{{negocio.titulo}}',
+      '{{negocio.etapa}}',
+      '{{negocio.quadro}}',
+      '{{negocio.valor}}',
+      '{{negocio.responsavel}}',
+      '{{campos.chave}}',
+    ]),
+  },
+  { label: 'Atendimento', vars: pick(['{{resumo}}', '{{data_hora}}', '{{nome_agente}}', '{{nome_escritorio}}']) },
+];
+
+/**
+ * Variáveis do CORPO PERSONALIZADO dos webhooks (por evento e ação "Chamar
+ * webhook"): caminhos do payload montado em buildWebhookPayload
+ * (lib/wa-agents/webhooks.ts) mais os extras de cada evento.
+ */
+export const WEBHOOK_VARIABLE_GROUPS: VariableGroup[] = [
+  {
+    label: 'Contato',
+    vars: [
+      { key: '{{contact.name}}', description: 'Nome' },
+      { key: '{{contact.phone}}', description: 'Telefone' },
+      { key: '{{contact.email}}', description: 'E-mail' },
+      { key: '{{contact.company_name}}', description: 'Empresa' },
+    ],
+  },
+  {
+    label: 'Lead',
+    vars: [
+      { key: '{{deal.id}}', description: 'ID do lead' },
+      { key: '{{deal.title}}', description: 'Nome (título) do lead' },
+      { key: '{{deal.stage_label}}', description: 'Etapa' },
+      { key: '{{deal.board_name}}', description: 'Pipeline (quadro)' },
+      { key: '{{deal.owner_name}}', description: 'Responsável' },
+      { key: '{{deal.value}}', description: 'Valor' },
+      { key: '{{deal.tags}}', description: 'Etiquetas' },
+      { key: '{{deal.description}}', description: 'Descrição' },
+      { key: '{{deal.custom_fields.chave}}', description: 'Campo personalizado (troque "chave" pela chave do campo)' },
+    ],
+  },
+  {
+    label: 'Atendimento',
+    vars: [
+      { key: '{{conversation.id}}', description: 'ID da conversa' },
+      { key: '{{conversation.phone}}', description: 'Número do contato' },
+      { key: '{{conversation.name}}', description: 'Nome no WhatsApp' },
+      { key: '{{conversation.contact_id}}', description: 'ID do contato' },
+      { key: '{{conversation.deal_id}}', description: 'ID do lead da conversa' },
+      { key: '{{conversation.ai_status}}', description: 'Situação do agente na conversa' },
+      { key: '{{resumo}}', description: 'Resumo do atendimento (no encerramento)' },
+      { key: '{{resultado}}', description: 'Chave do resultado (no encerramento)' },
+      { key: '{{resultado_label}}', description: 'Nome do resultado (no encerramento)' },
+      { key: '{{acao}}', description: 'Chave da ação (em ação durante a conversa)' },
+      { key: '{{acao_label}}', description: 'Nome da ação (em ação durante a conversa)' },
+      { key: '{{detalhes}}', description: 'Detalhes informados pelo agente (em ação durante a conversa)' },
+      { key: '{{text}}', description: 'Texto enviado (em resposta enviada)' },
+    ],
+  },
+  {
+    label: 'Agente e evento',
+    vars: [
+      { key: '{{agent.id}}', description: 'ID do agente' },
+      { key: '{{agent.name}}', description: 'Nome do agente' },
+      { key: '{{agent.persona_name}}', description: 'Nome da persona' },
+      { key: '{{event}}', description: 'Nome do evento' },
+      { key: '{{occurred_at}}', description: 'Data e hora (ISO)' },
+      { key: '{{organization_id}}', description: 'ID da organização' },
+    ],
+  },
+];
+
+/**
+ * Grupos com os campos personalizados da organização listados no grupo "Lead",
+ * logo depois do genérico ("chave"). `token(chave)` monta a variável do campo.
+ */
+export function withCustomFieldVariables(
+  groups: VariableGroup[],
+  customFields: Array<{ key: string; label: string }> | undefined,
+  token: (key: string) => string
+): VariableGroup[] {
+  if (!customFields || customFields.length === 0) return groups;
+  return groups.map(g =>
+    g.label === 'Lead'
+      ? { ...g, vars: [...g.vars, ...customFields.map(cf => ({ key: token(cf.key), description: `Campo: ${cf.label}` }))] }
+      : g
+  );
+}

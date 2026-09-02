@@ -34,6 +34,8 @@ export type WaAgentOptions = {
   owners: Array<{ id: string; name: string }>;
   tags: string[];
   products: Array<{ id: string; name: string }>;
+  /** Campos personalizados do negócio (variáveis das ações e dos webhooks); ausente em versões antigas da API */
+  custom_fields?: Array<{ key: string; label: string }>;
 };
 
 export type WaRunsFilters = {

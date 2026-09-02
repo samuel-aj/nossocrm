@@ -6,7 +6,8 @@
  *   boards:      [{ id, name, stages: [{ id, label, order }] }],
  *   owners:      [{ id, name }],
  *   tags:        string[],
- *   products:    [{ id, name }]
+ *   products:    [{ id, name }],
+ *   custom_fields: [{ key, label }]   (campos personalizados do negócio, para as variáveis)
  * }
  */
 import { json } from '@/lib/whatsapp/api';
@@ -41,7 +42,7 @@ export async function GET() {
   const admin = auth.admin;
   const orgId = auth.user.organizationId;
 
-  const [connections, boardsRes, stagesRes, tagsRes, profilesRes, membersRes, productsRes] = await Promise.all([
+  const [connections, boardsRes, stagesRes, tagsRes, profilesRes, membersRes, productsRes, fieldsRes] = await Promise.all([
     getConnectionsByOrg(admin, orgId),
     admin
       .from('boards')
@@ -58,8 +59,15 @@ export async function GET() {
     admin.from('profiles').select(PROFILE_COLUMNS).eq('organization_id', orgId).limit(300),
     admin.from('user_organizations').select('user_id').eq('organization_id', orgId).limit(300),
     admin.from('products').select('id, name, active').eq('organization_id', orgId).order('name', { ascending: true }).limit(300),
+    admin
+      .from('custom_field_definitions')
+      .select('key, label')
+      .eq('organization_id', orgId)
+      .eq('entity_type', 'deal')
+      .order('label', { ascending: true })
+      .limit(200),
   ]);
-  for (const res of [boardsRes, stagesRes, tagsRes, profilesRes, membersRes, productsRes]) {
+  for (const res of [boardsRes, stagesRes, tagsRes, profilesRes, membersRes, productsRes, fieldsRes]) {
     if (res.error) return json({ error: res.error.message }, 500);
   }
 
@@ -104,6 +112,11 @@ export async function GET() {
     .filter(p => p.active !== false)
     .map(p => ({ id: String(p.id), name: String(p.name ?? '').trim() || 'Produto' }));
 
+  // Campos personalizados do negócio: viram variáveis nos campos das ações e nos webhooks
+  const custom_fields = (fieldsRes.data ?? [])
+    .map(cf => ({ key: String(cf.key ?? '').trim(), label: String(cf.label ?? '').trim() || String(cf.key ?? '') }))
+    .filter(cf => cf.key !== '');
+
   return json({
     connections: connections.map(c => ({
       id: c.id,
@@ -115,5 +128,6 @@ export async function GET() {
     owners,
     tags,
     products,
+    custom_fields,
   });
 }

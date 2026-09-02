@@ -8,10 +8,11 @@
  */
 import { lookup } from 'node:dns/promises';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { resolveActionTexts, resolveAiVarValues } from './actionVars';
 import type { ConversationContext } from './context';
 import { errorMessage } from './errors';
-import { renderJsonTemplate } from './template';
-import type { AgentEvent, AgentRow } from './types';
+import { extractAiVarNames, renderJsonTemplate } from './template';
+import type { AgentEvent, AgentRow, EndAction } from './types';
 import { isPublicHttpUrl, isPublicIpAddress } from './url';
 
 export type WebhookResult = { id: string; url: string; ok: boolean; status?: number; error?: string };
@@ -150,7 +151,7 @@ export async function postWebhook(input: PostWebhookInput): Promise<Omit<Webhook
 }
 
 export async function dispatchAgentEvent(
-  _admin: SupabaseClient,
+  admin: SupabaseClient,
   input: { agent: AgentRow; event: AgentEvent; ctx: ConversationContext; extra?: Record<string, unknown> }
 ): Promise<WebhookResult[]> {
   const results: WebhookResult[] = [];
@@ -159,13 +160,33 @@ export async function dispatchAgentEvent(
     if (hooks.length === 0) return results;
     const payload = buildWebhookPayload(input);
 
+    // Corpos com {{ia:nome}}: a IA do agente preenche os valores antes do envio
+    // (uma chamada só para todos os webhooks do evento), com a mesma regra da
+    // ação "Chamar webhook" (valor escapado como string quando o corpo é JSON).
+    const comIa = hooks.filter(h => extractAiVarNames(h.body_template).length > 0);
+    let aiValues: Record<string, string> = {};
+    if (comIa.length > 0) {
+      const actions: EndAction[] = comIa.map(h => ({ type: 'webhook', url: h.url, body_template: h.body_template }));
+      aiValues = await resolveAiVarValues(admin, {
+        agent: input.agent,
+        ctx: input.ctx,
+        actions,
+        pushEvent: (type, extra) => {
+          if (type === 'ai_vars_falharam') console.warn('[wa-agents] variáveis de IA do webhook falharam:', extra);
+        },
+      });
+    }
+
     for (const hook of hooks) {
+      const action: EndAction = { type: 'webhook', url: hook.url, body_template: hook.body_template };
+      const resolved = resolveActionTexts(action, aiValues, {});
+      const body = resolved.type === 'webhook' ? resolved.body_template : hook.body_template;
       const r = await postWebhook({
         url: hook.url,
         event: input.event,
         payload,
         secret: hook.secret,
-        body_template: hook.body_template,
+        body_template: body,
       });
       results.push({ id: hook.id, ...r });
     }

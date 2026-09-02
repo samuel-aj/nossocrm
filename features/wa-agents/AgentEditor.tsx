@@ -1338,10 +1338,16 @@ export const AgentEditor: React.FC<{
 
         <Panel
           title="Integrações"
-          description="Webhooks: avise outros sistemas quando algo acontecer no atendimento."
+          description="Webhooks por evento do atendimento."
           icon={<Webhook size={16} />}
         >
-          <WebhooksEditor value={form.webhooks} onChange={(webhooks) => patch({ webhooks })} />
+          <WebhooksEditor
+            value={form.webhooks}
+            onChange={(webhooks) => patch({ webhooks })}
+            options={options}
+            aiVars={form.ai_vars}
+            onAiVarsChange={(ai_vars) => patch({ ai_vars })}
+          />
         </Panel>
       </TabPanel>
 

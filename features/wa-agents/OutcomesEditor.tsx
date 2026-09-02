@@ -14,8 +14,6 @@ import {
   Trash2,
   ArrowUp,
   ArrowDown,
-  Pencil,
-  ChevronUp,
   Flag,
   ArrowRightLeft,
   ShieldCheck,
@@ -33,9 +31,11 @@ import {
   Bot,
   type LucideIcon,
 } from 'lucide-react';
+import { WEBHOOK_VARIABLE_GROUPS, withCustomFieldVariables } from '@/lib/wa-agents/catalog';
 import type { AgentAiVar, BotMinimal, EndAction, Outcome } from '@/lib/wa-agents/types';
 import type { WaAgentListItem, WaAgentOptions } from './useWaAgents';
-import { BTN_ICON, BTN_SMALL, Badge, Field, HELP_CLASS, INPUT_CLASS, SUBCARD_CLASS, TEXTAREA_CLASS } from './ui';
+import { RuleEditorModal, RuleList } from './RuleList';
+import { BTN_ICON, BTN_SMALL, Disclosure, Field, HELP_CLASS, INPUT_CLASS, TEXTAREA_CLASS } from './ui';
 import { VarField } from './VarField';
 
 export type ActionType = EndAction['type'];
@@ -379,23 +379,6 @@ export function TagInput({
   );
 }
 
-/** Ajuda com as variáveis do corpo personalizado da ação webhook. */
-function WebhookVariablesHelp() {
-  return (
-    <div className={HELP_CLASS}>
-      <span className="font-medium">Variáveis disponíveis:</span>{' '}
-      {ACTION_WEBHOOK_VARIABLES.map((v, i) => (
-        <span key={v.key}>
-          <code className="font-mono">{`{{${v.key}}}`}</code> ({v.description})
-          {i < ACTION_WEBHOOK_VARIABLES.length - 1 ? ', ' : '.'}
-        </span>
-      ))}{' '}
-      Sem corpo personalizado, o envio traz o evento, o agente, a conversa, o contato, o negócio e o resultado (ou a
-      ação) em JSON. Se o corpo for um JSON válido, ele é enviado como JSON; senão vai como texto.
-    </div>
-  );
-}
-
 function ActionFields({
   action,
   onChange,
@@ -601,11 +584,12 @@ function ActionFields({
             maxLength={200}
             aria-label="Segredo do webhook"
           />
-          <details open={!!action.body_template}>
-            <summary className="cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-300 select-none">
-              Corpo personalizado (opcional)
-            </summary>
-            <div className="mt-2 space-y-2">
+          <Disclosure label="Corpo personalizado (opcional)" defaultOpen={!!action.body_template}>
+            <Field
+              label="Corpo (JSON)"
+              htmlFor={`${idPrefix}-body`}
+              tip="Vazio envia o JSON padrão (evento, agente, conversa, contato, negócio e resultado ou ação). JSON válido vai como JSON; senão, como texto. Digite { para ver as variáveis; as preenchidas pela IA ({{ia:nome}}) são geradas na hora do envio."
+            >
               <VarField
                 id={`${idPrefix}-body`}
                 value={action.body_template ?? ''}
@@ -616,11 +600,11 @@ function ActionFields({
                 ariaLabel="Corpo personalizado do webhook"
                 aiVars={aiVars}
                 onAiVarsChange={onAiVarsChange}
-                extraVars={ACTION_WEBHOOK_VARIABLES.map((v) => ({ key: `{{${v.key}}}`, description: v.description }))}
+                groups={withCustomFieldVariables(WEBHOOK_VARIABLE_GROUPS, options?.custom_fields, (key) => `{{deal.custom_fields.${key}}}`)}
+                insertLabel="Inserir variável"
               />
-              <WebhookVariablesHelp />
-            </div>
-          </details>
+            </Field>
+          </Disclosure>
         </div>
       );
     default:
@@ -694,7 +678,7 @@ export const ActionsEditor: React.FC<{
         return (
           <div
             key={aPrefix}
-            className="grid grid-cols-[auto_minmax(0,1fr)] md:grid-cols-[auto_minmax(0,240px)_1fr_auto] gap-2 items-start bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-lg p-2"
+            className="grid grid-cols-[auto_minmax(0,1fr)] md:grid-cols-[auto_minmax(0,240px)_1fr_auto] gap-2 items-start bg-slate-50 dark:bg-slate-950/40 border border-slate-200 dark:border-white/10 rounded-lg p-2"
           >
             <span
               className="mt-2 p-1.5 rounded-md bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400"
@@ -808,8 +792,18 @@ export function nextExpanded(expanded: number | null, change: { moved?: [from: n
   return expanded;
 }
 
+/** Chave única a partir de uma base ("novo-resultado", "novo-resultado-2"...). */
+function uniqueOutcomeKey(base: string, taken: string[]): string {
+  let key = base || 'resultado';
+  let n = 2;
+  while (taken.includes(key)) key = `${base}-${n++}`;
+  return key;
+}
+
 /**
- * Componente React `OutcomesEditor`.
+ * Componente React `OutcomesEditor`: resultados do encerramento em cartões
+ * compactos (nome, "Quando: ...", chips do que acontece); Editar abre a
+ * configuração completa num modal, o mesmo padrão das ações durante a conversa.
  * @returns {Element} Retorna um valor do tipo `Element`.
  */
 export const OutcomesEditor: React.FC<{
@@ -822,32 +816,16 @@ export const OutcomesEditor: React.FC<{
   onAiVarsChange?: (vars: AgentAiVar[]) => void;
   currentAgentId?: string | null;
 }> = ({ value, onChange, agents, options, bots = [], aiVars = [], onAiVarsChange = () => {}, currentAgentId }) => {
-  const [expanded, setExpanded] = useState<number | null>(null);
+  const [editing, setEditing] = useState<number | null>(null);
 
   const update = (index: number, patch: Partial<Outcome>) => {
     onChange(value.map((o, i) => (i === index ? { ...o, ...patch } : o)));
   };
-  const remove = (index: number) => {
-    onChange(value.filter((_, i) => i !== index));
-    setExpanded((e) => nextExpanded(e, { removed: index }));
-  };
-  const move = (index: number, dir: -1 | 1) => {
-    const target = index + dir;
-    if (target < 0 || target >= value.length) return;
-    const next = [...value];
-    const [item] = next.splice(index, 1);
-    next.splice(target, 0, item);
-    onChange(next);
-    setExpanded((e) => nextExpanded(e, { moved: [index, target] }));
-  };
   const add = () => {
-    let key = 'novo-resultado';
-    let n = 2;
-    while (value.some((o) => o.key === key)) key = `novo-resultado-${n++}`;
+    const key = uniqueOutcomeKey('novo-resultado', value.map((o) => o.key));
     onChange([...value, { key, label: 'Novo resultado', description: '', actions: [] }]);
-    setExpanded(value.length);
+    setEditing(value.length);
   };
-
   const setLabel = (index: number, label: string) => {
     const current = value[index];
     // Se a chave ainda segue o rótulo (ou está vazia), acompanha a mudança.
@@ -855,137 +833,128 @@ export const OutcomesEditor: React.FC<{
     update(index, { label, ...(follows ? { key: slugifyKey(label) } : {}) });
   };
 
+  const outcome = editing !== null ? value[editing] : null;
+  const idPrefix = `outcome-${editing ?? 0}`;
+
   return (
     <div className="space-y-3">
-      <p className={HELP_CLASS}>
-        Ao encerrar, o agente escolhe um destes resultados e as ações do cartão são executadas em ordem. A chave é o
-        nome que o modelo usa internamente.
-      </p>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          {value.length === 0
+            ? 'Define um resultado e executa as ações de encerramento.'
+            : `${value.length} ${value.length === 1 ? 'resultado' : 'resultados'}. O agente escolhe um ao encerrar.`}
+        </p>
+        <button type="button" className={BTN_SMALL} onClick={add}>
+          <Plus size={14} aria-hidden="true" /> Novo resultado
+        </button>
+      </div>
 
-      {value.length === 0 ? (
-        <p className="text-sm text-slate-500 dark:text-slate-400">Nenhum resultado. O agente só encerra a conversa.</p>
-      ) : null}
+      <RuleList
+        items={value}
+        onChange={(next) => {
+          onChange(next);
+          if (editing !== null && editing >= next.length) setEditing(null);
+        }}
+        keyOf={(o, i) => `${o.key || 'sem-chave'}-${i}`}
+        itemLabel="resultado"
+        emptyText="Nenhum resultado. Ao encerrar, o agente só para e a conversa fica com a equipe."
+        onEdit={setEditing}
+        duplicate={(o, all) => ({
+          ...o,
+          key: uniqueOutcomeKey(o.key || 'resultado', all.map((x) => x.key)),
+          label: `${o.label} (cópia)`,
+          actions: o.actions.map((x) => ({ ...x })),
+        })}
+        render={(o) => ({
+          icon: <Flag size={14} aria-hidden="true" />,
+          title: o.label.trim() || 'Sem rótulo',
+          subtitle: o.description.trim() ? (
+            <>
+              <span className="font-medium text-slate-600 dark:text-slate-300">Quando:</span> {o.description}
+            </>
+          ) : (
+            <span className="text-amber-700 dark:text-amber-300">Descreva quando usar este resultado.</span>
+          ),
+          body: (
+            <span className="flex flex-wrap items-start gap-1.5">
+              <span className="text-xs text-slate-500 dark:text-slate-400 pt-0.5">Ao finalizar:</span>
+              <ActionSummary
+                actions={o.actions}
+                agents={agents}
+                options={options}
+                bots={bots}
+                emptyText="Só encerra; a conversa fica com a equipe."
+              />
+            </span>
+          ),
+        })}
+      />
 
-      {value.map((outcome, index) => {
-        const idPrefix = `outcome-${index}`;
-        const open = expanded === index;
-        const bodyId = `${idPrefix}-body`;
-        return (
-          <div key={idPrefix} className={SUBCARD_CLASS}>
-            <div className="flex items-start gap-2">
-              <span className="mt-0.5 p-1.5 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 shrink-0">
-                <Flag size={14} aria-hidden="true" />
-              </span>
-              <div className="flex-1 min-w-0 space-y-1.5">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-semibold text-slate-900 dark:text-white">
-                    {outcome.label.trim() || 'Sem rótulo'}
-                  </span>
-                  {outcome.key ? (
-                    <Badge tone="slate">
-                      <span className="font-mono font-normal">{outcome.key}</span>
-                    </Badge>
-                  ) : (
-                    <Badge tone="amber">sem chave</Badge>
-                  )}
-                </div>
-                {!open ? (
-                  <>
-                    {outcome.description.trim() ? (
-                      <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-2">
-                        <span className="font-medium">Quando usar:</span> {outcome.description}
-                      </p>
-                    ) : (
-                      <p className="text-xs text-amber-700 dark:text-amber-300">Sem descrição de quando usar.</p>
-                    )}
-                    <div className="flex items-start gap-1.5">
-                      <ArrowRight size={14} className="mt-0.5 text-slate-400 shrink-0" aria-hidden="true" />
-                      <ActionSummary
-                        actions={outcome.actions}
-                        agents={agents}
-                        options={options}
-                        bots={bots}
-                        emptyText="Sem ações: o agente só encerra e a conversa fica com a equipe."
-                      />
-                    </div>
-                  </>
-                ) : null}
-              </div>
-              <div className="flex items-center gap-0.5 shrink-0">
-                <button
-                  type="button"
-                  className={BTN_SMALL}
-                  aria-expanded={open}
-                  aria-controls={bodyId}
-                  onClick={() => setExpanded(open ? null : index)}
-                >
-                  {open ? <ChevronUp size={14} aria-hidden="true" /> : <Pencil size={14} aria-hidden="true" />}
-                  {open ? 'Fechar' : 'Editar'}
-                </button>
-                <CardControls index={index} total={value.length} onMove={move} onRemove={remove} itemLabel="resultado" />
-              </div>
-            </div>
+      <RuleEditorModal
+        open={outcome !== null}
+        onClose={() => setEditing(null)}
+        title={outcome ? `Resultado: ${outcome.label.trim() || 'Sem rótulo'}` : 'Resultado'}
+      >
+        {outcome && editing !== null ? (
+          <>
+            <Field label="Nome do resultado" htmlFor={`${idPrefix}-label`}>
+              <input
+                id={`${idPrefix}-label`}
+                className={INPUT_CLASS}
+                value={outcome.label}
+                onChange={(e) => setLabel(editing, e.target.value)}
+                maxLength={80}
+                placeholder="Ex.: Qualificado"
+              />
+            </Field>
 
-            {open ? (
-              <div id={bodyId} className="space-y-3 border-t border-slate-200 dark:border-white/10 pt-3">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <Field label="Rótulo" htmlFor={`${idPrefix}-label`}>
-                    <input
-                      id={`${idPrefix}-label`}
-                      className={INPUT_CLASS}
-                      value={outcome.label}
-                      onChange={(e) => setLabel(index, e.target.value)}
-                      maxLength={80}
-                    />
-                  </Field>
-                  <Field label="Chave" htmlFor={`${idPrefix}-key`} help="Só letras minúsculas, números, hífen e sublinhado.">
-                    <input
-                      id={`${idPrefix}-key`}
-                      className={`${INPUT_CLASS} font-mono`}
-                      value={outcome.key}
-                      onChange={(e) => update(index, { key: slugifyKey(e.target.value) })}
-                      maxLength={40}
-                    />
-                  </Field>
-                </div>
+            <Field
+              label="Quando usar"
+              htmlFor={`${idPrefix}-description`}
+              tip="Explique ao modelo em que situação este resultado se aplica. Ex.: o lead tem os requisitos e quer seguir."
+            >
+              <textarea
+                id={`${idPrefix}-description`}
+                className={TEXTAREA_CLASS}
+                rows={2}
+                value={outcome.description}
+                onChange={(e) => update(editing, { description: e.target.value })}
+                maxLength={500}
+                placeholder="Ex.: o lead possui os requisitos necessários"
+              />
+            </Field>
 
-                <Field
-                  label="Quando usar"
-                  htmlFor={`${idPrefix}-description`}
-                  help="Explique ao modelo em que situação este resultado se aplica."
-                >
-                  <textarea
-                    id={`${idPrefix}-description`}
-                    className={TEXTAREA_CLASS}
-                    rows={2}
-                    value={outcome.description}
-                    onChange={(e) => update(index, { description: e.target.value })}
-                    maxLength={500}
-                  />
-                </Field>
+            <ActionsEditor
+              value={outcome.actions}
+              onChange={(actions) => update(editing, { actions })}
+              agents={agents}
+              options={options}
+              bots={bots}
+              aiVars={aiVars}
+              onAiVarsChange={onAiVarsChange}
+              currentAgentId={currentAgentId}
+              idPrefix={idPrefix}
+              emptyText="Sem ações: o agente só encerra e a conversa fica com a equipe."
+            />
 
-                <ActionsEditor
-                  value={outcome.actions}
-                  onChange={(actions) => update(index, { actions })}
-                  agents={agents}
-                  options={options}
-                  bots={bots}
-                  aiVars={aiVars}
-                  onAiVarsChange={onAiVarsChange}
-                  currentAgentId={currentAgentId}
-                  idPrefix={idPrefix}
-                  emptyText="Sem ações: o agente só encerra e a conversa fica com a equipe."
+            <Disclosure label="Avançado">
+              <Field
+                label="Chave"
+                htmlFor={`${idPrefix}-key`}
+                tip="Nome interno que o modelo usa para escolher este resultado (também vai nos webhooks como {{resultado}}). Só letras minúsculas, números, hífen e sublinhado."
+              >
+                <input
+                  id={`${idPrefix}-key`}
+                  className={`${INPUT_CLASS} font-mono sm:max-w-xs`}
+                  value={outcome.key}
+                  onChange={(e) => update(editing, { key: slugifyKey(e.target.value) })}
+                  maxLength={40}
                 />
-              </div>
-            ) : null}
-          </div>
-        );
-      })}
-
-      <button type="button" className={BTN_SMALL} onClick={add}>
-        <Plus size={14} aria-hidden="true" />
-        Adicionar resultado
-      </button>
+              </Field>
+            </Disclosure>
+          </>
+        ) : null}
+      </RuleEditorModal>
     </div>
   );
 };

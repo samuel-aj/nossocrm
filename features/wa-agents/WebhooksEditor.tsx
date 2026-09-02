@@ -1,38 +1,28 @@
 'use client';
 
 /**
- * Editor de webhooks do agente: por evento, URL, segredo, ativo e corpo
- * personalizado (JSON com {{variáveis}}).
+ * Webhooks por evento do agente, um cartão por webhook: evento + URL + ativo
+ * na primeira linha; corpo personalizado (JSON com {{variáveis}}, menu
+ * "Inserir variável" agrupado, autocomplete no `{` e variáveis preenchidas
+ * pela IA) e segredo ao expandir.
  */
 import React from 'react';
-import { Plus, Trash2 } from 'lucide-react';
-import { AGENT_EVENTS, AGENT_EVENT_LABELS, type AgentEvent, type AgentWebhook } from '@/lib/wa-agents/types';
-import { BTN_ICON, BTN_SMALL, Field, HELP_CLASS, INPUT_CLASS, SUBCARD_CLASS, TEXTAREA_CLASS, Toggle, newId } from './ui';
+import { Plus, Trash2, Webhook } from 'lucide-react';
+import { WEBHOOK_VARIABLE_GROUPS, withCustomFieldVariables } from '@/lib/wa-agents/catalog';
+import { AGENT_EVENTS, AGENT_EVENT_LABELS, type AgentAiVar, type AgentEvent, type AgentWebhook } from '@/lib/wa-agents/types';
+import type { WaAgentOptions } from './useWaAgents';
+import { VarField } from './VarField';
+import { Disclosure, Field, INPUT_CLASS, InfoTip, KebabMenu, Toggle, BTN_SMALL, newId } from './ui';
 
 const BODY_PLACEHOLDER = `{
   "evento": "{{event}}",
   "quando": "{{occurred_at}}",
   "agente": "{{agent.name}}",
   "telefone": "{{conversation.phone}}",
-  "nome": "{{conversation.name}}",
+  "nome": "{{contact.name}}",
   "resultado": "{{resultado}}",
-  "resumo": "{{resumo}}"
+  "resumo": "{{ia:resumo_atendimento}}"
 }`;
-
-const BODY_VARIABLES: Array<{ key: string; description: string }> = [
-  { key: 'event', description: 'nome do evento' },
-  { key: 'occurred_at', description: 'data e hora (ISO)' },
-  { key: 'agent.name', description: 'nome do agente' },
-  { key: 'conversation.phone', description: 'telefone da conversa' },
-  { key: 'conversation.name', description: 'nome no WhatsApp' },
-  { key: 'contact.name', description: 'nome do contato' },
-  { key: 'deal.title', description: 'título do negócio' },
-  { key: 'resultado', description: 'chave do resultado (no encerramento)' },
-  { key: 'resumo', description: 'resumo do atendimento (no encerramento)' },
-  { key: 'acao', description: 'chave da ação (em ação durante a conversa)' },
-  { key: 'detalhes', description: 'detalhes informados pelo agente (em ação durante a conversa)' },
-  { key: 'text', description: 'texto enviado (em resposta enviada)' },
-];
 
 /**
  * Componente React `WebhooksEditor`.
@@ -41,7 +31,10 @@ const BODY_VARIABLES: Array<{ key: string; description: string }> = [
 export const WebhooksEditor: React.FC<{
   value: AgentWebhook[];
   onChange: (value: AgentWebhook[]) => void;
-}> = ({ value, onChange }) => {
+  options?: WaAgentOptions | undefined;
+  aiVars?: AgentAiVar[];
+  onAiVarsChange?: (vars: AgentAiVar[]) => void;
+}> = ({ value, onChange, options, aiVars = [], onAiVarsChange = () => {} }) => {
   const update = (index: number, patch: Partial<AgentWebhook>) =>
     onChange(value.map((w, i) => (i === index ? { ...w, ...patch } : w)));
   const remove = (index: number) => onChange(value.filter((_, i) => i !== index));
@@ -50,117 +43,117 @@ export const WebhooksEditor: React.FC<{
       ...value,
       { id: newId(), event: 'finished', url: '', secret: null, body_template: null, active: true },
     ]);
+  const groups = withCustomFieldVariables(WEBHOOK_VARIABLE_GROUPS, options?.custom_fields, (key) => `{{deal.custom_fields.${key}}}`);
 
   return (
     <div className="space-y-3">
-      <p className={HELP_CLASS}>
-        Avise outro sistema (n8n, Make, seu backend) quando algo acontecer no atendimento. Sem corpo personalizado, o
-        envio traz o evento, o agente, a conversa, o contato e o negócio em JSON.
-      </p>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-slate-500 dark:text-slate-400 inline-flex items-center gap-1.5">
+          {value.length === 0 ? 'Nenhum webhook.' : `${value.length} ${value.length === 1 ? 'webhook' : 'webhooks'}.`}
+          <InfoTip
+            label="Sobre os webhooks"
+            text="Avise n8n, Make ou o seu backend quando algo acontecer no atendimento. Sem corpo personalizado, o envio traz o evento, o agente, a conversa, o contato e o negócio em JSON."
+          />
+        </p>
+        <button type="button" className={BTN_SMALL} onClick={add}>
+          <Plus size={14} aria-hidden="true" /> Novo webhook
+        </button>
+      </div>
 
-      {value.length === 0 ? (
-        <p className="text-sm text-slate-500 dark:text-slate-400">Nenhum webhook configurado.</p>
-      ) : null}
-
-      {value.map((hook, index) => {
-        const idPrefix = `webhook-${hook.id}`;
-        return (
-          <div key={hook.id} className={SUBCARD_CLASS}>
-            <div className="flex items-start gap-2">
-              <div className="flex-1 grid grid-cols-1 md:grid-cols-[minmax(0,260px)_1fr] gap-3">
-                <Field label="Evento" htmlFor={`${idPrefix}-event`}>
-                  <select
-                    id={`${idPrefix}-event`}
-                    className={INPUT_CLASS}
-                    value={hook.event}
-                    onChange={(e) => update(index, { event: e.target.value as AgentEvent })}
-                  >
-                    {AGENT_EVENTS.map((ev) => (
-                      <option key={ev} value={ev}>
-                        {AGENT_EVENT_LABELS[ev]}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="URL" htmlFor={`${idPrefix}-url`}>
-                  <input
-                    id={`${idPrefix}-url`}
-                    type="url"
-                    className={INPUT_CLASS}
-                    value={hook.url}
-                    onChange={(e) => update(index, { url: e.target.value })}
-                    placeholder="https://..."
-                  />
-                </Field>
-              </div>
-              <div className="flex flex-col items-center gap-2 shrink-0 pt-6">
-                <Toggle
-                  checked={hook.active}
-                  onChange={(active) => update(index, { active })}
-                  label={`Webhook ${index + 1} ativo`}
-                />
-                <button
-                  type="button"
-                  className={`${BTN_ICON} hover:text-red-600 dark:hover:text-red-400`}
-                  aria-label={`Remover webhook ${index + 1}`}
-                  title="Remover"
-                  onClick={() => remove(index)}
-                >
-                  <Trash2 size={14} aria-hidden="true" />
-                </button>
-              </div>
-            </div>
-
-            <Field
-              label="Segredo (opcional)"
-              htmlFor={`${idPrefix}-secret`}
-              help="Enviado nos cabeçalhos X-Webhook-Secret e Authorization: Bearer."
-            >
-              <input
-                id={`${idPrefix}-secret`}
-                type="password"
-                autoComplete="off"
-                className={INPUT_CLASS}
-                value={hook.secret ?? ''}
-                onChange={(e) => update(index, { secret: e.target.value || null })}
-                maxLength={200}
-              />
-            </Field>
-
-            <details open={!!hook.body_template} className="group">
-              <summary className="cursor-pointer text-sm font-medium text-slate-700 dark:text-slate-300 select-none">
-                Corpo personalizado (opcional)
-              </summary>
-              <div className="mt-2 space-y-2">
-                <textarea
-                  id={`${idPrefix}-body`}
-                  className={`${TEXTAREA_CLASS} font-mono text-xs`}
-                  rows={8}
-                  value={hook.body_template ?? ''}
-                  onChange={(e) => update(index, { body_template: e.target.value || null })}
-                  placeholder={BODY_PLACEHOLDER}
-                  aria-label="Corpo personalizado do webhook"
-                  maxLength={20000}
-                />
-                <div className={HELP_CLASS}>
-                  <span className="font-medium">Variáveis disponíveis:</span>{' '}
-                  {BODY_VARIABLES.map((v, i) => (
-                    <span key={v.key}>
-                      <code className="font-mono">{`{{${v.key}}}`}</code> ({v.description}){i < BODY_VARIABLES.length - 1 ? ', ' : '.'}
-                    </span>
-                  ))}{' '}
-                  Se o resultado for um JSON válido, ele é enviado como JSON; senão vai como texto.
+      {value.length > 0 ? (
+        <ul className="space-y-2" aria-label="Webhooks">
+          {value.map((hook, index) => {
+            const idPrefix = `webhook-${hook.id}`;
+            return (
+              <li
+                key={hook.id}
+                className={`rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 p-3 space-y-3 ${
+                  hook.active ? '' : 'opacity-70'
+                }`}
+              >
+                <div className="flex items-start gap-2">
+                  <span className="mt-1.5 p-1.5 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 shrink-0">
+                    <Webhook size={14} aria-hidden="true" />
+                  </span>
+                  <div className="flex-1 min-w-0 grid grid-cols-1 md:grid-cols-[minmax(0,220px)_1fr] gap-2">
+                    <select
+                      id={`${idPrefix}-event`}
+                      className={INPUT_CLASS}
+                      value={hook.event}
+                      onChange={(e) => update(index, { event: e.target.value as AgentEvent })}
+                      aria-label="Evento"
+                    >
+                      {AGENT_EVENTS.map((ev) => (
+                        <option key={ev} value={ev}>
+                          {AGENT_EVENT_LABELS[ev]}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      id={`${idPrefix}-url`}
+                      type="url"
+                      className={INPUT_CLASS}
+                      value={hook.url}
+                      onChange={(e) => update(index, { url: e.target.value })}
+                      placeholder="https://..."
+                      aria-label="URL do webhook"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0 pt-1">
+                    <Toggle checked={hook.active} onChange={(active) => update(index, { active })} label={`Webhook ${index + 1} ativo`} />
+                    <KebabMenu
+                      label={`Mais ações: webhook ${index + 1}`}
+                      items={[
+                        { label: 'Excluir', icon: <Trash2 size={14} aria-hidden="true" />, danger: true, onSelect: () => remove(index) },
+                      ]}
+                    />
+                  </div>
                 </div>
-              </div>
-            </details>
-          </div>
-        );
-      })}
 
-      <button type="button" className={BTN_SMALL} onClick={add}>
-        <Plus size={14} aria-hidden="true" />
-        Adicionar webhook
-      </button>
+                <Disclosure label="Corpo personalizado e segredo" defaultOpen={!!hook.body_template || !!hook.secret}>
+                  <div className="space-y-3">
+                    <Field
+                      label="Corpo (JSON)"
+                      htmlFor={`${idPrefix}-body`}
+                      tip="Vazio envia o JSON padrão do evento. Se o corpo for um JSON válido, vai como JSON; senão, como texto. Digite { para ver as variáveis; variáveis preenchidas pela IA ({{ia:nome}}) são geradas na hora do envio."
+                    >
+                      <VarField
+                        id={`${idPrefix}-body`}
+                        value={hook.body_template ?? ''}
+                        onChange={(body) => update(index, { body_template: body || null })}
+                        placeholder={BODY_PLACEHOLDER}
+                        maxLength={20000}
+                        rows={8}
+                        ariaLabel="Corpo personalizado do webhook"
+                        aiVars={aiVars}
+                        onAiVarsChange={onAiVarsChange}
+                        groups={groups}
+                        insertLabel="Inserir variável"
+                      />
+                    </Field>
+                    <Field
+                      label="Segredo"
+                      htmlFor={`${idPrefix}-secret`}
+                      tip="Opcional. Enviado nos cabeçalhos X-Webhook-Secret e Authorization: Bearer."
+                      className="sm:max-w-md"
+                    >
+                      <input
+                        id={`${idPrefix}-secret`}
+                        type="password"
+                        autoComplete="off"
+                        className={INPUT_CLASS}
+                        value={hook.secret ?? ''}
+                        onChange={(e) => update(index, { secret: e.target.value || null })}
+                        maxLength={200}
+                      />
+                    </Field>
+                  </div>
+                </Disclosure>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
     </div>
   );
 };
