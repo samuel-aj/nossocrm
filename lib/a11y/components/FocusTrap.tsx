@@ -4,6 +4,8 @@ import FocusTrapReact from 'focus-trap-react';
 export interface FocusTrapProps {
   /** Whether the trap is active */
   active: boolean;
+  /** Pausa o trap sem desativar nem devolver o foco (menus/modais por cima, em portais fora do contêiner). */
+  paused?: boolean;
   /** Element(s) to trap focus within */
   children: React.ReactNode;
   /** Callback when user presses Escape */
@@ -40,6 +42,7 @@ export interface FocusTrapProps {
  */
 export const FocusTrap: React.FC<FocusTrapProps> = ({
   active,
+  paused = false,
   children,
   onEscape,
   initialFocus,
@@ -65,6 +68,7 @@ export const FocusTrap: React.FC<FocusTrapProps> = ({
   return (
     <FocusTrapReact
       active={active}
+      paused={paused}
       focusTrapOptions={{
         initialFocus: getInitialFocus(),
         returnFocusOnDeactivate: returnFocus,

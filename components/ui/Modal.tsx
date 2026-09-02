@@ -154,17 +154,21 @@ export const Modal: React.FC<ModalProps> = ({
     </div>
   );
 
-  return focusTrapEnabled ? (
+  // O FocusTrap envolve o conteúdo SEMPRE: trocar entre "com" e "sem" wrapper
+  // muda a árvore e o React remonta o conteúdo inteiro (estado interno perdido:
+  // o modal da etapa do board abria e fechava na hora, o menu "..." sumia).
+  // Com `focusTrapEnabled=false` o trap só fica PAUSADO (menus/modais por cima,
+  // em portais fora daqui, recebem foco e cliques), sem desmontar nada.
+  return (
     <FocusTrap
       active={isOpen}
+      paused={!focusTrapEnabled}
       onEscape={handleEscape}
       initialFocus={initialFocus}
       returnFocus={true}
     >
       {content}
     </FocusTrap>
-  ) : (
-    content
   );
 };
 

@@ -70,9 +70,19 @@ export function BoardStagesEditor({
 
   useEffect(() => setMounted(true), []);
 
+  // O pai precisa pausar o foco preso ANTES de o menu/modal receber o foco: o aviso
+  // vai no mesmo lote de estado do clique (síncrono) e o efeito só garante consistência.
   useEffect(() => {
     onOverlayOpenChange?.(editing !== null || menuOpen);
   }, [editing, menuOpen, onOverlayOpenChange]);
+  const openStage = (id: string) => {
+    setEditing(id);
+    onOverlayOpenChange?.(true);
+  };
+  const onMenuOpenChange = (open: boolean) => {
+    setMenuOpen(open);
+    onOverlayOpenChange?.(open || editing !== null);
+  };
 
   // Rolagem automática enquanto arrasta perto das bordas
   useEffect(() => {
@@ -106,7 +116,7 @@ export function BoardStagesEditor({
   const add = () => {
     const id = crypto.randomUUID();
     onChange([...stages, { id, label: `Etapa ${stages.length + 1}`, color: STAGE_COLORS[stages.length % STAGE_COLORS.length] }]);
-    setEditing(id);
+    openStage(id);
     window.setTimeout(() => stripRef.current?.scrollTo({ left: stripRef.current.scrollWidth, behavior: 'smooth' }), 0);
   };
   const duplicate = (s: BoardStage, index: number) => {
@@ -340,10 +350,10 @@ export function BoardStagesEditor({
                   <KebabMenu
                     label={`Mais ações: ${stage.label}`}
                     size={15}
-                    onOpenChange={setMenuOpen}
+                    onOpenChange={onMenuOpenChange}
                     className="p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-white/10 transition-colors"
                     items={[
-                      { label: 'Editar etapa', icon: <Pencil size={14} aria-hidden="true" />, onSelect: () => setEditing(stage.id) },
+                      { label: 'Editar etapa', icon: <Pencil size={14} aria-hidden="true" />, onSelect: () => openStage(stage.id) },
                       ...(showIds
                         ? [{ label: 'Copiar ID da etapa', icon: <Copy size={14} aria-hidden="true" />, onSelect: () => void copyStageId(stage.id) }]
                         : []),
@@ -362,7 +372,7 @@ export function BoardStagesEditor({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setEditing(stage.id)}
+                  onClick={() => openStage(stage.id)}
                   className="block w-full text-left px-3 pb-3 pt-0.5 rounded-b-xl focus-visible-ring"
                   aria-label={`Editar etapa ${stage.label}`}
                 >

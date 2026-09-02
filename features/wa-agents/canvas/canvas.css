@@ -6,32 +6,32 @@
  * As variáveis --xy-* são as do @xyflow/react/dist/style.css.
  */
 .react-flow.wa-bot-canvas {
-  --xy-edge-stroke-default: #94a3b8;
+  --xy-edge-stroke-default: var(--color-slate-400);
   --xy-edge-stroke-selected-default: var(--color-purple-600);
   --xy-edge-stroke-width-default: 2;
   --xy-connectionline-stroke-default: var(--color-purple-500);
   --xy-connectionline-stroke-width-default: 2;
   --xy-handle-background-color-default: var(--color-purple-500);
-  --xy-handle-border-color-default: #ffffff;
-  --xy-background-color-default: #f8fafc;
-  --xy-background-pattern-dots-color-default: #cbd5e1;
-  --xy-minimap-background-color-default: #ffffff;
-  --xy-minimap-mask-background-color-default: rgb(241 245 249 / 0.75);
+  --xy-handle-border-color-default: var(--color-surface);
+  --xy-background-color-default: var(--color-muted);
+  --xy-background-pattern-dots-color-default: var(--color-border);
+  --xy-minimap-background-color-default: var(--color-surface);
+  --xy-minimap-mask-background-color-default: color-mix(in srgb, var(--color-muted) 75%, transparent);
   --xy-minimap-mask-stroke-color-default: var(--color-purple-300);
   --xy-minimap-mask-stroke-width-default: 1;
-  --xy-controls-button-background-color-default: #ffffff;
-  --xy-controls-button-background-color-hover-default: #f1f5f9;
-  --xy-controls-button-color-default: #334155;
-  --xy-controls-button-color-hover-default: #0f172a;
-  --xy-controls-button-border-color-default: #e2e8f0;
-  --xy-controls-box-shadow-default: 0 1px 3px rgb(15 23 42 / 0.12);
+  --xy-controls-button-background-color-default: var(--color-surface);
+  --xy-controls-button-background-color-hover-default: var(--color-muted);
+  --xy-controls-button-color-default: var(--color-text-secondary);
+  --xy-controls-button-color-hover-default: var(--color-text-primary);
+  --xy-controls-button-border-color-default: var(--color-border);
+  --xy-controls-box-shadow-default: 0 1px 3px rgb(0 0 0 / 0.12);
   --xy-attribution-background-color-default: transparent;
   --xy-selection-background-color-default: color-mix(in srgb, var(--color-purple-500) 8%, transparent);
   --xy-selection-border-default: 1px dashed var(--color-purple-500);
 }
 
 .react-flow.wa-bot-canvas.dark {
-  --xy-edge-stroke-default: #64748b;
+  --xy-edge-stroke-default: var(--color-slate-500);
   --xy-edge-stroke-selected-default: var(--color-purple-400);
   --xy-connectionline-stroke-default: var(--color-purple-400);
   --xy-handle-background-color-default: var(--color-purple-500);
@@ -43,8 +43,8 @@
   --xy-minimap-mask-stroke-color-default: var(--color-purple-600);
   --xy-controls-button-background-color-default: var(--color-dark-card);
   --xy-controls-button-background-color-hover-default: var(--color-dark-hover);
-  --xy-controls-button-color-default: #e2e8f0;
-  --xy-controls-button-color-hover-default: #ffffff;
+  --xy-controls-button-color-default: var(--color-text-secondary);
+  --xy-controls-button-color-hover-default: var(--color-text-primary);
   --xy-controls-button-border-color-default: var(--color-dark-border);
   --xy-controls-box-shadow-default: 0 1px 3px rgb(0 0 0 / 0.5);
   --xy-selection-background-color-default: color-mix(in srgb, var(--color-purple-400) 10%, transparent);
@@ -69,10 +69,10 @@
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-purple-500) 25%, transparent);
 }
 .wa-bot-canvas .react-flow__handle.wa-handle-in {
-  background-color: #94a3b8;
+  background-color: var(--color-slate-400);
 }
 .wa-bot-canvas.dark .react-flow__handle.wa-handle-in {
-  background-color: #64748b;
+  background-color: var(--color-slate-500);
 }
 .wa-bot-canvas .react-flow__handle.wa-handle-in.connectingto,
 .wa-bot-canvas .react-flow__handle.wa-handle-in.valid {
@@ -80,7 +80,7 @@
 }
 /* Saída sem ligação: bolinha vazada, para chamar a atenção sem gritar. */
 .wa-bot-canvas .react-flow__handle.wa-handle-loose {
-  background-color: #ffffff;
+  background-color: var(--color-surface);
   border-color: var(--color-purple-500);
   border-style: dashed;
 }
@@ -175,9 +175,9 @@
   width: 18px;
   height: 18px;
   border-radius: 9999px;
-  border: 1px solid #cbd5e1;
-  background: #ffffff;
-  color: #64748b;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
   opacity: 0.85;
   cursor: pointer;
   transition: opacity 0.15s, color 0.15s, border-color 0.15s;
@@ -191,5 +191,5 @@
 .react-flow.wa-bot-canvas.dark .wa-edge-disconnect {
   background: var(--color-dark-card);
   border-color: var(--color-dark-border);
-  color: #94a3b8;
+  color: var(--color-text-muted);
 }

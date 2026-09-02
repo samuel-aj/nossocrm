@@ -283,8 +283,8 @@ select:not(.appearance-none):not([multiple]):not([size]) {
 .dark select,
 .dark option,
 .dark optgroup {
-  background-color: #0f172a;
-  color: #f8fafc;
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
 }
 
 .dark select:not(.appearance-none):not([multiple]):not([size]) {
