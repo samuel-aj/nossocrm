@@ -172,8 +172,8 @@ const ReportsPage: React.FC = () => {
     return `R$ ${value.toLocaleString('pt-BR')}`;
   }, []);
 
-  // Conversão por etapa (snapshot do board), com a semântica "quantos
-  // CHEGARAM até aqui": barra = leads que alcançaram a etapa; % = dos que
+  // Conversão por etapa (coorte do período selecionado), com a semântica
+  // "quantos CHEGARAM até aqui": barra = leads que alcançaram a etapa; % = dos que
   // chegaram, quantos avançaram pra seguinte (na última, quantos fecharam).
   // Ganhos contam como tendo passado por TODAS as etapas; perdidos contam só
   // na PRIMEIRA (entraram no funil; até onde avançaram não fica registrado).
@@ -199,9 +199,16 @@ const ReportsPage: React.FC = () => {
     const wonStage = stages.find(isWonStage);
     const wonStageIds = new Set(stages.filter(isWonStage).map(s => s.id));
 
-    const boardDeals = allCrmDeals.filter(
-      d => d.boardId === convBoard.id && (!selectedOwnerId || d.ownerId === selectedOwnerId)
-    );
+    // COORTE DO PERÍODO: os mesmos leads dos cards de taxa (criados na janela
+    // do filtro "Este mês"/"Mês passado"...). Antes o gráfico era o snapshot
+    // do histórico inteiro e o filtro de período não mudava nada aqui.
+    const janela = getDateRange(period);
+    const boardDeals = allCrmDeals.filter(d => {
+      if (d.boardId !== convBoard.id) return false;
+      if (selectedOwnerId && d.ownerId !== selectedOwnerId) return false;
+      const criado = new Date(d.createdAt);
+      return criado >= janela.start && criado <= janela.end;
+    });
     // "Completaram o funil" = flag de ganho OU parados numa etapa de ganho
     // (ex.: cliente em Protocolado ainda sem a flag marcada)
     const completed = boardDeals.filter(d => d.isWon || (!d.isLost && wonStageIds.has(d.status))).length;
