@@ -18,9 +18,10 @@ import { UsersPage } from './UsersPage';
 import { LeadDistributionSettings } from './LeadDistributionSettings';
 import { useAuth } from '@/context/AuthContext';
 import { WaAgentsSettings } from '@/features/wa-agents/WaAgentsSettings';
-import { Settings as SettingsIcon, Users, Database, Sparkles, Plug, Package, Shuffle, Bot, Palette } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Settings as SettingsIcon, Users, Database, Sparkles, Plug, Package, Shuffle, Bot, Palette, UserRound, ChevronRight } from 'lucide-react';
 
-type SettingsTab = 'general' | 'appearance' | 'products' | 'integrations' | 'ai' | 'data' | 'users' | 'distribution' | 'agents';
+type SettingsTab = 'general' | 'appearance' | 'profile' | 'products' | 'integrations' | 'ai' | 'data' | 'users' | 'distribution' | 'agents';
 
 interface GeneralSettingsProps {
   hash?: string;
@@ -48,6 +49,10 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ hash, isAdmin }) => {
 
   return (
     <div className="pb-10">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold text-slate-900 dark:text-white font-display tracking-tight">Geral</h1>
+        <p className="text-slate-500 dark:text-slate-400 mt-2 text-lg">Escritório, preferências de início e cadastros do funil.</p>
+      </div>
       {/* Office Name (read-only, managed by agency) */}
       <div className="mb-8">
         <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl p-6">
@@ -87,6 +92,12 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ hash, isAdmin }) => {
 
       {isAdmin && (
         <>
+          <div className="mb-4 mt-2">
+            <h2 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Leads e funil</h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+              Regras e cadastros que valem para todos os quadros da organização.
+            </p>
+          </div>
           <InactiveLeadsSettings />
 
           <LossReasonsSettings />
@@ -129,6 +140,10 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ hash, isAdmin }) => {
 const ProductsSettings: React.FC = () => {
   return (
     <div className="pb-10">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold text-slate-900 dark:text-white font-display tracking-tight">Produtos e serviços</h1>
+        <p className="text-slate-500 dark:text-slate-400 mt-2 text-lg">O catálogo que entra nos leads e nas ações dos agentes.</p>
+      </div>
       <ProductsCatalogManager />
     </div>
   );
@@ -165,6 +180,10 @@ const IntegrationsSettings: React.FC = () => {
 
   return (
     <div className="pb-10">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold text-slate-900 dark:text-white font-display tracking-tight">Integrações</h1>
+        <p className="text-slate-500 dark:text-slate-400 mt-2 text-lg">Chaves de API, webhooks e MCP para ligar o CRM a outros sistemas.</p>
+      </div>
       <div className="flex items-center gap-2 mb-6">
         {([
           { id: 'api' as const, label: 'API' },
@@ -238,22 +257,61 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
   }, [pathname]);
 
   const isAdminOrSuper = profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN;
-  const tabs = [
-    { id: 'general' as SettingsTab, name: 'Geral', icon: SettingsIcon },
-    // Aparência é pessoal (modo + tema por usuário): aparece para qualquer papel.
-    { id: 'appearance' as SettingsTab, name: 'Aparência', icon: Palette },
-    // Distribuição logo no começo: como última aba ela caía fora da área
-    // visível da fileira (que rola na horizontal) e ninguém achava.
-    ...(isAdminOrSuper ? [{ id: 'distribution' as SettingsTab, name: 'Distribuição', icon: Shuffle }] : []),
-    ...(isAdminOrSuper ? [{ id: 'users' as SettingsTab, name: 'Equipe', icon: Users }] : []),
-    ...(isAdminOrSuper ? [{ id: 'products' as SettingsTab, name: 'Produtos/Serviços', icon: Package }] : []),
-    ...(isAdminOrSuper ? [{ id: 'integrations' as SettingsTab, name: 'Integrações', icon: Plug }] : []),
-    { id: 'ai' as SettingsTab, name: 'Central de I.A', icon: Sparkles },
-    // Automações (robôs + agente de IA) vale para qualquer admin: o robô é
-    // liberado pra todos e o agente aparece bloqueado até o super admin soltar.
-    ...(isAdminOrSuper ? [{ id: 'agents' as SettingsTab, name: 'Automações', icon: Bot }] : []),
-    { id: 'data' as SettingsTab, name: 'Dados', icon: Database },
+  const router = useRouter();
+
+  type NavItem = { id: SettingsTab; name: string; icon: React.ElementType; hint?: string; href?: string };
+  type NavGroup = { label: string; items: NavItem[] };
+
+  // Grupos por afinidade: pessoal, organização, IA, conexões e sistema.
+  // As funções não mudaram; só a ordem e o agrupamento.
+  const groups: NavGroup[] = [
+    {
+      label: 'Pessoal',
+      items: [
+        { id: 'appearance', name: 'Aparência', icon: Palette, hint: 'Modo e tema' },
+        { id: 'profile', name: 'Perfil', icon: UserRound, hint: 'Seus dados', href: '/profile' },
+      ],
+    },
+    {
+      label: 'Organização',
+      items: [
+        { id: 'general', name: 'Geral', icon: SettingsIcon, hint: 'Escritório e funil' },
+        ...(isAdminOrSuper ? [{ id: 'users' as SettingsTab, name: 'Equipe', icon: Users, hint: 'Membros e permissões' }] : []),
+        ...(isAdminOrSuper ? [{ id: 'distribution' as SettingsTab, name: 'Distribuição de leads', icon: Shuffle, hint: 'Quem recebe cada lead' }] : []),
+        ...(isAdminOrSuper ? [{ id: 'products' as SettingsTab, name: 'Produtos e serviços', icon: Package, hint: 'Catálogo' }] : []),
+      ],
+    },
+    {
+      label: 'Inteligência artificial',
+      items: [
+        { id: 'ai', name: 'Central de I.A', icon: Sparkles, hint: 'Provedor, modelo e prompts' },
+        // Automações (robôs + agente de IA) vale para qualquer admin: o robô é
+        // liberado pra todos e o agente aparece bloqueado até o super admin soltar.
+        ...(isAdminOrSuper ? [{ id: 'agents' as SettingsTab, name: 'Automações', icon: Bot, hint: 'Agentes e robôs' }] : []),
+      ],
+    },
+    ...(isAdminOrSuper
+      ? [
+          {
+            label: 'Conexões',
+            items: [{ id: 'integrations' as SettingsTab, name: 'Integrações', icon: Plug, hint: 'API, webhooks e MCP' }],
+          },
+        ]
+      : []),
+    {
+      label: 'Sistema',
+      items: [{ id: 'data', name: 'Dados', icon: Database, hint: 'Armazenamento e exportação' }],
+    },
   ];
+  const allItems = groups.flatMap((g) => g.items);
+
+  const go = (item: NavItem) => {
+    if (item.href) {
+      router.push(item.href);
+      return;
+    }
+    setActiveTab(item.id);
+  };
 
   const renderContent = () => {
     switch (activeTab) {
@@ -278,34 +336,78 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
     }
   };
 
+  const itemClass = (active: boolean) =>
+    `group relative w-full flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors focus-visible-ring ${
+      active
+        ? 'bg-primary-500/10 text-primary-700 dark:text-primary-300 font-medium'
+        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white'
+    }`;
+
   return (
-    <div className="max-w-5xl mx-auto">
-      {/* Tabs minimalistas. Mobile: carrossel horizontal próprio; sem isso as
-          últimas abas estouravam a tela e arrastavam a página inteira. */}
-      <div className="flex items-center gap-1 mb-8 border-b border-slate-200 dark:border-white/10 md:flex-wrap max-md:overflow-x-auto scrollbar-none">
-        {tabs.map((tab) => {
-          const isActive = activeTab === tab.id;
+    <div className="max-w-6xl mx-auto">
+      {/* Celular: fileira rolável, uma linha, na ordem dos grupos */}
+      <div
+        className="md:hidden flex items-center gap-1 mb-6 border-b border-slate-200 dark:border-white/10 overflow-x-auto scrollbar-none"
+        role="tablist"
+        aria-label="Seções das configurações"
+      >
+        {allItems.map((item) => {
+          const isActive = !item.href && activeTab === item.id;
           return (
             <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`relative flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors shrink-0 whitespace-nowrap ${isActive
-                ? 'text-primary-600 dark:text-primary-400'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
+              key={item.id}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => go(item)}
+              className={`relative flex items-center gap-2 px-3 py-3 text-sm font-medium transition-colors shrink-0 whitespace-nowrap ${
+                isActive ? 'text-primary-600 dark:text-primary-400' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
             >
-              <tab.icon className="h-4 w-4" />
-              {tab.name}
-              {isActive && (
-                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-600 dark:bg-primary-400 rounded-full" />
-              )}
+              <item.icon className="h-4 w-4" aria-hidden="true" />
+              {item.name}
+              {isActive && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-600 dark:bg-primary-400 rounded-full" />}
             </button>
           );
         })}
       </div>
 
-      {/* Content */}
-      {renderContent()}
+      <div className="md:grid md:grid-cols-[15rem_minmax(0,1fr)] md:gap-10">
+        {/* Desktop: navegação lateral em grupos */}
+        <nav className="hidden md:block md:sticky md:top-4 self-start space-y-6" aria-label="Seções das configurações">
+          {groups.map((g) => (
+            <div key={g.label}>
+              <p className="px-3 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">{g.label}</p>
+              <ul className="space-y-0.5">
+                {g.items.map((item) => {
+                  const isActive = !item.href && activeTab === item.id;
+                  return (
+                    <li key={item.id}>
+                      <button type="button" aria-current={isActive ? 'page' : undefined} onClick={() => go(item)} className={itemClass(isActive)}>
+                        <span
+                          className={`absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-full bg-primary-600 dark:bg-primary-400 transition-opacity ${
+                            isActive ? 'opacity-100' : 'opacity-0'
+                          }`}
+                          aria-hidden="true"
+                        />
+                        <item.icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-primary-600 dark:text-primary-400' : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300'}`} aria-hidden="true" />
+                        <span className="flex-1 min-w-0">
+                          <span className="block truncate">{item.name}</span>
+                          {item.hint ? <span className="block text-[11px] font-normal text-slate-400 dark:text-slate-500 truncate">{item.hint}</span> : null}
+                        </span>
+                        {item.href ? <ChevronRight className="h-3.5 w-3.5 text-slate-300 dark:text-slate-600" aria-hidden="true" /> : null}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </nav>
+
+        {/* Conteúdo */}
+        <div className="min-w-0">{renderContent()}</div>
+      </div>
     </div>
   );
 };

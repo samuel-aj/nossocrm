@@ -23,6 +23,7 @@ import {
   LEGACY_DARK_KEY,
   MODE_STORAGE_KEY,
   THEME_STORAGE_KEY,
+  getTheme,
   isAppearanceMode,
   isThemeId,
   type AppearanceMode,
@@ -124,9 +125,18 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     (next: ThemeId) => {
       const value = isThemeId(next) ? next : DEFAULT_THEME;
       setThemeStored(value);
+      // Tema "escuro por natureza" (Preto) ou "claro" (Branco) leva a aparência junto;
+      // a pessoa pode trocar a aparência depois e o tema se adapta.
+      const preferred = getTheme(value).preferredMode;
+      if (preferred) {
+        setModeStored(preferred);
+        setLegacyDark(preferred === 'dark');
+        changeListener?.({ theme: value, mode: preferred });
+        return;
+      }
       changeListener?.({ theme: value });
     },
-    [setThemeStored]
+    [setThemeStored, setModeStored, setLegacyDark]
   );
 
   const toggleDarkMode = useCallback(() => setMode(darkMode ? 'light' : 'dark'), [darkMode, setMode]);

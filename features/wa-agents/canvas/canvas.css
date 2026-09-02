@@ -1,21 +1,23 @@
 /*
  * Quadro do robô: ajustes por cima do tema do React Flow (claro e escuro).
+ * As cores de destaque vêm das variáveis do tema (--color-purple-*), então
+ * acompanham o tema escolhido em Configurações → Aparência.
  * O React Flow aplica a classe `dark` na raiz quando colorMode="dark".
  * As variáveis --xy-* são as do @xyflow/react/dist/style.css.
  */
 .react-flow.wa-bot-canvas {
   --xy-edge-stroke-default: #94a3b8;
-  --xy-edge-stroke-selected-default: #9333ea;
+  --xy-edge-stroke-selected-default: var(--color-purple-600);
   --xy-edge-stroke-width-default: 2;
-  --xy-connectionline-stroke-default: #a855f7;
+  --xy-connectionline-stroke-default: var(--color-purple-500);
   --xy-connectionline-stroke-width-default: 2;
-  --xy-handle-background-color-default: #a855f7;
+  --xy-handle-background-color-default: var(--color-purple-500);
   --xy-handle-border-color-default: #ffffff;
   --xy-background-color-default: #f8fafc;
   --xy-background-pattern-dots-color-default: #cbd5e1;
   --xy-minimap-background-color-default: #ffffff;
   --xy-minimap-mask-background-color-default: rgb(241 245 249 / 0.75);
-  --xy-minimap-mask-stroke-color-default: #c4b5fd;
+  --xy-minimap-mask-stroke-color-default: var(--color-purple-300);
   --xy-minimap-mask-stroke-width-default: 1;
   --xy-controls-button-background-color-default: #ffffff;
   --xy-controls-button-background-color-hover-default: #f1f5f9;
@@ -24,29 +26,29 @@
   --xy-controls-button-border-color-default: #e2e8f0;
   --xy-controls-box-shadow-default: 0 1px 3px rgb(15 23 42 / 0.12);
   --xy-attribution-background-color-default: transparent;
-  --xy-selection-background-color-default: rgb(168 85 247 / 0.08);
-  --xy-selection-border-default: 1px dashed #a855f7;
+  --xy-selection-background-color-default: color-mix(in srgb, var(--color-purple-500) 8%, transparent);
+  --xy-selection-border-default: 1px dashed var(--color-purple-500);
 }
 
 .react-flow.wa-bot-canvas.dark {
   --xy-edge-stroke-default: #64748b;
-  --xy-edge-stroke-selected-default: #c084fc;
-  --xy-connectionline-stroke-default: #c084fc;
-  --xy-handle-background-color-default: #a855f7;
+  --xy-edge-stroke-selected-default: var(--color-purple-400);
+  --xy-connectionline-stroke-default: var(--color-purple-400);
+  --xy-handle-background-color-default: var(--color-purple-500);
   --xy-handle-border-color-default: #0f172a;
   --xy-background-color-default: transparent;
   --xy-background-pattern-dots-color-default: #334155;
   --xy-minimap-background-color-default: #0f172a;
   --xy-minimap-mask-background-color-default: rgb(2 6 23 / 0.75);
-  --xy-minimap-mask-stroke-color-default: #7c3aed;
+  --xy-minimap-mask-stroke-color-default: var(--color-purple-600);
   --xy-controls-button-background-color-default: #1e293b;
   --xy-controls-button-background-color-hover-default: #334155;
   --xy-controls-button-color-default: #e2e8f0;
   --xy-controls-button-color-hover-default: #ffffff;
   --xy-controls-button-border-color-default: #334155;
   --xy-controls-box-shadow-default: 0 1px 3px rgb(0 0 0 / 0.5);
-  --xy-selection-background-color-default: rgb(192 132 252 / 0.1);
-  --xy-selection-border-default: 1px dashed #c084fc;
+  --xy-selection-background-color-default: color-mix(in srgb, var(--color-purple-400) 10%, transparent);
+  --xy-selection-border-default: 1px dashed var(--color-purple-400);
 }
 
 /* Nada escapa da moldura arredondada (o React Flow não corta por padrão). */
@@ -64,7 +66,7 @@
 .wa-bot-canvas .react-flow__handle:hover,
 .wa-bot-canvas .react-flow__handle.connectingfrom,
 .wa-bot-canvas .react-flow__handle.connectingto {
-  box-shadow: 0 0 0 4px rgb(168 85 247 / 0.25);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-purple-500) 25%, transparent);
 }
 .wa-bot-canvas .react-flow__handle.wa-handle-in {
   background-color: #94a3b8;
@@ -79,7 +81,7 @@
 /* Saída sem ligação: bolinha vazada, para chamar a atenção sem gritar. */
 .wa-bot-canvas .react-flow__handle.wa-handle-loose {
   background-color: #ffffff;
-  border-color: #a855f7;
+  border-color: var(--color-purple-500);
   border-style: dashed;
 }
 .wa-bot-canvas.dark .react-flow__handle.wa-handle-loose {
@@ -88,7 +90,7 @@
 
 /* Arestas: realce ao passar o mouse. */
 .wa-bot-canvas .react-flow__edge:hover .react-flow__edge-path {
-  stroke: #a855f7;
+  stroke: var(--color-purple-500);
 }
 .wa-bot-canvas .react-flow__edge.selected .react-flow__edge-path,
 .wa-bot-canvas .react-flow__edge:focus .react-flow__edge-path,
@@ -129,7 +131,7 @@
   right: 8px;
   height: 2px;
   border-radius: 2px;
-  background-color: #a855f7;
+  background-color: var(--color-purple-500);
   pointer-events: none;
 }
 
