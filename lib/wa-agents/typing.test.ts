@@ -6,7 +6,7 @@ const ligado: AgentTyping = { ...DEFAULT_AGENT_TYPING, enabled: true };
 
 describe('typingDelayMs', () => {
   it('desligado não espera nada', () => {
-    expect(typingDelayMs('mensagem qualquer', DEFAULT_AGENT_TYPING)).toBe(0);
+    expect(typingDelayMs('mensagem qualquer', { ...DEFAULT_AGENT_TYPING, enabled: false })).toBe(0);
     expect(typingDelayMs('mensagem qualquer', null)).toBe(0);
   });
 

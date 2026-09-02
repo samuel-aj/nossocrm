@@ -6,7 +6,8 @@
  */
 import React, { useEffect, useId, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown, ChevronUp, Copy, GripVertical, Loader2, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, ChevronUp, Copy, GripVertical, HelpCircle, Loader2, X } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 export const CARD_CLASS =
   'bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/5 rounded-xl p-4 shadow-sm space-y-4';
@@ -65,27 +66,178 @@ export function Toggle({
   );
 }
 
-/** Rótulo + campo + texto de ajuda. */
+/**
+ * Ícone "?" com a explicação secundária num balão (passa o mouse ou toca).
+ * Serve para tirar os textos de ajuda de baixo dos campos sem perder a informação.
+ */
+export function InfoTip({ text, label = 'Mais informações' }: { text: React.ReactNode; label?: string }) {
+  // Controlado para abrir também no toque (o balão do radix só abre no hover/foco).
+  const [open, setOpen] = useState(false);
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip open={open} onOpenChange={setOpen}>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={label}
+            onClick={() => setOpen((v) => !v)}
+            className="inline-flex items-center justify-center rounded-full text-slate-400 hover:text-purple-600 dark:hover:text-purple-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500/40 transition-colors align-middle"
+          >
+            <HelpCircle size={14} aria-hidden="true" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          side="top"
+          className="max-w-xs rounded-lg border-0 bg-slate-900 px-3 py-2 text-xs leading-relaxed text-white shadow-xl dark:bg-slate-700"
+        >
+          {text}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+/** Rótulo + campo + texto de ajuda (ou um balão "?" ao lado do rótulo). */
 export function Field({
   label,
   htmlFor,
   help,
+  tip,
   children,
   className,
 }: {
   label: string;
   htmlFor?: string;
   help?: React.ReactNode;
+  /** Explicação secundária, num balão ao lado do rótulo */
+  tip?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
 }) {
   return (
     <div className={className}>
-      <label htmlFor={htmlFor} className={LABEL_CLASS}>
+      <label htmlFor={htmlFor} className={`${LABEL_CLASS} ${tip ? 'inline-flex items-center gap-1.5' : ''}`}>
         {label}
+        {tip ? <InfoTip text={tip} label={`Sobre ${label}`} /> : null}
       </label>
       {children}
       {help ? <p className={HELP_CLASS}>{help}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * Linha de configuração: título (com balão opcional) à esquerda e o controle
+ * (interruptor, seletor) à direita. Várias em sequência formam uma lista compacta.
+ */
+export function SettingRow({
+  title,
+  description,
+  tip,
+  control,
+  children,
+}: {
+  title: string;
+  /** Uma linha curta abaixo do título, só quando for mesmo necessária */
+  description?: React.ReactNode;
+  tip?: React.ReactNode;
+  control?: React.ReactNode;
+  /** Conteúdo extra abaixo da linha (aparece só quando a opção está ligada, por exemplo) */
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-slate-800 dark:text-slate-200 inline-flex items-center gap-1.5">
+            {title}
+            {tip ? <InfoTip text={tip} label={`Sobre ${title}`} /> : null}
+          </p>
+          {description ? <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{description}</p> : null}
+        </div>
+        {control ? <div className="shrink-0">{control}</div> : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/** Divisor fino entre linhas de configuração dentro do mesmo cartão. */
+export const ROW_DIVIDER_CLASS = 'divide-y divide-slate-100 dark:divide-white/5 [&>*]:py-3 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0';
+
+/** Controle segmentado: uma escolha entre poucas opções, todas visíveis. */
+export function Segmented<T extends string>({
+  value,
+  onChange,
+  options,
+  ariaLabel,
+  className,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: Array<{ value: T; label: string; icon?: React.ReactNode }>;
+  ariaLabel: string;
+  className?: string;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label={ariaLabel}
+      className={`inline-flex max-w-full flex-wrap gap-1 rounded-lg bg-slate-100 dark:bg-white/5 p-1 ${className ?? ''}`}
+    >
+      {options.map((o) => {
+        const active = o.value === value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(o.value)}
+            className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500/40 ${
+              active
+                ? 'bg-white dark:bg-slate-800 text-purple-700 dark:text-purple-300 shadow-sm'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            {o.icon}
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Bloco recolhido por padrão ("Configurações avançadas"), aberto por um clique. */
+export function Disclosure({
+  label,
+  defaultOpen = false,
+  children,
+}: {
+  label: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const bodyId = useId();
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls={bodyId}
+        className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-purple-600 dark:text-slate-400 dark:hover:text-purple-300 transition-colors"
+      >
+        <ChevronRight size={14} className={`transition-transform ${open ? 'rotate-90' : ''}`} aria-hidden="true" />
+        {label}
+      </button>
+      {open ? (
+        <div id={bodyId} className="mt-3">
+          {children}
+        </div>
+      ) : null}
     </div>
   );
 }

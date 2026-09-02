@@ -1,13 +1,19 @@
 'use client';
 
 /**
- * Editor de agente de IA em abas: Roteiro | Conhecimento e mídias | Ações |
- * Gatilhos e números | Configurações (estado local + hash da URL).
- * Barra inferior fixa com Testar / Cancelar / Salvar. "Testar" abre o painel
- * lateral com o chat de teste e o "Ajustar com IA".
+ * Editor de agente de IA em abas: Identidade e comportamento | Conhecimento |
+ * Ações e recursos | Atendimento e automações | Modelo e resposta (estado
+ * local + hash da URL). Barra inferior fixa com Testar / Cancelar / Salvar.
+ * "Testar" abre o painel lateral com o chat de teste e o "Ajustar com IA".
  *
  * Salva via POST (novo) ou PATCH (existente, só o que mudou). Um agente novo
  * continua no editor depois de salvo (o id libera uploads e teste).
+ *
+ * Comportamentos fixos (sem opção na tela, sempre enviados no payload): o
+ * agente lê a descrição e os campos personalizados do lead, não tem limite de
+ * respostas, mostra "digitando..." antes de cada linha e não tem intervalo
+ * fixo entre linhas. Agentes salvos antes com outros valores são normalizados
+ * no próximo salvamento (ver `legacyDefaultsPatch`).
  */
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -19,7 +25,6 @@ import {
   Phone,
   Cpu,
   FileText,
-  SlidersHorizontal,
   Flag,
   CircleStop,
   Webhook,
@@ -28,11 +33,14 @@ import {
   ListChecks,
   X,
   BookOpen,
-  Settings,
-  Users,
   Calculator,
   AlarmClock,
   KanbanSquare,
+  Brain,
+  Gauge,
+  Paperclip,
+  UserRound,
+  MessageSquare,
 } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
 import { useToast } from '@/context/ToastContext';
@@ -49,7 +57,6 @@ import {
   type AgentInput,
   type AgentPublic,
   type AgentTriggers,
-  type AgentLeadContext,
   type AgentMediaUnderstanding,
   type AgentTyping,
   type AgentWebhook,
@@ -86,13 +93,17 @@ import {
   BTN_SECONDARY,
   BTN_SMALL,
   Badge,
+  Disclosure,
   Field,
   HELP_CLASS,
   INPUT_CLASS,
+  InfoTip,
   Notice,
   Panel,
+  ROW_DIVIDER_CLASS,
   SUBCARD_CLASS,
-  TEXTAREA_CLASS,
+  Segmented,
+  SettingRow,
   TabPanel,
   Tabs,
   Toggle,
@@ -131,10 +142,7 @@ type AgentFormState = {
   /** Campos numéricos aceitam '' enquanto o usuário digita; o limite é aplicado no onBlur e no toPayload. */
   buffer_seconds: number | '';
   history_limit: number | '';
-  line_delay_ms: number | '';
   human_pause_minutes: number | '';
-  /** Teto de respostas por atendimento (0 = sem limite) */
-  max_replies: number | '';
   only_new_conversations: boolean;
   /** Ao ser ativado pelo chat/pipeline: fala primeiro ou espera a próxima mensagem do contato */
   start_mode: AgentStartMode;
@@ -146,8 +154,8 @@ type AgentFormState = {
   webhooks: AgentWebhook[];
   helper_agent_ids: string[];
   tools: AgentToolsState;
-  typing: AgentTyping;
-  lead_context: AgentLeadContext;
+  /** Velocidade do "digitando..." (sempre ligado; só os tempos são editáveis) */
+  typing: Omit<AgentTyping, 'enabled'>;
   media_understanding: AgentMediaUnderstanding;
   /** Lead criado sozinho quando o contato não tem negócio aberto */
   auto_lead: AgentAutoLead;
@@ -156,6 +164,36 @@ type AgentFormState = {
 };
 
 const CUSTOM_MODEL = '__custom__';
+
+// ---------------------------------------------------------------- Comportamentos fixos
+
+/** Sem intervalo fixo entre linhas: o "digitando..." dá o ritmo. */
+const FIXED_LINE_DELAY_MS = 0;
+/** Sem limite de respostas por atendimento. */
+const FIXED_MAX_REPLIES = 0;
+/** O agente sempre lê a descrição e os campos personalizados do lead. */
+const FIXED_LEAD_CONTEXT = { ...DEFAULT_AGENT_LEAD_CONTEXT, description: true, custom_fields: true } as const;
+
+function fixedTyping(t: Omit<AgentTyping, 'enabled'>): AgentTyping {
+  return { enabled: true, ms_per_char: t.ms_per_char, min_ms: t.min_ms, max_ms: t.max_ms };
+}
+
+/**
+ * Campos fixos cujo valor salvo no agente ainda é o antigo. Entram no PATCH do
+ * próximo salvamento (mesmo sem outra alteração) para o agente passar a ter o
+ * comportamento padrão; a tela não os mostra como "alteração não salva".
+ */
+function legacyDefaultsPatch(agent: AgentPublic | null): Partial<AgentInput> {
+  if (!agent) return {};
+  const out: Partial<AgentInput> = {};
+  if ((agent.line_delay_ms ?? FIXED_LINE_DELAY_MS) !== FIXED_LINE_DELAY_MS) out.line_delay_ms = FIXED_LINE_DELAY_MS;
+  if ((agent.max_replies ?? FIXED_MAX_REPLIES) !== FIXED_MAX_REPLIES) out.max_replies = FIXED_MAX_REPLIES;
+  const typing = normalizeTyping(agent.typing);
+  if (!typing.enabled) out.typing = { ...typing, enabled: true };
+  const lead = { ...DEFAULT_AGENT_LEAD_CONTEXT, ...(agent.lead_context ?? {}) };
+  if (!lead.description || !lead.custom_fields) out.lead_context = { ...FIXED_LEAD_CONTEXT };
+  return out;
+}
 
 // ---------------------------------------------------------------- Abas
 
@@ -200,14 +238,14 @@ const FIELD_TABS: Record<string, EditorTab> = {
   only_new_conversations: 'gatilhos',
   start_mode: 'gatilhos',
   followups: 'gatilhos',
-  webhooks: 'config',
+  webhooks: 'acoes',
   outcomes: 'acoes',
   custom_actions: 'acoes',
   helper_agent_ids: 'acoes',
   tools: 'acoes',
   typing: 'config',
   lead_context: 'roteiro',
-  media_understanding: 'roteiro',
+  media_understanding: 'config',
   auto_lead: 'gatilhos',
   ai_vars: 'acoes',
 };
@@ -251,9 +289,7 @@ function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInpu
     stop_rules: agent ? (agent.stop_rules ?? '') : (initial?.stop_rules ?? DEFAULT_STOP_RULES),
     buffer_seconds: src.buffer_seconds ?? 10,
     history_limit: src.history_limit ?? 40,
-    line_delay_ms: src.line_delay_ms ?? 0,
     human_pause_minutes: src.human_pause_minutes ?? 30,
-    max_replies: src.max_replies ?? 0,
     only_new_conversations: src.only_new_conversations ?? false,
     start_mode: src.start_mode ?? 'speak_first',
     followups: src.followups ?? [],
@@ -263,8 +299,7 @@ function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInpu
     webhooks: src.webhooks ?? [],
     helper_agent_ids: src.helper_agent_ids ?? [],
     tools: { calculator: src.tools?.calculator ?? true },
-    typing: normalizeTyping(src.typing),
-    lead_context: { ...DEFAULT_AGENT_LEAD_CONTEXT, ...(src.lead_context ?? {}) },
+    typing: (({ ms_per_char, min_ms, max_ms }) => ({ ms_per_char, min_ms, max_ms }))(normalizeTyping(src.typing)),
     media_understanding: { ...DEFAULT_AGENT_MEDIA_UNDERSTANDING, ...(src.media_understanding ?? {}) },
     auto_lead: { ...DEFAULT_AGENT_AUTO_LEAD, ...(src.auto_lead ?? {}) },
     ai_vars: src.ai_vars ?? [],
@@ -285,9 +320,9 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
     stop_rules: form.stop_rules,
     buffer_seconds: clampField('buffer_seconds', form.buffer_seconds),
     history_limit: clampField('history_limit', form.history_limit),
-    line_delay_ms: clampField('line_delay_ms', form.line_delay_ms),
+    line_delay_ms: FIXED_LINE_DELAY_MS,
     human_pause_minutes: clampField('human_pause_minutes', form.human_pause_minutes),
-    max_replies: clampField('max_replies', form.max_replies),
+    max_replies: FIXED_MAX_REPLIES,
     only_new_conversations: form.only_new_conversations,
     start_mode: form.start_mode,
     followups: form.followups,
@@ -310,8 +345,8 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
     webhooks: form.webhooks,
     helper_agent_ids: form.helper_agent_ids,
     tools: { calculator: form.tools.calculator },
-    typing: form.typing,
-    lead_context: form.lead_context,
+    typing: fixedTyping(form.typing),
+    lead_context: { ...FIXED_LEAD_CONTEXT },
     media_understanding: form.media_understanding,
     auto_lead: {
       enabled: form.auto_lead.enabled,
@@ -340,9 +375,8 @@ const FIELD_NAMES: Record<string, string> = {
   stop_rules: 'Quando encerrar',
   buffer_seconds: 'Espera para agrupar mensagens',
   history_limit: 'Mensagens de histórico',
-  line_delay_ms: 'Intervalo entre linhas',
   human_pause_minutes: 'Pausa após atendente responder',
-  max_replies: 'Limite de respostas',
+  typing: 'Velocidade de resposta',
   start_mode: 'Ao ser ativado',
   followups: 'Follow-ups',
   auto_lead: 'Lead automático',
@@ -368,14 +402,12 @@ function clampInt(value: string, min: number, max: number): number {
   return Math.max(min, Math.min(max, n));
 }
 
-type NumField = 'buffer_seconds' | 'history_limit' | 'line_delay_ms' | 'human_pause_minutes' | 'max_replies';
+type NumField = 'buffer_seconds' | 'history_limit' | 'human_pause_minutes';
 
 const NUM_LIMITS: Record<NumField, [min: number, max: number]> = {
   buffer_seconds: [0, 60],
   history_limit: [5, 200],
-  line_delay_ms: [0, 10000],
   human_pause_minutes: [0, 1440],
-  max_replies: [0, 500],
 };
 
 /** Limite final de um campo numérico ('' vira o mínimo). */
@@ -409,14 +441,6 @@ function segundosEmMs(field: 'min_ms' | 'max_ms', raw: string): number {
   const s = Number(raw);
   if (!Number.isFinite(s)) return DEFAULT_AGENT_TYPING[field];
   const [min, max] = TYPING_LIMITS[field];
-  return Math.round(Math.min(Math.max(s * 1000, min), max));
-}
-
-/** Segundos digitados -> ms, entre `min` e `max` (para campos fora do bloco typing). */
-function segundosEmMsSimples(raw: string, min: number, max: number): number {
-  if (raw === '') return min;
-  const s = Number(raw);
-  if (!Number.isFinite(s)) return min;
   return Math.round(Math.min(Math.max(s * 1000, min), max));
 }
 
@@ -513,19 +537,24 @@ function findFriendlyIssue(form: AgentFormState, agents: WaAgentListItem[]): Fri
 const INBOUND_MODES: Array<{ value: InboundMode; label: string; help: string }> = [
   {
     value: 'any',
-    label: 'Qualquer mensagem nova',
-    help: 'Padrão. O agente assume toda conversa nova que chegar nos números marcados acima.',
+    label: 'Qualquer mensagem',
+    help: 'Assume toda conversa nova que chegar nos números marcados.',
   },
   {
     value: 'keywords',
-    label: 'Só quando a mensagem contiver...',
-    help: 'O agente só entra se a mensagem tiver uma das palavras-chave (sem diferenciar maiúsculas e acentos). Tem prioridade sobre um agente do mesmo número que atende qualquer mensagem.',
+    label: 'Somente quando contiver...',
+    help: 'Entra só se a mensagem tiver uma das palavras-chave (ignora maiúsculas e acentos) e passa na frente de um agente do mesmo número que atende qualquer mensagem.',
   },
   {
     value: 'none',
     label: 'Nunca por mensagem',
-    help: 'Só por passagem de outro agente, pelo cadastro no pipeline ou por início manual no chat.',
+    help: 'Só por passagem de outro agente, pelo cadastro no pipeline ou pelo botão Automações do chat.',
   },
+];
+
+const START_MODES: Array<{ value: AgentStartMode; label: string }> = [
+  { value: 'speak_first', label: 'Envia a primeira mensagem' },
+  { value: 'wait_reply', label: 'Espera o contato falar' },
 ];
 
 const DEAL_EVENTS: Array<{ value: DealEvent; label: string }> = [
@@ -625,32 +654,24 @@ function TriggersFields({
   const stages = boards.find((b) => b.id === boardId)?.stages ?? [];
   const selectedConnection = connections.find((c) => c.id === deal.connection_id);
 
+  const inboundHelp = INBOUND_MODES.find((m) => m.value === inbound.mode)?.help;
+
   return (
     <div className="space-y-4">
       <div className={SUBCARD_CLASS}>
-        <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Por mensagem recebida</p>
-        <div className="space-y-2" role="radiogroup" aria-label="Gatilho por mensagem recebida">
-          {INBOUND_MODES.map((m) => (
-            <label key={m.value} className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="radio"
-                name="agent-inbound-mode"
-                className="mt-1 h-4 w-4 border-slate-300 text-purple-600 focus:ring-purple-500"
-                checked={inbound.mode === m.value}
-                onChange={() => setInbound({ mode: m.value })}
-              />
-              <span className="min-w-0">
-                <span className="block text-sm text-slate-900 dark:text-white">{m.label}</span>
-                <span className="block text-xs text-slate-500 dark:text-slate-400">{m.help}</span>
-              </span>
-            </label>
-          ))}
-        </div>
+        <p className="text-sm font-medium text-slate-800 dark:text-slate-200">Por mensagem recebida</p>
+        <Segmented
+          ariaLabel="Gatilho por mensagem recebida"
+          value={inbound.mode}
+          onChange={(mode) => setInbound({ mode })}
+          options={INBOUND_MODES.map((m) => ({ value: m.value, label: m.label }))}
+        />
+        {inboundHelp ? <p className={HELP_CLASS}>{inboundHelp}</p> : null}
         {inbound.mode === 'keywords' ? (
           <Field
             label="Palavras-chave"
             htmlFor="agent-inbound-keywords"
-            help="Separe por vírgula ou Enter. Basta uma delas aparecer na mensagem."
+            tip="Separe por vírgula ou Enter. Basta uma delas aparecer na mensagem."
           >
             <KeywordChips
               id="agent-inbound-keywords"
@@ -662,15 +683,13 @@ function TriggersFields({
       </div>
 
       <div className={SUBCARD_CLASS}>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Por cadastro no pipeline</p>
-            <p className={HELP_CLASS}>
-              O agente envia a primeira mensagem sozinho, com os dados do cadastro no contexto.
-            </p>
-          </div>
-          <Toggle checked={deal.enabled} onChange={(enabled) => setDeal({ enabled })} label="Gatilho por cadastro no pipeline" />
-        </div>
+        <SettingRow
+          title="Por cadastro no pipeline"
+          tip="Quando um negócio é criado ou entra numa etapa, o agente inicia a conversa com os dados do cadastro no contexto."
+          control={
+            <Toggle checked={deal.enabled} onChange={(enabled) => setDeal({ enabled })} label="Gatilho por cadastro no pipeline" />
+          }
+        />
 
         {deal.enabled ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -691,7 +710,7 @@ function TriggersFields({
             <Field
               label={deal.event === 'deal_stage_entered' ? 'Quadro' : 'Quadro (opcional)'}
               htmlFor="agent-deal-board"
-              help={
+              tip={
                 deal.event === 'deal_stage_entered'
                   ? 'Escolha o quadro para listar as etapas.'
                   : 'Vazio dispara para negócios criados em qualquer quadro.'
@@ -712,7 +731,7 @@ function TriggersFields({
               </select>
             </Field>
             {deal.event === 'deal_stage_entered' ? (
-              <Field label="Etapa" htmlFor="agent-deal-stage" help="Dispara quando um negócio entra nesta etapa.">
+              <Field label="Etapa" htmlFor="agent-deal-stage">
                 <select
                   id="agent-deal-stage"
                   className={INPUT_CLASS}
@@ -732,7 +751,7 @@ function TriggersFields({
             <Field
               label="Número que inicia a conversa"
               htmlFor="agent-deal-connection"
-              help="Número conectado que envia a primeira mensagem ao telefone do contato do negócio."
+              tip="Número conectado que envia a primeira mensagem ao telefone do contato do negócio."
             >
               <select
                 id="agent-deal-connection"
@@ -815,6 +834,41 @@ function CheckList<T extends { id: string }>({
 }
 
 /**
+ * Campo numérico que mostra o valor numa unidade diferente da guardada (ex.:
+ * caracteres por segundo, segundos) sem brigar com a digitação: enquanto está em
+ * foco vale o rascunho digitado; cada valor válido é convertido e gravado na hora;
+ * ao sair do campo o rascunho some e aparece o valor gravado, já limitado.
+ */
+function DraftNumberInput({
+  value,
+  toText,
+  fromText,
+  onCommit,
+  ...inputProps
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'onBlur' | 'type'> & {
+  value: number;
+  toText: (value: number) => string;
+  /** null = rascunho ainda não é um número válido */
+  fromText: (text: string) => number | null;
+  onCommit: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <input
+      {...inputProps}
+      type="number"
+      value={draft ?? toText(value)}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        const n = fromText(e.target.value);
+        if (n !== null) onCommit(n);
+      }}
+      onBlur={() => setDraft(null)}
+    />
+  );
+}
+
+/**
  * Componente React `AgentEditor`.
  * @returns {Element} Retorna um valor do tipo `Element`.
  */
@@ -845,6 +899,8 @@ export const AgentEditor: React.FC<{
   const [agentId, setAgentId] = useState<string | null>(agent?.id ?? null);
   const [hasApiKey, setHasApiKey] = useState<boolean>(agent?.has_api_key ?? false);
   const [hasAudioApiKey, setHasAudioApiKey] = useState<boolean>(agent?.has_audio_api_key ?? false);
+  // Valores antigos dos comportamentos fixos: vão junto no primeiro PATCH (ver legacyDefaultsPatch).
+  const [legacyPatch, setLegacyPatch] = useState<Partial<AgentInput>>(() => legacyDefaultsPatch(agent));
   /** Terá chave para transcrever áudio depois de salvar (digitada agora ou já salva). */
   const temChaveDeAudio = form.clear_audio_api_key ? false : hasAudioApiKey || !!form.audio_api_key.trim();
   const [tab, setTabState] = useState<EditorTab>('roteiro');
@@ -982,7 +1038,7 @@ export const AgentEditor: React.FC<{
     }
     // PATCH (agente existente): só o que mudou desde o snapshot; api_key só vai quando digitada ou limpa.
     // POST (novo): payload completo.
-    const input = agentId ? diffPayload(payload, snapshot) : payload;
+    const input = agentId ? { ...legacyPatch, ...diffPayload(payload, snapshot) } : payload;
     if (agentId && Object.keys(input).length === 0) {
       showToast('Nada para salvar', 'info');
       return true;
@@ -996,6 +1052,7 @@ export const AgentEditor: React.FC<{
       setAgentId(saved.id);
       setHasApiKey(!!saved.has_api_key);
       setHasAudioApiKey(!!saved.has_audio_api_key);
+      setLegacyPatch({});
       patch({ api_key: '', clear_api_key: false, audio_api_key: '', clear_audio_api_key: false });
       showToast(agentId ? 'Agente salvo' : 'Agente criado. Agora você pode enviar documentos e mídias e testar.', 'success');
       if (saved.warning) {
@@ -1052,29 +1109,32 @@ export const AgentEditor: React.FC<{
   };
 
   const tabs: TabDef[] = [
-    { id: 'roteiro', label: 'Roteiro', icon: <FileText size={16} aria-hidden="true" /> },
+    { id: 'roteiro', label: 'Identidade e comportamento', icon: <User size={16} aria-hidden="true" /> },
     {
       id: 'conhecimento',
-      label: 'Conhecimento e mídias',
+      label: 'Conhecimento',
       icon: <BookOpen size={16} aria-hidden="true" />,
       badge: countBadge(knowledgeCount),
     },
     {
       id: 'acoes',
-      label: 'Ações',
+      label: 'Ações e recursos',
       icon: <ListChecks size={16} aria-hidden="true" />,
       badge: countBadge(form.custom_actions.length),
     },
     {
       id: 'gatilhos',
-      label: 'Gatilhos e números',
-      icon: <Zap size={16} aria-hidden="true" />,
+      label: 'Atendimento e automações',
+      icon: <MessageSquare size={16} aria-hidden="true" />,
       badge: countBadge(form.connection_ids.length),
     },
-    { id: 'config', label: 'Configurações', icon: <Settings size={16} aria-hidden="true" /> },
+    { id: 'config', label: 'Modelo e resposta', icon: <Cpu size={16} aria-hidden="true" /> },
   ];
 
   const agentLabel = form.persona_name || form.name || 'agente';
+  /** Chave auxiliar de áudio só quando faz diferença: provedor que não é a OpenAI, ou chave já salva (para remover). */
+  const showAudioKey = form.provider !== 'openai' || hasAudioApiKey || form.audio_api_key.trim() !== '';
+  const typingPreview = fixedTyping(form.typing);
 
   return (
     <div className={`space-y-4 transition-[padding] duration-200 ${testOpen ? 'lg:pr-[496px] xl:pr-[576px]' : ''}`}>
@@ -1089,9 +1149,7 @@ export const AgentEditor: React.FC<{
               {agentId ? `Editar agente: ${form.name || 'sem nome'}` : 'Novo agente'}
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              {agentId
-                ? 'Alterações só valem depois de salvar. Teste em qualquer aba pelo botão Testar.'
-                : 'Salve para liberar documentos, mídias e o teste. Você continua aqui depois de salvar.'}
+              {agentId ? 'As alterações valem depois de salvar.' : 'Salve para liberar documentos, mídias e o teste.'}
             </p>
           </div>
         </div>
@@ -1101,11 +1159,10 @@ export const AgentEditor: React.FC<{
 
       <Tabs tabs={tabs} value={tab} onChange={(id) => setTab(id as EditorTab)} ariaLabel="Seções do agente" idPrefix="agent-tab" />
 
-      {/* Roteiro */}
+      {/* 1. Identidade e comportamento */}
       <TabPanel id="roteiro" active={tab === 'roteiro'} idPrefix="agent-tab" className="space-y-4">
         <Panel
           title="Identidade"
-          description="Como o agente se apresenta e se está ligado."
           icon={<User size={16} />}
           right={
             <div className="flex items-center gap-2">
@@ -1115,7 +1172,7 @@ export const AgentEditor: React.FC<{
           }
         >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="Nome do agente" htmlFor="agent-name" help="Uso interno, aparece nas listas e execuções.">
+            <Field label="Nome do agente" htmlFor="agent-name" tip="Nome interno: aparece nas listas e nas execuções.">
               <input
                 id="agent-name"
                 className={INPUT_CLASS}
@@ -1128,7 +1185,7 @@ export const AgentEditor: React.FC<{
             <Field
               label="Nome da persona"
               htmlFor="agent-persona"
-              help="Nome com que o agente se apresenta ao lead. Vazio usa o nome do agente."
+              tip="Como o agente se apresenta ao lead. Vazio usa o nome do agente."
             >
               <input
                 id="agent-persona"
@@ -1140,83 +1197,12 @@ export const AgentEditor: React.FC<{
               />
             </Field>
           </div>
-          {!form.enabled ? <p className={HELP_CLASS}>Desligado, o agente não responde e não pode ser iniciado.</p> : null}
-        </Panel>
-
-        <Panel
-          title="O que ele sabe do lead"
-          description="O CRM injeta sozinho os dados do cadastro (negócio, etapa, contato). Aqui você escolhe o que mais entra."
-          icon={<BookOpen size={16} />}
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Descrição do lead</p>
-              <p className={HELP_CLASS}>
-                O texto da descrição do negócio (histórico, resumos de atendimentos anteriores, contexto escrito pela
-                equipe). Desligue se preferir que ele não leia isso.
-              </p>
-            </div>
-            <Toggle
-              checked={form.lead_context.description}
-              onChange={(description) => patch({ lead_context: { ...form.lead_context, description } })}
-              label="Ler a descrição do lead"
-            />
-          </div>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Campos personalizados</p>
-              <p className={HELP_CLASS}>Os campos do cadastro (motivo do contato, veículo, origem...).</p>
-            </div>
-            <Toggle
-              checked={form.lead_context.custom_fields}
-              onChange={(custom_fields) => patch({ lead_context: { ...form.lead_context, custom_fields } })}
-              label="Ler os campos personalizados do lead"
-            />
-          </div>
-          <p className={HELP_CLASS}>
-            O contexto enviado no cadastro pela API (<code className="font-mono">ai_context</code>) entra sempre, junto
-            do contexto que a equipe escreve ao iniciar o atendimento.
-          </p>
-
-          <div className="pt-3 border-t border-slate-200 dark:border-white/10 space-y-3">
-            <div>
-              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Mídia que o lead manda</p>
-              <p className={HELP_CLASS}>
-                Antes de responder, o agente transforma o arquivo em texto usando a IA dele (o resultado também aparece
-                no chat). Sem isso, ele só vê &quot;[áudio]&quot;, &quot;[imagem]&quot;, &quot;[documento]&quot;.
-              </p>
-            </div>
-            {(
-              [
-                ['audio', 'Ouvir áudios', 'Transcreve o que o lead falou.'],
-                ['image', 'Ver imagens e figurinhas', 'Descreve a imagem e transcreve texto de prints, boletos e documentos fotografados.'],
-                ['document', 'Ler documentos', 'Extrai o texto de PDF, DOCX e arquivos de texto.'],
-              ] as Array<[keyof AgentMediaUnderstanding, string, string]>
-            ).map(([campo, titulo, ajuda]) => (
-              <div key={campo} className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm text-slate-700 dark:text-slate-300">{titulo}</p>
-                  <p className={HELP_CLASS}>{ajuda}</p>
-                </div>
-                <Toggle
-                  checked={form.media_understanding[campo]}
-                  onChange={(v) => patch({ media_understanding: { ...form.media_understanding, [campo]: v } })}
-                  label={titulo}
-                />
-              </div>
-            ))}
-            {form.media_understanding.audio && form.provider === 'anthropic' && !temChaveDeAudio ? (
-              <Notice tone="amber">
-                A Anthropic não transcreve áudio. Configure a chave auxiliar da OpenAI na aba Configurações (ou a chave
-                da OpenAI da organização na Central de I.A.) para o agente ouvir os áudios.
-              </Notice>
-            ) : null}
-          </div>
+          {!form.enabled ? <Notice tone="amber">Desligado, o agente não responde e não pode ser iniciado.</Notice> : null}
         </Panel>
 
         <Panel
           title="Roteiro"
-          description="As instruções que guiam o agente: papel, como conduzir, regras e tom. Teste e peça ajustes à IA pelo botão Testar."
+          description="Papel, condução, regras e tom. Pelo botão Testar você conversa com o agente e pede ajustes à IA."
           icon={<FileText size={16} />}
         >
           <PromptEditor
@@ -1232,47 +1218,27 @@ export const AgentEditor: React.FC<{
           />
         </Panel>
 
-        <Panel
-          title="Quando encerrar"
-          description="O momento em que o agente para: o que precisa ter acontecido para ele encerrar e o que diz na mensagem final. Vale como regra obrigatória, junto do roteiro."
-          icon={<CircleStop size={16} />}
-        >
+        <Panel title="Encerramento" icon={<CircleStop size={16} />}>
           <Field
             label="Regras de encerramento"
             htmlFor="agent-stop-rules"
-            help="Ex.: encerrar quando tiver nome, cidade e resumo do caso; ou quando a pessoa pedir para falar com alguém da equipe. Ao encerrar, o agente escolhe um dos Resultados da aba Ações."
+            tip="Regras obrigatórias, junto do roteiro: assim que uma delas se cumprir, o agente manda a mensagem final e escolhe um dos resultados de Ações e recursos. Ex.: encerrar quando tiver nome, cidade e resumo do caso, ou quando a pessoa pedir para falar com a equipe."
           >
             <HighlightedScript
               id="agent-stop-rules"
               value={form.stop_rules}
               onChange={(stop_rules) => patch({ stop_rules })}
               known={knownTokens}
-              rows={7}
+              rows={6}
               maxLength={4000}
-              ariaLabel="Quando encerrar"
-              placeholder="Descreva quando o agente deve encerrar o atendimento e o que dizer na mensagem final."
-            />
-          </Field>
-          <Field
-            label="Limite de respostas por atendimento"
-            htmlFor="agent-max-replies"
-            help="Trava de segurança: 0 = sem limite. Ao atingir o limite, o agente manda a mensagem final e encerra sozinho, mesmo que as regras acima não tenham acontecido."
-          >
-            <input
-              id="agent-max-replies"
-              type="number"
-              min={0}
-              max={500}
-              className={`${INPUT_CLASS} sm:max-w-[200px]`}
-              value={form.max_replies}
-              onChange={(e) => patch({ max_replies: readNumber(e.target.value) })}
-              onBlur={() => patch({ max_replies: clampField('max_replies', form.max_replies) })}
+              ariaLabel="Regras de encerramento"
+              placeholder="Quando o agente deve encerrar o atendimento e o que dizer na mensagem final."
             />
           </Field>
         </Panel>
       </TabPanel>
 
-      {/* Conhecimento e mídias */}
+      {/* 2. Conhecimento */}
       <TabPanel id="conhecimento" active={tab === 'conhecimento'} idPrefix="agent-tab" className="space-y-4">
         <KnowledgePanel
           agentId={agentId}
@@ -1283,11 +1249,11 @@ export const AgentEditor: React.FC<{
         />
       </TabPanel>
 
-      {/* Ações */}
+      {/* 3. Ações e recursos */}
       <TabPanel id="acoes" active={tab === 'acoes'} idPrefix="agent-tab" className="space-y-4">
         <Panel
           title="Ações durante a conversa"
-          description="O que o agente faz no meio do atendimento, sem encerrar: registrar, mover, rotular ou avisar outro sistema."
+          description="O que o agente faz no meio do atendimento, sem encerrar."
           icon={<ListChecks size={16} />}
         >
           <CustomActionsEditor
@@ -1303,8 +1269,8 @@ export const AgentEditor: React.FC<{
         </Panel>
 
         <Panel
-          title="Quando o atendimento terminar"
-          description="Os resultados que o agente pode escolher ao encerrar e o que acontece em cada um."
+          title="Ações ao finalizar atendimento"
+          description="Os resultados que o agente escolhe ao encerrar e o que acontece em cada um."
           icon={<Flag size={16} />}
         >
           <OutcomesEditor
@@ -1319,68 +1285,78 @@ export const AgentEditor: React.FC<{
           />
         </Panel>
 
-        <Panel
-          title="Recursos do agente"
-          description="O que ele pode usar durante a conversa, além do roteiro e da base de conhecimento."
-          icon={<Users size={16} />}
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Calculadora</p>
-              <p className={HELP_CLASS}>
-                Para contas (parcelas, prazos, percentuais) sem o modelo chutar números (ferramenta calcular).
-              </p>
-            </div>
-            <Toggle
-              checked={form.tools.calculator}
-              onChange={(calculator) => patch({ tools: { ...form.tools, calculator } })}
-              label="Calculadora"
+        <Panel title="Recursos" icon={<Calculator size={16} />}>
+          <div className={ROW_DIVIDER_CLASS}>
+            <SettingRow
+              title="Calculadora"
+              tip="Ferramenta calcular: contas de parcelas, prazos e percentuais sem o modelo chutar números."
+              control={
+                <Toggle
+                  checked={form.tools.calculator}
+                  onChange={(calculator) => patch({ tools: { ...form.tools, calculator } })}
+                  label="Calculadora"
+                />
+              }
             />
-          </div>
-
-          <div className="pt-3 border-t border-slate-200 dark:border-white/10 space-y-3">
-            <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Agentes auxiliares</p>
-            <p className={HELP_CLASS}>
-              O agente pode consultar estes agentes durante a conversa (ferramenta consultar_agente).
-            </p>
-          {agentsQ.isLoading ? (
-            <p className={HELP_CLASS}>Carregando agentes...</p>
-          ) : helperCandidates.length === 0 ? (
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              Nenhum outro agente cadastrado. Crie outro agente (por exemplo, um especialista com os próprios documentos)
-              para usá-lo como auxiliar.
-            </p>
-          ) : (
-            <CheckList
-              items={helperCandidates}
-              selected={form.helper_agent_ids}
-              onToggle={toggleHelper}
-              disabledIds={disabledHelpers}
-              render={(a) => (
-                <>
-                  <span className="flex-1 min-w-0 truncate text-slate-900 dark:text-white">
-                    {a.name}
-                    {a.persona_name ? <span className="text-slate-500 dark:text-slate-400"> ({a.persona_name})</span> : null}
-                  </span>
-                  {!a.enabled ? <Badge tone="amber">Desligado</Badge> : null}
-                </>
+            <SettingRow
+              title="Agentes auxiliares"
+              tip="Este agente consulta os auxiliares durante a conversa (ferramenta consultar_agente). O auxiliar não fala com o lead: responde só a este agente, com o próprio roteiro e a própria base de conhecimento. Agentes desligados não podem ser auxiliares."
+              control={
+                form.helper_agent_ids.length > 0 ? (
+                  <Badge tone="purple">
+                    {form.helper_agent_ids.length} {form.helper_agent_ids.length === 1 ? 'selecionado' : 'selecionados'}
+                  </Badge>
+                ) : null
+              }
+            >
+              {agentsQ.isLoading ? (
+                <p className={HELP_CLASS}>Carregando agentes...</p>
+              ) : helperCandidates.length === 0 ? (
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Nenhum outro agente cadastrado. Crie um especialista com os próprios documentos para usá-lo aqui.
+                </p>
+              ) : (
+                <CheckList
+                  items={helperCandidates}
+                  selected={form.helper_agent_ids}
+                  onToggle={toggleHelper}
+                  disabledIds={disabledHelpers}
+                  render={(a) => (
+                    <>
+                      <span className="flex-1 min-w-0 truncate text-slate-900 dark:text-white">
+                        {a.name}
+                        {a.persona_name ? <span className="text-slate-500 dark:text-slate-400"> ({a.persona_name})</span> : null}
+                      </span>
+                      {!a.enabled ? <Badge tone="amber">Desligado</Badge> : null}
+                    </>
+                  )}
+                />
               )}
-            />
-          )}
-            <p className={HELP_CLASS}>
-              O auxiliar não fala com o lead: responde só a este agente, com o próprio roteiro e a própria base de
-              conhecimento. Agentes desligados não podem ser auxiliares.
-            </p>
+            </SettingRow>
           </div>
+        </Panel>
+
+        <Panel
+          title="Integrações"
+          description="Webhooks: avise outros sistemas quando algo acontecer no atendimento."
+          icon={<Webhook size={16} />}
+        >
+          <WebhooksEditor value={form.webhooks} onChange={(webhooks) => patch({ webhooks })} />
         </Panel>
       </TabPanel>
 
-      {/* Gatilhos e números */}
+      {/* 4. Atendimento e automações */}
       <TabPanel id="gatilhos" active={tab === 'gatilhos'} idPrefix="agent-tab" className="space-y-4">
         <Panel
           title="Números"
-          description="Em quais números conectados este agente responde as conversas novas."
+          description="Números conectados em que este agente atende."
           icon={<Phone size={16} />}
+          right={
+            <InfoTip
+              label="Sobre os números"
+              text="Deixe vazio se este agente só recebe conversas passadas por outro agente."
+            />
+          }
         >
           {connections.length === 0 ? (
             <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -1401,105 +1377,90 @@ export const AgentEditor: React.FC<{
               )}
             />
           )}
-          <p className={HELP_CLASS}>Deixe vazio se este agente só recebe conversas de outro agente.</p>
         </Panel>
 
         <Panel title="Gatilhos" description={`Quando o agente entra em ação: ${triggerSummary}.`} icon={<Zap size={16} />}>
           <TriggersFields value={form.triggers} onChange={(triggers) => patch({ triggers })} options={options} />
-          <div className="pt-3 border-t border-slate-200 dark:border-white/10 space-y-3">
-            <Field
-              label="Ao ser ativado (pelo chat ou pelo pipeline)"
-              htmlFor="agent-start-mode"
-              help="Vale para o botão Automações do chat e para o início pelo pipeline. Por palavra-chave o agente sempre responde à mensagem que o ativou."
-            >
-              <select
-                id="agent-start-mode"
-                className={INPUT_CLASS}
-                value={form.start_mode}
-                onChange={(e) => patch({ start_mode: e.target.value === 'wait_reply' ? 'wait_reply' : 'speak_first' })}
-              >
-                <option value="speak_first">Já envia a primeira mensagem</option>
-                <option value="wait_reply">Espera a próxima mensagem do contato e só então responde</option>
-              </select>
-            </Field>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Só conversas novas</p>
-                <p className={HELP_CLASS}>
-                  Ligado, o agente não entra em conversas que já tiveram mensagens enviadas pela equipe.
-                </p>
-              </div>
-              <Toggle
-                checked={form.only_new_conversations}
-                onChange={(only_new_conversations) => patch({ only_new_conversations })}
-                label="Atender só conversas novas"
-              />
-            </div>
+          <div className={`bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-white/10 rounded-lg p-3 ${ROW_DIVIDER_CLASS}`}>
+            <SettingRow
+              title="Ao ser ativado"
+              tip="Vale para o botão Automações do chat e para o início pelo pipeline. Por palavra-chave o agente sempre responde à mensagem que o ativou."
+              control={
+                <Segmented
+                  ariaLabel="Ao ser ativado"
+                  value={form.start_mode}
+                  onChange={(start_mode) => patch({ start_mode })}
+                  options={START_MODES}
+                />
+              }
+            />
+            <SettingRow
+              title="Somente conversas novas"
+              tip="Ligado, o agente não entra em conversas que já tiveram mensagens enviadas pela equipe."
+              control={
+                <Toggle
+                  checked={form.only_new_conversations}
+                  onChange={(only_new_conversations) => patch({ only_new_conversations })}
+                  label="Atender só conversas novas"
+                />
+              }
+            />
           </div>
         </Panel>
 
-        <Panel
-          title="Lead automático"
-          description="Cria o lead no CRM sozinho quando o contato da conversa ainda não tem um negócio aberto."
-          icon={<KanbanSquare size={16} />}
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                Criar lead quando o contato não tiver um
-              </p>
-              <p className={HELP_CLASS}>
-                Ao atender, se o contato não tiver NENHUM negócio aberto, o agente cria um (número sem contato no CRM
-                ganha o contato junto). Se já existir, nada muda: nunca duplica. O responsável segue a distribuição de
-                leads da organização.
-              </p>
-            </div>
-            <Toggle
-              checked={form.auto_lead.enabled}
-              onChange={(enabled) => patch({ auto_lead: { ...form.auto_lead, enabled } })}
-              label="Criar lead automaticamente"
-            />
-          </div>
-          {form.auto_lead.enabled ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-slate-200 dark:border-white/10">
-              <Field label="Quadro" htmlFor="agent-auto-lead-board" help="Onde o lead nasce.">
-                <select
-                  id="agent-auto-lead-board"
-                  className={INPUT_CLASS}
-                  value={form.auto_lead.board_id ?? ''}
-                  onChange={(e) =>
-                    patch({ auto_lead: { ...form.auto_lead, board_id: e.target.value || null, stage_id: null } })
-                  }
-                >
-                  <option value="">Primeiro quadro da organização</option>
-                  {(options?.boards ?? []).map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Etapa" htmlFor="agent-auto-lead-stage" help="Em que etapa ele entra.">
-                <select
-                  id="agent-auto-lead-stage"
-                  className={INPUT_CLASS}
-                  value={form.auto_lead.stage_id ?? ''}
-                  onChange={(e) => patch({ auto_lead: { ...form.auto_lead, stage_id: e.target.value || null } })}
-                >
-                  <option value="">Primeira etapa do quadro</option>
-                  {(
-                    (form.auto_lead.board_id
-                      ? options?.boards.find((b) => b.id === form.auto_lead.board_id)?.stages
-                      : options?.boards[0]?.stages) ?? []
-                  ).map((st) => (
-                    <option key={st.id} value={st.id}>
-                      {st.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </div>
-          ) : null}
+        <Panel title="Lead automático" icon={<KanbanSquare size={16} />}>
+          <SettingRow
+            title="Criar lead quando o contato ainda não tiver um"
+            tip="Ao atender, se o contato não tiver nenhum negócio aberto, o agente cria um (número sem contato no CRM ganha o contato junto). Se já existir, nada muda: nunca duplica. O responsável segue a distribuição de leads da organização."
+            control={
+              <Toggle
+                checked={form.auto_lead.enabled}
+                onChange={(enabled) => patch({ auto_lead: { ...form.auto_lead, enabled } })}
+                label="Criar lead automaticamente"
+              />
+            }
+          >
+            {form.auto_lead.enabled ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Field label="Quadro" htmlFor="agent-auto-lead-board">
+                  <select
+                    id="agent-auto-lead-board"
+                    className={INPUT_CLASS}
+                    value={form.auto_lead.board_id ?? ''}
+                    onChange={(e) =>
+                      patch({ auto_lead: { ...form.auto_lead, board_id: e.target.value || null, stage_id: null } })
+                    }
+                  >
+                    <option value="">Primeiro quadro da organização</option>
+                    {(options?.boards ?? []).map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Etapa" htmlFor="agent-auto-lead-stage">
+                  <select
+                    id="agent-auto-lead-stage"
+                    className={INPUT_CLASS}
+                    value={form.auto_lead.stage_id ?? ''}
+                    onChange={(e) => patch({ auto_lead: { ...form.auto_lead, stage_id: e.target.value || null } })}
+                  >
+                    <option value="">Primeira etapa do quadro</option>
+                    {(
+                      (form.auto_lead.board_id
+                        ? options?.boards.find((b) => b.id === form.auto_lead.board_id)?.stages
+                        : options?.boards[0]?.stages) ?? []
+                    ).map((st) => (
+                      <option key={st.id} value={st.id}>
+                        {st.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+            ) : null}
+          </SettingRow>
         </Panel>
 
         <Panel
@@ -1511,10 +1472,10 @@ export const AgentEditor: React.FC<{
         </Panel>
       </TabPanel>
 
-      {/* Configurações */}
+      {/* 5. Modelo e resposta */}
       <TabPanel id="config" active={tab === 'config'} idPrefix="agent-tab" className="space-y-4">
-        <Panel title="Modelo" description="Provedor, modelo e criatividade." icon={<Cpu size={16} />}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Panel title="Modelo" icon={<Cpu size={16} />}>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Field label="Provedor" htmlFor="agent-provider">
               <select
                 id="agent-provider"
@@ -1568,28 +1529,28 @@ export const AgentEditor: React.FC<{
                 />
               ) : null}
             </Field>
+            <Field
+              label={`Temperatura: ${form.temperature.toFixed(2)}`}
+              htmlFor="agent-temperature"
+              tip="Baixa = respostas mais previsíveis; alta = mais criativas. Para atendimento, entre 0,3 e 0,7."
+            >
+              <input
+                id="agent-temperature"
+                type="range"
+                min={0}
+                max={1.5}
+                step={0.05}
+                value={form.temperature}
+                onChange={(e) => patch({ temperature: Number(e.target.value) })}
+                className="w-full accent-purple-600 mt-2.5"
+              />
+            </Field>
           </div>
-          <Field
-            label={`Temperatura: ${form.temperature.toFixed(2)}`}
-            htmlFor="agent-temperature"
-            help="Baixa = respostas mais previsíveis; alta = mais criativas. Para atendimento, entre 0,3 e 0,7."
-          >
-            <input
-              id="agent-temperature"
-              type="range"
-              min={0}
-              max={1.5}
-              step={0.05}
-              value={form.temperature}
-              onChange={(e) => patch({ temperature: Number(e.target.value) })}
-              className="w-full accent-purple-600"
-            />
-          </Field>
         </Panel>
 
         <Panel
-          title="Chave própria da API"
-          description="Opcional. Vazio usa a chave da organização configurada na Central de I.A."
+          title="Chave própria"
+          description="Opcional. Vazio usa a chave da organização, configurada na Central de I.A."
           icon={<KeyRound size={16} />}
         >
           <Field
@@ -1600,7 +1561,7 @@ export const AgentEditor: React.FC<{
                 ? 'A chave própria será removida ao salvar; o agente passará a usar a chave da organização.'
                 : hasApiKey
                   ? 'Este agente tem uma chave própria salva. Digite outra para substituir.'
-                  : 'Vazio usa a chave da organização configurada na Central de I.A.'
+                  : undefined
             }
           >
             <div className="flex items-center gap-2">
@@ -1635,23 +1596,17 @@ export const AgentEditor: React.FC<{
               ) : null}
             </div>
           </Field>
-        </Panel>
-
-        {form.provider !== 'openai' ? (
-          <Panel
-            title="Chave auxiliar da OpenAI (áudio e recursos de voz)"
-            description="Só aparece quando o provedor do agente não é a OpenAI: usada para transcrever os áudios do lead (whisper-1)."
-            icon={<KeyRound size={16} />}
-          >
+          {showAudioKey ? (
             <Field
-              label="Chave da OpenAI só para o áudio (opcional)"
+              label="Chave auxiliar da OpenAI (áudio)"
               htmlFor="agent-audio-api-key"
+              tip="Só para transcrever os áudios do lead (whisper-1) quando o provedor do agente não é a OpenAI. Vazio: o Google transcreve com a chave do próprio agente e a Anthropic usa a chave da OpenAI da organização (Central de I.A.)."
               help={
                 form.clear_audio_api_key
                   ? 'A chave de áudio será removida ao salvar.'
                   : hasAudioApiKey
                     ? 'Este agente tem uma chave de áudio salva. Digite outra para substituir.'
-                    : 'Vazio: o Google transcreve com a chave do próprio agente, e a Anthropic tenta a chave da OpenAI da organização (Central de I.A.).'
+                    : undefined
               }
             >
               <div className="flex items-center gap-2">
@@ -1680,41 +1635,15 @@ export const AgentEditor: React.FC<{
                 ) : null}
               </div>
             </Field>
-            {form.provider === 'anthropic' && !temChaveDeAudio && form.media_understanding.audio ? (
-              <Notice tone="amber">
-                A Anthropic não transcreve áudio. Sem uma chave da OpenAI (aqui ou na Central de I.A. da organização), o
-                áudio continua chegando como &quot;[áudio]&quot; — imagens e documentos funcionam normalmente.
-              </Notice>
-            ) : null}
-          </Panel>
-        ) : null}
+          ) : null}
+        </Panel>
 
-        <Panel
-          title="Ritmo e memória"
-          description="Tempo de espera para agrupar mensagens, ritmo de envio, quanto do histórico ele lê e a pausa quando um atendente responde."
-          icon={<SlidersHorizontal size={16} />}
-        >
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field
-              label="Espera para agrupar mensagens (segundos)"
-              htmlFor="agent-buffer"
-              help="O agente aguarda esse tempo para o lead terminar de digitar antes de responder. 0 a 60."
-            >
-              <input
-                id="agent-buffer"
-                type="number"
-                min={0}
-                max={60}
-                className={INPUT_CLASS}
-                value={form.buffer_seconds}
-                onChange={(e) => patch({ buffer_seconds: readNumber(e.target.value) })}
-                onBlur={() => patch({ buffer_seconds: clampField('buffer_seconds', form.buffer_seconds) })}
-              />
-            </Field>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Panel title="Memória" icon={<Brain size={16} />} className="h-full">
             <Field
               label="Mensagens de histórico"
               htmlFor="agent-history"
-              help="Quantas mensagens anteriores o modelo enxerga. 5 a 200."
+              tip="Quantas mensagens anteriores da conversa o modelo enxerga (5 a 200)."
             >
               <input
                 id="agent-history"
@@ -1727,26 +1656,13 @@ export const AgentEditor: React.FC<{
                 onBlur={() => patch({ history_limit: clampField('history_limit', form.history_limit) })}
               />
             </Field>
-            <Field
-              label="Intervalo entre linhas (s)"
-              htmlFor="agent-line-delay"
-              help="Pausa fixa entre uma mensagem e outra. 0 = sem pausa (o tempo que o agente leva pra pensar já espaça as mensagens). Ignorado quando o “digitando” está ligado."
-            >
-              <input
-                id="agent-line-delay"
-                type="number"
-                min={0}
-                max={10}
-                step={0.5}
-                className={INPUT_CLASS}
-                value={msEmSegundos(typeof form.line_delay_ms === 'number' ? form.line_delay_ms : 0)}
-                onChange={(e) => patch({ line_delay_ms: segundosEmMsSimples(e.target.value, 0, 10_000) })}
-              />
-            </Field>
+          </Panel>
+
+          <Panel title="Atendimento humano" icon={<UserRound size={16} />} className="h-full">
             <Field
               label="Pausa após atendente responder (minutos)"
               htmlFor="agent-human-pause"
-              help="Quando alguém da equipe responde, o agente pausa por esse tempo. 0 = só retoma manualmente."
+              tip="Quando alguém da equipe responde, o agente pausa por esse tempo e retoma sozinho. 0 = só retoma manualmente."
             >
               <input
                 id="agent-human-pause"
@@ -1759,86 +1675,118 @@ export const AgentEditor: React.FC<{
                 onBlur={() => patch({ human_pause_minutes: clampField('human_pause_minutes', form.human_pause_minutes) })}
               />
             </Field>
-          </div>
+          </Panel>
+        </div>
 
-          <div className="pt-3 border-t border-slate-200 dark:border-white/10 space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Mostrar &quot;digitando...&quot;</p>
-                <p className={HELP_CLASS}>
-                  Antes de cada mensagem o contato vê o agente digitando, pelo tempo que uma pessoa levaria para
-                  escrever aquele texto. Substitui o intervalo fixo entre linhas.
-                </p>
-              </div>
-              <Toggle
-                checked={form.typing.enabled}
-                onChange={(enabled) => patch({ typing: { ...form.typing, enabled } })}
-                label="Mostrar digitando"
+        <Panel
+          title="Velocidade de resposta"
+          description="Antes de cada mensagem o contato vê o agente digitando por um tempo proporcional ao texto."
+          icon={<Gauge size={16} />}
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Field
+              label="Caracteres por segundo"
+              htmlFor="agent-typing-speed"
+              tip="22 = ritmo de celular. Menor = digita mais devagar."
+            >
+              <DraftNumberInput
+                id="agent-typing-speed"
+                min={2}
+                max={200}
+                step={1}
+                className={INPUT_CLASS}
+                value={form.typing.ms_per_char}
+                toText={(ms) => String(charsPorSegundo(ms))}
+                fromText={(t) => (t === '' || !(Number(t) > 0) ? null : charsPorSegundoEmMs(t))}
+                onCommit={(ms_per_char) => patch({ typing: { ...form.typing, ms_per_char } })}
               />
-            </div>
-            {form.typing.enabled ? (
-              <>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <Field
-                    label="Velocidade (caracteres por segundo)"
-                    htmlFor="agent-typing-speed"
-                    help="22 = ritmo de celular. Menor = digita mais devagar."
-                  >
-                    <input
-                      id="agent-typing-speed"
-                      type="number"
-                      min={2}
-                      max={200}
-                      step={1}
-                      className={INPUT_CLASS}
-                      value={charsPorSegundo(form.typing.ms_per_char)}
-                      onChange={(e) =>
-                        patch({ typing: { ...form.typing, ms_per_char: charsPorSegundoEmMs(e.target.value) } })
-                      }
-                    />
-                  </Field>
-                  <Field label="Mínimo por mensagem (s)" htmlFor="agent-typing-min" help="Piso, mesmo numa linha curta.">
-                    <input
-                      id="agent-typing-min"
-                      type="number"
-                      min={0}
-                      max={30}
-                      step={0.5}
-                      className={INPUT_CLASS}
-                      value={msEmSegundos(form.typing.min_ms)}
-                      onChange={(e) => patch({ typing: { ...form.typing, min_ms: segundosEmMs('min_ms', e.target.value) } })}
-                    />
-                  </Field>
-                  <Field label="Máximo por mensagem (s)" htmlFor="agent-typing-max" help="Teto, para linha longa não travar a conversa.">
-                    <input
-                      id="agent-typing-max"
-                      type="number"
-                      min={0}
-                      max={60}
-                      step={0.5}
-                      className={INPUT_CLASS}
-                      value={msEmSegundos(form.typing.max_ms)}
-                      onChange={(e) => patch({ typing: { ...form.typing, max_ms: segundosEmMs('max_ms', e.target.value) } })}
-                    />
-                  </Field>
-                </div>
-                <p className={HELP_CLASS}>
-                  Prévia: mensagem curta (40 caracteres) ={' '}
-                  <strong>{typingSecondsLabel(typingDelayMs('x'.repeat(40), form.typing))} s</strong> · média (120) ={' '}
-                  <strong>{typingSecondsLabel(typingDelayMs('x'.repeat(120), form.typing))} s</strong> · longa (240) ={' '}
-                  <strong>{typingSecondsLabel(typingDelayMs('x'.repeat(240), form.typing))} s</strong> digitando.
-                </p>
-              </>
-            ) : null}
+            </Field>
+            <Field label="Tempo mínimo (s)" htmlFor="agent-typing-min" tip="Piso por mensagem, mesmo numa linha curta.">
+              <DraftNumberInput
+                id="agent-typing-min"
+                min={0}
+                max={30}
+                step={0.1}
+                className={INPUT_CLASS}
+                value={form.typing.min_ms}
+                toText={(ms) => String(msEmSegundos(ms))}
+                fromText={(t) => (t === '' || !Number.isFinite(Number(t)) ? null : segundosEmMs('min_ms', t))}
+                onCommit={(min_ms) => patch({ typing: { ...form.typing, min_ms } })}
+              />
+            </Field>
+            <Field label="Tempo máximo (s)" htmlFor="agent-typing-max" tip="Teto por mensagem, para uma linha longa não travar a conversa.">
+              <DraftNumberInput
+                id="agent-typing-max"
+                min={0}
+                max={60}
+                step={0.5}
+                className={INPUT_CLASS}
+                value={form.typing.max_ms}
+                toText={(ms) => String(msEmSegundos(ms))}
+                fromText={(t) => (t === '' || !Number.isFinite(Number(t)) ? null : segundosEmMs('max_ms', t))}
+                onCommit={(max_ms) => patch({ typing: { ...form.typing, max_ms } })}
+              />
+            </Field>
           </div>
+          <p className={HELP_CLASS}>
+            Prévia: mensagem curta <strong>{typingSecondsLabel(typingDelayMs('x'.repeat(40), typingPreview))} s</strong> · média{' '}
+            <strong>{typingSecondsLabel(typingDelayMs('x'.repeat(120), typingPreview))} s</strong> · longa{' '}
+            <strong>{typingSecondsLabel(typingDelayMs('x'.repeat(240), typingPreview))} s</strong> digitando.
+          </p>
+          <Disclosure label="Configurações avançadas">
+            <Field
+              label="Espera para agrupar mensagens (segundos)"
+              htmlFor="agent-buffer"
+              tip="O agente aguarda esse tempo para o lead terminar de digitar antes de responder (0 a 60)."
+              className="sm:max-w-[260px]"
+            >
+              <input
+                id="agent-buffer"
+                type="number"
+                min={0}
+                max={60}
+                className={INPUT_CLASS}
+                value={form.buffer_seconds}
+                onChange={(e) => patch({ buffer_seconds: readNumber(e.target.value) })}
+                onBlur={() => patch({ buffer_seconds: clampField('buffer_seconds', form.buffer_seconds) })}
+              />
+            </Field>
+          </Disclosure>
         </Panel>
 
         <Panel
-          title="Webhooks"
-          description="Avise outros sistemas quando algo acontecer no atendimento."
-          icon={<Webhook size={16} />}
+          title="Mídias recebidas no atendimento"
+          description="Arquivos que o lead manda na conversa viram texto para o agente. Não tem relação com a base de conhecimento."
+          icon={<Paperclip size={16} />}
         >
-          <WebhooksEditor value={form.webhooks} onChange={(webhooks) => patch({ webhooks })} />
+          <div className={ROW_DIVIDER_CLASS}>
+            {(
+              [
+                ['audio', 'Ouvir áudios', 'Transcreve o que o lead falou. A transcrição também aparece no chat.'],
+                ['image', 'Ver imagens', 'Descreve fotos e figurinhas e lê o texto de prints, boletos e documentos fotografados.'],
+                ['document', 'Ler documentos', 'Extrai o texto de PDF, DOCX e arquivos de texto.'],
+              ] as Array<[keyof AgentMediaUnderstanding, string, string]>
+            ).map(([campo, titulo, ajuda]) => (
+              <SettingRow
+                key={campo}
+                title={titulo}
+                tip={ajuda}
+                control={
+                  <Toggle
+                    checked={form.media_understanding[campo]}
+                    onChange={(v) => patch({ media_understanding: { ...form.media_understanding, [campo]: v } })}
+                    label={titulo}
+                  />
+                }
+              />
+            ))}
+          </div>
+          {form.media_understanding.audio && form.provider === 'anthropic' && !temChaveDeAudio ? (
+            <Notice tone="amber">
+              A Anthropic não transcreve áudio. Informe a chave auxiliar da OpenAI em Chave própria (ou na Central de
+              I.A. da organização); sem ela, o áudio chega como &quot;[áudio]&quot;.
+            </Notice>
+          ) : null}
         </Panel>
       </TabPanel>
 

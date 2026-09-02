@@ -175,7 +175,8 @@ export const AgentTypingSchema = z.object({
   max_ms: z.number().int().min(0).max(60000).default(8000),
 });
 export type AgentTyping = z.infer<typeof AgentTypingSchema>;
-export const DEFAULT_AGENT_TYPING: AgentTyping = { enabled: false, ms_per_char: 45, min_ms: 800, max_ms: 8000 };
+/** Ligado por padrão: o editor não tem mais a opção, o "digitando..." é o ritmo padrão do agente. */
+export const DEFAULT_AGENT_TYPING: AgentTyping = { enabled: true, ms_per_char: 45, min_ms: 800, max_ms: 8000 };
 
 // ---------------------------------------------------------------------------
 // O que do cadastro do lead entra no prompt

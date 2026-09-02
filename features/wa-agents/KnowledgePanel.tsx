@@ -692,7 +692,7 @@ export const KnowledgePanel: React.FC<{
   if (!agentId) {
     return (
       <Panel
-        title="Conhecimento e mídias"
+        title="Base de conhecimento"
         icon={<BookOpen size={16} />}
         description="Documentos que o agente consulta e mídias que ele pode enviar na conversa."
       >
@@ -717,7 +717,7 @@ export const KnowledgePanel: React.FC<{
       <Panel
         title="Base de conhecimento"
         icon={<BookOpen size={16} />}
-        description="Documentos que o agente consulta para responder (PDF, TXT, Markdown ou DOCX, até 50 MB cada). O CRM extrai o texto, divide em trechos e usa os mais relevantes em cada resposta."
+        description="Conteúdo que você adiciona para o agente consultar ao responder. Os arquivos que o lead manda na conversa não entram aqui."
       >
         <DropZone
           accept={DOC_ACCEPT}
@@ -790,7 +790,7 @@ export const KnowledgePanel: React.FC<{
       <Panel
         title="Mídias"
         icon={<Paperclip size={16} />}
-        description="Imagens, vídeos, áudios e PDFs que o agente pode enviar na conversa. Descreva quando enviar cada um ou marque o momento no roteiro com Inserir no roteiro."
+        description="Arquivos que o agente pode enviar ao lead. Descreva quando enviar cada um ou marque o momento no roteiro."
       >
         <DropZone
           accept={MEDIA_ACCEPT}
