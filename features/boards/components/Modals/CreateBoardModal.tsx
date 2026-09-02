@@ -140,6 +140,8 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
   const [selectedTemplate, setSelectedTemplate] = useState<BoardTemplateType | ''>('');
   const [stages, setStages] = useState<BoardStage[]>([]);
   const [isLifecycleModalOpen, setIsLifecycleModalOpen] = useState(false);
+  // Modal da etapa (por cima deste): solta o foco preso enquanto estiver aberto
+  const [isStageModalOpen, setIsStageModalOpen] = useState(false);
   const [draggingStageId, setDraggingStageId] = useState<string | null>(null);
   const [dragOverStageId, setDragOverStageId] = useState<string | null>(null);
   const [copiedStageId, setCopiedStageId] = useState<string | null>(null);
@@ -392,11 +394,11 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
         title={editingBoard ? 'Editar Board' : 'Criar Novo Board'}
         size="lg"
         labelledById={headingId}
-        className="max-w-2xl"
+        className="max-w-6xl w-[96vw]"
         // We control padding/scroll inside, so keep the Modal body wrapper flat.
         bodyClassName="p-0"
         // Nested modal: avoid trapping focus behind the lifecycle modal.
-        focusTrapEnabled={!isLifecycleModalOpen}
+        focusTrapEnabled={!isLifecycleModalOpen && !isStageModalOpen}
       >
         <div className="flex flex-col">
           {/* 
@@ -439,6 +441,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                 </div>
               )}
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Name */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
@@ -469,6 +472,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                   placeholder="Breve descrição do propósito deste board"
                   className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white placeholder:text-slate-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 />
+              </div>
               </div>
 
               {/* Template Selection (only for new boards) */}
@@ -503,6 +507,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                 lifecycleStages={lifecycleStages}
                 showIds={!!editingBoard}
                 onManageLifecycle={() => setIsLifecycleModalOpen(true)}
+                onStageModalOpenChange={setIsStageModalOpen}
               />
 
               {/* Pouco usado no dia a dia: chave, estágio gerenciado, produto padrão, grupos de campos, próximo board, ganho/perdido */}

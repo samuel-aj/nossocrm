@@ -156,7 +156,7 @@ export const AgentList: React.FC = () => {
                       {item.persona_name ? <Badge tone="purple">Persona: {item.persona_name}</Badge> : null}
                       <Badge tone={item.enabled ? 'green' : 'slate'}>{item.enabled ? 'Ligado' : 'Desligado'}</Badge>
                       {full?.has_api_key ? <Badge tone="blue">Chave própria</Badge> : null}
-                      <CopyIdButton id={item.id} />
+                      <CopyIdButton id={item.id} label="ID do agente" />
                     </div>
                     <div className="mt-2 flex flex-col gap-1 text-xs text-slate-500 dark:text-slate-400">
                       {item.provider || item.model ? (

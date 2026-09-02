@@ -8,6 +8,7 @@ import React, { useEffect, useId, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, ChevronRight, ChevronUp, Copy, GripVertical, HelpCircle, Loader2, MoreHorizontal, X } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { CopyId } from '@/components/ui/CopyId';
 
 export const CARD_CLASS =
   'bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/5 rounded-xl p-4 shadow-sm space-y-4';
@@ -553,36 +554,12 @@ export function TabPanel({
  * outra janela) fica com o comportamento nativo do navegador.
  */
 /**
- * Chip "ID abc123… ⧉" que copia o id inteiro no clique. É por ele que a
- * integração (n8n/Make) pega o `agent_id` e o `bot_id` sem precisar chamar a API.
+ * ID copiável de agente/robô: só o rótulo aparece ("ID do agente"); o valor
+ * vai para a área de transferência no clique. Mesmo padrão de todo o CRM
+ * (components/ui/CopyId).
  */
 export function CopyIdButton({ id, label = 'ID' }: { id: string; label?: string }) {
-  const [copiado, setCopiado] = useState(false);
-  const copiar = async () => {
-    try {
-      await navigator.clipboard.writeText(id);
-      setCopiado(true);
-      window.setTimeout(() => setCopiado(false), 1500);
-    } catch {
-      // sem permissão/HTTPS o navegador recusa: o id continua visível para copiar na mão
-    }
-  };
-  return (
-    <button
-      type="button"
-      onClick={() => void copiar()}
-      title={`Copiar o ${label}: ${id}`}
-      aria-label={`Copiar o ${label} ${id}`}
-      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-mono text-[11px] border transition-colors ${
-        copiado
-          ? 'bg-green-50 border-green-200 text-green-700 dark:bg-green-900/20 dark:border-green-500/30 dark:text-green-300'
-          : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200 dark:bg-white/10 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/20'
-      }`}
-    >
-      {copiado ? <Check size={11} aria-hidden="true" /> : <Copy size={11} aria-hidden="true" />}
-      {copiado ? 'copiado!' : `${label} ${id.slice(0, 8)}…`}
-    </button>
-  );
+  return <CopyId value={id} label={label} size="xs" />;
 }
 
 export const PROMPT_TOKEN_MIME = 'application/x-wa-prompt-token';

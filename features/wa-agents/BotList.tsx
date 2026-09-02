@@ -163,7 +163,7 @@ export const BotList: React.FC = () => {
                     <Badge tone="slate">
                       {bot.steps.length} {bot.steps.length === 1 ? 'passo' : 'passos'}
                     </Badge>
-                    <CopyIdButton id={bot.id} />
+                    <CopyIdButton id={bot.id} label="ID do robô" />
                   </div>
                   <div className="mt-2 flex flex-col gap-1 text-xs text-slate-500 dark:text-slate-400">
                     <span className="inline-flex items-center gap-1.5">
