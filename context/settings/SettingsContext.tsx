@@ -65,6 +65,10 @@ interface SettingsContextType {
   customFieldGroups: string[];
   addCustomFieldGroup: (name: string) => Promise<boolean>;
   removeCustomFieldGroup: (name: string) => Promise<boolean>;
+  /** Ordem manual dos campos (ids na ordem desejada; grava position). false = não salvou no servidor */
+  reorderCustomFields: (ids: string[]) => Promise<boolean>;
+  /** Ordem manual dos grupos (nomes na ordem desejada). false = não salvou no servidor */
+  reorderCustomFieldGroups: (names: string[]) => Promise<boolean>;
 
   // Tags (persisted in Supabase)
   availableTags: string[];
@@ -377,6 +381,7 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
         type: r.type,
         options: Array.isArray(r.options) ? r.options : undefined,
         groupName: (r as { group_name?: string | null }).group_name ?? undefined,
+        position: (r as { position?: number | null }).position ?? null,
       })));
     };
 
@@ -770,6 +775,41 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
     return true;
   }, []);
 
+  // Ordem manual dos campos: aplica na hora (position = índice) e grava no servidor
+  const reorderCustomFields = useCallback(async (ids: string[]): Promise<boolean> => {
+    const pos = new Map(ids.map((id, i) => [id, i] as const));
+    setCustomFieldDefinitions(prev => {
+      const next = prev.map(f => (pos.has(f.id) ? { ...f, position: pos.get(f.id)! } : f));
+      return next
+        .map((f, i) => ({ f, i }))
+        .sort((a, b) => {
+          const pa = a.f.position ?? Number.MAX_SAFE_INTEGER;
+          const pb = b.f.position ?? Number.MAX_SAFE_INTEGER;
+          return pa - pb || a.i - b.i;
+        })
+        .map(x => x.f);
+    });
+    const res = await fetch('/api/custom-fields/reorder', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ ids }),
+    });
+    return res.ok;
+  }, []);
+
+  // Ordem manual dos grupos
+  const reorderCustomFieldGroups = useCallback(async (names: string[]): Promise<boolean> => {
+    setCustomFieldGroups(prev => [...names.filter(n => prev.includes(n)), ...prev.filter(n => !names.includes(n))]);
+    const res = await fetch('/api/custom-field-groups', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ names }),
+    });
+    return res.ok;
+  }, []);
+
   // Tags (persisted in Supabase via /api/tags)
   const addTag = useCallback(async (tag: string) => {
     const name = tag.trim();
@@ -879,6 +919,8 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
       customFieldGroups,
       addCustomFieldGroup,
       removeCustomFieldGroup,
+      reorderCustomFields,
+      reorderCustomFieldGroups,
       availableTags,
       addTag,
       removeTag,
@@ -928,6 +970,8 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
       customFieldGroups,
       addCustomFieldGroup,
       removeCustomFieldGroup,
+      reorderCustomFields,
+      reorderCustomFieldGroups,
       availableTags,
       addTag,
       removeTag,

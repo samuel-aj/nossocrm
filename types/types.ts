@@ -205,6 +205,8 @@ export interface CustomFieldDefinition {
   options?: string[]; // For select type
   /** Grupo do campo (ex.: por produto/pipeline). null/undefined = desagrupado. */
   groupName?: string | null;
+  /** Ordem manual dentro do grupo (null = ordem de criação) */
+  position?: number | null;
 }
 
 // O Dinheiro/Oportunidade (O que vai no Kanban)

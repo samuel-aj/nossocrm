@@ -18,6 +18,18 @@ type ApiKeyRow = {
 };
 
 /**
+ * Chaves da API SEMPRE pela rota /api/api-keys, escopada pela organização da
+ * aba (header x-org-id): a consulta direta à tabela e a RPC create_api_key
+ * usavam a organização do PERFIL e mostravam/criavam chaves de outra organização.
+ */
+async function apiKeysRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, { credentials: 'include', ...init });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error((body && body.error) || `HTTP ${res.status}`);
+  return body as T;
+}
+
+/**
  * Componente React `ApiKeysSection`.
  * @returns {Element} Retorna um valor do tipo `Element`.
  */
@@ -79,12 +91,8 @@ export const ApiKeysSection: React.FC = () => {
     }
     setLoadingKeys(true);
     try {
-      const { data, error } = await supabase
-        .from('api_keys')
-        .select('id,name,key_prefix,created_at,last_used_at,revoked_at')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      setKeys((data || []) as ApiKeyRow[]);
+      const body = await apiKeysRequest<{ data: ApiKeyRow[] }>('/api/api-keys');
+      setKeys(body.data || []);
     } catch (e: any) {
       addToast(e?.message || 'Erro ao carregar chaves', 'error');
     } finally {
@@ -107,9 +115,12 @@ export const ApiKeysSection: React.FC = () => {
     setCreatedPrefix(null);
     setTestResult(null);
     try {
-      const { data, error } = await supabase.rpc('create_api_key', { p_name: name });
-      if (error) throw error;
-      const row = Array.isArray(data) ? data[0] : data;
+      const body = await apiKeysRequest<{ data: ApiKeyRow & { token?: string } }>('/api/api-keys', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const row = body.data as { token?: string; key_prefix?: string } | undefined;
       const token = row?.token as string | undefined;
       const prefix = row?.key_prefix as string | undefined;
       if (!token || !prefix) throw new Error('Resposta inválida ao criar chave');
@@ -132,8 +143,7 @@ export const ApiKeysSection: React.FC = () => {
     }
     setRevokingId(id);
     try {
-      const { error } = await supabase.rpc('revoke_api_key', { p_api_key_id: id });
-      if (error) throw error;
+      await apiKeysRequest(`/api/api-keys/${encodeURIComponent(id)}`, { method: 'PATCH' });
       addToast('Chave revogada.', 'success');
       await loadKeys();
     } catch (e: any) {
@@ -151,12 +161,7 @@ export const ApiKeysSection: React.FC = () => {
     setDeletingId(id);
     try {
       // Segurança: só permite excluir se já estiver revogada
-      const { error } = await supabase
-        .from('api_keys')
-        .delete()
-        .eq('id', id)
-        .not('revoked_at', 'is', null);
-      if (error) throw error;
+      await apiKeysRequest(`/api/api-keys/${encodeURIComponent(id)}`, { method: 'DELETE' });
       addToast('Chave excluída.', 'success');
       await loadKeys();
     } catch (e: any) {

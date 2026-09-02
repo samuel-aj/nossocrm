@@ -13,5 +13,5 @@ const SettingsPage = dynamic(
  * @returns {Element} Retorna um valor do tipo `Element`.
  */
 export default function SettingsAgentes() {
-  return <SettingsPage tab="agents" />
+  return <SettingsPage tab="ai" />
 }

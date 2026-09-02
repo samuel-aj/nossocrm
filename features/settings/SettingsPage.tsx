@@ -1,10 +1,15 @@
-import React, { useState, useEffect } from 'react';
+'use client';
+
+/**
+ * Configurações do CRM. As categorias ficam no TOPO (sem sidebar interna):
+ * Geral | Aparência | CRM | Distribuição | Equipe | Produtos/Serviços |
+ * IA e Automações | Integrações | Dados. Cada categoria só reorganiza o que
+ * já existia; as rotas antigas (/settings/ai, /settings/agentes,
+ * /settings/integracoes, /settings/products) e os hashes continuam valendo.
+ */
+import React, { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useSettingsController } from './hooks/useSettingsController';
-import { TagsManager } from './components/TagsManager';
-import { InactiveLeadsSettings } from './components/InactiveLeadsSettings';
-import { LossReasonsSettings } from './components/LossReasonsSettings';
-import { CustomFieldsManager } from './components/CustomFieldsManager';
 import { ApiKeysSection } from './components/ApiKeysSection';
 import { WebhooksSection } from './components/WebhooksSection';
 import { McpSection } from './components/McpSection';
@@ -12,208 +17,141 @@ import { DataStorageSettings } from './components/DataStorageSettings';
 import AppearanceSettings from './components/AppearanceSettings';
 import { ProductsCatalogManager } from './components/ProductsCatalogManager';
 import { UserRole } from '@/types/constants';
-import { AICenterSettings } from './AICenterSettings';
-
 import { UsersPage } from './UsersPage';
 import { LeadDistributionSettings } from './LeadDistributionSettings';
+import { CrmSettings } from './CrmSettings';
+import { AiAutomationsSettings, type AiSubTab } from './AiAutomationsSettings';
 import { useAuth } from '@/context/AuthContext';
-import { WaAgentsSettings } from '@/features/wa-agents/WaAgentsSettings';
-import { useRouter } from 'next/navigation';
-import { Settings as SettingsIcon, Users, Database, Sparkles, Plug, Package, Shuffle, Bot, Palette, UserRound, ChevronRight } from 'lucide-react';
+import { SETTINGS_INPUT_CLASS, SettingsCard, SettingsHeader, SettingsRow, SubTabs } from './components/SettingsUi';
+import {
+  Settings as SettingsIcon,
+  Users,
+  Database,
+  Sparkles,
+  Plug,
+  Package,
+  Shuffle,
+  Palette,
+  KanbanSquare,
+  Webhook,
+  KeyRound,
+  Cable,
+  Building2,
+  Compass,
+} from 'lucide-react';
 
-type SettingsTab = 'general' | 'appearance' | 'profile' | 'products' | 'integrations' | 'ai' | 'data' | 'users' | 'distribution' | 'agents';
+type SettingsTab = 'general' | 'appearance' | 'crm' | 'distribution' | 'users' | 'products' | 'ai' | 'integrations' | 'data';
 
-interface GeneralSettingsProps {
-  hash?: string;
-  isAdmin: boolean;
-}
+// ---------------------------------------------------------------- Geral
 
-const GeneralSettings: React.FC<GeneralSettingsProps> = ({ hash, isAdmin }) => {
+const GeneralSettings: React.FC = () => {
   const controller = useSettingsController();
   const { profile } = useAuth();
   const organizationName = profile?.organization_name || 'Não definido';
 
-  // Scroll to hash element (e.g., #ai-config)
-  useEffect(() => {
-    if (hash) {
-      const elementId = hash.slice(1); // Remove #
-      setTimeout(() => {
-        const element = document.getElementById(elementId);
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-      }, 100);
-    }
-  }, [hash]);
-
-
   return (
-    <div className="pb-10">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-slate-900 dark:text-white font-display tracking-tight">Geral</h1>
-        <p className="text-slate-500 dark:text-slate-400 mt-2 text-lg">Escritório, preferências de início e cadastros do funil.</p>
-      </div>
-      {/* Office Name (read-only, managed by agency) */}
-      <div className="mb-8">
-        <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl p-6">
-          <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-1">Nome do Escritório</h3>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-            Definido pela agência. Aparece na sidebar e na identidade do sistema.
-          </p>
-          <div className="px-4 py-2.5 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl w-fit min-w-[200px]">
-            <span className="text-slate-900 dark:text-white font-medium">{organizationName}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* General Settings */}
-      <div className="mb-12">
-        <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl p-6">
-          <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-1">Página Inicial</h3>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-            Escolha qual tela deve abrir quando você iniciar o CRM.
-          </p>
-          <select
-            aria-label="Selecionar página inicial"
-            value={controller.defaultRoute}
-            onChange={(e) => controller.setDefaultRoute(e.target.value)}
-            className="w-full max-w-xs px-4 py-2.5 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-slate-900 dark:text-white transition-all"
-          >
-            <option value="/dashboard">Dashboard</option>
-            <option value="/inbox-list">Inbox (Lista)</option>
-            <option value="/inbox-focus">Inbox (Foco)</option>
-            <option value="/boards">Boards (Kanban)</option>
-            <option value="/contacts">Contatos</option>
-            <option value="/activities">Atividades</option>
-            <option value="/reports">Relatórios</option>
-          </select>
-        </div>
-      </div>
-
-      {isAdmin && (
-        <>
-          <div className="mb-4 mt-2">
-            <h2 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Leads e funil</h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-              Regras e cadastros que valem para todos os quadros da organização.
-            </p>
-          </div>
-          <InactiveLeadsSettings />
-
-          <LossReasonsSettings />
-
-          <TagsManager
-            availableTags={controller.availableTags}
-            newTagName={controller.newTagName}
-            setNewTagName={controller.setNewTagName}
-            onAddTag={controller.handleAddTag}
-            onRemoveTag={controller.removeTag}
-          />
-
-          <CustomFieldsManager
-            customFieldDefinitions={controller.customFieldDefinitions}
-            newFieldLabel={controller.newFieldLabel}
-            setNewFieldLabel={controller.setNewFieldLabel}
-            newFieldType={controller.newFieldType}
-            setNewFieldType={controller.setNewFieldType}
-            newFieldOptions={controller.newFieldOptions}
-            setNewFieldOptions={controller.setNewFieldOptions}
-            newFieldGroup={controller.newFieldGroup}
-            setNewFieldGroup={controller.setNewFieldGroup}
-            existingFieldGroups={controller.existingFieldGroups}
-            editingId={controller.editingId}
-            onStartEditing={controller.startEditingField}
-            onCancelEditing={controller.cancelEditingField}
-            onSaveField={controller.handleSaveField}
-            onRemoveField={controller.removeCustomField}
-            onCreateGroup={controller.handleCreateGroup}
-            onRemoveGroup={controller.handleRemoveGroup}
-            onMoveFieldToGroup={controller.handleMoveFieldToGroup}
-          />
-        </>
-      )}
-
+    <div className="pb-10 space-y-6">
+      <SettingsHeader title="Geral" description="O básico da organização e da sua navegação." />
+      <SettingsCard title="Escritório" icon={Building2}>
+        <SettingsRow
+          title="Nome do escritório"
+          description="Definido pela agência. Aparece na sidebar e na identidade do sistema."
+          control={
+            <span className="inline-flex items-center rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20 px-3 py-1.5 text-sm font-medium text-slate-900 dark:text-white">
+              {organizationName}
+            </span>
+          }
+        />
+      </SettingsCard>
+      <SettingsCard title="Navegação" icon={Compass}>
+        <SettingsRow
+          title="Página inicial"
+          description="A tela que abre quando você entra no CRM."
+          control={
+            <select
+              aria-label="Selecionar página inicial"
+              value={controller.defaultRoute}
+              onChange={(e) => controller.setDefaultRoute(e.target.value)}
+              className={`${SETTINGS_INPUT_CLASS} w-56`}
+            >
+              <option value="/dashboard">Dashboard</option>
+              <option value="/inbox-list">Inbox (Lista)</option>
+              <option value="/inbox-focus">Inbox (Foco)</option>
+              <option value="/boards">Boards (Kanban)</option>
+              <option value="/contacts">Contatos</option>
+              <option value="/activities">Atividades</option>
+              <option value="/reports">Relatórios</option>
+            </select>
+          }
+        />
+      </SettingsCard>
     </div>
   );
 };
 
-const ProductsSettings: React.FC = () => {
-  return (
-    <div className="pb-10">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-slate-900 dark:text-white font-display tracking-tight">Produtos e serviços</h1>
-        <p className="text-slate-500 dark:text-slate-400 mt-2 text-lg">O catálogo que entra nos leads e nas ações dos agentes.</p>
-      </div>
-      <ProductsCatalogManager />
-    </div>
-  );
-};
+// ---------------------------------------------------------------- Produtos
+
+const ProductsSettings: React.FC = () => (
+  <div className="pb-10">
+    <SettingsHeader title="Produtos e serviços" description="O catálogo que entra nos leads e nas ações dos agentes." />
+    <ProductsCatalogManager />
+  </div>
+);
+
+// ---------------------------------------------------------------- Integrações
+
+type IntegrationsSubTab = 'webhooks' | 'api' | 'mcp';
 
 const IntegrationsSettings: React.FC = () => {
-  // A conexão do WhatsApp saiu daqui: agora é a página Conexão, no grupo
-  // WhatsApp do menu lateral (junto de Chats e Modelos).
-  type IntegrationsSubTab = 'api' | 'webhooks' | 'mcp';
-  const [subTab, setSubTab] = useState<IntegrationsSubTab>('api');
+  const [subTab, setSubTab] = useState<IntegrationsSubTab>('webhooks');
 
   useEffect(() => {
     const syncFromHash = () => {
-    const h = typeof window !== 'undefined' ? (window.location.hash || '').replace('#', '') : '';
-    if (h === 'webhooks' || h === 'api' || h === 'mcp') setSubTab(h as IntegrationsSubTab);
+      const h = (window.location.hash || '').replace('#', '');
+      if (h === 'webhooks' || h === 'api' || h === 'mcp') setSubTab(h);
     };
-
     syncFromHash();
-
-    if (typeof window !== 'undefined') {
-      window.addEventListener('hashchange', syncFromHash);
-      return () => window.removeEventListener('hashchange', syncFromHash);
-    }
+    window.addEventListener('hashchange', syncFromHash);
+    return () => window.removeEventListener('hashchange', syncFromHash);
   }, []);
 
-  const setSubTabAndHash = (t: IntegrationsSubTab) => {
+  const go = (t: IntegrationsSubTab) => {
     setSubTab(t);
-    if (typeof window !== 'undefined') {
-      const url = new URL(window.location.href);
-      url.hash = `#${t}`;
-      window.history.replaceState({}, '', url.toString());
-    }
+    const url = new URL(window.location.href);
+    url.hash = `#${t}`;
+    window.history.replaceState({}, '', url.toString());
   };
 
   return (
     <div className="pb-10">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-slate-900 dark:text-white font-display tracking-tight">Integrações</h1>
-        <p className="text-slate-500 dark:text-slate-400 mt-2 text-lg">Chaves de API, webhooks e MCP para ligar o CRM a outros sistemas.</p>
-      </div>
-      <div className="flex items-center gap-2 mb-6">
-        {([
-          { id: 'api' as const, label: 'API' },
-          { id: 'webhooks' as const, label: 'Webhooks' },
-          { id: 'mcp' as const, label: 'MCP' },
-        ] as const).map((t) => {
-          const active = subTab === t.id;
-          return (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setSubTabAndHash(t.id)}
-              className={`px-3 py-2 rounded-xl text-sm font-semibold border transition-colors ${
-                active
-                  ? 'border-primary-500/50 bg-primary-500/10 text-primary-700 dark:text-primary-300'
-                  : 'border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'
-              }`}
-            >
-              {t.label}
-            </button>
-          );
-        })}
-      </div>
-
-      {subTab === 'api' && <ApiKeysSection />}
+      <SettingsHeader title="Integrações" description="Webhooks, chaves da API e MCP para ligar o CRM a outros sistemas." />
+      <SubTabs
+        ariaLabel="Seções de Integrações"
+        value={subTab}
+        onChange={go}
+        tabs={[
+          { id: 'webhooks', label: 'Webhooks', icon: Webhook },
+          { id: 'api', label: 'API e chaves', icon: KeyRound },
+          { id: 'mcp', label: 'MCP', icon: Cable },
+        ]}
+      />
       {subTab === 'webhooks' && <WebhooksSection />}
+      {subTab === 'api' && <ApiKeysSection />}
       {subTab === 'mcp' && <McpSection />}
     </div>
   );
 };
+
+// ---------------------------------------------------------------- Dados
+
+const DataSettings: React.FC = () => (
+  <div className="pb-10">
+    <SettingsHeader title="Dados" description="Armazenamento, importação, exportação e limpeza." />
+    <DataStorageSettings />
+  </div>
+);
+
+// ---------------------------------------------------------------- Página
 
 interface SettingsPageProps {
   tab?: SettingsTab;
@@ -229,188 +167,121 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
   const { profile } = useAuth();
   const pathname = usePathname();
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab || 'general');
+  const [aiSub, setAiSub] = useState<AiSubTab>('agentes');
 
-  // Get hash from URL for scrolling
-  const hash = typeof window !== 'undefined' ? window.location.hash : '';
-
-  // Determine tab from pathname if available
+  // Rotas antigas continuam levando à mesma tela
   useEffect(() => {
     if (pathname?.includes('/settings/agentes')) {
-      setActiveTab('agents');
+      setActiveTab('ai');
+      setAiSub('agentes');
     } else if (pathname?.includes('/settings/ai')) {
       setActiveTab('ai');
+      setAiSub('central');
     } else if (pathname?.includes('/settings/products')) {
       setActiveTab('products');
     } else if (pathname?.includes('/settings/integracoes')) {
       setActiveTab('integrations');
     } else if (pathname?.includes('/settings/data')) {
       setActiveTab('data');
-    } else if (pathname?.includes('/settings/aparencia')) {
-      setActiveTab('appearance');
     } else if (pathname?.includes('/settings/users')) {
       setActiveTab('users');
     } else if (pathname?.includes('/settings/distribuicao')) {
       setActiveTab('distribution');
+    } else if (pathname?.includes('/settings/aparencia')) {
+      setActiveTab('appearance');
+    } else if (pathname?.includes('/settings/crm')) {
+      setActiveTab('crm');
     } else {
       setActiveTab('general');
     }
   }, [pathname]);
 
+  // Links com âncora (ex.: /settings/ai#ai-config) rolam até a seção depois de renderizar
+  useEffect(() => {
+    const hash = (window.location.hash || '').replace('#', '');
+    if (!hash) return;
+    const t = window.setTimeout(() => {
+      const el = document.getElementById(hash);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 150);
+    return () => window.clearTimeout(t);
+  }, [activeTab]);
+
   const isAdminOrSuper = profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN;
-  const router = useRouter();
 
-  type NavItem = { id: SettingsTab; name: string; icon: React.ElementType; hint?: string; href?: string };
-  type NavGroup = { label: string; items: NavItem[] };
-
-  // Grupos por afinidade: pessoal, organização, IA, conexões e sistema.
-  // As funções não mudaram; só a ordem e o agrupamento.
-  const groups: NavGroup[] = [
-    {
-      label: 'Pessoal',
-      items: [
-        { id: 'appearance', name: 'Aparência', icon: Palette, hint: 'Modo e tema' },
-        { id: 'profile', name: 'Perfil', icon: UserRound, hint: 'Seus dados', href: '/profile' },
-      ],
-    },
-    {
-      label: 'Organização',
-      items: [
-        { id: 'general', name: 'Geral', icon: SettingsIcon, hint: 'Escritório e funil' },
-        ...(isAdminOrSuper ? [{ id: 'users' as SettingsTab, name: 'Equipe', icon: Users, hint: 'Membros e permissões' }] : []),
-        ...(isAdminOrSuper ? [{ id: 'distribution' as SettingsTab, name: 'Distribuição de leads', icon: Shuffle, hint: 'Quem recebe cada lead' }] : []),
-        ...(isAdminOrSuper ? [{ id: 'products' as SettingsTab, name: 'Produtos e serviços', icon: Package, hint: 'Catálogo' }] : []),
-      ],
-    },
-    {
-      label: 'Inteligência artificial',
-      items: [
-        { id: 'ai', name: 'Central de I.A', icon: Sparkles, hint: 'Provedor, modelo e prompts' },
-        // Automações (robôs + agente de IA) vale para qualquer admin: o robô é
-        // liberado pra todos e o agente aparece bloqueado até o super admin soltar.
-        ...(isAdminOrSuper ? [{ id: 'agents' as SettingsTab, name: 'Automações', icon: Bot, hint: 'Agentes e robôs' }] : []),
-      ],
-    },
-    ...(isAdminOrSuper
-      ? [
-          {
-            label: 'Conexões',
-            items: [{ id: 'integrations' as SettingsTab, name: 'Integrações', icon: Plug, hint: 'API, webhooks e MCP' }],
-          },
-        ]
-      : []),
-    {
-      label: 'Sistema',
-      items: [{ id: 'data', name: 'Dados', icon: Database, hint: 'Armazenamento e exportação' }],
-    },
+  const tabs: Array<{ id: SettingsTab; name: string; icon: typeof SettingsIcon }> = [
+    { id: 'general', name: 'Geral', icon: SettingsIcon },
+    { id: 'appearance', name: 'Aparência', icon: Palette },
+    ...(isAdminOrSuper ? [{ id: 'crm' as const, name: 'CRM', icon: KanbanSquare }] : []),
+    ...(isAdminOrSuper ? [{ id: 'distribution' as const, name: 'Distribuição', icon: Shuffle }] : []),
+    ...(isAdminOrSuper ? [{ id: 'users' as const, name: 'Equipe', icon: Users }] : []),
+    ...(isAdminOrSuper ? [{ id: 'products' as const, name: 'Produtos/Serviços', icon: Package }] : []),
+    { id: 'ai', name: 'IA e Automações', icon: Sparkles },
+    ...(isAdminOrSuper ? [{ id: 'integrations' as const, name: 'Integrações', icon: Plug }] : []),
+    { id: 'data', name: 'Dados', icon: Database },
   ];
-  const allItems = groups.flatMap((g) => g.items);
-
-  const go = (item: NavItem) => {
-    if (item.href) {
-      router.push(item.href);
-      return;
-    }
-    setActiveTab(item.id);
-  };
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'agents':
-        return <WaAgentsSettings />;
       case 'appearance':
         return <AppearanceSettings />;
-      case 'products':
-        return <ProductsSettings />;
-      case 'integrations':
-        return <IntegrationsSettings />;
-      case 'ai':
-        return <AICenterSettings />;
-      case 'data':
-        return <DataStorageSettings />;
-      case 'users':
-        return <UsersPage />;
+      case 'crm':
+        return <CrmSettings />;
       case 'distribution':
         return <LeadDistributionSettings />;
+      case 'users':
+        return <UsersPage />;
+      case 'products':
+        return <ProductsSettings />;
+      case 'ai':
+        return <AiAutomationsSettings initialSub={aiSub} />;
+      case 'integrations':
+        return <IntegrationsSettings />;
+      case 'data':
+        return <DataSettings />;
       default:
-        return <GeneralSettings hash={hash} isAdmin={isAdminOrSuper} />;
+        return <GeneralSettings />;
     }
   };
 
-  const itemClass = (active: boolean) =>
-    `group relative w-full flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors focus-visible-ring ${
-      active
-        ? 'bg-primary-500/10 text-primary-700 dark:text-primary-300 font-medium'
-        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white'
-    }`;
-
   return (
-    <div className="max-w-6xl mx-auto">
-      {/* Celular: fileira rolável, uma linha, na ordem dos grupos */}
-      <div
-        className="md:hidden flex items-center gap-1 mb-6 border-b border-slate-200 dark:border-white/10 overflow-x-auto scrollbar-none"
-        role="tablist"
-        aria-label="Seções das configurações"
+    <div className="max-w-5xl mx-auto">
+      {/* Categorias no topo: pílulas com ícone, rolagem horizontal no celular */}
+      <nav
+        aria-label="Categorias das configurações"
+        className="mb-8 -mx-1 px-1 overflow-x-auto scrollbar-none border-b border-slate-200 dark:border-white/10"
       >
-        {allItems.map((item) => {
-          const isActive = !item.href && activeTab === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              aria-selected={isActive}
-              onClick={() => go(item)}
-              className={`relative flex items-center gap-2 px-3 py-3 text-sm font-medium transition-colors shrink-0 whitespace-nowrap ${
-                isActive ? 'text-primary-600 dark:text-primary-400' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
-              }`}
-            >
-              <item.icon className="h-4 w-4" aria-hidden="true" />
-              {item.name}
-              {isActive && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-600 dark:bg-primary-400 rounded-full" />}
-            </button>
-          );
-        })}
-      </div>
+        <div role="tablist" className="flex items-center gap-1 pb-2 min-w-max">
+          {tabs.map((tab) => {
+            const isActive = activeTab === tab.id;
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                onClick={() => setActiveTab(tab.id)}
+                className={`relative inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors focus-visible-ring ${
+                  isActive
+                    ? 'bg-primary-500/10 text-primary-700 dark:text-primary-300'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Icon className={`h-4 w-4 ${isActive ? 'text-primary-600 dark:text-primary-400' : 'text-slate-400 dark:text-slate-500'}`} aria-hidden="true" />
+                {tab.name}
+                {isActive ? (
+                  <span className="absolute -bottom-2 left-2 right-2 h-0.5 rounded-full bg-primary-600 dark:bg-primary-400" aria-hidden="true" />
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </nav>
 
-      <div className="md:grid md:grid-cols-[15rem_minmax(0,1fr)] md:gap-10">
-        {/* Desktop: navegação lateral em grupos */}
-        <nav className="hidden md:block md:sticky md:top-4 self-start space-y-6" aria-label="Seções das configurações">
-          {groups.map((g) => (
-            <div key={g.label}>
-              <p className="px-3 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">{g.label}</p>
-              <ul className="space-y-0.5">
-                {g.items.map((item) => {
-                  const isActive = !item.href && activeTab === item.id;
-                  return (
-                    <li key={item.id}>
-                      <button type="button" aria-current={isActive ? 'page' : undefined} onClick={() => go(item)} className={itemClass(isActive)}>
-                        <span
-                          className={`absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-full bg-primary-600 dark:bg-primary-400 transition-opacity ${
-                            isActive ? 'opacity-100' : 'opacity-0'
-                          }`}
-                          aria-hidden="true"
-                        />
-                        <item.icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-primary-600 dark:text-primary-400' : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300'}`} aria-hidden="true" />
-                        <span className="flex-1 min-w-0">
-                          <span className="block truncate">{item.name}</span>
-                          {item.hint ? <span className="block text-[11px] font-normal text-slate-400 dark:text-slate-500 truncate">{item.hint}</span> : null}
-                        </span>
-                        {item.href ? <ChevronRight className="h-3.5 w-3.5 text-slate-300 dark:text-slate-600" aria-hidden="true" /> : null}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ))}
-        </nav>
-
-        {/* Conteúdo */}
-        <div className="min-w-0">{renderContent()}</div>
-      </div>
+      {renderContent()}
     </div>
   );
 };
 
 export default SettingsPage;
-

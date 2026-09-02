@@ -56,20 +56,27 @@ function mapRow(row: any) {
     entity_type: (row.entity_type ?? 'deal') as string,
     group_name: (row.group_name ?? null) as string | null,
     created_at: row.created_at as string | null,
+    position: typeof row.position === 'number' ? (row.position as number) : null,
   };
 }
 
 export async function GET() {
   const auth = await getAuthedProfile();
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
-
   const sb = createStaticAdminClient();
+  // Ordem manual (coluna position, migração 20260902130000) e, sem ela, ordem de criação
+  const ordered = await sb
+    .from('custom_field_definitions')
+    .select('id,key,label,type,options,entity_type,group_name,created_at,position')
+    .eq('organization_id', auth.profile.organization_id)
+    .order('position', { ascending: true, nullsFirst: false })
+    .order('created_at', { ascending: true });
+  if (!ordered.error) return NextResponse.json({ data: (ordered.data || []).map(mapRow) });
   const { data, error } = await sb
     .from('custom_field_definitions')
     .select('id,key,label,type,options,entity_type,group_name,created_at')
     .eq('organization_id', auth.profile.organization_id)
     .order('created_at', { ascending: true });
-
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ data: (data || []).map(mapRow) });
 }

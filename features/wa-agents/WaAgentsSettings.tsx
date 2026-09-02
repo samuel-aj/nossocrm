@@ -32,9 +32,15 @@ function isSubTab(value: string): value is SubTab {
  * Componente React `WaAgentsSettings`.
  * @returns {Element} Retorna um valor do tipo `Element`.
  */
-export const WaAgentsSettings: React.FC = () => {
+export const WaAgentsSettings: React.FC<{
+  /** Dentro de Configurações → IA e Automações: sem cabeçalho e sem a própria barra de sub-abas */
+  embedded?: boolean;
+  /** Sub-aba controlada pelo pai (quando embutido) */
+  tab?: SubTab;
+}> = ({ embedded = false, tab }) => {
   const { agentsApproved, isAdmin, isLoading } = useWaAgentsAccess();
-  const [subTab, setSubTab] = useState<SubTab>('agentes');
+  const [ownSubTab, setSubTab] = useState<SubTab>('agentes');
+  const subTab: SubTab = tab ?? ownSubTab;
 
   useEffect(() => {
     const syncFromHash = () => {
@@ -59,6 +65,7 @@ export const WaAgentsSettings: React.FC = () => {
 
   return (
     <div className="pb-10">
+      {!embedded ? (
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-slate-900 dark:text-white font-display tracking-tight">
           Automações
@@ -68,12 +75,15 @@ export const WaAgentsSettings: React.FC = () => {
         </p>
       </div>
 
+      ) : null}
+
       {isLoading ? (
         <Spinner />
       ) : !isAdmin ? (
         <Notice tone="blue">Apenas administradores podem configurar automações.</Notice>
       ) : (
         <>
+          {!embedded ? (
           <div className="flex items-center gap-2 mb-6 flex-wrap" role="tablist" aria-label="Seções de Agentes">
             {SUB_TABS.map((t) => {
               const active = subTab === t.id;
@@ -100,6 +110,7 @@ export const WaAgentsSettings: React.FC = () => {
               );
             })}
           </div>
+          ) : null}
 
           {subTab === 'agentes' &&
             (agentsApproved ? (

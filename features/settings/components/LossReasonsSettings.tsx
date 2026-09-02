@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { ThumbsDown, Plus, X, RotateCcw } from 'lucide-react';
-import { SettingsSection } from './SettingsSection';
+import { SETTINGS_BTN_PRIMARY, SETTINGS_INPUT_CLASS, SettingsCard } from './SettingsUi';
 import { useOrgPreferences } from '@/lib/query/hooks/useOrgPreferences';
 import { useToast } from '@/context/ToastContext';
 import {
@@ -43,15 +43,15 @@ function ReasonListEditor({ title, description, reasons, onChange }: ReasonListE
   };
 
   return (
-    <div className="p-4 rounded-xl border bg-slate-50 dark:bg-black/20 border-slate-200 dark:border-white/5">
-      <p className="text-sm font-bold text-slate-900 dark:text-white">{title}</p>
+    <div className="p-4 rounded-xl border border-slate-200 dark:border-white/10">
+      <p className="text-sm font-semibold text-slate-900 dark:text-white">{title}</p>
       <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">{description}</p>
 
       <div className="flex flex-wrap gap-2 mb-3">
         {reasons.map((reason) => (
           <div
             key={reason}
-            className="flex items-center gap-1.5 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 hover:border-red-300 dark:hover:border-red-500/50 transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 pl-3 pr-1.5 py-1"
           >
             <span className="text-sm text-slate-900 dark:text-white">{reason}</span>
             <button
@@ -85,13 +85,13 @@ function ReasonListEditor({ title, description, reasons, onChange }: ReasonListE
           }}
           placeholder="Novo motivo..."
           maxLength={80}
-          className="flex-1 bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+          className={`${SETTINGS_INPUT_CLASS} flex-1`}
         />
         <button
           type="button"
           onClick={handleAdd}
           disabled={!draft.trim() || reasons.length >= MAX_REASONS}
-          className="bg-primary-600 hover:bg-primary-500 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className={SETTINGS_BTN_PRIMARY}
         >
           <Plus size={14} /> Adicionar
         </button>
@@ -161,13 +161,11 @@ export function LossReasonsSettings() {
   };
 
   return (
-    <SettingsSection title="Motivos de perda" icon={ThumbsDown}>
-      <p className="text-sm text-slate-600 dark:text-slate-300 mb-4 leading-relaxed">
-        Personalize as opções que aparecem quando um lead é marcado como{' '}
-        <span className="font-semibold">perdido</span>. A opção "Outro" (texto livre) fica sempre
-        disponível no modal.
-      </p>
-
+    <SettingsCard
+      title="Motivos de perda"
+      description='As opções ao marcar um lead como perdido. "Outro" (texto livre) fica sempre disponível.'
+      icon={ThumbsDown}
+    >
       {isLoading ? (
         <p className="text-sm text-slate-500 italic">Carregando motivos...</p>
       ) : (
@@ -198,7 +196,7 @@ export function LossReasonsSettings() {
               type="button"
               onClick={handleSave}
               disabled={!dirty || setLossReasons.isPending}
-              className="bg-primary-600 hover:bg-primary-500 shadow-primary-600/20 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              className={SETTINGS_BTN_PRIMARY}
             >
               {setLossReasons.isPending ? 'Salvando...' : 'Salvar motivos'}
             </button>
@@ -219,7 +217,7 @@ export function LossReasonsSettings() {
           </div>
         </>
       )}
-    </SettingsSection>
+    </SettingsCard>
   );
 }
 

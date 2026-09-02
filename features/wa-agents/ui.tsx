@@ -7,7 +7,6 @@
 import React, { useEffect, useId, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, ChevronRight, ChevronUp, Copy, GripVertical, HelpCircle, Loader2, MoreHorizontal, X } from 'lucide-react';
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 export const CARD_CLASS =
@@ -210,85 +209,9 @@ export function Segmented<T extends string>({
   );
 }
 
-export type KebabItem = {
-  label: string;
-  icon?: React.ReactNode;
-  onSelect: () => void;
-  danger?: boolean;
-  disabled?: boolean;
-};
-
-/**
- * Menu "..." de ações secundárias de um cartão (mover, duplicar, excluir).
- * Renderiza num portal acima dos modais (z-[10000]).
- */
-export function KebabMenu({ items, label = 'Mais ações' }: { items: KebabItem[]; label?: string }) {
-  return (
-    <DropdownMenu.Root modal={false}>
-      <DropdownMenu.Trigger asChild>
-        <button type="button" className={BTN_ICON} aria-label={label} title="Mais ações">
-          <MoreHorizontal size={16} aria-hidden="true" />
-        </button>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content
-          align="end"
-          sideOffset={4}
-          className="z-[10000] min-w-[11rem] rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 shadow-xl p-1 animate-in fade-in-0 zoom-in-95"
-        >
-          {items.map((it) => (
-            <DropdownMenu.Item
-              key={it.label}
-              disabled={it.disabled}
-              onSelect={() => it.onSelect()}
-              className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm cursor-pointer outline-none select-none data-[disabled]:opacity-40 data-[disabled]:pointer-events-none ${
-                it.danger
-                  ? 'text-red-600 dark:text-red-400 data-[highlighted]:bg-red-50 dark:data-[highlighted]:bg-red-900/20'
-                  : 'text-slate-700 dark:text-slate-200 data-[highlighted]:bg-slate-100 dark:data-[highlighted]:bg-white/10'
-              }`}
-            >
-              {it.icon}
-              {it.label}
-            </DropdownMenu.Item>
-          ))}
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
-  );
-}
-
-/** Bloco recolhido por padrão ("Configurações avançadas"), aberto por um clique. */
-export function Disclosure({
-  label,
-  defaultOpen = false,
-  children,
-}: {
-  label: string;
-  defaultOpen?: boolean;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const bodyId = useId();
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        aria-controls={bodyId}
-        className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-purple-600 dark:text-slate-400 dark:hover:text-purple-300 transition-colors"
-      >
-        <ChevronRight size={14} className={`transition-transform ${open ? 'rotate-90' : ''}`} aria-hidden="true" />
-        {label}
-      </button>
-      {open ? (
-        <div id={bodyId} className="mt-3">
-          {children}
-        </div>
-      ) : null}
-    </div>
-  );
-}
+// Menu "..." e bloco recolhido são compartilhados com Configurações e boards.
+export { KebabMenu, type KebabItem } from '@/components/ui/KebabMenu';
+export { Disclosure } from '@/components/ui/Disclosure';
 
 /** Seção colapsável do editor. */
 export function Section({

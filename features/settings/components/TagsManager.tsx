@@ -1,87 +1,124 @@
-import React from 'react';
-import { Tag, Plus, X } from 'lucide-react';
-import { SettingsSection } from './SettingsSection';
-
-interface TagsManagerProps {
-  availableTags: string[];
-  newTagName: string;
-  setNewTagName: (name: string) => void;
-  onAddTag: () => void;
-  onRemoveTag: (tag: string) => void;
-}
+'use client';
 
 /**
- * Componente React `TagsManager`.
- *
- * @param {TagsManagerProps} {
-  availableTags,
-  newTagName,
-  setNewTagName,
-  onAddTag,
-  onRemoveTag
-} - Parâmetro `{
-  availableTags,
-  newTagName,
-  setNewTagName,
-  onAddTag,
-  onRemoveTag
-}`.
- * @returns {Element} Retorna um valor do tipo `Element`.
+ * Tags (Configurações → CRM): lista compacta com busca e criação inline.
+ * Renomear não existe na API (a tag é referenciada pelo nome nos negócios).
  */
-export const TagsManager: React.FC<TagsManagerProps> = ({
-  availableTags,
-  newTagName,
-  setNewTagName,
-  onAddTag,
-  onRemoveTag
-}) => {
-  return (
-    <SettingsSection title="Gerenciamento de Tags" icon={Tag}>
-      <p className="text-sm text-slate-600 dark:text-slate-300 mb-4 leading-relaxed">
-        Crie tags para categorizar seus negócios. Elas aparecerão como opções ao criar ou editar negócios no Pipeline.
-      </p>
+import React, { useMemo, useState } from 'react';
+import { Plus, Search, Tag, X } from 'lucide-react';
+import ConfirmModal from '@/components/ConfirmModal';
+import { useSettings } from '@/context/settings/SettingsContext';
+import { useToast } from '@/context/ToastContext';
+import { SETTINGS_BTN_PRIMARY, SETTINGS_INPUT_CLASS, SettingsCard, SettingsEmpty } from './SettingsUi';
 
-      <div className="p-4 rounded-xl border bg-slate-50 dark:bg-black/20 border-slate-200 dark:border-white/5 mb-6">
-        <div className="flex gap-3 items-end">
-          <div className="flex-1">
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nome da Tag</label>
+export const TagsManager: React.FC = () => {
+  const { availableTags, addTag, removeTag } = useSettings();
+  const { addToast } = useToast();
+  const [search, setSearch] = useState('');
+  const [draft, setDraft] = useState('');
+  const [confirm, setConfirm] = useState<string | null>(null);
+
+  const term = search.trim().toLowerCase();
+  const visible = useMemo(
+    () => [...availableTags].sort((a, b) => a.localeCompare(b, 'pt-BR')).filter((t) => !term || t.toLowerCase().includes(term)),
+    [availableTags, term]
+  );
+
+  const create = async () => {
+    const name = draft.trim();
+    if (!name) return;
+    if (availableTags.some((t) => t.toLowerCase() === name.toLowerCase())) {
+      addToast('Essa tag já existe.', 'warning');
+      return;
+    }
+    await addTag(name);
+    setDraft('');
+    addToast(`Tag "${name}" criada.`, 'success');
+  };
+
+  return (
+    <SettingsCard
+      title="Tags"
+      description="Etiquetas para classificar os leads. Aparecem ao criar ou editar um negócio."
+      icon={Tag}
+      right={
+        <span className="text-xs text-slate-400">
+          {availableTags.length} {availableTags.length === 1 ? 'tag' : 'tags'}
+        </span>
+      }
+    >
+      <div className="flex flex-col sm:flex-row gap-2 mb-4">
+        <div className="relative flex-1">
+          <Plus size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && void create()}
+            placeholder="Nova tag (ex.: VIP, Urgente)"
+            aria-label="Nova tag"
+            maxLength={60}
+            className={`${SETTINGS_INPUT_CLASS} pl-9`}
+          />
+        </div>
+        <button type="button" className={SETTINGS_BTN_PRIMARY} onClick={() => void create()} disabled={!draft.trim()}>
+          Criar tag
+        </button>
+        {availableTags.length > 8 ? (
+          <div className="relative sm:w-56">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
             <input
-              type="text"
-              value={newTagName}
-              onChange={(e) => setNewTagName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && onAddTag()}
-              placeholder="Ex: VIP, Urgente, Q4..."
-              className="w-full bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar"
+              aria-label="Buscar tags"
+              className={`${SETTINGS_INPUT_CLASS} pl-9`}
             />
           </div>
-          <button
-            onClick={onAddTag}
-            disabled={!newTagName.trim()}
-            className="bg-primary-600 hover:bg-primary-500 shadow-primary-600/20 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors h-[38px] shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Plus size={16} /> Adicionar
-          </button>
-        </div>
+        ) : null}
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {availableTags.map(tag => (
-          <div key={tag} className="flex items-center gap-2 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 group hover:border-red-300 dark:hover:border-red-500/50 transition-colors">
-            <Tag size={14} className="text-slate-400" />
-            <span className="text-sm font-medium text-slate-900 dark:text-white">{tag}</span>
-            <button
-              onClick={() => onRemoveTag(tag)}
-              className="text-slate-400 hover:text-red-500 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors opacity-0 group-hover:opacity-100 max-md:opacity-100"
-              title="Remover tag"
+      {availableTags.length === 0 ? (
+        <SettingsEmpty>Nenhuma tag ainda.</SettingsEmpty>
+      ) : visible.length === 0 ? (
+        <SettingsEmpty>Nenhuma tag com esse nome.</SettingsEmpty>
+      ) : (
+        <ul className="flex flex-wrap gap-2" aria-label="Tags">
+          {visible.map((tag) => (
+            <li
+              key={tag}
+              className="group inline-flex items-center gap-1.5 rounded-full border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 pl-3 pr-1.5 py-1 text-sm text-slate-800 dark:text-slate-100"
             >
-              <X size={14} />
-            </button>
-          </div>
-        ))}
-        {availableTags.length === 0 && (
-          <p className="text-center text-slate-500 text-sm py-4 italic w-full">Nenhuma tag criada.</p>
-        )}
-      </div>
-    </SettingsSection>
+              <span className="h-1.5 w-1.5 rounded-full bg-primary-500" aria-hidden="true" />
+              {tag}
+              <button
+                type="button"
+                onClick={() => setConfirm(tag)}
+                aria-label={`Excluir tag ${tag}`}
+                title="Excluir"
+                className="ml-0.5 p-0.5 rounded-full text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+              >
+                <X size={13} aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <ConfirmModal
+        isOpen={confirm !== null}
+        onClose={() => setConfirm(null)}
+        onConfirm={() => {
+          if (confirm) void removeTag(confirm).then(() => addToast(`Tag "${confirm}" excluída.`, 'info'));
+          setConfirm(null);
+        }}
+        title="Excluir tag?"
+        message={`A tag "${confirm ?? ''}" sai da lista de opções. Negócios que já a usam continuam com ela.`}
+        confirmText="Excluir"
+        cancelText="Cancelar"
+        variant="danger"
+      />
+    </SettingsCard>
   );
 };
+
+export default TagsManager;

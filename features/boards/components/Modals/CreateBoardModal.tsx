@@ -9,6 +9,8 @@ import { useToast } from '@/context/ToastContext';
 import { Modal } from '@/components/ui/Modal';
 import { MODAL_FOOTER_CLASS } from '@/components/ui/modalStyles';
 import { slugify } from '@/lib/utils/slugify';
+import { Disclosure } from '@/components/ui/Disclosure';
+import { BoardStagesEditor } from './BoardStagesEditor';
 
 interface CreateBoardModalProps {
   isOpen: boolean;
@@ -390,7 +392,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
         title={editingBoard ? 'Editar Board' : 'Criar Novo Board'}
         size="lg"
         labelledById={headingId}
-        className="max-w-xl"
+        className="max-w-2xl"
         // We control padding/scroll inside, so keep the Modal body wrapper flat.
         bodyClassName="p-0"
         // Nested modal: avoid trapping focus behind the lifecycle modal.
@@ -455,37 +457,6 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                 />
               </div>
 
-              {/* Board key (slug) */}
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  Chave (slug) — para integrações
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={boardKey}
-                    onChange={(e) => {
-                      setKeyTouched(true);
-                      setBoardKey(e.target.value);
-                    }}
-                    placeholder="ex: vendas-b2b"
-                    className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white placeholder:text-slate-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent font-mono text-sm"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleCopyKey}
-                    className="shrink-0 px-3 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 hover:bg-slate-50 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200"
-                    aria-label="Copiar chave do board"
-                    title="Copiar chave"
-                  >
-                    <Copy size={16} />
-                  </button>
-                </div>
-                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                  Dica: é mais fácil usar isso no n8n/Make do que um UUID.
-                </p>
-              </div>
-
               {/* Description */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
@@ -524,6 +495,49 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                   )}
                 </div>
               )}
+
+              {/* Etapas */}
+              <BoardStagesEditor
+                stages={stages}
+                onChange={setStages}
+                lifecycleStages={lifecycleStages}
+                showIds={!!editingBoard}
+                onManageLifecycle={() => setIsLifecycleModalOpen(true)}
+              />
+
+              {/* Pouco usado no dia a dia: chave, estágio gerenciado, produto padrão, grupos de campos, próximo board, ganho/perdido */}
+              <Disclosure label="Configurações avançadas">
+                <div className="space-y-6 rounded-xl border border-slate-200 dark:border-white/10 p-4">
+              {/* Board key (slug) */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  Chave (slug) — para integrações
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={boardKey}
+                    onChange={(e) => {
+                      setKeyTouched(true);
+                      setBoardKey(e.target.value);
+                    }}
+                    placeholder="ex: vendas-b2b"
+                    className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white placeholder:text-slate-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent font-mono text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCopyKey}
+                    className="shrink-0 px-3 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 hover:bg-slate-50 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200"
+                    aria-label="Copiar chave do board"
+                    title="Copiar chave"
+                  >
+                    <Copy size={16} />
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                  Dica: é mais fácil usar isso no n8n/Make do que um UUID.
+                </p>
+              </div>
 
               {/* Linked Lifecycle Stage */}
               <div>
@@ -693,164 +707,8 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                 </div>
               </div>
 
-              {/* Stages */}
-              <div>
-                <div className="flex items-center justify-between mb-4">
-                  <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                    Etapas do Kanban
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={handleAddStage}
-                      className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-lg transition-colors"
-                    >
-                      <Plus size={14} />
-                      Adicionar etapa
-                    </button>
-                    <button
-                      onClick={() => setIsLifecycleModalOpen(true)}
-                      className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors"
-                    >
-                      <Settings size={14} />
-                      Gerenciar Estágios
-                    </button>
-                  </div>
                 </div>
-
-                <div className="space-y-3">
-                  {stages.map((stage, index) => (
-                    <div
-                      key={stage.id}
-                      data-stage-card="true"
-                      className={`p-4 bg-slate-50 dark:bg-white/5 rounded-xl border transition-colors ${
-                        dragOverStageId === stage.id
-                          ? 'border-primary-500/60 ring-2 ring-primary-500/20'
-                          : draggingStageId === stage.id
-                            ? 'border-primary-500/40 ring-2 ring-primary-500/10 opacity-70 shadow-lg'
-                            : 'border-slate-200 dark:border-white/10 hover:border-slate-300 dark:hover:border-white/20'
-                      }`}
-                      onDragOver={(e) => {
-                        // Required to allow dropping.
-                        e.preventDefault();
-                        if (draggingStageId) setDragOverStageId(stage.id);
-                      }}
-                      onDragLeave={() => {
-                        if (dragOverStageId === stage.id) setDragOverStageId(null);
-                      }}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        const fromId = e.dataTransfer.getData('text/stage-id');
-                        if (fromId) moveStage(fromId, stage.id);
-                        setDraggingStageId(null);
-                        setDragOverStageId(null);
-                      }}
-                    >
-                      {/* Stage Header */}
-                      <div className="flex items-center gap-3 mb-3">
-                        <button
-                          type="button"
-                          draggable
-                          onDragStart={(e) => {
-                            setDraggingStageId(stage.id);
-                            e.dataTransfer.setData('text/stage-id', stage.id);
-                            e.dataTransfer.effectAllowed = 'move';
-                            // Use the whole card as the drag "ghost" so it feels like you're dragging the item.
-                            const card = (e.currentTarget.closest('[data-stage-card="true"]') as HTMLElement | null);
-                            if (card) {
-                              const cleanup = createDragPreviewFromElement(card);
-                              // Ensure cleanup runs even if the browser doesn't fire dragend for some edge cases.
-                              window.setTimeout(cleanup, 0);
-                              e.dataTransfer.setDragImage(card, 24, 24);
-                            }
-                          }}
-                          onDragEnd={() => {
-                            setDraggingStageId(null);
-                            setDragOverStageId(null);
-                          }}
-                          className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-grab active:cursor-grabbing flex-shrink-0"
-                          aria-label={`Reordenar etapa: ${stage.label}`}
-                          title="Arraste para reordenar"
-                        >
-                          <GripVertical size={18} aria-hidden="true" />
-                        </button>
-
-                        {/* Color Picker */}
-                        <div className="relative flex-shrink-0">
-                          <div className={`w-5 h-5 rounded-full ${stage.color} cursor-pointer ring-2 ring-slate-200 dark:ring-slate-700 hover:ring-slate-300 dark:hover:ring-slate-600 transition-all`} />
-                          <select
-                            value={stage.color}
-                            onChange={(e) => handleUpdateStage(stage.id, { color: e.target.value })}
-                            className="absolute inset-0 opacity-0 cursor-pointer"
-                          >
-                            {STAGE_COLORS.map(color => (
-                              <option key={color} value={color}>{color.replace('bg-', '').replace('-500', '')}</option>
-                            ))}
-                          </select>
-                        </div>
-
-                        {/* Label */}
-                        <input
-                          type="text"
-                          value={stage.label}
-                          onChange={(e) => handleUpdateStage(stage.id, { label: e.target.value })}
-                          className="flex-1 px-3 py-2 text-base font-medium rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                          placeholder="Nome da etapa"
-                        />
-
-                        {/* Delete */}
-                        <button
-                          onClick={() => handleRemoveStage(stage.id)}
-                          disabled={stages.length <= 2}
-                          className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0 transition-colors"
-                          title="Remover etapa"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
-
-                      {/* Copiar ID do estágio (use em to_stage_id da API/n8n) */}
-                      {editingBoard ? (
-                        <div className="pl-9 mb-3">
-                          <button
-                            type="button"
-                            onClick={() => copyStageId(stage.id)}
-                            title="Copiar ID do estágio (use no to_stage_id da API/n8n)"
-                            className="inline-flex max-w-full items-center gap-1.5 rounded-md bg-slate-100 dark:bg-white/10 px-2 py-0.5 font-mono text-[11px] text-slate-500 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-slate-200 dark:hover:bg-white/15 transition-colors"
-                          >
-                            {copiedStageId === stage.id ? <Check className="h-3 w-3 shrink-0 text-green-600" /> : <Copy className="h-3 w-3 shrink-0" />}
-                            <span className="truncate">{copiedStageId === stage.id ? 'ID copiado!' : `ID: ${stage.id}`}</span>
-                          </button>
-                        </div>
-                      ) : null}
-
-                      {/* Lifecycle Automation */}
-                      <div className="pl-9">
-                        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">
-                          Promove contato para:
-                        </label>
-                        <div className="relative">
-                          <select
-                            value={stage.linkedLifecycleStage || ''}
-                            onChange={(e) => handleUpdateStage(stage.id, { linkedLifecycleStage: e.target.value || undefined })}
-                            className={`w-full pl-3 pr-10 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-700 dark:text-slate-300 focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all appearance-none cursor-pointer
-                            ${stage.linkedLifecycleStage ? 'font-semibold text-primary-700 dark:text-primary-300 bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''}
-                          `}
-                          >
-                            <option value="">Sem automação</option>
-                            {lifecycleStages.map(ls => (
-                              <option key={ls.id} value={ls.id}>{ls.name}</option>
-                            ))}
-                          </select>
-                          <ChevronDown
-                            size={16}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              </Disclosure>
           </div>
 
           {/* Footer */}

@@ -18,30 +18,38 @@ vi.mock('@/context/AuthContext', () => ({
   useAuth: vi.fn(),
 }))
 
+vi.mock('@/context/ToastContext', () => ({
+  useToast: () => ({ addToast: vi.fn(), showToast: vi.fn() }),
+}))
+
 vi.mock('./hooks/useSettingsController', () => ({
   useSettingsController: () => ({
     defaultRoute: '/boards',
     setDefaultRoute: vi.fn(),
+  }),
+}))
 
+// A aba CRM lê campos, grupos e tags direto do SettingsContext (sem provider no teste).
+vi.mock('@/context/settings/SettingsContext', () => ({
+  useSettings: () => ({
     customFieldDefinitions: [],
-    newFieldLabel: '',
-    setNewFieldLabel: vi.fn(),
-    newFieldType: 'text',
-    setNewFieldType: vi.fn(),
-    newFieldOptions: '',
-    setNewFieldOptions: vi.fn(),
-    editingId: null,
-    startEditingField: vi.fn(),
-    cancelEditingField: vi.fn(),
-    handleSaveField: vi.fn(),
+    addCustomField: vi.fn(),
+    updateCustomField: vi.fn(),
     removeCustomField: vi.fn(),
-
+    customFieldGroups: [],
+    addCustomFieldGroup: vi.fn(),
+    removeCustomFieldGroup: vi.fn(),
+    reorderCustomFields: vi.fn(),
+    reorderCustomFieldGroups: vi.fn(),
     availableTags: ['VIP'],
-    newTagName: '',
-    setNewTagName: vi.fn(),
-    handleAddTag: vi.fn(),
+    addTag: vi.fn(),
     removeTag: vi.fn(),
   }),
+}))
+
+// Motivos de perda usam react-query (sem provider no teste).
+vi.mock('./components/LossReasonsSettings', () => ({
+  LossReasonsSettings: () => null,
 }))
 
 // Evita depender de providers (Toast/Boards/Supabase) ao renderizar a aba Integrações no teste.
@@ -56,7 +64,7 @@ vi.mock('./components/ApiKeysSection', () => ({
 vi.mock('./components/WebhooksSection', () => ({
   WebhooksSection: () => (
     <div>
-      <h3>Webhooks</h3>
+      <h3>Webhooks (Integrações)</h3>
     </div>
   ),
 }))
@@ -64,22 +72,19 @@ vi.mock('./components/WebhooksSection', () => ({
 vi.mock('./components/McpSection', () => ({
   McpSection: () => (
     <div>
-      <h3>MCP</h3>
+      <h3>MCP (Integrações)</h3>
     </div>
   ),
 }))
 
 // Acesso às automações: o hook usa react-query (sem provider no teste). A aba
-// "Automações" hoje aparece para qualquer admin; o agente de IA é que fica
-// bloqueado até o super admin liberar — aqui, não liberado.
+// "IA e Automações" aparece para qualquer papel; as sub-abas de agentes/robôs
+// só para admin, e o agente de IA fica bloqueado até o super admin liberar.
 vi.mock('@/hooks/useWaAgentsAccess', () => ({
   useWaAgentsAccess: () => ({ agentsApproved: false, isAdmin: false, isLoading: false }),
 }))
 vi.mock('@/features/wa-agents/WaAgentsSettings', () => ({
   WaAgentsSettings: () => null,
-}))
-vi.mock('@/features/wa-agents/WaAgentsBetaCard', () => ({
-  WaAgentsBetaCard: () => null,
 }))
 
 import SettingsPage from './SettingsPage'
@@ -99,21 +104,17 @@ describe('SettingsPage RBAC', () => {
 
     render(<SettingsPage />)
 
-    expect(
-      screen.queryByRole('heading', { name: /^Gerenciamento de Tags$/i })
-    ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole('heading', { name: /^Campos Personalizados$/i })
-    ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole('heading', { name: /^API \(Integrações\)$/i })
-    ).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: /^Webhooks$/i })).not.toBeInTheDocument()
+    // Sem as categorias de administração
+    expect(screen.queryByRole('tab', { name: /^CRM$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: /integrações/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: /equipe/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /^Tags$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /^Campos personalizados$/i })).not.toBeInTheDocument()
 
     // Preferências pessoais seguem visíveis
     expect(screen.getByText(/página inicial/i)).toBeInTheDocument()
-    // Tabs pessoais seguem visíveis
-    expect(screen.getByRole('button', { name: /central de i\.a/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /aparência/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /ia e automações/i })).toBeInTheDocument()
   })
 
   it('admin vê seções de configuração do sistema', async () => {
@@ -123,32 +124,26 @@ describe('SettingsPage RBAC', () => {
 
     render(<SettingsPage />)
 
-    expect(
-      screen.getByRole('heading', { name: /^Gerenciamento de Tags$/i })
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole('heading', { name: /^Campos Personalizados$/i })
-    ).toBeInTheDocument()
-    // Admin também vê as abas extras
-    const integrationsTab = screen.getByRole('button', { name: /integrações/i })
-    expect(integrationsTab).toBeInTheDocument()
-    fireEvent.click(integrationsTab)
+    // CRM: campos personalizados e tags
+    fireEvent.click(screen.getByRole('tab', { name: /^CRM$/i }))
+    expect(await screen.findByRole('heading', { name: /^Campos personalizados$/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /^Tags$/i })).toBeInTheDocument()
 
-    // Sub-tabs dentro de Integrações
-    const apiSubTab = await screen.findByRole('button', { name: /^API$/i })
-    const webhooksSubTab = await screen.findByRole('button', { name: /^Webhooks$/i })
-    const mcpSubTab = await screen.findByRole('button', { name: /^MCP$/i })
-    expect(apiSubTab).toBeInTheDocument()
-    expect(webhooksSubTab).toBeInTheDocument()
-    expect(mcpSubTab).toBeInTheDocument()
+    // Integrações com as sub-abas
+    fireEvent.click(screen.getByRole('tab', { name: /integrações/i }))
+    const webhooksSubTab = await screen.findByRole('tab', { name: /^Webhooks$/i })
+    const apiSubTab = await screen.findByRole('tab', { name: /API e chaves/i })
+    const mcpSubTab = await screen.findByRole('tab', { name: /^MCP$/i })
 
-    // Default é API
+    // Padrão é Webhooks
+    expect(await screen.findByRole('heading', { name: /^Webhooks \(Integrações\)$/i })).toBeInTheDocument()
+
+    fireEvent.click(apiSubTab)
     expect(await screen.findByRole('heading', { name: /^API \(Integrações\)$/i })).toBeInTheDocument()
 
-    fireEvent.click(webhooksSubTab)
-    expect(await screen.findByRole('heading', { name: /^Webhooks$/i })).toBeInTheDocument()
-
     fireEvent.click(mcpSubTab)
-    expect(await screen.findByRole('heading', { name: /^MCP$/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /^MCP \(Integrações\)$/i })).toBeInTheDocument()
+
+    expect(webhooksSubTab).toBeInTheDocument()
   })
 })

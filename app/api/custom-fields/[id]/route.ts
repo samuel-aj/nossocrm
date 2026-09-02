@@ -14,6 +14,8 @@ const UpdateSchema = z.object({
   type: FieldTypeEnum.optional(),
   options: z.array(z.string()).optional(),
   group_name: z.string().min(1).max(60).nullable().optional(),
+  /** Ordem manual dentro do grupo (migração 20260902130000) */
+  position: z.number().int().min(0).max(100000).nullable().optional(),
 }).strict();
 
 async function getAuthedProfile() {
@@ -72,6 +74,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   if (parsed.data.type !== undefined) updates.type = parsed.data.type;
   // null explícito desagrupa o campo
   if (parsed.data.group_name !== undefined) updates.group_name = parsed.data.group_name;
+  if (parsed.data.position !== undefined) updates.position = parsed.data.position;
 
   // Options only apply to select-like types; for other types clear to null.
   const nextType = parsed.data.type;
