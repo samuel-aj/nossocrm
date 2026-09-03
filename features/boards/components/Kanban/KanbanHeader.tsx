@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Search, LayoutGrid, Table as TableIcon, User, Tag, X, Settings, Lightbulb, Download, MoreVertical, CheckSquare, Target, ChevronDown } from 'lucide-react';
+import { Plus, Search, LayoutGrid, Table as TableIcon, User, Tag, X, Settings, Lightbulb, Download, MoreVertical, CheckSquare, Target, ChevronDown, Zap } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Board } from '@/types';
 import { BoardSelector } from '../BoardSelector';
@@ -40,6 +40,11 @@ interface KanbanHeaderProps {
     selectionMode: boolean;
     onEnterSelectionMode: () => void;
     onExitSelectionMode: () => void;
+    // Modo Automatizar (só admin recebe o toggle)
+    automationMode?: boolean;
+    onToggleAutomationMode?: () => void;
+    /** Leads visíveis com os filtros atuais (contexto do cabeçalho) */
+    totalLeads?: number;
 }
 
 /** Uma condição do filtro: campo + operador + valor (quando o operador exige). */
@@ -311,36 +316,13 @@ function CustomFieldFiltersButton({
 }
 
 /**
- * Componente React `KanbanHeader`.
- *
- * @param {KanbanHeaderProps} {
-    boards,
-    activeBoard,
-    onSelectBoard,
-    onCreateBoard,
-    onEditBoard,
-    onDeleteBoard,
-    onExportTemplates,
-    viewMode, setViewMode,
-    searchTerm, setSearchTerm,
-    ownerFilter, setOwnerFilter,
-    statusFilter, setStatusFilter,
-    onNewDeal
-} - Parâmetro `{
-    boards,
-    activeBoard,
-    onSelectBoard,
-    onCreateBoard,
-    onEditBoard,
-    onDeleteBoard,
-    onExportTemplates,
-    viewMode, setViewMode,
-    searchTerm, setSearchTerm,
-    ownerFilter, setOwnerFilter,
-    statusFilter, setStatusFilter,
-    onNewDeal
-}`.
- * @returns {Element} Retorna um valor do tipo `Element`.
+ * Cabeçalho do board em duas linhas:
+ * 1) identidade: nome do board (seletor em estilo título), contexto
+ *    "N leads · M etapas", sugestões da IA; à direita, Automatizar, menu ⋮
+ *    (selecionar vários, estratégia, configurações, exportar) e Novo Negócio;
+ * 2) controles: busca, status, responsável, Filtros (tag/data/campos), modo
+ *    de visualização e o atalho de configurações do board.
+ * No modo Automatizar a linha 2 vira uma faixa explicativa.
  */
 export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
     boards,
@@ -359,7 +341,10 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
     tagFilter, setTagFilter, tagOptions,
     dateRange, setDateRange,
     selectionMode, onEnterSelectionMode, onExitSelectionMode,
-    onNewDeal
+    onNewDeal,
+    automationMode = false,
+    onToggleAutomationMode,
+    totalLeads,
 }) => {
     // Lista de responsáveis da org (admin/super_admin); para vendedor vem vazia
     // (hook desabilitado), então só aparecem "Todos" e "Meus".
@@ -396,292 +381,348 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
     const currentStatus = statusOptions.find((o) => o.value === statusFilter) ?? statusOptions[0];
     // "Meus Negócios" já cobre o próprio usuário — evita opção duplicada na lista.
     const assignableOwners = orgUsers.filter((u) => u.id !== profile?.id);
+
+    const stageCount = activeBoard.stages.length;
+    const contextParts = [
+        typeof totalLeads === 'number' ? `${totalLeads} ${totalLeads === 1 ? 'lead' : 'leads'}` : null,
+        `${stageCount} ${stageCount === 1 ? 'etapa' : 'etapas'}`,
+    ].filter(Boolean);
+
+    const controlClass =
+        'rounded-lg border border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm';
+    const menuItemClass =
+        'w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors';
+
     return (
-        // Empilha até md (celular deitado incluso): flex-wrap em coluna
-        // quebrava os itens pro LADO quando faltava altura.
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 max-md:mb-3 max-md:gap-2 max-md:relative">
-            <div className="flex items-center gap-4 w-full md:w-auto flex-wrap max-md:gap-2">
-                {/* Board Selector */}
-                <BoardSelector
-                    boards={boards}
-                    activeBoard={activeBoard}
-                    onSelectBoard={onSelectBoard}
-                    onCreateBoard={onCreateBoard}
-                    onEditBoard={onEditBoard}
-                    onDeleteBoard={onDeleteBoard}
-                    onReorderBoards={onReorderBoards}
-                />
-
-                {/* Edit Board Button */}
-                {onEditBoard && (
-                    <button
-                        onClick={() => onEditBoard(activeBoard)}
-                        className="p-2 max-md:hidden text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors"
-                        title="Configurações do Board"
-                    >
-                        <Settings size={20} className="max-md:w-[18px] max-md:h-[18px]" />
-                    </button>
-                )}
-
-                {/* Export Template Button (tarefa de desktop; some no celular) */}
-                {onExportTemplates && (
-                    <button
-                        onClick={onExportTemplates}
-                        className="p-2 max-md:hidden text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors"
-                        title="Exportar template (comunidade)"
-                    >
-                        <Download size={20} />
-                    </button>
-                )}
-
-                {/* Automation Guide Button */}
-                {activeBoard.automationSuggestions && activeBoard.automationSuggestions.length > 0 && (
-                    <Popover>
-                        <PopoverTrigger asChild>
-                            <button
-                                className="p-2 text-yellow-600 hover:text-yellow-700 dark:text-yellow-400 dark:hover:text-yellow-300 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 rounded-lg transition-colors relative group"
-                                title="Automações Sugeridas"
-                            >
-                                <Lightbulb size={20} className="fill-current" />
-                                <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
-                            </button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-80 p-0" align="start">
-                            <div className="p-4 border-b border-slate-100 dark:border-white/10 bg-slate-50 dark:bg-slate-900/50">
-                                <h4 className="font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-                                    <Lightbulb size={16} className="text-yellow-500" />
-                                    Automações Sugeridas
-                                </h4>
-                                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                                    Dicas da IA para otimizar este processo.
-                                </p>
-                            </div>
-                            <div className="p-2">
-                                <ul className="space-y-1">
-                                    {activeBoard.automationSuggestions.map((suggestion, idx) => (
-                                        <li key={idx} className="text-sm text-slate-700 dark:text-slate-300 p-2 hover:bg-slate-50 dark:hover:bg-white/5 rounded-md flex gap-2 items-start">
-                                            <span className="text-slate-400 mt-0.5">•</span>
-                                            <span>{suggestion}</span>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        </PopoverContent>
-                    </Popover>
-                )}
-
-                {/* VIEW TOGGLE. max-md:mr-16 reserva o canto direito da linha
-                    pro ⋮ e pro botão + (posicionados de forma absoluta) */}
-                <div className="flex bg-slate-100 dark:bg-white/5 p-1 rounded-lg border border-slate-200 dark:border-white/10 max-md:mr-[5.25rem]">
-                    <button
-                        onClick={() => setViewMode('kanban')}
-                        aria-label="Visualização em quadro Kanban"
-                        aria-pressed={viewMode === 'kanban'}
-                        className={`p-1.5 rounded-md transition-all ${viewMode === 'kanban' ? 'bg-white dark:bg-slate-700 shadow-sm text-primary-600 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'}`}
-                    >
-                        <LayoutGrid size={16} aria-hidden="true" />
-                    </button>
-                    <button
-                        onClick={() => setViewMode('list')}
-                        aria-label="Visualização em lista"
-                        title="Lista (Todos / Qualificação / SQL)"
-                        aria-pressed={viewMode === 'list'}
-                        className={`p-1.5 rounded-md transition-all ${viewMode === 'list' ? 'bg-white dark:bg-slate-700 shadow-sm text-primary-600 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'}`}
-                    >
-                        <TableIcon size={16} aria-hidden="true" />
-                    </button>
-                </div>
-
-                <div className="h-8 w-px bg-slate-200 dark:bg-white/10 mx-2 hidden md:block"></div>
-                {/* Celular: busca em linha própria (basis-full quebra a linha) */}
-                <div className="relative flex-1 sm:w-64 max-md:basis-full">
-                    {/* z-10: o input tem backdrop-blur (cria stacking context) e pintava POR CIMA da lupa */}
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 pointer-events-none" size={16} />
-                    <input
-                        type="text"
-                        placeholder="Filtrar negócios ou empresas..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2 max-md:py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm"
-                    />
-                </div>
-                {/* Status no celular: botão que abre um menuzinho de opções */}
-                <div ref={statusMenuRef} className="relative md:hidden">
-                    <button
-                        type="button"
-                        onClick={() => setStatusMenuOpen((o) => !o)}
-                        aria-expanded={statusMenuOpen}
-                        aria-label="Filtrar por status"
-                        className="flex items-center gap-2 pl-3 pr-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm text-slate-700 dark:text-slate-200 backdrop-blur-sm"
-                    >
-                        <span className={`w-2 h-2 rounded-full ${currentStatus.dot}`} aria-hidden="true" />
-                        {currentStatus.label}
-                        <ChevronDown
-                            size={14}
-                            aria-hidden="true"
-                            className={`text-slate-400 transition-transform ${statusMenuOpen ? 'rotate-180' : ''}`}
+        <div className="mb-4 max-md:mb-3 space-y-3 max-md:space-y-2">
+            {/* Linha 1: identidade do board + ações principais */}
+            <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex items-center gap-1.5">
+                    <div className="min-w-0">
+                        <BoardSelector
+                            variant="title"
+                            boards={boards}
+                            activeBoard={activeBoard}
+                            onSelectBoard={onSelectBoard}
+                            onCreateBoard={onCreateBoard}
+                            onEditBoard={onEditBoard}
+                            onDeleteBoard={onDeleteBoard}
+                            onReorderBoards={onReorderBoards}
                         />
-                    </button>
-                    {statusMenuOpen && (
-                        <div className="absolute left-0 z-50 mt-1 w-44 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1">
-                            {statusOptions.map((option) => (
+                        <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                            {contextParts.join(' · ')}
+                            {automationMode && <span className="text-primary-600 dark:text-primary-300 font-medium"> · modo Automatizar</span>}
+                        </p>
+                    </div>
+
+                    {/* Automation Guide Button */}
+                    {activeBoard.automationSuggestions && activeBoard.automationSuggestions.length > 0 && (
+                        <Popover>
+                            <PopoverTrigger asChild>
                                 <button
-                                    key={option.value}
-                                    type="button"
-                                    onClick={() => {
-                                        setStatusFilter(option.value);
-                                        setStatusMenuOpen(false);
-                                    }}
-                                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-colors hover:bg-slate-50 dark:hover:bg-white/5 ${statusFilter === option.value
-                                        ? 'font-bold text-primary-600 dark:text-primary-400'
-                                        : 'text-slate-700 dark:text-slate-200'}`}
+                                    className="p-2 text-yellow-600 hover:text-yellow-700 dark:text-yellow-400 dark:hover:text-yellow-300 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 rounded-lg transition-colors relative group shrink-0"
+                                    title="Automações Sugeridas"
                                 >
-                                    <span className={`w-2 h-2 rounded-full ${option.dot}`} aria-hidden="true" />
-                                    {option.label}
+                                    <Lightbulb size={18} className="fill-current" />
+                                    <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
                                 </button>
-                            ))}
-                        </div>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-80 p-0" align="start">
+                                <div className="p-4 border-b border-slate-100 dark:border-white/10 bg-slate-50 dark:bg-slate-900/50">
+                                    <h4 className="font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                                        <Lightbulb size={16} className="text-yellow-500" />
+                                        Automações Sugeridas
+                                    </h4>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                                        Dicas da IA para otimizar este processo.
+                                    </p>
+                                </div>
+                                <div className="p-2">
+                                    <ul className="space-y-1">
+                                        {activeBoard.automationSuggestions.map((suggestion, idx) => (
+                                            <li key={idx} className="text-sm text-slate-700 dark:text-slate-300 p-2 hover:bg-slate-50 dark:hover:bg-white/5 rounded-md flex gap-2 items-start">
+                                                <span className="text-slate-400 mt-0.5">•</span>
+                                                <span>{suggestion}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            </PopoverContent>
+                        </Popover>
                     )}
                 </div>
 
-                {/* Status: select só no desktop */}
-                <div className="relative max-md:hidden">
-                    <select
-                        value={statusFilter}
-                        onChange={(e) => setStatusFilter(e.target.value as any)}
-                        aria-label="Filtrar por status"
-                        className="pl-3 pr-8 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm appearance-none cursor-pointer"
+                <div className="flex items-center gap-2 shrink-0 max-md:gap-1.5">
+                    {/* Automatizar: camada de automações por etapa (só admin) */}
+                    {onToggleAutomationMode && (
+                        <button
+                            type="button"
+                            onClick={onToggleAutomationMode}
+                            aria-pressed={automationMode}
+                            title={automationMode ? 'Voltar ao board' : 'Automatizar: o que dispara em cada etapa'}
+                            className={`h-[38px] flex items-center gap-2 px-3 max-md:px-2.5 rounded-lg border text-sm font-medium transition-all ${automationMode
+                                ? 'border-primary-600 bg-primary-600 text-white shadow-lg shadow-primary-600/20'
+                                : 'border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-white/5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10 hover:text-primary-700 dark:hover:text-white'
+                                }`}
+                        >
+                            <Zap size={16} className={automationMode ? 'fill-current' : ''} aria-hidden="true" />
+                            <span className="max-md:hidden">Automatizar</span>
+                        </button>
+                    )}
+
+                    {/* ⋮ mais opções */}
+                    <div ref={moreMenuRef} className="relative">
+                        <button
+                            type="button"
+                            onClick={() => setMoreMenuOpen((o) => !o)}
+                            aria-expanded={moreMenuOpen}
+                            aria-label="Mais opções"
+                            title="Mais opções"
+                            className={`h-[38px] w-[38px] flex items-center justify-center rounded-lg border text-sm transition-colors ${selectionMode
+                                ? 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
+                                : 'border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-white/5 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/10'
+                                }`}
+                        >
+                            <MoreVertical size={18} />
+                        </button>
+                        {moreMenuOpen && (
+                            <div className="absolute right-0 z-50 mt-1 w-56 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1">
+                                {!selectionMode ? (
+                                    <>
+                                        {/* Seleção múltipla só tem UI (checkboxes) no kanban */}
+                                        {viewMode === 'kanban' && !automationMode && (
+                                            <button
+                                                type="button"
+                                                onClick={() => { onEnterSelectionMode(); setMoreMenuOpen(false); }}
+                                                className={menuItemClass}
+                                            >
+                                                <CheckSquare size={14} /> Selecionar vários
+                                            </button>
+                                        )}
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                // Abre o editor de estratégia do board (o banner de CTA
+                                                // não existe mais no kanban — este é o ponto de entrada).
+                                                window.dispatchEvent(new Event('crm:board-strategy-edit'));
+                                                setMoreMenuOpen(false);
+                                            }}
+                                            className={menuItemClass}
+                                        >
+                                            <Target size={14} /> Estratégia do board
+                                        </button>
+                                        {onEditBoard && (
+                                            <button
+                                                type="button"
+                                                onClick={() => { onEditBoard(activeBoard); setMoreMenuOpen(false); }}
+                                                className={menuItemClass}
+                                            >
+                                                <Settings size={14} /> Configurações do board
+                                            </button>
+                                        )}
+                                        {onExportTemplates && (
+                                            <button
+                                                type="button"
+                                                onClick={() => { onExportTemplates(); setMoreMenuOpen(false); }}
+                                                className={`${menuItemClass} max-md:hidden`}
+                                            >
+                                                <Download size={14} /> Exportar template
+                                            </button>
+                                        )}
+                                    </>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={() => { onExitSelectionMode(); setMoreMenuOpen(false); }}
+                                        className={menuItemClass}
+                                    >
+                                        <X size={14} /> Cancelar seleção
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    <button
+                        onClick={onNewDeal}
+                        className="max-md:hidden h-[38px] bg-primary-700 hover:bg-primary-600 text-white px-4 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-primary-700/20"
                     >
-                        <option value="open">Em Aberto</option>
-                        <option value="won">Ganhos</option>
-                        <option value="lost">Perdidos</option>
-                        <option value="all">Todos</option>
-                    </select>
-                    <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                        <div className={`w-2 h-2 rounded-full ${statusFilter === 'open' ? 'bg-blue-500' :
-                            statusFilter === 'won' ? 'bg-green-500' :
-                                statusFilter === 'lost' ? 'bg-red-500' : 'bg-slate-400'
-                            }`} />
+                        <Plus size={18} aria-hidden="true" /> Novo Negócio
+                    </button>
+                    <button
+                        onClick={onNewDeal}
+                        aria-label="Novo negócio"
+                        title="Novo negócio"
+                        className="md:hidden h-[38px] w-[38px] flex items-center justify-center rounded-lg bg-primary-700 hover:bg-primary-600 text-white shadow-lg shadow-primary-700/20 active:scale-95 transition-all"
+                    >
+                        <Plus size={20} aria-hidden="true" />
+                    </button>
+                </div>
+            </div>
+
+            {/* Linha 2: controles (ou a faixa do modo Automatizar) */}
+            {automationMode ? (
+                <div className="flex items-center gap-2.5 rounded-xl border border-primary-200 dark:border-primary-500/30 bg-primary-50/70 dark:bg-primary-500/10 px-3 py-2 text-sm text-primary-800 dark:text-primary-200">
+                    <Zap size={14} className="fill-current shrink-0" aria-hidden="true" />
+                    <span className="min-w-0">
+                        Cada coluna mostra o que dispara quando um lead <strong>entra</strong> na etapa. Use <strong>Automatizar</strong> na coluna para adicionar.
+                    </span>
+                    {onToggleAutomationMode && (
+                        <button type="button" onClick={onToggleAutomationMode} className="ml-auto shrink-0 text-xs font-semibold hover:underline">
+                            Voltar ao board
+                        </button>
+                    )}
+                </div>
+            ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                    {/* Busca: cresce; no celular ocupa a linha inteira */}
+                    <div className="relative flex-1 min-w-[12rem] md:max-w-sm max-md:basis-full">
+                        {/* z-10: o input tem backdrop-blur (cria stacking context) e pintava POR CIMA da lupa */}
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 pointer-events-none" size={16} />
+                        <input
+                            type="text"
+                            placeholder="Buscar negócios ou empresas..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className={`w-full pl-10 pr-4 py-2 max-md:py-1.5 ${controlClass}`}
+                        />
+                    </div>
+
+                    {/* Status no celular: botão que abre um menuzinho de opções */}
+                    <div ref={statusMenuRef} className="relative md:hidden">
+                        <button
+                            type="button"
+                            onClick={() => setStatusMenuOpen((o) => !o)}
+                            aria-expanded={statusMenuOpen}
+                            aria-label="Filtrar por status"
+                            className={`flex items-center gap-2 pl-3 pr-2.5 py-1.5 text-slate-700 dark:text-slate-200 ${controlClass}`}
+                        >
+                            <span className={`w-2 h-2 rounded-full ${currentStatus.dot}`} aria-hidden="true" />
+                            {currentStatus.label}
+                            <ChevronDown
+                                size={14}
+                                aria-hidden="true"
+                                className={`text-slate-400 transition-transform ${statusMenuOpen ? 'rotate-180' : ''}`}
+                            />
+                        </button>
+                        {statusMenuOpen && (
+                            <div className="absolute left-0 z-50 mt-1 w-44 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1">
+                                {statusOptions.map((option) => (
+                                    <button
+                                        key={option.value}
+                                        type="button"
+                                        onClick={() => {
+                                            setStatusFilter(option.value);
+                                            setStatusMenuOpen(false);
+                                        }}
+                                        className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-colors hover:bg-slate-50 dark:hover:bg-white/5 ${statusFilter === option.value
+                                            ? 'font-bold text-primary-600 dark:text-primary-400'
+                                            : 'text-slate-700 dark:text-slate-200'}`}
+                                    >
+                                        <span className={`w-2 h-2 rounded-full ${option.dot}`} aria-hidden="true" />
+                                        {option.label}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Status: select só no desktop */}
+                    <div className="relative max-md:hidden">
+                        <select
+                            value={statusFilter}
+                            onChange={(e) => setStatusFilter(e.target.value as 'open' | 'won' | 'lost' | 'all')}
+                            aria-label="Filtrar por status"
+                            className={`pl-3 pr-8 py-2 appearance-none cursor-pointer ${controlClass}`}
+                        >
+                            {statusOptions.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                        </select>
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                            <div className={`w-2 h-2 rounded-full ${currentStatus.dot}`} />
+                        </div>
+                    </div>
+
+                    {/* Responsável (no celular é o item flexível da linha) */}
+                    <div className="relative max-md:flex-1 max-md:min-w-0">
+                        <select
+                            value={ownerFilter}
+                            onChange={(e) => setOwnerFilter(e.target.value)}
+                            aria-label="Filtrar negócios por proprietário"
+                            className={`pl-3 pr-8 py-2 max-md:py-1.5 max-md:pl-2 max-md:pr-6 max-md:w-full appearance-none cursor-pointer ${controlClass}`}
+                        >
+                            <option value="all">Todos os Donos</option>
+                            <option value="mine">Meus Negócios</option>
+                            {assignableOwners.length > 0 && (
+                                <>
+                                    <option value="none">Sem responsável</option>
+                                    <optgroup label="Responsáveis">
+                                        {assignableOwners.map((u) => (
+                                            <option key={u.id} value={u.id}>
+                                                {u.name}{u.role === 'admin' ? ' (admin)' : ''}
+                                            </option>
+                                        ))}
+                                    </optgroup>
+                                </>
+                            )}
+                        </select>
+                        <User className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+                    </div>
+
+                    {/* Filtros: tag (select) + data de criação + construtor de
+                        condições por campo/UTM. Sempre visível: a data existe em
+                        qualquer board, mesmo sem tags/campos configurados. */}
+                    <CustomFieldFiltersButton
+                        conditions={customFieldConditions}
+                        onConditionsChange={setCustomFieldConditions}
+                        logic={customFieldLogic}
+                        onLogicChange={setCustomFieldLogic}
+                        options={customFieldOptions}
+                        tagFilter={tagFilter}
+                        onTagFilterChange={setTagFilter}
+                        tagOptions={tagOptions}
+                        dateRange={dateRange}
+                        onDateRangeChange={setDateRange}
+                    />
+
+                    <div className="ml-auto flex items-center gap-2">
+                        {/* Modo de visualização */}
+                        <div className="flex bg-slate-100 dark:bg-white/5 p-1 rounded-lg border border-slate-200 dark:border-white/10">
+                            <button
+                                onClick={() => setViewMode('kanban')}
+                                aria-label="Visualização em quadro Kanban"
+                                title="Kanban"
+                                aria-pressed={viewMode === 'kanban'}
+                                className={`p-1.5 rounded-md transition-all ${viewMode === 'kanban' ? 'bg-white dark:bg-slate-700 shadow-sm text-primary-600 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'}`}
+                            >
+                                <LayoutGrid size={16} aria-hidden="true" />
+                            </button>
+                            <button
+                                onClick={() => setViewMode('list')}
+                                aria-label="Visualização em lista"
+                                title="Lista (Todos / Qualificação / SQL)"
+                                aria-pressed={viewMode === 'list'}
+                                className={`p-1.5 rounded-md transition-all ${viewMode === 'list' ? 'bg-white dark:bg-slate-700 shadow-sm text-primary-600 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'}`}
+                            >
+                                <TableIcon size={16} aria-hidden="true" />
+                            </button>
+                        </div>
+
+                        {/* Configurações do board (atalho de desktop; no celular fica no menu ⋮) */}
+                        {onEditBoard && (
+                            <button
+                                onClick={() => onEditBoard(activeBoard)}
+                                className="p-2 max-md:hidden text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors"
+                                title="Configurações do Board"
+                                aria-label="Configurações do board"
+                            >
+                                <Settings size={18} />
+                            </button>
+                        )}
                     </div>
                 </div>
-
-                {/* Celular: o select de dono é o item flexível da linha (encolhe
-                    pra caber junto do status e do Filtros) */}
-                <div className="relative max-md:flex-1 max-md:min-w-0">
-                    <select
-                        value={ownerFilter}
-                        onChange={(e) => setOwnerFilter(e.target.value)}
-                        aria-label="Filtrar negócios por proprietário"
-                        className="pl-3 pr-8 py-2 max-md:py-1.5 max-md:pl-2 max-md:pr-6 max-md:w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm appearance-none cursor-pointer"
-                    >
-                        <option value="all">Todos os Donos</option>
-                        <option value="mine">Meus Negócios</option>
-                        {assignableOwners.length > 0 && (
-                            <>
-                                <option value="none">Sem responsável</option>
-                                <optgroup label="Responsáveis">
-                                    {assignableOwners.map((u) => (
-                                        <option key={u.id} value={u.id}>
-                                            {u.name}{u.role === 'admin' ? ' (admin)' : ''}
-                                        </option>
-                                    ))}
-                                </optgroup>
-                            </>
-                        )}
-                    </select>
-                    <User className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
-                </div>
-
-                {/* Filtros: tag (select) + data de criação + construtor de
-                    condições por campo/UTM. Sempre visível: a data existe em
-                    qualquer board, mesmo sem tags/campos configurados. */}
-                <CustomFieldFiltersButton
-                    conditions={customFieldConditions}
-                    onConditionsChange={setCustomFieldConditions}
-                    logic={customFieldLogic}
-                    onLogicChange={setCustomFieldLogic}
-                    options={customFieldOptions}
-                    tagFilter={tagFilter}
-                    onTagFilterChange={setTagFilter}
-                    tagOptions={tagOptions}
-                    dateRange={dateRange}
-                    onDateRangeChange={setDateRange}
-                />
-            </div>
-
-            {/* Celular: este bloco ancora no canto superior direito (o toggle
-                reserva o espaço com mr-16) e o Novo Negócio vira botão "+" */}
-            <div className="flex gap-3 max-md:absolute max-md:top-0 max-md:right-0 max-md:gap-1.5">
-                {/* ⋮ mais opções (ex.: Selecionar vários) */}
-                <div ref={moreMenuRef} className="relative">
-                    <button
-                        type="button"
-                        onClick={() => setMoreMenuOpen((o) => !o)}
-                        aria-expanded={moreMenuOpen}
-                        aria-label="Mais opções"
-                        title="Mais opções"
-                        className={`p-2 max-md:p-0 max-md:h-[38px] max-md:w-[38px] max-md:flex max-md:items-center max-md:justify-center rounded-lg border text-sm transition-colors ${selectionMode
-                            ? 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
-                            : 'border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/10'
-                            }`}
-                    >
-                        <MoreVertical size={18} />
-                    </button>
-                    {moreMenuOpen && (
-                        <div className="absolute right-0 z-50 mt-1 w-52 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1">
-                            {!selectionMode ? (
-                                <>
-                                {/* Seleção múltipla só tem UI (checkboxes) no kanban */}
-                                {viewMode === 'kanban' && (
-                                <button
-                                    type="button"
-                                    onClick={() => { onEnterSelectionMode(); setMoreMenuOpen(false); }}
-                                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
-                                >
-                                    <CheckSquare size={14} /> Selecionar vários
-                                </button>
-                                )}
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        // Abre o editor de estratégia do board (o banner de CTA
-                                        // não existe mais no kanban — este é o ponto de entrada).
-                                        window.dispatchEvent(new Event('crm:board-strategy-edit'));
-                                        setMoreMenuOpen(false);
-                                    }}
-                                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
-                                >
-                                    <Target size={14} /> Estratégia do board
-                                </button>
-                                </>
-                            ) : (
-                                <button
-                                    type="button"
-                                    onClick={() => { onExitSelectionMode(); setMoreMenuOpen(false); }}
-                                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
-                                >
-                                    <X size={14} /> Cancelar seleção
-                                </button>
-                            )}
-                        </div>
-                    )}
-                </div>
-                <button
-                    onClick={onNewDeal}
-                    className="max-md:hidden bg-primary-700 hover:bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-primary-700/20"
-                >
-                    <Plus size={18} aria-hidden="true" /> Novo Negócio
-                </button>
-                <button
-                    onClick={onNewDeal}
-                    aria-label="Novo negócio"
-                    title="Novo negócio"
-                    className="md:hidden h-[38px] w-[38px] flex items-center justify-center rounded-lg bg-primary-700 hover:bg-primary-600 text-white shadow-lg shadow-primary-700/20 active:scale-95 transition-all"
-                >
-                    <Plus size={20} aria-hidden="true" />
-                </button>
-            </div>
-
+            )}
         </div>
     );
 };

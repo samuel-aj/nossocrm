@@ -50,6 +50,8 @@ export type HighlightedScriptProps = {
   ariaLabel?: string;
   /** classes extras do contêiner (ex.: altura mínima, anel de destaque) */
   className?: string;
+  /** Cresce com o texto (sem alça de redimensionar); `rows` vira a altura mínima */
+  autoResize?: boolean;
   /**
    * Chip solto no texto: `at` é a posição medida no espelho (undefined quando
    * não deu para medir; aí o chamador usa o cursor atual). Passar isto liga o
@@ -73,6 +75,7 @@ export const HighlightedScript: React.FC<HighlightedScriptProps> = ({
   placeholder,
   ariaLabel,
   className = '',
+  autoResize = false,
   onInsertToken,
 }) => {
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -106,6 +109,14 @@ export const HighlightedScript: React.FC<HighlightedScriptProps> = ({
   }, [ref]);
 
   useEffect(sync, [value, sync]);
+
+  // Auto-resize: a altura acompanha o conteúdo (o espelho segue pelo ResizeObserver)
+  useEffect(() => {
+    const el = ref.current;
+    if (!autoResize || !el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [autoResize, value, rows, ref]);
 
   const parts = splitPromptTokens(value, known);
 
@@ -170,8 +181,8 @@ export const HighlightedScript: React.FC<HighlightedScriptProps> = ({
   return (
     <div
       ref={boxRef}
-      className={`relative rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-800 focus-within:ring-2 focus-within:ring-purple-500/20 focus-within:border-purple-500 ${
-        dragging ? 'ring-2 ring-purple-500 border-purple-500' : ''
+      className={`relative rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-800 focus-within:ring-2 focus-within:ring-primary-500/20 focus-within:border-primary-500 ${
+        dragging ? 'ring-2 ring-primary-500 border-primary-500' : ''
       } ${className}`}
     >
       {/*
@@ -196,7 +207,7 @@ export const HighlightedScript: React.FC<HighlightedScriptProps> = ({
       <textarea
         ref={ref}
         id={id}
-        className={`${BOX_CLASS} relative z-10 w-full bg-transparent border-0 outline-none resize-y whitespace-pre-wrap break-words text-slate-900 dark:text-white placeholder:text-slate-400`}
+        className={`${BOX_CLASS} relative z-10 w-full bg-transparent border-0 outline-none ${autoResize ? 'resize-none overflow-hidden' : 'resize-y'} whitespace-pre-wrap break-words text-slate-900 dark:text-white placeholder:text-slate-400`}
         rows={rows}
         value={value}
         maxLength={maxLength}
@@ -216,7 +227,7 @@ export const HighlightedScript: React.FC<HighlightedScriptProps> = ({
       {drop ? (
         <span
           aria-hidden="true"
-          className="absolute z-20 w-0.5 rounded-full bg-purple-600 dark:bg-purple-400 pointer-events-none animate-pulse"
+          className="absolute z-20 w-0.5 rounded-full bg-primary-600 dark:bg-primary-400 pointer-events-none animate-pulse"
           style={{ left: drop.left, top: drop.top, height: drop.height }}
         />
       ) : null}

@@ -38,10 +38,17 @@ interface AIConfig {
   anthropicCaching: boolean;
 }
 
+/** Cópia local da página inicial: aplica antes de o servidor responder (EntryRedirect). */
+export const DEFAULT_ROUTE_STORAGE_KEY = 'crm_default_route';
+
 interface SettingsContextType {
   // Loading state
   loading: boolean;
   error: string | null;
+
+  // Página inicial (user_settings.default_route)
+  defaultRoute: string;
+  setDefaultRoute: (route: string) => Promise<void>;
 
   // Lifecycle Stages
   lifecycleStages: LifecycleStage[];
@@ -129,6 +136,16 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
 
   // State
   const [loading, setLoading] = useState(true);
+  const [defaultRoute, setDefaultRouteState] = useState<string>(() => {
+    if (typeof window === 'undefined') return '/dashboard';
+    try {
+      const raw = localStorage.getItem(DEFAULT_ROUTE_STORAGE_KEY);
+      const v = raw ? (JSON.parse(raw) as unknown) : null;
+      return typeof v === 'string' && v.startsWith('/') ? v : '/dashboard';
+    } catch {
+      return '/dashboard';
+    }
+  });
   const [error, setError] = useState<string | null>(null);
   const [lifecycleStages, setLifecycleStages] = useState<LifecycleStage[]>(DEFAULT_LIFECYCLE_STAGES);
   const [products, setProducts] = useState<Product[]>([]);
@@ -213,6 +230,14 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
       // Preferências por usuário (mantidas em user_settings)
       const { data: settings } = await settingsService.get();
       if (settings) {
+        if (typeof settings.defaultRoute === 'string' && settings.defaultRoute.startsWith('/')) {
+          setDefaultRouteState(settings.defaultRoute);
+          try {
+            localStorage.setItem(DEFAULT_ROUTE_STORAGE_KEY, JSON.stringify(settings.defaultRoute));
+          } catch {
+            // sem localStorage: segue só com o servidor
+          }
+        }
         setAiThinkingState(settings.aiThinking);
         setAiSearchState(settings.aiSearch);
         setAiAnthropicCachingState(settings.aiAnthropicCaching);
@@ -897,6 +922,19 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
     setLeads(prev => prev.map(l => (l.id === id ? { ...l, ...updates } : l)));
   }, []);
 
+  // Página inicial: grava no servidor (vale em qualquer aparelho) e na cópia local
+  const setDefaultRoute = useCallback(async (route: string) => {
+    const clean = route.startsWith('/') ? route : '/dashboard';
+    setDefaultRouteState(clean);
+    try {
+      localStorage.setItem(DEFAULT_ROUTE_STORAGE_KEY, JSON.stringify(clean));
+    } catch {
+      // ignore
+    }
+    const { error: updateError } = await settingsService.update({ defaultRoute: clean });
+    if (updateError) setError(updateError.message);
+  }, []);
+
   const discardLead = useCallback((id: string) => {
     setLeads(prev => prev.filter(l => l.id !== id));
   }, []);
@@ -905,6 +943,8 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
     () => ({
       loading,
       error,
+      defaultRoute,
+      setDefaultRoute,
       lifecycleStages,
       addLifecycleStage,
       updateLifecycleStage,
@@ -956,6 +996,8 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
     [
       loading,
       error,
+      defaultRoute,
+      setDefaultRoute,
       lifecycleStages,
       addLifecycleStage,
       updateLifecycleStage,

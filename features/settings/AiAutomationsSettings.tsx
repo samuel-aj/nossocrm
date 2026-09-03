@@ -10,6 +10,7 @@
 import React, { useEffect, useState } from 'react';
 import { Bot, History, Sparkles, Workflow, Lock } from 'lucide-react';
 import { useWaAgentsAccess } from '@/hooks/useWaAgentsAccess';
+import { Spinner } from '@/features/wa-agents/ui';
 import { WaAgentsSettings } from '@/features/wa-agents/WaAgentsSettings';
 import { AICenterSettings } from './AICenterSettings';
 import { SettingsHeader, SubTabs } from './components/SettingsUi';
@@ -21,13 +22,15 @@ function isAiSubTab(v: string): v is AiSubTab {
 }
 
 export const AiAutomationsSettings: React.FC<{ initialSub?: AiSubTab }> = ({ initialSub = 'agentes' }) => {
-  const { agentsApproved, isAdmin } = useWaAgentsAccess();
+  const { agentsApproved, isAdmin, isLoading } = useWaAgentsAccess();
   const [sub, setSub] = useState<AiSubTab>(initialSub);
 
   useEffect(() => {
     const sync = () => {
       const h = (window.location.hash || '').replace('#', '');
       if (isAiSubTab(h)) setSub(h);
+      // Links antigos para a configuração da IA (ex.: /settings/ai#ai-config)
+      else if (h === 'ai-config') setSub('central');
     };
     sync();
     window.addEventListener('hashchange', sync);
@@ -66,8 +69,18 @@ export const AiAutomationsSettings: React.FC<{ initialSub?: AiSubTab }> = ({ ini
         title="IA e Automações"
         description="Agentes que conversam com o lead, robôs de mensagens e a configuração da inteligência artificial."
       />
-      <SubTabs tabs={tabs} value={effective} onChange={go} ariaLabel="Seções de IA e Automações" />
-      {effective === 'central' ? <AICenterSettings embedded /> : <WaAgentsSettings embedded tab={effective} />}
+      {/* Enquanto o acesso carrega não decidimos a sub-aba: senão a Central de IA
+          aparecia por um instante antes de Agentes de IA (o padrão para admin). */}
+      {isLoading ? (
+        <div className="py-10">
+          <Spinner />
+        </div>
+      ) : (
+        <>
+          <SubTabs tabs={tabs} value={effective} onChange={go} ariaLabel="Seções de IA e Automações" />
+          {effective === 'central' ? <AICenterSettings embedded /> : <WaAgentsSettings embedded tab={effective} />}
+        </>
+      )}
     </div>
   );
 };

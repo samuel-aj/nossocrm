@@ -8,6 +8,8 @@ import { useActivities } from '@/lib/query/hooks/useActivitiesQuery';
 
 import { useCRM } from '@/context/CRMContext';
 import { Archive, Hourglass, Undo2, UserX, ChevronLeft, ChevronRight } from 'lucide-react';
+import { StageAutomationsPanel } from '@/features/boards/automations/StageAutomationsPanel';
+import type { KanbanAutomation } from '@/features/boards/automations/AutomationLayer';
 
 // Shared immutable default so every card without pending activities reuses
 // the same reference — React.memo on DealCard can then bail out on re-renders.
@@ -60,7 +62,9 @@ function dropHighlightClasses(stageBgClass?: string): string {
   return 'border-emerald-500 bg-emerald-100/20 dark:bg-emerald-900/30 shadow-xl shadow-emerald-500/30';
 }
 
-interface KanbanBoardProps {
+export interface KanbanBoardProps {
+  /** Modo Automatizar: as colunas mostram as automações da etapa no lugar dos leads */
+  automation?: KanbanAutomation;
   stages: BoardStage[];
   filteredDeals: DealView[];
   customFieldDefinitions: CustomFieldDefinition[];
@@ -148,6 +152,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   inactiveDeals,
   onMarkInactive,
   onRestoreInactive,
+  automation,
 }) => {
   const { lifecycleStages, contacts } = useCRM();
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
@@ -449,7 +454,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                 </span>
                 <span className="flex items-center gap-1">
                   <span className="text-xs font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded text-slate-600 dark:text-slate-300">
-                    {stageDeals.length}
+                    {automation ? (automation.byStage.get(stage.id)?.length ?? 0) : stageDeals.length}
                   </span>
                   {/* Celular: setinha pra próxima etapa */}
                   {stageIndex < mobileColumns.length - 1 && (
@@ -480,13 +485,29 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
               </div>
 
               <div className="text-xs text-slate-500 dark:text-slate-400 font-medium text-right">
-                Total:{' '}
-                <span className="text-slate-900 dark:text-white font-mono">
-                  ${stageValue.toLocaleString()}
-                </span>
+                {automation ? (
+                  <>Ao entrar: <span className="text-slate-900 dark:text-white font-mono">{automation.byStage.get(stage.id)?.length ?? 0}</span></>
+                ) : (
+                  <>
+                    Total:{' '}
+                    <span className="text-slate-900 dark:text-white font-mono">
+                      ${stageValue.toLocaleString()}
+                    </span>
+                  </>
+                )}
               </div>
             </div>
 
+            {automation ? (
+              <StageAutomationsPanel
+                items={automation.byStage.get(stage.id) ?? []}
+                loading={automation.loading}
+                onAdd={() => automation.onAdd(stage)}
+                onOpen={automation.onOpen}
+                onToggle={automation.onToggle}
+                onRemove={automation.onRemove}
+              />
+            ) : (
             <div
               data-kanban-col-scroll
               className={`flex-1 p-2 overflow-y-auto scrollbar-custom space-y-2 bg-slate-100/50 dark:bg-black/20 min-h-[100px]`}
@@ -530,6 +551,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                 />
               ))}
             </div>
+            )}
           </div>
         );
       })}

@@ -12,6 +12,22 @@ import React, { useId, useCallback, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import { FocusTrap, useFocusReturn } from '@/lib/a11y';
+
+/**
+ * Camadas flutuantes (menus, balões) abertas num portal FORA do modal avisam
+ * por aqui: enquanto houver uma aberta, o foco preso fica pausado (senão o
+ * trap devolve o foco e a camada fecha na hora).
+ */
+const ModalOverlayContext = React.createContext<((open: boolean) => void) | null>(null);
+
+export function useModalOverlay(open: boolean) {
+  const notify = React.useContext(ModalOverlayContext);
+  React.useEffect(() => {
+    if (!notify || !open) return;
+    notify(true);
+    return () => notify(false);
+  }, [notify, open]);
+}
 import {
   MODAL_BODY_CLASS,
   MODAL_CLOSE_BUTTON_CLASS,
@@ -101,6 +117,9 @@ export const Modal: React.FC<ModalProps> = ({
   
   // Restore focus to trigger element on close
   useFocusReturn({ enabled: isOpen });
+  // Quantas camadas flutuantes (menus/balões em portal) estão abertas por cima
+  const [overlays, setOverlays] = React.useState(0);
+  const notifyOverlay = useCallback((open: boolean) => setOverlays((n) => Math.max(0, n + (open ? 1 : -1))), []);
 
   // Handle Escape key
   const handleEscape = useCallback(() => {
@@ -162,12 +181,12 @@ export const Modal: React.FC<ModalProps> = ({
   return (
     <FocusTrap
       active={isOpen}
-      paused={!focusTrapEnabled}
+      paused={!focusTrapEnabled || overlays > 0}
       onEscape={handleEscape}
       initialFocus={initialFocus}
       returnFocus={true}
     >
-      {content}
+      <ModalOverlayContext.Provider value={notifyOverlay}>{content}</ModalOverlayContext.Provider>
     </FocusTrap>
   );
 };

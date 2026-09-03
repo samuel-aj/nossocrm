@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 import { CRMProvider } from '@/context/CRMContext'
 import { AIProvider } from '@/context/AIContext'
 import Layout from '@/components/Layout'
+import EntryRedirect from '@/components/EntryRedirect'
 
 /**
  * Layout do grupo `(protected)`. Providers globais (Query, Toast, Theme,
@@ -25,6 +26,7 @@ export default function ProtectedLayout({
     return (
         <CRMProvider>
             <AIProvider>
+                <EntryRedirect />
                 {shouldUseAppShell ? <Layout>{children}</Layout> : children}
             </AIProvider>
         </CRMProvider>

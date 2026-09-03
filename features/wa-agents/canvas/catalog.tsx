@@ -162,7 +162,7 @@ export function BlockCatalog({
             }}
             title={title}
             aria-label={iconsOnly ? meta.label : undefined}
-            className={`shrink-0 inline-flex items-center gap-2 rounded-lg text-sm text-left text-slate-700 dark:text-slate-200 select-none outline-none focus-visible:ring-2 focus-visible:ring-purple-500/40 transition-colors ${
+            className={`shrink-0 inline-flex items-center gap-2 rounded-lg text-sm text-left text-slate-700 dark:text-slate-200 select-none outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 transition-colors ${
               horizontal ? 'flex-col gap-1 px-2 py-1.5 min-w-[64px] text-[10px] leading-tight text-center' : iconsOnly ? 'p-1.5 justify-center' : 'px-2.5 py-2'
             } ${
               disabledReason

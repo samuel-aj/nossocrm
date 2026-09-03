@@ -194,7 +194,7 @@ export function BotCanvas({
         </button>
         <button
           type="button"
-          className={`${TOOL_BTN} hidden md:inline-flex ${showMinimap ? 'text-purple-600 dark:text-purple-300' : ''}`}
+          className={`${TOOL_BTN} hidden md:inline-flex ${showMinimap ? 'text-primary-600 dark:text-primary-300' : ''}`}
           onClick={onToggleMinimap}
           aria-pressed={showMinimap}
           aria-label={showMinimap ? 'Esconder o minimapa' : 'Mostrar o minimapa'}
@@ -205,7 +205,7 @@ export function BotCanvas({
         <div ref={helpRef} className="relative">
           <button
             type="button"
-            className={`${TOOL_BTN} ${helpOpen ? 'text-purple-600 dark:text-purple-300' : ''}`}
+            className={`${TOOL_BTN} ${helpOpen ? 'text-primary-600 dark:text-primary-300' : ''}`}
             onClick={() => setHelpOpen((v) => !v)}
             aria-expanded={helpOpen}
             aria-label="Atalhos e dicas"
@@ -231,14 +231,14 @@ export function BotCanvas({
 
       {empty ? (
         <Panel position="top-center" className="pointer-events-none mt-3">
-          <div className="pointer-events-auto max-w-xs px-4 py-3 rounded-xl border border-dashed border-purple-300 dark:border-purple-500/50 bg-white/95 dark:bg-dark-card/95 backdrop-blur shadow text-center">
+          <div className="pointer-events-auto max-w-xs px-4 py-3 rounded-xl border border-dashed border-primary-300 dark:border-primary-500/50 bg-white/95 dark:bg-dark-card/95 backdrop-blur shadow text-center">
             <p className="text-sm font-medium text-slate-800 dark:text-white">O quadro está vazio</p>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               Arraste um bloco da paleta ou clique em + para começar. O primeiro balão já sai ligado ao gatilho.
             </p>
             <button
               type="button"
-              className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-600 hover:bg-purple-700 text-white transition-colors"
+              className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary-600 hover:bg-primary-700 text-white transition-colors"
               onClick={onQuickStart}
             >
               <Plus size={14} aria-hidden="true" />

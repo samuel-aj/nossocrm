@@ -6,6 +6,7 @@ import { BoardCreationWizard } from './BoardCreationWizard';
 import { KanbanHeader } from './Kanban/KanbanHeader';
 import { BoardStrategyHeader } from './Kanban/BoardStrategyHeader';
 import { KanbanBoard } from './Kanban/KanbanBoard';
+import { AutomationLayer } from '@/features/boards/automations/AutomationLayer';
 import { QualificationView } from './Kanban/QualificationView';
 import { DeleteBoardModal } from './Modals/DeleteBoardModal';
 import { LossReasonModal } from '@/components/ui/LossReasonModal';
@@ -388,6 +389,9 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   const { profile } = useAuth();
   const isAdmin = profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN;
   const [isExportModalOpen, setIsExportModalOpen] = React.useState(false);
+  // Modo Automatizar (kanban): colunas mostram o que dispara ao entrar na etapa
+  const [automationMode, setAutomationMode] = React.useState(false);
+  const automationActive = automationMode && viewMode === 'kanban';
 
   // Modais de ação em massa (estado local: só UI)
   const [bulkModal, setBulkModal] = React.useState<null | 'stage' | 'tags' | 'field'>(null);
@@ -517,11 +521,21 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
             onEnterSelectionMode={enterSelectionMode}
             onExitSelectionMode={exitSelectionMode}
             onNewDeal={() => setIsCreateModalOpen(true)}
+            automationMode={automationActive}
+            onToggleAutomationMode={
+              isAdmin
+                ? () => {
+                    if (!automationActive) setViewMode('kanban');
+                    setAutomationMode(!automationActive);
+                  }
+                : undefined
+            }
+            totalLeads={filteredDeals.length}
           />
 
           {/* Barra de ações da seleção múltipla — no TOPO, estilo Kommo.
               Só no kanban, a única view com UI de seleção (checkboxes). */}
-          {selectionMode && viewMode === 'kanban' && (
+          {selectionMode && viewMode === 'kanban' && !automationActive && (
             <div className="flex items-center gap-4 px-4 py-2 mb-4 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50/80 dark:bg-white/5 backdrop-blur-sm max-md:flex-wrap max-md:gap-x-3 max-md:gap-y-1.5">
               <button
                 type="button"
@@ -573,7 +587,10 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
 
           <div className="flex-1 overflow-hidden">
             {viewMode === 'kanban' ? (
+              <AutomationLayer board={activeBoard} enabled={automationActive}>
+                {(automation) => (
               <KanbanBoard
+                automation={automation}
                 stages={kanbanStages}
                 // Coluna Inativos fica OCULTA na visão padrão; aparece só no
                 // filtro "Todos" (guardar continua possível pela zona do drag).
@@ -599,6 +616,8 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                 setLastMouseDownDealId={setLastMouseDownDealId}
                 onMoveDealToStage={handleMoveDealToStage}
               />
+                )}
+              </AutomationLayer>
             ) : (
               <QualificationView
                 board={activeBoard}

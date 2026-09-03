@@ -23,10 +23,10 @@ export const useSettingsController = () => {
     addTag,
     removeTag,
   } = useCRM();
-  const { customFieldGroups, addCustomFieldGroup, removeCustomFieldGroup } = useSettings();
+  const { customFieldGroups, addCustomFieldGroup, removeCustomFieldGroup, defaultRoute, setDefaultRoute } = useSettings();
 
   // General Settings
-  const [defaultRoute, setDefaultRoute] = usePersistedState<string>('crm_default_route', '/boards');
+  // Página inicial: user_settings.default_route (com cópia local), ver SettingsContext
 
   const [newFieldLabel, setNewFieldLabel] = useState('');
   const [newFieldType, setNewFieldType] = useState<CustomFieldType>('text');

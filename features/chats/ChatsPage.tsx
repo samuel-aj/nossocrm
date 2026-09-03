@@ -1,5 +1,6 @@
 'use client';
 
+import { usePersistedState } from '@/hooks/usePersistedState';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
@@ -24,6 +25,11 @@ import { useToast } from '@/context/ToastContext';
 import { DealWhatsAppChat } from '@/features/whatsapp/DealWhatsAppChat';
 import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
 import { Contact, Deal } from '@/types';
+
+/** Largura da lista de conversas no desktop (px): padrão, mínimo e máximo */
+const CHAT_LIST_DEFAULT_WIDTH = 445;
+const CHAT_LIST_MIN_WIDTH = 320;
+const CHAT_LIST_MAX_WIDTH = 720;
 
 // ---------------------------------------------------------------------------
 // Página CHATS: inbox de WhatsApp da organização, estilo WhatsApp Web.
@@ -1025,6 +1031,37 @@ export const ChatsPage: React.FC = () => {
     }
   };
 
+  // Largura do painel de conversas (desktop), escolhida pela pessoa e guardada
+  // neste navegador. Duplo clique na divisória volta ao padrão.
+  const [listWidth, setListWidth] = usePersistedState<number>('crm_chat_list_width', CHAT_LIST_DEFAULT_WIDTH);
+  const [resizing, setResizing] = useState(false);
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = listWidth;
+    setResizing(true);
+    const prevCursor = document.body.style.cursor;
+    const prevSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    const onMove = (ev: PointerEvent) => {
+      const next = Math.round(Math.min(CHAT_LIST_MAX_WIDTH, Math.max(CHAT_LIST_MIN_WIDTH, startW + (ev.clientX - startX))));
+      setListWidth(next);
+    };
+    const onUp = () => {
+      setResizing(false);
+      document.body.style.cursor = prevCursor;
+      document.body.style.userSelect = prevSelect;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  };
+
   return (
     // Tela CHEIA: ancora no <main> (que é relative) e ignora o p-6 dele —
     // nada de cartão flutuante; o chat cola nas bordas da área de conteúdo.
@@ -1036,7 +1073,10 @@ export const ChatsPage: React.FC = () => {
       {/* +65px de largura (era 360/380): nome de grupo costuma ter prefixo
           ("AJ Marketing - ...") e cortava antes de chegar na parte que
           identifica o grupo. */}
-      <aside className={`${selected ? 'hidden md:flex' : 'flex'} w-full md:w-[425px] lg:w-[445px] shrink-0 flex-col border-r border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card`}>
+      <aside
+        className={`${selected ? 'hidden md:flex' : 'flex'} w-full md:w-[var(--chat-list-w)] shrink-0 flex-col border-r border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card`}
+        style={{ ['--chat-list-w' as string]: `${listWidth}px` }}
+      >
         {/* Cabeçalho */}
         <div className="shrink-0 px-4 pt-4 pb-3 border-b border-slate-100 dark:border-white/5">
           <div className="flex items-center justify-between gap-2 mb-3">
@@ -1595,6 +1635,21 @@ export const ChatsPage: React.FC = () => {
           })}
         </div>
       </aside>
+
+      {/* Divisória arrastável (só desktop): define a largura da lista de conversas */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Redimensionar painel de conversas"
+        title="Arraste para ajustar a largura"
+        onPointerDown={startResize}
+        onDoubleClick={() => setListWidth(CHAT_LIST_DEFAULT_WIDTH)}
+        className={`hidden md:flex relative w-1.5 -ml-[3px] shrink-0 cursor-col-resize items-stretch justify-center group z-10 ${
+          resizing ? 'bg-primary-500/60' : 'bg-transparent hover:bg-primary-500/40'
+        } transition-colors`}
+      >
+        <span className="w-px bg-slate-200 dark:bg-white/10 group-hover:bg-transparent" aria-hidden="true" />
+      </div>
 
       {/* ============ COLUNA DIREITA: chat ============ */}
       <section className={`${selected ? 'flex' : 'hidden md:flex'} flex-1 min-w-0 flex-col bg-slate-50/40 dark:bg-black/10`}>

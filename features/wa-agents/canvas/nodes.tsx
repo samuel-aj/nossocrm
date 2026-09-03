@@ -283,7 +283,7 @@ function TriggerNodeView({ id, data, selected }: NodeProps<TriggerNode>) {
 
   return (
     <div
-      className={`w-[300px] rounded-xl border bg-white dark:bg-dark-card text-slate-900 dark:text-white shadow-sm transition-shadow ${
+      className={`w-fit min-w-[300px] max-w-[460px] rounded-xl border bg-white dark:bg-dark-card text-slate-900 dark:text-white shadow-sm transition-shadow ${
         selected
           ? 'border-primary-500 ring-2 ring-primary-500/30 shadow-lg'
           : issue?.errors.length
@@ -430,10 +430,10 @@ function BlockRow({
       ref={rowRef}
       className={`group relative flex items-start gap-1.5 rounded-lg border pl-1 pr-1.5 py-1.5 cursor-pointer transition-colors ${
         selected
-          ? 'border-purple-500 bg-purple-50/70 dark:bg-purple-900/20'
+          ? 'border-primary-500 bg-primary-50/70 dark:bg-primary-900/20'
           : hasError
             ? 'border-red-300 dark:border-red-500/50 bg-white dark:bg-dark-card'
-            : 'border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card hover:border-purple-300 dark:hover:border-purple-500/50'
+            : 'border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card hover:border-primary-300 dark:hover:border-primary-500/50'
       }`}
       onClick={() => actions.selectBlock(ref)}
       onKeyDown={(e) => {

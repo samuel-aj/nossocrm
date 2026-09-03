@@ -151,7 +151,7 @@ function MessageEditor({ block, update }: EditorProps<'send_text'>) {
           <button
             key={v.key}
             type="button"
-            className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors"
+            className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 hover:bg-primary-100 dark:hover:bg-primary-900/30 transition-colors"
             title={`Inserir ${v.description}`}
             onClick={() => insert(v.key)}
           >
@@ -332,7 +332,7 @@ function ConditionEditor({ block, update }: EditorProps<'condition'>) {
                   <span className="flex-1 border-t border-slate-200 dark:border-white/10" />
                   <button
                     type="button"
-                    className="px-2 py-0.5 rounded-full border border-purple-300 dark:border-purple-500/40 text-[11px] font-bold text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-900/20"
+                    className="px-2 py-0.5 rounded-full border border-primary-300 dark:border-primary-500/40 text-[11px] font-bold text-primary-700 dark:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-900/20"
                     title="Alterna entre E (todas as condições) e OU (qualquer uma)"
                     aria-label={`Combinação das condições do caminho ${index + 1}: ${rule.match === 'all' ? 'todas (E)' : 'qualquer uma (OU)'}`}
                     onClick={() => setRule(rule.id, { match: rule.match === 'all' ? 'any' : 'all' })}
@@ -394,7 +394,7 @@ function ConditionEditor({ block, update }: EditorProps<'condition'>) {
           ))}
           <button
             type="button"
-            className="inline-flex items-center gap-1 text-xs font-medium text-purple-600 dark:text-purple-300 hover:underline"
+            className="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-300 hover:underline"
             onClick={() => setRule(rule.id, { clauses: [...rule.clauses, newConditionClause(newId())] })}
           >
             <Plus size={12} aria-hidden="true" />
@@ -404,7 +404,7 @@ function ConditionEditor({ block, update }: EditorProps<'condition'>) {
       ))}
       <button
         type="button"
-        className="inline-flex items-center gap-1 text-xs font-medium text-purple-600 dark:text-purple-300 hover:underline"
+        className="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-300 hover:underline"
         onClick={() => setRules([...rules, newConditionRule(newId(), newId())])}
       >
         <Plus size={12} aria-hidden="true" />

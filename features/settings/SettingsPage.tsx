@@ -70,16 +70,16 @@ const GeneralSettings: React.FC = () => {
             <select
               aria-label="Selecionar página inicial"
               value={controller.defaultRoute}
-              onChange={(e) => controller.setDefaultRoute(e.target.value)}
+              onChange={(e) => void controller.setDefaultRoute(e.target.value)}
               className={`${SETTINGS_INPUT_CLASS} w-56`}
             >
-              <option value="/dashboard">Dashboard</option>
-              <option value="/inbox-list">Inbox (Lista)</option>
-              <option value="/inbox-focus">Inbox (Foco)</option>
+              <option value="/dashboard">Visão Geral</option>
               <option value="/boards">Boards (Kanban)</option>
+              <option value="/chats">Chats (WhatsApp)</option>
+              <option value="/inbox">Inbox</option>
               <option value="/contacts">Contatos</option>
-              <option value="/activities">Atividades</option>
-              <option value="/reports">Relatórios</option>
+              <option value="/activities">Minhas Atividades</option>
+              <option value="/reports">Performance (Relatórios)</option>
             </select>
           }
         />
@@ -175,8 +175,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ tab: initialTab }) => {
       setActiveTab('ai');
       setAiSub('agentes');
     } else if (pathname?.includes('/settings/ai')) {
+      // Entrar em IA e Automações abre direto em Agentes de IA; a Central fica
+      // atrás de #central (e #ai-config, o link antigo).
       setActiveTab('ai');
-      setAiSub('central');
+      setAiSub(/#(central|ai-config)/.test(window.location.hash) ? 'central' : 'agentes');
     } else if (pathname?.includes('/settings/products')) {
       setActiveTab('products');
     } else if (pathname?.includes('/settings/integracoes')) {

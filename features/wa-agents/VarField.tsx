@@ -8,16 +8,20 @@
  *   PREENCHIDAS PELA IA ({{ia:nome}}) aparecem destacadas no texto (chips de
  *   cor, azul e rosa), com a mesma camada espelho do roteiro.
  * - Digitar `{` abre o autocomplete; continuar digitando filtra a lista. O
- *   botão de chaves ao lado faz o mesmo.
- * - "+ Criar variável preenchida pela IA" abre o popover de nome + instrução.
- * - Clicar numa variável de IA já escrita abre o popover para editar a
- *   instrução, o exemplo ou excluir.
+ *   botão "Inserir variável" abre o mesmo menu, com busca.
+ * - "+ Criar variável preenchida pela IA" abre o balão de nome + instrução.
+ * - Clicar numa variável de IA já escrita abre o balão para editar/excluir.
+ *
+ * Menu e balão são camadas flutuantes num portal (FloatingLayer): nunca ficam
+ * cortados pelo modal e viram para cima quando não há espaço embaixo.
+ * O campo cresce sozinho conforme o texto (auto-resize), sem alça manual.
  *
  * As definições das variáveis de IA são DO AGENTE (agent.ai_vars): a mesma
  * variável pode ser usada em várias ações e a instrução é uma só.
  */
 import React, { useMemo, useRef, useState } from 'react';
 import { Braces, Search, Sparkles, Trash2 } from 'lucide-react';
+import { FloatingLayer } from '@/components/ui/FloatingLayer';
 import {
   ACTION_TEXT_VARIABLE_GROUPS,
   promptVariableName,
@@ -38,8 +42,10 @@ export type VarFieldProps = {
   placeholder?: string;
   ariaLabel?: string;
   maxLength?: number;
-  /** 1 = campo de uma linha (Enter não quebra); mais = área de texto */
+  /** 1 = uma linha lógica (Enter vira espaço; a altura ainda cresce com o texto); mais = área de texto */
   rows?: number;
+  /** Altura inicial em linhas (o campo cresce a partir daí) */
+  minRows?: number;
   /** Variáveis de IA do agente e como alterá-las (compartilhadas entre as ações) */
   aiVars: AgentAiVar[];
   onAiVarsChange: (vars: AgentAiVar[]) => void;
@@ -79,6 +85,7 @@ export const VarField: React.FC<VarFieldProps> = ({
   ariaLabel,
   maxLength,
   rows = 1,
+  minRows,
   aiVars,
   onAiVarsChange,
   extraVars,
@@ -86,12 +93,16 @@ export const VarField: React.FC<VarFieldProps> = ({
   insertLabel,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const anchorRef = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const [menu, setMenu] = useState<MenuState>({ open: false, triggerPos: null });
   const [popover, setPopover] = useState<PopoverState>({ mode: 'closed' });
   const [draft, setDraft] = useState<AgentAiVar>({ name: '', instruction: '', example: '' });
   const [draftError, setDraftError] = useState<string | null>(null);
   /** Busca digitada no menu aberto pelo botão (o menu do `{` filtra pelo texto do campo) */
   const [busca, setBusca] = useState('');
+  const singleLine = rows === 1;
+  const visibleRows = minRows ?? (singleLine ? 2 : rows);
 
   const varGroups: VariableGroup[] = useMemo(() => {
     const base = groups ?? ACTION_TEXT_VARIABLE_GROUPS;
@@ -132,6 +143,13 @@ export const VarField: React.FC<VarFieldProps> = ({
     setMenu({ open: false, triggerPos: null });
     setBusca('');
   };
+  const abrirMenuPeloBotao = () => {
+    setMenu({ open: true, triggerPos: null });
+    // Foco na busca DEPOIS de a camada avisar o modal (foco preso pausado)
+    window.setTimeout(() => searchRef.current?.focus(), 30);
+  };
+
+  const limpar = (text: string) => (singleLine ? text.replace(/\n+/g, ' ') : text);
 
   /** Insere um token: substitui `{`+filtro digitados (quando o menu veio do teclado) ou entra no cursor. */
   const inserir = (token: string) => {
@@ -147,7 +165,7 @@ export const VarField: React.FC<VarFieldProps> = ({
       end = el.selectionEnd ?? caret;
     }
     const { next, caret: pos } = insertToken(value, token, start, end);
-    onChange(rows === 1 ? next.replace(/\n+/g, ' ') : next);
+    onChange(limpar(next));
     fecharMenu();
     requestAnimationFrame(() => {
       el?.focus();
@@ -159,7 +177,7 @@ export const VarField: React.FC<VarFieldProps> = ({
   const handleChange = (next: string) => {
     const el = textareaRef.current;
     const caret = el?.selectionStart ?? next.length;
-    const limpo = rows === 1 ? next.replace(/\n+/g, ' ') : next;
+    const limpo = limpar(next);
     onChange(limpo);
     if (limpo.length === value.length + 1 && limpo[caret - 1] === '{') {
       setMenu({ open: true, triggerPos: caret - 1 });
@@ -223,7 +241,7 @@ export const VarField: React.FC<VarFieldProps> = ({
       const el = textareaRef.current;
       const caret = popover.insertAt ?? el?.selectionStart ?? value.length;
       const { next, caret: pos } = insertToken(value, aiVarToken(nome), caret, el?.selectionEnd ?? caret);
-      onChange(rows === 1 ? next.replace(/\n+/g, ' ') : next);
+      onChange(limpar(next));
       requestAnimationFrame(() => {
         el?.focus();
         el?.setSelectionRange(pos, pos);
@@ -257,59 +275,36 @@ export const VarField: React.FC<VarFieldProps> = ({
     setPopover({ mode: 'closed' });
   };
 
+  const insertFromDrop = (token: string, at?: number) => {
+    const el = textareaRef.current;
+    const start = at ?? el?.selectionStart ?? value.length;
+    const { next, caret } = insertToken(value, token, start, at ?? el?.selectionEnd ?? start);
+    onChange(limpar(next));
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(caret, caret);
+    });
+  };
+
   return (
-    <div className="relative">
+    <div ref={anchorRef} className="relative">
       <div className="flex items-start gap-1.5">
         {/* Clique dentro de um {{ia:...}} (o clique da textarea borbulha até aqui) abre a edição */}
         <div className="flex-1 min-w-0" onClick={abrirEdicaoNoCaret}>
-          {rows === 1 ? (
-            /* Uma linha: o espelho do HighlightedScript precisa de altura própria,
-               então o campo de linha única usa o input com destaque no wrapper */
-            <HighlightedScript
-              id={id}
-              value={value}
-              onChange={handleChange}
-              known={known}
-              textareaRef={textareaRef}
-              rows={1}
-              maxLength={maxLength}
-              placeholder={placeholder}
-              ariaLabel={ariaLabel}
-              className="min-h-0"
-              onInsertToken={(token, at) => {
-                const el = textareaRef.current;
-                const start = at ?? el?.selectionStart ?? value.length;
-                const { next, caret } = insertToken(value, token, start, at ?? el?.selectionEnd ?? start);
-                onChange(next.replace(/\n+/g, ' '));
-                requestAnimationFrame(() => {
-                  el?.focus();
-                  el?.setSelectionRange(caret, caret);
-                });
-              }}
-            />
-          ) : (
-            <HighlightedScript
-              id={id}
-              value={value}
-              onChange={handleChange}
-              known={known}
-              textareaRef={textareaRef}
-              rows={rows}
-              maxLength={maxLength}
-              placeholder={placeholder}
-              ariaLabel={ariaLabel}
-              onInsertToken={(token, at) => {
-                const el = textareaRef.current;
-                const start = at ?? el?.selectionStart ?? value.length;
-                const { next, caret } = insertToken(value, token, start, at ?? el?.selectionEnd ?? start);
-                onChange(next);
-                requestAnimationFrame(() => {
-                  el?.focus();
-                  el?.setSelectionRange(caret, caret);
-                });
-              }}
-            />
-          )}
+          <HighlightedScript
+            id={id}
+            value={value}
+            onChange={handleChange}
+            known={known}
+            textareaRef={textareaRef}
+            rows={visibleRows}
+            maxLength={maxLength}
+            placeholder={placeholder}
+            ariaLabel={ariaLabel}
+            className="min-h-0"
+            autoResize
+            onInsertToken={insertFromDrop}
+          />
         </div>
         <button
           type="button"
@@ -317,161 +312,145 @@ export const VarField: React.FC<VarFieldProps> = ({
           title={insertLabel ?? 'Inserir variável'}
           aria-label={insertLabel ?? 'Inserir variável'}
           aria-expanded={menu.open}
-          onClick={() => (menu.open ? fecharMenu() : setMenu({ open: true, triggerPos: null }))}
+          onClick={() => (menu.open ? fecharMenu() : abrirMenuPeloBotao())}
         >
           <Braces size={14} aria-hidden="true" />
           {insertLabel ? <span>{insertLabel}</span> : null}
         </button>
       </div>
 
-      {menu.open ? (
-        <>
-          <div className="fixed inset-0 z-30" onClick={fecharMenu} aria-hidden="true" />
-          <div className="absolute right-0 top-full mt-1 z-40 w-80 max-w-[calc(100vw-2rem)] max-h-80 overflow-y-auto scrollbar-custom rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 shadow-xl p-1.5">
-            {menu.triggerPos === null ? (
-              <div className="relative mb-1">
-                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
-                <input
-                  autoFocus
-                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg pl-8 pr-2 py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:border-purple-500"
-                  placeholder="Buscar variável"
-                  aria-label="Buscar variável"
-                  value={busca}
-                  onChange={e => setBusca(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Escape') fecharMenu();
-                  }}
-                />
-              </div>
-            ) : null}
-            {gruposFiltrados.map(g => (
-              <div key={g.label}>
-                <p className="px-2.5 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{g.label}</p>
-                {g.vars.map(v => (
-                  <button key={v.key} type="button" className={MENU_ITEM_CLASS} onClick={() => inserir(v.key)}>
-                    <span className="block text-slate-800 dark:text-slate-100">{v.description}</span>
-                    <code className="block font-mono text-[11px] text-blue-700 dark:text-blue-300">{v.key}</code>
-                  </button>
-                ))}
-              </div>
-            ))}
-            {nadaEncontrado ? (
-              <p className="px-2.5 py-2 text-xs text-slate-500 dark:text-slate-400">Nenhuma variável com esse nome.</p>
-            ) : null}
-            {iaFiltradas.length > 0 ? (
-              <p className="px-2.5 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                Preenchidas pela IA
-              </p>
-            ) : null}
-            {iaFiltradas.map(v => (
-              <button key={v.name} type="button" className={MENU_ITEM_CLASS} onClick={() => inserir(aiVarToken(v.name))}>
-                <code className="font-mono text-[11px] text-fuchsia-700 dark:text-fuchsia-300">{aiVarToken(v.name)}</code>
-                <span className="block text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1">{v.instruction}</span>
+      <FloatingLayer open={menu.open} anchorRef={anchorRef} onClose={fecharMenu} width={340} align="end" maxHeight={380} role="menu" ariaLabel="Variáveis disponíveis" className="p-1.5">
+        {menu.triggerPos === null ? (
+          <div className="relative mb-1 sticky top-0 bg-white dark:bg-dark-card">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+            <input
+              ref={searchRef}
+              className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg pl-8 pr-2 py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:border-primary-500"
+              placeholder="Buscar variável"
+              aria-label="Buscar variável"
+              value={busca}
+              onChange={e => setBusca(e.target.value)}
+            />
+          </div>
+        ) : null}
+        {gruposFiltrados.map(g => (
+          <div key={g.label}>
+            <p className="px-2.5 pt-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{g.label}</p>
+            {g.vars.map(v => (
+              <button key={v.key} type="button" className={MENU_ITEM_CLASS} onClick={() => inserir(v.key)}>
+                <span className="block text-slate-800 dark:text-slate-100">{v.description}</span>
+                <code className="block font-mono text-[11px] text-blue-700 dark:text-blue-300">{v.key}</code>
               </button>
             ))}
-            <div className="border-t border-slate-200 dark:border-white/10 mt-1 pt-1">
+          </div>
+        ))}
+        {nadaEncontrado ? (
+          <p className="px-2.5 py-2 text-xs text-slate-500 dark:text-slate-400">Nenhuma variável com esse nome.</p>
+        ) : null}
+        {iaFiltradas.length > 0 ? (
+          <p className="px-2.5 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Preenchidas pela IA</p>
+        ) : null}
+        {iaFiltradas.map(v => (
+          <button key={v.name} type="button" className={MENU_ITEM_CLASS} onClick={() => inserir(aiVarToken(v.name))}>
+            <code className="font-mono text-[11px] text-fuchsia-700 dark:text-fuchsia-300">{aiVarToken(v.name)}</code>
+            <span className="block text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1">{v.instruction}</span>
+          </button>
+        ))}
+        <div className="border-t border-slate-200 dark:border-white/10 mt-1 pt-1 sticky bottom-0 bg-white dark:bg-dark-card">
+          <button
+            type="button"
+            className={`${MENU_ITEM_CLASS} font-semibold text-fuchsia-700 dark:text-fuchsia-300 flex items-center gap-1.5`}
+            onClick={() => abrirCriacao(menu.triggerPos)}
+          >
+            <Sparkles size={13} aria-hidden="true" />
+            Criar variável preenchida pela IA
+          </button>
+        </div>
+      </FloatingLayer>
+
+      <FloatingLayer
+        open={popover.mode !== 'closed'}
+        anchorRef={anchorRef}
+        onClose={() => setPopover({ mode: 'closed' })}
+        width={400}
+        align="end"
+        maxHeight={520}
+        role="dialog"
+        ariaLabel={popover.mode === 'create' ? 'Criar variável preenchida pela IA' : 'Editar variável preenchida pela IA'}
+        className="p-3"
+      >
+        <div className="space-y-2.5">
+          <p className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
+            <Sparkles size={14} className="text-fuchsia-600 dark:text-fuchsia-400" aria-hidden="true" />
+            {popover.mode === 'create' ? 'Variável preenchida pela IA' : popover.mode === 'edit' ? `Editar {{ia:${popover.name}}}` : ''}
+          </p>
+          <div>
+            <label htmlFor={`${id}-iavar-nome`} className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+              Nome
+            </label>
+            <input
+              id={`${id}-iavar-nome`}
+              className={`${INPUT_CLASS} font-mono`}
+              value={draft.name}
+              onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
+              onBlur={() => setDraft(d => ({ ...d, name: slugAiName(d.name) }))}
+              placeholder="motivo_contato"
+              maxLength={40}
+            />
+          </div>
+          <div>
+            <label htmlFor={`${id}-iavar-instrucao`} className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+              Instrução para a IA
+            </label>
+            <textarea
+              id={`${id}-iavar-instrucao`}
+              className={TEXTAREA_CLASS}
+              rows={3}
+              value={draft.instruction}
+              onChange={e => setDraft(d => ({ ...d, instruction: e.target.value }))}
+              placeholder="Identifique resumidamente o principal motivo pelo qual o cliente entrou em contato."
+              maxLength={500}
+            />
+          </div>
+          <div>
+            <label htmlFor={`${id}-iavar-exemplo`} className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+              Exemplo de resultado (opcional)
+            </label>
+            <input
+              id={`${id}-iavar-exemplo`}
+              className={INPUT_CLASS}
+              value={draft.example}
+              onChange={e => setDraft(d => ({ ...d, example: e.target.value }))}
+              placeholder="Dúvida sobre honorários de ação trabalhista"
+              maxLength={200}
+            />
+          </div>
+          {draftError ? <p className="text-xs text-red-600 dark:text-red-400">{draftError}</p> : null}
+          <p className={HELP_CLASS}>Na hora de executar a ação, a IA do agente lê a conversa e preenche o valor no lugar da variável.</p>
+          <div className="flex items-center justify-between gap-2 pt-1">
+            {popover.mode === 'edit' ? (
+              <button type="button" className={`${BTN_SMALL} text-red-600 dark:text-red-400`} onClick={excluirVariavel}>
+                <Trash2 size={13} aria-hidden="true" />
+                Excluir
+              </button>
+            ) : (
+              <span />
+            )}
+            <span className="flex items-center gap-1.5">
+              <button type="button" className={BTN_SMALL} onClick={() => setPopover({ mode: 'closed' })}>
+                Cancelar
+              </button>
               <button
                 type="button"
-                className={`${MENU_ITEM_CLASS} font-semibold text-fuchsia-700 dark:text-fuchsia-300 flex items-center gap-1.5`}
-                onClick={() => abrirCriacao(menu.triggerPos)}
+                className={`${BTN_SMALL} !text-white !bg-fuchsia-600 hover:!bg-fuchsia-500 !border-fuchsia-600`}
+                onClick={salvarPopover}
               >
-                <Sparkles size={13} aria-hidden="true" />
-                Criar variável preenchida pela IA
+                {popover.mode === 'create' ? 'Criar e inserir' : 'Salvar'}
               </button>
-            </div>
+            </span>
           </div>
-        </>
-      ) : null}
-
-      {popover.mode !== 'closed' ? (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setPopover({ mode: 'closed' })} aria-hidden="true" />
-          <div
-            role="dialog"
-            aria-label={popover.mode === 'create' ? 'Criar variável preenchida pela IA' : 'Editar variável preenchida pela IA'}
-            className="absolute right-0 top-full mt-1 z-40 w-96 max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 shadow-xl p-3 space-y-2.5"
-          >
-            <p className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
-              <Sparkles size={14} className="text-fuchsia-600 dark:text-fuchsia-400" aria-hidden="true" />
-              {popover.mode === 'create' ? 'Variável preenchida pela IA' : `Editar {{ia:${popover.name}}}`}
-            </p>
-            <div>
-              <label htmlFor={`${id}-iavar-nome`} className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                Nome
-              </label>
-              <input
-                id={`${id}-iavar-nome`}
-                className={`${INPUT_CLASS} font-mono`}
-                value={draft.name}
-                onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
-                onBlur={() => setDraft(d => ({ ...d, name: slugAiName(d.name) }))}
-                placeholder="motivo_contato"
-                maxLength={40}
-              />
-            </div>
-            <div>
-              <label
-                htmlFor={`${id}-iavar-instrucao`}
-                className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
-              >
-                Instrução para a IA
-              </label>
-              <textarea
-                id={`${id}-iavar-instrucao`}
-                className={TEXTAREA_CLASS}
-                rows={3}
-                value={draft.instruction}
-                onChange={e => setDraft(d => ({ ...d, instruction: e.target.value }))}
-                placeholder="Identifique resumidamente o principal motivo pelo qual o cliente entrou em contato."
-                maxLength={500}
-              />
-            </div>
-            <div>
-              <label htmlFor={`${id}-iavar-exemplo`} className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                Exemplo de resultado (opcional)
-              </label>
-              <input
-                id={`${id}-iavar-exemplo`}
-                className={INPUT_CLASS}
-                value={draft.example}
-                onChange={e => setDraft(d => ({ ...d, example: e.target.value }))}
-                placeholder="Dúvida sobre honorários de ação trabalhista"
-                maxLength={200}
-              />
-            </div>
-            {draftError ? <p className="text-xs text-red-600 dark:text-red-400">{draftError}</p> : null}
-            <p className={HELP_CLASS}>
-              Na hora de executar a ação, a IA do agente lê a conversa e preenche o valor no lugar da variável.
-            </p>
-            <div className="flex items-center justify-between gap-2 pt-1">
-              {popover.mode === 'edit' ? (
-                <button
-                  type="button"
-                  className={`${BTN_SMALL} text-red-600 dark:text-red-400`}
-                  onClick={excluirVariavel}
-                >
-                  <Trash2 size={13} aria-hidden="true" />
-                  Excluir
-                </button>
-              ) : (
-                <span />
-              )}
-              <span className="flex items-center gap-1.5">
-                <button type="button" className={BTN_SMALL} onClick={() => setPopover({ mode: 'closed' })}>
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  className={`${BTN_SMALL} !text-white !bg-fuchsia-600 hover:!bg-fuchsia-500 !border-fuchsia-600`}
-                  onClick={salvarPopover}
-                >
-                  {popover.mode === 'create' ? 'Criar e inserir' : 'Salvar'}
-                </button>
-              </span>
-            </div>
-          </div>
-        </>
-      ) : null}
+        </div>
+      </FloatingLayer>
     </div>
   );
 };

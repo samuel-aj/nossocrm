@@ -4,7 +4,7 @@
  * Lista de agentes de IA: cards com status, números vinculados e ações
  * (Editar, Duplicar, Excluir). "Novo agente" abre o editor com os padrões.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Bot, Plus, Pencil, Copy, Trash2, Phone, Cpu } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
 import { useToast } from '@/context/ToastContext';
@@ -69,6 +69,19 @@ export const AgentList: React.FC = () => {
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<WaAgentListItem | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  // Vindo do board (Automatizar): ?agent=<id> abre o editor e some da URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('agent');
+    if (!id || !listQ.data) return;
+    params.delete('agent');
+    const qs = params.toString();
+    window.history.replaceState(null, '', `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`);
+    const item = listQ.data.find((a) => a.id === id);
+    const full = item ? asPublic(item) : null;
+    if (full) setEditor({ agent: full });
+  }, [listQ.data]);
 
   if (editor) {
     return <AgentEditor agent={editor.agent} initial={editor.initial} onClose={() => setEditor(null)} />;

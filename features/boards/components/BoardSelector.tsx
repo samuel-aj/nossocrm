@@ -11,6 +11,8 @@ interface BoardSelectorProps {
   onDeleteBoard?: (id: string) => void;
   /** Arrastar pra reordenar as pipelines: recebe TODOS os ids na nova ordem. */
   onReorderBoards?: (orderedIds: string[]) => void;
+  /** 'title': o nome do board vira o título da página (sem caixa/borda) */
+  variant?: 'default' | 'title';
 }
 
 /**
@@ -41,6 +43,7 @@ export const BoardSelector: React.FC<BoardSelectorProps> = ({
   onEditBoard,
   onDeleteBoard,
   onReorderBoards,
+  variant = 'default',
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   // Drag & drop nativo com REORDENAÇÃO AO VIVO: enquanto arrasta, a lista
@@ -84,15 +87,28 @@ export const BoardSelector: React.FC<BoardSelectorProps> = ({
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/10 transition-colors"
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        title="Trocar de board"
+        className={
+          variant === 'title'
+            ? 'flex items-center gap-1.5 -ml-1.5 px-1.5 py-0.5 rounded-lg max-w-full hover:bg-slate-100 dark:hover:bg-white/5 transition-colors'
+            : 'flex items-center gap-2 px-3 py-2 rounded-lg bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/10 transition-colors'
+        }
       >
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-primary-500" />
-          <span className="font-medium text-slate-900 dark:text-white max-md:max-w-[6rem] max-md:truncate max-md:text-sm">
+        <div className="flex items-center gap-2 min-w-0">
+          {variant !== 'title' && <div className="w-2 h-2 rounded-full bg-primary-500" />}
+          <span
+            className={
+              variant === 'title'
+                ? 'font-display font-bold text-xl md:text-2xl tracking-tight text-slate-900 dark:text-white truncate max-md:max-w-[11rem]'
+                : 'font-medium text-slate-900 dark:text-white max-md:max-w-[6rem] max-md:truncate max-md:text-sm'
+            }
+          >
             {activeBoard.name}
           </span>
         </div>
-        <ChevronDown size={16} className={`text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        <ChevronDown size={variant === 'title' ? 18 : 16} className={`shrink-0 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
       {isOpen && (

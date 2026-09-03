@@ -6,7 +6,7 @@
  * O editor abre como camada de tela cheia por cima da lista (portal), então a
  * lista continua montada embaixo e reaparece atualizada ao fechar.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Workflow, Plus, Pencil, Trash2, Play, Phone, Zap, Loader2 } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -52,6 +52,18 @@ export const BotList: React.FC = () => {
   const [testBot, setTestBot] = useState<BotRow | null>(null);
   const [testPhone, setTestPhone] = useState('');
   const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  // Vindo do board (Automatizar): ?bot=<id> abre o editor e some da URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('bot');
+    if (!id || !listQ.data) return;
+    params.delete('bot');
+    const qs = params.toString();
+    window.history.replaceState(null, '', `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`);
+    const bot = listQ.data.find((b) => b.id === id);
+    if (bot) setEditor({ bot });
+  }, [listQ.data]);
 
   const options = optionsQ.data;
   const connectionLabel = (id: string | null) => {

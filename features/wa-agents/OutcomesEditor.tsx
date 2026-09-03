@@ -534,7 +534,7 @@ function ActionFields({
       );
     case 'create_task':
       return (
-        <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+        <div className="space-y-2">
           <VarField
             id={`${idPrefix}-task-title`}
             value={action.title}
@@ -678,16 +678,17 @@ export const ActionsEditor: React.FC<{
         return (
           <div
             key={aPrefix}
-            className="grid grid-cols-[auto_minmax(0,1fr)] md:grid-cols-[auto_minmax(0,240px)_1fr_auto] gap-2 items-start bg-slate-50 dark:bg-slate-950/40 border border-slate-200 dark:border-white/10 rounded-lg p-2"
+            className="bg-slate-50 dark:bg-slate-950/40 border border-slate-200 dark:border-white/10 rounded-lg p-2.5 space-y-2"
           >
+            <div className="flex items-center gap-2">
             <span
-              className="mt-2 p-1.5 rounded-md bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400"
+              className="p-1.5 rounded-md bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 shrink-0"
               title={actionLabel(action.type)}
             >
               <Icon size={14} aria-hidden="true" />
             </span>
             <select
-              className={INPUT_CLASS}
+              className={`${INPUT_CLASS} md:max-w-xs`}
               value={action.type}
               aria-label={`Tipo da ação ${aIndex + 1}`}
               onChange={(e) => setAction(defaultAction(e.target.value as ActionType, agents, options, currentAgentId, bots))}
@@ -698,7 +699,17 @@ export const ActionsEditor: React.FC<{
                 </option>
               ))}
             </select>
-            <div className="min-w-0 col-span-2 md:col-span-1">
+            <button
+              type="button"
+              className={`${BTN_ICON} hover:text-red-600 dark:hover:text-red-400 ml-auto`}
+              aria-label={`Remover ação ${aIndex + 1}`}
+              title="Remover ação"
+              onClick={() => onChange(value.filter((_, i) => i !== aIndex))}
+            >
+              <Trash2 size={14} aria-hidden="true" />
+            </button>
+            </div>
+            <div className="min-w-0">
               <ActionFields
                 action={action}
                 onChange={setAction}
@@ -711,15 +722,6 @@ export const ActionsEditor: React.FC<{
                 idPrefix={aPrefix}
               />
             </div>
-            <button
-              type="button"
-              className={`${BTN_ICON} hover:text-red-600 dark:hover:text-red-400 col-start-2 md:col-start-auto justify-self-end`}
-              aria-label={`Remover ação ${aIndex + 1}`}
-              title="Remover ação"
-              onClick={() => onChange(value.filter((_, i) => i !== aIndex))}
-            >
-              <Trash2 size={14} aria-hidden="true" />
-            </button>
           </div>
         );
       })}
