@@ -575,12 +575,24 @@ Deno.serve(async (req) => {
           if (novoTexto) {
             const tsE = typeof m.messageTimestamp === "string" ? parseInt(m.messageTimestamp, 10) : m.messageTimestamp;
             const editadoEm = tsE ? new Date(tsE * 1000).toISOString() : new Date().toISOString();
-            const { data: alvoMsg } = await supabase
-              .from("wa_messages")
-              .select("id, conversation_id, sender_name")
-              .eq("organization_id", orgId)
-              .eq("evolution_message_id", editTargetId)
-              .maybeSingle();
+            const buscarAlvo = async () =>
+              (await supabase
+                .from("wa_messages")
+                .select("id, conversation_id, sender_name")
+                .eq("organization_id", orgId)
+                .eq("evolution_message_id", editTargetId)
+                .maybeSingle()).data;
+            let alvoMsg = await buscarAlvo();
+            if (!alvoMsg) {
+              // Edição COLADA no envio (pessoa corrige na hora): o evento da
+              // edição pode chegar antes de a mensagem original terminar de
+              // ser gravada. Espera um instante e tenta de novo.
+              await new Promise((r) => setTimeout(r, 1500));
+              alvoMsg = await buscarAlvo();
+            }
+            if (!alvoMsg) {
+              console.error(`[wa-webhook] edicao: mensagem original nao encontrada (provider_id=${editTargetId})`);
+            }
             if (alvoMsg) {
               let { error: edErr } = await supabase
                 .from("wa_messages")
@@ -941,12 +953,21 @@ Deno.serve(async (req) => {
       }
       novoTexto = novoTexto.trim();
       if (!targetId || !novoTexto) continue;
-      const { data: alvoMsg } = await supabase
-        .from("wa_messages")
-        .select("id, body, conversation_id, sender_name")
-        .eq("organization_id", orgId)
-        .eq("evolution_message_id", String(targetId))
-        .maybeSingle();
+      const buscarAlvo = async () =>
+        (await supabase
+          .from("wa_messages")
+          .select("id, body, conversation_id, sender_name")
+          .eq("organization_id", orgId)
+          .eq("evolution_message_id", String(targetId))
+          .maybeSingle()).data;
+      let alvoMsg = await buscarAlvo();
+      if (!alvoMsg) {
+        // Edição COLADA no envio (pessoa corrige na hora): o evento da edição
+        // pode chegar antes de a mensagem original terminar de ser gravada.
+        // Espera um instante e tenta de novo antes de desistir.
+        await new Promise((r) => setTimeout(r, 1500));
+        alvoMsg = await buscarAlvo();
+      }
       if (!alvoMsg) {
         console.error(`[wa-webhook] edicao: mensagem original nao encontrada (provider_id=${String(targetId)})`);
         continue;
