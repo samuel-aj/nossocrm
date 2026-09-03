@@ -71,16 +71,24 @@ function diaDaMensagem(m: { wa_timestamp: string | null; created_at: string }): 
   return isNaN(d.getTime()) ? '' : `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
-/** Rótulo do separador de dia, estilo WhatsApp: Hoje, Ontem ou 01/09/2026. */
+const WEEKDAY_FMT = new Intl.DateTimeFormat('pt-BR', { weekday: 'long' });
+
+/**
+ * Rótulo do separador de dia, igual ao WhatsApp: Hoje, Ontem, o dia da
+ * semana ("terça-feira") dentro da última semana e a data completa
+ * (01/09/2026) para o que for mais antigo.
+ */
 function rotuloDoDia(m: { wa_timestamp: string | null; created_at: string }): string {
   const d = new Date(m.wa_timestamp || m.created_at);
   if (isNaN(d.getTime())) return '';
   const hoje = new Date();
-  const ontem = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate() - 1);
-  const mesmoDia = (a: Date, b: Date) =>
-    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-  if (mesmoDia(d, hoje)) return 'Hoje';
-  if (mesmoDia(d, ontem)) return 'Ontem';
+  const inicioHoje = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+  const dias = Math.floor(
+    (inicioHoje.getTime() - new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()) / 86_400_000
+  );
+  if (dias <= 0) return 'Hoje';
+  if (dias === 1) return 'Ontem';
+  if (dias < 7) return WEEKDAY_FMT.format(d);
   return DATE_FMT.format(d);
 }
 
@@ -2110,15 +2118,10 @@ export function DealWhatsAppChat({
             }}
           >
             {(i === 0 || diaDaMensagem(messages[i - 1]) !== diaDaMensagem(m)) && rotuloDoDia(m) && (
-              <div
-                className="flex items-center gap-3 pt-2 pb-1 select-none"
-                aria-label={`Mensagens de ${rotuloDoDia(m)}`}
-              >
-                <span className="flex-1 h-px bg-slate-200 dark:bg-white/10" />
-                <span className="text-[11px] font-semibold px-3 py-1 rounded-full bg-white dark:bg-white/10 text-slate-500 dark:text-slate-300 shadow-sm border border-slate-200/70 dark:border-white/10">
+              <div className="flex justify-center py-1.5 select-none" aria-label={`Mensagens de ${rotuloDoDia(m)}`}>
+                <span className="text-[11px] font-medium px-2.5 py-[3px] rounded-md bg-slate-200/80 text-slate-600 dark:bg-white/10 dark:text-slate-300 shadow-sm">
                   {rotuloDoDia(m)}
                 </span>
-                <span className="flex-1 h-px bg-slate-200 dark:bg-white/10" />
               </div>
             )}
             {showConnDividers &&
