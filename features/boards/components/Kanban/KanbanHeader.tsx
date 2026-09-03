@@ -565,13 +565,37 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                     )}
                 </div>
 
-                {/* Ação principal (desktop). No celular ela vai para a barra de controles */}
-                <button
-                    onClick={onNewDeal}
-                    className="max-md:hidden shrink-0 h-[38px] bg-primary-700 hover:bg-primary-600 text-white px-4 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-primary-700/20"
-                >
-                    <Plus size={18} aria-hidden="true" /> Novo Negócio
-                </button>
+                {/* Ações principais: Automatizar (só admin) à esquerda de Novo Negócio */}
+                <div className="flex items-center gap-2 shrink-0 max-md:gap-1.5">
+                    {onToggleAutomationMode && (
+                        <button
+                            type="button"
+                            onClick={onToggleAutomationMode}
+                            aria-pressed={automationMode}
+                            title={automationMode ? 'Concluir e voltar aos leads' : 'Automatizar: o que dispara em cada etapa'}
+                            className={`${CONTROL_BUTTON_CLASS} font-medium ${automationMode
+                                ? 'border-primary-600 bg-primary-600 text-white shadow-lg shadow-primary-600/20 hover:bg-primary-700'
+                                : `${CONTROL_IDLE} hover:text-primary-700 dark:hover:text-white`}`}
+                        >
+                            <Zap size={15} className={automationMode ? 'fill-current' : ''} aria-hidden="true" />
+                            <span className="max-md:hidden">{automationMode ? 'Concluir' : 'Automatizar'}</span>
+                        </button>
+                    )}
+                    <button
+                        onClick={onNewDeal}
+                        className="max-md:hidden h-[38px] bg-primary-700 hover:bg-primary-600 text-white px-4 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-primary-700/20"
+                    >
+                        <Plus size={18} aria-hidden="true" /> Novo Negócio
+                    </button>
+                    <button
+                        onClick={onNewDeal}
+                        aria-label="Novo negócio"
+                        title="Novo negócio"
+                        className="md:hidden h-[38px] w-[38px] flex items-center justify-center rounded-lg bg-primary-700 hover:bg-primary-600 text-white shadow-lg shadow-primary-700/20 active:scale-95 transition-all"
+                    >
+                        <Plus size={20} aria-hidden="true" />
+                    </button>
+                </div>
             </div>
 
             {/* Barra de controles */}
@@ -599,6 +623,76 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                     onDeleteBoard={onDeleteBoard}
                     onReorderBoards={onReorderBoards}
                 />
+
+                {/* ⋮ mais opções, colado no seletor do board */}
+                <div ref={moreMenuRef} className="relative">
+                    <button
+                        type="button"
+                        onClick={() => setMoreMenuOpen((o) => !o)}
+                        aria-expanded={moreMenuOpen}
+                        aria-label="Mais opções"
+                        title="Mais opções"
+                        className={`h-[38px] w-[38px] flex items-center justify-center rounded-lg border text-sm transition-colors ${selectionMode ? CONTROL_ACTIVE : CONTROL_IDLE}`}
+                    >
+                        <MoreVertical size={18} />
+                    </button>
+                    {moreMenuOpen && (
+                        <div className="absolute left-0 z-50 mt-1 w-56 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1">
+                            {!selectionMode ? (
+                                <>
+                                    {/* Seleção múltipla só tem UI (checkboxes) no kanban */}
+                                    {viewMode === 'kanban' && !automationMode && (
+                                        <button
+                                            type="button"
+                                            onClick={() => { onEnterSelectionMode(); setMoreMenuOpen(false); }}
+                                            className={menuItemClass}
+                                        >
+                                            <CheckSquare size={14} /> Selecionar vários
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            // Abre o editor de estratégia do board (o banner de CTA
+                                            // não existe mais no kanban — este é o ponto de entrada).
+                                            window.dispatchEvent(new Event('crm:board-strategy-edit'));
+                                            setMoreMenuOpen(false);
+                                        }}
+                                        className={menuItemClass}
+                                    >
+                                        <Target size={14} /> Estratégia do board
+                                    </button>
+                                    {onEditBoard && (
+                                        <button
+                                            type="button"
+                                            onClick={() => { onEditBoard(activeBoard); setMoreMenuOpen(false); }}
+                                            className={menuItemClass}
+                                        >
+                                            <Settings size={14} /> Configurações do board
+                                        </button>
+                                    )}
+                                    {onExportTemplates && (
+                                        <button
+                                            type="button"
+                                            onClick={() => { onExportTemplates(); setMoreMenuOpen(false); }}
+                                            className={`${menuItemClass} max-md:hidden`}
+                                        >
+                                            <Download size={14} /> Exportar template
+                                        </button>
+                                    )}
+                                </>
+                            ) : (
+                                <button
+                                    type="button"
+                                    onClick={() => { onExitSelectionMode(); setMoreMenuOpen(false); }}
+                                    className={menuItemClass}
+                                >
+                                    <X size={14} /> Cancelar seleção
+                                </button>
+                            )}
+                        </div>
+                    )}
+                </div>
 
                 <PeriodButton dateRange={dateRange} onChange={setDateRange} />
 
@@ -641,101 +735,6 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                         </button>
                     </div>
 
-                    {/* Automatizar: camada de automações por etapa (só admin) */}
-                    {onToggleAutomationMode && (
-                        <button
-                            type="button"
-                            onClick={onToggleAutomationMode}
-                            aria-pressed={automationMode}
-                            title={automationMode ? 'Concluir e voltar ao board' : 'Automatizar: o que dispara em cada etapa'}
-                            className={`${CONTROL_BUTTON_CLASS} font-medium ${automationMode
-                                ? 'border-primary-600 bg-primary-600 text-white shadow-lg shadow-primary-600/20 hover:bg-primary-700'
-                                : `${CONTROL_IDLE} hover:text-primary-700 dark:hover:text-white`}`}
-                        >
-                            <Zap size={15} className={automationMode ? 'fill-current' : ''} aria-hidden="true" />
-                            <span className="max-md:hidden">{automationMode ? 'Concluir' : 'Automatizar'}</span>
-                        </button>
-                    )}
-
-                    {/* ⋮ mais opções */}
-                    <div ref={moreMenuRef} className="relative">
-                        <button
-                            type="button"
-                            onClick={() => setMoreMenuOpen((o) => !o)}
-                            aria-expanded={moreMenuOpen}
-                            aria-label="Mais opções"
-                            title="Mais opções"
-                            className={`h-[38px] w-[38px] flex items-center justify-center rounded-lg border text-sm transition-colors ${selectionMode ? CONTROL_ACTIVE : CONTROL_IDLE}`}
-                        >
-                            <MoreVertical size={18} />
-                        </button>
-                        {moreMenuOpen && (
-                            <div className="absolute right-0 z-50 mt-1 w-56 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1">
-                                {!selectionMode ? (
-                                    <>
-                                        {/* Seleção múltipla só tem UI (checkboxes) no kanban */}
-                                        {viewMode === 'kanban' && !automationMode && (
-                                            <button
-                                                type="button"
-                                                onClick={() => { onEnterSelectionMode(); setMoreMenuOpen(false); }}
-                                                className={menuItemClass}
-                                            >
-                                                <CheckSquare size={14} /> Selecionar vários
-                                            </button>
-                                        )}
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                // Abre o editor de estratégia do board (o banner de CTA
-                                                // não existe mais no kanban — este é o ponto de entrada).
-                                                window.dispatchEvent(new Event('crm:board-strategy-edit'));
-                                                setMoreMenuOpen(false);
-                                            }}
-                                            className={menuItemClass}
-                                        >
-                                            <Target size={14} /> Estratégia do board
-                                        </button>
-                                        {onEditBoard && (
-                                            <button
-                                                type="button"
-                                                onClick={() => { onEditBoard(activeBoard); setMoreMenuOpen(false); }}
-                                                className={menuItemClass}
-                                            >
-                                                <Settings size={14} /> Configurações do board
-                                            </button>
-                                        )}
-                                        {onExportTemplates && (
-                                            <button
-                                                type="button"
-                                                onClick={() => { onExportTemplates(); setMoreMenuOpen(false); }}
-                                                className={`${menuItemClass} max-md:hidden`}
-                                            >
-                                                <Download size={14} /> Exportar template
-                                            </button>
-                                        )}
-                                    </>
-                                ) : (
-                                    <button
-                                        type="button"
-                                        onClick={() => { onExitSelectionMode(); setMoreMenuOpen(false); }}
-                                        className={menuItemClass}
-                                    >
-                                        <X size={14} /> Cancelar seleção
-                                    </button>
-                                )}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Novo negócio no celular (no desktop fica ao lado do título) */}
-                    <button
-                        onClick={onNewDeal}
-                        aria-label="Novo negócio"
-                        title="Novo negócio"
-                        className="md:hidden h-[38px] w-[38px] flex items-center justify-center rounded-lg bg-primary-700 hover:bg-primary-600 text-white shadow-lg shadow-primary-700/20 active:scale-95 transition-all"
-                    >
-                        <Plus size={20} aria-hidden="true" />
-                    </button>
                 </div>
             </div>
 

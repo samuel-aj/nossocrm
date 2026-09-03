@@ -454,7 +454,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                 </span>
                 <span className="flex items-center gap-1">
                   <span className="text-xs font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded text-slate-600 dark:text-slate-300">
-                    {stageDeals.length}
+                    {automation ? (automation.byStage.get(stage.id)?.length ?? 0) : stageDeals.length}
                   </span>
                   {/* Celular: setinha pra próxima etapa */}
                   {stageIndex < mobileColumns.length - 1 && (
@@ -485,10 +485,16 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
               </div>
 
               <div className="text-xs text-slate-500 dark:text-slate-400 font-medium text-right">
-                Total:{' '}
-                <span className="text-slate-900 dark:text-white font-mono">
-                  ${stageValue.toLocaleString()}
-                </span>
+                {automation ? (
+                  <span className="text-primary-600 dark:text-primary-300">Automações da etapa</span>
+                ) : (
+                  <>
+                    Total:{' '}
+                    <span className="text-slate-900 dark:text-white font-mono">
+                      ${stageValue.toLocaleString()}
+                    </span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -496,8 +502,8 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
               data-kanban-col-scroll
               className={`flex-1 p-2 overflow-y-auto scrollbar-custom space-y-2 bg-slate-100/50 dark:bg-black/20 min-h-[100px]`}
             >
-              {/* Modo Automatizar: o que dispara ao entrar, acima dos leads */}
-              {automation && (
+              {/* Modo Automatizar: as automações no lugar dos leads */}
+              {automation ? (
                 <StageAutomationsPanel
                   items={automation.byStage.get(stage.id) ?? []}
                   loading={automation.loading}
@@ -506,9 +512,10 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                   onToggle={automation.onToggle}
                   onRemove={automation.onRemove}
                 />
-              )}
+              ) : (
+              <>
               {stageDeals.length === 0 && !draggingId && (
-                <div className={`${automation ? 'py-4' : 'h-full py-8'} flex items-center justify-center text-slate-400 dark:text-slate-600 text-sm`}>
+                <div className="h-full py-8 flex items-center justify-center text-slate-400 dark:text-slate-600 text-sm">
                   Sem negócios
                 </div>
               )}
@@ -545,6 +552,8 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                   contactInactive={!!deal.contactId && inactiveContactIds.has(deal.contactId)}
                 />
               ))}
+              </>
+              )}
             </div>
           </div>
         );
