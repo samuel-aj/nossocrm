@@ -673,14 +673,52 @@ async function processarEventos(supabase: any, conn: ConnRow, payload: any): Pro
         }
         if (!convId) continue;
 
-        // idempotência: se já temos essa mensagem (reentrega da Meta), pula.
+        // Idempotência: se já temos essa mensagem (reentrega da Meta), pula —
+        // MAS reentrega com TEXTO DIFERENTE é EDIÇÃO: a Cloud API reenvia a
+        // mensagem editada com o MESMO id. Atualiza o corpo e carimba
+        // edited_at em vez de descartar (antes a edição sumia em silêncio e o
+        // CRM ficava com o texto antigo para sempre).
         const { data: existingMsg } = await supabase
           .from("wa_messages")
-          .select("id")
+          .select("id, body, conversation_id, sender_name")
           .eq("organization_id", orgId)
           .eq("evolution_message_id", providerId)
           .maybeSingle();
-        if (existingMsg) continue;
+        if (existingMsg) {
+          const novoTexto = (text ?? "").trim();
+          const antigo = (existingMsg.body ?? "").trim();
+          if (novoTexto && novoTexto !== antigo) {
+            console.log(
+              `[wa-webhook-meta] edicao: msg=${existingMsg.id} de="${antigo.slice(0, 80)}" para="${novoTexto.slice(0, 80)}"`
+            );
+            let { error: edErr } = await supabase
+              .from("wa_messages")
+              .update({ body: novoTexto, edited_at: new Date().toISOString() })
+              .eq("id", existingMsg.id);
+            // Banco ainda sem a coluna edited_at (migração pendente): grava só o texto
+            if (edErr && /column/i.test(String(edErr.message)) && /edited_at/i.test(String(edErr.message))) {
+              ({ error: edErr } = await supabase.from("wa_messages").update({ body: novoTexto }).eq("id", existingMsg.id));
+            }
+            if (edErr) console.error("[wa-webhook-meta] edicao falhou:", edErr.message);
+            // Prévia: só quando a editada é a ÚLTIMA mensagem da conversa
+            const { data: ultima } = await supabase
+              .from("wa_messages")
+              .select("id")
+              .eq("conversation_id", existingMsg.conversation_id)
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            if (ultima?.id === existingMsg.id) {
+              const nome = (existingMsg.sender_name ?? "").trim();
+              const previa = (nome ? `${nome}: ${novoTexto}` : novoTexto).slice(0, 140);
+              await supabase
+                .from("wa_conversations")
+                .update({ last_message_preview: previa })
+                .eq("id", existingMsg.conversation_id);
+            }
+          }
+          continue;
+        }
 
         // Mídia: baixa por media-id na Graph API e sobe pro Storage privado.
         let mediaPath: string | null = null;
