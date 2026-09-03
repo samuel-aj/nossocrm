@@ -1118,6 +1118,9 @@ export const useBoardsController = () => {
             defaultProductId: boardData.defaultProductId,
             hiddenFieldGroups: boardData.hiddenFieldGroups,
             stages: boardData.stages,
+            // Objetivo: objeto salva, null limpa as colunas goal_* (antes não era
+            // enviado e a remoção ficava só na tela)
+            goal: boardData.goal ?? null,
           },
         },
         {

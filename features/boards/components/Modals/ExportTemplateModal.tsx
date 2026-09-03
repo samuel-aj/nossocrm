@@ -80,7 +80,7 @@ function buildJourneyFromBoards(
       })),
       strategy: {
         agentPersona: b.agentPersona,
-        goal: b.goal,
+        goal: b.goal ?? undefined,
         entryTrigger: b.entryTrigger,
       },
     })),

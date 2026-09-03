@@ -3,7 +3,7 @@ import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
 import { useOrgMembers } from '@/lib/query/hooks';
 import { Deal, Board, Contact, Company, Product } from '@/types';
-import { X, Building2, User, Mail, Phone, AlertCircle, Loader2, Package, Shuffle } from 'lucide-react';
+import { X, Building2, User, Mail, Phone, AlertCircle, Loader2, Package, Shuffle, Columns3 } from 'lucide-react';
 import { DebugFillButton } from '@/components/debug/DebugFillButton';
 import { fakeDeal, fakeContact, fakeCompany } from '@/lib/debug';
 import { ContactSearchCombobox } from '@/components/ui/ContactSearchCombobox';
@@ -81,6 +81,13 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
 
     // Produto selecionado
     const [selectedProductId, setSelectedProductId] = useState<string>('');
+    // Etapa em que o negócio nasce ('' = primeira etapa do board)
+    const [selectedStageId, setSelectedStageId] = useState<string>('');
+    React.useEffect(() => {
+        if (!isOpen) return;
+        // Ao abrir (ou trocar de board), volta para a primeira etapa
+        setSelectedStageId('');
+    }, [isOpen, activeBoard?.id]);
 
     // Estado de UI
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -93,6 +100,7 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
         setNewContactData({ name: '', email: '', phone: '', companyName: '' });
         setDealData({ title: '', value: '' });
         setSelectedProductId('');
+        setSelectedStageId('');
         setError(null);
         setIsSubmitting(false);
     };
@@ -155,8 +163,8 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
         setIsSubmitting(true);
 
         try {
-            // Usa o primeiro estágio do board ativo
-            const firstStage = activeBoard.stages[0];
+            // Etapa escolhida no formulário (padrão: a primeira do board)
+            const firstStage = activeBoard.stages.find((s) => s.id === selectedStageId) ?? activeBoard.stages[0];
 
             const ownerName = profile?.nickname ||
                 profile?.display_name ||
@@ -434,6 +442,26 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
                                         Valor: R$ {(products.find(p => p.id === selectedProductId)?.price || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </p>
                                 )}
+                            </div>
+
+                            {/* Etapa em que o negócio é criado (automações da etapa disparam nela) */}
+                            <div>
+                                <label htmlFor="new-deal-stage" className="block text-xs font-medium text-slate-500 mb-1">Etapa</label>
+                                <div className="relative">
+                                    <Columns3 size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                                    <select
+                                        id="new-deal-stage"
+                                        className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg pl-10 pr-3 py-2.5 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500 appearance-none"
+                                        value={selectedStageId || activeBoard.stages[0]?.id || ''}
+                                        onChange={e => setSelectedStageId(e.target.value)}
+                                    >
+                                        {activeBoard.stages.map(stage => (
+                                            <option key={stage.id} value={stage.id}>
+                                                {stage.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
                             </div>
                         </div>
                     </div>
