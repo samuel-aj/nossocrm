@@ -291,6 +291,9 @@ const EVENTOS_WEBHOOK = [
   "MESSAGES_UPSERT",
   "MESSAGES_UPDATE",
   "MESSAGES_EDITED",
+  // Edição feita VIA API da Evolution (chat/updateMessage) sai neste evento,
+  // não em MESSAGES_EDITED; o payload é o mesmo protocolMessage.
+  "SEND_MESSAGE_UPDATE",
   "CONNECTION_UPDATE",
   "QRCODE_UPDATED",
 ];
@@ -372,6 +375,104 @@ Deno.serve(async (req) => {
   const pathSecret = getSecretFromPath(req);
   if (!pathSecret || String(conn.webhook_secret) !== String(pathSecret)) {
     return json(401, { error: "secret inválido" });
+  }
+
+  // CAPTURA TEMPORÁRIA (diagnóstico de edição): enquanto o backend de logs da
+  // Supabase está indisponível, eventos fora do feijão-com-arroz (ou que citam
+  // edição) ficam em wa_webhook_debug pra inspeção. Best-effort; derrubar a
+  // tabela e este bloco quando o diagnóstico terminar.
+  try {
+    const conhecidos = ["messages.upsert", "messages.update", "connection.update", "qrcode.updated", "diag.webhook", "diag.edit", "heal.ping"];
+    const citaEdicao = rawBody.includes("editedMessage") || rawBody.includes("protocolMessage") || event.includes("edit");
+    if (!conhecidos.includes(event) || citaEdicao) {
+      await supabase.from("wa_webhook_debug").insert({ event, payload });
+    }
+  } catch {
+    // diagnóstico nunca derruba o webhook
+  }
+
+  // DIAGNÓSTICO (gate = o mesmo secret do path): POST com {"event":"diag.find"}
+  // consulta as mensagens guardadas no banco DA EVOLUTION (chat/findMessages).
+  // Uso: recuperar o texto ATUAL de mensagens editadas cujo evento se perdeu.
+  // data: o corpo repassado à Evolution (ex.: { where: { key: { remoteJid } } }).
+  if (event === "diag.find") {
+    const base = String(conn.base_url ?? Deno.env.get("EVOLUTION_BASE_URL") ?? "")
+      .replace(/\/+$/, "")
+      .replace(/\/manager$/, "");
+    const token = String(conn.instance_token ?? "");
+    if (!base || !token) return json(200, { error: "conexao sem base_url/token" });
+    const r = await fetch(`${base}/chat/findMessages/${encodeURIComponent(String(instanceName))}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: token },
+      body: JSON.stringify(payload?.data ?? {}),
+    })
+      .then(async (x) => ({ status: x.status, body: (await x.text()).slice(0, 20000) }))
+      .catch((e) => ({ status: 0, body: String(e) }));
+    return json(200, { find: r });
+  }
+
+  // DIAGNÓSTICO (gate = o mesmo secret do path): POST com {"event":"diag.edit"}
+  // pede à Evolution que EDITE uma mensagem enviada pela própria instância
+  // (chat/updateMessage) — teste de ponta a ponta do fluxo de edição sem
+  // depender de alguém editar no celular. data: { number, remoteJid, id, text }.
+  if (event === "diag.edit") {
+    const base = String(conn.base_url ?? Deno.env.get("EVOLUTION_BASE_URL") ?? "")
+      .replace(/\/+$/, "")
+      .replace(/\/manager$/, "");
+    const token = String(conn.instance_token ?? "");
+    if (!base || !token) return json(200, { error: "conexao sem base_url/token" });
+    const d = payload?.data ?? {};
+    const r = await fetch(`${base}/chat/updateMessage/${encodeURIComponent(String(instanceName))}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: token },
+      body: JSON.stringify({
+        number: String(d.number ?? ""),
+        text: String(d.text ?? ""),
+        key: { remoteJid: String(d.remoteJid ?? ""), fromMe: true, id: String(d.id ?? "") },
+      }),
+    })
+      .then(async (x) => ({ status: x.status, body: (await x.text()).slice(0, 2000) }))
+      .catch((e) => ({ status: 0, body: String(e) }));
+    return json(200, { edit: r });
+  }
+
+  // DIAGNÓSTICO (gate = o mesmo secret do path): POST com {"event":"diag.webhook"}
+  // devolve a configuração de webhook ATUAL da instância na Evolution e o
+  // resultado de uma reassinatura na hora. Serve pra enxergar por que um
+  // evento (ex.: MESSAGES_EDITED) não está chegando, sem depender dos logs.
+  if (event === "diag.webhook") {
+    const base = String(conn.base_url ?? Deno.env.get("EVOLUTION_BASE_URL") ?? "")
+      .replace(/\/+$/, "")
+      .replace(/\/manager$/, "");
+    const token = String(conn.instance_token ?? "");
+    if (!base || !token) return json(200, { error: "conexao sem base_url/token" });
+    const cb = `${supabaseUrl.replace(/\/+$/, "")}/functions/v1/whatsapp-webhook/${conn.webhook_secret}`;
+    const chame = async (metodo: string, caminho: string, corpo?: unknown) => {
+      try {
+        const r = await fetch(`${base}${caminho}`, {
+          method: metodo,
+          headers: { "Content-Type": "application/json", apikey: token },
+          body: corpo ? JSON.stringify(corpo) : undefined,
+        });
+        return { status: r.status, body: (await r.text()).slice(0, 3000) };
+      } catch (e) {
+        return { status: 0, body: String(e) };
+      }
+    };
+    const antes = await chame("GET", `/webhook/find/${encodeURIComponent(String(instanceName))}`);
+    const set = await chame("POST", `/webhook/set/${encodeURIComponent(String(instanceName))}`, {
+      webhook: {
+        enabled: true,
+        url: cb,
+        byEvents: false,
+        webhookByEvents: false,
+        base64: true,
+        webhookBase64: true,
+        events: EVENTOS_WEBHOOK,
+      },
+    });
+    const depois = await chame("GET", `/webhook/find/${encodeURIComponent(String(instanceName))}`);
+    return json(200, { antes, set, depois });
   }
 
   // Garante MESSAGES_EDITED na assinatura (instâncias antigas não o tinham).
@@ -931,8 +1032,11 @@ Deno.serve(async (req) => {
     return json(200, { ok: true });
   }
 
-  // --- Edição de mensagem (evento dedicado MESSAGES_EDITED da Evolution) ---
-  if (event === "messages.edited") {
+  // --- Edição de mensagem ---
+  // MESSAGES_EDITED = edição vinda de um celular; SEND_MESSAGE_UPDATE = edição
+  // feita via API da Evolution. Os dois carregam o MESMO protocolMessage
+  // ({ key: { id da ORIGINAL }, editedMessage: { texto novo } }).
+  if (event === "messages.edited" || event === "send.message.update") {
     const items = Array.isArray(data) ? data : [data];
     for (const it of items) {
       if (!it) continue;
