@@ -2110,10 +2110,15 @@ export function DealWhatsAppChat({
             }}
           >
             {(i === 0 || diaDaMensagem(messages[i - 1]) !== diaDaMensagem(m)) && rotuloDoDia(m) && (
-              <div className="flex justify-center py-2 select-none" aria-label={`Mensagens de ${rotuloDoDia(m)}`}>
-                <span className="text-[11px] font-semibold px-3 py-1 rounded-lg bg-white dark:bg-white/10 text-slate-500 dark:text-slate-300 shadow-sm border border-slate-200/70 dark:border-white/10">
+              <div
+                className="flex items-center gap-3 pt-2 pb-1 select-none"
+                aria-label={`Mensagens de ${rotuloDoDia(m)}`}
+              >
+                <span className="flex-1 h-px bg-slate-200 dark:bg-white/10" />
+                <span className="text-[11px] font-semibold px-3 py-1 rounded-full bg-white dark:bg-white/10 text-slate-500 dark:text-slate-300 shadow-sm border border-slate-200/70 dark:border-white/10">
                   {rotuloDoDia(m)}
                 </span>
+                <span className="flex-1 h-px bg-slate-200 dark:bg-white/10" />
               </div>
             )}
             {showConnDividers &&
