@@ -509,7 +509,7 @@ Deno.serve(async (req) => {
       {
         // deno-lint-ignore no-explicit-any
         const rawEdit: any = m.message ?? {};
-        const inner = rawEdit.editedMessage?.message ?? rawEdit;
+        const inner = unwrapMessage(rawEdit.editedMessage?.message ?? rawEdit);
         const proto = inner?.protocolMessage;
         const editTargetId = proto?.editedMessage ? proto?.key?.id : null;
         if (editTargetId) {
@@ -862,5 +862,60 @@ Deno.serve(async (req) => {
     return json(200, { ok: true });
   }
 
+  // --- Edição de mensagem (evento dedicado MESSAGES_EDITED da Evolution) ---
+  if (event === "messages.edited") {
+    const items = Array.isArray(data) ? data : [data];
+    for (const it of items) {
+      if (!it) continue;
+      // Log de diagnóstico: o formato deste evento varia por versão da
+      // Evolution; com o payload no log dá pra cobrir o que faltar.
+      try {
+        console.log("[wa-webhook] messages.edited:", JSON.stringify(it).slice(0, 1500));
+      } catch {
+        // payload não serializável: segue sem log
+      }
+      const targetId = it?.key?.id ?? it?.keyId ?? it?.id ?? null;
+      let novoTexto = "";
+      if (typeof it?.conversation === "string") novoTexto = it.conversation;
+      else if (typeof it?.text === "string") novoTexto = it.text;
+      else {
+        const c = extractContent(it?.editedMessage ?? it?.message ?? {});
+        novoTexto = c.text ?? "";
+      }
+      novoTexto = novoTexto.trim();
+      if (!targetId || !novoTexto) continue;
+      const { data: alvoMsg } = await supabase
+        .from("wa_messages")
+        .select("id, conversation_id, sender_name")
+        .eq("organization_id", orgId)
+        .eq("evolution_message_id", String(targetId))
+        .maybeSingle();
+      if (!alvoMsg) continue;
+      let { error: edErr } = await supabase
+        .from("wa_messages")
+        .update({ body: novoTexto, edited_at: new Date().toISOString() })
+        .eq("id", alvoMsg.id);
+      if (edErr && /column/i.test(String(edErr.message)) && /edited_at/i.test(String(edErr.message))) {
+        ({ error: edErr } = await supabase.from("wa_messages").update({ body: novoTexto }).eq("id", alvoMsg.id));
+      }
+      if (edErr) console.error("[wa-webhook] edicao (evento):", edErr.message);
+      const { data: ultima } = await supabase
+        .from("wa_messages")
+        .select("id")
+        .eq("conversation_id", alvoMsg.conversation_id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (ultima?.id === alvoMsg.id) {
+        const nome = (alvoMsg.sender_name ?? "").trim();
+        const previa = (nome ? `${nome}: ${novoTexto}` : novoTexto).slice(0, 140);
+        await supabase.from("wa_conversations").update({ last_message_preview: previa }).eq("id", alvoMsg.conversation_id);
+      }
+    }
+    return json(200, { ok: true });
+  }
+
+  // Evento que a função não trata: registra o NOME (ajuda a descobrir formatos novos)
+  console.log("[wa-webhook] evento ignorado:", event);
   return json(200, { ok: true, ignored: event });
 });
