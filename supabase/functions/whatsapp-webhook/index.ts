@@ -280,6 +280,60 @@ function mapState(s?: string): string {
   return "disconnected";
 }
 
+// AUTO-CURA da assinatura de eventos na Evolution: instâncias antigas foram
+// registradas SEM o evento MESSAGES_EDITED (edição de mensagem nunca chegava
+// aqui e o CRM ficava com o texto antigo). Reaplica o webhook com a lista
+// completa, no máximo 1x por instância a cada TTL por instância desta função.
+// Idempotente: o POST /webhook/set só regrava a mesma configuração.
+const ASSINATURA_TTL_MS = 6 * 60 * 60 * 1000;
+const ultimaAssinatura = new Map<string, number>();
+const EVENTOS_WEBHOOK = [
+  "MESSAGES_UPSERT",
+  "MESSAGES_UPDATE",
+  "MESSAGES_EDITED",
+  "CONNECTION_UPDATE",
+  "QRCODE_UPDATED",
+];
+
+// deno-lint-ignore no-explicit-any
+function agendarAssinatura(supabaseUrl: string, conn: any, instanceName: string): void {
+  const agora = Date.now();
+  if ((ultimaAssinatura.get(conn.id) ?? 0) > agora - ASSINATURA_TTL_MS) return;
+  ultimaAssinatura.set(conn.id, agora);
+  const base = String(conn.base_url ?? Deno.env.get("EVOLUTION_BASE_URL") ?? "")
+    .replace(/\/+$/, "")
+    .replace(/\/manager$/, "");
+  const token = String(conn.instance_token ?? "");
+  if (!base || !token) return;
+  const cb = `${supabaseUrl.replace(/\/+$/, "")}/functions/v1/whatsapp-webhook/${conn.webhook_secret}`;
+  const p = fetch(`${base}/webhook/set/${encodeURIComponent(instanceName)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", apikey: token },
+    body: JSON.stringify({
+      webhook: {
+        enabled: true,
+        url: cb,
+        byEvents: false,
+        webhookByEvents: false,
+        base64: true,
+        webhookBase64: true,
+        events: EVENTOS_WEBHOOK,
+      },
+    }),
+  })
+    .then(async (r) => {
+      const corpo = r.ok ? "" : ` ${(await r.text()).slice(0, 200)}`;
+      console.log(`[wa-webhook] assinatura conn=${conn.id} => ${r.status}${corpo}`);
+    })
+    .catch((e) => console.error("[wa-webhook] assinatura falhou:", e));
+  try {
+    // @ts-ignore: EdgeRuntime existe no runtime das Edge Functions da Supabase
+    EdgeRuntime.waitUntil(p);
+  } catch {
+    void p;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== "POST") return json(405, { error: "Método não permitido" });
@@ -319,6 +373,9 @@ Deno.serve(async (req) => {
   if (!pathSecret || String(conn.webhook_secret) !== String(pathSecret)) {
     return json(401, { error: "secret inválido" });
   }
+
+  // Garante MESSAGES_EDITED na assinatura (instâncias antigas não o tinham).
+  agendarAssinatura(supabaseUrl, conn, String(instanceName));
 
   // ESPELHO: outro sistema (n8n, outro CRM, automação) que também precisa dos
   // eventos deste número. A Evolution entrega pra UM webhook por instância,
@@ -886,11 +943,17 @@ Deno.serve(async (req) => {
       if (!targetId || !novoTexto) continue;
       const { data: alvoMsg } = await supabase
         .from("wa_messages")
-        .select("id, conversation_id, sender_name")
+        .select("id, body, conversation_id, sender_name")
         .eq("organization_id", orgId)
         .eq("evolution_message_id", String(targetId))
         .maybeSingle();
-      if (!alvoMsg) continue;
+      if (!alvoMsg) {
+        console.error(`[wa-webhook] edicao: mensagem original nao encontrada (provider_id=${String(targetId)})`);
+        continue;
+      }
+      console.log(
+        `[wa-webhook] edicao: msg=${alvoMsg.id} de="${String(alvoMsg.body ?? "").slice(0, 80)}" para="${novoTexto.slice(0, 80)}"`
+      );
       let { error: edErr } = await supabase
         .from("wa_messages")
         .update({ body: novoTexto, edited_at: new Date().toISOString() })

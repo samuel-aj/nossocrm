@@ -77,6 +77,9 @@ function mapState(state?: string): WaConnectionState {
 const WEBHOOK_EVENTS = [
   'MESSAGES_UPSERT',
   'MESSAGES_UPDATE',
+  // Sem MESSAGES_EDITED a Evolution NÃO avisa quando alguém edita uma
+  // mensagem no WhatsApp — o CRM ficava com o texto antigo para sempre.
+  'MESSAGES_EDITED',
   'CONNECTION_UPDATE',
   'QRCODE_UPDATED',
 ] as const;
