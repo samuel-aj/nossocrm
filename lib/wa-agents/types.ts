@@ -67,7 +67,8 @@ export const EndActionSchema = z.discriminatedUnion('type', [
   /** Transfere o atendimento para um robô: o agente para e o robô assume a conversa */
   z.object({ type: z.literal('start_bot'), bot_id: z.string().uuid() }),
   z.object({ type: z.literal('note'), title: z.string().max(120).optional() }),
-  z.object({ type: z.literal('move_stage'), stage_id: z.string().uuid() }),
+  /** loss_reason: motivo da perda quando a etapa de destino é a etapa de perda do quadro (aceita variáveis) */
+  z.object({ type: z.literal('move_stage'), stage_id: z.string().uuid(), loss_reason: z.string().max(200).optional() }),
   z.object({ type: z.literal('add_tag'), tag: z.string().min(1).max(60) }),
   z.object({ type: z.literal('mark_lost'), loss_reason: z.string().max(200).optional() }),
   z.object({ type: z.literal('assign_owner'), owner_id: z.string().uuid() }),

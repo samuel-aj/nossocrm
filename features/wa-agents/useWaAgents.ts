@@ -30,7 +30,13 @@ export type WaAgentListItem = AgentMinimal & Partial<AgentPublic>;
 
 export type WaAgentOptions = {
   connections: Array<{ id: string; label: string; provider: string; status: string }>;
-  boards: Array<{ id: string; name: string; stages: Array<{ id: string; label: string; order: number }> }>;
+  boards: Array<{
+    id: string;
+    name: string;
+    stages: Array<{ id: string; label: string; order: number }>;
+    /** Etapa de perda do quadro (mover pra ela marca o negócio como perdido); ausente em respostas antigas da API */
+    lost_stage_id?: string | null;
+  }>;
   owners: Array<{ id: string; name: string }>;
   tags: string[];
   products: Array<{ id: string; name: string }>;

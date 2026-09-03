@@ -17,7 +17,7 @@ import { guardRoute } from '../_shared';
 export const runtime = 'nodejs';
 
 type StageOption = { id: string; label: string; order: number };
-type BoardOption = { id: string; name: string; stages: StageOption[] };
+type BoardOption = { id: string; name: string; stages: StageOption[]; lost_stage_id: string | null };
 type ProfileLike = {
   first_name?: string | null;
   last_name?: string | null;
@@ -46,7 +46,7 @@ export async function GET() {
     getConnectionsByOrg(admin, orgId),
     admin
       .from('boards')
-      .select('id, name, position')
+      .select('id, name, position, lost_stage_id')
       .eq('organization_id', orgId)
       .is('deleted_at', null)
       .order('position', { ascending: true }),
@@ -90,6 +90,8 @@ export async function GET() {
     id: String(b.id),
     name: String(b.name ?? ''),
     stages: [],
+    // etapa de perda do quadro: mover pra ela marca o negócio como perdido
+    lost_stage_id: b.lost_stage_id ? String(b.lost_stage_id) : null,
   }));
   const boardsById = new Map(boards.map(b => [b.id, b]));
   for (const s of stagesRes.data ?? []) {

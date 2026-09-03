@@ -29,7 +29,10 @@ export const MODAL_TITLE_CLASS =
 export const MODAL_CLOSE_BUTTON_CLASS =
   'p-2 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors focus-visible-ring';
 
-export const MODAL_BODY_CLASS = 'p-4 sm:p-5';
+// min-h-0 + overflow: quando o conteúdo passa do teto de altura do painel
+// (90dvh), o corpo ROLA em vez de ser cortado (o painel tem overflow-hidden).
+// Modais que já definem a própria rolagem via bodyClassName continuam valendo.
+export const MODAL_BODY_CLASS = 'p-4 sm:p-5 min-h-0 overflow-y-auto';
 
 export const MODAL_FOOTER_CLASS =
   'p-4 sm:p-5 border-t border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card shrink-0';
