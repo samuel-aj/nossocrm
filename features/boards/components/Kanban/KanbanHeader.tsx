@@ -1,10 +1,12 @@
 import React from 'react';
-import { Plus, Search, LayoutGrid, Table as TableIcon, User, Tag, X, Settings, Lightbulb, Download, MoreVertical, CheckSquare, Target, ChevronDown, Zap } from 'lucide-react';
+import { Plus, Search, LayoutGrid, Table as TableIcon, X, Settings, Lightbulb, Download, MoreVertical, CheckSquare, Target, Zap, SlidersHorizontal, CalendarDays, ChevronDown } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Board } from '@/types';
 import { BoardSelector } from '../BoardSelector';
 import { useOrgUsers } from '@/lib/query/hooks';
 import { useAuth } from '@/context/AuthContext';
+
+type StatusFilter = 'open' | 'won' | 'lost' | 'all';
 
 interface KanbanHeaderProps {
     // Boards
@@ -33,8 +35,8 @@ interface KanbanHeaderProps {
     tagOptions: string[];
     dateRange: { start: string; end: string };
     setDateRange: (r: { start: string; end: string }) => void;
-    statusFilter: 'open' | 'won' | 'lost' | 'all';
-    setStatusFilter: (filter: 'open' | 'won' | 'lost' | 'all') => void;
+    statusFilter: StatusFilter;
+    setStatusFilter: (filter: StatusFilter) => void;
     onNewDeal: () => void;
     // Modo de seleção múltipla (menu ⋮)
     selectionMode: boolean;
@@ -55,53 +57,192 @@ type CfCondition = {
     value: string;
 };
 
+const STATUS_OPTIONS: Array<{ value: StatusFilter; label: string; dot: string }> = [
+    { value: 'open', label: 'Em aberto', dot: 'bg-blue-500' },
+    { value: 'won', label: 'Ganhos', dot: 'bg-green-500' },
+    { value: 'lost', label: 'Perdidos', dot: 'bg-red-500' },
+    { value: 'all', label: 'Todos', dot: 'bg-slate-400' },
+];
+
+const CONTROL_CLASS =
+    'h-[38px] rounded-lg border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm';
+const CONTROL_BUTTON_CLASS =
+    'h-[38px] flex items-center gap-2 px-3 max-md:px-2.5 rounded-lg border text-sm transition-colors backdrop-blur-sm';
+const CONTROL_IDLE = 'border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-white/5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10';
+const CONTROL_ACTIVE = 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300';
+const PANEL_CLASS =
+    'absolute z-50 mt-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg p-3 space-y-3 max-md:fixed max-md:inset-x-3 max-md:top-24 max-md:mt-0 max-md:w-auto';
+const INPUT_CLASS =
+    'px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white';
+const SECTION_TITLE = 'text-[11px] font-bold text-slate-400 uppercase border-b border-slate-100 dark:border-white/10 pb-1';
+const BADGE_CLASS = 'ml-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-primary-600 text-white text-[11px] font-bold flex items-center justify-center';
+
+/** Fecha o painel ao clicar fora dele. */
+function useClickOutside(open: boolean, ref: React.RefObject<HTMLDivElement | null>, close: () => void) {
+    React.useEffect(() => {
+        if (!open) return;
+        const handler = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) close();
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, [open, ref, close]);
+}
+
+function toIsoDate(d: Date): string {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+function formatShort(iso: string): string {
+    const [y, m, d] = iso.split('-');
+    return y && m && d ? `${d}/${m}/${y.slice(2)}` : iso;
+}
+
 /**
- * Painel "Filtros" com construtor de CONDIÇÕES por campo/UTM:
- * cada condição = campo + operador (contém / é igual a / está vazio / está
- * preenchido) + valor (campos select oferecem as opções no "é igual a").
- * Várias condições combinam com E (todas) ou OU (qualquer). A seção Tag é um
- * select à parte (tags cadastradas em Configurações) e soma junto (E).
+ * Período: data de criação do negócio (De / Até) com atalhos.
  */
-function CustomFieldFiltersButton({
+function PeriodButton({ dateRange, onChange }: { dateRange: { start: string; end: string }; onChange: (r: { start: string; end: string }) => void }) {
+    const [open, setOpen] = React.useState(false);
+    const ref = React.useRef<HTMLDivElement>(null);
+    const close = React.useCallback(() => setOpen(false), []);
+    useClickOutside(open, ref, close);
+    const active = Boolean(dateRange.start || dateRange.end);
+
+    const preset = (days: number | 'month') => {
+        const today = new Date();
+        if (days === 'month') {
+            onChange({ start: toIsoDate(new Date(today.getFullYear(), today.getMonth(), 1)), end: toIsoDate(today) });
+            return;
+        }
+        const start = new Date(today);
+        start.setDate(today.getDate() - (days - 1));
+        onChange({ start: toIsoDate(start), end: toIsoDate(today) });
+    };
+
+    const label = !active
+        ? 'Período'
+        : dateRange.start && dateRange.end
+            ? `${formatShort(dateRange.start)} – ${formatShort(dateRange.end)}`
+            : dateRange.start
+                ? `Desde ${formatShort(dateRange.start)}`
+                : `Até ${formatShort(dateRange.end)}`;
+
+    return (
+        <div ref={ref} className="relative">
+            <button
+                type="button"
+                onClick={() => setOpen((o) => !o)}
+                aria-expanded={open}
+                title="Período (data de criação do negócio)"
+                className={`${CONTROL_BUTTON_CLASS} ${active ? CONTROL_ACTIVE : CONTROL_IDLE}`}
+            >
+                <CalendarDays size={15} aria-hidden="true" />
+                <span className="max-md:hidden whitespace-nowrap">{label}</span>
+                <ChevronDown size={13} aria-hidden="true" className={`max-md:hidden text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+            </button>
+            {open && (
+                <div className={`${PANEL_CLASS} w-72`}>
+                    <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-slate-400 uppercase">Data de criação</p>
+                        {active && (
+                            <button type="button" onClick={() => onChange({ start: '', end: '' })} className="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline">
+                                Limpar
+                            </button>
+                        )}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                        {[
+                            { label: 'Hoje', run: () => preset(1) },
+                            { label: '7 dias', run: () => preset(7) },
+                            { label: '30 dias', run: () => preset(30) },
+                            { label: 'Este mês', run: () => preset('month') },
+                        ].map((p) => (
+                            <button
+                                key={p.label}
+                                type="button"
+                                onClick={p.run}
+                                className="px-2.5 py-1 rounded-full border border-slate-200 dark:border-white/10 text-xs font-medium text-slate-600 dark:text-slate-300 hover:border-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors"
+                            >
+                                {p.label}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <label className="flex-1 min-w-0 space-y-0.5">
+                            <span className="block text-[11px] text-slate-500 dark:text-slate-400">De</span>
+                            <input
+                                type="date"
+                                value={dateRange.start}
+                                max={dateRange.end || undefined}
+                                onChange={(e) => onChange({ ...dateRange, start: e.target.value })}
+                                aria-label="Criado a partir de"
+                                className={`${INPUT_CLASS} w-full`}
+                            />
+                        </label>
+                        <label className="flex-1 min-w-0 space-y-0.5">
+                            <span className="block text-[11px] text-slate-500 dark:text-slate-400">Até</span>
+                            <input
+                                type="date"
+                                value={dateRange.end}
+                                min={dateRange.start || undefined}
+                                onChange={(e) => onChange({ ...dateRange, end: e.target.value })}
+                                aria-label="Criado até"
+                                className={`${INPUT_CLASS} w-full`}
+                            />
+                        </label>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+/**
+ * Painel "Filtros": responsável, status, tag e construtor de CONDIÇÕES por
+ * campo/UTM (campo + operador + valor; várias combinam com E ou OU).
+ */
+function FiltersButton({
+    ownerFilter,
+    onOwnerChange,
+    owners,
+    statusFilter,
+    onStatusChange,
+    tagFilter,
+    onTagFilterChange,
+    tagOptions,
     conditions,
     onConditionsChange,
     logic,
     onLogicChange,
     options,
-    tagFilter,
-    onTagFilterChange,
-    tagOptions,
-    dateRange,
-    onDateRangeChange,
 }: {
+    ownerFilter: string;
+    onOwnerChange: (v: string) => void;
+    owners: Array<{ id: string; name: string; role?: string }>;
+    statusFilter: StatusFilter;
+    onStatusChange: (v: StatusFilter) => void;
+    tagFilter: string;
+    onTagFilterChange: (v: string) => void;
+    tagOptions: string[];
     conditions: CfCondition[];
     onConditionsChange: (c: CfCondition[]) => void;
     logic: 'AND' | 'OR';
     onLogicChange: (l: 'AND' | 'OR') => void;
     options: Array<{ key: string; label: string; kind: 'select' | 'text'; options: string[] }>;
-    tagFilter: string;
-    onTagFilterChange: (v: string) => void;
-    tagOptions: string[];
-    dateRange: { start: string; end: string };
-    onDateRangeChange: (r: { start: string; end: string }) => void;
 }) {
     const [open, setOpen] = React.useState(false);
-    const containerRef = React.useRef<HTMLDivElement>(null);
-
-    React.useEffect(() => {
-        if (!open) return;
-        const handler = (e: MouseEvent) => {
-            if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
-        };
-        document.addEventListener('mousedown', handler);
-        return () => document.removeEventListener('mousedown', handler);
-    }, [open]);
+    const ref = React.useRef<HTMLDivElement>(null);
+    const close = React.useCallback(() => setOpen(false), []);
+    useClickOutside(open, ref, close);
 
     const activeConditions = conditions.filter(
         (c) => c.field && (c.operator === 'empty' || c.operator === 'not_empty' || c.value.trim() !== '')
     );
-    const dateActive = Boolean(dateRange.start || dateRange.end);
-    const activeCount = activeConditions.length + (tagFilter ? 1 : 0) + (dateActive ? 1 : 0);
+    const activeCount =
+        activeConditions.length + (tagFilter ? 1 : 0) + (ownerFilter !== 'all' ? 1 : 0) + (statusFilter !== 'open' ? 1 : 0);
 
     const updateCondition = (id: string, patch: Partial<CfCondition>) =>
         onConditionsChange(conditions.map((c) => (c.id === id ? { ...c, ...patch } : c)));
@@ -111,56 +252,93 @@ function CustomFieldFiltersButton({
             ...conditions,
             { id: crypto.randomUUID(), field: options[0]?.key || '', operator: 'contains', value: '' },
         ]);
-
-    const inputClass =
-        'px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white';
+    const clearAll = () => {
+        onConditionsChange([]);
+        onTagFilterChange('');
+        onOwnerChange('all');
+        onStatusChange('open');
+    };
 
     return (
-        <div ref={containerRef} className="relative">
+        <div ref={ref} className="relative">
             <button
                 type="button"
                 onClick={() => setOpen((o) => !o)}
                 aria-expanded={open}
-                className={`flex items-center gap-2 px-3 py-2 max-md:px-2.5 max-md:py-1.5 rounded-lg border text-sm transition-colors backdrop-blur-sm ${activeCount > 0
-                    ? 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
-                    : 'border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-white/5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10'
-                    }`}
-                title="Filtrar por tag, campos personalizados e UTMs"
+                title="Filtros: responsável, status, tag, campos e UTMs"
+                className={`${CONTROL_BUTTON_CLASS} ${activeCount > 0 ? CONTROL_ACTIVE : CONTROL_IDLE}`}
             >
-                <Tag size={14} />
+                <SlidersHorizontal size={15} aria-hidden="true" />
                 <span className="max-md:hidden">Filtros</span>
-                {activeCount > 0 && (
-                    <span className="ml-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-primary-600 text-white text-[11px] font-bold flex items-center justify-center">
-                        {activeCount}
-                    </span>
-                )}
+                {activeCount > 0 && <span className={BADGE_CLASS}>{activeCount}</span>}
             </button>
             {open && (
-                <div className="absolute z-50 mt-1 w-80 max-h-[28rem] max-md:fixed max-md:inset-x-3 max-md:top-24 max-md:mt-0 max-md:w-auto max-md:max-h-[calc(100dvh-13rem)] overflow-y-auto scrollbar-custom rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg p-3 space-y-3">
+                <div className={`${PANEL_CLASS} w-80 max-h-[28rem] max-md:max-h-[calc(100dvh-13rem)] overflow-y-auto scrollbar-custom`}>
                     <div className="flex items-center justify-between">
                         <p className="text-xs font-bold text-slate-400 uppercase">Filtros</p>
                         {activeCount > 0 && (
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    onConditionsChange([]);
-                                    onTagFilterChange('');
-                                    onDateRangeChange({ start: '', end: '' });
-                                }}
-                                className="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
-                            >
+                            <button type="button" onClick={clearAll} className="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline">
                                 Limpar ({activeCount})
                             </button>
                         )}
                     </div>
+
+                    {/* Status */}
+                    <div className="space-y-2">
+                        <p className={SECTION_TITLE}>Status</p>
+                        <div className="grid grid-cols-2 gap-1.5">
+                            {STATUS_OPTIONS.map((option) => (
+                                <button
+                                    key={option.value}
+                                    type="button"
+                                    onClick={() => onStatusChange(option.value)}
+                                    aria-pressed={statusFilter === option.value}
+                                    className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-sm text-left transition-colors ${statusFilter === option.value
+                                        ? 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/20 font-semibold text-primary-700 dark:text-primary-300'
+                                        : 'border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5'}`}
+                                >
+                                    <span className={`w-2 h-2 rounded-full ${option.dot}`} aria-hidden="true" />
+                                    {option.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Responsável */}
+                    <div className="space-y-2">
+                        <p className={SECTION_TITLE}>Responsável</p>
+                        <select
+                            value={ownerFilter}
+                            onChange={(e) => onOwnerChange(e.target.value)}
+                            aria-label="Filtrar negócios por responsável"
+                            className={`${INPUT_CLASS} w-full cursor-pointer`}
+                        >
+                            <option value="all">Todos os donos</option>
+                            <option value="mine">Meus negócios</option>
+                            {owners.length > 0 && (
+                                <>
+                                    <option value="none">Sem responsável</option>
+                                    <optgroup label="Responsáveis">
+                                        {owners.map((u) => (
+                                            <option key={u.id} value={u.id}>
+                                                {u.name}{u.role === 'admin' ? ' (admin)' : ''}
+                                            </option>
+                                        ))}
+                                    </optgroup>
+                                </>
+                            )}
+                        </select>
+                    </div>
+
+                    {/* Tag */}
                     {tagOptions.length > 0 && (
                         <div className="space-y-2">
-                            <p className="text-[11px] font-bold text-slate-400 uppercase border-b border-slate-100 dark:border-white/10 pb-1">Tag</p>
+                            <p className={SECTION_TITLE}>Tag</p>
                             <select
                                 value={tagFilter}
                                 onChange={(e) => onTagFilterChange(e.target.value)}
                                 aria-label="Filtrar por tag"
-                                className={`${inputClass} w-full cursor-pointer`}
+                                className={`${INPUT_CLASS} w-full cursor-pointer`}
                             >
                                 <option value="">Todas</option>
                                 {tagOptions.map((t) => (
@@ -169,49 +347,11 @@ function CustomFieldFiltersButton({
                             </select>
                         </div>
                     )}
-                    <div className="space-y-2">
-                        <p className="text-[11px] font-bold text-slate-400 uppercase border-b border-slate-100 dark:border-white/10 pb-1">
-                            Data de criação
-                        </p>
-                        <div className="flex items-center gap-2">
-                            <label className="flex-1 min-w-0 space-y-0.5">
-                                <span className="block text-[11px] text-slate-500 dark:text-slate-400">De</span>
-                                <input
-                                    type="date"
-                                    value={dateRange.start}
-                                    max={dateRange.end || undefined}
-                                    onChange={(e) => onDateRangeChange({ ...dateRange, start: e.target.value })}
-                                    aria-label="Criado a partir de"
-                                    className={`${inputClass} w-full`}
-                                />
-                            </label>
-                            <label className="flex-1 min-w-0 space-y-0.5">
-                                <span className="block text-[11px] text-slate-500 dark:text-slate-400">Até</span>
-                                <input
-                                    type="date"
-                                    value={dateRange.end}
-                                    min={dateRange.start || undefined}
-                                    onChange={(e) => onDateRangeChange({ ...dateRange, end: e.target.value })}
-                                    aria-label="Criado até"
-                                    className={`${inputClass} w-full`}
-                                />
-                            </label>
-                        </div>
-                        {dateActive && (
-                            <button
-                                type="button"
-                                onClick={() => onDateRangeChange({ start: '', end: '' })}
-                                className="text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
-                            >
-                                Limpar datas
-                            </button>
-                        )}
-                    </div>
+
+                    {/* Campos personalizados / UTMs */}
                     {options.length > 0 && (
                         <div className="space-y-2">
-                            <p className="text-[11px] font-bold text-slate-400 uppercase border-b border-slate-100 dark:border-white/10 pb-1">
-                                Condições (campos/UTMs)
-                            </p>
+                            <p className={SECTION_TITLE}>Campos personalizados e UTMs</p>
                             {conditions.length >= 2 && (
                                 <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
                                     <span>Atender:</span>
@@ -243,7 +383,7 @@ function CustomFieldFiltersButton({
                                                 value={c.field}
                                                 onChange={(e) => updateCondition(c.id, { field: e.target.value, value: '' })}
                                                 aria-label="Campo"
-                                                className={`${inputClass} flex-1 min-w-0 cursor-pointer`}
+                                                className={`${INPUT_CLASS} flex-1 min-w-0 cursor-pointer`}
                                             >
                                                 {options.map((o) => (
                                                     <option key={o.key} value={o.key}>{o.label}</option>
@@ -264,7 +404,7 @@ function CustomFieldFiltersButton({
                                                 value={c.operator}
                                                 onChange={(e) => updateCondition(c.id, { operator: e.target.value as CfCondition['operator'] })}
                                                 aria-label="Operador"
-                                                className={`${inputClass} w-32 shrink-0 cursor-pointer`}
+                                                className={`${INPUT_CLASS} w-32 shrink-0 cursor-pointer`}
                                             >
                                                 <option value="contains">contém</option>
                                                 <option value="not_contains">não contém</option>
@@ -278,7 +418,7 @@ function CustomFieldFiltersButton({
                                                         value={c.value}
                                                         onChange={(e) => updateCondition(c.id, { value: e.target.value })}
                                                         aria-label="Valor"
-                                                        className={`${inputClass} flex-1 min-w-0 cursor-pointer`}
+                                                        className={`${INPUT_CLASS} flex-1 min-w-0 cursor-pointer`}
                                                     >
                                                         <option value="">Selecione...</option>
                                                         {fieldDef.options.map((v) => (
@@ -292,7 +432,7 @@ function CustomFieldFiltersButton({
                                                         onChange={(e) => updateCondition(c.id, { value: e.target.value })}
                                                         placeholder="valor..."
                                                         aria-label="Valor"
-                                                        className={`${inputClass} flex-1 min-w-0`}
+                                                        className={`${INPUT_CLASS} flex-1 min-w-0`}
                                                     />
                                                 )
                                             )}
@@ -316,13 +456,14 @@ function CustomFieldFiltersButton({
 }
 
 /**
- * Cabeçalho do board em duas linhas:
- * 1) identidade: nome do board (seletor em estilo título), contexto
- *    "N leads · M etapas", sugestões da IA; à direita, Automatizar, menu ⋮
- *    (selecionar vários, estratégia, configurações, exportar) e Novo Negócio;
- * 2) controles: busca, status, responsável, Filtros (tag/data/campos), modo
- *    de visualização e o atalho de configurações do board.
- * No modo Automatizar a linha 2 vira uma faixa explicativa.
+ * Cabeçalho do board:
+ * - título da página = nome do board por extenso, com "N leads · M etapas"
+ *   embaixo (não é o seletor);
+ * - barra de controles: busca, seletor do board, período, filtros
+ *   (responsável, status, tag, campos/UTMs); à direita, visualização,
+ *   Automatizar, menu ⋮ (selecionar vários, estratégia, configurações,
+ *   exportar) e Novo Negócio.
+ * No modo Automatizar aparece uma faixa discreta explicando o modo.
  */
 export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
     boards,
@@ -350,37 +491,14 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
     // (hook desabilitado), então só aparecem "Todos" e "Meus".
     const { users: orgUsers } = useOrgUsers();
     const { profile } = useAuth();
+    // "Meus negócios" já cobre o próprio usuário — evita opção duplicada na lista.
+    const assignableOwners = orgUsers.filter((u) => u.id !== profile?.id);
+
     // Menu ⋮ (mais opções)
     const [moreMenuOpen, setMoreMenuOpen] = React.useState(false);
     const moreMenuRef = React.useRef<HTMLDivElement>(null);
-    React.useEffect(() => {
-        if (!moreMenuOpen) return;
-        const handler = (e: MouseEvent) => {
-            if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) setMoreMenuOpen(false);
-        };
-        document.addEventListener('mousedown', handler);
-        return () => document.removeEventListener('mousedown', handler);
-    }, [moreMenuOpen]);
-    // Menu de status no celular (o select fica só no desktop)
-    const [statusMenuOpen, setStatusMenuOpen] = React.useState(false);
-    const statusMenuRef = React.useRef<HTMLDivElement>(null);
-    React.useEffect(() => {
-        if (!statusMenuOpen) return;
-        const handler = (e: MouseEvent) => {
-            if (statusMenuRef.current && !statusMenuRef.current.contains(e.target as Node)) setStatusMenuOpen(false);
-        };
-        document.addEventListener('mousedown', handler);
-        return () => document.removeEventListener('mousedown', handler);
-    }, [statusMenuOpen]);
-    const statusOptions: Array<{ value: 'open' | 'won' | 'lost' | 'all'; label: string; dot: string }> = [
-        { value: 'open', label: 'Em Aberto', dot: 'bg-blue-500' },
-        { value: 'won', label: 'Ganhos', dot: 'bg-green-500' },
-        { value: 'lost', label: 'Perdidos', dot: 'bg-red-500' },
-        { value: 'all', label: 'Todos', dot: 'bg-slate-400' },
-    ];
-    const currentStatus = statusOptions.find((o) => o.value === statusFilter) ?? statusOptions[0];
-    // "Meus Negócios" já cobre o próprio usuário — evita opção duplicada na lista.
-    const assignableOwners = orgUsers.filter((u) => u.id !== profile?.id);
+    const closeMore = React.useCallback(() => setMoreMenuOpen(false), []);
+    useClickOutside(moreMenuOpen, moreMenuRef, closeMore);
 
     const stageCount = activeBoard.stages.length;
     const contextParts = [
@@ -388,30 +506,25 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
         `${stageCount} ${stageCount === 1 ? 'etapa' : 'etapas'}`,
     ].filter(Boolean);
 
-    const controlClass =
-        'rounded-lg border border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white backdrop-blur-sm';
     const menuItemClass =
         'w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors';
 
     return (
         <div className="mb-4 max-md:mb-3 space-y-3 max-md:space-y-2">
-            {/* Linha 1: identidade do board + ações principais */}
-            <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0 flex items-center gap-1.5">
+            {/* Título da página: nome do board por extenso + contexto */}
+            <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex items-start gap-1.5">
                     <div className="min-w-0">
-                        <BoardSelector
-                            variant="title"
-                            boards={boards}
-                            activeBoard={activeBoard}
-                            onSelectBoard={onSelectBoard}
-                            onCreateBoard={onCreateBoard}
-                            onEditBoard={onEditBoard}
-                            onDeleteBoard={onDeleteBoard}
-                            onReorderBoards={onReorderBoards}
-                        />
-                        <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                            {contextParts.join(' · ')}
-                            {automationMode && <span className="text-primary-600 dark:text-primary-300 font-medium"> · modo Automatizar</span>}
+                        <h1 className="font-display font-bold text-2xl md:text-[1.75rem] leading-tight tracking-tight text-slate-900 dark:text-white break-words">
+                            {activeBoard.name}
+                        </h1>
+                        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5 flex-wrap">
+                            <span>{contextParts.join(' · ')}</span>
+                            {automationMode && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-primary-600 text-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
+                                    <Zap size={10} className="fill-current" aria-hidden="true" /> Automatizar · ativo
+                                </span>
+                            )}
                         </p>
                     </div>
 
@@ -420,7 +533,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                         <Popover>
                             <PopoverTrigger asChild>
                                 <button
-                                    className="p-2 text-yellow-600 hover:text-yellow-700 dark:text-yellow-400 dark:hover:text-yellow-300 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 rounded-lg transition-colors relative group shrink-0"
+                                    className="mt-1 p-1.5 text-yellow-600 hover:text-yellow-700 dark:text-yellow-400 dark:hover:text-yellow-300 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 rounded-lg transition-colors relative group shrink-0"
                                     title="Automações Sugeridas"
                                 >
                                     <Lightbulb size={18} className="fill-current" />
@@ -452,21 +565,95 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                     )}
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0 max-md:gap-1.5">
+                {/* Ação principal (desktop). No celular ela vai para a barra de controles */}
+                <button
+                    onClick={onNewDeal}
+                    className="max-md:hidden shrink-0 h-[38px] bg-primary-700 hover:bg-primary-600 text-white px-4 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-primary-700/20"
+                >
+                    <Plus size={18} aria-hidden="true" /> Novo Negócio
+                </button>
+            </div>
+
+            {/* Barra de controles */}
+            <div className="flex flex-wrap items-center gap-2">
+                {/* Busca: no celular ocupa a linha inteira */}
+                <div className="relative flex-1 min-w-[11rem] md:max-w-xs max-md:basis-full">
+                    {/* z-10: o input tem backdrop-blur (cria stacking context) e pintava POR CIMA da lupa */}
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 pointer-events-none" size={16} />
+                    <input
+                        type="text"
+                        placeholder="Buscar negócios ou empresas..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className={`w-full pl-10 pr-4 ${CONTROL_CLASS}`}
+                    />
+                </div>
+
+                {/* Seletor do board */}
+                <BoardSelector
+                    boards={boards}
+                    activeBoard={activeBoard}
+                    onSelectBoard={onSelectBoard}
+                    onCreateBoard={onCreateBoard}
+                    onEditBoard={onEditBoard}
+                    onDeleteBoard={onDeleteBoard}
+                    onReorderBoards={onReorderBoards}
+                />
+
+                <PeriodButton dateRange={dateRange} onChange={setDateRange} />
+
+                <FiltersButton
+                    ownerFilter={ownerFilter}
+                    onOwnerChange={setOwnerFilter}
+                    owners={assignableOwners}
+                    statusFilter={statusFilter}
+                    onStatusChange={setStatusFilter}
+                    tagFilter={tagFilter}
+                    onTagFilterChange={setTagFilter}
+                    tagOptions={tagOptions}
+                    conditions={customFieldConditions}
+                    onConditionsChange={setCustomFieldConditions}
+                    logic={customFieldLogic}
+                    onLogicChange={setCustomFieldLogic}
+                    options={customFieldOptions}
+                />
+
+                <div className="ml-auto flex items-center gap-2 max-md:gap-1.5">
+                    {/* Modo de visualização */}
+                    <div className="h-[38px] flex items-center bg-slate-100 dark:bg-white/5 p-1 rounded-lg border border-slate-200 dark:border-white/10">
+                        <button
+                            onClick={() => setViewMode('kanban')}
+                            aria-label="Visualização em quadro Kanban"
+                            title="Kanban"
+                            aria-pressed={viewMode === 'kanban'}
+                            className={`p-1.5 rounded-md transition-all ${viewMode === 'kanban' ? 'bg-white dark:bg-slate-700 shadow-sm text-primary-600 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'}`}
+                        >
+                            <LayoutGrid size={16} aria-hidden="true" />
+                        </button>
+                        <button
+                            onClick={() => setViewMode('list')}
+                            aria-label="Visualização em lista"
+                            title="Lista (Todos / Qualificação / SQL)"
+                            aria-pressed={viewMode === 'list'}
+                            className={`p-1.5 rounded-md transition-all ${viewMode === 'list' ? 'bg-white dark:bg-slate-700 shadow-sm text-primary-600 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'}`}
+                        >
+                            <TableIcon size={16} aria-hidden="true" />
+                        </button>
+                    </div>
+
                     {/* Automatizar: camada de automações por etapa (só admin) */}
                     {onToggleAutomationMode && (
                         <button
                             type="button"
                             onClick={onToggleAutomationMode}
                             aria-pressed={automationMode}
-                            title={automationMode ? 'Voltar ao board' : 'Automatizar: o que dispara em cada etapa'}
-                            className={`h-[38px] flex items-center gap-2 px-3 max-md:px-2.5 rounded-lg border text-sm font-medium transition-all ${automationMode
-                                ? 'border-primary-600 bg-primary-600 text-white shadow-lg shadow-primary-600/20'
-                                : 'border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-white/5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10 hover:text-primary-700 dark:hover:text-white'
-                                }`}
+                            title={automationMode ? 'Concluir e voltar ao board' : 'Automatizar: o que dispara em cada etapa'}
+                            className={`${CONTROL_BUTTON_CLASS} font-medium ${automationMode
+                                ? 'border-primary-600 bg-primary-600 text-white shadow-lg shadow-primary-600/20 hover:bg-primary-700'
+                                : `${CONTROL_IDLE} hover:text-primary-700 dark:hover:text-white`}`}
                         >
-                            <Zap size={16} className={automationMode ? 'fill-current' : ''} aria-hidden="true" />
-                            <span className="max-md:hidden">Automatizar</span>
+                            <Zap size={15} className={automationMode ? 'fill-current' : ''} aria-hidden="true" />
+                            <span className="max-md:hidden">{automationMode ? 'Concluir' : 'Automatizar'}</span>
                         </button>
                     )}
 
@@ -478,10 +665,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                             aria-expanded={moreMenuOpen}
                             aria-label="Mais opções"
                             title="Mais opções"
-                            className={`h-[38px] w-[38px] flex items-center justify-center rounded-lg border text-sm transition-colors ${selectionMode
-                                ? 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
-                                : 'border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-white/5 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/10'
-                                }`}
+                            className={`h-[38px] w-[38px] flex items-center justify-center rounded-lg border text-sm transition-colors ${selectionMode ? CONTROL_ACTIVE : CONTROL_IDLE}`}
                         >
                             <MoreVertical size={18} />
                         </button>
@@ -543,12 +727,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                         )}
                     </div>
 
-                    <button
-                        onClick={onNewDeal}
-                        className="max-md:hidden h-[38px] bg-primary-700 hover:bg-primary-600 text-white px-4 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-primary-700/20"
-                    >
-                        <Plus size={18} aria-hidden="true" /> Novo Negócio
-                    </button>
+                    {/* Novo negócio no celular (no desktop fica ao lado do título) */}
                     <button
                         onClick={onNewDeal}
                         aria-label="Novo negócio"
@@ -560,167 +739,16 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                 </div>
             </div>
 
-            {/* Linha 2: controles (ou a faixa do modo Automatizar) */}
-            {automationMode ? (
-                <div className="flex items-center gap-2.5 rounded-xl border border-primary-200 dark:border-primary-500/30 bg-primary-50/70 dark:bg-primary-500/10 px-3 py-2 text-sm text-primary-800 dark:text-primary-200">
-                    <Zap size={14} className="fill-current shrink-0" aria-hidden="true" />
-                    <span className="min-w-0">
-                        Cada coluna mostra o que dispara quando um lead <strong>entra</strong> na etapa. Use <strong>Automatizar</strong> na coluna para adicionar.
-                    </span>
+            {/* Faixa discreta do modo Automatizar */}
+            {automationMode && (
+                <div className="flex items-center gap-2.5 rounded-lg border border-primary-200 dark:border-primary-500/30 bg-primary-50/70 dark:bg-primary-500/10 px-3 py-1.5 text-xs text-primary-800 dark:text-primary-200">
+                    <Zap size={13} className="fill-current shrink-0" aria-hidden="true" />
+                    <span className="min-w-0">Cada coluna mostra o que dispara quando um lead entra na etapa. Adicione ações direto na etapa.</span>
                     {onToggleAutomationMode && (
-                        <button type="button" onClick={onToggleAutomationMode} className="ml-auto shrink-0 text-xs font-semibold hover:underline">
-                            Voltar ao board
+                        <button type="button" onClick={onToggleAutomationMode} className="ml-auto shrink-0 font-semibold hover:underline">
+                            Concluir
                         </button>
                     )}
-                </div>
-            ) : (
-                <div className="flex flex-wrap items-center gap-2">
-                    {/* Busca: cresce; no celular ocupa a linha inteira */}
-                    <div className="relative flex-1 min-w-[12rem] md:max-w-sm max-md:basis-full">
-                        {/* z-10: o input tem backdrop-blur (cria stacking context) e pintava POR CIMA da lupa */}
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 pointer-events-none" size={16} />
-                        <input
-                            type="text"
-                            placeholder="Buscar negócios ou empresas..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            className={`w-full pl-10 pr-4 py-2 max-md:py-1.5 ${controlClass}`}
-                        />
-                    </div>
-
-                    {/* Status no celular: botão que abre um menuzinho de opções */}
-                    <div ref={statusMenuRef} className="relative md:hidden">
-                        <button
-                            type="button"
-                            onClick={() => setStatusMenuOpen((o) => !o)}
-                            aria-expanded={statusMenuOpen}
-                            aria-label="Filtrar por status"
-                            className={`flex items-center gap-2 pl-3 pr-2.5 py-1.5 text-slate-700 dark:text-slate-200 ${controlClass}`}
-                        >
-                            <span className={`w-2 h-2 rounded-full ${currentStatus.dot}`} aria-hidden="true" />
-                            {currentStatus.label}
-                            <ChevronDown
-                                size={14}
-                                aria-hidden="true"
-                                className={`text-slate-400 transition-transform ${statusMenuOpen ? 'rotate-180' : ''}`}
-                            />
-                        </button>
-                        {statusMenuOpen && (
-                            <div className="absolute left-0 z-50 mt-1 w-44 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1">
-                                {statusOptions.map((option) => (
-                                    <button
-                                        key={option.value}
-                                        type="button"
-                                        onClick={() => {
-                                            setStatusFilter(option.value);
-                                            setStatusMenuOpen(false);
-                                        }}
-                                        className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-colors hover:bg-slate-50 dark:hover:bg-white/5 ${statusFilter === option.value
-                                            ? 'font-bold text-primary-600 dark:text-primary-400'
-                                            : 'text-slate-700 dark:text-slate-200'}`}
-                                    >
-                                        <span className={`w-2 h-2 rounded-full ${option.dot}`} aria-hidden="true" />
-                                        {option.label}
-                                    </button>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Status: select só no desktop */}
-                    <div className="relative max-md:hidden">
-                        <select
-                            value={statusFilter}
-                            onChange={(e) => setStatusFilter(e.target.value as 'open' | 'won' | 'lost' | 'all')}
-                            aria-label="Filtrar por status"
-                            className={`pl-3 pr-8 py-2 appearance-none cursor-pointer ${controlClass}`}
-                        >
-                            {statusOptions.map((option) => (
-                                <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                        </select>
-                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                            <div className={`w-2 h-2 rounded-full ${currentStatus.dot}`} />
-                        </div>
-                    </div>
-
-                    {/* Responsável (no celular é o item flexível da linha) */}
-                    <div className="relative max-md:flex-1 max-md:min-w-0">
-                        <select
-                            value={ownerFilter}
-                            onChange={(e) => setOwnerFilter(e.target.value)}
-                            aria-label="Filtrar negócios por proprietário"
-                            className={`pl-3 pr-8 py-2 max-md:py-1.5 max-md:pl-2 max-md:pr-6 max-md:w-full appearance-none cursor-pointer ${controlClass}`}
-                        >
-                            <option value="all">Todos os Donos</option>
-                            <option value="mine">Meus Negócios</option>
-                            {assignableOwners.length > 0 && (
-                                <>
-                                    <option value="none">Sem responsável</option>
-                                    <optgroup label="Responsáveis">
-                                        {assignableOwners.map((u) => (
-                                            <option key={u.id} value={u.id}>
-                                                {u.name}{u.role === 'admin' ? ' (admin)' : ''}
-                                            </option>
-                                        ))}
-                                    </optgroup>
-                                </>
-                            )}
-                        </select>
-                        <User className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
-                    </div>
-
-                    {/* Filtros: tag (select) + data de criação + construtor de
-                        condições por campo/UTM. Sempre visível: a data existe em
-                        qualquer board, mesmo sem tags/campos configurados. */}
-                    <CustomFieldFiltersButton
-                        conditions={customFieldConditions}
-                        onConditionsChange={setCustomFieldConditions}
-                        logic={customFieldLogic}
-                        onLogicChange={setCustomFieldLogic}
-                        options={customFieldOptions}
-                        tagFilter={tagFilter}
-                        onTagFilterChange={setTagFilter}
-                        tagOptions={tagOptions}
-                        dateRange={dateRange}
-                        onDateRangeChange={setDateRange}
-                    />
-
-                    <div className="ml-auto flex items-center gap-2">
-                        {/* Modo de visualização */}
-                        <div className="flex bg-slate-100 dark:bg-white/5 p-1 rounded-lg border border-slate-200 dark:border-white/10">
-                            <button
-                                onClick={() => setViewMode('kanban')}
-                                aria-label="Visualização em quadro Kanban"
-                                title="Kanban"
-                                aria-pressed={viewMode === 'kanban'}
-                                className={`p-1.5 rounded-md transition-all ${viewMode === 'kanban' ? 'bg-white dark:bg-slate-700 shadow-sm text-primary-600 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'}`}
-                            >
-                                <LayoutGrid size={16} aria-hidden="true" />
-                            </button>
-                            <button
-                                onClick={() => setViewMode('list')}
-                                aria-label="Visualização em lista"
-                                title="Lista (Todos / Qualificação / SQL)"
-                                aria-pressed={viewMode === 'list'}
-                                className={`p-1.5 rounded-md transition-all ${viewMode === 'list' ? 'bg-white dark:bg-slate-700 shadow-sm text-primary-600 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'}`}
-                            >
-                                <TableIcon size={16} aria-hidden="true" />
-                            </button>
-                        </div>
-
-                        {/* Configurações do board (atalho de desktop; no celular fica no menu ⋮) */}
-                        {onEditBoard && (
-                            <button
-                                onClick={() => onEditBoard(activeBoard)}
-                                className="p-2 max-md:hidden text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors"
-                                title="Configurações do Board"
-                                aria-label="Configurações do board"
-                            >
-                                <Settings size={18} />
-                            </button>
-                        )}
-                    </div>
                 </div>
             )}
         </div>

@@ -3,15 +3,16 @@
 /**
  * Modo Automatizar do Kanban: só quando ligado é que carrega robôs, agentes e
  * webhooks (hooks ficam no componente interno), entrega ao KanbanBoard o que
- * cada coluna mostra e cuida dos modais (escolher automação, webhook, excluir).
+ * cada coluna mostra e cuida dos modais (ação da etapa, webhook, excluir).
  */
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import ConfirmModal from '@/components/ConfirmModal';
 import { useToast } from '@/context/ToastContext';
+import { useWaAgentsAccess } from '@/hooks/useWaAgentsAccess';
 import type { Board, BoardStage } from '@/types';
 import { useStageAutomations, type PipelineRule, type StageAutomation } from './useStageAutomations';
-import { StageAutomationPicker } from './StageAutomationPicker';
+import { StageActionModal } from './StageActionModal';
 import { PipelineWebhookRuleModal } from './PipelineWebhookRuleModal';
 
 export type KanbanAutomation = {
@@ -33,8 +34,9 @@ export function AutomationLayer({ board, enabled, children }: { board: Board; en
 function ActiveLayer({ board, children }: { board: Board; children: Children }) {
   const router = useRouter();
   const { addToast } = useToast();
+  const { agentsApproved } = useWaAgentsAccess();
   const auto = useStageAutomations(board);
-  const [picker, setPicker] = useState<BoardStage | null>(null);
+  const [action, setAction] = useState<{ key: number; stage: BoardStage; item: StageAutomation | null } | null>(null);
   const [webhook, setWebhook] = useState<{ stage: BoardStage; rule: PipelineRule | null } | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<StageAutomation | null>(null);
 
@@ -43,19 +45,21 @@ function ActiveLayer({ board, children }: { board: Board; children: Children }) 
   }, [auto.error, addToast]);
 
   const fail = (fallback: string) => (e: unknown) => addToast((e as Error)?.message || fallback, 'error');
+  const stageOf = (id: string) => board.stages.find((s) => s.id === id) ?? null;
 
   const automation: KanbanAutomation = {
     byStage: auto.byStage,
     loading: auto.isLoading,
-    onAdd: (stage) => setPicker(stage),
+    onAdd: (stage) => setAction({ key: Date.now(), stage, item: null }),
     onOpen: (item) => {
+      const stage = stageOf(item.stageId);
+      if (!stage) return;
       if (item.kind === 'bot') {
         router.push(`/settings/agentes?bot=${encodeURIComponent(item.refId)}#robos`);
-      } else if (item.kind === 'agent') {
-        router.push(`/settings/agentes?agent=${encodeURIComponent(item.refId)}#agentes`);
+      } else if (item.kind === 'webhook') {
+        setWebhook({ stage, rule: item.rule ?? null });
       } else {
-        const stage = board.stages.find((s) => s.id === item.stageId);
-        if (stage) setWebhook({ stage, rule: item.rule ?? null });
+        setAction({ key: Date.now(), stage, item });
       }
     },
     onToggle: (item) => {
@@ -73,20 +77,23 @@ function ActiveLayer({ board, children }: { board: Board; children: Children }) 
     if (!item) return;
     void auto
       .remove(item)
-      .then(() => addToast('Automação excluída', 'success'))
+      .then(() => addToast(item.kind === 'agent' ? 'O agente deixou de iniciar conversas nesta etapa' : 'Automação excluída', 'success'))
       .catch(fail('Não foi possível excluir a automação'));
   };
 
   return (
     <>
       {children(automation)}
-      {picker ? (
-        <StageAutomationPicker
+      {action ? (
+        <StageActionModal
+          key={action.key}
           open
-          onClose={() => setPicker(null)}
+          onClose={() => setAction(null)}
           board={board}
-          stage={picker}
-          onWebhook={() => setWebhook({ stage: picker, rule: null })}
+          stage={action.stage}
+          item={action.item}
+          automationsApproved={agentsApproved}
+          onWebhook={() => setWebhook({ stage: action.stage, rule: null })}
         />
       ) : null}
       {webhook ? (
@@ -103,16 +110,24 @@ function ActiveLayer({ board, children }: { board: Board; children: Children }) 
         isOpen={!!confirmRemove}
         onClose={() => setConfirmRemove(null)}
         onConfirm={confirmRemoval}
-        title="Excluir automação"
+        title={confirmRemove?.kind === 'agent' ? 'Remover desta etapa' : 'Excluir automação'}
         message={
           confirmRemove ? (
             <>
-              Excluir <strong>{confirmRemove.title}</strong>?{' '}
-              {confirmRemove.kind === 'bot' ? 'O robô será apagado, com todos os passos.' : 'O webhook deixa de ser chamado.'}
+              {confirmRemove.kind === 'agent' ? (
+                <>
+                  O agente <strong>{confirmRemove.subtitle}</strong> deixa de iniciar a conversa ao entrar nesta etapa. O agente continua existindo.
+                </>
+              ) : (
+                <>
+                  Excluir <strong>{confirmRemove.title}</strong>?{' '}
+                  {confirmRemove.kind === 'bot' ? 'O robô será apagado, com todos os passos.' : confirmRemove.kind === 'webhook' ? 'O webhook deixa de ser chamado.' : 'A ação deixa de disparar nesta etapa.'}
+                </>
+              )}
             </>
           ) : null
         }
-        confirmText="Excluir"
+        confirmText={confirmRemove?.kind === 'agent' ? 'Remover' : 'Excluir'}
       />
     </>
   );

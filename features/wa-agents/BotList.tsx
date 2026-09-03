@@ -15,6 +15,7 @@ import { useToast } from '@/context/ToastContext';
 import type { BotRow } from '@/lib/wa-agents/types';
 import { useDeleteWaBot, useSaveWaBot, useStartWaBot, useWaAgentOptions, useWaBotsList } from './useWaAgents';
 import { TRIGGER_LABELS } from './canvas/types';
+import { isStageAutomationBot } from '@/features/boards/automations/stageAutomationModel';
 import {
   BTN_ICON,
   BTN_PRIMARY,
@@ -126,7 +127,8 @@ export const BotList: React.FC = () => {
     }
   };
 
-  const bots = listQ.data ?? [];
+  // Automações de etapa do board (robôs marcados) ficam só no board
+  const bots = (listQ.data ?? []).filter((b) => !isStageAutomationBot(b));
 
   return (
     <div className="space-y-4">

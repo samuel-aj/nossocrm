@@ -454,7 +454,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                 </span>
                 <span className="flex items-center gap-1">
                   <span className="text-xs font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded text-slate-600 dark:text-slate-300">
-                    {automation ? (automation.byStage.get(stage.id)?.length ?? 0) : stageDeals.length}
+                    {stageDeals.length}
                   </span>
                   {/* Celular: setinha pra próxima etapa */}
                   {stageIndex < mobileColumns.length - 1 && (
@@ -485,35 +485,30 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
               </div>
 
               <div className="text-xs text-slate-500 dark:text-slate-400 font-medium text-right">
-                {automation ? (
-                  <>Ao entrar: <span className="text-slate-900 dark:text-white font-mono">{automation.byStage.get(stage.id)?.length ?? 0}</span></>
-                ) : (
-                  <>
-                    Total:{' '}
-                    <span className="text-slate-900 dark:text-white font-mono">
-                      ${stageValue.toLocaleString()}
-                    </span>
-                  </>
-                )}
+                Total:{' '}
+                <span className="text-slate-900 dark:text-white font-mono">
+                  ${stageValue.toLocaleString()}
+                </span>
               </div>
             </div>
 
-            {automation ? (
-              <StageAutomationsPanel
-                items={automation.byStage.get(stage.id) ?? []}
-                loading={automation.loading}
-                onAdd={() => automation.onAdd(stage)}
-                onOpen={automation.onOpen}
-                onToggle={automation.onToggle}
-                onRemove={automation.onRemove}
-              />
-            ) : (
             <div
               data-kanban-col-scroll
               className={`flex-1 p-2 overflow-y-auto scrollbar-custom space-y-2 bg-slate-100/50 dark:bg-black/20 min-h-[100px]`}
             >
+              {/* Modo Automatizar: o que dispara ao entrar, acima dos leads */}
+              {automation && (
+                <StageAutomationsPanel
+                  items={automation.byStage.get(stage.id) ?? []}
+                  loading={automation.loading}
+                  onAdd={() => automation.onAdd(stage)}
+                  onOpen={automation.onOpen}
+                  onToggle={automation.onToggle}
+                  onRemove={automation.onRemove}
+                />
+              )}
               {stageDeals.length === 0 && !draggingId && (
-                <div className="h-full flex items-center justify-center text-slate-400 dark:text-slate-600 text-sm py-8">
+                <div className={`${automation ? 'py-4' : 'h-full py-8'} flex items-center justify-center text-slate-400 dark:text-slate-600 text-sm`}>
                   Sem negócios
                 </div>
               )}
@@ -551,7 +546,6 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                 />
               ))}
             </div>
-            )}
           </div>
         );
       })}

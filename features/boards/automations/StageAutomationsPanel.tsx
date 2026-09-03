@@ -1,18 +1,31 @@
 'use client';
 
 /**
- * Camada de automação de uma coluna do Kanban (modo Automatizar): o que
- * dispara quando um lead ENTRA nesta etapa, em chips compactos, com menu
- * "..." (abrir, ativar/desativar, excluir) e "+ Automatizar".
+ * Seção "Dispara ao entrar" de uma coluna do Kanban (modo Automatizar): fica
+ * no TOPO do conteúdo da etapa, acima dos leads. Lista compacta das
+ * automações, menu "..." (editar/abrir, ativar/desativar, excluir) e o botão
+ * de adicionar logo abaixo.
  */
-import React, { useState } from 'react';
-import { Bot, ExternalLink, Pause, Play, Plus, Sparkles, Trash2, Webhook, Zap } from 'lucide-react';
+import React from 'react';
+import { Bot, ExternalLink, Pause, Pencil, Play, Plus, Sparkles, Trash2, Webhook, Zap, MessageCircle, Tag, MoveRight } from 'lucide-react';
 import { KebabMenu, type KebabItem } from '@/components/ui/KebabMenu';
 import type { StageAutomation } from './useStageAutomations';
+import { stageActionStep } from './stageAutomationModel';
 
-const KIND_ICON = { bot: Bot, agent: Sparkles, webhook: Webhook } as const;
-const KIND_LABEL = { bot: 'Robô', agent: 'Agente de IA', webhook: 'Webhook' } as const;
-const COLLAPSED = 4;
+const KIND_LABEL = { action: 'Ação', bot: 'Robô', agent: 'Agente de IA', webhook: 'Webhook' } as const;
+
+function iconFor(item: StageAutomation) {
+  if (item.kind === 'action' && item.bot) {
+    const step = stageActionStep(item.bot);
+    if (step?.type === 'send_text') return MessageCircle;
+    if (step?.type === 'add_tag') return Tag;
+    if (step?.type === 'move_stage') return MoveRight;
+    if (step?.type === 'handoff_agent') return Sparkles;
+  }
+  if (item.kind === 'agent') return Sparkles;
+  if (item.kind === 'webhook') return Webhook;
+  return Bot;
+}
 
 export function StageAutomationsPanel({
   items,
@@ -29,53 +42,57 @@ export function StageAutomationsPanel({
   onToggle: (item: StageAutomation) => void;
   onRemove: (item: StageAutomation) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const visible = expanded ? items : items.slice(0, COLLAPSED);
-  const hidden = items.length - visible.length;
-
   return (
-    <div className="flex-1 p-3 overflow-y-auto scrollbar-custom bg-slate-100/50 dark:bg-black/20 min-h-[100px] flex flex-col gap-2">
-      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-primary-700 dark:text-primary-300">
-        <Zap size={12} aria-hidden="true" /> Dispara ao entrar
-      </p>
+    <section
+      aria-label="Automações ao entrar na etapa"
+      className="rounded-lg border border-primary-200/80 dark:border-primary-500/25 bg-white dark:bg-dark-card shadow-sm overflow-hidden"
+    >
+      <header className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-primary-50/80 dark:bg-primary-500/10 border-b border-primary-100 dark:border-primary-500/20">
+        <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-primary-700 dark:text-primary-300">
+          <Zap size={12} className="fill-current" aria-hidden="true" /> Dispara ao entrar
+        </p>
+        {items.length > 0 ? (
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-primary-600 text-white">{items.length}</span>
+        ) : null}
+      </header>
 
       {loading ? (
-        <p className="text-xs text-slate-400 py-2">Carregando...</p>
+        <p className="px-2.5 py-2 text-[11px] text-slate-400">Carregando...</p>
       ) : items.length === 0 ? (
-        <p className="text-xs text-slate-500 dark:text-slate-400 py-1">Nenhuma automação</p>
+        <p className="px-2.5 py-2 text-[11px] text-slate-500 dark:text-slate-400">Sem automações</p>
       ) : (
-        <ul className="space-y-1.5">
-          {visible.map((item) => {
-            const Icon = KIND_ICON[item.kind];
+        <ul className="divide-y divide-slate-100 dark:divide-white/5">
+          {items.map((item) => {
+            const Icon = iconFor(item);
+            const openLabel = item.kind === 'bot' ? 'Abrir robô' : 'Editar';
             const menu: KebabItem[] = [
-              { label: item.kind === 'webhook' ? 'Editar' : 'Abrir configuração', icon: <ExternalLink size={14} aria-hidden="true" />, onSelect: () => onOpen(item) },
+              {
+                label: openLabel,
+                icon: item.kind === 'bot' ? <ExternalLink size={14} aria-hidden="true" /> : <Pencil size={14} aria-hidden="true" />,
+                onSelect: () => onOpen(item),
+              },
               {
                 label: item.enabled ? 'Desativar' : 'Ativar',
                 icon: item.enabled ? <Pause size={14} aria-hidden="true" /> : <Play size={14} aria-hidden="true" />,
                 onSelect: () => onToggle(item),
               },
-              ...(item.kind !== 'agent'
-                ? [{ label: 'Excluir', icon: <Trash2 size={14} aria-hidden="true" />, danger: true, onSelect: () => onRemove(item) }]
-                : []),
+              {
+                label: item.kind === 'agent' ? 'Remover desta etapa' : 'Excluir',
+                icon: <Trash2 size={14} aria-hidden="true" />,
+                danger: true,
+                onSelect: () => onRemove(item),
+              },
             ];
             return (
-              <li
-                key={item.id}
-                className={`group flex items-start gap-2 rounded-lg border bg-white dark:bg-dark-card px-2.5 py-2 transition-colors ${
-                  item.enabled
-                    ? 'border-slate-200 dark:border-white/10 hover:border-primary-300 dark:hover:border-primary-500/40'
-                    : 'border-dashed border-slate-300 dark:border-white/15 opacity-70'
-                }`}
-              >
+              <li key={item.id} className={`group flex items-start gap-2 px-2 py-1.5 ${item.enabled ? '' : 'opacity-60'}`}>
                 <span className="mt-0.5 p-1 rounded-md bg-primary-500/10 text-primary-600 dark:text-primary-400 shrink-0" title={KIND_LABEL[item.kind]}>
-                  <Icon size={13} aria-hidden="true" />
+                  <Icon size={12} aria-hidden="true" />
                 </span>
-                <button type="button" onClick={() => onOpen(item)} className="flex-1 min-w-0 text-left focus-visible-ring rounded">
-                  <span className="block text-xs font-semibold text-slate-900 dark:text-white truncate">{item.title}</span>
-                  <span className="block text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                    {KIND_LABEL[item.kind]}
-                    {item.subtitle ? ` · ${item.subtitle}` : ''}
-                    {!item.enabled ? ' · desativado' : ''}
+                <button type="button" onClick={() => onOpen(item)} className="flex-1 min-w-0 text-left rounded focus-visible-ring" title={openLabel}>
+                  <span className="block text-[12px] font-semibold leading-tight text-slate-900 dark:text-white truncate">{item.title}</span>
+                  <span className="block text-[11px] leading-tight text-slate-500 dark:text-slate-400 truncate">
+                    {item.subtitle}
+                    {!item.enabled ? ' · desativada' : ''}
                   </span>
                 </button>
                 <KebabMenu
@@ -90,20 +107,14 @@ export function StageAutomationsPanel({
         </ul>
       )}
 
-      {hidden > 0 ? (
-        <button type="button" onClick={() => setExpanded(true)} className="text-[11px] font-medium text-slate-500 hover:text-primary-600 dark:text-slate-400 dark:hover:text-primary-300 text-left">
-          Ver mais {hidden}
-        </button>
-      ) : null}
-
       <button
         type="button"
         onClick={onAdd}
-        className="mt-auto inline-flex items-center justify-center gap-1.5 w-full rounded-lg border border-dashed border-slate-300 dark:border-white/15 px-3 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 hover:border-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors focus-visible-ring"
+        className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 border-t border-slate-100 dark:border-white/5 text-[11px] font-semibold text-primary-700 dark:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-500/10 transition-colors focus-visible-ring"
       >
-        <Plus size={14} aria-hidden="true" /> {items.length === 0 ? 'Automatizar' : 'Adicionar automação'}
+        <Plus size={13} aria-hidden="true" /> {items.length === 0 ? 'Automatizar' : 'Adicionar automação'}
       </button>
-    </div>
+    </section>
   );
 }
 

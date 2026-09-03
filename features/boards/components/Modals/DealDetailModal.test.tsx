@@ -26,6 +26,8 @@ vi.mock('@/context/ToastContext', () => ({
 vi.mock('@/lib/query/hooks', () => ({
   useMoveDealSimple: () => ({ moveDeal: vi.fn() }),
   useDeal: () => ({ data: null, isLoading: false, error: null }),
+  useOrgUsers: () => ({ users: [], isAdmin: false, isLoading: false }),
+  useOrgMembers: () => ({ members: [], isLoading: false }),
 }));
 
 vi.mock('@/lib/a11y', () => ({
@@ -99,6 +101,8 @@ vi.mock('@/context/CRMContext', () => ({
     };
 
     return {
+      sidebarCollapsed: false,
+      setSidebarCollapsed: vi.fn(),
       deals: [deal],
       contacts: [{ id: 'contact-1', stage: null }],
       updateDeal: vi.fn(),

@@ -1,14 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ChatAgentBanner, formatResumeAt } from './ChatAgentBanner';
-import type { AgentMinimal, ConversationAiInfo } from '@/lib/wa-agents/types';
-
-const AGENTS: AgentMinimal[] = [
-  { id: 'a1', name: 'Pré-atendimento', persona_name: 'Ana', enabled: true },
-  { id: 'a2', name: 'Triagem', persona_name: null, enabled: true },
-  { id: 'a3', name: 'Desligado', persona_name: null, enabled: false },
-];
+import type { ConversationAiInfo, ConversationBotInfo } from '@/lib/wa-agents/types';
 
 function info(partial: Partial<ConversationAiInfo>): ConversationAiInfo {
   return {
@@ -40,88 +34,40 @@ describe('ChatAgentBanner', () => {
     onAction.mockClear();
   });
 
-  it('sem agente: botão discreto abre o menu com os agentes ligados e inicia', async () => {
-    const user = userEvent.setup();
-    render(<ChatAgentBanner ai={null} agents={AGENTS} busy={false} onAction={onAction} />);
-
-    const btn = screen.getByRole('button', { name: /Iniciar agente de IA/ });
-    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
-    await user.click(btn);
-    expect(screen.getByRole('menu')).toBeInTheDocument();
-    expect(screen.getByText('Pré-atendimento')).toBeInTheDocument();
-    expect(screen.getByText('Triagem')).toBeInTheDocument();
-    expect(screen.queryByText('Desligado')).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('menuitem', { name: /Triagem/ }));
-    expect(onAction).toHaveBeenCalledWith('start', 'a2');
-    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  it('sem agente nem robô em andamento: a faixa não aparece', () => {
+    const { container } = render(<ChatAgentBanner ai={null} bot={null} busy={false} onAction={onAction} />);
+    expect(container).toBeEmptyDOMElement();
   });
 
-  it('menu vazio mostra "Nenhum agente configurado"', async () => {
-    const user = userEvent.setup();
-    render(<ChatAgentBanner ai={null} agents={[]} busy={false} onAction={onAction} />);
-    await user.click(screen.getByRole('button', { name: /Iniciar agente de IA/ }));
-    expect(screen.getByText('Nenhum agente configurado')).toBeInTheDocument();
-  });
-
-  it('menu fecha com Escape e com clique fora', async () => {
-    const user = userEvent.setup();
-    render(
-      <div>
-        <span data-testid="fora">fora</span>
-        <ChatAgentBanner ai={null} agents={AGENTS} busy={false} onAction={onAction} />
-      </div>
-    );
-    const btn = screen.getByRole('button', { name: /Iniciar agente de IA/ });
-
-    await user.click(btn);
-    expect(screen.getByRole('menu')).toBeInTheDocument();
-    fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
-
-    await user.click(btn);
-    expect(screen.getByRole('menu')).toBeInTheDocument();
-    fireEvent.pointerDown(screen.getByTestId('fora'));
-    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  it('stopped: a faixa some (iniciar é pelo botão Automações do compositor)', () => {
+    const { container } = render(<ChatAgentBanner ai={info({ status: 'stopped' })} bot={null} busy={false} onAction={onAction} />);
+    expect(container).toBeEmptyDOMElement();
   });
 
   it('active: nome do agente, Pausar e Parar', async () => {
     const user = userEvent.setup();
-    render(<ChatAgentBanner ai={info({ status: 'active' })} agents={AGENTS} busy={false} onAction={onAction} />);
+    render(<ChatAgentBanner ai={info({ status: 'active' })} bot={null} busy={false} onAction={onAction} />);
     expect(screen.getByText('Agente Ana ativo nesta conversa')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Pausar/ }));
-    expect(onAction).toHaveBeenCalledWith('pause', undefined);
+    expect(onAction).toHaveBeenCalledWith('pause');
     await user.click(screen.getByRole('button', { name: /Parar/ }));
-    expect(onAction).toHaveBeenCalledWith('stop', undefined);
+    expect(onAction).toHaveBeenCalledWith('stop');
     expect(screen.queryByRole('button', { name: /Retomar/ })).not.toBeInTheDocument();
   });
 
   it('paused com resumeAt: mostra a hora de retomada, Retomar e Parar', async () => {
     const user = userEvent.setup();
     const resumeAt = new Date(2026, 7, 25, 9, 30, 0).toISOString();
-    render(
-      <ChatAgentBanner ai={info({ status: 'paused', resumeAt })} agents={AGENTS} busy={false} onAction={onAction} />
-    );
+    render(<ChatAgentBanner ai={info({ status: 'paused', resumeAt })} bot={null} busy={false} onAction={onAction} />);
     expect(screen.getByText('Agente Ana pausado, retoma às 09:30')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Retomar/ }));
-    expect(onAction).toHaveBeenCalledWith('resume', undefined);
+    expect(onAction).toHaveBeenCalledWith('resume');
     expect(screen.getByRole('button', { name: /Parar/ })).toBeInTheDocument();
   });
 
   it('paused sem resumeAt: "até você retomar"', () => {
-    render(
-      <ChatAgentBanner ai={info({ status: 'paused', resumeAt: null })} agents={AGENTS} busy={false} onAction={onAction} />
-    );
+    render(<ChatAgentBanner ai={info({ status: 'paused', resumeAt: null })} bot={null} busy={false} onAction={onAction} />);
     expect(screen.getByText('Agente Ana pausado até você retomar')).toBeInTheDocument();
-  });
-
-  it('stopped: texto cinza e menu Iniciar', async () => {
-    const user = userEvent.setup();
-    render(<ChatAgentBanner ai={info({ status: 'stopped' })} agents={AGENTS} busy={false} onAction={onAction} />);
-    expect(screen.getByText('Agente parado nesta conversa')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /^Iniciar/ }));
-    await user.click(screen.getByRole('menuitem', { name: /Pré-atendimento/ }));
-    expect(onAction).toHaveBeenCalledWith('start', 'a1');
   });
 
   it('awaiting_approval: texto, resumo expansível, Aprovar e Recusar', async () => {
@@ -137,7 +83,7 @@ describe('ChatAgentBanner', () => {
             requestedAt: new Date().toISOString(),
           },
         })}
-        agents={AGENTS}
+        bot={null}
         busy={false}
         onAction={onAction}
       />
@@ -147,43 +93,41 @@ describe('ChatAgentBanner', () => {
     await user.click(screen.getByRole('button', { name: /Ver resumo/ }));
     expect(screen.getByText('Lead quer falar sobre rescisão.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Aprovar/ }));
-    expect(onAction).toHaveBeenCalledWith('approve', undefined);
+    expect(onAction).toHaveBeenCalledWith('approve');
     await user.click(screen.getByRole('button', { name: /Recusar/ }));
-    expect(onAction).toHaveBeenCalledWith('reject', undefined);
+    expect(onAction).toHaveBeenCalledWith('reject');
   });
 
-  it('agente externo (native false): só Pausar/Retomar, sem Parar nem Iniciar', async () => {
+  it('agente externo (native false): texto próprio, Pausar/Retomar e Parar', async () => {
     const user = userEvent.setup();
     const { rerender } = render(
-      <ChatAgentBanner
-        ai={info({ status: 'active', native: false, agent: null })}
-        agents={AGENTS}
-        busy={false}
-        onAction={onAction}
-      />
+      <ChatAgentBanner ai={info({ status: 'active', native: false, agent: null })} bot={null} busy={false} onAction={onAction} />
     );
-    expect(screen.getByText('Agente de IA ativo nesta conversa')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Parar/ })).not.toBeInTheDocument();
+    expect(screen.getByText('Agente de IA externo ativo nesta conversa')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Pausar/ }));
-    expect(onAction).toHaveBeenCalledWith('pause', undefined);
+    expect(onAction).toHaveBeenCalledWith('pause');
+    expect(screen.getByRole('button', { name: /Parar/ })).toBeInTheDocument();
 
     rerender(
-      <ChatAgentBanner
-        ai={info({ status: 'paused', native: false, agent: null })}
-        agents={AGENTS}
-        busy={false}
-        onAction={onAction}
-      />
+      <ChatAgentBanner ai={info({ status: 'paused', native: false, agent: null })} bot={null} busy={false} onAction={onAction} />
     );
-    expect(screen.getByText('Agente de IA pausado (atendimento humano)')).toBeInTheDocument();
+    expect(screen.getByText('Agente de IA externo pausado (atendimento humano)')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Retomar/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Parar/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Iniciar/ })).not.toBeInTheDocument();
+  });
+
+  it('robô em andamento: faixa do robô com Cancelar robô', async () => {
+    const user = userEvent.setup();
+    const bot: ConversationBotInfo = { runId: 'r1', botId: 'b1', name: 'Boas-vindas', status: 'waiting_reply' };
+    render(<ChatAgentBanner ai={null} bot={bot} busy={false} onAction={onAction} />);
+    expect(screen.getByText('Robô Boas-vindas aguardando resposta do contato')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Cancelar robô/ }));
+    expect(onAction).toHaveBeenCalledWith('cancel_bot');
   });
 
   it('busy: botões desabilitados e sem chamar onAction', async () => {
     const user = userEvent.setup();
-    render(<ChatAgentBanner ai={info({ status: 'active' })} agents={AGENTS} busy onAction={onAction} />);
+    render(<ChatAgentBanner ai={info({ status: 'active' })} bot={null} busy onAction={onAction} />);
     const pausar = screen.getByRole('button', { name: /Pausar/ });
     expect(pausar).toBeDisabled();
     await user.click(pausar);
