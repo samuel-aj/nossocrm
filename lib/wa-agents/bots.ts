@@ -48,6 +48,8 @@ const CHAIN_DEPTH_VAR = '_chain_depth';
 const MAX_CHAIN_DEPTH = 5;
 /** Esperas de até isto acontecem dentro da execução (o relógio do tick é de 30 s e atrasaria) */
 const INLINE_WAIT_MAX_S = 25;
+/** Passos que falam com o lead: exigem conversa no WhatsApp (telefone + número). */
+const CONVERSATION_STEP_TYPES = new Set<BotStep['type']>(['send_text', 'send_template', 'typing', 'wait_reply', 'handoff_agent', 'start_bot']);
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -416,6 +418,29 @@ export function evalConditionRule(rule: BotConditionRule, env: ConditionEnv): bo
  * Processa uma execução a partir de `run.step_index`. Quem chama já deve ter
  * a trava (claimBotLock) ou ter acabado de criar a run.
  */
+/**
+ * Move o negócio para uma etapa de OUTRO quadro da mesma organização (troca
+ * board_id e stage_id juntos). A etapa precisa pertencer ao quadro de destino.
+ */
+async function moveDealToBoardStage(admin: SupabaseClient, orgId: string, dealId: string, boardId: string, stageId: string): Promise<void> {
+  const { data: stage, error: stageError } = await admin
+    .from('board_stages')
+    .select('id')
+    .eq('organization_id', orgId)
+    .eq('board_id', boardId)
+    .eq('id', stageId)
+    .maybeSingle();
+  if (stageError) throw new Error(stageError.message);
+  if (!stage) throw new Error('etapa de destino não pertence ao pipeline escolhido');
+  const now = nowIso();
+  const { error } = await admin
+    .from('deals')
+    .update({ board_id: boardId, stage_id: stageId, last_stage_change_date: now, updated_at: now })
+    .eq('organization_id', orgId)
+    .eq('id', dealId);
+  if (error) throw new Error(error.message);
+}
+
 export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Promise<void> {
   const st: RunState = {
     run,
@@ -469,7 +494,15 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
     /** Número da conversa existente: é ele que envia (o do robô só como reserva) */
     let convConnectionId: string | null = null;
     let phone = run.phone ? normalizePhoneE164(run.phone) : '';
-    if (!run.conversation_id) {
+    // Automação só de CRM (etapa, rótulo, webhook, condição, espera): roda sem
+    // abrir conversa no WhatsApp e sem exigir telefone ou número.
+    const needsConversation = steps.some((s) => CONVERSATION_STEP_TYPES.has(s.type));
+    if (!run.conversation_id && !needsConversation) {
+      phone = normalizePhoneE164(run.phone || contact?.phone || '');
+      if (!st.run.contact_id && (contact?.id || contactId)) {
+        st.run = { ...st.run, contact_id: contact?.id ?? contactId ?? null };
+      }
+    } else if (!run.conversation_id) {
       phone = normalizePhoneE164(run.phone || contact?.phone || '');
       if (!phone) {
         note(st, null, 'sem telefone para enviar');
@@ -531,7 +564,7 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
         return;
       }
     }
-    const conversationId = st.run.conversation_id as string;
+    const conversationId: string | null = st.run.conversation_id ?? null;
 
     const getConnection = async (): Promise<WaConnectionRow> => {
       if (connection) return connection;
@@ -550,6 +583,7 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
     let lastInboundId: string | null | undefined;
     const getLastInboundId = async (): Promise<string | null> => {
       if (lastInboundId === undefined) {
+        if (!conversationId) return null;
         lastInboundId = await loadLastInboundProviderId(admin, {
           organizationId: orgId,
           conversationId,
@@ -786,6 +820,9 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
         case 'move_stage': {
           if (!deal) {
             note(st, step, 'sem negócio: etapa ignorada');
+          } else if (step.board_id && step.board_id !== deal.board_id) {
+            await moveDealToBoardStage(admin, orgId, deal.id, step.board_id, step.stage_id);
+            note(st, step, 'negócio movido para outro pipeline');
           } else {
             const r = await moveStageByDealId({ organizationId: orgId, dealId: deal.id, target: { to_stage_id: step.stage_id } });
             if (!r.ok) throw new Error((r.body as { error?: string }).error || 'falha ao mover etapa');
@@ -835,6 +872,7 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
           break;
         }
         case 'handoff_agent': {
+          if (!conversationId) throw new Error('sem conversa para entregar ao agente');
           // O robô é livre, mas ENTREGAR a um agente de IA só vale se a
           // organização tiver o agente liberado pelo super admin.
           if (!(await isAiAgentsApproved(admin, orgId))) {

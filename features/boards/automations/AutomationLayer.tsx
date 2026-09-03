@@ -3,7 +3,8 @@
 /**
  * Modo Automatizar do Kanban: só quando ligado é que carrega robôs, agentes e
  * webhooks (hooks ficam no componente interno), entrega ao KanbanBoard o que
- * cada coluna mostra e cuida dos modais (ação da etapa, webhook, excluir).
+ * cada coluna mostra e cuida dos modais (ação da etapa, webhook, excluir) e
+ * do arrastar entre etapas.
  */
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -22,6 +23,8 @@ export type KanbanAutomation = {
   onOpen: (item: StageAutomation) => void;
   onToggle: (item: StageAutomation) => void;
   onRemove: (item: StageAutomation) => void;
+  /** Card arrastado e solto em outra coluna */
+  onMove: (itemId: string, stageId: string) => void;
 };
 
 type Children = (automation: KanbanAutomation | undefined) => React.ReactNode;
@@ -46,6 +49,13 @@ function ActiveLayer({ board, children }: { board: Board; children: Children }) 
 
   const fail = (fallback: string) => (e: unknown) => addToast((e as Error)?.message || fallback, 'error');
   const stageOf = (id: string) => board.stages.find((s) => s.id === id) ?? null;
+  const findItem = (id: string): StageAutomation | null => {
+    for (const list of auto.byStage.values()) {
+      const hit = list.find((i) => i.id === id);
+      if (hit) return hit;
+    }
+    return null;
+  };
 
   const automation: KanbanAutomation = {
     byStage: auto.byStage,
@@ -69,6 +79,15 @@ function ActiveLayer({ board, children }: { board: Board; children: Children }) 
         .catch(fail('Não foi possível alterar a automação'));
     },
     onRemove: (item) => setConfirmRemove(item),
+    onMove: (itemId, stageId) => {
+      const item = findItem(itemId);
+      if (!item || item.stageId === stageId) return;
+      const target = stageOf(stageId);
+      void auto
+        .move(item, stageId)
+        .then(() => addToast(`Automação movida para ${target?.label ?? 'a etapa'}`, 'success'))
+        .catch(fail('Não foi possível mover a automação'));
+    },
   };
 
   const confirmRemoval = () => {
@@ -93,7 +112,7 @@ function ActiveLayer({ board, children }: { board: Board; children: Children }) 
           stage={action.stage}
           item={action.item}
           automationsApproved={agentsApproved}
-          onWebhook={() => setWebhook({ stage: action.stage, rule: null })}
+          onLegacyWebhook={() => setWebhook({ stage: action.stage, rule: null })}
         />
       ) : null}
       {webhook ? (

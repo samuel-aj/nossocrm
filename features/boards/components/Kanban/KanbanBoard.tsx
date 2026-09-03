@@ -8,7 +8,7 @@ import { useActivities } from '@/lib/query/hooks/useActivitiesQuery';
 
 import { useCRM } from '@/context/CRMContext';
 import { Archive, Hourglass, Undo2, UserX, ChevronLeft, ChevronRight } from 'lucide-react';
-import { StageAutomationsPanel } from '@/features/boards/automations/StageAutomationsPanel';
+import { AUTOMATION_DRAG_TYPE, StageAutomationsPanel } from '@/features/boards/automations/StageAutomationsPanel';
 import type { KanbanAutomation } from '@/features/boards/automations/AutomationLayer';
 
 // Shared immutable default so every card without pending activities reuses
@@ -156,6 +156,8 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
 }) => {
   const { lifecycleStages, contacts } = useCRM();
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
+  // Modo Automatizar: card de automação sendo arrastado entre etapas
+  const [autoDrag, setAutoDrag] = useState<{ id: string; stageId: string } | null>(null);
 
   // Contatos INATIVOS: sinalização automática no card (derivada do status do
   // contato — sempre em sincronia; reativar o contato limpa o aviso sozinho).
@@ -393,7 +395,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
       {stages.map((stage, stageIndex) => {
         const stageDeals = dealsByStageId.map.get(stage.id) ?? [];
         const stageValue = dealsByStageId.totals.get(stage.id) ?? 0;
-        const isOver = dragOverStage === stage.id && draggingId !== null;
+        const isOver = dragOverStage === stage.id && (draggingId !== null || (autoDrag !== null && autoDrag.stageId !== stage.id));
 
         // Resolve linked stage name
         const linkedStageName =
@@ -409,7 +411,14 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
               setDragOverStage(stage.id);
             }}
             onDrop={(e) => {
-              handleDrop(e, stage.id);
+              const automationId = automation ? e.dataTransfer.getData(AUTOMATION_DRAG_TYPE) : '';
+              if (automationId) {
+                e.preventDefault();
+                automation?.onMove(automationId, stage.id);
+                setAutoDrag(null);
+              } else {
+                handleDrop(e, stage.id);
+              }
               setDragOverStage(null);
             }}
             onDragEnter={() => setDragOverStage(stage.id)}
@@ -511,6 +520,13 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                   onOpen={automation.onOpen}
                   onToggle={automation.onToggle}
                   onRemove={automation.onRemove}
+                  draggingItemId={autoDrag?.id ?? null}
+                  dropActive={isOver && autoDrag !== null}
+                  onDragStart={(item) => setAutoDrag({ id: item.id, stageId: stage.id })}
+                  onDragEnd={() => {
+                    setAutoDrag(null);
+                    setDragOverStage(null);
+                  }}
                 />
               ) : (
               <>

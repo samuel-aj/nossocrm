@@ -3,30 +3,32 @@
 /**
  * Automações que disparam quando um lead ENTRA numa etapa do board, reunindo
  * o que já existe no CRM (nada novo no backend):
- * - Ações da etapa (robôs marcados como automação da etapa: um passo cada);
+ * - Ações da etapa (robôs marcados como automação da etapa);
  * - Robôs comuns com gatilho "entrou na etapa" / "criado" nessa etapa;
  * - Agentes de IA com gatilho por cadastro no pipeline apontando para a etapa;
  * - Webhooks do pipeline (integration_outbound_endpoints, kind = 'pipeline')
  *   com etapa de destino igual à etapa.
  *
- * Expõe a lista por etapa e as ações (ativar/desativar, excluir) usando os
- * mesmos serviços das telas de Configurações.
+ * Expõe a lista por etapa e as ações (ativar/desativar, excluir, mover de
+ * etapa) usando os mesmos serviços das telas de Configurações.
  */
 import { useCallback, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
+import { useCRM } from '@/context/CRMContext';
 import { supabase } from '@/lib/supabase/client';
 import { DEFAULT_AGENT_TRIGGERS, type BotRow, type BotStep } from '@/lib/wa-agents/types';
 import {
   useDeleteWaBot,
   useSaveWaAgent,
   useSaveWaBot,
+  useWaAgentOptions,
   useWaAgentsList,
   useWaBotsList,
   type WaAgentListItem,
 } from '@/features/wa-agents/useWaAgents';
 import type { Board } from '@/types';
-import { describeStageAction, isStageAutomationBot, stageActionStep } from './stageAutomationModel';
+import { STAGE_ACTION_LABEL, describeStageAction, isStageAutomationBot, stageActionStep, summarizeStageAutomation } from './stageAutomationModel';
 
 export type StageAutomationKind = 'action' | 'bot' | 'agent' | 'webhook';
 
@@ -36,6 +38,10 @@ export type StageAutomation = {
   stageId: string;
   title: string;
   subtitle: string;
+  /** "Após 30 min · Movido para etapa" */
+  when: string;
+  /** "Origem = Google Ads" (ou null) */
+  conditions: string | null;
   enabled: boolean;
   /** id da entidade original (robô, agente ou regra de webhook) */
   refId: string;
@@ -74,6 +80,8 @@ const STEP_SHORT: Record<string, string> = {
   end: 'Encerra',
 };
 
+const DEFAULT_WHEN = 'Imediatamente · Qualquer entrada';
+
 function describeBotSteps(steps: BotStep[] | undefined): string {
   const list = (steps ?? []).filter((s) => s.type !== 'end').slice(0, 3).map((s) => STEP_SHORT[s.type] ?? s.type);
   if (list.length === 0) return 'Sem passos ainda';
@@ -89,10 +97,12 @@ function botHitsStage(bot: BotRow, stageId: string): boolean {
 
 export function useStageAutomations(board: Board | null | undefined) {
   const { profile } = useAuth();
+  const { customFieldDefinitions } = useCRM();
   const orgId = profile?.organization_id ?? null;
   const qc = useQueryClient();
   const botsQ = useWaBotsList();
   const agentsQ = useWaAgentsList();
+  const optionsQ = useWaAgentOptions();
   const saveBot = useSaveWaBot();
   const deleteBot = useDeleteWaBot();
   const saveAgent = useSaveWaAgent();
@@ -114,22 +124,33 @@ export function useStageAutomations(board: Board | null | undefined) {
     },
   });
 
+  const customLabels = useMemo(() => Object.fromEntries((customFieldDefinitions ?? []).map((d) => [d.key, d.label])), [customFieldDefinitions]);
+
   const byStage = useMemo(() => {
     const map = new Map<string, StageAutomation[]>();
     if (!board) return map;
     const agents = agentsQ.data ?? [];
+    const bots = botsQ.data ?? [];
+    const ctx = {
+      boards: optionsQ.data?.boards ?? [],
+      agents,
+      bots,
+    };
     for (const stage of board.stages) {
       const items: StageAutomation[] = [];
-      for (const bot of botsQ.data ?? []) {
+      for (const bot of bots) {
         if (!botHitsStage(bot, stage.id)) continue;
         const step = isStageAutomationBot(bot) ? stageActionStep(bot) : null;
         if (step) {
+          const summary = summarizeStageAutomation(bot, customLabels);
           items.push({
             id: `action:${bot.id}`,
             kind: 'action',
             stageId: stage.id,
-            title: bot.name.replace(`${stage.label} · `, ''),
-            subtitle: describeStageAction(step, { stages: board.stages, agents }),
+            title: STAGE_ACTION_LABEL[step.type],
+            subtitle: describeStageAction(step, ctx),
+            when: summary.when,
+            conditions: summary.conditions,
             enabled: bot.enabled,
             refId: bot.id,
             bot,
@@ -141,6 +162,8 @@ export function useStageAutomations(board: Board | null | undefined) {
             stageId: stage.id,
             title: bot.name,
             subtitle: describeBotSteps(bot.steps),
+            when: DEFAULT_WHEN,
+            conditions: null,
             enabled: bot.enabled,
             refId: bot.id,
             bot,
@@ -156,6 +179,8 @@ export function useStageAutomations(board: Board | null | undefined) {
           stageId: stage.id,
           title: 'Agente de IA inicia a conversa',
           subtitle: agent.persona_name ? `${agent.name} (${agent.persona_name})` : agent.name,
+          when: DEFAULT_WHEN,
+          conditions: null,
           enabled: !!deal.enabled && agent.enabled,
           refId: agent.id,
           agent,
@@ -175,6 +200,8 @@ export function useStageAutomations(board: Board | null | undefined) {
           stageId: stage.id,
           title: rule.name || 'Webhook',
           subtitle: host,
+          when: DEFAULT_WHEN,
+          conditions: null,
           enabled: rule.active,
           refId: rule.id,
           rule,
@@ -183,7 +210,7 @@ export function useStageAutomations(board: Board | null | undefined) {
       map.set(stage.id, items);
     }
     return map;
-  }, [board, botsQ.data, agentsQ.data, rulesQ.data]);
+  }, [board, botsQ.data, agentsQ.data, rulesQ.data, optionsQ.data, customLabels]);
 
   const ruleMutation = useMutation({
     mutationFn: async (input: { id: string; patch?: Partial<PipelineRule>; remove?: boolean }) => {
@@ -238,6 +265,25 @@ export function useStageAutomations(board: Board | null | undefined) {
     [deleteBot, ruleMutation, patchAgentDeal]
   );
 
+  /** Arrastou o card para outra etapa: só o gatilho muda, o resto da configuração fica igual. */
+  const move = useCallback(
+    async (item: StageAutomation, stageId: string) => {
+      if (!board || item.stageId === stageId) return;
+      const target = board.stages.find((s) => s.id === stageId);
+      if (!target) return;
+      if ((item.kind === 'action' || item.kind === 'bot') && item.bot) {
+        const trigger = { ...item.bot.trigger, board_id: board.id, stage_id: stageId };
+        const input = item.kind === 'action' ? { trigger, name: `${target.label} · ${item.title}` } : { trigger };
+        await saveBot.mutateAsync({ id: item.refId, input });
+      } else if (item.kind === 'agent' && item.agent) {
+        await patchAgentDeal(item.agent, { board_id: board.id, stage_id: stageId });
+      } else if (item.kind === 'webhook') {
+        await ruleMutation.mutateAsync({ id: item.refId, patch: { board_id: board.id, to_stage_id: stageId } });
+      }
+    },
+    [board, saveBot, patchAgentDeal, ruleMutation]
+  );
+
   const refresh = useCallback(() => {
     void qc.invalidateQueries({ queryKey: PIPELINE_RULES_QUERY_KEY });
     void botsQ.refetch();
@@ -251,6 +297,7 @@ export function useStageAutomations(board: Board | null | undefined) {
     error: botsQ.error || agentsQ.error || rulesQ.error,
     toggle,
     remove,
+    move,
     refresh,
     busy: saveBot.isPending || saveAgent.isPending || deleteBot.isPending || ruleMutation.isPending,
   };

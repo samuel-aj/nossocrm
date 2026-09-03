@@ -632,7 +632,7 @@ export const BotStepSchema = z.discriminatedUnion('type', [
     bot_id: z.string().uuid(),
     bot_name: z.string().max(120).optional(),
   }),
-  z.object({ ...botStepBase, type: z.literal('wait'), seconds: z.number().int().min(1).max(604800) }),
+  z.object({ ...botStepBase, type: z.literal('wait'), seconds: z.number().int().min(1).max(2592000) }),
   z.object({
     ...botStepBase,
     type: z.literal('wait_reply'),
@@ -645,7 +645,8 @@ export const BotStepSchema = z.discriminatedUnion('type', [
     rules: z.array(BotConditionRuleSchema).min(1),
     else_step_id: z.string().optional().nullable(),
   }),
-  z.object({ ...botStepBase, type: z.literal('move_stage'), stage_id: z.string().uuid() }),
+  /** Quadro de destino opcional: com outro quadro, o negócio troca de pipeline junto com a etapa */
+  z.object({ ...botStepBase, type: z.literal('move_stage'), stage_id: z.string().uuid(), board_id: z.string().uuid().nullable().optional() }),
   z.object({ ...botStepBase, type: z.literal('add_tag'), tag: z.string().min(1).max(60) }),
   z.object({
     ...botStepBase,
@@ -670,6 +671,11 @@ export const BotTriggerSchema = z.object({
    * conversa). Vazio = o primeiro número do robô. Precisa ser um dos números dele.
    */
   connection_id: z.string().uuid().nullable().optional(),
+  /**
+   * Como o negócio entrou na etapa (só deal_stage_entered): criado nela,
+   * movido para ela ou qualquer um (padrão). Lido pelo trigger wa_bot_on_deal.
+   */
+  entry: z.enum(['any', 'created', 'moved']).optional(),
   /** Posição do nó Gatilho no quadro (persistida como a dos passos) */
   ui: BotStepUiSchema.optional(),
 });
