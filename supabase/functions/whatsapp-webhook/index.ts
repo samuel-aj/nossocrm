@@ -501,6 +501,61 @@ Deno.serve(async (req) => {
       const participantJid: string = rawPart.endsWith("@lid") && altPart ? altPart : rawPart;
       const senderPhone = isGroup ? jidToE164(participantJid) : phone;
       const senderName: string | null = isGroup && !fromMe ? (m.pushName ?? null) : null;
+      // EDIÇÃO DE MENSAGEM: chega como protocolMessage com editedMessage (o
+      // Baileys às vezes embrulha em editedMessage.message). Em vez de
+      // descartar (o CRM ficava com o texto antigo para sempre), atualiza o
+      // corpo da mensagem ORIGINAL e carimba edited_at; se ela for a última
+      // da conversa, a prévia da lista acompanha.
+      {
+        // deno-lint-ignore no-explicit-any
+        const rawEdit: any = m.message ?? {};
+        const inner = rawEdit.editedMessage?.message ?? rawEdit;
+        const proto = inner?.protocolMessage;
+        const editTargetId = proto?.editedMessage ? proto?.key?.id : null;
+        if (editTargetId) {
+          const novoConteudo = extractContent(proto.editedMessage);
+          const novoTexto = (novoConteudo.text ?? "").trim();
+          if (novoTexto) {
+            const tsE = typeof m.messageTimestamp === "string" ? parseInt(m.messageTimestamp, 10) : m.messageTimestamp;
+            const editadoEm = tsE ? new Date(tsE * 1000).toISOString() : new Date().toISOString();
+            const { data: alvoMsg } = await supabase
+              .from("wa_messages")
+              .select("id, conversation_id, sender_name")
+              .eq("organization_id", orgId)
+              .eq("evolution_message_id", editTargetId)
+              .maybeSingle();
+            if (alvoMsg) {
+              let { error: edErr } = await supabase
+                .from("wa_messages")
+                .update({ body: novoTexto, edited_at: editadoEm })
+                .eq("id", alvoMsg.id);
+              // Banco ainda sem a coluna edited_at (migração pendente): grava só o texto
+              if (edErr && /column/i.test(String(edErr.message)) && /edited_at/i.test(String(edErr.message))) {
+                ({ error: edErr } = await supabase.from("wa_messages").update({ body: novoTexto }).eq("id", alvoMsg.id));
+              }
+              if (edErr) console.error("[wa-webhook] edicao:", edErr.message);
+              // Prévia: só quando a editada é a ÚLTIMA mensagem da conversa
+              const { data: ultima } = await supabase
+                .from("wa_messages")
+                .select("id")
+                .eq("conversation_id", alvoMsg.conversation_id)
+                .order("created_at", { ascending: false })
+                .limit(1)
+                .maybeSingle();
+              if (ultima?.id === alvoMsg.id) {
+                const nome = (alvoMsg.sender_name ?? "").trim();
+                const previa = (nome ? `${nome}: ${novoTexto}` : novoTexto).slice(0, 140);
+                await supabase
+                  .from("wa_conversations")
+                  .update({ last_message_preview: previa })
+                  .eq("id", alvoMsg.conversation_id);
+              }
+            }
+          }
+          continue; // edição tratada: não vira bolha nova
+        }
+      }
+
       const { text, mediaType, mediaMime, fileName, skip } = extractContent(m.message);
       if (skip) continue;
       // Evento SEM conteúdo nenhum (tipo desconhecido, protocolo novo do

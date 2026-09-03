@@ -20,7 +20,7 @@ import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
 import { getConversationAiInfo, getConversationBotInfo } from '@/lib/wa-agents/conversation';
 
 const MESSAGE_COLUMNS =
-  'id, conversation_id, direction, status, body, media_type, media_mime, media_url, from_phone, to_phone, wa_timestamp, created_at, sent_by, source, error, transcription, quoted_message_id, quoted, forwarded, sender_name';
+  'id, conversation_id, direction, status, body, media_type, media_mime, media_url, from_phone, to_phone, wa_timestamp, created_at, sent_by, source, error, transcription, quoted_message_id, quoted, forwarded, sender_name, edited_at';
 
 /**
  * As 300 mensagens mais RECENTES das conversas (desc + limit, revertidas

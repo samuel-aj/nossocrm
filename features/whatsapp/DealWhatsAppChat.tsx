@@ -63,6 +63,26 @@ import { AutomationsMenu } from '@/features/wa-agents/AutomationsMenu';
 import type { AgentMinimal, BotMinimal, ConversationAiAction } from '@/lib/wa-agents/types';
 
 const TIME_FMT = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
+const DATE_FMT = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+/** Chave do DIA da mensagem (ano-mes-dia local); '' quando a data é inválida. */
+function diaDaMensagem(m: { wa_timestamp: string | null; created_at: string }): string {
+  const d = new Date(m.wa_timestamp || m.created_at);
+  return isNaN(d.getTime()) ? '' : `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+/** Rótulo do separador de dia, estilo WhatsApp: Hoje, Ontem ou 01/09/2026. */
+function rotuloDoDia(m: { wa_timestamp: string | null; created_at: string }): string {
+  const d = new Date(m.wa_timestamp || m.created_at);
+  if (isNaN(d.getTime())) return '';
+  const hoje = new Date();
+  const ontem = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate() - 1);
+  const mesmoDia = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  if (mesmoDia(d, hoje)) return 'Hoje';
+  if (mesmoDia(d, ontem)) return 'Ontem';
+  return DATE_FMT.format(d);
+}
 
 /** Confirmação (toast) das ações da faixa que trocam quem atende a conversa; as demais só atualizam a faixa. */
 const AI_ACTION_DONE_TOAST: Partial<Record<ConversationAiAction, string>> = {
@@ -970,6 +990,17 @@ function MessageBubble({
           } ${isOut ? 'text-emerald-100' : 'text-slate-400'}`}
         >
           {failReason && <FailBadge reason={failReason} />}
+          {m.edited_at && (
+            <span
+              className="italic cursor-default"
+              title={`Editada em ${(() => {
+                const d = new Date(m.edited_at);
+                return isNaN(d.getTime()) ? '' : `${DATE_FMT.format(d)} às ${TIME_FMT.format(d)}`;
+              })()}`}
+            >
+              Editada
+            </span>
+          )}
           <span>{time}</span>
           {isOut && (
             <span
@@ -2078,6 +2109,13 @@ export function DealWhatsAppChat({
               else msgRefs.current.delete(m.id);
             }}
           >
+            {(i === 0 || diaDaMensagem(messages[i - 1]) !== diaDaMensagem(m)) && rotuloDoDia(m) && (
+              <div className="flex justify-center py-2 select-none" aria-label={`Mensagens de ${rotuloDoDia(m)}`}>
+                <span className="text-[11px] font-semibold px-3 py-1 rounded-lg bg-white dark:bg-white/10 text-slate-500 dark:text-slate-300 shadow-sm border border-slate-200/70 dark:border-white/10">
+                  {rotuloDoDia(m)}
+                </span>
+              </div>
+            )}
             {showConnDividers &&
               (i === 0 || (messages[i - 1].connection_id ?? null) !== (m.connection_id ?? null)) && (
                 <div className="flex items-center gap-2 pt-2 pb-1 select-none">

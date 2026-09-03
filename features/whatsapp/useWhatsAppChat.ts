@@ -46,6 +46,8 @@ export interface WaChatMessage {
   forwarded?: boolean;
   /** GRUPO: nome (WhatsApp) de quem escreveu a mensagem recebida */
   sender_name?: string | null;
+  /** Quando a mensagem foi EDITADA no WhatsApp (null = nunca); body já traz o texto novo */
+  edited_at?: string | null;
 }
 
 /** Número conectado disponível pra ENVIAR (multi-número). */
