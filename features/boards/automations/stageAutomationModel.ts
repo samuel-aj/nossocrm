@@ -24,7 +24,7 @@ export const STAGE_ACTION_LABEL: Record<StageActionKind, string> = {
   move_stage: 'Mover de etapa',
   handoff_agent: 'Entregar a um agente de IA',
   webhook: 'Webhook',
-  start_bot: 'Ativar robô',
+  start_bot: 'Iniciar robô',
 };
 
 /** Ações que falam com o lead: precisam de um número do WhatsApp (o motor abre a conversa). */

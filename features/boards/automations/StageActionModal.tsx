@@ -48,7 +48,7 @@ const CARDS: Card[] = [
   { id: 'send_text', title: STAGE_ACTION_LABEL.send_text, description: 'O lead recebe uma mensagem assim que entra na etapa.', icon: MessageCircle, group: 'Conversa', needsBeta: true },
   { id: 'agent_start', title: 'Agente de IA inicia a conversa', description: 'Um agente manda a primeira mensagem e conduz o atendimento.', icon: Bot, group: 'Conversa', needsAgents: true, needsBeta: true },
   { id: 'handoff_agent', title: STAGE_ACTION_LABEL.handoff_agent, description: 'A conversa aberta do lead passa a ser atendida pelo agente.', icon: Sparkles, group: 'Conversa', needsAgents: true, needsBeta: true },
-  { id: 'start_bot', title: STAGE_ACTION_LABEL.start_bot, description: 'Inicia um robô já configurado para este lead.', icon: Workflow, group: 'Conversa', needsBots: true, needsBeta: true },
+  { id: 'start_bot', title: STAGE_ACTION_LABEL.start_bot, description: 'Inicia um robô existente para esse lead/conversa.', icon: Workflow, group: 'Conversa', needsBeta: true },
   { id: 'add_tag', title: STAGE_ACTION_LABEL.add_tag, description: 'Marca o lead com uma tag ao entrar.', icon: Tag, group: 'Ações no CRM', needsBeta: true },
   { id: 'move_stage', title: STAGE_ACTION_LABEL.move_stage, description: 'Leva o lead para outra etapa, deste ou de outro pipeline.', icon: MoveRight, group: 'Ações no CRM', needsBeta: true },
   { id: 'webhook', title: 'Webhook', description: 'Envia os dados do lead e do contato em JSON para o seu n8n, Make ou sistema.', icon: Webhook, group: 'Integrações' },
@@ -119,7 +119,8 @@ export function StageActionModal({
   const tags = optionsQ.data?.tags ?? [];
   const boards = optionsQ.data?.boards ?? [];
   const agents = useMemo(() => (agentsQ.data ?? []).filter((a) => a.enabled), [agentsQ.data]);
-  const bots = useMemo(() => (botsQ.data ?? []).filter((b) => b.enabled && !isStageAutomationBot(b)), [botsQ.data]);
+  // Robôs da organização (a lista da API já é só da org atual); os desligados aparecem marcados
+  const bots = useMemo(() => (botsQ.data ?? []).filter((b) => !isStageAutomationBot(b)), [botsQ.data]);
 
   // Número padrão: o primeiro conectado
   useEffect(() => {
@@ -259,75 +260,96 @@ export function StageActionModal({
         const ops = conditionOpsFor(c.field as ConditionField);
         const needsValue = opNeedsValue(c.op as ConditionOp);
         const def = c.field === 'custom_field' ? customFieldDefinitions.find((d) => d.key === c.key) : null;
+        const valueClass = `${INPUT_SM} w-full min-w-0`;
+        // Valor conforme o tipo: tag = lista de tags; campo personalizado respeita o tipo; valor = número
+        let valueInput: React.ReactNode = null;
+        if (!needsValue) {
+          valueInput = <span className="text-xs text-slate-400 dark:text-slate-500 px-1 self-center">sem valor</span>;
+        } else if (c.field === 'tags' && tags.length > 0) {
+          valueInput = (
+            <select value={c.value ?? ''} onChange={(e) => updateClause(i, { value: e.target.value })} aria-label="Tag" className={`${valueClass} cursor-pointer`}>
+              <option value="">Selecione a tag</option>
+              {tags.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          );
+        } else if ((def?.type === 'select' || def?.type === 'multiselect') && def.options?.length) {
+          valueInput = (
+            <select value={c.value ?? ''} onChange={(e) => updateClause(i, { value: e.target.value })} aria-label="Valor" className={`${valueClass} cursor-pointer`}>
+              <option value="">Selecione...</option>
+              {def.options.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          );
+        } else {
+          const numeric = c.field === 'deal_value' || def?.type === 'number' || def?.type === 'currency';
+          const type = def?.type === 'date' ? 'date' : numeric ? 'number' : c.field === 'contact_phone' ? 'tel' : 'text';
+          valueInput = (
+            <input
+              type={type}
+              step={numeric ? 'any' : undefined}
+              value={c.value ?? ''}
+              onChange={(e) => updateClause(i, { value: e.target.value })}
+              placeholder={c.field === 'custom_field' && c.key ? customLabel(c.key) : numeric ? '0' : 'valor...'}
+              aria-label="Valor"
+              className={valueClass}
+            />
+          );
+        }
         return (
-          <div key={i} className="rounded-lg border border-slate-200 dark:border-white/10 p-2 space-y-1.5">
-            <div className="flex items-center gap-1.5">
+          <div key={i} className="rounded-lg border border-slate-200 dark:border-white/10 p-2 min-w-0">
+            {/* [Campo] [Operador compacto] [Valor: o resto do espaço] [×]; em telas estreitas o valor desce para a 2ª linha */}
+            <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] sm:grid-cols-[minmax(8rem,10rem)_auto_minmax(0,1fr)_auto] gap-1.5 items-center">
               <select
-                value={c.field}
+                value={c.field === 'custom_field' && c.key ? `custom:${c.key}` : c.field}
                 onChange={(e) => {
-                  const field = e.target.value as ConditionField;
+                  const raw = e.target.value;
+                  const field = (raw.startsWith('custom:') ? 'custom_field' : raw) as ConditionField;
+                  const key = raw.startsWith('custom:') ? raw.slice(7) : undefined;
                   const nextOps = conditionOpsFor(field);
-                  updateClause(i, { field, key: field === 'custom_field' ? customFieldDefinitions[0]?.key : undefined, op: nextOps.includes(c.op as ConditionOp) ? c.op : nextOps[0], value: '' });
+                  updateClause(i, { field, key, op: nextOps.includes(c.op as ConditionOp) ? c.op : nextOps[0], value: '' });
                 }}
                 aria-label="Campo"
-                className={`${INPUT_SM} flex-1 min-w-0 cursor-pointer`}
+                className={`${INPUT_SM} min-w-0 cursor-pointer`}
               >
-                {CONDITION_FIELDS.filter((f) => f !== 'custom_field' || customFieldDefinitions.length > 0).map((f) => (
+                {CONDITION_FIELDS.filter((f) => f !== 'custom_field').map((f) => (
                   <option key={f} value={f}>
                     {CONDITION_FIELD_LABELS_BOARD[f]}
                   </option>
                 ))}
+                {customFieldDefinitions.length > 0 && (
+                  <optgroup label="Campos personalizados">
+                    {customFieldDefinitions.map((d) => (
+                      <option key={d.key} value={`custom:${d.key}`}>
+                        {d.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
-              {c.field === 'custom_field' && (
-                <select value={c.key ?? ''} onChange={(e) => updateClause(i, { key: e.target.value, value: '' })} aria-label="Campo personalizado" className={`${INPUT_SM} flex-1 min-w-0 cursor-pointer`}>
-                  {customFieldDefinitions.map((d) => (
-                    <option key={d.key} value={d.key}>
-                      {d.label}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <button type="button" onClick={() => setClauses(clauses.filter((_, j) => j !== i))} aria-label="Remover condição" title="Remover condição" className="shrink-0 p-1 rounded text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors">
-                <X size={14} />
-              </button>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <select value={c.op} onChange={(e) => updateClause(i, { op: e.target.value as ConditionOp })} aria-label="Operador" className={`${INPUT_SM} w-40 shrink-0 cursor-pointer`}>
+              <select value={c.op} onChange={(e) => updateClause(i, { op: e.target.value as ConditionOp })} aria-label="Operador" className={`${INPUT_SM} w-auto shrink-0 cursor-pointer`}>
                 {ops.map((op) => (
                   <option key={op} value={op}>
                     {CONDITION_OP_LABELS[op]}
                   </option>
                 ))}
               </select>
-              {needsValue &&
-                (c.field === 'tags' && tags.length > 0 ? (
-                  <>
-                    <input list="sa-cond-tags" value={c.value ?? ''} onChange={(e) => updateClause(i, { value: e.target.value })} placeholder="tag" aria-label="Valor" className={`${INPUT_SM} flex-1 min-w-0`} />
-                    <datalist id="sa-cond-tags">
-                      {tags.map((t) => (
-                        <option key={t} value={t} />
-                      ))}
-                    </datalist>
-                  </>
-                ) : def?.type === 'select' && def.options?.length ? (
-                  <select value={c.value ?? ''} onChange={(e) => updateClause(i, { value: e.target.value })} aria-label="Valor" className={`${INPUT_SM} flex-1 min-w-0 cursor-pointer`}>
-                    <option value="">Selecione...</option>
-                    {def.options.map((v) => (
-                      <option key={v} value={v}>
-                        {v}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    type={c.field === 'deal_value' ? 'number' : 'text'}
-                    value={c.value ?? ''}
-                    onChange={(e) => updateClause(i, { value: e.target.value })}
-                    placeholder={c.field === 'custom_field' && c.key ? customLabel(c.key) : 'valor...'}
-                    aria-label="Valor"
-                    className={`${INPUT_SM} flex-1 min-w-0`}
-                  />
-                ))}
+              <div className="min-w-0 col-span-3 sm:col-span-1 flex">{valueInput}</div>
+              <button
+                type="button"
+                onClick={() => setClauses(clauses.filter((_, j) => j !== i))}
+                aria-label="Remover condição"
+                title="Remover condição"
+                className="shrink-0 p-1 rounded text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors justify-self-end row-start-1 col-start-3 sm:col-start-4"
+              >
+                <X size={14} />
+              </button>
             </div>
           </div>
         );
@@ -512,14 +534,17 @@ export function StageActionModal({
                     Robô
                   </label>
                   <select id="sa-bot" className={INPUT} value={draft.botId} onChange={(e) => patch({ botId: e.target.value, botName: bots.find((b) => b.id === e.target.value)?.name ?? '' })}>
-                    <option value="">Selecione</option>
+                    <option value="">{botsQ.isLoading ? 'Carregando robôs...' : bots.length === 0 ? 'Nenhum robô nesta organização' : 'Selecione'}</option>
                     {bots.map((b) => (
                       <option key={b.id} value={b.id}>
                         {b.name}
+                        {b.enabled ? '' : ' (desligado)'}
                       </option>
                     ))}
                   </select>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Usa o robô como ele está configurado em IA e Automações → Robôs.</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    Usa o robô como ele está configurado em IA e Automações → Robôs. Um robô desligado não roda: ligue-o antes.
+                  </p>
                 </div>
                 {connectionSelect(draft.connectionId, (v) => patch({ connectionId: v }), 'Número em que o robô conversa com o lead.')}
               </>
