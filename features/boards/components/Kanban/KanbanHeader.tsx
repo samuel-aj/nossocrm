@@ -5,6 +5,7 @@ import { Board } from '@/types';
 import { BoardSelector } from '../BoardSelector';
 import { useOrgUsers } from '@/lib/query/hooks';
 import { useAuth } from '@/context/AuthContext';
+import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
 
 type StatusFilter = 'open' | 'won' | 'lost' | 'all';
 
@@ -487,6 +488,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
     onToggleAutomationMode,
     totalLeads,
 }) => {
+    const podeCriarCard = useMyActionPermissions().deals.create;
     // Lista de responsáveis da org (admin/super_admin); para vendedor vem vazia
     // (hook desabilitado), então só aparecem "Todos" e "Meus".
     const { users: orgUsers } = useOrgUsers();
@@ -581,20 +583,26 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                             <span className="max-md:hidden">{automationMode ? 'Concluir' : 'Automatizar'}</span>
                         </button>
                     )}
-                    <button
-                        onClick={onNewDeal}
-                        className="max-md:hidden h-[38px] bg-primary-700 hover:bg-primary-600 text-white px-4 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-primary-700/20"
-                    >
-                        <Plus size={18} aria-hidden="true" /> Novo Negócio
-                    </button>
-                    <button
-                        onClick={onNewDeal}
-                        aria-label="Novo negócio"
-                        title="Novo negócio"
-                        className="md:hidden h-[38px] w-[38px] flex items-center justify-center rounded-lg bg-primary-700 hover:bg-primary-600 text-white shadow-lg shadow-primary-700/20 active:scale-95 transition-all"
-                    >
-                        <Plus size={20} aria-hidden="true" />
-                    </button>
+                    {/* Sem permissão de criar cards (Equipe > permissões), os botões
+                        somem — e o banco recusa de qualquer jeito (trigger vis_guard) */}
+                    {podeCriarCard && (
+                        <>
+                            <button
+                                onClick={onNewDeal}
+                                className="max-md:hidden h-[38px] bg-primary-700 hover:bg-primary-600 text-white px-4 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-primary-700/20"
+                            >
+                                <Plus size={18} aria-hidden="true" /> Novo Negócio
+                            </button>
+                            <button
+                                onClick={onNewDeal}
+                                aria-label="Novo negócio"
+                                title="Novo negócio"
+                                className="md:hidden h-[38px] w-[38px] flex items-center justify-center rounded-lg bg-primary-700 hover:bg-primary-600 text-white shadow-lg shadow-primary-700/20 active:scale-95 transition-all"
+                            >
+                                <Plus size={20} aria-hidden="true" />
+                            </button>
+                        </>
+                    )}
                 </div>
             </div>
 

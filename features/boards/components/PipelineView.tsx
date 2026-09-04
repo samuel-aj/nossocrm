@@ -15,6 +15,7 @@ import { CheckCircle2, XCircle, Trash2, X, Tag, Pencil, ArrowRightLeft, Archive 
 import { DealView, CustomFieldDefinition, Board, BoardStage } from '@/types';
 import { ExportTemplateModal } from './Modals/ExportTemplateModal';
 import { useAuth } from '@/context/AuthContext';
+import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
 import PageLoader from '@/components/PageLoader';
 import { UserRole } from '@/types/constants';
 
@@ -391,6 +392,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
 }) => {
   const { profile } = useAuth();
   const isAdmin = profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN;
+  const minhasAcoes = useMyActionPermissions();
   const [isExportModalOpen, setIsExportModalOpen] = React.useState(false);
   // Modo Automatizar (kanban): colunas mostram o que dispara ao entrar na etapa
   const [automationMode, setAutomationMode] = React.useState(false);
@@ -556,14 +558,17 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
               >
                 <Pencil size={13} /> alterar o campo
               </button>
-              <button
-                type="button"
-                disabled={selectedDealIds.length === 0}
-                onClick={() => setBulkDeleteOpen(true)}
-                className={`${selActionClass} hover:!text-red-500 dark:hover:!text-red-400`}
-              >
-                <Trash2 size={13} /> excluir
-              </button>
+              {/* Sem permissão de excluir cards, o botão some (o banco recusa de qualquer jeito) */}
+              {minhasAcoes.deals.delete && (
+                <button
+                  type="button"
+                  disabled={selectedDealIds.length === 0}
+                  onClick={() => setBulkDeleteOpen(true)}
+                  className={`${selActionClass} hover:!text-red-500 dark:hover:!text-red-400`}
+                >
+                  <Trash2 size={13} /> excluir
+                </button>
+              )}
               <button
                 type="button"
                 disabled={selectedDealIds.length === 0}

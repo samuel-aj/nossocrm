@@ -3,6 +3,7 @@ import { DealView, CustomFieldDefinition } from '@/types';
 import { Phone, Copy, Check, Hourglass, Trophy, XCircle, Package, UserX } from 'lucide-react';
 import { ActivityStatusIcon } from './ActivityStatusIcon';
 import { OwnerBadge } from './OwnerBadge';
+import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
 
 /** Chegada do lead no card: "Hoje - 14:32", "Ontem - 09:15" ou "12/08 - 18:40". */
 function rotuloChegada(iso: string): string {
@@ -103,6 +104,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
   contactInactive,
 }) => {
   const [localDragging, setLocalDragging] = useState(false);
+  const podeMover = useMyActionPermissions().deals.move;
   const isClosed = isDealClosed(deal);
 
   const handleToggleMenu = (e: React.MouseEvent) => {
@@ -207,7 +209,9 @@ const DealCardComponent: React.FC<DealCardProps> = ({
   return (
     <div
       data-deal-id={deal.id}
-      draggable={!deal.id.startsWith('temp-')}
+      // Sem permissão de mover cards (Equipe > permissões), o arrasto nem inicia
+      // (o banco recusaria a troca de etapa de qualquer jeito)
+      draggable={!deal.id.startsWith('temp-') && podeMover}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onMouseDown={() => setLastMouseDownDealId(deal.id)}

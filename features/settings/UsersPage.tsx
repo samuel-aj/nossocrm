@@ -7,8 +7,10 @@ import { Loader2, UserPlus, Crown, Briefcase, KeyRound, Mail, Check, X, Sparkles
 import { UserRole } from '@/types/constants';
 import { useCRM } from '@/context/CRMContext';
 import {
+    DEFAULT_ACTION_PERMISSIONS,
     DEFAULT_VISIBILITY_RULES,
     normalizeVisibilityRules,
+    type ActionPermissions,
     type VisibilityRules,
     type VisibilityScope,
 } from '@/lib/permissions/types';
@@ -957,7 +959,14 @@ const VisibilityModal: React.FC<{
     // Conversas por RESPONSÁVEL (dono do lead do contato, como no filtro dos Chats)
     const [allOwners, setAllOwners] = useState(base.whatsapp.owner_user_ids === null);
     const [ownerIds, setOwnerIds] = useState<string[]>(base.whatsapp.owner_user_ids ?? []);
+    // Permissões de AÇÃO (o que ele pode FAZER): impostas no banco por triggers
+    const [actions, setActions] = useState<ActionPermissions>(base.actions ?? DEFAULT_ACTION_PERMISSIONS);
     const [saving, setSaving] = useState(false);
+
+    const setContactAction = (key: keyof ActionPermissions['contacts'], value: boolean) =>
+        setActions(a => ({ ...a, contacts: { ...a.contacts, [key]: value } }));
+    const setDealAction = (key: keyof ActionPermissions['deals'], value: boolean) =>
+        setActions(a => ({ ...a, deals: { ...a.deals, [key]: value } }));
 
     useEffect(() => {
         let alive = true;
@@ -1020,6 +1029,7 @@ const VisibilityModal: React.FC<{
                     label_ids: base.whatsapp.label_ids,
                     owner_user_ids: allOwners ? null : ownerIds,
                 },
+                actions,
             };
             const res = await fetch(`/api/org/visibility/${user.id}`, {
                 method: 'PUT',
@@ -1228,9 +1238,64 @@ const VisibilityModal: React.FC<{
                         </div>
                     </section>
 
+                    {/* Ações: o que o vendedor pode FAZER (impostas por triggers no banco) */}
+                    <section>
+                        <p className="flex items-center gap-2 text-sm font-bold text-slate-700 dark:text-slate-200 mb-1">
+                            <KeyRound className="h-4 w-4 text-primary-500" /> O que ele pode fazer
+                        </p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                            Desmarcar bloqueia a ação de verdade, no banco de dados. A pessoa vê uma mensagem clara ao tentar.
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="rounded-xl border border-slate-200 dark:border-white/10 p-3">
+                                <p className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">Contatos</p>
+                                {(
+                                    [
+                                        ['view', 'Visualizar contatos'],
+                                        ['create', 'Criar contatos'],
+                                        ['edit', 'Editar contatos'],
+                                        ['delete', 'Excluir contatos'],
+                                    ] as Array<[keyof ActionPermissions['contacts'], string]>
+                                ).map(([key, label]) => (
+                                    <label key={key} className="flex items-center gap-2 py-1 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500"
+                                            checked={actions.contacts[key]}
+                                            onChange={e => setContactAction(key, e.target.checked)}
+                                        />
+                                        <span className="text-sm text-slate-700 dark:text-slate-200">{label}</span>
+                                    </label>
+                                ))}
+                            </div>
+                            <div className="rounded-xl border border-slate-200 dark:border-white/10 p-3">
+                                <p className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">Cards (leads nos quadros)</p>
+                                {(
+                                    [
+                                        ['create', 'Criar cards'],
+                                        ['edit', 'Editar cards'],
+                                        ['delete', 'Excluir cards'],
+                                        ['move', 'Mover cards entre etapas'],
+                                    ] as Array<[keyof ActionPermissions['deals'], string]>
+                                ).map(([key, label]) => (
+                                    <label key={key} className="flex items-center gap-2 py-1 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500"
+                                            checked={actions.deals[key]}
+                                            onChange={e => setDealAction(key, e.target.checked)}
+                                        />
+                                        <span className="text-sm text-slate-700 dark:text-slate-200">{label}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+                    </section>
+
                     <p className="text-[11px] text-slate-400 dark:text-slate-500">
-                        As permissões valem na interface e no servidor: leads e quadros são cortados na própria leitura do
-                        banco, e as conversas de WhatsApp nas rotas do sistema. Administradores sempre veem tudo.
+                        As permissões valem na interface e no servidor: leads, contatos e quadros são cortados na própria
+                        leitura do banco, as ações bloqueadas são recusadas na gravação e as conversas de WhatsApp nas
+                        rotas do sistema. Administradores sempre podem tudo.
                     </p>
                 </div>
 

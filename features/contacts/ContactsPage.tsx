@@ -2,6 +2,7 @@ import React from 'react';
 import { useRouter } from 'next/navigation';
 import { Trash2, X } from 'lucide-react';
 import { useContactsController } from './hooks/useContactsController';
+import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
 import { contactsService } from '@/lib/supabase/contacts';
 import { ContactsHeader } from './components/ContactsHeader';
 import { ContactsFilters } from './components/ContactsFilters';
@@ -21,6 +22,7 @@ import ConfirmModal from '@/components/ConfirmModal';
  */
 export const ContactsPage: React.FC = () => {
     const controller = useContactsController();
+    const minhasAcoes = useMyActionPermissions();
 
     // DEEP LINK: /contacts?contactId=... (vindo do Kanban, Inbox, Timeline)
     // abre o CONTATO direto, não só a aba. Roda uma vez, quando a lista chega;
@@ -142,13 +144,16 @@ export const ContactsPage: React.FC = () => {
                         </button>
                     </div>
                     <div className="flex items-center gap-2">
-                        <button
-                            onClick={() => controller.setBulkDeleteConfirm(true)}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-sm font-medium rounded-lg transition-colors"
-                        >
-                            <Trash2 size={14} />
-                            Excluir selecionados
-                        </button>
+                        {/* Sem permissão de excluir contatos, o botão some (o banco recusa de qualquer jeito) */}
+                        {minhasAcoes.contacts.delete && (
+                            <button
+                                onClick={() => controller.setBulkDeleteConfirm(true)}
+                                className="flex items-center gap-2 px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-sm font-medium rounded-lg transition-colors"
+                            >
+                                <Trash2 size={14} />
+                                Excluir selecionados
+                            </button>
+                        )}
                     </div>
                 </div>
             )}
