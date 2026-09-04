@@ -1,6 +1,6 @@
 import React from 'react';
 import { useRouter } from 'next/navigation';
-import { Trash2, X } from 'lucide-react';
+import { Trash2, X, Tag as TagIcon } from 'lucide-react';
 import { useContactsController } from './hooks/useContactsController';
 import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
 import { contactsService } from '@/lib/supabase/contacts';
@@ -13,6 +13,7 @@ import { ContactFormModal } from './components/ContactFormModal';
 import { CompanyFormModal } from './components/CompanyFormModal';
 import { SelectBoardModal } from './components/SelectBoardModal';
 import { PaginationControls } from './components/PaginationControls';
+import { BulkTagsModal } from './components/BulkTagsModal';
 import { ContactsImportExportModal } from './components/ContactsImportExportModal';
 import ConfirmModal from '@/components/ConfirmModal';
 
@@ -144,6 +145,26 @@ export const ContactsPage: React.FC = () => {
                         </button>
                     </div>
                     <div className="flex items-center gap-2">
+                        {/* Tags em massa: só na aba de pessoas (empresa não tem tag) e
+                            com permissão de EDITAR contatos */}
+                        {controller.viewMode === 'people' && minhasAcoes.contacts.edit && (
+                            <>
+                                <button
+                                    onClick={() => controller.setBulkTagsMode('add')}
+                                    className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-white/10 border border-primary-200 dark:border-primary-800 text-primary-700 dark:text-primary-300 text-sm font-medium rounded-lg hover:bg-primary-100 dark:hover:bg-white/20 transition-colors"
+                                >
+                                    <TagIcon size={14} />
+                                    Adicionar tags
+                                </button>
+                                <button
+                                    onClick={() => controller.setBulkTagsMode('remove')}
+                                    className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-white/10 border border-primary-200 dark:border-primary-800 text-primary-700 dark:text-primary-300 text-sm font-medium rounded-lg hover:bg-primary-100 dark:hover:bg-white/20 transition-colors"
+                                >
+                                    <TagIcon size={14} />
+                                    Remover tags
+                                </button>
+                            </>
+                        )}
                         {/* Sem permissão de excluir contatos, o botão some (o banco recusa de qualquer jeito) */}
                         {minhasAcoes.contacts.delete && (
                             <button
@@ -215,6 +236,18 @@ export const ContactsPage: React.FC = () => {
                 boards={controller.boards}
                 contactName={controller.contactForDeal?.name || ''}
             />
+
+            {controller.bulkTagsMode && (
+                <BulkTagsModal
+                    mode={controller.bulkTagsMode}
+                    count={controller.selectedIds.size}
+                    busy={controller.bulkTagsBusy}
+                    onClose={() => controller.setBulkTagsMode(null)}
+                    onConfirm={tags => {
+                        if (controller.bulkTagsMode) void controller.confirmBulkTags(controller.bulkTagsMode, tags);
+                    }}
+                />
+            )}
 
             <ConfirmModal
                 isOpen={!!controller.deleteId}

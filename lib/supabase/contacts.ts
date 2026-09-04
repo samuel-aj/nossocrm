@@ -73,6 +73,8 @@ export interface DbContact {
   updated_at: string;
   /** ID do dono/responsável. */
   owner_id: string | null;
+  /** Tags do contato (ausente em bancos sem a migração 20260904150000). */
+  tags?: string[] | null;
 }
 
 /**
@@ -123,6 +125,7 @@ const transformContact = (db: DbContact): Contact => ({
   lastInteraction: db.last_interaction || undefined,
   lastPurchaseDate: db.last_purchase_date || undefined,
   totalValue: db.total_value || 0,
+  tags: Array.isArray(db.tags) ? db.tags : [],
   createdAt: db.created_at,
   updatedAt: db.updated_at,
 });
@@ -164,6 +167,7 @@ const transformContactToDb = (contact: Partial<Contact>): Partial<DbContact> => 
   else if (contact.companyId !== undefined) db.client_company_id = contact.companyId || null;
   if (contact.avatar !== undefined) db.avatar = contact.avatar || null;
   if (contact.notes !== undefined) db.notes = contact.notes || null;
+  if (contact.tags !== undefined) db.tags = contact.tags;
   if (contact.status !== undefined) db.status = contact.status;
   if (contact.stage !== undefined) db.stage = contact.stage;
   if (contact.source !== undefined) db.source = contact.source || null;
@@ -487,8 +491,84 @@ export const contactsService = {
   },
 
   /**
+   * Adiciona ou remove TAGS de vários contatos de uma vez (seleção da lista).
+   *
+   * - Sem duplicatas no mesmo contato (comparação sem diferenciar maiúsculas);
+   * - Contato que já está no estado desejado não é regravado;
+   * - Roda com a sessão do usuário: RLS e o trigger de permissão de EDITAR
+   *   contatos (vis_guard_contacts) valem em cada linha.
+   */
+  async bulkEditTags(
+    ids: string[],
+    mode: 'add' | 'remove',
+    tags: string[]
+  ): Promise<{ successCount: number; errorCount: number; error: Error | null }> {
+    try {
+      if (!supabase) return { successCount: 0, errorCount: ids.length, error: new Error('Supabase não configurado') };
+      const limpas = Array.from(
+        new Map(tags.map(t => [t.trim().toLowerCase(), t.trim()])).values()
+      ).filter(Boolean);
+      if (ids.length === 0 || limpas.length === 0) return { successCount: 0, errorCount: 0, error: null };
+
+      const { data, error } = await supabase.from('contacts').select('id, tags').in('id', ids);
+      if (error) {
+        // Banco ainda sem a coluna (migração 20260904150000 pendente)
+        if (/column/i.test(error.message) && /tags/i.test(error.message)) {
+          return {
+            successCount: 0,
+            errorCount: ids.length,
+            error: new Error('Tags de contato ainda não estão habilitadas neste banco (migração pendente).'),
+          };
+        }
+        return { successCount: 0, errorCount: ids.length, error };
+      }
+
+      const alvo = new Set(limpas.map(t => t.toLowerCase()));
+      let successCount = 0;
+      let errorCount = 0;
+
+      // Lotes pequenos: várias linhas sem estourar conexões do PostgREST
+      const CONCORRENCIA = 5;
+      const linhas = (data ?? []) as Array<{ id: string; tags: string[] | null }>;
+      for (let i = 0; i < linhas.length; i += CONCORRENCIA) {
+        const lote = linhas.slice(i, i + CONCORRENCIA);
+        const resultados = await Promise.all(
+          lote.map(async row => {
+            const atuais = Array.isArray(row.tags) ? row.tags : [];
+            const atuaisLower = new Set(atuais.map(t => t.toLowerCase()));
+            let novas: string[];
+            if (mode === 'add') {
+              novas = [...atuais, ...limpas.filter(t => !atuaisLower.has(t.toLowerCase()))];
+            } else {
+              novas = atuais.filter(t => !alvo.has(t.toLowerCase()));
+            }
+            if (novas.length === atuais.length && novas.every((t, idx) => t === atuais[idx])) {
+              return true; // nada a mudar conta como sucesso
+            }
+            const { error: upErr } = await supabase!
+              .from('contacts')
+              .update({ tags: novas, updated_at: new Date().toISOString() })
+              .eq('id', row.id);
+            return !upErr;
+          })
+        );
+        for (const ok of resultados) {
+          if (ok) successCount++;
+          else errorCount++;
+        }
+      }
+      // ids que a leitura não devolveu (RLS/inexistentes) contam como erro
+      errorCount += ids.length - linhas.length;
+
+      return { successCount, errorCount, error: null };
+    } catch (e) {
+      return { successCount: 0, errorCount: ids.length, error: e as Error };
+    }
+  },
+
+  /**
    * Exclui um contato.
-   * 
+   *
    * @param id - ID do contato a ser excluído.
    * @returns Promise com erro, se houver.
    */

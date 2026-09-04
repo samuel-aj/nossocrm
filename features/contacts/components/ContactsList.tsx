@@ -248,8 +248,30 @@ export const ContactsList: React.FC<ContactsListProps> = ({
                                             >
                                                 {(contact.name || '?').charAt(0)}
                                             </button>
-                                            <div>
+                                            <div className="min-w-0">
                                                 <span className="font-semibold text-slate-900 dark:text-white block max-md:max-w-[10rem] max-md:truncate">{contact.name}</span>
+                                                {/* Tags do contato (adicionadas em massa pela seleção da lista) */}
+                                                {(contact.tags?.length ?? 0) > 0 && (
+                                                    <span className="mt-0.5 flex flex-wrap gap-1 max-md:hidden">
+                                                        {contact.tags!.slice(0, 3).map(tag => (
+                                                            <span
+                                                                key={tag}
+                                                                title={tag}
+                                                                className="inline-block max-w-[8rem] truncate px-1.5 py-px rounded text-[10px] font-medium bg-primary-50 text-primary-700 ring-1 ring-inset ring-primary-100 dark:bg-primary-500/10 dark:text-primary-300 dark:ring-primary-400/20"
+                                                            >
+                                                                {tag}
+                                                            </span>
+                                                        ))}
+                                                        {contact.tags!.length > 3 && (
+                                                            <span
+                                                                title={contact.tags!.slice(3).join(', ')}
+                                                                className="inline-block px-1.5 py-px rounded text-[10px] font-medium bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-400"
+                                                            >
+                                                                +{contact.tags!.length - 3}
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
                                     </td>

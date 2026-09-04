@@ -164,6 +164,8 @@ export interface Contact {
   stage: string; // ID do LifecycleStage (antes era ContactStage enum)
   source?: 'WEBSITE' | 'LINKEDIN' | 'REFERRAL' | 'MANUAL'; // Origem do contato
   notes?: string; // Anotações gerais
+  /** Tags do contato (independentes das tags do negócio); sem duplicatas */
+  tags?: string[];
   lastPurchaseDate?: string;
   totalValue?: number; // LTV
   createdAt: string;
