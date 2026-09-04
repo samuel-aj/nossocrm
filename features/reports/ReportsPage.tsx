@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
-import { useRouter } from 'next/navigation';
-import { TrendingUp, Clock, Target, DollarSign, Trophy, Users, Download, Settings, ThumbsDown, UserX, CheckCircle2 } from 'lucide-react';
+import { TrendingUp, Clock, Target, DollarSign, Trophy, Users, Download, ThumbsDown, UserX, CheckCircle2 } from 'lucide-react';
 import { getDateRange, useDashboardMetrics, PeriodFilter, COMPARISON_LABELS } from '../dashboard/hooks/useDashboardMetrics';
 import { PeriodFilterSelect } from '@/components/filters/PeriodFilterSelect';
 import { LazyStageConversionChart, ChartWrapper } from '@/components/charts';
@@ -35,7 +34,6 @@ const STAGE_COLOR_MAP: Record<string, string> = {
  * @returns {Element} Retorna um valor do tipo `Element`.
  */
 const ReportsPage: React.FC = () => {
-  const router = useRouter();
   const { boards, deals: allCrmDeals } = useCRM();
   const { profile } = useAuth();
   const [period, setPeriod] = useState<PeriodFilter>('this_month');
@@ -486,23 +484,7 @@ const ReportsPage: React.FC = () => {
             }
           </p>
         </div>
-      ) : (
-        <div className="glass p-4 rounded-xl border border-amber-200 dark:border-amber-500/20 bg-amber-50/50 dark:bg-amber-500/5 shadow-sm shrink-0">
-          <div className="flex items-center gap-3">
-            <Settings className="text-amber-500" size={20} />
-            <div className="flex-1">
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">Meta não configurada</h3>
-              <p className="text-xs text-slate-500">Defina uma meta no board para acompanhar o forecast.</p>
-            </div>
-            <button
-              onClick={() => router.push('/boards')}
-              className="px-3 py-1.5 text-xs font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors"
-            >
-              Configurar
-            </button>
-          </div>
-        </div>
-      )}
+      ) : null /* Sem meta no board: o forecast simplesmente não aparece (sem aviso) */}
 
       {/* KPI Cards Grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 shrink-0">
