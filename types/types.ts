@@ -353,7 +353,8 @@ export interface Board {
   // AI Strategy Fields
   /** null = objetivo removido (o service limpa as colunas goal_* no banco) */
   goal?: BoardGoal | null;
-  agentPersona?: AgentPersona;
+  /** null = agente removido (o service limpa as colunas agent_* no banco) */
+  agentPersona?: AgentPersona | null;
   entryTrigger?: string; // "Quem deve entrar aqui?"
 
   createdAt: string;

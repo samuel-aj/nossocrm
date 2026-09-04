@@ -154,15 +154,19 @@ const transformStage = (db: DbBoardStage): BoardStage => ({
  * @returns Board no formato da aplicação.
  */
 const transformBoard = (db: DbBoard, stages: DbBoardStage[]): Board => {
-  const goal: BoardGoal | undefined = db.goal_description ? {
-    description: db.goal_description,
+  // A meta existe se QUALQUER campo dela estiver preenchido. Antes a chave era
+  // só goal_description: quem salvava a meta com valor/KPI mas sem o contexto
+  // via a meta gravar no banco e SUMIR da tela no refetch seguinte (parecia
+  // que criar não funcionava). Mesmo racional para o agente (antes: agent_name).
+  const goal: BoardGoal | undefined = (db.goal_description || db.goal_kpi || db.goal_target_value) ? {
+    description: db.goal_description || '',
     kpi: db.goal_kpi || '',
     targetValue: db.goal_target_value || '',
     type: (db.goal_type as BoardGoal['type']) || undefined,
   } : undefined;
 
-  const agentPersona: AgentPersona | undefined = db.agent_name ? {
-    name: db.agent_name,
+  const agentPersona: AgentPersona | undefined = (db.agent_name || db.agent_role || db.agent_behavior) ? {
+    name: db.agent_name || '',
     role: db.agent_role || '',
     behavior: db.agent_behavior || '',
   } : undefined;

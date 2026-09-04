@@ -79,7 +79,7 @@ function buildJourneyFromBoards(
         linkedLifecycleStage: s.linkedLifecycleStage,
       })),
       strategy: {
-        agentPersona: b.agentPersona,
+        agentPersona: b.agentPersona ?? undefined,
         goal: b.goal ?? undefined,
         entryTrigger: b.entryTrigger,
       },
