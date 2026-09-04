@@ -13,6 +13,7 @@ import {
 import { Board } from '@/types';
 import { useCRM } from '@/context/CRMContext';
 import { useToast } from '@/context/ToastContext';
+import ConfirmModal from '@/components/ConfirmModal';
 
 // Performance: reuse formatter instances.
 const BRL_CURRENCY_FORMATTER = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -32,6 +33,7 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
   const { addToast } = useToast();
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false);
   const [editedBoard, setEditedBoard] = useState(board);
 
   // Calculate Progress Automatically
@@ -149,13 +151,11 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
     setIsEditing(false);
   };
 
+  // Apaga SÓ a meta (objetivo) e as regras de entrada. O agente do board (a
+  // persona: nome/cargo/comportamento) fica — pra removê-lo, basta limpar os
+  // campos dele e salvar. Nada aqui toca nos Agentes de IA do WhatsApp.
+  // A confirmação é um modal do próprio CRM (ConfirmModal), não o alert do navegador.
   const handleRemove = async () => {
-    // Apaga SÓ a meta (objetivo) e as regras de entrada. O agente do board (a
-    // persona: nome/cargo/comportamento) fica — pra removê-lo, basta limpar os
-    // campos dele e salvar. Nada aqui toca nos Agentes de IA do WhatsApp.
-    if (!window.confirm('Remover a meta (objetivo) e as regras de entrada deste board? O agente não é apagado.')) {
-      return;
-    }
     setIsSaving(true);
     const ok = await updateBoard(board.id, { goal: null, entryTrigger: '' });
     setIsSaving(false);
@@ -220,7 +220,7 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
               <div className="flex items-center gap-2">
                 {hasStrategy && (
                   <button
-                    onClick={handleRemove}
+                    onClick={() => setConfirmRemoveOpen(true)}
                     disabled={isSaving}
                     title="Apaga a meta e as regras de entrada; o agente do board fica"
                     className="px-3 py-1.5 text-xs font-medium text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 transition-colors disabled:opacity-50"
@@ -505,6 +505,16 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
           </>
         )}
       </div>
+
+      <ConfirmModal
+        isOpen={confirmRemoveOpen}
+        onClose={() => setConfirmRemoveOpen(false)}
+        onConfirm={handleRemove}
+        title="Remover meta e entrada"
+        message="A meta (objetivo) e as regras de entrada deste board serão apagadas. O agente não é apagado."
+        confirmText="Remover"
+        variant="danger"
+      />
     </div>
   );
 };
