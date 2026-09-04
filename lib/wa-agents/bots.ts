@@ -468,7 +468,7 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
 
     // Negócio e contato
     const deal = await loadDealContext(admin, orgId, { dealId: run.deal_id });
-    let contact: { id: string; name: string; phone: string | null } | null = null;
+    let contact: { id: string; name: string; phone: string | null; email: string | null } | null = null;
     let contactId = run.contact_id;
     if (!contactId && deal) {
       const { data } = await admin
@@ -480,13 +480,15 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
       contactId = (data as { contact_id?: string | null } | null)?.contact_id ?? null;
     }
     if (contactId) {
+      // email entra no contato porque os webhooks do robô mandam {{contact.email}}
+      // (integrações usam o e-mail pra casar o cliente do outro lado)
       const { data } = await admin
         .from('contacts')
-        .select('id, name, phone')
+        .select('id, name, phone, email')
         .eq('organization_id', orgId)
         .eq('id', contactId)
         .maybeSingle();
-      contact = (data as { id: string; name: string; phone: string | null } | null) ?? null;
+      contact = (data as { id: string; name: string; phone: string | null; email: string | null } | null) ?? null;
     }
 
     // Conversa (cria na primeira execução)
