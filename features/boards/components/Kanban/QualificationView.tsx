@@ -11,6 +11,7 @@ import { useActivities } from '@/lib/query/hooks/useActivitiesQuery';
 import { useOrgMembers, useOrgUsers } from '@/lib/query/hooks';
 import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
+import { useSettings } from '@/context/settings/SettingsContext';
 import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
 
 type QuickAddType = 'CALL' | 'MEETING' | 'EMAIL';
@@ -235,17 +236,32 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
   // Gravar as tags do lead editadas pelo dropdown da célula. A permissão de
   // EDITAR cards vale (o trigger do banco recusa sem ela; a célula nem abre).
   const podeEditarCards = useMyActionPermissions().deals.edit;
+  const { availableTags, addTag } = useSettings();
   const handleChangeTags = useCallback(
     (dealId: string, tags: string[]) => {
       updateDeal(dealId, { tags });
+      // Tag digitada que ainda não existe entra no catálogo da organização
+      // (mesmo comportamento do card do lead), pra aparecer nas próximas listas
+      const conhecidas = new Set((availableTags || []).map(t => t.toLowerCase()));
+      for (const t of tags) {
+        if (!conhecidas.has(t.toLowerCase())) void addTag(t);
+      }
     },
-    [updateDeal]
+    [updateDeal, availableTags, addTag]
   );
 
-  // Sugestões do dropdown: todas as tags já usadas nos leads visíveis do quadro
+  // Sugestões do dropdown: o CATÁLOGO de tags da organização (Configurações >
+  // Tags, o mesmo do card do lead) + tags já usadas nos leads visíveis do quadro
   const tagSuggestions = useMemo(() => {
     const vistas = new Set<string>();
     const lista: string[] = [];
+    for (const t of availableTags || []) {
+      const chave = t.toLowerCase();
+      if (!vistas.has(chave)) {
+        vistas.add(chave);
+        lista.push(t);
+      }
+    }
     for (const d of filteredDeals) {
       for (const t of d.tags) {
         const chave = t.toLowerCase();
@@ -256,7 +272,7 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
       }
     }
     return lista.sort((a, b) => a.localeCompare(b, 'pt-BR'));
-  }, [filteredDeals]);
+  }, [availableTags, filteredDeals]);
 
   const handleChangeOwner = useCallback(
     (dealId: string, ownerId: string) => {
