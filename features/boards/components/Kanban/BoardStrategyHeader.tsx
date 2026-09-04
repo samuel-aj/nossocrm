@@ -150,17 +150,20 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
   };
 
   const handleRemove = async () => {
-    if (!window.confirm('Remover a estratégia deste board? Objetivo, agente e regras de entrada serão apagados.')) {
+    // Apaga SÓ a meta (objetivo) e as regras de entrada. O agente do board (a
+    // persona: nome/cargo/comportamento) fica — pra removê-lo, basta limpar os
+    // campos dele e salvar. Nada aqui toca nos Agentes de IA do WhatsApp.
+    if (!window.confirm('Remover a meta (objetivo) e as regras de entrada deste board? O agente não é apagado.')) {
       return;
     }
     setIsSaving(true);
-    const ok = await updateBoard(board.id, { goal: null, agentPersona: null, entryTrigger: '' });
+    const ok = await updateBoard(board.id, { goal: null, entryTrigger: '' });
     setIsSaving(false);
     if (!ok) {
-      addToast('Não foi possível remover a estratégia. Tente de novo.', 'error');
+      addToast('Não foi possível remover. Tente de novo.', 'error');
       return;
     }
-    addToast('Estratégia removida.', 'success');
+    addToast('Meta e regras de entrada removidas.', 'success');
     setIsEditing(false);
   };
 
@@ -219,9 +222,10 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
                   <button
                     onClick={handleRemove}
                     disabled={isSaving}
+                    title="Apaga a meta e as regras de entrada; o agente do board fica"
                     className="px-3 py-1.5 text-xs font-medium text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 transition-colors disabled:opacity-50"
                   >
-                    Remover estratégia
+                    Remover meta e entrada
                   </button>
                 )}
                 <button
