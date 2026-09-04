@@ -640,8 +640,8 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                         <div className="absolute left-0 z-50 mt-1 w-56 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1">
                             {!selectionMode ? (
                                 <>
-                                    {/* Seleção múltipla só tem UI (checkboxes) no kanban */}
-                                    {viewMode === 'kanban' && !automationMode && (
+                                    {/* Seleção múltipla: kanban e lista têm checkboxes */}
+                                    {!automationMode && (
                                         <button
                                             type="button"
                                             onClick={() => { onEnterSelectionMode(); setMoreMenuOpen(false); }}

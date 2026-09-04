@@ -197,6 +197,12 @@ type KanbanListRowProps = {
    *  faixa colorida da etapa desce inteira, ligando o grupo, em vez de ser
    *  cortada por um filete a cada lead. */
   showDivider?: boolean;
+  /** Seleção em massa ("Selecionar vários"): checkbox no início da linha e o
+   *  clique passa a marcar/desmarcar em vez de abrir o lead — mesma mecânica
+   *  do card do kanban. */
+  selectionMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (dealId: string) => void;
 };
 
 /** Padding padrão das células. py-3 dá a mesma altura de linha com e sem a
@@ -231,6 +237,9 @@ export const KanbanListRow = React.memo(function KanbanListRow({
   onCloseOwnerMenu,
   onChangeOwner,
   showDivider = false,
+  selectionMode = false,
+  selected = false,
+  onToggleSelect,
 }: KanbanListRowProps) {
   // Mesma cor/espessura da divisória da aba Todos (divide-slate-200) e, como
   // lá, atravessando a linha INTEIRA — inclusive a célula do alerta. A faixa
@@ -258,9 +267,16 @@ export const KanbanListRow = React.memo(function KanbanListRow({
       ? 'bg-rose-50 text-rose-700 ring-rose-200/70 dark:bg-rose-500/15 dark:text-rose-300 dark:ring-rose-400/20'
       : 'bg-slate-50 text-slate-700 ring-slate-200 dark:bg-white/[0.06] dark:text-slate-200 dark:ring-white/10';
 
+  // No modo seleção, o clique/Enter na linha marca/desmarca em vez de abrir
+  // o lead — mesma mecânica do card do kanban.
+  const acionarLinha = () => {
+    if (selectionMode) onToggleSelect?.(deal.id);
+    else onSelect(deal.id);
+  };
+
   return (
     <tr
-      onClick={() => onSelect(deal.id)}
+      onClick={acionarLinha}
       onKeyDown={(e) => {
         // Só quando a PRÓPRIA linha está focada: sem isso, o Enter que
         // escolhe uma etapa no dropdown (portal, mas que borbulha na
@@ -268,19 +284,40 @@ export const KanbanListRow = React.memo(function KanbanListRow({
         if (e.target !== e.currentTarget) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          onSelect(deal.id);
+          acionarLinha();
         }
       }}
       tabIndex={0}
-      aria-label={`Abrir ${deal.title}`}
-      className="group cursor-pointer transition-colors focus-visible-ring hover:bg-primary-50/60 focus-visible:bg-primary-50/80 dark:hover:bg-white/[0.045] dark:focus-visible:bg-white/[0.06]"
+      aria-label={selectionMode ? `Selecionar ${deal.title}` : `Abrir ${deal.title}`}
+      aria-selected={selectionMode ? selected : undefined}
+      className={`group cursor-pointer transition-colors focus-visible-ring hover:bg-primary-50/60 focus-visible:bg-primary-50/80 dark:hover:bg-white/[0.045] dark:focus-visible:bg-white/[0.06] ${
+        selected ? 'bg-primary-50/80 dark:bg-primary-500/10' : ''
+      }`}
     >
+      {/* Checkbox de seleção múltipla: primeira célula, só no modo seleção.
+          A faixa colorida da etapa (accentColor) muda pra cá — ela vive na
+          PRIMEIRA célula da linha pra descer colada na borda esquerda. */}
+      {selectionMode && (
+        <td className={'relative px-2 py-3 align-middle text-center' + (showDivider ? ' border-t border-slate-200 dark:border-white/10' : '')}>
+          {accentColor && (
+            <span aria-hidden="true" className={`absolute -top-px bottom-0 left-0 w-[3px] ${accentColor}`} />
+          )}
+          <input
+            type="checkbox"
+            checked={selected}
+            onClick={(e) => e.stopPropagation()}
+            onChange={() => onToggleSelect?.(deal.id)}
+            aria-label={`Selecionar ${deal.title}`}
+            className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500 cursor-pointer align-middle"
+          />
+        </td>
+      )}
       {/* Padding próprio (px-2, não o px-4 das outras células): a coluna do
           ícone é estreita e, com table-fixed, o padding come a largura útil
           em vez de alargar a coluna — o ícone e o selo "Nd" de atraso
           vazariam por cima da coluna do lado. */}
       <td className={CELULA_ALERTA}>
-        {accentColor ? (
+        {selectionMode ? null : accentColor ? (
           <span aria-hidden="true" className={`absolute -top-px bottom-0 left-0 w-[3px] ${accentColor}`} />
         ) : (
           // Filete que aparece no hover: dá o mesmo "trilho" das abas

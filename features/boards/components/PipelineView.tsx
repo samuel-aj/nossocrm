@@ -152,6 +152,8 @@ interface PipelineViewProps {
   toggleDealSelection: (dealId: string) => void;
   clearDealSelection: () => void;
   toggleStageSelection: (stageId: string) => void;
+  /** Seleciona/deseleciona um grupo de leads de uma vez (lista: selecionar todos/grupo) */
+  toggleManySelection: (dealIds: string[]) => void;
   bulkMoveToStage: (stageId: string, lossReason?: string, lossCategory?: 'qualified' | 'disqualified') => void;
   bulkEditTags: (mode: 'add' | 'remove', tag: string) => void;
   bulkSetCustomField: (key: string, value: string) => void;
@@ -321,6 +323,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   toggleDealSelection,
   clearDealSelection,
   toggleStageSelection,
+  toggleManySelection,
   bulkMoveToStage,
   bulkEditTags,
   bulkSetCustomField,
@@ -534,8 +537,8 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
           />
 
           {/* Barra de ações da seleção múltipla — no TOPO, estilo Kommo.
-              Só no kanban, a única view com UI de seleção (checkboxes). */}
-          {selectionMode && viewMode === 'kanban' && !automationActive && (
+              Vale pro kanban e pra lista (as duas têm checkboxes). */}
+          {selectionMode && !automationActive && (
             <div className="flex items-center gap-4 px-4 py-2 mb-4 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50/80 dark:bg-white/5 backdrop-blur-sm max-md:flex-wrap max-md:gap-x-3 max-md:gap-y-1.5">
               <button
                 type="button"
@@ -629,6 +632,10 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                 setOpenActivityMenuId={setOpenActivityMenuId}
                 handleQuickAddActivity={handleQuickAddActivity}
                 onMoveDealToStage={handleMoveDealToStage}
+                selectionMode={selectionMode}
+                selectedDealIds={selectedDealIds}
+                onToggleDealSelection={toggleDealSelection}
+                onToggleManySelection={toggleManySelection}
               />
             )}
           </div>

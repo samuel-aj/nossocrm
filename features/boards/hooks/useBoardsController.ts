@@ -700,19 +700,24 @@ export const useBoardsController = () => {
 
   const clearDealSelection = () => setSelectedDealIds([]);
 
-  // Seleciona/deseleciona TODOS os leads visíveis de uma etapa.
-  const toggleStageSelection = (stageId: string) => {
-    const stageDealIds = filteredDeals
-      .filter(d => d.status === stageId && !d.id.startsWith('temp-'))
-      .map(d => d.id);
-    if (stageDealIds.length === 0) return;
+  // Seleciona/deseleciona um GRUPO de leads de uma vez (todos já marcados =
+  // desmarca todos; senão marca todos). Usada pela etapa no kanban e pelo
+  // "selecionar todos" da visualização em lista.
+  const toggleManySelection = (dealIds: string[]) => {
+    const ids = dealIds.filter(id => !id.startsWith('temp-'));
+    if (ids.length === 0) return;
     setSelectedDealIds(prev => {
       const set = new Set(prev);
-      const allSelected = stageDealIds.every(id => set.has(id));
-      if (allSelected) stageDealIds.forEach(id => set.delete(id));
-      else stageDealIds.forEach(id => set.add(id));
+      const allSelected = ids.every(id => set.has(id));
+      if (allSelected) ids.forEach(id => set.delete(id));
+      else ids.forEach(id => set.add(id));
       return Array.from(set);
     });
+  };
+
+  // Seleciona/deseleciona TODOS os leads visíveis de uma etapa.
+  const toggleStageSelection = (stageId: string) => {
+    toggleManySelection(filteredDeals.filter(d => d.status === stageId).map(d => d.id));
   };
 
   // Mover todos os selecionados p/ uma etapa. Etapa de perda SEM motivo →
@@ -1335,6 +1340,7 @@ export const useBoardsController = () => {
     toggleDealSelection,
     clearDealSelection,
     toggleStageSelection,
+    toggleManySelection,
     bulkMoveToStage,
     bulkEditTags,
     bulkSetCustomField,
