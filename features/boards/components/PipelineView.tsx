@@ -421,9 +421,12 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   // Visão padrão ("Em Aberto") esconde as COLUNAS de ganho/perdido do Kanban —
   // elas só aparecem ao filtrar por Ganhos/Perdidos/Todos. Marcar ganho/perdido
   // no dia a dia é pelas zonas flutuantes do drag (ou trocando o filtro).
+  // EXCEÇÃO: no modo Automatizar TODAS as etapas aparecem, senão não haveria
+  // como criar automação ao entrar em Ganho ou Perdido (que é justamente onde
+  // moram avisos de contrato fechado e de perda).
   const kanbanStages = !activeBoard
     ? []
-    : statusFilter === 'open'
+    : statusFilter === 'open' && !automationActive
       ? activeBoard.stages.filter(
           (s) => s.id !== activeBoard.wonStageId && s.id !== activeBoard.lostStageId
         )
