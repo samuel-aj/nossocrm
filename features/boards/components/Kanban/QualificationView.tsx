@@ -11,6 +11,7 @@ import { useActivities } from '@/lib/query/hooks/useActivitiesQuery';
 import { useOrgMembers, useOrgUsers } from '@/lib/query/hooks';
 import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
+import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
 
 type QuickAddType = 'CALL' | 'MEETING' | 'EMAIL';
 
@@ -151,9 +152,10 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
   const [openStageMenuId, setOpenStageMenuId] = useState<string | null>(null);
   const handleToggleStageMenu = useCallback((dealId: string) => {
     setOpenStageMenuId((prev) => (prev === dealId ? null : dealId));
-    // Abrir um menu fecha o outro: os dois saem da mesma linha e ficariam
+    // Abrir um menu fecha os outros: saem da mesma linha e ficariam
     // sobrepostos na tela.
     setOpenOwnerMenuId(null);
+    setOpenTagsMenuId(null);
   }, []);
   const handleCloseStageMenu = useCallback(() => setOpenStageMenuId(null), []);
 
@@ -162,8 +164,18 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
   const handleToggleOwnerMenu = useCallback((dealId: string) => {
     setOpenOwnerMenuId((prev) => (prev === dealId ? null : dealId));
     setOpenStageMenuId(null);
+    setOpenTagsMenuId(null);
   }, []);
   const handleCloseOwnerMenu = useCallback(() => setOpenOwnerMenuId(null), []);
+
+  // Dropdown de TAGS na própria célula (adicionar/remover, como estágio/responsável).
+  const [openTagsMenuId, setOpenTagsMenuId] = useState<string | null>(null);
+  const handleToggleTagsMenu = useCallback((dealId: string) => {
+    setOpenTagsMenuId((prev) => (prev === dealId ? null : dealId));
+    setOpenStageMenuId(null);
+    setOpenOwnerMenuId(null);
+  }, []);
+  const handleCloseTagsMenu = useCallback(() => setOpenTagsMenuId(null), []);
 
   const handleSort = useCallback(
     (column: SortColumn) => {
@@ -219,6 +231,32 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
     profile?.first_name ||
     (profile?.email || '').split('@')[0] ||
     'Usuário';
+
+  // Gravar as tags do lead editadas pelo dropdown da célula. A permissão de
+  // EDITAR cards vale (o trigger do banco recusa sem ela; a célula nem abre).
+  const podeEditarCards = useMyActionPermissions().deals.edit;
+  const handleChangeTags = useCallback(
+    (dealId: string, tags: string[]) => {
+      updateDeal(dealId, { tags });
+    },
+    [updateDeal]
+  );
+
+  // Sugestões do dropdown: todas as tags já usadas nos leads visíveis do quadro
+  const tagSuggestions = useMemo(() => {
+    const vistas = new Set<string>();
+    const lista: string[] = [];
+    for (const d of filteredDeals) {
+      for (const t of d.tags) {
+        const chave = t.toLowerCase();
+        if (!vistas.has(chave)) {
+          vistas.add(chave);
+          lista.push(t);
+        }
+      }
+    }
+    return lista.sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [filteredDeals]);
 
   const handleChangeOwner = useCallback(
     (dealId: string, ownerId: string) => {
@@ -556,6 +594,12 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                     onToggleOwnerMenu={handleToggleOwnerMenu}
                     onCloseOwnerMenu={handleCloseOwnerMenu}
                     onChangeOwner={handleChangeOwner}
+                    canEditTags={podeEditarCards}
+                    tagSuggestions={tagSuggestions}
+                    isTagsMenuOpen={openTagsMenuId === deal.id}
+                    onToggleTagsMenu={handleToggleTagsMenu}
+                    onCloseTagsMenu={handleCloseTagsMenu}
+                    onChangeTags={handleChangeTags}
                     selectionMode={selectionMode}
                     selected={selectedSet.has(deal.id)}
                     onToggleSelect={onToggleDealSelection}
@@ -650,6 +694,12 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                           onToggleOwnerMenu={handleToggleOwnerMenu}
                           onCloseOwnerMenu={handleCloseOwnerMenu}
                           onChangeOwner={handleChangeOwner}
+                          canEditTags={podeEditarCards}
+                          tagSuggestions={tagSuggestions}
+                          isTagsMenuOpen={openTagsMenuId === deal.id}
+                          onToggleTagsMenu={handleToggleTagsMenu}
+                          onCloseTagsMenu={handleCloseTagsMenu}
+                          onChangeTags={handleChangeTags}
                           selectionMode={selectionMode}
                           selected={selectedSet.has(deal.id)}
                           onToggleSelect={onToggleDealSelection}

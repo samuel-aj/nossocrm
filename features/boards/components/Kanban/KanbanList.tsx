@@ -184,6 +184,14 @@ type KanbanListRowProps = {
   isStageMenuOpen: boolean;
   onToggleStageMenu: (dealId: string) => void;
   onCloseStageMenu: () => void;
+  /** TAGS pela própria célula da lista (adicionar/remover num dropdown, como
+   *  o estágio e o responsável). `canEditTags` false = célula só de leitura. */
+  canEditTags: boolean;
+  tagSuggestions: string[];
+  isTagsMenuOpen: boolean;
+  onToggleTagsMenu: (dealId: string) => void;
+  onCloseTagsMenu: () => void;
+  onChangeTags: (dealId: string, tags: string[]) => void;
   /** Trocar responsável pela lista. `canAssignOwner` false (vendedor) deixa
    *  a célula só de leitura, mesma regra do card do lead. */
   canAssignOwner: boolean;
@@ -236,6 +244,12 @@ export const KanbanListRow = React.memo(function KanbanListRow({
   onToggleOwnerMenu,
   onCloseOwnerMenu,
   onChangeOwner,
+  canEditTags,
+  tagSuggestions,
+  isTagsMenuOpen,
+  onToggleTagsMenu,
+  onCloseTagsMenu,
+  onChangeTags,
   showDivider = false,
   selectionMode = false,
   selected = false,
@@ -256,6 +270,48 @@ export const KanbanListRow = React.memo(function KanbanListRow({
     isOwnerMenuOpen,
     onCloseOwnerMenu
   );
+  const { triggerRef: tagsTriggerRef, menuRef: tagsMenuRef, pos: tagsMenuPos } = useAnchoredMenu(
+    isTagsMenuOpen,
+    onCloseTagsMenu
+  );
+  // Campo "nova tag" do dropdown de tags (limpo ao fechar/abrir o menu)
+  const [novaTag, setNovaTag] = useState('');
+  useEffect(() => {
+    if (!isTagsMenuOpen) setNovaTag('');
+  }, [isTagsMenuOpen]);
+
+  // Marca/desmarca uma tag do lead (sem duplicar; comparação sem maiúsculas)
+  const alternarTag = (tag: string) => {
+    const chave = tag.toLowerCase();
+    const tem = deal.tags.some((t) => t.toLowerCase() === chave);
+    onChangeTags(
+      deal.id,
+      tem ? deal.tags.filter((t) => t.toLowerCase() !== chave) : [...deal.tags, tag]
+    );
+  };
+
+  const adicionarNovaTag = () => {
+    const t = novaTag.trim();
+    if (!t) return;
+    if (!deal.tags.some((x) => x.toLowerCase() === t.toLowerCase())) {
+      onChangeTags(deal.id, [...deal.tags, t]);
+    }
+    setNovaTag('');
+  };
+
+  // Opções do menu: tags do quadro + as do próprio lead, sem repetidas
+  const opcoesDeTags = React.useMemo(() => {
+    const vistas = new Set<string>();
+    const lista: string[] = [];
+    for (const t of [...deal.tags, ...tagSuggestions]) {
+      const chave = t.toLowerCase();
+      if (!vistas.has(chave)) {
+        vistas.add(chave);
+        lista.push(t);
+      }
+    }
+    return lista.sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [deal.tags, tagSuggestions]);
   const criado = formatCriadoEm(deal.createdAt);
   const stageAtual = stages.find((s) => s.id === deal.status);
 
@@ -355,7 +411,120 @@ export const KanbanListRow = React.memo(function KanbanListRow({
       </td>
 
       <td className={CELULA}>
-        {deal.tags.length > 0 ? (
+        {canEditTags ? (
+          <>
+            {/* Célula clicável: abre o dropdown de tags, como estágio/responsável */}
+            <button
+              ref={tagsTriggerRef}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleTagsMenu(deal.id);
+              }}
+              aria-haspopup="listbox"
+              aria-expanded={isTagsMenuOpen}
+              aria-label={
+                deal.tags.length > 0 ? `Tags: ${deal.tags.join(', ')}. Clique para editar.` : 'Adicionar tags'
+              }
+              title="Adicionar/remover tags"
+              className="-mx-1.5 flex max-w-full flex-wrap items-center gap-1 rounded-md px-1.5 py-1 text-left transition-colors focus-visible-ring hover:bg-slate-100 dark:hover:bg-white/10"
+            >
+              {deal.tags.length > 0 ? (
+                <>
+                  {deal.tags.slice(0, 2).map((tag, index) => (
+                    <span key={`${deal.id}-tag-${index}`} title={tag} className={`max-w-full truncate ${PILL_BASE} ${PILL_NEUTRO}`}>
+                      {tag}
+                    </span>
+                  ))}
+                  {deal.tags.length > 2 && (
+                    <span
+                      title={deal.tags.slice(2).join(', ')}
+                      className={`${PILL_BASE} bg-slate-100 text-slate-500 ring-slate-200/70 dark:bg-white/[0.06] dark:text-slate-400 dark:ring-white/10`}
+                    >
+                      +{deal.tags.length - 2}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <span className="text-slate-300 dark:text-slate-600">—</span>
+              )}
+              <ChevronDown
+                size={12}
+                aria-hidden="true"
+                className={`shrink-0 text-slate-400 opacity-60 transition-transform ${isTagsMenuOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+
+            {isTagsMenuOpen && tagsMenuPos && typeof document !== 'undefined'
+              ? createPortal(
+                  <FocusTrap active={isTagsMenuOpen} onEscape={onCloseTagsMenu} initialFocus={`#tags-input-${deal.id}`} returnFocus>
+                    <div
+                      ref={tagsMenuRef}
+                      role="listbox"
+                      aria-label="Tags do lead"
+                      aria-multiselectable="true"
+                      style={{ position: 'fixed', top: tagsMenuPos.top, left: tagsMenuPos.left, width: 220 }}
+                      className="z-[9999] max-h-[280px] overflow-y-auto scrollbar-custom rounded-xl bg-white p-1.5 shadow-2xl ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-white/10 animate-in fade-in zoom-in-95 duration-100"
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <p className="px-2 pb-1.5 pt-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">Tags</p>
+                      {/* Nova tag: Enter adiciona no lead na hora */}
+                      <input
+                        id={`tags-input-${deal.id}`}
+                        value={novaTag}
+                        onChange={(e) => setNovaTag(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            adicionarNovaTag();
+                          }
+                          e.stopPropagation();
+                        }}
+                        placeholder="Nova tag + Enter"
+                        maxLength={60}
+                        className="mb-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-800 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 dark:border-white/10 dark:bg-white/5 dark:text-slate-100"
+                      />
+                      {opcoesDeTags.length === 0 ? (
+                        <p className="px-2.5 py-2 text-xs text-slate-400">Sem tags neste quadro ainda.</p>
+                      ) : (
+                        opcoesDeTags.map((tag) => {
+                          const marcada = deal.tags.some((t) => t.toLowerCase() === tag.toLowerCase());
+                          return (
+                            <button
+                              key={tag.toLowerCase()}
+                              type="button"
+                              role="option"
+                              aria-selected={marcada}
+                              onClick={() => alternarTag(tag)}
+                              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm focus-visible-ring hover:bg-slate-100 dark:hover:bg-white/10 ${
+                                marcada
+                                  ? 'bg-primary-500/10 font-semibold text-primary-600 dark:text-primary-300'
+                                  : 'text-slate-700 dark:text-slate-200'
+                              }`}
+                            >
+                              <span
+                                aria-hidden="true"
+                                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                                  marcada
+                                    ? 'border-primary-500 bg-primary-500 text-white'
+                                    : 'border-slate-300 dark:border-slate-600'
+                                }`}
+                              >
+                                {marcada && <Check size={11} />}
+                              </span>
+                              <span className="flex-1 truncate">{tag}</span>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </FocusTrap>,
+                  document.body
+                )
+              : null}
+          </>
+        ) : deal.tags.length > 0 ? (
           <div className="flex flex-wrap items-center gap-1">
             {deal.tags.slice(0, 2).map((tag, index) => (
               <span
