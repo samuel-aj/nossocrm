@@ -151,19 +151,19 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
     setIsEditing(false);
   };
 
-  // Apaga SÓ a meta (objetivo) e as regras de entrada. O agente do board (a
-  // persona: nome/cargo/comportamento) fica — pra removê-lo, basta limpar os
-  // campos dele e salvar. Nada aqui toca nos Agentes de IA do WhatsApp.
-  // A confirmação é um modal do próprio CRM (ConfirmModal), não o alert do navegador.
+  // Apaga a estratégia COMPLETA do board: objetivo, agente do board (a persona
+  // nome/cargo/comportamento) e regras de entrada. Não tem relação com os
+  // Agentes de IA do WhatsApp, que ficam intactos. A confirmação é um modal do
+  // próprio CRM (ConfirmModal), não o alert do navegador.
   const handleRemove = async () => {
     setIsSaving(true);
-    const ok = await updateBoard(board.id, { goal: null, entryTrigger: '' });
+    const ok = await updateBoard(board.id, { goal: null, agentPersona: null, entryTrigger: '' });
     setIsSaving(false);
     if (!ok) {
-      addToast('Não foi possível remover. Tente de novo.', 'error');
+      addToast('Não foi possível remover a estratégia. Tente de novo.', 'error');
       return;
     }
-    addToast('Meta e regras de entrada removidas.', 'success');
+    addToast('Estratégia removida.', 'success');
     setIsEditing(false);
   };
 
@@ -222,10 +222,10 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
                   <button
                     onClick={() => setConfirmRemoveOpen(true)}
                     disabled={isSaving}
-                    title="Apaga a meta e as regras de entrada; o agente do board fica"
+                    title="Apaga objetivo, agente do board e regras de entrada"
                     className="px-3 py-1.5 text-xs font-medium text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 transition-colors disabled:opacity-50"
                   >
-                    Remover meta e entrada
+                    Remover estratégia
                   </button>
                 )}
                 <button
@@ -510,8 +510,8 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
         isOpen={confirmRemoveOpen}
         onClose={() => setConfirmRemoveOpen(false)}
         onConfirm={handleRemove}
-        title="Remover meta e entrada"
-        message="A meta (objetivo) e as regras de entrada deste board serão apagadas. O agente não é apagado."
+        title="Remover estratégia"
+        message="Objetivo, agente do board e regras de entrada serão apagados. Seus Agentes de IA do WhatsApp não têm relação com isso e continuam intactos."
         confirmText="Remover"
         variant="danger"
       />

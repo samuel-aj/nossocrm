@@ -1121,6 +1121,11 @@ export const useBoardsController = () => {
             // Objetivo: objeto salva, null limpa as colunas goal_* (antes não era
             // enviado e a remoção ficava só na tela)
             goal: boardData.goal ?? null,
+            // "Remover estratégia" no modal manda agentPersona: null e
+            // entryTrigger: '' pra apagar tudo; ausentes (undefined), o
+            // service não toca nesses campos.
+            agentPersona: boardData.agentPersona,
+            entryTrigger: boardData.entryTrigger,
           },
         },
         {
