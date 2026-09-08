@@ -362,7 +362,9 @@ export const contactsService = {
             condicoes.push(`name.ilike.%${termoSeguro}%`, `email.ilike.%${termoSeguro}%`);
           }
           const digitos = searchTerm.replace(/\D/g, '');
-          if (digitos.length >= 3) {
+          // Desde o PRIMEIRO dígito já filtra pelo telefone (mesma regra da
+          // busca do quadro): cada número digitado vai estreitando a lista.
+          if (digitos.length >= 1) {
             const numeros = new Set<string>([digitos]);
             for (const variante of brPhoneVariants(digitos.startsWith('55') ? `+${digitos}` : `+55${digitos}`)) {
               const so = variante.replace(/\D/g, '');
