@@ -96,4 +96,4 @@ export { useOrgMembers } from './useOrgMembers';
 export type { OrgMember } from './useOrgMembers';
 
 // Preferências da organização (ex.: etapa Inativos)
-export { useOrgPreferences } from './useOrgPreferences';
+export { useOrgPreferences, type DealStatusFilter } from './useOrgPreferences';

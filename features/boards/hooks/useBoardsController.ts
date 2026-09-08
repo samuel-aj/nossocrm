@@ -164,7 +164,16 @@ export const useBoardsController = () => {
   );
   // 'all' = todos | 'mine' = meus (profile.id) | 'none' = sem responsável | <userId> = um responsável específico
   const [ownerFilter, setOwnerFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<'open' | 'won' | 'lost' | 'all'>('open');
+  const [statusFilter, setStatusFilterState] = useState<'open' | 'won' | 'lost' | 'all'>('open');
+  // Quadro abre no filtro escolhido em Configurações > CRM. A preferência chega
+  // pela rede, então: só é aplicada UMA vez, e nunca por cima de um filtro que
+  // veio da URL ou que o usuário já trocou na mão.
+  const statusTouchedRef = useRef(false);
+  const statusPrefAppliedRef = useRef(false);
+  const setStatusFilter = useCallback((value: 'open' | 'won' | 'lost' | 'all') => {
+    statusTouchedRef.current = true;
+    setStatusFilterState(value);
+  }, []);
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   // Filtro por campo personalizado / UTM (ex.: utm_source, utm_campaign): { chave, valor }.
   // Filtro por campo personalizado/UTM (builder de condições): cada condição é
@@ -301,7 +310,17 @@ export const useBoardsController = () => {
   // Get lifecycle stages from CRM context for automations
   const { lifecycleStages, customFieldDefinitions: orgFieldDefs, deleteDeal, updateDeal, updateContact, availableTags, contacts } = useCRM();
   // Etapa "Inativos" (opcional por organização — Configurações)
-  const { inactiveLeadsEnabled } = useOrgPreferences();
+  const { inactiveLeadsEnabled, defaultDealStatusFilter } = useOrgPreferences();
+
+  // Preferência da organização: aplica uma vez, respeitando ?status= da URL e
+  // qualquer troca que o usuário já tenha feito no cabeçalho do quadro.
+  useEffect(() => {
+    if (statusPrefAppliedRef.current || defaultDealStatusFilter === undefined) return;
+    statusPrefAppliedRef.current = true;
+    if (statusTouchedRef.current) return;
+    if (searchParams?.get('status')) return;
+    if (defaultDealStatusFilter !== 'open') setStatusFilterState(defaultDealStatusFilter);
+  }, [defaultDealStatusFilter, searchParams]);
   // Contatos com status INATIVO: com a etapa Inativos ligada, os leads desses
   // contatos vão automaticamente pra coluna Inativos.
   const inactiveContactIds = useMemo(
@@ -353,7 +372,7 @@ export const useBoardsController = () => {
 
     const statusParam = searchParams.get('status');
     if (statusParam === 'open' || statusParam === 'won' || statusParam === 'lost' || statusParam === 'all') {
-      setStatusFilter(statusParam);
+      setStatusFilterState(statusParam);
     }
   }, [searchParams]);
 
