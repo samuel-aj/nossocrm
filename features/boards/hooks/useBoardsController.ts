@@ -52,6 +52,39 @@ export const getActivityStatus = (deal: DealView) => {
 };
 
 /**
+ * Cache local do status FIXADO (alfinete em Filtros). A preferência real vem do
+ * servidor, mas ela chega depois do primeiro desenho — sem este cache o quadro
+ * abria em "Em aberto" e trocava de filtro na frente do usuário. Guarda também
+ * a organização: ao trocar de org, o valor de outra não é aplicado.
+ */
+const STATUS_FIXADO_KEY = 'crm_default_status_filter';
+type StatusFiltro = 'open' | 'won' | 'lost' | 'all';
+
+function lerStatusFixadoCache(orgId?: string | null): StatusFiltro {
+  if (typeof window === 'undefined') return 'open';
+  try {
+    const bruto = localStorage.getItem(STATUS_FIXADO_KEY);
+    if (!bruto) return 'open';
+    const dados = JSON.parse(bruto) as { org?: string; value?: string };
+    // org conhecida e diferente da salva: ignora (o servidor corrige em seguida)
+    if (orgId && dados.org && dados.org !== orgId) return 'open';
+    const v = dados.value;
+    return v === 'won' || v === 'lost' || v === 'all' || v === 'open' ? v : 'open';
+  } catch {
+    return 'open';
+  }
+}
+
+function gravarStatusFixadoCache(orgId: string | null | undefined, value: StatusFiltro): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(STATUS_FIXADO_KEY, JSON.stringify({ org: orgId ?? null, value }));
+  } catch {
+    // sem localStorage: só perde o atalho, a preferência do servidor continua valendo
+  }
+}
+
+/**
  * Hook React `useBoardsController` que encapsula uma lógica reutilizável.
  * @returns {{ boards: Board[]; boardsLoading: boolean; boardsFetched: boolean; activeBoard: Board | null; activeBoardId: string | null; handleSelectBoard: (boardId: string) => void; ... 45 more ...; handleLossReasonClose: () => void; }} Retorna um valor do tipo `{ boards: Board[]; boardsLoading: boolean; boardsFetched: boolean; activeBoard: Board | null; activeBoardId: string | null; handleSelectBoard: (boardId: string) => void; ... 45 more ...; handleLossReasonClose: () => void; }`.
  */
@@ -164,7 +197,10 @@ export const useBoardsController = () => {
   );
   // 'all' = todos | 'mine' = meus (profile.id) | 'none' = sem responsável | <userId> = um responsável específico
   const [ownerFilter, setOwnerFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilterState] = useState<'open' | 'won' | 'lost' | 'all'>('open');
+  // Abre JÁ no status fixado (cache local); o servidor confirma/corrige depois.
+  const [statusFilter, setStatusFilterState] = useState<StatusFiltro>(() =>
+    lerStatusFixadoCache(organizationId)
+  );
   // Quadro abre no filtro escolhido em Configurações > CRM. A preferência chega
   // pela rede, então: só é aplicada UMA vez, e nunca por cima de um filtro que
   // veio da URL ou que o usuário já trocou na mão.
@@ -315,12 +351,17 @@ export const useBoardsController = () => {
   // Preferência da organização: aplica uma vez, respeitando ?status= da URL e
   // qualquer troca que o usuário já tenha feito no cabeçalho do quadro.
   useEffect(() => {
-    if (statusPrefAppliedRef.current || defaultDealStatusFilter === undefined) return;
+    if (defaultDealStatusFilter === undefined) return;
+    // Sempre atualiza o cache: é ele que faz o próximo carregamento abrir certo
+    // (inclusive quando o admin acabou de mudar o alfinete).
+    gravarStatusFixadoCache(organizationId, defaultDealStatusFilter);
+    if (statusPrefAppliedRef.current) return;
     statusPrefAppliedRef.current = true;
     if (statusTouchedRef.current) return;
     if (searchParams?.get('status')) return;
-    if (defaultDealStatusFilter !== 'open') setStatusFilterState(defaultDealStatusFilter);
-  }, [defaultDealStatusFilter, searchParams]);
+    // Aplica mesmo quando é 'open': corrige um cache velho apontando pra outro status
+    setStatusFilterState(defaultDealStatusFilter);
+  }, [defaultDealStatusFilter, organizationId, searchParams]);
   // Contatos com status INATIVO: com a etapa Inativos ligada, os leads desses
   // contatos vão automaticamente pra coluna Inativos.
   const inactiveContactIds = useMemo(
