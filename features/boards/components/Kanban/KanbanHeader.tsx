@@ -1,11 +1,13 @@
 import React from 'react';
-import { Plus, Search, LayoutGrid, Table as TableIcon, X, Settings, Lightbulb, Download, MoreVertical, CheckSquare, Target, Zap, SlidersHorizontal, CalendarDays, ChevronDown } from 'lucide-react';
+import { Plus, Search, LayoutGrid, Table as TableIcon, X, Settings, Lightbulb, Download, MoreVertical, CheckSquare, Target, Zap, SlidersHorizontal, CalendarDays, ChevronDown, Pin } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Board } from '@/types';
 import { BoardSelector } from '../BoardSelector';
 import { useOrgUsers } from '@/lib/query/hooks';
 import { useAuth } from '@/context/AuthContext';
 import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
+import { useOrgPreferences } from '@/lib/query/hooks';
+import { useToast } from '@/context/ToastContext';
 
 type StatusFilter = 'open' | 'won' | 'lost' | 'all';
 
@@ -239,6 +241,28 @@ function FiltersButton({
     const close = React.useCallback(() => setOpen(false), []);
     useClickOutside(open, ref, close);
 
+    // PIN do status: fixa com qual status o quadro abre (preferência da org).
+    // Só admin fixa; para os demais o alfinete some (o servidor também barra).
+    const { defaultDealStatusFilter, setDefaultDealStatusFilter } = useOrgPreferences();
+    const { profile } = useAuth();
+    const { addToast } = useToast();
+    const statusFixado: StatusFilter = defaultDealStatusFilter ?? 'open';
+    const podeFixar = profile?.role === 'admin' || profile?.role === 'super_admin';
+    const fixarStatus = (value: StatusFilter) => {
+        // clicar no alfinete do que já está fixo volta ao padrão do sistema
+        const alvo: StatusFilter = value === statusFixado ? 'open' : value;
+        setDefaultDealStatusFilter.mutate(alvo, {
+            onSuccess: () =>
+                addToast(
+                    alvo === 'open'
+                        ? 'O quadro volta a abrir em "Em aberto".'
+                        : `O quadro passa a abrir em "${STATUS_OPTIONS.find((o) => o.value === alvo)?.label}".`,
+                    'success'
+                ),
+            onError: (e) => addToast((e as Error).message, 'error'),
+        });
+    };
+
     const activeConditions = conditions.filter(
         (c) => c.field && (c.operator === 'empty' || c.operator === 'not_empty' || c.value.trim() !== '')
     );
@@ -288,20 +312,53 @@ function FiltersButton({
                     <div className="space-y-2">
                         <p className={SECTION_TITLE}>Status</p>
                         <div className="grid grid-cols-2 gap-1.5">
-                            {STATUS_OPTIONS.map((option) => (
-                                <button
-                                    key={option.value}
-                                    type="button"
-                                    onClick={() => onStatusChange(option.value)}
-                                    aria-pressed={statusFilter === option.value}
-                                    className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-sm text-left transition-colors ${statusFilter === option.value
-                                        ? 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/20 font-semibold text-primary-700 dark:text-primary-300'
-                                        : 'border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5'}`}
-                                >
-                                    <span className={`w-2 h-2 rounded-full ${option.dot}`} aria-hidden="true" />
-                                    {option.label}
-                                </button>
-                            ))}
+                            {STATUS_OPTIONS.map((option) => {
+                                const selecionado = statusFilter === option.value;
+                                const fixo = statusFixado === option.value;
+                                return (
+                                    // Alfinete ao lado do rótulo: fixa com qual status o quadro
+                                    // abre. Botões irmãos (não aninhados) para o HTML ser válido.
+                                    <div
+                                        key={option.value}
+                                        className={`group flex items-center rounded-lg border transition-colors ${selecionado
+                                            ? 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/20'
+                                            : 'border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/5'}`}
+                                    >
+                                        <button
+                                            type="button"
+                                            onClick={() => onStatusChange(option.value)}
+                                            aria-pressed={selecionado}
+                                            className={`flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-left transition-colors ${selecionado
+                                                ? 'font-semibold text-primary-700 dark:text-primary-300'
+                                                : 'text-slate-700 dark:text-slate-200'}`}
+                                        >
+                                            <span className={`w-2 h-2 shrink-0 rounded-full ${option.dot}`} aria-hidden="true" />
+                                            <span className="truncate">{option.label}</span>
+                                        </button>
+                                        {(podeFixar || fixo) && (
+                                            <button
+                                                type="button"
+                                                disabled={!podeFixar || setDefaultDealStatusFilter.isPending}
+                                                onClick={() => fixarStatus(option.value)}
+                                                aria-pressed={fixo}
+                                                title={
+                                                    !podeFixar
+                                                        ? 'O quadro abre neste status'
+                                                        : fixo
+                                                            ? 'O quadro abre neste status. Clique para voltar ao padrão (Em aberto).'
+                                                            : 'Fixar: o quadro passa a abrir neste status'
+                                                }
+                                                aria-label={fixo ? `${option.label} é o status que abre o quadro` : `Fixar ${option.label} como status que abre o quadro`}
+                                                className={`mr-1 shrink-0 rounded-md p-1 transition-all disabled:cursor-default ${fixo
+                                                    ? 'text-primary-600 dark:text-primary-400'
+                                                    : 'text-slate-300 dark:text-slate-600 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-slate-500 dark:hover:text-slate-300'}`}
+                                            >
+                                                <Pin size={13} className={fixo ? 'fill-current' : ''} aria-hidden="true" />
+                                            </button>
+                                        )}
+                                    </div>
+                                );
+                            })}
                         </div>
                     </div>
 

@@ -6,12 +6,11 @@
  * Inativos). Só reorganiza o que já existia em "Geral".
  */
 import React from 'react';
-import { SlidersHorizontal, LayoutGrid } from 'lucide-react';
+import { SlidersHorizontal } from 'lucide-react';
 import { Disclosure } from '@/components/ui/Disclosure';
 import { CustomFieldsManager } from './components/CustomFieldsManager';
 import { TagsManager } from './components/TagsManager';
 import { LossReasonsSettings } from './components/LossReasonsSettings';
-import { DefaultStatusFilterSettings } from './components/DefaultStatusFilterSettings';
 import { InactiveLeadsSettings } from './components/InactiveLeadsSettings';
 import { SettingsCard, SettingsHeader } from './components/SettingsUi';
 
@@ -22,13 +21,6 @@ export const CrmSettings: React.FC = () => {
       <CustomFieldsManager />
       <TagsManager />
       <LossReasonsSettings />
-      <SettingsCard
-        title="Quadro"
-        description="Como o quadro abre para todo mundo da organização."
-        icon={LayoutGrid}
-      >
-        <DefaultStatusFilterSettings />
-      </SettingsCard>
       <Disclosure label="Configurações avançadas">
         <SettingsCard title="Avançado" description="Opções pouco usadas do funil." icon={SlidersHorizontal}>
           <InactiveLeadsSettings />
