@@ -15,7 +15,7 @@
 import { supabase } from './client';
 import { Contact, CRMCompany, OrganizationId, PaginationState, PaginatedResponse, ContactsServerFilters } from '@/types';
 import { sanitizeUUID, sanitizeText, sanitizeNumber } from './utils';
-import { normalizePhoneE164 } from '@/lib/phone';
+import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
 
 // =============================================================================
 // Organization inference: centralizada em ./orgId (org POR ABA + fallback perfil)
@@ -349,10 +349,28 @@ export const contactsService = {
 
       // Apply filters
       if (filters) {
-        // T007: Search filter (name OR email)
+        // Busca por NOME, E-MAIL ou TELEFONE. O telefone é guardado em E.164
+        // (+5569...), então compara só dígitos: "9296", "(69) 99292-6666" e
+        // "+5569992926666" acham o mesmo contato. Também tenta a outra grafia
+        // do nono dígito, senão um número salvo sem o 9 nunca aparecia.
         if (filters.search && filters.search.trim()) {
           const searchTerm = filters.search.trim();
-          query = query.or(`name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%`);
+          // vírgula/parênteses/aspas quebram a sintaxe do filtro `or` do PostgREST
+          const termoSeguro = searchTerm.replace(/[,()"\\]/g, ' ').trim();
+          const condicoes: string[] = [];
+          if (termoSeguro) {
+            condicoes.push(`name.ilike.%${termoSeguro}%`, `email.ilike.%${termoSeguro}%`);
+          }
+          const digitos = searchTerm.replace(/\D/g, '');
+          if (digitos.length >= 3) {
+            const numeros = new Set<string>([digitos]);
+            for (const variante of brPhoneVariants(digitos.startsWith('55') ? `+${digitos}` : `+55${digitos}`)) {
+              const so = variante.replace(/\D/g, '');
+              if (so) numeros.add(so);
+            }
+            for (const n of numeros) condicoes.push(`phone.ilike.%${n}%`);
+          }
+          if (condicoes.length > 0) query = query.or(condicoes.join(','));
         }
 
         // T008: Stage filter
@@ -594,6 +612,45 @@ export const contactsService = {
       return { error };
     } catch (e) {
       return { error: e as Error };
+    }
+  },
+
+  /**
+   * Leads (deals) de VÁRIOS contatos de uma vez — usado pela lista de contatos
+   * para o botão "abrir o card do lead" (um contato pode ter mais de um).
+   * Ignora leads na lixeira e devolve o mínimo para montar o menu.
+   */
+  async dealsForContacts(
+    contactIds: string[]
+  ): Promise<{ data: Record<string, Array<{ id: string; title: string; boardId: string | null; isWon: boolean; isLost: boolean }>>; error: Error | null }> {
+    try {
+      if (!supabase || contactIds.length === 0) return { data: {}, error: null };
+      const orgId = await getCurrentOrganizationId();
+      if (!orgId) return { data: {}, error: null };
+
+      const { data, error } = await supabase
+        .from('deals')
+        .select('id, title, board_id, contact_id, is_won, is_lost')
+        .eq('organization_id', orgId)
+        .is('deleted_at', null)
+        .in('contact_id', contactIds)
+        .order('created_at', { ascending: false });
+      if (error) return { data: {}, error };
+
+      const porContato: Record<string, Array<{ id: string; title: string; boardId: string | null; isWon: boolean; isLost: boolean }>> = {};
+      for (const linha of (data ?? []) as Array<{ id: string; title: string | null; board_id: string | null; contact_id: string | null; is_won: boolean | null; is_lost: boolean | null }>) {
+        if (!linha.contact_id) continue;
+        (porContato[linha.contact_id] ??= []).push({
+          id: linha.id,
+          title: linha.title || 'Sem título',
+          boardId: linha.board_id,
+          isWon: !!linha.is_won,
+          isLost: !!linha.is_lost,
+        });
+      }
+      return { data: porContato, error: null };
+    } catch (e) {
+      return { data: {}, error: e as Error };
     }
   },
 

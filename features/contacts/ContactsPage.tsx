@@ -3,6 +3,8 @@ import { useRouter } from 'next/navigation';
 import { Trash2, X, Tag as TagIcon } from 'lucide-react';
 import { useContactsController } from './hooks/useContactsController';
 import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
+import { useDealsForContacts } from '@/lib/query/hooks/useContactsQuery';
+import { useBoards } from '@/lib/query/hooks/useBoardsQuery';
 import { contactsService } from '@/lib/supabase/contacts';
 import { ContactsHeader } from './components/ContactsHeader';
 import { ContactsFilters } from './components/ContactsFilters';
@@ -85,6 +87,23 @@ export const ContactsPage: React.FC = () => {
         controller.setDeleteWithDeals(null);
         router.push(`/boards?deal=${dealId}`);
     };
+
+    // Leads dos contatos da página atual, numa consulta só (botão "abrir card")
+    const contatosVisiveis = React.useMemo(
+        () => controller.filteredContacts.map(c => c.id),
+        [controller.filteredContacts]
+    );
+    const { data: dealsByContact } = useDealsForContacts(contatosVisiveis);
+    const { data: boards = [] } = useBoards();
+    const nomeDoQuadro = React.useCallback(
+        (boardId: string | null) => boards.find(b => b.id === boardId)?.name ?? 'Quadro removido',
+        [boards]
+    );
+    // Chat do contato: a página Chats abre a conversa por ?contact=
+    const goToChat = React.useCallback(
+        (contactId: string) => router.push(`/chats?contact=${contactId}`),
+        [router]
+    );
 
     return (
         <div className="space-y-6 p-8 max-md:p-4 max-w-[1600px] mx-auto">
@@ -193,6 +212,10 @@ export const ContactsPage: React.FC = () => {
                 convertContactToDeal={controller.convertContactToDeal}
                 openEditModal={controller.openEditModal}
                 setDeleteId={controller.setDeleteId}
+                dealsByContact={dealsByContact}
+                getBoardName={nomeDoQuadro}
+                onOpenChat={(contact) => goToChat(contact.id)}
+                onOpenDeal={goToDeal}
                 openEditCompanyModal={controller.openEditCompanyModal}
                 setDeleteCompanyId={controller.setDeleteCompanyId}
                 sortBy={controller.sortBy}

@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Building2, Mail, Phone, Plus, Calendar, Pencil, Trash2, Globe, MoreHorizontal, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Building2, Mail, Phone, Plus, Calendar, Pencil, Trash2, Globe, MoreHorizontal, ArrowUpDown, ArrowUp, ArrowDown, MessageCircle, KanbanSquare, Trophy, XCircle } from 'lucide-react';
 import { Contact, Company, ContactSortableColumn } from '@/types';
 import { StageBadge } from './ContactsStageTabs';
 
@@ -72,6 +72,8 @@ const SortableHeader: React.FC<SortableHeaderProps> = ({ label, column, currentS
     );
 };
 
+export type ContactDeal = { id: string; title: string; boardId: string | null; isWon: boolean; isLost: boolean };
+
 interface ContactsListProps {
     /** Deep link: contato a destacar e rolar até (linha pisca em primary) */
     highlightId?: string | null;
@@ -89,6 +91,14 @@ interface ContactsListProps {
     setDeleteId: (id: string) => void;
     openEditCompanyModal?: (company: Company) => void;
     setDeleteCompanyId?: (id: string) => void;
+    /** Leads do contato (id -> lista); alimenta o botão "abrir o card do lead" */
+    dealsByContact?: Record<string, ContactDeal[]>;
+    /** Nome do quadro, para diferenciar leads homônimos no menu */
+    getBoardName?: (boardId: string | null) => string;
+    /** Abrir o chat do contato (WhatsApp) */
+    onOpenChat?: (contact: Contact) => void;
+    /** Abrir o card de um lead */
+    onOpenDeal?: (dealId: string) => void;
     // Sorting props
     sortBy?: ContactSortableColumn;
     sortOrder?: 'asc' | 'desc';
@@ -133,6 +143,103 @@ interface ContactsListProps {
 }`.
  * @returns {Element} Retorna um valor do tipo `Element`.
  */
+/**
+ * Botão "abrir o card do lead" da linha do contato.
+ * Nenhum lead: não aparece (a coluna Status já tem o "+" para criar um).
+ * Um lead: vai direto. Vários: abre a lista para escolher, com o quadro e o
+ * estado (ganho/perdido) de cada um.
+ */
+const ContactDealsButton: React.FC<{
+    contactName: string;
+    deals: ContactDeal[];
+    getBoardName?: (boardId: string | null) => string;
+    onOpenDeal?: (dealId: string) => void;
+}> = ({ contactName, deals, getBoardName, onOpenDeal }) => {
+    const [open, setOpen] = React.useState(false);
+    const ref = React.useRef<HTMLDivElement>(null);
+
+    React.useEffect(() => {
+        if (!open) return;
+        const fora = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+        };
+        const esc = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setOpen(false);
+        };
+        document.addEventListener('mousedown', fora);
+        document.addEventListener('keydown', esc);
+        return () => {
+            document.removeEventListener('mousedown', fora);
+            document.removeEventListener('keydown', esc);
+        };
+    }, [open]);
+
+    if (!onOpenDeal || deals.length === 0) return null;
+
+    const abrir = (id: string) => {
+        setOpen(false);
+        onOpenDeal(id);
+    };
+
+    return (
+        <div ref={ref} className="relative">
+            <button
+                onClick={() => (deals.length === 1 ? abrir(deals[0].id) : setOpen(o => !o))}
+                aria-haspopup={deals.length > 1 ? 'menu' : undefined}
+                aria-expanded={deals.length > 1 ? open : undefined}
+                className="p-1.5 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-colors relative"
+                aria-label={
+                    deals.length === 1
+                        ? `Abrir o card do lead de ${contactName}`
+                        : `Ver os ${deals.length} leads de ${contactName}`
+                }
+                title={deals.length === 1 ? 'Abrir o card do lead' : `${deals.length} leads deste contato`}
+            >
+                <KanbanSquare size={16} aria-hidden="true" />
+                {deals.length > 1 && (
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-primary-600 text-white text-[9px] font-bold flex items-center justify-center">
+                        {deals.length}
+                    </span>
+                )}
+            </button>
+            {open && deals.length > 1 && (
+                <div
+                    role="menu"
+                    className="absolute right-0 z-50 mt-1 w-64 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1 text-left"
+                >
+                    <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                        Leads deste contato
+                    </p>
+                    {deals.map(deal => (
+                        <button
+                            key={deal.id}
+                            role="menuitem"
+                            onClick={() => abrir(deal.id)}
+                            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
+                        >
+                            {deal.isWon ? (
+                                <Trophy size={13} className="shrink-0 text-emerald-500" aria-hidden="true" />
+                            ) : deal.isLost ? (
+                                <XCircle size={13} className="shrink-0 text-rose-500" aria-hidden="true" />
+                            ) : (
+                                <KanbanSquare size={13} className="shrink-0 text-slate-400" aria-hidden="true" />
+                            )}
+                            <span className="min-w-0 flex-1">
+                                <span className="block truncate">{deal.title}</span>
+                                {getBoardName ? (
+                                    <span className="block truncate text-[11px] text-slate-400">
+                                        {getBoardName(deal.boardId)}
+                                    </span>
+                                ) : null}
+                            </span>
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
+
 export const ContactsList: React.FC<ContactsListProps> = ({
     highlightId,
     viewMode,
@@ -147,6 +254,10 @@ export const ContactsList: React.FC<ContactsListProps> = ({
     convertContactToDeal,
     openEditModal,
     setDeleteId,
+    dealsByContact,
+    getBoardName,
+    onOpenChat,
+    onOpenDeal,
     openEditCompanyModal,
     setDeleteCompanyId,
     sortBy = 'created_at',
@@ -332,6 +443,24 @@ export const ContactsList: React.FC<ContactsListProps> = ({
                                     </td>
                                     <td className="px-6 py-4 max-md:px-3 max-md:py-2.5 text-right">
                                         <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 max-md:opacity-100 transition-all">
+                                            {/* Ir para o chat do contato (só faz sentido com telefone) */}
+                                            {onOpenChat && contact.phone ? (
+                                                <button
+                                                    onClick={() => onOpenChat(contact)}
+                                                    className="p-1.5 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded transition-colors"
+                                                    aria-label={`Abrir conversa com ${contact.name}`}
+                                                    title="Abrir conversa no WhatsApp"
+                                                >
+                                                    <MessageCircle size={16} aria-hidden="true" />
+                                                </button>
+                                            ) : null}
+                                            {/* Ir para o card do lead; com mais de um, abre a lista */}
+                                            <ContactDealsButton
+                                                contactName={contact.name}
+                                                deals={dealsByContact?.[contact.id] ?? []}
+                                                getBoardName={getBoardName}
+                                                onOpenDeal={onOpenDeal}
+                                            />
                                             <button
                                                 onClick={() => openEditModal(contact)}
                                                 className="p-1.5 text-slate-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-colors"
