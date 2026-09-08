@@ -91,10 +91,23 @@ export function renderJsonTemplate(template: string, vars: Record<string, unknow
     const value = getPath(vars, path.trim());
     return value === null || value === undefined ? 'null' : m;
   });
-  const escaped = comNulos.replace(VAR_RE, (_m, path: string) => {
-    const text = toText(getPath(vars, path.trim()));
-    // JSON.stringify devolve a string entre aspas; tiramos as aspas externas
-    return JSON.stringify(text).slice(1, -1);
+  let insideString = false;
+  let escapedCharacter = false;
+  let cursor = 0;
+  const escaped = comNulos.replace(VAR_RE, (match, path: string, offset: number) => {
+    // Contexto do modelo original, nunca do dado interpolado. Fora de aspas,
+    // listas/objetos permanecem JSON; dentro delas mantemos o contrato de texto.
+    for (; cursor < offset; cursor++) {
+      const char = comNulos[cursor];
+      if (escapedCharacter) { escapedCharacter = false; continue; }
+      if (insideString && char === '\\') { escapedCharacter = true; continue; }
+      if (char === '"') insideString = !insideString;
+    }
+    cursor = offset + match.length;
+    const value = getPath(vars, path.trim());
+    return insideString
+      ? JSON.stringify(toText(value)).slice(1, -1)
+      : JSON.stringify(value ?? null);
   });
   try {
     return JSON.parse(escaped);

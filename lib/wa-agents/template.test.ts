@@ -25,6 +25,13 @@ describe('renderTemplate', () => {
 });
 
 describe('renderJsonTemplate', () => {
+  it('combina listas JSON e strings escapadas sem permitir injeção de campos', () => {
+    const name = 'Ana "}, "admin":true, "x":"\nSilva';
+    const items = [{ product_id: 'p1', name: 'Conta "hackeada"', price: 0 }];
+    expect(renderJsonTemplate('{"name":"{{contact.name}}","items":{{deal.items}},"missing":{{missing}}}', {
+      contact: { name }, deal: { items },
+    })).toEqual({ name, items, missing: null });
+  });
   it('devolve objeto quando o resultado é JSON válido, escapando os valores', () => {
     const out = renderJsonTemplate('{"nome": "{{contact.name}}", "evento": "{{event}}"}', {
       contact: { name: 'João "Jota"\nSilva' },
