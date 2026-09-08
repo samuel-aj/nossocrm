@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { traduzErroWhatsApp } from '@/lib/whatsapp/metaErrorsPtBr';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -62,6 +62,8 @@ import { ChatAgentBanner } from '@/features/wa-agents/ChatAgentBanner';
 import { AutomationsMenu } from '@/features/wa-agents/AutomationsMenu';
 import type { AgentMinimal, BotMinimal, ConversationAiAction } from '@/lib/wa-agents/types';
 
+/** Teto do campo de escrita do chat: ~6 linhas; passou disso, rola por dentro. */
+const ALTURA_MAX_COMPOSITOR = 160;
 const TIME_FMT = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const DATE_FMT = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
@@ -1119,6 +1121,19 @@ export function DealWhatsAppChat({
   const [forwardMsg, setForwardMsg] = useState<WaChatMessage | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null); // bolha citada em destaque após "pular para"
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  /**
+   * Campo de escrita cresce com o texto, estilo WhatsApp: a cada mudança a
+   * altura volta a "auto" (pra encolher quando apagam linhas) e assume a
+   * altura real do conteúdo, até o teto de ALTURA_MAX_COMPOSITOR — daí em
+   * diante rola por dentro. useLayoutEffect: ajusta antes de pintar, sem
+   * tremida. Vale também pro texto que entra por fora (modelo, emoji, colar).
+   */
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, ALTURA_MAX_COMPOSITOR)}px`;
+  }, [text]);
   // GRUPO: buscando/copiando o link de convite
   const [inviteBusy, setInviteBusy] = useState(false);
   useEffect(() => {
@@ -2834,7 +2849,10 @@ export function DealWhatsAppChat({
               }}
               rows={1}
               placeholder={attachment ? 'Legenda (opcional)...' : 'Escreva uma mensagem...'}
-              className="flex-1 resize-none max-h-32 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2.5 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500"
+              // A altura é calculada no useLayoutEffect (cresce com as linhas);
+              // overflow-y-auto só entra em ação ao bater no teto.
+              style={{ maxHeight: ALTURA_MAX_COMPOSITOR }}
+              className="flex-1 resize-none overflow-y-auto bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2.5 text-sm leading-relaxed text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500"
             />
             {!text.trim() && !attachment ? (
               <button
