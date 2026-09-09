@@ -69,23 +69,34 @@ const renderConversionLabel = (props: any) => {
   );
 };
 
+const abbreviateStage = (name: string) => {
+  const shortened = name.trim()
+    .replace(/contato/gi, 'Cont.')
+    .replace(/contrato/gi, 'Contr.')
+    .replace(/qualificação/gi, 'qualif.')
+    .replace(/qualificado/gi, 'Qualif.')
+    .replace(/proposta/gi, 'Prop.')
+    .replace(/pendente/gi, 'pend.')
+    .replace(/assinado/gi, 'ass.')
+    .replace(/protocolado/gi, 'Protoc.');
+  return shortened.length > 14 ? shortened.slice(0, 13).trimEnd() + '…' : shortened;
+};
+
 export const StageConversionChart: React.FC<StageConversionChartProps> = ({ data }) => (
   <ResponsiveContainer width="100%" height="100%">
     <BarChart data={data} margin={{ top: 24, right: 12, bottom: 8, left: 4 }}>
       <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
       <XAxis
         dataKey="name"
+        tickFormatter={abbreviateStage}
         axisLine={false}
         tickLine={false}
         tick={{ fill: 'var(--chart-text)', fontSize: 11 }}
-        interval={0}
-        /* Reserva altura suficiente p/ os rótulos rotacionados quando há muitas
-           etapas — sem isso os nomes longos (ex.: "Qualificação", "Negociação")
-           ficam cortados. */
-        height={data.length > 5 ? 88 : 28}
-        angle={data.length > 5 ? -35 : 0}
-        textAnchor={data.length > 5 ? 'end' : 'middle'}
-        dy={data.length > 5 ? 4 : 6}
+        interval="preserveStartEnd"
+        height={32}
+        angle={0}
+        textAnchor="middle"
+        dy={6}
       />
       <YAxis
         axisLine={false}
