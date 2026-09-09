@@ -14,7 +14,7 @@ export function generateReportPDF(data: PerformanceMetrics & { webhookUnavailabl
   doc.text(doc.splitTextToSize(`${context.boardName} | ${context.period} | ${context.range}\n${context.owner} | Quadro e responsável atuais\nGerado por ${context.generatedBy} em ${new Date().toLocaleString('pt-BR')}`, 180), 14, 29);
   autoTable(doc, { startY: 52, head: [['Indicador', 'Resultado', 'Base']], body: [
     ['Entradas', String(data.entries.length), 'Criados no período'],
-    ['Qualificados', data.hasQualifiedStage ? String(data.qualifiedCount) : '-', 'Qualificação registrada no período'],
+    ['Qualificados', data.hasQualifiedStage ? String(data.qualifiedCount) : '-', 'Qualificação comprovada no período'],
     ['Taxa de qualificação', rate(data.qualificationRate), `${data.qualifiedCount} qualificados / ${data.entries.length} entradas`],
     ['Taxa de fechamento', rate(data.closingRate), `${data.wonDeals.length} ganhos / ${data.qualifiedCount} qualificados`],
     ['Ganhos', String(data.wonDeals.length), 'Data de encerramento'],
@@ -35,7 +35,7 @@ export function generateReportPDF(data: PerformanceMetrics & { webhookUnavailabl
   if (reasons.size) autoTable(doc, { head: [['Motivos de perda', 'Leads']], body: [...reasons], styles: { fontSize: 9 } });
   autoTable(doc, { head: [['Como ler este relatório']], body: [
     ['Taxas acima de 100% são válidas. Entradas, qualificações e ganhos podem ser de leads diferentes. Denominador zero: traço.'],
-    ['Cada lead conta uma vez por etapa no período. Ganho usa a data de fechamento. Barras não representam conversão entre si.'],
+    ['Cada lead conta uma vez por etapa no período. Ganho usa a data de fechamento. Etapas intermediárias são incluídas quando o intervalo comprovado está dentro do período. Barras não representam conversão entre si.'],
     [`Histórico: ${data.unknownQualification.length} leads com indicação de qualificação sem data recuperável; ${data.unknownClosure.length} encerramentos sem data. Não são atribuídos a um mês por estimativa.`],
     ...(data.webhookUnavailable ? [['Histórico complementar de integrações indisponível. Foram usadas atividades registradas.']] : []),
   ], styles: { fontSize: 9 } });

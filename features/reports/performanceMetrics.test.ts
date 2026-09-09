@@ -62,7 +62,7 @@ describe('Performance por acontecimentos', () => {
   });
   it('usa cores das etapas e percentuais de volumes sem limitar a 100%', () => {
     const coloredBoard = { ...board, stages: board.stages.map(s => ({ ...s, color: s.id === 'q' ? 'bg-orange-500' : '#a855f7' })) };
-    const data = calculatePerformance([deal('a'), deal('b'), deal('c')], [event('a', 'q'), event('a', 'proposal'), event('b', 'proposal')], coloredBoard, august);
+    const data = calculatePerformance([deal('a'), deal('b'), deal('c')], [event('a', 'q'), event('a', 'proposal'), event('b', 'q', '2026-07-10'), event('b', 'proposal')], coloredBoard, august);
     expect(data.stageData.find(s => s.name === 'Qualificado')).toMatchObject({ fill: '#f97316', conversionRate: 200 });
     expect(data.stageData.find(s => s.name === 'Novo Lead')).toMatchObject({ fill: '#a855f7', conversionRate: null });
   });
@@ -79,6 +79,27 @@ describe('Performance por acontecimentos', () => {
     expect(data).toMatchObject({ wonRevenue: 100, previousRevenue: 200, revenueChange: -50, fastestSalesCycle: 3, slowestSalesCycle: 20, avgSalesCycle: 12 });
     expect(calculatePerformance([], [], board, range, '', previous).revenueChange).toBeNull();
     expect(performanceComparisonRange(range, 'all')).toBeUndefined();
+  });
+  it('conta todas as entradas e reconstrói etapas obrigatórias dentro do período', () => {
+    const leads = [deal('a', { createdAt: '2026-08-01', status: 'proposal' }), deal('open', { createdAt: '2026-08-02' })];
+    const data = calculatePerformance(leads, [event('a', 'proposal', '2026-08-20')], board, august);
+    expect(data.stageData.find(s => s.name === 'Novo Lead')?.count).toBe(2);
+    expect(data.stageData.find(s => s.name === 'Qualificado')).toMatchObject({ count: 1, inferredCount: 1 });
+    expect(data.qualifiedCount).toBe(1);
+    expect(data.unknownQualification).toHaveLength(0);
+    expect(data.qualificationDates.has('a')).toBe(false);
+  });
+  it('não inventa o mês de uma passagem cujo intervalo atravessa meses', () => {
+    const data = calculatePerformance([deal('a', { createdAt: '2026-07-10', status: 'proposal' })], [event('a', 'proposal', '2026-08-20')], board, august);
+    expect(data.qualifiedCount).toBe(0);
+    expect(data.stageData.find(s => s.name === 'Qualificado')).toMatchObject({ count: 0, uncertainCount: 1, conversionRate: null });
+    const year = calculatePerformance([deal('a', { createdAt: '2026-07-10', status: 'proposal' })], [event('a', 'proposal', '2026-08-20')], board, {start:new Date('2026-01-01'),end:august.end});
+    expect(year.qualifiedCount).toBe(1);
+  });
+  it('não transfere qualificação de julho para agosto nem usa estado atual no passado', () => {
+    const data = calculatePerformance([deal('a', {status:'proposal'}),deal('b',{createdAt:'2026-08-01',status:'proposal'})], [event('a','q','2026-07-10'),event('a','proposal','2026-08-20')], board, august, '', undefined, new Date('2026-09-10'));
+    expect(data.qualifiedCount).toBe(0);
+    expect(data.stageData.find(s=>s.name==='Qualificado')?.inferredCount).toBe(0);
   });
   it('não usa perdas desqualificadas no denominador', () => {
     const leads = [deal('q'), deal('win', { isWon: true, closedAt: '2026-08-20' }), deal('lost', { isLost: true, lossCategory: 'disqualified', closedAt: '2026-08-20' })];
