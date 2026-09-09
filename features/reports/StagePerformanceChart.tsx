@@ -16,6 +16,8 @@ interface StageConversionData {
   count: number;
   fill: string;
   conversionRate?: number | null; // % that converted to next stage
+  inferredCount?: number;
+  uncertainCount?: number;
   comparisonBase?: string;
   conversionLabel?: string; // "avançam" or "fecham"
 }
@@ -40,6 +42,8 @@ const CustomTooltip = ({ active, payload }: any) => {
     >
       <p style={{ fontWeight: 700, marginBottom: 4 }}>{d.name}</p>
       <p style={{ fontSize: 13 }}>{d.count} negócio{d.count !== 1 ? 's' : ''}</p>
+      {!!d.inferredCount && <p style={{ fontSize: 12 }}>{d.inferredCount} passagens intermediárias comprovadas no período</p>}
+      {!!d.uncertainCount && <p style={{ fontSize: 12 }}>{d.uncertainCount} passagens sem período definido; percentual indisponível</p>}
       {d.comparisonBase && <p style={{ fontSize: 12 }}>{d.comparisonBase}</p>}
       {d.conversionRate !== undefined && (
         <p style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>

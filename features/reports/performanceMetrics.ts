@@ -59,7 +59,7 @@ export function performanceComparisonRange(range: PeriodRange, period: string): 
   return { start, end };
 }
 
-export function calculatePerformance(deals: Deal[], events: StageEvent[], board: Board, range: PeriodRange, ownerId = '', comparisonRange?: PeriodRange) {
+export function calculatePerformance(deals: Deal[], events: StageEvent[], board: Board, range: PeriodRange, ownerId = '', comparisonRange?: PeriodRange, snapshotDate = new Date()) {
   const scoped = deals.filter(deal => deal.boardId === board.id && (!ownerId || deal.ownerId === ownerId));
   const byId = new Map(scoped.map(deal => [deal.id, deal]));
   const inPeriod = (date?: string) => {
@@ -108,9 +108,6 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   // A creation is an entry, not proof of visits to all intermediate stages.
   const wonDeals = scoped.filter(deal => deal.isWon && !deal.isLost && inPeriod(deal.closedAt));
   const lostDeals = scoped.filter(deal => deal.isLost && !deal.isWon && inPeriod(deal.closedAt));
-  const unknownQualification = rules.qualifiedIndex < 0 ? [] : scoped.filter(deal =>
-    Date.parse(deal.createdAt) <= range.end.getTime() && !qualificationKnown.has(deal.id) &&
-    (deal.lossCategory === 'qualified' || deal.isWon || stepIndex(deal.status) >= rules.qualifiedIndex));
   const unknownClosure = scoped.filter(deal => (deal.isWon || deal.isLost) && !Number.isFinite(Date.parse(deal.closedAt || '')));
   const cycles = wonDeals.map(deal => (Date.parse(deal.closedAt!) - Date.parse(deal.createdAt)) / 86400000)
     .filter(days => Number.isFinite(days) && days >= 0);
@@ -121,6 +118,51 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   const revenueChange = previousRevenue !== null && previousRevenue > 0 ? (wonRevenue - previousRevenue) / previousRevenue * 100 : null;
   const rate = (numerator: number, denominator: number) => denominator > 0 ? numerator / denominator * 100 : null;
   const chartStages = board.stages.filter(stage => !rules.lost(stage.id));
+  // Chart reconstruction is bounded by evidence, never a guessed event date.
+  const inferred = new Map(chartStages.map(stage => [stage.id, new Set<string>()]));
+  const uncertain = new Map(chartStages.map(stage => [stage.id, new Set<string>()]));
+  const chartIndex = (id?: string) => chartStages.findIndex(stage => stage.id === id);
+  const eventsByDeal = new Map<string, StageEvent[]>();
+  for (const event of validEvents) {
+    const list = eventsByDeal.get(event.dealId) || [];
+    list.push(event); eventsByDeal.set(event.dealId, list);
+  }
+  const firstStage = chartStages[0];
+  if (firstStage) reached.set(firstStage.id, new Set(entries.map(deal => deal.id)));
+  for (const deal of scoped) {
+    const created = Date.parse(deal.createdAt);
+    if (!Number.isFinite(created)) continue;
+    const history = eventsByDeal.get(deal.id) || [];
+    const evidence = history.flatMap(event => [
+      { index: chartIndex(event.stageId), date: Date.parse(event.date) },
+      { index: chartIndex(event.fromStageId), date: Date.parse(event.date) },
+    ]).filter(item => item.index >= 0 && item.date >= created);
+    if (deal.isWon && !deal.isLost && deal.closedAt) evidence.push({ index: chartStages.findIndex(stage => rules.won(stage.id)), date: Date.parse(deal.closedAt) });
+    if (deal.isLost && deal.lossCategory === 'qualified' && deal.closedAt) evidence.push({ index: chartIndex(qualifiedStage), date: Date.parse(deal.closedAt) });
+    if (!deal.isWon && !deal.isLost) evidence.push({ index: chartIndex(deal.status), date: snapshotDate.getTime() });
+    for (let index = 1; index < chartStages.length; index++) {
+      const stage = chartStages[index];
+      if (rules.won(stage.id) || reached.get(stage.id)?.has(deal.id)) continue;
+      // An explicitly dated arrival stays in its own month, even after later advances.
+      if (history.some(event => event.stageId === stage.id)) continue;
+      const upper = Math.min(...evidence.filter(item => item.index >= index && Number.isFinite(item.date)).map(item => item.date));
+      if (!Number.isFinite(upper) || upper < range.start.getTime()) continue;
+      const lower = Math.max(created, ...evidence.filter(item => item.index >= 0 && item.index < index && item.date <= upper).map(item => item.date));
+      if (lower >= range.start.getTime() && upper <= range.end.getTime()) {
+        reached.get(stage.id)?.add(deal.id);
+        inferred.get(stage.id)?.add(deal.id);
+        if (stage.id === qualifiedStage) {
+          qualified.add(deal.id);
+          qualificationKnown.add(deal.id);
+        }
+      } else if (lower <= range.end.getTime()) {
+        uncertain.get(stage.id)?.add(deal.id);
+      }
+    }
+  }
+  const unknownQualification = rules.qualifiedIndex < 0 ? [] : scoped.filter(deal =>
+    Date.parse(deal.createdAt) <= range.end.getTime() && !qualificationKnown.has(deal.id) &&
+    (deal.lossCategory === 'qualified' || deal.isWon || stepIndex(deal.status) >= rules.qualifiedIndex));
   const stageCount = (id: string) => rules.won(id) ? wonDeals.length : reached.get(id)?.size || 0;
   const stageData = chartStages.map((stage, index) => {
     const isWon = rules.won(stage.id);
@@ -130,7 +172,9 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
     return {
       name: stage.label, count: stageCount(stage.id),
       fill: STAGE_COLORS[stage.color] || (/^#[0-9a-f]{6}$/i.test(stage.color || '') ? stage.color : isWon ? '#22c55e' : '#3b82f6'),
-      conversionRate: rate(numerator, denominator),
+      conversionRate: !isWon && ((uncertain.get(stage.id)?.size || 0) > 0 || (next && (uncertain.get(next.id)?.size || 0) > 0)) ? null : rate(numerator, denominator),
+      inferredCount: inferred.get(stage.id)?.size || 0,
+      uncertainCount: uncertain.get(stage.id)?.size || 0,
       conversionLabel: isWon ? 'ganhos / entradas no período' : 'volume da próxima etapa / esta etapa',
       comparisonBase: isWon ? numerator + ' ganhos ÷ ' + denominator + ' entradas' : numerator + ' em ' + (next?.label || 'próxima etapa') + ' ÷ ' + denominator + ' em ' + stage.label,
     };

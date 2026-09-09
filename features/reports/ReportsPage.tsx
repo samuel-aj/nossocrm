@@ -206,7 +206,7 @@ const ReportsPage: React.FC = () => {
       {!metrics && !report.isError && <p role="status">Carregando histórico de movimentações…</p>}
       {metrics && !report.isError && <>
       {(metrics.unknownQualification.length > 0 || metrics.unknownClosure.length > 0 || metrics.webhookUnavailable) && <aside className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:bg-amber-900/15 dark:text-amber-200">
-        <strong>Histórico incompleto</strong><p>{metrics.unknownQualification.length} leads com indicação de qualificação sem data recuperável e {metrics.unknownClosure.length} encerramentos sem data. Esses registros não são atribuídos a um mês por estimativa. As taxas usam qualificações com data conhecida.</p>
+        <strong>Histórico incompleto</strong><p>{metrics.unknownQualification.length} leads com indicação de qualificação sem data recuperável e {metrics.unknownClosure.length} encerramentos sem data. Esses registros não são atribuídos a um mês por estimativa. As taxas usam qualificações comprovadas no período.</p>
         {metrics.webhookUnavailable && <p>Histórico complementar de integrações indisponível; foram usadas as atividades registradas.</p>}
       </aside>}
       {/* KPI Cards Grid */}
