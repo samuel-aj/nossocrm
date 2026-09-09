@@ -1,327 +1,43 @@
-import { jsPDF } from 'jspdf';
+﻿import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { PeriodFilter, PERIOD_LABELS } from '@/features/dashboard/hooks/useDashboardMetrics';
-import { Deal } from '@/types';
+import type { PerformanceMetrics } from '../performanceMetrics';
 
-interface ReportData {
-    pipelineValue: number;
-    actualWinRate: number;
-    avgSalesCycle: number;
-    fastestDeal: number;
-    wonRevenue: number;
-    wonDeals: Deal[];
-    changes: {
-        pipeline: number;
-        winRate: number;
-        revenue: number;
-    };
-    funnelData: { name: string; count: number }[];
+export interface ReportContext { boardName: string; period: string; range: string; owner: string; generatedBy: string }
+
+export function generateReportPDF(data: PerformanceMetrics & { webhookUnavailable?: boolean }, context: ReportContext) {
+  const doc = new jsPDF();
+  const money = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const rate = (value: number | null) => value === null ? '-' : `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
+  doc.setFontSize(20);
+  doc.text('Relatório de Performance', 14, 20);
+  doc.setFontSize(10);
+  doc.text(doc.splitTextToSize(`${context.boardName} | ${context.period} | ${context.range}\n${context.owner} | Quadro e responsável atuais\nGerado por ${context.generatedBy} em ${new Date().toLocaleString('pt-BR')}`, 180), 14, 29);
+  autoTable(doc, { startY: 52, head: [['Indicador', 'Resultado', 'Base']], body: [
+    ['Entradas', String(data.entries.length), 'Criados no período'],
+    ['Qualificados', data.hasQualifiedStage ? String(data.qualifiedCount) : '-', 'Qualificação registrada no período'],
+    ['Taxa de qualificação', rate(data.qualificationRate), `${data.qualifiedCount} qualificados / ${data.entries.length} entradas`],
+    ['Taxa de fechamento', rate(data.closingRate), `${data.wonDeals.length} ganhos / ${data.qualifiedCount} qualificados`],
+    ['Ganhos', String(data.wonDeals.length), 'Data de encerramento'],
+    ['Faturamento fechado', money(data.wonRevenue), 'Ganhos do período'],
+    ['Variação do faturamento', data.revenueChange == null ? '-' : rate(data.revenueChange), 'vs período anterior'],
+    ['Perdas qualificadas', String(data.lostDeals.filter(d => d.lossCategory === 'qualified').length), 'Data de encerramento'],
+    ['Perdas desqualificadas', String(data.lostDeals.filter(d => d.lossCategory === 'disqualified').length), 'Data de encerramento'],
+    ['Perdas sem classificação', String(data.lostDeals.filter(d => !d.lossCategory).length), 'Data de encerramento'],
+    ['Ciclo médio dos ganhos', data.avgSalesCycle === null ? '-' : `${data.avgSalesCycle} dias`, data.fastestSalesCycle == null ? 'Sem ganhos no período' : `Rápido: ${data.fastestSalesCycle}d | Lento: ${data.slowestSalesCycle}d`],
+  ], styles: { fontSize: 9 }, headStyles: { fillColor: [30, 41, 59] } });
+  autoTable(doc, { head: [['Avanços por etapa no período', 'Leads distintos', 'Percentual / Base']], body: data.stageData.map(stage => [stage.name, stage.count, rate(stage.conversionRate) + ' · ' + stage.comparisonBase]), styles: { fontSize: 9 } });
+  const reasons = new Map<string, number>();
+  for (const deal of data.lostDeals) {
+    const category = deal.lossCategory === 'qualified' ? 'Qualificado' : deal.lossCategory === 'disqualified' ? 'Desqualificado' : 'Sem classificação';
+    const key = `${category}: ${deal.lossReason || 'Não informado'}`;
+    reasons.set(key, (reasons.get(key) || 0) + 1);
+  }
+  if (reasons.size) autoTable(doc, { head: [['Motivos de perda', 'Leads']], body: [...reasons], styles: { fontSize: 9 } });
+  autoTable(doc, { head: [['Como ler este relatório']], body: [
+    ['Taxas acima de 100% são válidas. Entradas, qualificações e ganhos podem ser de leads diferentes. Denominador zero: traço.'],
+    ['Cada lead conta uma vez por etapa no período. Ganho usa a data de fechamento. Barras não representam conversão entre si.'],
+    [`Histórico: ${data.unknownQualification.length} leads com indicação de qualificação sem data recuperável; ${data.unknownClosure.length} encerramentos sem data. Não são atribuídos a um mês por estimativa.`],
+    ...(data.webhookUnavailable ? [['Histórico complementar de integrações indisponível. Foram usadas atividades registradas.']] : []),
+  ], styles: { fontSize: 9 } });
+  doc.save(`performance-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
-
-// Color Palette
-const COLORS = {
-    primary: [15, 23, 42] as [number, number, number],
-    secondary: [100, 116, 139] as [number, number, number],
-    blue: [59, 130, 246] as [number, number, number],
-    emerald: [16, 185, 129] as [number, number, number],
-    purple: [139, 92, 246] as [number, number, number],
-    orange: [249, 115, 22] as [number, number, number],
-    red: [239, 68, 68] as [number, number, number],
-    bgLight: [248, 250, 252] as [number, number, number],
-    border: [226, 232, 240] as [number, number, number],
-    white: [255, 255, 255] as [number, number, number],
-};
-
-/**
- * Função pública `generateReportPDF` do projeto.
- *
- * @param {ReportData} data - Parâmetro `data`.
- * @param {PeriodFilter} period - Parâmetro `period`.
- * @param {string | undefined} boardName - Parâmetro `boardName`.
- * @param {string | undefined} generatedBy - Parâmetro `generatedBy`.
- * @returns {void} Não retorna valor.
- */
-export const generateReportPDF = (data: ReportData, period: PeriodFilter, boardName?: string, generatedBy?: string) => {
-    const doc = new jsPDF();
-    const pageWidth = doc.internal.pageSize.width;
-    const pageHeight = doc.internal.pageSize.height;
-    const margin = 15;
-    const contentWidth = pageWidth - margin * 2;
-
-    // Helpers
-    const formatCurrency = (value: number) => {
-        if (value >= 1000000) return `R$ ${(value / 1000000).toFixed(1)}M`;
-        if (value >= 1000) return `R$ ${(value / 1000).toFixed(0)}k`;
-        return `R$ ${value.toLocaleString('pt-BR')}`;
-    };
-
-    // Current date/time
-    const now = new Date();
-    const dateStr = now.toLocaleDateString('pt-BR');
-    const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-
-    // ============================================
-    // HEADER
-    // ============================================
-
-    // Logo placeholder (N for NossoCRM)
-    doc.setFillColor(...COLORS.blue);
-    doc.roundedRect(margin, 12, 12, 12, 2, 2, 'F');
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(255, 255, 255);
-    doc.text('N', margin + 4.5, 20);
-
-    // Title
-    doc.setFontSize(20);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...COLORS.primary);
-    doc.text('Relatório de Performance', margin + 18, 21);
-
-    // Pipeline name
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...COLORS.secondary);
-    doc.text(`Pipeline: ${boardName || 'Padrão'}`, margin, 32);
-
-    // Period badge - Rocket science precision
-    const periodLabel = PERIOD_LABELS[period];
-    const fontSize = 8;
-    const paddingX = 8;
-    const paddingY = 3;
-
-    doc.setFontSize(fontSize);
-    doc.setFont('helvetica', 'bold');
-    const textWidth = doc.getTextWidth(periodLabel);
-
-    const badgeWidth = textWidth + paddingX * 2;
-    const badgeHeight = fontSize + paddingY * 2;
-    const badgeX = pageWidth - margin - badgeWidth;
-    const badgeY = 14;
-    const radius = 2; // Minimal, professional
-
-    // Dark badge
-    doc.setFillColor(...COLORS.primary);
-    doc.roundedRect(badgeX, badgeY, badgeWidth, badgeHeight, radius, radius, 'F');
-
-    // Text - mathematically centered
-    // Y = badgeY + paddingY + (fontSize * 0.75) accounts for baseline
-    doc.setTextColor(255, 255, 255);
-    doc.text(periodLabel, badgeX + paddingX, badgeY + paddingY + fontSize * 0.72);
-
-    // Generated by + Date/Time (below badge)
-    const metaY = badgeY + badgeHeight + 4;
-    doc.setFontSize(7);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...COLORS.secondary);
-    doc.text(`Por: ${generatedBy || 'Usuário'} | ${dateStr} às ${timeStr}`, pageWidth - margin, metaY, { align: 'right' });
-
-    // Divider
-    doc.setDrawColor(...COLORS.border);
-    doc.setLineWidth(0.3);
-    doc.line(margin, 38, pageWidth - margin, 38);
-
-    // ============================================
-    // KPI CARDS - Compact 4-column grid
-    // ============================================
-    const kpiY = 45;
-    const cardGap = 4;
-    const cardWidth = (contentWidth - cardGap * 3) / 4;
-    const cardHeight = 32; // Reduced height
-
-    const kpis = [
-        {
-            label: 'Pipeline Total',
-            value: formatCurrency(data.pipelineValue),
-            change: `${data.changes.pipeline >= 0 ? '+' : ''}${data.changes.pipeline.toFixed(1)}%`,
-            isPositive: data.changes.pipeline >= 0,
-            accent: COLORS.blue
-        },
-        {
-            label: 'Win Rate',
-            value: `${data.actualWinRate.toFixed(1)}%`,
-            change: `${data.changes.winRate >= 0 ? '+' : ''}${data.changes.winRate.toFixed(1)}%`,
-            isPositive: data.changes.winRate >= 0,
-            accent: COLORS.emerald
-        },
-        {
-            label: 'Ciclo Médio',
-            value: `${data.avgSalesCycle} dias`,
-            change: `Mín: ${data.fastestDeal}d`,
-            isPositive: true,
-            accent: COLORS.purple
-        },
-        {
-            label: 'Volume Fechado',
-            value: formatCurrency(data.wonRevenue),
-            change: `${data.wonDeals.length} deals`,
-            isPositive: true,
-            accent: COLORS.orange
-        },
-    ];
-
-    kpis.forEach((kpi, i) => {
-        const x = margin + i * (cardWidth + cardGap);
-
-        // Card background
-        doc.setFillColor(...COLORS.white);
-        doc.setDrawColor(...COLORS.border);
-        doc.roundedRect(x, kpiY, cardWidth, cardHeight, 2, 2, 'FD');
-
-        // Colored top bar
-        doc.setFillColor(...kpi.accent);
-        doc.roundedRect(x, kpiY, cardWidth, 4, 2, 2, 'F');
-        doc.setFillColor(...COLORS.white);
-        doc.rect(x, kpiY + 2, cardWidth, 2, 'F');
-
-        // Label
-        doc.setFontSize(7);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(...COLORS.secondary);
-        doc.text(kpi.label, x + 4, kpiY + 11);
-
-        // Value - BIGGER
-        doc.setFontSize(14);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(...COLORS.primary);
-        doc.text(kpi.value, x + 4, kpiY + 21);
-
-        // Change
-        doc.setFontSize(7);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(...(kpi.isPositive ? COLORS.emerald : COLORS.red));
-        doc.text(kpi.change, x + 4, kpiY + 28);
-    });
-
-    // ============================================
-    // VISUAL FUNNEL - Horizontal bars
-    // ============================================
-    const funnelY = kpiY + cardHeight + 15;
-
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...COLORS.primary);
-    doc.text('Funil de Vendas', margin, funnelY);
-
-    const maxCount = Math.max(...data.funnelData.map(s => s.count), 1);
-    const barMaxWidth = contentWidth - 80; // Space for label and count
-    const barHeight = 10;
-    const barGap = 6;
-
-    data.funnelData.forEach((stage, i) => {
-        const y = funnelY + 8 + i * (barHeight + barGap);
-        const barWidth = Math.max((stage.count / maxCount) * barMaxWidth, 15);
-
-        // Gradient: blue to purple
-        const ratio = i / Math.max(data.funnelData.length - 1, 1);
-        const r = Math.round(COLORS.blue[0] + (COLORS.purple[0] - COLORS.blue[0]) * ratio);
-        const g = Math.round(COLORS.blue[1] + (COLORS.purple[1] - COLORS.blue[1]) * ratio);
-        const b = Math.round(COLORS.blue[2] + (COLORS.purple[2] - COLORS.blue[2]) * ratio);
-
-        // Stage name (left aligned)
-        doc.setFontSize(8);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(...COLORS.secondary);
-        doc.text(stage.name, margin, y + 7);
-
-        // Bar
-        doc.setFillColor(r, g, b);
-        doc.roundedRect(margin + 50, y, barWidth, barHeight, 2, 2, 'F');
-
-        // Count (right of bar)
-        doc.setFontSize(9);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(...COLORS.primary);
-        doc.text(stage.count.toString(), margin + 55 + barWidth, y + 7);
-    });
-
-    // ============================================
-    // LEADERBOARD - Full width table
-    // ============================================
-    const funnelHeight = data.funnelData.length * (barHeight + barGap) + 8;
-    const leaderboardY = funnelY + funnelHeight + 12;
-
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...COLORS.primary);
-    doc.text('Top Vendedores', margin, leaderboardY);
-
-    // Prepare data
-    const repsMap: Record<string, { name: string; deals: number; revenue: number }> = {};
-    data.wonDeals.forEach((deal) => {
-        const ownerName = deal.owner?.name || 'Sem Dono';
-        if (!repsMap[ownerName]) {
-            repsMap[ownerName] = { name: ownerName, deals: 0, revenue: 0 };
-        }
-        repsMap[ownerName].deals += 1;
-        repsMap[ownerName].revenue += deal.value;
-    });
-
-    const leaderboard = Object.values(repsMap)
-        .sort((a, b) => b.revenue - a.revenue)
-        .slice(0, 5);
-
-    const tableData = leaderboard.length > 0
-        ? leaderboard.map((rep, i) => [
-            (i + 1).toString(),
-            rep.name,
-            rep.deals.toString(),
-            formatCurrency(rep.revenue)
-        ])
-        : [['—', 'Sem dados no período', '—', '—']];
-
-    autoTable(doc, {
-        startY: leaderboardY + 5,
-        head: [['#', 'Vendedor', 'Deals', 'Receita']],
-        body: tableData,
-        theme: 'striped',
-        tableWidth: contentWidth,
-        margin: { left: margin, right: margin },
-        styles: {
-            font: 'helvetica',
-            fontSize: 9,
-            cellPadding: 3,
-        },
-        headStyles: {
-            fillColor: COLORS.primary,
-            textColor: [255, 255, 255],
-            fontStyle: 'bold',
-        },
-        alternateRowStyles: {
-            fillColor: COLORS.bgLight,
-        },
-        columnStyles: {
-            0: { halign: 'center', cellWidth: 12 },
-            1: { cellWidth: 'auto' },
-            2: { halign: 'center', cellWidth: 25 },
-            3: { halign: 'right', fontStyle: 'bold' },
-        },
-    });
-
-    // ============================================
-    // FOOTER - With separator line
-    // ============================================
-
-    // Separator line
-    doc.setDrawColor(...COLORS.border);
-    doc.setLineWidth(0.3);
-    doc.line(margin, pageHeight - 18, pageWidth - margin, pageHeight - 18);
-
-    // Footer text
-    doc.setFontSize(7);
-    doc.setTextColor(...COLORS.secondary);
-    doc.text('NossoCRM', margin, pageHeight - 10);
-    doc.text('Página 1', pageWidth / 2, pageHeight - 10, { align: 'center' });
-    doc.text(new Date().toLocaleDateString('pt-BR'), pageWidth - margin, pageHeight - 10, { align: 'right' });
-
-    // ============================================
-    // OUTPUT
-    // ============================================
-    // OUTPUT via Blob URL (Enterprise Standard)
-    const pdfBlob = doc.output('blob');
-    const blobUrl = URL.createObjectURL(pdfBlob);
-    window.open(blobUrl, '_blank');
-
-    // Clean up after 1 minute (optional but good practice)
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
-};
