@@ -353,7 +353,7 @@ const ReportsPage: React.FC = () => {
               Avanços por Etapa no Período
             </h2>
             <span className="text-xs text-slate-500 bg-slate-100 dark:bg-white/5 px-2 py-1 rounded">
-              Leads distintos por etapa
+              Por criação · Ganhos por encerramento
             </span>
           </div>
           {/* max-md:min-h: gráfico absolute colapsava quando o grid empilha */}
