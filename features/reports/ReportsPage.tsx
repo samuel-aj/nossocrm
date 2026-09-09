@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
+import dynamic from 'next/dynamic';
+const LazyStageConversionChart = dynamic(() => import('./StagePerformanceChart').then(module => module.StageConversionChart), { ssr: false });
 import { TrendingUp, Clock, Target, DollarSign, Trophy, Users, Download, ThumbsDown, UserX, CheckCircle2 } from 'lucide-react';
 import { getDateRange, PeriodFilter, PERIOD_LABELS, COMPARISON_LABELS } from '../dashboard/hooks/useDashboardMetrics';
 import { PeriodFilterSelect } from '@/components/filters/PeriodFilterSelect';
-import { LazyStageConversionChart, ChartWrapper } from '@/components/charts';
+import { ChartWrapper } from '@/components/charts';
 import { generateReportPDF } from './utils/generateReportPDF';
 import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
@@ -56,54 +58,6 @@ const ReportsPage: React.FC = () => {
   const wonDeals = metrics?.wonDeals || [];
   const lostDeals = metrics?.lostDeals || [];
   const wonRevenue = metrics?.wonRevenue || 0;
-  const actualWinRate = metrics?.closingRate ?? 0;
-
-  // Extrair meta do board selecionado
-  const boardGoal = selectedBoard?.goal;
-  const goalType = boardGoal?.type || 'currency';
-  const goalTarget = parseFloat(boardGoal?.targetValue || '0') || 0;
-  const goalKpi = boardGoal?.kpi || 'Receita';
-  const hasGoal = goalTarget > 0;
-
-  // Calcular valor atual baseado no tipo de meta (PADRÃO HUBSPOT/SALESFORCE)
-  // Usa dados DO PERÍODO selecionado, não o total histórico
-  const currentValue = React.useMemo(() => {
-    switch (goalType) {
-      case 'currency':
-        // Receita GANHA no período
-        return wonRevenue;
-      case 'percentage':
-        // Taxa de conversão do período
-        return actualWinRate;
-      case 'number':
-      default:
-        // Quantidade de deals GANHOS no período
-        return wonDeals.length;
-    }
-  }, [goalType, wonRevenue, actualWinRate, wonDeals.length]);
-
-  // Calcular Forecast
-  const forecastPercent = hasGoal ? Math.min((currentValue / goalTarget) * 100, 100) : 0;
-  const forecastGap = goalTarget - currentValue;
-  const isOnTrack = forecastPercent >= 75;
-
-  // Formatador baseado no tipo
-  // Performance: keep formatter stable (prevents unnecessary child rerenders when passed down).
-  const formatGoalValue = useCallback((value: number) => {
-    switch (goalType) {
-      case 'currency':
-        if (value >= 1000000) return `R$ ${(value / 1000000).toFixed(1)}M`;
-        if (value >= 1000) return `R$ ${(value / 1000).toFixed(0)}k`;
-        return `R$ ${value.toLocaleString('pt-BR')}`;
-      case 'number':
-        return value.toFixed(0);
-      case 'percentage':
-        return `${value.toFixed(1)}%`;
-      default:
-        return value.toLocaleString();
-    }
-  }, [goalType]);
-
   // Calcular Performance por Vendedor (Leaderboard)
   const leaderboard = React.useMemo(() => {
     const repsMap: Record<string, { name: string; avatar: string; deals: number; revenue: number; winRate: number }> = {};
@@ -206,7 +160,7 @@ const ReportsPage: React.FC = () => {
             Relatórios de Performance
           </h1>
           <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
-            Entradas, qualificações e resultados pela data em que aconteceram.
+            Análise detalhada de vendas e tendências.
           </p>
         </div>
         <div className="flex items-center gap-3 max-md:flex-wrap max-md:w-full">
@@ -248,7 +202,6 @@ const ReportsPage: React.FC = () => {
         </div>
       </div>
 
-      <p className="text-xs text-slate-500">{range.start.toLocaleDateString('pt-BR')} a {range.end.toLocaleDateString('pt-BR')} · Horário local · Quadro e responsável atuais</p>
       {report.isError && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">Não foi possível carregar o relatório. {report.error.message} <button className="underline" onClick={() => void report.refetch()}>Tentar novamente</button></div>}
       {!metrics && !report.isError && <p role="status">Carregando histórico de movimentações…</p>}
       {metrics && !report.isError && <>
@@ -256,56 +209,6 @@ const ReportsPage: React.FC = () => {
         <strong>Histórico incompleto</strong><p>{metrics.unknownQualification.length} leads com indicação de qualificação sem data recuperável e {metrics.unknownClosure.length} encerramentos sem data. Esses registros não são atribuídos a um mês por estimativa. As taxas usam qualificações com data conhecida.</p>
         {metrics.webhookUnavailable && <p>Histórico complementar de integrações indisponível; foram usadas as atividades registradas.</p>}
       </aside>}
-      {/* Forecast Bar - FEATURE #1 (80/20) */}
-      {hasGoal ? (
-        <div className="glass p-4 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm shrink-0">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <Target className={`${isOnTrack ? 'text-emerald-500' : 'text-amber-500'}`} size={20} />
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                {goalKpi}
-              </h3>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="text-right">
-                <span className="text-xs text-slate-500">Realizado</span>
-                <p className="text-lg font-bold text-emerald-500">{goalType === 'percentage' && metrics.closingRate === null ? '—' : formatGoalValue(currentValue)}</p>
-              </div>
-              <div className="text-right">
-                <span className="text-xs text-slate-500">Meta</span>
-                <p className="text-lg font-bold text-slate-900 dark:text-white">{formatGoalValue(goalTarget)}</p>
-              </div>
-              <div className="text-right">
-                <span className="text-xs text-slate-500">Gap</span>
-                <p className={`text-lg font-bold ${forecastGap > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>
-                  {forecastGap > 0 ? `-${formatGoalValue(forecastGap)}` : '✓ Atingido'}
-                </p>
-              </div>
-            </div>
-          </div>
-          <div className="relative">
-            <div className="w-full bg-slate-100 dark:bg-white/10 rounded-full h-4 overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${isOnTrack ? 'bg-gradient-to-r from-emerald-400 to-emerald-500' : 'bg-gradient-to-r from-amber-400 to-amber-500'
-                  }`}
-                style={{ width: `${forecastPercent}%` }}
-              />
-            </div>
-            <div className="absolute top-0 right-0 h-4 flex items-center">
-              <span className={`text-xs font-bold px-2 ${forecastPercent >= 50 ? 'text-white' : 'text-slate-600'}`}>
-                {goalType === 'percentage' && metrics.closingRate === null ? '—' : forecastPercent.toFixed(0) + '%'}
-              </span>
-            </div>
-          </div>
-          <p className="text-xs text-slate-500 mt-2">
-            {goalType === 'percentage' && metrics.closingRate === null ? 'Sem qualificações com data no período para calcular a meta percentual.' : isOnTrack
-              ? forecastGap <= 0 ? 'Meta atingida.' : `🎯 No ritmo! Faltam ${formatGoalValue(forecastGap)} para bater a meta.`
-              : `⚠️ Atenção! Você está abaixo de 75% da meta. Faltam ${formatGoalValue(Math.abs(forecastGap))}.`
-            }
-          </p>
-        </div>
-      ) : null /* Sem meta no board: o forecast simplesmente não aparece (sem aviso) */}
-
       {/* KPI Cards Grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 shrink-0">
         {/* Pipeline Value - FEATURE #2 */}
