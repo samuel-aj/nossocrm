@@ -163,7 +163,19 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   const unknownQualification = rules.qualifiedIndex < 0 ? [] : scoped.filter(deal =>
     Date.parse(deal.createdAt) <= range.end.getTime() && !qualificationKnown.has(deal.id) &&
     (deal.lossCategory === 'qualified' || deal.isWon || stepIndex(deal.status) >= rules.qualifiedIndex));
-  const stageCount = (id: string) => rules.won(id) ? wonDeals.length : reached.get(id)?.size || 0;
+  // The chart follows the creation cohort to its furthest known stage today.
+  // Only the won column uses the selected closure period (including older leads).
+  const cohortReached = new Map(chartStages.map(stage => [stage.id, new Set<string>()]));
+  for (const deal of entries) {
+    let furthest = Math.max(0, chartIndex(deal.status));
+    for (const event of eventsByDeal.get(deal.id) || []) {
+      if (Date.parse(event.date) <= snapshotDate.getTime()) furthest = Math.max(furthest, chartIndex(event.stageId), chartIndex(event.fromStageId));
+    }
+    if (deal.isWon && !deal.isLost) furthest = chartStages.length - 1;
+    if (deal.lossCategory === 'qualified') furthest = Math.max(furthest, chartIndex(qualifiedStage));
+    for (let index = 0; index <= furthest; index++) cohortReached.get(chartStages[index]?.id)?.add(deal.id);
+  }
+  const stageCount = (id: string) => rules.won(id) ? wonDeals.length : cohortReached.get(id)?.size || 0;
   const stageData = chartStages.map((stage, index) => {
     const isWon = rules.won(stage.id);
     const next = chartStages[index + 1];
@@ -172,10 +184,9 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
     return {
       name: stage.label, count: stageCount(stage.id),
       fill: STAGE_COLORS[stage.color] || (/^#[0-9a-f]{6}$/i.test(stage.color || '') ? stage.color : isWon ? '#22c55e' : '#3b82f6'),
-      conversionRate: !isWon && ((uncertain.get(stage.id)?.size || 0) > 0 || (next && (uncertain.get(next.id)?.size || 0) > 0)) ? null : rate(numerator, denominator),
-      inferredCount: inferred.get(stage.id)?.size || 0,
-      uncertainCount: uncertain.get(stage.id)?.size || 0,
-      conversionLabel: isWon ? 'ganhos / entradas no período' : 'volume da próxima etapa / esta etapa',
+      conversionRate: rate(numerator, denominator),
+      conversionLabel: isWon ? 'ganhos encerrados / leads criados no período' : 'próxima etapa / esta etapa',
+      populationLabel: isWon ? 'Ganhos pela data de encerramento; inclui leads de outros meses.' : 'Leads criados no período, pela etapa mais avançada alcançada até agora.',
       comparisonBase: isWon ? numerator + ' ganhos ÷ ' + denominator + ' entradas' : numerator + ' em ' + (next?.label || 'próxima etapa') + ' ÷ ' + denominator + ' em ' + stage.label,
     };
   });
