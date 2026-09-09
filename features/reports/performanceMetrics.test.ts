@@ -56,9 +56,15 @@ describe('Performance por acontecimentos', () => {
       deal('next', { status: 'won', isWon: true, closedAt: '2026-09-02' }),
     ];
     const data = calculatePerformance(leads, [event('won', 'won'), event('next', 'won')], board, august);
-    expect(data.stageData.find(s => s.name === 'Ganho')).toEqual({ name: 'Ganho', count: 2, fill: '#22c55e' });
+    expect(data.stageData.find(s => s.name === 'Ganho')).toMatchObject({ name: 'Ganho', count: 2, fill: '#22c55e' });
     expect(data.stageData.find(s => s.name === 'Perdido')).toBeUndefined();
     expect(data.wonDeals).toHaveLength(2);
+  });
+  it('usa cores das etapas e percentuais de volumes sem limitar a 100%', () => {
+    const coloredBoard = { ...board, stages: board.stages.map(s => ({ ...s, color: s.id === 'q' ? 'bg-orange-500' : '#a855f7' })) };
+    const data = calculatePerformance([deal('a'), deal('b'), deal('c')], [event('a', 'q'), event('a', 'proposal'), event('b', 'proposal')], coloredBoard, august);
+    expect(data.stageData.find(s => s.name === 'Qualificado')).toMatchObject({ fill: '#f97316', conversionRate: 200 });
+    expect(data.stageData.find(s => s.name === 'Novo Lead')).toMatchObject({ fill: '#a855f7', conversionRate: null });
   });
   it('não usa perdas desqualificadas no denominador', () => {
     const leads = [deal('q'), deal('win', { isWon: true, closedAt: '2026-08-20' }), deal('lost', { isLost: true, lossCategory: 'disqualified', closedAt: '2026-08-20' })];

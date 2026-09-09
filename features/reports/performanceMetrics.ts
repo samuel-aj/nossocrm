@@ -28,6 +28,11 @@ export function activityEvents(activities: MovementActivity[], board: Board): St
   });
 }
 
+const STAGE_COLORS: Record<string, string> = {
+  'bg-blue-500': '#3b82f6', 'bg-green-500': '#22c55e', 'bg-yellow-500': '#eab308',
+  'bg-orange-500': '#f97316', 'bg-red-500': '#ef4444', 'bg-purple-500': '#a855f7',
+  'bg-pink-500': '#ec4899', 'bg-indigo-500': '#6366f1', 'bg-teal-500': '#14b8a6', 'bg-slate-500': '#64748b',
+};
 export function getStageRules(board: Board) {
   const customers = board.stages.filter(stage => stage.linkedLifecycleStage === 'CUSTOMER');
   const won = (id: string) => {
@@ -102,6 +107,21 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   const cycles = wonDeals.map(deal => (Date.parse(deal.closedAt!) - Date.parse(deal.createdAt)) / 86400000)
     .filter(days => Number.isFinite(days) && days >= 0);
   const rate = (numerator: number, denominator: number) => denominator > 0 ? numerator / denominator * 100 : null;
+  const chartStages = board.stages.filter(stage => !rules.lost(stage.id));
+  const stageCount = (id: string) => rules.won(id) ? wonDeals.length : reached.get(id)?.size || 0;
+  const stageData = chartStages.map((stage, index) => {
+    const isWon = rules.won(stage.id);
+    const next = chartStages[index + 1];
+    const numerator = isWon ? wonDeals.length : next ? stageCount(next.id) : 0;
+    const denominator = isWon ? entries.length : stageCount(stage.id);
+    return {
+      name: stage.label, count: stageCount(stage.id),
+      fill: STAGE_COLORS[stage.color] || (/^#[0-9a-f]{6}$/i.test(stage.color || '') ? stage.color : isWon ? '#22c55e' : '#3b82f6'),
+      conversionRate: rate(numerator, denominator),
+      conversionLabel: isWon ? 'ganhos / entradas no período' : 'volume da próxima etapa / esta etapa',
+      comparisonBase: isWon ? numerator + ' ganhos ÷ ' + denominator + ' entradas' : numerator + ' em ' + (next?.label || 'próxima etapa') + ' ÷ ' + denominator + ' em ' + stage.label,
+    };
+  });
   return {
     entries, qualifiedIds: qualified, qualificationDates, qualifiedCount: qualified.size,
     qualificationRate: rules.qualifiedIndex >= 0 ? rate(qualified.size, entries.length) : null,
@@ -110,12 +130,7 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
     wonDeals, lostDeals, unknownQualification, unknownClosure,
     wonRevenue: wonDeals.reduce((sum, deal) => sum + deal.value, 0),
     avgSalesCycle: cycles.length ? Math.round(cycles.reduce((a, b) => a + b, 0) / cycles.length) : null,
-    stageData: board.stages.filter(stage => !rules.lost(stage.id)).map(stage => ({
-      name: stage.label,
-      // Wins use closure dates, including boards that keep won deals in their original stage.
-      count: rules.won(stage.id) ? wonDeals.length : reached.get(stage.id)?.size || 0,
-      fill: rules.won(stage.id) ? '#22c55e' : '#3b82f6',
-    })),
+    stageData,
   };
 }
 

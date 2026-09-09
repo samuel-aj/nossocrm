@@ -374,21 +374,21 @@ const ReportsPage: React.FC = () => {
             <div className="p-2 rounded-lg bg-orange-500/10">
               <TrendingUp className="text-orange-500" size={18} />
             </div>
-            <span className="text-xs text-slate-500">Deals Fechados</span>
+            <span className="text-xs text-slate-500">Encerramentos qualificados</span>
           </div>
           <p className="text-2xl font-bold text-slate-900 dark:text-white">
             <span className="text-emerald-500">{wonDeals.length}</span>
             <span className="text-slate-400 mx-1">/</span>
-            <span className="text-red-500">{lostDeals.length}</span>
+            <span className="text-red-500">{lostDeals.filter(deal => deal.lossCategory === 'qualified').length}</span>
           </p>
           <p className="text-xs text-slate-500">
-            Por data de encerramento
+            Ganhos / Perdas qualificadas · Por encerramento
           </p>
         </div>
       </div>
 
       <p className="text-xs text-slate-500">Qualificação = qualificados ÷ entradas. Fechamento = ganhos ÷ qualificados. As taxas podem ultrapassar 100%, pois os acontecimentos podem ser de leads de meses diferentes. “—” indica denominador zero ou etapa de qualificação não identificada.</p>
-      <p className="text-xs text-slate-500">Cada lead conta uma vez por etapa no período. As barras mostram chegadas registradas; Ganho usa a data de fechamento. Não representam conversão entre etapas.</p>
+      <p className="text-xs text-slate-500">Cada lead conta uma vez por etapa no período. As barras mostram chegadas registradas; Ganho usa a data de fechamento. Percentuais comparam volumes da próxima etapa com a atual; em Ganho, ganhos ÷ entradas. Podem superar 100% e não representam conversão dos mesmos leads.</p>
       {/* Fileira: Leads Perdidos + Conversão por Etapa lado a lado */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Loss by Category */}

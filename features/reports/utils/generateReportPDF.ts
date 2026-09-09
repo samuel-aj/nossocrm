@@ -24,7 +24,7 @@ export function generateReportPDF(data: PerformanceMetrics & { webhookUnavailabl
     ['Perdas sem classificação', String(data.lostDeals.filter(d => !d.lossCategory).length), 'Data de encerramento'],
     ['Ciclo médio dos ganhos', data.avgSalesCycle === null ? '-' : `${data.avgSalesCycle} dias`, 'Criação até encerramento'],
   ], styles: { fontSize: 9 }, headStyles: { fillColor: [30, 41, 59] } });
-  autoTable(doc, { head: [['Avanços por etapa no período', 'Leads distintos']], body: data.stageData.map(stage => [stage.name, stage.count]), styles: { fontSize: 9 } });
+  autoTable(doc, { head: [['Avanços por etapa no período', 'Leads distintos', 'Percentual / Base']], body: data.stageData.map(stage => [stage.name, stage.count, rate(stage.conversionRate) + ' · ' + stage.comparisonBase]), styles: { fontSize: 9 } });
   const reasons = new Map<string, number>();
   for (const deal of data.lostDeals) {
     const category = deal.lossCategory === 'qualified' ? 'Qualificado' : deal.lossCategory === 'disqualified' ? 'Desqualificado' : 'Sem classificação';

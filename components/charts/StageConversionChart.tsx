@@ -15,7 +15,8 @@ interface StageConversionData {
   name: string;
   count: number;
   fill: string;
-  conversionRate?: number; // % that converted to next stage
+  conversionRate?: number | null; // % that converted to next stage
+  comparisonBase?: string;
   conversionLabel?: string; // "avançam" or "fecham"
 }
 
@@ -39,9 +40,10 @@ const CustomTooltip = ({ active, payload }: any) => {
     >
       <p style={{ fontWeight: 700, marginBottom: 4 }}>{d.name}</p>
       <p style={{ fontSize: 13 }}>{d.count} negócio{d.count !== 1 ? 's' : ''}</p>
+      {d.comparisonBase && <p style={{ fontSize: 12 }}>{d.comparisonBase}</p>}
       {d.conversionRate !== undefined && (
         <p style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>
-          → {d.conversionRate.toFixed(1)}% {d.conversionLabel || 'avançam'}
+          {d.conversionRate === null ? '—' : d.conversionRate.toFixed(1) + '%'} {d.conversionLabel || 'avançam'}
         </p>
       )}
     </div>
@@ -50,7 +52,7 @@ const CustomTooltip = ({ active, payload }: any) => {
 
 const renderConversionLabel = (props: any) => {
   const { x, y, width, value } = props;
-  if (value === undefined || value === null) return null;
+  if (value === undefined) return null;
   return (
     <text
       x={x + width / 2}
@@ -60,7 +62,7 @@ const renderConversionLabel = (props: any) => {
       fontSize={11}
       fontWeight={600}
     >
-      {value.toFixed(0)}%
+      {value === null ? '—' : value.toFixed(0) + '%'}
     </text>
   );
 };
