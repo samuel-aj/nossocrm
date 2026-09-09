@@ -205,10 +205,6 @@ const ReportsPage: React.FC = () => {
       {report.isError && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">Não foi possível carregar o relatório. {report.error.message} <button className="underline" onClick={() => void report.refetch()}>Tentar novamente</button></div>}
       {!metrics && !report.isError && <p role="status">Carregando histórico de movimentações…</p>}
       {metrics && !report.isError && <>
-      {(metrics.unknownQualification.length > 0 || metrics.unknownClosure.length > 0 || metrics.webhookUnavailable) && <aside className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:bg-amber-900/15 dark:text-amber-200">
-        <strong>Histórico incompleto</strong><p>{metrics.unknownQualification.length} leads com indicação de qualificação sem data recuperável e {metrics.unknownClosure.length} encerramentos sem data. Esses registros não são atribuídos a um mês por estimativa. As taxas usam qualificações comprovadas no período.</p>
-        {metrics.webhookUnavailable && <p>Histórico complementar de integrações indisponível; foram usadas as atividades registradas.</p>}
-      </aside>}
       {/* KPI Cards Grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 shrink-0">
         {/* Pipeline Value - FEATURE #2 */}
