@@ -2,33 +2,13 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { TrendingUp, Clock, Target, DollarSign, Trophy, Users, Download, Settings, ThumbsDown, UserX, CheckCircle2 } from 'lucide-react';
-import { getDateRange, useDashboardMetrics, PeriodFilter, COMPARISON_LABELS } from '../dashboard/hooks/useDashboardMetrics';
+import { getDateRange, PeriodFilter, PERIOD_LABELS } from '../dashboard/hooks/useDashboardMetrics';
 import { PeriodFilterSelect } from '@/components/filters/PeriodFilterSelect';
 import { LazyStageConversionChart, ChartWrapper } from '@/components/charts';
 import { generateReportPDF } from './utils/generateReportPDF';
 import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
-
-// Etapa de GANHO por NOME: padrão do produto "fechou contrato = Ganho" —
-// cobre Ganho/Won/Vendido, Contrato Assinado, Protocolado, Concluído, Novo
-// Cliente (levantado dos boards reais de todas as orgs em 2026-08-17).
-const WON_LABEL_RE = /^(ganh|won|vendid|protocolad|conclu[ií]d|novo cliente)|assinad/i;
-// Etapa de PERDA por nome (o vínculo de ciclo "OTHER" também conta)
-const LOST_LABEL_RE = /^(perdid|lost|desqualificad)/i;
-
-// Cor do estágio (classe Tailwind gravada no board) → cor hex pro gráfico
-const STAGE_COLOR_MAP: Record<string, string> = {
-  'bg-blue-500': '#3b82f6',
-  'bg-green-500': '#22c55e',
-  'bg-yellow-500': '#eab308',
-  'bg-orange-500': '#f97316',
-  'bg-red-500': '#ef4444',
-  'bg-purple-500': '#a855f7',
-  'bg-pink-500': '#ec4899',
-  'bg-indigo-500': '#6366f1',
-  'bg-teal-500': '#14b8a6',
-  'bg-slate-500': '#64748b',
-};
+import { usePerformanceReport } from './usePerformanceReport';
 
 /**
  * Componente React `ReportsPage`.
@@ -60,38 +40,23 @@ const ReportsPage: React.FC = () => {
   // boards (e PDF exportado nesse instante sairia errado).
   const boardIdEfetivo = selectedBoardId || defaultBoardId;
 
-  // Lista de vendedores únicos para o filtro
-  const ownersList = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const deal of allCrmDeals) {
-      if (deal.ownerId && deal.owner?.name) {
-        map.set(deal.ownerId, deal.owner.name);
-      }
-    }
-    return Array.from(map, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
-  }, [allCrmDeals]);
-
   // Pegar o board selecionado para acessar a meta
   const selectedBoard = useMemo(() => {
     return boards.find(b => b.id === boardIdEfetivo);
   }, [boards, boardIdEfetivo]);
 
-  const {
-    avgSalesCycle,
-    fastestDeal,
-    slowestDeal,
-    wonDealsWithDates,
-    actualWinRate,
-    wonDeals,
-    lostDeals,
-    topLossReasons,
-    topDeals,
-    wonRevenue,
-    pipelineValue,
-    deals,
-    changes,
-    funnelData,
-  } = useDashboardMetrics(period, boardIdEfetivo, selectedOwnerId || undefined);
+  const range = useMemo(() => getDateRange(period), [period]);
+  const report = usePerformanceReport(selectedBoard, range, selectedOwnerId);
+  const metrics = report.data;
+  const ownersList = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const deal of metrics?.deals || allCrmDeals) if (deal.ownerId) map.set(deal.ownerId, deal.owner.name);
+    return [...map].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [metrics?.deals, allCrmDeals]);
+  const wonDeals = metrics?.wonDeals || [];
+  const lostDeals = metrics?.lostDeals || [];
+  const wonRevenue = metrics?.wonRevenue || 0;
+  const actualWinRate = metrics?.closingRate ?? 0;
 
   // Extrair meta do board selecionado
   const boardGoal = selectedBoard?.goal;
@@ -144,7 +109,7 @@ const ReportsPage: React.FC = () => {
     const repsMap: Record<string, { name: string; avatar: string; deals: number; revenue: number; winRate: number }> = {};
 
     wonDeals.forEach(deal => {
-      const ownerKey = deal.owner?.name || 'unknown';
+      const ownerKey = deal.ownerId || 'unassigned';
       const ownerName = deal.owner?.name || 'Sem Dono';
       const ownerAvatar = deal.owner?.avatar || '';
 
@@ -172,149 +137,14 @@ const ReportsPage: React.FC = () => {
     return `R$ ${value.toLocaleString('pt-BR')}`;
   }, []);
 
-  // Conversão por etapa (coorte do período selecionado), com a semântica
-  // "quantos CHEGARAM até aqui": barra = leads que alcançaram a etapa; % = dos que
-  // chegaram, quantos avançaram pra seguinte (na última, quantos fecharam).
-  // Ganhos contam como tendo passado por TODAS as etapas; perdidos contam só
-  // na PRIMEIRA (entraram no funil; até onde avançaram não fica registrado).
-  // Antes, os perdidos — por morarem na última coluna do board — contavam
-  // como se tivessem chegado em tudo, e o gráfico dava ~100% em toda etapa.
-  const stageConversionData = useMemo(() => {
-    const convBoard = selectedBoard || boards[0];
-    const stages = convBoard?.stages || [];
-    if (stages.length === 0) return [];
-
-    // Etapas FINAIS são resultado, não passagem — saem do funil e viram a
-    // barra final. GANHO = nome de fechamento (WON_LABEL_RE) OU a ÚNICA
-    // etapa do board vinculada ao ciclo "CUSTOMER" (pipeline clássico);
-    // boards de pós-venda têm VÁRIAS etapas CUSTOMER, aí só o nome decide.
-    const customerStages = stages.filter(s => s.linkedLifecycleStage === 'CUSTOMER');
-    const soleCustomerId = customerStages.length === 1 ? customerStages[0].id : null;
-    const isWonStage = (s: (typeof stages)[number]) =>
-      WON_LABEL_RE.test(s.label.trim()) || s.id === soleCustomerId;
-    const isLostStage = (s: (typeof stages)[number]) =>
-      s.linkedLifecycleStage === 'OTHER' || LOST_LABEL_RE.test(s.label.trim());
-    const midStages = stages.filter(s => !isWonStage(s) && !isLostStage(s));
-    if (midStages.length === 0) return [];
-    const wonStage = stages.find(isWonStage);
-    const wonStageIds = new Set(stages.filter(isWonStage).map(s => s.id));
-
-    // COORTE DO PERÍODO: os mesmos leads dos cards de taxa (criados na janela
-    // do filtro "Este mês"/"Mês passado"...). Antes o gráfico era o snapshot
-    // do histórico inteiro e o filtro de período não mudava nada aqui.
-    const janela = getDateRange(period);
-    const boardDeals = allCrmDeals.filter(d => {
-      if (d.boardId !== convBoard.id) return false;
-      if (selectedOwnerId && d.ownerId !== selectedOwnerId) return false;
-      const criado = new Date(d.createdAt);
-      return criado >= janela.start && criado <= janela.end;
-    });
-    // "Completaram o funil" = flag de ganho OU parados numa etapa de ganho
-    // (ex.: cliente em Protocolado ainda sem a flag marcada)
-    const completed = boardDeals.filter(d => d.isWon || (!d.isLost && wonStageIds.has(d.status))).length;
-    const lostCount = boardDeals.filter(d => d.isLost && !d.isWon).length;
-    const openByStage = new Map<string, number>();
-    for (const d of boardDeals) {
-      if (d.isWon || d.isLost || wonStageIds.has(d.status)) continue;
-      openByStage.set(d.status, (openByStage.get(d.status) || 0) + 1);
-    }
-
-    // chegaram(i) = abertos da etapa i em diante + completados; 1ª etapa inclui os perdidos
-    const reached: number[] = new Array(midStages.length).fill(0);
-    let acc = completed;
-    for (let i = midStages.length - 1; i >= 0; i--) {
-      acc += openByStage.get(midStages[i].id) || 0;
-      reached[i] = acc;
-    }
-    reached[0] += lostCount;
-
-    const items = midStages.map((s, i) => {
-      const isLastMid = i === midStages.length - 1;
-      const next = isLastMid ? completed : reached[i + 1];
-      return {
-        name: s.label,
-        count: reached[i],
-        fill: STAGE_COLOR_MAP[s.color] || '#3b82f6',
-        conversionRate: reached[i] > 0 ? (next / reached[i]) * 100 : 0,
-        conversionLabel: isLastMid ? 'fecham' : 'avançam',
-      };
-    });
-
-    items.push({
-      // A barra final usa o nome da PRÓPRIA etapa de ganho do board
-      // ("Protocolado", "Ganho"...) pra não parecer duas coisas diferentes
-      name: wonStage?.label || 'Ganho',
-      count: completed,
-      fill: '#22c55e',
-      conversionRate: reached[0] > 0 ? (completed / reached[0]) * 100 : 0,
-      conversionLabel: 'do total',
-    });
-
-    return items;
-  }, [selectedBoard, boards, allCrmDeals, selectedOwnerId, period]);
-
-  // Taxas do funil (mesma base do gráfico de conversão, snapshot do board):
-  // Qualificação = chegaram à etapa "Qualificado" ÷ total que entrou no funil;
-  // Conversão = ganhos ÷ qualificados. Board sem etapa "Qualificado" cai no
-  // fallback ganhos ÷ total.
-  const funnelRates = useMemo(() => {
-    const convBoard = selectedBoard || boards[0];
-    const stages = convBoard?.stages || [];
-    // COORTE DO PERÍODO: leads CRIADOS na janela selecionada (este mês, mês
-    // passado...). Antes era o snapshot do histórico inteiro e o filtro de
-    // período não mudava nada nestes cards.
-    const janela = getDateRange(period);
-    const boardDeals = allCrmDeals.filter(d => {
-      if (d.boardId !== convBoard?.id) return false;
-      if (selectedOwnerId && d.ownerId !== selectedOwnerId) return false;
-      const criado = new Date(d.createdAt);
-      return criado >= janela.start && criado <= janela.end;
-    });
-    const total = boardDeals.length;
-
-    // Mesmos critérios do gráfico: ganho por nome de fechamento OU única
-    // etapa CUSTOMER do board; perda por nome OU ciclo OTHER
-    const customerStages = stages.filter(s => s.linkedLifecycleStage === 'CUSTOMER');
-    const soleCustomerId = customerStages.length === 1 ? customerStages[0].id : null;
-    const isWonStage = (s: (typeof stages)[number]) =>
-      WON_LABEL_RE.test(s.label.trim()) || s.id === soleCustomerId;
-    const isLostStage = (s: (typeof stages)[number]) =>
-      s.linkedLifecycleStage === 'OTHER' || LOST_LABEL_RE.test(s.label.trim());
-    const midStages = stages.filter(s => !isWonStage(s) && !isLostStage(s));
-    const wonStageIds = new Set(stages.filter(isWonStage).map(s => s.id));
-    const wonCount = boardDeals.filter(d => d.isWon || (!d.isLost && wonStageIds.has(d.status))).length;
-    // "Qualificado(a/s)" — o ^ evita casar com "Em qualificação"
-    const qIdx = midStages.findIndex(s => /^qualificad/i.test(s.label.trim()));
-
-    let qualified: number | null = null;
-    if (qIdx >= 0) {
-      const openByStage = new Map<string, number>();
-      for (const d of boardDeals) {
-        if (d.isWon || d.isLost || wonStageIds.has(d.status)) continue;
-        openByStage.set(d.status, (openByStage.get(d.status) || 0) + 1);
-      }
-      // qualificados = chegaram à etapa Qualificado (abertos dela em diante + ganhos)
-      let acc = wonCount;
-      for (let i = midStages.length - 1; i >= qIdx; i--) {
-        acc += openByStage.get(midStages[i].id) || 0;
-      }
-      qualified = acc;
-    }
-
-    return {
-      total,
-      wonCount,
-      qualified,
-      hasQualifiedStage: qIdx >= 0,
-      qualificationRate: qualified !== null && total > 0 ? (qualified / total) * 100 : null,
-      conversionRate:
-        qualified !== null && qualified > 0
-          ? (wonCount / qualified) * 100
-          : total > 0
-            ? (wonCount / total) * 100
-            : null,
-    };
-  }, [selectedBoard, boards, allCrmDeals, selectedOwnerId, period]);
+  const stageConversionData = metrics?.stageData || [];
+  const funnelRates = {
+    total: metrics?.entries.length || 0, wonCount: wonDeals.length,
+    qualified: metrics?.qualifiedCount || 0,
+    hasQualifiedStage: metrics?.hasQualifiedStage || false,
+    qualificationRate: metrics?.qualificationRate ?? null,
+    conversionRate: metrics?.closingRate ?? null,
+  };
 
   const generatedBy = useMemo(() => {
     if (profile?.first_name && profile?.last_name) return `${profile.first_name} ${profile.last_name}`;
@@ -322,34 +152,13 @@ const ReportsPage: React.FC = () => {
   }, [profile?.email, profile?.first_name, profile?.last_name]);
 
   const handleExportPDF = useCallback(() => {
-    generateReportPDF(
-      {
-        pipelineValue,
-        actualWinRate,
-        avgSalesCycle,
-        fastestDeal,
-        wonRevenue,
-        wonDeals,
-        changes,
-        funnelData,
-      },
-      period,
-      selectedBoard?.name,
-      generatedBy
-    );
-  }, [
-    actualWinRate,
-    avgSalesCycle,
-    changes,
-    fastestDeal,
-    funnelData,
-    generatedBy,
-    period,
-    pipelineValue,
-    selectedBoard?.name,
-    wonDeals,
-    wonRevenue,
-  ]);
+    if (!metrics || report.isFetching || report.isError) return;
+    generateReportPDF(metrics, {
+      boardName: selectedBoard?.name || '', period: PERIOD_LABELS[period],
+      owner: ownersList.find(owner => owner.id === selectedOwnerId)?.name || 'Todos os vendedores',
+      range: range.start.toLocaleDateString('pt-BR') + ' a ' + range.end.toLocaleDateString('pt-BR'), generatedBy,
+    });
+  }, [metrics, report.isFetching, report.isError, selectedBoard, period, selectedOwnerId, ownersList, range, generatedBy]);
 
   // Ranking de motivos (barra + contagem) usado pelos cards "Motivos de
   // Perda" e "Desqualificação" — cada card recebe só as perdas da sua
@@ -397,7 +206,7 @@ const ReportsPage: React.FC = () => {
             Relatórios de Performance
           </h1>
           <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
-            Análise detalhada de vendas e tendências.
+            Entradas, qualificações e resultados pela data em que aconteceram.
           </p>
         </div>
         <div className="flex items-center gap-3 max-md:flex-wrap max-md:w-full">
@@ -428,6 +237,7 @@ const ReportsPage: React.FC = () => {
 
           <button
             type="button"
+            disabled={!metrics || report.isFetching || report.isError}
             onClick={handleExportPDF}
             className="group flex items-center gap-2 px-3 py-2 rounded-lg glass border border-slate-200/50 dark:border-white/10 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:border-slate-300 dark:hover:border-white/20 transition-all duration-200"
             title="Exportar PDF"
@@ -438,6 +248,14 @@ const ReportsPage: React.FC = () => {
         </div>
       </div>
 
+      <p className="text-xs text-slate-500">{range.start.toLocaleDateString('pt-BR')} a {range.end.toLocaleDateString('pt-BR')} · Horário local · Quadro e responsável atuais</p>
+      {report.isError && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">Não foi possível carregar o relatório. {report.error.message} <button className="underline" onClick={() => void report.refetch()}>Tentar novamente</button></div>}
+      {!metrics && !report.isError && <p role="status">Carregando histórico de movimentações…</p>}
+      {metrics && !report.isError && <>
+      {(metrics.unknownQualification.length > 0 || metrics.unknownClosure.length > 0 || metrics.webhookUnavailable) && <aside className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:bg-amber-900/15 dark:text-amber-200">
+        <strong>Histórico incompleto</strong><p>{metrics.unknownQualification.length} leads com indicação de qualificação sem data recuperável e {metrics.unknownClosure.length} encerramentos sem data. Esses registros não são atribuídos a um mês por estimativa. As taxas usam qualificações com data conhecida.</p>
+        {metrics.webhookUnavailable && <p>Histórico complementar de integrações indisponível; foram usadas as atividades registradas.</p>}
+      </aside>}
       {/* Forecast Bar - FEATURE #1 (80/20) */}
       {hasGoal ? (
         <div className="glass p-4 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm shrink-0">
@@ -451,7 +269,7 @@ const ReportsPage: React.FC = () => {
             <div className="flex items-center gap-4">
               <div className="text-right">
                 <span className="text-xs text-slate-500">Realizado</span>
-                <p className="text-lg font-bold text-emerald-500">{formatGoalValue(currentValue)}</p>
+                <p className="text-lg font-bold text-emerald-500">{goalType === 'percentage' && metrics.closingRate === null ? '—' : formatGoalValue(currentValue)}</p>
               </div>
               <div className="text-right">
                 <span className="text-xs text-slate-500">Meta</span>
@@ -475,13 +293,13 @@ const ReportsPage: React.FC = () => {
             </div>
             <div className="absolute top-0 right-0 h-4 flex items-center">
               <span className={`text-xs font-bold px-2 ${forecastPercent >= 50 ? 'text-white' : 'text-slate-600'}`}>
-                {forecastPercent.toFixed(0)}%
+                {goalType === 'percentage' && metrics.closingRate === null ? '—' : forecastPercent.toFixed(0) + '%'}
               </span>
             </div>
           </div>
           <p className="text-xs text-slate-500 mt-2">
-            {isOnTrack
-              ? `🎯 No ritmo! Faltam ${formatGoalValue(Math.abs(forecastGap))} para bater a meta.`
+            {goalType === 'percentage' && metrics.closingRate === null ? 'Sem qualificações com data no período para calcular a meta percentual.' : isOnTrack
+              ? forecastGap <= 0 ? 'Meta atingida.' : `🎯 No ritmo! Faltam ${formatGoalValue(forecastGap)} para bater a meta.`
               : `⚠️ Atenção! Você está abaixo de 75% da meta. Faltam ${formatGoalValue(Math.abs(forecastGap))}.`
             }
           </p>
@@ -512,12 +330,10 @@ const ReportsPage: React.FC = () => {
             <div className="p-2 rounded-lg bg-blue-500/10">
               <DollarSign className="text-blue-500" size={18} />
             </div>
-            <span className="text-xs text-slate-500">Pipeline Total</span>
+            <span className="text-xs text-slate-500">Entradas no período</span>
           </div>
-          <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatCurrency(pipelineValue)}</p>
-          <p className={`text-xs ${changes.pipeline >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
-            {changes.pipeline >= 0 ? '+' : ''}{changes.pipeline.toFixed(1)}% {COMPARISON_LABELS[period]}
-          </p>
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">{metrics.entries.length}</p>
+          <p className="text-xs text-slate-500">Leads criados no período selecionado</p>
         </div>
 
         {/* Taxa de Qualificação = qualificados ÷ total de leads do funil */}
@@ -533,7 +349,7 @@ const ReportsPage: React.FC = () => {
           </p>
           <p className="text-xs text-slate-500">
             {funnelRates.hasQualifiedStage
-              ? `${funnelRates.qualified} qualificados de ${funnelRates.total} leads`
+              ? `${funnelRates.qualified} qualificados no período ÷ ${funnelRates.total} entradas`
               : 'Board sem etapa "Qualificado"'}
           </p>
         </div>
@@ -544,15 +360,15 @@ const ReportsPage: React.FC = () => {
             <div className="p-2 rounded-lg bg-teal-500/10">
               <TrendingUp className="text-teal-500" size={18} />
             </div>
-            <span className="text-xs text-slate-500">Taxa de Conversão</span>
+            <span className="text-xs text-slate-500">Taxa de Fechamento</span>
           </div>
           <p className="text-2xl font-bold text-slate-900 dark:text-white">
             {funnelRates.conversionRate !== null ? `${funnelRates.conversionRate.toFixed(1)}%` : '--'}
           </p>
           <p className="text-xs text-slate-500">
             {funnelRates.hasQualifiedStage
-              ? `${funnelRates.wonCount} ganhos de ${funnelRates.qualified} qualificados`
-              : `${funnelRates.wonCount} ganhos de ${funnelRates.total} leads`}
+              ? `${funnelRates.wonCount} ganhos ÷ ${funnelRates.qualified} qualificados no período`
+              : 'Pipeline sem etapa de qualificação'}
           </p>
         </div>
 
@@ -564,9 +380,9 @@ const ReportsPage: React.FC = () => {
             </div>
             <span className="text-xs text-slate-500">Ciclo Médio</span>
           </div>
-          <p className="text-2xl font-bold text-slate-900 dark:text-white">{avgSalesCycle} dias</p>
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">{metrics.avgSalesCycle === null ? '—' : metrics.avgSalesCycle + ' dias'}</p>
           <p className="text-xs text-slate-500">
-            Rápido: {fastestDeal}d | Lento: {slowestDeal}d
+            Da criação ao encerramento dos ganhos do período
           </p>
         </div>
 
@@ -584,11 +400,13 @@ const ReportsPage: React.FC = () => {
             <span className="text-red-500">{lostDeals.length}</span>
           </p>
           <p className="text-xs text-slate-500">
-            Ganhos / Perdas
+            Por data de encerramento
           </p>
         </div>
       </div>
 
+      <p className="text-xs text-slate-500">Qualificação = qualificados ÷ entradas. Fechamento = ganhos ÷ qualificados. As taxas podem ultrapassar 100%, pois os acontecimentos podem ser de leads de meses diferentes. “—” indica denominador zero ou etapa de qualificação não identificada.</p>
+      <p className="text-xs text-slate-500">Cada lead conta uma vez por etapa no período. As barras mostram chegadas registradas, não conversão entre etapas.</p>
       {/* Fileira: Leads Perdidos + Conversão por Etapa lado a lado */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Loss by Category */}
@@ -596,7 +414,7 @@ const ReportsPage: React.FC = () => {
           <div className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
             <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2 mb-4">
               <ThumbsDown className="text-red-500" size={20} />
-              Leads Perdidos
+              Perdas no Período
             </h2>
             {(() => {
               // Sem categoria gravada (perdas antigas) = "Sem classificação";
@@ -645,10 +463,10 @@ const ReportsPage: React.FC = () => {
         >
           <div className="flex justify-between items-center mb-2 shrink-0">
             <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display">
-              Conversão por Etapa
+              Avanços por Etapa no Período
             </h2>
             <span className="text-xs text-slate-500 bg-slate-100 dark:bg-white/5 px-2 py-1 rounded">
-              Snapshot Atual
+              Leads distintos por etapa
             </span>
           </div>
           {/* max-md:min-h: gráfico absolute colapsava quando o grid empilha */}
@@ -670,10 +488,10 @@ const ReportsPage: React.FC = () => {
           <div className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
             <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2 mb-4">
               <CheckCircle2 className="text-orange-500" size={20} />
-              Motivos de Perda
+              Motivos de Perda — Qualificados
             </h2>
             {renderLossReasons(
-              lostDeals.filter(d => d.lossCategory !== 'disqualified'),
+              lostDeals.filter(d => d.lossCategory === 'qualified'),
               'bg-orange-500'
             )}
           </div>
@@ -750,7 +568,15 @@ const ReportsPage: React.FC = () => {
           a altura fixa do container, padding no root não aparece (fica no
           limite nominal da caixa, não abaixo do conteúdo transbordado) —
           este elemento garante a margem inferior em qualquer cenário */}
+      <section className="glass p-5 rounded-xl border border-slate-200 dark:border-white/10">
+        <h2 className="font-bold mb-2">Receita ganha no período</h2><p className="text-2xl font-bold text-emerald-500">{formatCurrency(wonRevenue)}</p>
+      </section>
+      <details className="glass p-5 rounded-xl border border-slate-200 dark:border-white/10">
+        <summary className="cursor-pointer font-bold">Conferir qualificados no período ({metrics.qualifiedCount})</summary>
+        <ul className="mt-3 space-y-2 text-sm">{metrics.deals.filter(deal => metrics.qualifiedIds.has(deal.id)).map(deal => <li key={deal.id}>{deal.title} · {metrics.qualificationDates?.get(deal.id) ? new Date(metrics.qualificationDates.get(deal.id)!).toLocaleDateString('pt-BR') : 'Data não disponível'} · {deal.isWon ? 'Ganho' : deal.isLost ? 'Perdido' : selectedBoard?.stages.find(stage => stage.id === deal.status)?.label || 'Em aberto'}</li>)}</ul>
+      </details>
       <div className="shrink-0 h-2" aria-hidden="true" />
+      </>}
     </div>
   );
 };

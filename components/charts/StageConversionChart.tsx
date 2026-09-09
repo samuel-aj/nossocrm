@@ -94,7 +94,7 @@ export const StageConversionChart: React.FC<StageConversionChartProps> = ({ data
         {data.map((entry, index) => (
           <Cell key={index} fill={entry.fill} />
         ))}
-        <LabelList dataKey="conversionRate" content={renderConversionLabel} />
+        {data.some(entry => entry.conversionRate !== undefined) ? <LabelList dataKey="conversionRate" content={renderConversionLabel} /> : <LabelList dataKey="count" position="top" fill="var(--chart-text)" fontSize={11} />}
       </Bar>
     </BarChart>
   </ResponsiveContainer>
