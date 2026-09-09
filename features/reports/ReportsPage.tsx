@@ -388,7 +388,7 @@ const ReportsPage: React.FC = () => {
       </div>
 
       <p className="text-xs text-slate-500">Qualificação = qualificados ÷ entradas. Fechamento = ganhos ÷ qualificados. As taxas podem ultrapassar 100%, pois os acontecimentos podem ser de leads de meses diferentes. “—” indica denominador zero ou etapa de qualificação não identificada.</p>
-      <p className="text-xs text-slate-500">Cada lead conta uma vez por etapa no período. As barras mostram chegadas registradas, não conversão entre etapas.</p>
+      <p className="text-xs text-slate-500">Cada lead conta uma vez por etapa no período. As barras mostram chegadas registradas; Ganho usa a data de fechamento. Não representam conversão entre etapas.</p>
       {/* Fileira: Leads Perdidos + Conversão por Etapa lado a lado */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Loss by Category */}

@@ -110,7 +110,12 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
     wonDeals, lostDeals, unknownQualification, unknownClosure,
     wonRevenue: wonDeals.reduce((sum, deal) => sum + deal.value, 0),
     avgSalesCycle: cycles.length ? Math.round(cycles.reduce((a, b) => a + b, 0) / cycles.length) : null,
-    stageData: rules.steps.map(stage => ({ name: stage.label, count: reached.get(stage.id)?.size || 0, fill: '#3b82f6' })),
+    stageData: board.stages.filter(stage => !rules.lost(stage.id)).map(stage => ({
+      name: stage.label,
+      // Wins use closure dates, including boards that keep won deals in their original stage.
+      count: rules.won(stage.id) ? wonDeals.length : reached.get(stage.id)?.size || 0,
+      fill: rules.won(stage.id) ? '#22c55e' : '#3b82f6',
+    })),
   };
 }
 
