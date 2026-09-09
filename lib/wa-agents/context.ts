@@ -6,6 +6,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ModelMessage } from 'ai';
 import { getConnectionByIdForOrg, type WaConnectionRow } from '@/lib/whatsapp/service';
 import { WaAgentError } from './errors';
+import { loadDealItems, type ContextDealItem } from './dealItems';
 import { renderTemplate } from './template';
 import { formatKnowledgeHits } from './knowledge';
 import { normalizeKeyword } from './text';
@@ -90,6 +91,8 @@ export type ContextContact = {
 
 export type ContextDeal = {
   id: string;
+  /** Itens contratados, disponíveis também em {{deal.items}} nos webhooks. */
+  items?: ContextDealItem[];
   title: string;
   board_id: string | null;
   stage_id: string | null;
@@ -381,7 +384,7 @@ export async function loadDealContext(
       : {};
   const cfKeys = Object.keys(customFields);
 
-  const [stageRes, boardRes, ownerRes, defsRes, contactRes] = await Promise.all([
+  const [stageRes, boardRes, ownerRes, defsRes, contactRes, items] = await Promise.all([
     deal.stage_id
       ? admin.from('board_stages').select('label, name').eq('organization_id', organizationId).eq('id', deal.stage_id).maybeSingle()
       : Promise.resolve({ data: null }),
@@ -402,6 +405,7 @@ export async function loadDealContext(
     deal.contact_id
       ? admin.from('contacts').select('source').eq('organization_id', organizationId).eq('id', deal.contact_id).maybeSingle()
       : Promise.resolve({ data: null }),
+    loadDealItems(admin, organizationId, deal.id),
   ]);
 
   const s = stageRes.data as { label?: string | null; name?: string | null } | null;
@@ -413,6 +417,7 @@ export async function loadDealContext(
 
   return {
     id: deal.id,
+    items,
     title: deal.title,
     board_id: deal.board_id,
     stage_id: deal.stage_id,

@@ -21,7 +21,8 @@ interface BoardsContextType {
   loading: boolean;
   error: string | null;
   addBoard: (board: Omit<Board, 'id' | 'createdAt'>, order?: number) => Promise<Board | null>;
-  updateBoard: (id: string, updates: Partial<Board>) => Promise<void>;
+  /** Devolve true quando gravou; false em erro (quem chama pode avisar o usuário). */
+  updateBoard: (id: string, updates: Partial<Board>) => Promise<boolean>;
   deleteBoard: (id: string) => Promise<void>;
 
   // Active board state (UI state - permanece em useState)
@@ -129,11 +130,12 @@ export const BoardsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     if (updateError) {
       console.error('Erro ao atualizar board:', updateError.message);
-      return;
+      return false;
     }
 
     // Invalida cache para TanStack Query atualizar
     await queryClient.invalidateQueries({ queryKey: queryKeys.boards.all });
+    return true;
   }, [queryClient]);
 
   const deleteBoard = useCallback(async (id: string) => {

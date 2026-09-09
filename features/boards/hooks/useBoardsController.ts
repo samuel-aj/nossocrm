@@ -52,6 +52,39 @@ export const getActivityStatus = (deal: DealView) => {
 };
 
 /**
+ * Cache local do status FIXADO (alfinete em Filtros). A preferência real vem do
+ * servidor, mas ela chega depois do primeiro desenho — sem este cache o quadro
+ * abria em "Em aberto" e trocava de filtro na frente do usuário. Guarda também
+ * a organização: ao trocar de org, o valor de outra não é aplicado.
+ */
+const STATUS_FIXADO_KEY = 'crm_default_status_filter';
+type StatusFiltro = 'open' | 'won' | 'lost' | 'all';
+
+function lerStatusFixadoCache(orgId?: string | null): StatusFiltro {
+  if (typeof window === 'undefined') return 'open';
+  try {
+    const bruto = localStorage.getItem(STATUS_FIXADO_KEY);
+    if (!bruto) return 'open';
+    const dados = JSON.parse(bruto) as { org?: string; value?: string };
+    // org conhecida e diferente da salva: ignora (o servidor corrige em seguida)
+    if (orgId && dados.org && dados.org !== orgId) return 'open';
+    const v = dados.value;
+    return v === 'won' || v === 'lost' || v === 'all' || v === 'open' ? v : 'open';
+  } catch {
+    return 'open';
+  }
+}
+
+function gravarStatusFixadoCache(orgId: string | null | undefined, value: StatusFiltro): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(STATUS_FIXADO_KEY, JSON.stringify({ org: orgId ?? null, value }));
+  } catch {
+    // sem localStorage: só perde o atalho, a preferência do servidor continua valendo
+  }
+}
+
+/**
  * Hook React `useBoardsController` que encapsula uma lógica reutilizável.
  * @returns {{ boards: Board[]; boardsLoading: boolean; boardsFetched: boolean; activeBoard: Board | null; activeBoardId: string | null; handleSelectBoard: (boardId: string) => void; ... 45 more ...; handleLossReasonClose: () => void; }} Retorna um valor do tipo `{ boards: Board[]; boardsLoading: boolean; boardsFetched: boolean; activeBoard: Board | null; activeBoardId: string | null; handleSelectBoard: (boardId: string) => void; ... 45 more ...; handleLossReasonClose: () => void; }`.
  */
@@ -164,7 +197,19 @@ export const useBoardsController = () => {
   );
   // 'all' = todos | 'mine' = meus (profile.id) | 'none' = sem responsável | <userId> = um responsável específico
   const [ownerFilter, setOwnerFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<'open' | 'won' | 'lost' | 'all'>('open');
+  // Abre JÁ no status fixado (cache local); o servidor confirma/corrige depois.
+  const [statusFilter, setStatusFilterState] = useState<StatusFiltro>(() =>
+    lerStatusFixadoCache(organizationId)
+  );
+  // Quadro abre no filtro escolhido em Configurações > CRM. A preferência chega
+  // pela rede, então: só é aplicada UMA vez, e nunca por cima de um filtro que
+  // veio da URL ou que o usuário já trocou na mão.
+  const statusTouchedRef = useRef(false);
+  const statusPrefAppliedRef = useRef(false);
+  const setStatusFilter = useCallback((value: 'open' | 'won' | 'lost' | 'all') => {
+    statusTouchedRef.current = true;
+    setStatusFilterState(value);
+  }, []);
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   // Filtro por campo personalizado / UTM (ex.: utm_source, utm_campaign): { chave, valor }.
   // Filtro por campo personalizado/UTM (builder de condições): cada condição é
@@ -301,7 +346,22 @@ export const useBoardsController = () => {
   // Get lifecycle stages from CRM context for automations
   const { lifecycleStages, customFieldDefinitions: orgFieldDefs, deleteDeal, updateDeal, updateContact, availableTags, contacts } = useCRM();
   // Etapa "Inativos" (opcional por organização — Configurações)
-  const { inactiveLeadsEnabled } = useOrgPreferences();
+  const { inactiveLeadsEnabled, defaultDealStatusFilter } = useOrgPreferences();
+
+  // Preferência da organização: aplica uma vez, respeitando ?status= da URL e
+  // qualquer troca que o usuário já tenha feito no cabeçalho do quadro.
+  useEffect(() => {
+    if (defaultDealStatusFilter === undefined) return;
+    // Sempre atualiza o cache: é ele que faz o próximo carregamento abrir certo
+    // (inclusive quando o admin acabou de mudar o alfinete).
+    gravarStatusFixadoCache(organizationId, defaultDealStatusFilter);
+    if (statusPrefAppliedRef.current) return;
+    statusPrefAppliedRef.current = true;
+    if (statusTouchedRef.current) return;
+    if (searchParams?.get('status')) return;
+    // Aplica mesmo quando é 'open': corrige um cache velho apontando pra outro status
+    setStatusFilterState(defaultDealStatusFilter);
+  }, [defaultDealStatusFilter, organizationId, searchParams]);
   // Contatos com status INATIVO: com a etapa Inativos ligada, os leads desses
   // contatos vão automaticamente pra coluna Inativos.
   const inactiveContactIds = useMemo(
@@ -353,7 +413,7 @@ export const useBoardsController = () => {
 
     const statusParam = searchParams.get('status');
     if (statusParam === 'open' || statusParam === 'won' || statusParam === 'lost' || statusParam === 'all') {
-      setStatusFilter(statusParam);
+      setStatusFilterState(statusParam);
     }
   }, [searchParams]);
 
@@ -700,19 +760,24 @@ export const useBoardsController = () => {
 
   const clearDealSelection = () => setSelectedDealIds([]);
 
-  // Seleciona/deseleciona TODOS os leads visíveis de uma etapa.
-  const toggleStageSelection = (stageId: string) => {
-    const stageDealIds = filteredDeals
-      .filter(d => d.status === stageId && !d.id.startsWith('temp-'))
-      .map(d => d.id);
-    if (stageDealIds.length === 0) return;
+  // Seleciona/deseleciona um GRUPO de leads de uma vez (todos já marcados =
+  // desmarca todos; senão marca todos). Usada pela etapa no kanban e pelo
+  // "selecionar todos" da visualização em lista.
+  const toggleManySelection = (dealIds: string[]) => {
+    const ids = dealIds.filter(id => !id.startsWith('temp-'));
+    if (ids.length === 0) return;
     setSelectedDealIds(prev => {
       const set = new Set(prev);
-      const allSelected = stageDealIds.every(id => set.has(id));
-      if (allSelected) stageDealIds.forEach(id => set.delete(id));
-      else stageDealIds.forEach(id => set.add(id));
+      const allSelected = ids.every(id => set.has(id));
+      if (allSelected) ids.forEach(id => set.delete(id));
+      else ids.forEach(id => set.add(id));
       return Array.from(set);
     });
+  };
+
+  // Seleciona/deseleciona TODOS os leads visíveis de uma etapa.
+  const toggleStageSelection = (stageId: string) => {
+    toggleManySelection(filteredDeals.filter(d => d.status === stageId).map(d => d.id));
   };
 
   // Mover todos os selecionados p/ uma etapa. Etapa de perda SEM motivo →
@@ -1121,6 +1186,11 @@ export const useBoardsController = () => {
             // Objetivo: objeto salva, null limpa as colunas goal_* (antes não era
             // enviado e a remoção ficava só na tela)
             goal: boardData.goal ?? null,
+            // "Remover estratégia" no modal manda agentPersona: null e
+            // entryTrigger: '' pra apagar tudo; ausentes (undefined), o
+            // service não toca nesses campos.
+            agentPersona: boardData.agentPersona,
+            entryTrigger: boardData.entryTrigger,
           },
         },
         {
@@ -1330,6 +1400,7 @@ export const useBoardsController = () => {
     toggleDealSelection,
     clearDealSelection,
     toggleStageSelection,
+    toggleManySelection,
     bulkMoveToStage,
     bulkEditTags,
     bulkSetCustomField,

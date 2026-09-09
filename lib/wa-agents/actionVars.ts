@@ -30,6 +30,8 @@ export function actionTextFields(action: EndAction): string[] {
       return [action.tag];
     case 'mark_lost':
       return [action.loss_reason ?? ''];
+    case 'move_stage':
+      return [action.loss_reason ?? ''];
     case 'append_description':
       return [action.prefix ?? ''];
     case 'create_task':
@@ -163,6 +165,8 @@ export function resolveActionTexts(
     case 'add_tag':
       return { ...action, tag: r(action.tag).slice(0, 60) };
     case 'mark_lost':
+      return { ...action, loss_reason: action.loss_reason ? r(action.loss_reason).slice(0, 200) : action.loss_reason };
+    case 'move_stage':
       return { ...action, loss_reason: action.loss_reason ? r(action.loss_reason).slice(0, 200) : action.loss_reason };
     case 'append_description':
       return { ...action, prefix: action.prefix ? r(action.prefix).slice(0, 120) : action.prefix };

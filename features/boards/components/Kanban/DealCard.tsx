@@ -3,6 +3,7 @@ import { DealView, CustomFieldDefinition } from '@/types';
 import { Phone, Copy, Check, Hourglass, Trophy, XCircle, Package, UserX } from 'lucide-react';
 import { ActivityStatusIcon } from './ActivityStatusIcon';
 import { OwnerBadge } from './OwnerBadge';
+import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
 
 /** Chegada do lead no card: "Hoje - 14:32", "Ontem - 09:15" ou "12/08 - 18:40". */
 function rotuloChegada(iso: string): string {
@@ -103,6 +104,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
   contactInactive,
 }) => {
   const [localDragging, setLocalDragging] = useState(false);
+  const podeMover = useMyActionPermissions().deals.move;
   const isClosed = isDealClosed(deal);
 
   const handleToggleMenu = (e: React.MouseEvent) => {
@@ -207,7 +209,9 @@ const DealCardComponent: React.FC<DealCardProps> = ({
   return (
     <div
       data-deal-id={deal.id}
-      draggable={!deal.id.startsWith('temp-')}
+      // Sem permissão de mover cards (Equipe > permissões), o arrasto nem inicia
+      // (o banco recusaria a troca de etapa de qualquer jeito)
+      draggable={!deal.id.startsWith('temp-') && podeMover}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onMouseDown={() => setLastMouseDownDealId(deal.id)}
@@ -284,14 +288,16 @@ const DealCardComponent: React.FC<DealCardProps> = ({
           linha do título — nome e telefone sobem (design mais limpo). */}
       {!(deal.isWon || deal.isLost || contactInactive || deal.tags.length > 0) && deal.createdAt && (
         <span
-          className="float-right ml-2 text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap tabular-nums"
+          // mr-6 no modo seleção: o checkbox (absoluto no canto) não cobre o horário
+          className={`float-right ml-2 text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap tabular-nums ${selectionMode ? 'mr-6' : ''}`}
           title={`Lead chegou em ${new Date(deal.createdAt).toLocaleDateString('pt-BR')} às ${new Date(deal.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`}
         >
           {rotuloChegada(deal.createdAt)}
         </span>
       )}
       {(deal.isWon || deal.isLost || contactInactive || deal.tags.length > 0) && (
-      <div className="flex gap-1 mb-2 flex-wrap items-center">
+      // pr-6 no modo seleção: a fileira de selos + horário para antes do checkbox
+      <div className={`flex gap-1 mb-2 flex-wrap items-center ${selectionMode ? 'pr-6' : ''}`}>
         {/* Chegada do lead: data/hora pequena no canto superior direito
             (order-last + ml-auto = sempre à direita da fileira, mesmo sem tags) */}
         {deal.createdAt && (

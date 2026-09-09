@@ -137,6 +137,7 @@ export const WEBHOOK_VARIABLE_GROUPS: VariableGroup[] = [
       { key: '{{deal.board_name}}', description: 'Pipeline (quadro)' },
       { key: '{{deal.owner_name}}', description: 'Responsável' },
       { key: '{{deal.value}}', description: 'Valor' },
+      { key: '{{deal.items}}', description: 'Produtos contratados (lista JSON com product_id, name, quantity e price; usar sem aspas)' },
       { key: '{{deal.tags}}', description: 'Etiquetas' },
       { key: '{{deal.description}}', description: 'Descrição' },
       { key: '{{deal.custom_fields.chave}}', description: 'Campo personalizado (troque "chave" pela chave do campo)' },

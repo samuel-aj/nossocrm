@@ -280,6 +280,63 @@ function mapState(s?: string): string {
   return "disconnected";
 }
 
+// AUTO-CURA da assinatura de eventos na Evolution: instâncias antigas foram
+// registradas SEM o evento MESSAGES_EDITED (edição de mensagem nunca chegava
+// aqui e o CRM ficava com o texto antigo). Reaplica o webhook com a lista
+// completa, no máximo 1x por instância a cada TTL por instância desta função.
+// Idempotente: o POST /webhook/set só regrava a mesma configuração.
+const ASSINATURA_TTL_MS = 6 * 60 * 60 * 1000;
+const ultimaAssinatura = new Map<string, number>();
+const EVENTOS_WEBHOOK = [
+  "MESSAGES_UPSERT",
+  "MESSAGES_UPDATE",
+  "MESSAGES_EDITED",
+  // Edição feita VIA API da Evolution (chat/updateMessage) sai neste evento,
+  // não em MESSAGES_EDITED; o payload é o mesmo protocolMessage.
+  "SEND_MESSAGE_UPDATE",
+  "CONNECTION_UPDATE",
+  "QRCODE_UPDATED",
+];
+
+// deno-lint-ignore no-explicit-any
+function agendarAssinatura(supabaseUrl: string, conn: any, instanceName: string): void {
+  const agora = Date.now();
+  if ((ultimaAssinatura.get(conn.id) ?? 0) > agora - ASSINATURA_TTL_MS) return;
+  ultimaAssinatura.set(conn.id, agora);
+  const base = String(conn.base_url ?? Deno.env.get("EVOLUTION_BASE_URL") ?? "")
+    .replace(/\/+$/, "")
+    .replace(/\/manager$/, "");
+  const token = String(conn.instance_token ?? "");
+  if (!base || !token) return;
+  const cb = `${supabaseUrl.replace(/\/+$/, "")}/functions/v1/whatsapp-webhook/${conn.webhook_secret}`;
+  const p = fetch(`${base}/webhook/set/${encodeURIComponent(instanceName)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", apikey: token },
+    body: JSON.stringify({
+      webhook: {
+        enabled: true,
+        url: cb,
+        byEvents: false,
+        webhookByEvents: false,
+        base64: true,
+        webhookBase64: true,
+        events: EVENTOS_WEBHOOK,
+      },
+    }),
+  })
+    .then(async (r) => {
+      const corpo = r.ok ? "" : ` ${(await r.text()).slice(0, 200)}`;
+      console.log(`[wa-webhook] assinatura conn=${conn.id} => ${r.status}${corpo}`);
+    })
+    .catch((e) => console.error("[wa-webhook] assinatura falhou:", e));
+  try {
+    // @ts-ignore: EdgeRuntime existe no runtime das Edge Functions da Supabase
+    EdgeRuntime.waitUntil(p);
+  } catch {
+    void p;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== "POST") return json(405, { error: "Método não permitido" });
@@ -319,6 +376,107 @@ Deno.serve(async (req) => {
   if (!pathSecret || String(conn.webhook_secret) !== String(pathSecret)) {
     return json(401, { error: "secret inválido" });
   }
+
+  // CAPTURA TEMPORÁRIA (diagnóstico de edição): enquanto o backend de logs da
+  // Supabase está indisponível, eventos fora do feijão-com-arroz (ou que citam
+  // edição) ficam em wa_webhook_debug pra inspeção. Best-effort; derrubar a
+  // tabela e este bloco quando o diagnóstico terminar.
+  try {
+    const conhecidos = ["messages.upsert", "messages.update", "connection.update", "qrcode.updated", "diag.webhook", "diag.edit", "heal.ping"];
+    const citaEdicao = rawBody.includes("editedMessage") || rawBody.includes("protocolMessage") || event.includes("edit");
+    if (!conhecidos.includes(event) || citaEdicao) {
+      await supabase.from("wa_webhook_debug").insert({ event, payload });
+    }
+  } catch {
+    // diagnóstico nunca derruba o webhook
+  }
+
+  // DIAGNÓSTICO (gate = o mesmo secret do path): POST com {"event":"diag.find"}
+  // consulta as mensagens guardadas no banco DA EVOLUTION (chat/findMessages).
+  // Uso: recuperar o texto ATUAL de mensagens editadas cujo evento se perdeu.
+  // data: o corpo repassado à Evolution (ex.: { where: { key: { remoteJid } } }).
+  if (event === "diag.find") {
+    const base = String(conn.base_url ?? Deno.env.get("EVOLUTION_BASE_URL") ?? "")
+      .replace(/\/+$/, "")
+      .replace(/\/manager$/, "");
+    const token = String(conn.instance_token ?? "");
+    if (!base || !token) return json(200, { error: "conexao sem base_url/token" });
+    const r = await fetch(`${base}/chat/findMessages/${encodeURIComponent(String(instanceName))}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: token },
+      body: JSON.stringify(payload?.data ?? {}),
+    })
+      .then(async (x) => ({ status: x.status, body: (await x.text()).slice(0, 20000) }))
+      .catch((e) => ({ status: 0, body: String(e) }));
+    return json(200, { find: r });
+  }
+
+  // DIAGNÓSTICO (gate = o mesmo secret do path): POST com {"event":"diag.edit"}
+  // pede à Evolution que EDITE uma mensagem enviada pela própria instância
+  // (chat/updateMessage) — teste de ponta a ponta do fluxo de edição sem
+  // depender de alguém editar no celular. data: { number, remoteJid, id, text }.
+  if (event === "diag.edit") {
+    const base = String(conn.base_url ?? Deno.env.get("EVOLUTION_BASE_URL") ?? "")
+      .replace(/\/+$/, "")
+      .replace(/\/manager$/, "");
+    const token = String(conn.instance_token ?? "");
+    if (!base || !token) return json(200, { error: "conexao sem base_url/token" });
+    const d = payload?.data ?? {};
+    const r = await fetch(`${base}/chat/updateMessage/${encodeURIComponent(String(instanceName))}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: token },
+      body: JSON.stringify({
+        number: String(d.number ?? ""),
+        text: String(d.text ?? ""),
+        key: { remoteJid: String(d.remoteJid ?? ""), fromMe: true, id: String(d.id ?? "") },
+      }),
+    })
+      .then(async (x) => ({ status: x.status, body: (await x.text()).slice(0, 2000) }))
+      .catch((e) => ({ status: 0, body: String(e) }));
+    return json(200, { edit: r });
+  }
+
+  // DIAGNÓSTICO (gate = o mesmo secret do path): POST com {"event":"diag.webhook"}
+  // devolve a configuração de webhook ATUAL da instância na Evolution e o
+  // resultado de uma reassinatura na hora. Serve pra enxergar por que um
+  // evento (ex.: MESSAGES_EDITED) não está chegando, sem depender dos logs.
+  if (event === "diag.webhook") {
+    const base = String(conn.base_url ?? Deno.env.get("EVOLUTION_BASE_URL") ?? "")
+      .replace(/\/+$/, "")
+      .replace(/\/manager$/, "");
+    const token = String(conn.instance_token ?? "");
+    if (!base || !token) return json(200, { error: "conexao sem base_url/token" });
+    const cb = `${supabaseUrl.replace(/\/+$/, "")}/functions/v1/whatsapp-webhook/${conn.webhook_secret}`;
+    const chame = async (metodo: string, caminho: string, corpo?: unknown) => {
+      try {
+        const r = await fetch(`${base}${caminho}`, {
+          method: metodo,
+          headers: { "Content-Type": "application/json", apikey: token },
+          body: corpo ? JSON.stringify(corpo) : undefined,
+        });
+        return { status: r.status, body: (await r.text()).slice(0, 3000) };
+      } catch (e) {
+        return { status: 0, body: String(e) };
+      }
+    };
+    const antes = await chame("GET", `/webhook/find/${encodeURIComponent(String(instanceName))}`);
+    const set = await chame("POST", `/webhook/set/${encodeURIComponent(String(instanceName))}`, {
+      webhook: {
+        enabled: true,
+        url: cb,
+        byEvents: false,
+        webhookByEvents: false,
+        base64: true,
+        webhookBase64: true,
+        events: EVENTOS_WEBHOOK,
+      },
+    });
+    const depois = await chame("GET", `/webhook/find/${encodeURIComponent(String(instanceName))}`);
+    return json(200, { antes, set, depois });
+  }
+
+  // Garante MESSAGES_EDITED na assinatura (instâncias antigas não o tinham).
+  agendarAssinatura(supabaseUrl, conn, String(instanceName));
 
   // ESPELHO: outro sistema (n8n, outro CRM, automação) que também precisa dos
   // eventos deste número. A Evolution entrega pra UM webhook por instância,
@@ -509,7 +667,7 @@ Deno.serve(async (req) => {
       {
         // deno-lint-ignore no-explicit-any
         const rawEdit: any = m.message ?? {};
-        const inner = rawEdit.editedMessage?.message ?? rawEdit;
+        const inner = unwrapMessage(rawEdit.editedMessage?.message ?? rawEdit);
         const proto = inner?.protocolMessage;
         const editTargetId = proto?.editedMessage ? proto?.key?.id : null;
         if (editTargetId) {
@@ -518,12 +676,24 @@ Deno.serve(async (req) => {
           if (novoTexto) {
             const tsE = typeof m.messageTimestamp === "string" ? parseInt(m.messageTimestamp, 10) : m.messageTimestamp;
             const editadoEm = tsE ? new Date(tsE * 1000).toISOString() : new Date().toISOString();
-            const { data: alvoMsg } = await supabase
-              .from("wa_messages")
-              .select("id, conversation_id, sender_name")
-              .eq("organization_id", orgId)
-              .eq("evolution_message_id", editTargetId)
-              .maybeSingle();
+            const buscarAlvo = async () =>
+              (await supabase
+                .from("wa_messages")
+                .select("id, conversation_id, sender_name")
+                .eq("organization_id", orgId)
+                .eq("evolution_message_id", editTargetId)
+                .maybeSingle()).data;
+            let alvoMsg = await buscarAlvo();
+            if (!alvoMsg) {
+              // Edição COLADA no envio (pessoa corrige na hora): o evento da
+              // edição pode chegar antes de a mensagem original terminar de
+              // ser gravada. Espera um instante e tenta de novo.
+              await new Promise((r) => setTimeout(r, 1500));
+              alvoMsg = await buscarAlvo();
+            }
+            if (!alvoMsg) {
+              console.error(`[wa-webhook] edicao: mensagem original nao encontrada (provider_id=${editTargetId})`);
+            }
             if (alvoMsg) {
               let { error: edErr } = await supabase
                 .from("wa_messages")
@@ -862,5 +1032,78 @@ Deno.serve(async (req) => {
     return json(200, { ok: true });
   }
 
+  // --- Edição de mensagem ---
+  // MESSAGES_EDITED = edição vinda de um celular; SEND_MESSAGE_UPDATE = edição
+  // feita via API da Evolution. Os dois carregam o MESMO protocolMessage
+  // ({ key: { id da ORIGINAL }, editedMessage: { texto novo } }).
+  if (event === "messages.edited" || event === "send.message.update") {
+    const items = Array.isArray(data) ? data : [data];
+    for (const it of items) {
+      if (!it) continue;
+      // Log de diagnóstico: o formato deste evento varia por versão da
+      // Evolution; com o payload no log dá pra cobrir o que faltar.
+      try {
+        console.log("[wa-webhook] messages.edited:", JSON.stringify(it).slice(0, 1500));
+      } catch {
+        // payload não serializável: segue sem log
+      }
+      const targetId = it?.key?.id ?? it?.keyId ?? it?.id ?? null;
+      let novoTexto = "";
+      if (typeof it?.conversation === "string") novoTexto = it.conversation;
+      else if (typeof it?.text === "string") novoTexto = it.text;
+      else {
+        const c = extractContent(it?.editedMessage ?? it?.message ?? {});
+        novoTexto = c.text ?? "";
+      }
+      novoTexto = novoTexto.trim();
+      if (!targetId || !novoTexto) continue;
+      const buscarAlvo = async () =>
+        (await supabase
+          .from("wa_messages")
+          .select("id, body, conversation_id, sender_name")
+          .eq("organization_id", orgId)
+          .eq("evolution_message_id", String(targetId))
+          .maybeSingle()).data;
+      let alvoMsg = await buscarAlvo();
+      if (!alvoMsg) {
+        // Edição COLADA no envio (pessoa corrige na hora): o evento da edição
+        // pode chegar antes de a mensagem original terminar de ser gravada.
+        // Espera um instante e tenta de novo antes de desistir.
+        await new Promise((r) => setTimeout(r, 1500));
+        alvoMsg = await buscarAlvo();
+      }
+      if (!alvoMsg) {
+        console.error(`[wa-webhook] edicao: mensagem original nao encontrada (provider_id=${String(targetId)})`);
+        continue;
+      }
+      console.log(
+        `[wa-webhook] edicao: msg=${alvoMsg.id} de="${String(alvoMsg.body ?? "").slice(0, 80)}" para="${novoTexto.slice(0, 80)}"`
+      );
+      let { error: edErr } = await supabase
+        .from("wa_messages")
+        .update({ body: novoTexto, edited_at: new Date().toISOString() })
+        .eq("id", alvoMsg.id);
+      if (edErr && /column/i.test(String(edErr.message)) && /edited_at/i.test(String(edErr.message))) {
+        ({ error: edErr } = await supabase.from("wa_messages").update({ body: novoTexto }).eq("id", alvoMsg.id));
+      }
+      if (edErr) console.error("[wa-webhook] edicao (evento):", edErr.message);
+      const { data: ultima } = await supabase
+        .from("wa_messages")
+        .select("id")
+        .eq("conversation_id", alvoMsg.conversation_id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (ultima?.id === alvoMsg.id) {
+        const nome = (alvoMsg.sender_name ?? "").trim();
+        const previa = (nome ? `${nome}: ${novoTexto}` : novoTexto).slice(0, 140);
+        await supabase.from("wa_conversations").update({ last_message_preview: previa }).eq("id", alvoMsg.conversation_id);
+      }
+    }
+    return json(200, { ok: true });
+  }
+
+  // Evento que a função não trata: registra o NOME (ajuda a descobrir formatos novos)
+  console.log("[wa-webhook] evento ignorado:", event);
   return json(200, { ok: true, ignored: event });
 });

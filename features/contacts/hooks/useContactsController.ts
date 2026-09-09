@@ -20,6 +20,9 @@ import {
 import { useCreateDeal } from '@/lib/query/hooks/useDealsQuery';
 import { useBoards } from '@/lib/query/hooks/useBoardsQuery';
 import { useRealtimeSync } from '@/lib/realtime/useRealtimeSync';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/lib/query/queryKeys';
+import { contactsService } from '@/lib/supabase/contacts';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { generateFakeContacts } from '@/lib/debug';
 
@@ -155,6 +158,9 @@ export const useContactsController = () => {
   const [deleteCompanyId, setDeleteCompanyId] = useState<string | null>(null);
   const [deleteWithDeals, setDeleteWithDeals] = useState<{ id: string; dealCount: number; deals: Array<{ id: string; title: string }> } | null>(null);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  // Tags em massa na seleção da lista (null = fechado; 'add' | 'remove' = modal aberto)
+  const [bulkTagsMode, setBulkTagsMode] = useState<null | 'add' | 'remove'>(null);
+  const [bulkTagsBusy, setBulkTagsBusy] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -321,6 +327,39 @@ export const useContactsController = () => {
 
   const clearSelection = () => {
     setSelectedIds(new Set());
+  };
+
+  // Tags em massa: aplica nos contatos SELECIONADOS (roda com a sessão do
+  // usuário — RLS e o trigger de permissão de editar contatos valem por linha)
+  const queryClient = useQueryClient();
+  const confirmBulkTags = async (mode: 'add' | 'remove', tags: string[]) => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0 || tags.length === 0) return;
+    setBulkTagsBusy(true);
+    try {
+      const { successCount, errorCount, error } = await contactsService.bulkEditTags(ids, mode, tags);
+      if (error) {
+        (addToast || showToast)(error.message, 'error');
+        return;
+      }
+      if (successCount > 0) {
+        (addToast || showToast)(
+          mode === 'add'
+            ? `Tags adicionadas em ${successCount} contato(s).`
+            : `Tags removidas de ${successCount} contato(s).`,
+          'success'
+        );
+      }
+      if (errorCount > 0) {
+        (addToast || showToast)(`Falha em ${errorCount} contato(s) (sem permissão ou fora do seu acesso).`, 'error');
+      }
+      // A lista recarrega sozinha (cache invalidado); seleção permanece pra
+      // encadear outra ação em massa sobre os mesmos contatos
+      await queryClient.invalidateQueries({ queryKey: queryKeys.contacts.all });
+      setBulkTagsMode(null);
+    } finally {
+      setBulkTagsBusy(false);
+    }
   };
 
   // Bulk delete
@@ -668,6 +707,10 @@ export const useContactsController = () => {
     deleteWithDeals,
     setDeleteWithDeals,
     bulkDeleteConfirm,
+    bulkTagsMode,
+    setBulkTagsMode,
+    bulkTagsBusy,
+    confirmBulkTags,
     setBulkDeleteConfirm,
     formData,
     setFormData,

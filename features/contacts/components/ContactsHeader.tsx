@@ -1,5 +1,6 @@
 import React from 'react';
 import { Search, Filter, Plus, Download } from 'lucide-react';
+import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
 
 interface ContactsHeaderProps {
   viewMode: 'people' | 'companies';
@@ -48,6 +49,7 @@ export const ContactsHeader: React.FC<ContactsHeaderProps> = ({
   openCreateModal,
   openImportExportModal,
 }) => {
+  const podeCriar = useMyActionPermissions().contacts.create;
   return (
     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 max-md:gap-3">
       <div>
@@ -108,21 +110,27 @@ export const ContactsHeader: React.FC<ContactsHeaderProps> = ({
             <Download size={20} aria-hidden="true" />
           </button>
         )}
-        <button
-          onClick={openCreateModal}
-          className="max-md:hidden bg-primary-600 hover:bg-primary-500 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-primary-600/20"
-        >
-          <Plus size={18} /> {viewMode === 'people' ? 'Novo Contato' : 'Nova Empresa'}
-        </button>
-        {/* Celular: criar vira o botão "+" compacto, no padrão do board */}
-        <button
-          onClick={openCreateModal}
-          aria-label={viewMode === 'people' ? 'Novo contato' : 'Nova empresa'}
-          title={viewMode === 'people' ? 'Novo contato' : 'Nova empresa'}
-          className="md:hidden h-[38px] w-[38px] flex items-center justify-center rounded-lg bg-primary-600 hover:bg-primary-500 text-white shadow-lg shadow-primary-600/20 active:scale-95 transition-all"
-        >
-          <Plus size={20} aria-hidden="true" />
-        </button>
+        {/* Sem permissão de criar contatos (Equipe > permissões), os botões nem
+            aparecem — e o banco recusa de qualquer jeito (trigger vis_guard) */}
+        {podeCriar && (
+          <>
+            <button
+              onClick={openCreateModal}
+              className="max-md:hidden bg-primary-600 hover:bg-primary-500 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-primary-600/20"
+            >
+              <Plus size={18} /> {viewMode === 'people' ? 'Novo Contato' : 'Nova Empresa'}
+            </button>
+            {/* Celular: criar vira o botão "+" compacto, no padrão do board */}
+            <button
+              onClick={openCreateModal}
+              aria-label={viewMode === 'people' ? 'Novo contato' : 'Nova empresa'}
+              title={viewMode === 'people' ? 'Novo contato' : 'Nova empresa'}
+              className="md:hidden h-[38px] w-[38px] flex items-center justify-center rounded-lg bg-primary-600 hover:bg-primary-500 text-white shadow-lg shadow-primary-600/20 active:scale-95 transition-all"
+            >
+              <Plus size={20} aria-hidden="true" />
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

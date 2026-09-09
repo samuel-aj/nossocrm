@@ -107,7 +107,8 @@ interface CRMContextType {
   activeBoardId: string;
   setActiveBoardId: (id: string) => void;
   addBoard: (board: Omit<Board, 'id' | 'createdAt'>) => Promise<Board | null>;
-  updateBoard: (id: string, updates: Partial<Board>) => Promise<void>;
+  /** Devolve true quando gravou; false em erro (quem chama pode avisar o usuário). */
+  updateBoard: (id: string, updates: Partial<Board>) => Promise<boolean>;
   deleteBoard: (id: string) => Promise<void>;
 
   // Deals

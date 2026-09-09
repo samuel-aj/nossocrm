@@ -4,7 +4,7 @@ import { usePersistedState } from '@/hooks/usePersistedState';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, KanbanSquare, Loader2, MessageCircle, MessageSquareDot, Pencil, Plus, Search, Tag, Trash2, User, UserPlus, Users, X } from 'lucide-react';
 import { useCRM } from '@/context/CRMContext';
@@ -649,6 +649,25 @@ export const ChatsPage: React.FC = () => {
     },
     staleTime: 60_000,
   });
+  // DEEP LINK: /chats?contact=<id> (botão "abrir conversa" da aba Contatos).
+  // Espera a lista carregar, seleciona a conversa daquele contato e limpa o
+  // parâmetro pra não reabrir sozinho ao voltar pra página.
+  const searchParams = useSearchParams();
+  const deepLinkFeito = useRef(false);
+  useEffect(() => {
+    if (deepLinkFeito.current) return;
+    const contactId = searchParams?.get('contact');
+    if (!contactId) {
+      deepLinkFeito.current = true;
+      return;
+    }
+    if (chatList.length === 0) return; // lista ainda carregando
+    deepLinkFeito.current = true;
+    const alvo = chatList.find(i => i.contactId === contactId);
+    if (alvo) setSelected(alvo);
+    window.history.replaceState({}, '', '/chats');
+  }, [searchParams, chatList]);
+
   const labels = useMemo(() => labelsQ.data?.labels ?? [], [labelsQ.data]);
   const labelById = useMemo(() => new Map(labels.map(l => [l.id, l])), [labels]);
 

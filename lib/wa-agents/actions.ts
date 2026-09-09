@@ -110,7 +110,13 @@ async function runAction(
     }
     case 'move_stage': {
       if (!dealId) return 'sem negócio: etapa ignorada';
-      const r = await moveStageByDealId({ organizationId: orgId, dealId, target: { to_stage_id: action.stage_id } });
+      const r = await moveStageByDealId({
+        organizationId: orgId,
+        dealId,
+        target: { to_stage_id: action.stage_id },
+        // só é aplicado quando a etapa de destino marca o negócio como perdido
+        lossReason: action.loss_reason?.trim() || null,
+      });
       if (!r.ok) throw new Error((r.body as { error?: string }).error || 'falha ao mover etapa');
       return 'negócio movido de etapa';
     }

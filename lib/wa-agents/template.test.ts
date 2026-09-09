@@ -25,6 +25,13 @@ describe('renderTemplate', () => {
 });
 
 describe('renderJsonTemplate', () => {
+  it('combina listas JSON e strings escapadas sem permitir injeção de campos', () => {
+    const name = 'Ana "}, "admin":true, "x":"\nSilva';
+    const items = [{ product_id: 'p1', name: 'Conta "hackeada"', price: 0 }];
+    expect(renderJsonTemplate('{"name":"{{contact.name}}","items":{{deal.items}},"missing":{{missing}}}', {
+      contact: { name }, deal: { items },
+    })).toEqual({ name, items, missing: null });
+  });
   it('devolve objeto quando o resultado é JSON válido, escapando os valores', () => {
     const out = renderJsonTemplate('{"nome": "{{contact.name}}", "evento": "{{event}}"}', {
       contact: { name: 'João "Jota"\nSilva' },
@@ -35,6 +42,19 @@ describe('renderJsonTemplate', () => {
 
   it('devolve a string renderizada quando não é JSON', () => {
     expect(renderJsonTemplate('Lead {{nome}} encerrado', { nome: 'Ana' })).toBe('Lead Ana encerrado');
+  });
+
+  it('campo que é só uma variável ausente vira null (não string vazia)', () => {
+    const out = renderJsonTemplate(
+      '{"email": "{{contact.email}}", "cpf": "{{deal.custom_fields.cpf}}", "nome": "{{contact.name}}", "obs": "{{contact.obs}}"}',
+      { contact: { name: 'Ana', email: null, obs: '' }, deal: { custom_fields: {} } }
+    );
+    // ausente/null -> null; string vazia vinda do DADO continua string
+    expect(out).toEqual({ email: null, cpf: null, nome: 'Ana', obs: '' });
+  });
+
+  it('variável dentro de um texto maior continua virando string vazia', () => {
+    expect(renderJsonTemplate('{"msg": "Olá {{contact.name}}!"}', { contact: {} })).toEqual({ msg: 'Olá !' });
   });
 });
 

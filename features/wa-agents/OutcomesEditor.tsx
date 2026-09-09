@@ -171,6 +171,13 @@ function findStage(options: WaAgentOptions | undefined, stageId: string) {
   return null;
 }
 
+/** A etapa é a etapa de PERDA do quadro dela? (mover pra lá marca o negócio como perdido) */
+function isLossStage(options: WaAgentOptions | undefined, stageId: string): boolean {
+  if (!stageId) return false;
+  const board = (options?.boards ?? []).find((b) => b.stages.some((s) => s.id === stageId));
+  return !!board?.lost_stage_id && board.lost_stage_id === stageId;
+}
+
 function hostOf(url: string): string {
   try {
     return new URL(url).host;
@@ -203,7 +210,8 @@ export function describeAction(
       return action.title ? `registrar nota "${action.title}"` : 'registrar nota no negócio';
     case 'move_stage': {
       const stage = findStage(options, action.stage_id);
-      return `mover para a etapa ${stage ? stage.label : 'não escolhida'}`;
+      const motivo = action.loss_reason?.trim();
+      return `mover para a etapa ${stage ? stage.label : 'não escolhida'}${motivo ? ` (motivo: ${motivo})` : ''}`;
     }
     case 'add_tag':
       return `adicionar rótulo ${action.tag.trim() ? `"${action.tag.trim()}"` : 'sem nome'}`;
@@ -451,13 +459,35 @@ function ActionFields({
       );
     case 'move_stage':
       return (
-        <StageSelect
-          id={`${idPrefix}-stage`}
-          value={action.stage_id}
-          onChange={(stage_id) => onChange({ ...action, stage_id })}
-          options={options}
-          ariaLabel="Etapa de destino"
-        />
+        <div className="space-y-2">
+          <StageSelect
+            id={`${idPrefix}-stage`}
+            value={action.stage_id}
+            onChange={(stage_id) =>
+              // trocar pra uma etapa que não é de perda descarta o motivo
+              onChange({ ...action, stage_id, ...(isLossStage(options, stage_id) ? {} : { loss_reason: undefined }) })
+            }
+            options={options}
+            ariaLabel="Etapa de destino"
+          />
+          {isLossStage(options, action.stage_id) ? (
+            <div className="space-y-1">
+              <VarField
+                id={`${idPrefix}-move-loss`}
+                value={action.loss_reason ?? ''}
+                onChange={(loss) => onChange({ ...action, loss_reason: loss || undefined })}
+                placeholder="Motivo da perda (opcional)"
+                maxLength={200}
+                ariaLabel="Motivo da perda"
+                aiVars={aiVars}
+                onAiVarsChange={onAiVarsChange}
+              />
+              <p className={HELP_CLASS}>
+                Esta é a etapa de perda do quadro: o negócio será marcado como perdido com este motivo.
+              </p>
+            </div>
+          ) : null}
+        </div>
       );
     case 'add_tag':
       return (

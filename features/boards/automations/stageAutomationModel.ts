@@ -333,6 +333,7 @@ export const STAGE_WEBHOOK_VARIABLE_GROUPS: VariableGroup[] = [
     vars: [
       { key: '{{contact.name}}', description: 'Nome' },
       { key: '{{contact.phone}}', description: 'Telefone' },
+      { key: '{{contact.email}}', description: 'E-mail' },
       { key: '{{contact.id}}', description: 'ID do contato' },
     ],
   },

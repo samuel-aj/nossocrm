@@ -141,6 +141,9 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
   const [stages, setStages] = useState<BoardStage[]>([]);
   // Objetivo (meta) do board: opcional. null = sem objetivo (o cabeçalho de estratégia não aparece).
   const [goal, setGoal] = useState<BoardGoal | null>(null);
+  // "Remover estratégia" clicado: ao salvar, apaga TUDO da estratégia no banco
+  // (objetivo, agente do board e regras de entrada), não só o objetivo.
+  const [clearStrategy, setClearStrategy] = useState(false);
   const [isLifecycleModalOpen, setIsLifecycleModalOpen] = useState(false);
   // Modal da etapa (por cima deste): solta o foco preso enquanto estiver aberto
   const [isStageModalOpen, setIsStageModalOpen] = useState(false);
@@ -166,6 +169,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
         setSelectedTemplate(editingBoard.template || '');
         setStages(editingBoard.stages);
         setGoal(editingBoard.goal ?? null);
+        setClearStrategy(false);
       } else {
         // Restore draft (so we can close modal immediately on save and re-open on error without losing inputs)
         try {
@@ -196,6 +200,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
         }
         // Reset for new board
         setGoal(null);
+        setClearStrategy(false);
         setName('');
         setBoardKey('');
         setKeyTouched(false);
@@ -343,6 +348,9 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
       goal: (goal
         ? { ...goal, description: goal.description.trim() || goal.kpi.trim() || 'Objetivo do board' }
         : null) as any,
+      // "Remover estratégia": apaga também o agente do board e as regras de
+      // entrada (sem o clique, esses campos nem são enviados e ficam como estão)
+      ...(clearStrategy ? { agentPersona: null, entryTrigger: '' } : {}),
       isDefault: false
     };
     // Persist draft before closing (so we can restore on error)
@@ -530,22 +538,34 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                     <div>
                       <p className="text-sm font-medium text-slate-800 dark:text-slate-200">Objetivo do board</p>
                       <p className="text-xs text-slate-500 dark:text-slate-400">
-                        {goal ? 'A meta aparece no topo do kanban com o progresso automático.' : 'Opcional. Sem objetivo, nada aparece no topo do kanban.'}
+                        {goal
+                          ? 'A meta aparece no topo do kanban com o progresso automático.'
+                          : clearStrategy
+                            ? 'Ao salvar, a estratégia inteira (objetivo, agente e regras de entrada) será apagada.'
+                            : 'Opcional. Sem objetivo, nada aparece no topo do kanban.'}
                       </p>
                     </div>
                   </div>
                   {goal ? (
                     <button
                       type="button"
-                      onClick={() => setGoal(null)}
+                      onClick={() => {
+                        // Remover daqui apaga a estratégia COMPLETA ao salvar
+                        setGoal(null);
+                        setClearStrategy(true);
+                      }}
+                      title="Ao salvar, apaga objetivo, agente do board e regras de entrada"
                       className="inline-flex items-center gap-1 text-xs font-medium text-red-600 dark:text-red-400 hover:underline"
                     >
-                      <Trash2 size={13} aria-hidden="true" /> Remover objetivo
+                      <Trash2 size={13} aria-hidden="true" /> Remover estratégia
                     </button>
                   ) : (
                     <button
                       type="button"
-                      onClick={() => setGoal({ description: '', kpi: '', targetValue: '', type: 'number' })}
+                      onClick={() => {
+                        setGoal({ description: '', kpi: '', targetValue: '', type: 'number' });
+                        setClearStrategy(false);
+                      }}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-primary-700 dark:text-primary-300 hover:bg-primary-500/10 transition-colors focus-visible-ring"
                     >
                       <Plus size={14} aria-hidden="true" /> Adicionar objetivo

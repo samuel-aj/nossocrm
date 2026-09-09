@@ -82,10 +82,32 @@ export function renderTemplate(template: string, vars: Record<string, unknown>):
  */
 export function renderJsonTemplate(template: string, vars: Record<string, unknown>): unknown {
   if (!template) return '';
-  const escaped = template.replace(VAR_RE, (_m, path: string) => {
-    const text = toText(getPath(vars, path.trim()));
-    // JSON.stringify devolve a string entre aspas; tiramos as aspas externas
-    return JSON.stringify(text).slice(1, -1);
+  // Campo cujo valor é SÓ uma variável ("{{a.b}}") e que não existe no payload
+  // vira null, não "": integrações costumam validar o formato do campo (e-mail,
+  // CPF) e recusam string vazia, enquanto null significa "não informado".
+  // Valor presente — inclusive string vazia vinda do dado — segue como string.
+  const QUOTED_VAR_RE = new RegExp(`"${VAR_PATTERN}"`, 'g');
+  const comNulos = template.replace(QUOTED_VAR_RE, (m, path: string) => {
+    const value = getPath(vars, path.trim());
+    return value === null || value === undefined ? 'null' : m;
+  });
+  let insideString = false;
+  let escapedCharacter = false;
+  let cursor = 0;
+  const escaped = comNulos.replace(VAR_RE, (match, path: string, offset: number) => {
+    // Contexto do modelo original, nunca do dado interpolado. Fora de aspas,
+    // listas/objetos permanecem JSON; dentro delas mantemos o contrato de texto.
+    for (; cursor < offset; cursor++) {
+      const char = comNulos[cursor];
+      if (escapedCharacter) { escapedCharacter = false; continue; }
+      if (insideString && char === '\\') { escapedCharacter = true; continue; }
+      if (char === '"') insideString = !insideString;
+    }
+    cursor = offset + match.length;
+    const value = getPath(vars, path.trim());
+    return insideString
+      ? JSON.stringify(toText(value)).slice(1, -1)
+      : JSON.stringify(value ?? null);
   });
   try {
     return JSON.parse(escaped);

@@ -11,6 +11,8 @@ import { useActivities } from '@/lib/query/hooks/useActivitiesQuery';
 import { useOrgMembers, useOrgUsers } from '@/lib/query/hooks';
 import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
+import { useSettings } from '@/context/settings/SettingsContext';
+import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
 
 type QuickAddType = 'CALL' | 'MEETING' | 'EMAIL';
 
@@ -35,6 +37,12 @@ interface QualificationViewProps {
   handleQuickAddActivity: (dealId: string, type: QuickAddType, dealTitle: string) => void;
   /** Keyboard-accessible handler to move a deal to a new stage */
   onMoveDealToStage?: (dealId: string, newStageId: string) => void;
+  /** Seleção em massa ("Selecionar vários"), igual ao kanban: checkboxes por
+   *  linha, selecionar todos (aba Todos) e por grupo (abas agrupadas). */
+  selectionMode?: boolean;
+  selectedDealIds?: string[];
+  onToggleDealSelection?: (dealId: string) => void;
+  onToggleManySelection?: (dealIds: string[]) => void;
 }
 
 /** Total por etapa no cabeçalho do grupo, sem centavos (é um somatório de
@@ -122,6 +130,10 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
   setOpenActivityMenuId,
   handleQuickAddActivity,
   onMoveDealToStage,
+  selectionMode = false,
+  selectedDealIds = [],
+  onToggleDealSelection,
+  onToggleManySelection,
 }) => {
   const [activeTab, setActiveTab] = useState<ListTab>('todos');
   // Grupos recolhidos (por id da etapa); todos abertos por padrão.
@@ -141,9 +153,10 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
   const [openStageMenuId, setOpenStageMenuId] = useState<string | null>(null);
   const handleToggleStageMenu = useCallback((dealId: string) => {
     setOpenStageMenuId((prev) => (prev === dealId ? null : dealId));
-    // Abrir um menu fecha o outro: os dois saem da mesma linha e ficariam
+    // Abrir um menu fecha os outros: saem da mesma linha e ficariam
     // sobrepostos na tela.
     setOpenOwnerMenuId(null);
+    setOpenTagsMenuId(null);
   }, []);
   const handleCloseStageMenu = useCallback(() => setOpenStageMenuId(null), []);
 
@@ -152,8 +165,18 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
   const handleToggleOwnerMenu = useCallback((dealId: string) => {
     setOpenOwnerMenuId((prev) => (prev === dealId ? null : dealId));
     setOpenStageMenuId(null);
+    setOpenTagsMenuId(null);
   }, []);
   const handleCloseOwnerMenu = useCallback(() => setOpenOwnerMenuId(null), []);
+
+  // Dropdown de TAGS na própria célula (adicionar/remover, como estágio/responsável).
+  const [openTagsMenuId, setOpenTagsMenuId] = useState<string | null>(null);
+  const handleToggleTagsMenu = useCallback((dealId: string) => {
+    setOpenTagsMenuId((prev) => (prev === dealId ? null : dealId));
+    setOpenStageMenuId(null);
+    setOpenOwnerMenuId(null);
+  }, []);
+  const handleCloseTagsMenu = useCallback(() => setOpenTagsMenuId(null), []);
 
   const handleSort = useCallback(
     (column: SortColumn) => {
@@ -209,6 +232,47 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
     profile?.first_name ||
     (profile?.email || '').split('@')[0] ||
     'Usuário';
+
+  // Gravar as tags do lead editadas pelo dropdown da célula. A permissão de
+  // EDITAR cards vale (o trigger do banco recusa sem ela; a célula nem abre).
+  const podeEditarCards = useMyActionPermissions().deals.edit;
+  const { availableTags, addTag } = useSettings();
+  const handleChangeTags = useCallback(
+    (dealId: string, tags: string[]) => {
+      updateDeal(dealId, { tags });
+      // Tag digitada que ainda não existe entra no catálogo da organização
+      // (mesmo comportamento do card do lead), pra aparecer nas próximas listas
+      const conhecidas = new Set((availableTags || []).map(t => t.toLowerCase()));
+      for (const t of tags) {
+        if (!conhecidas.has(t.toLowerCase())) void addTag(t);
+      }
+    },
+    [updateDeal, availableTags, addTag]
+  );
+
+  // Sugestões do dropdown: o CATÁLOGO de tags da organização (Configurações >
+  // Tags, o mesmo do card do lead) + tags já usadas nos leads visíveis do quadro
+  const tagSuggestions = useMemo(() => {
+    const vistas = new Set<string>();
+    const lista: string[] = [];
+    for (const t of availableTags || []) {
+      const chave = t.toLowerCase();
+      if (!vistas.has(chave)) {
+        vistas.add(chave);
+        lista.push(t);
+      }
+    }
+    for (const d of filteredDeals) {
+      for (const t of d.tags) {
+        const chave = t.toLowerCase();
+        if (!vistas.has(chave)) {
+          vistas.add(chave);
+          lista.push(t);
+        }
+      }
+    }
+    return lista.sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [availableTags, filteredDeals]);
 
   const handleChangeOwner = useCallback(
     (dealId: string, ownerId: string) => {
@@ -339,7 +403,10 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
     { id: 'sql', label: 'SQL', count: viewData.sqlCount },
   ];
 
-  const totalColumns = 7 + customFieldDefinitions.length;
+  // Conjunto pra lookup O(1) por linha (a lista pode ser grande)
+  const selectedSet = useMemo(() => new Set(selectedDealIds), [selectedDealIds]);
+
+  const totalColumns = (selectionMode ? 1 : 0) + 7 + customFieldDefinitions.length;
   // Sem etapa Qualificado no funil (ex.: board de pós-venda) a aba SQL não
   // tem o que mostrar; o aviso fala de leads, não de configuração de etapas.
   const sqlUnavailable = activeTab === 'sql' && !viewData.qualifiedStage;
@@ -405,6 +472,8 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
             className="w-full table-fixed max-md:min-w-[50rem] text-left text-sm border-collapse"
           >
             <colgroup>
+              {/* Coluna do checkbox de seleção múltipla (só no modo seleção) */}
+              {selectionMode && <col className="w-10" />}
               {/* Larguras equilibradas: antes o Negócio levava 24% (vão
                   enorme até a Tag, já que título de lead é curto) e a última
                   coluna ficava espremida. A primeira coluna guarda o ícone
@@ -427,6 +496,21 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
             {activeTab === 'todos' && (
               <thead className="sticky top-0 z-10 border-b border-slate-200/80 bg-primary-50/50 backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.04]">
                 <tr>
+                  {selectionMode && (
+                    <th scope="col" className="px-2 py-3 text-center">
+                      <input
+                        type="checkbox"
+                        checked={
+                          sortedFilteredDeals.length > 0 &&
+                          sortedFilteredDeals.every((d) => selectedSet.has(d.id))
+                        }
+                        onChange={() => onToggleManySelection?.(sortedFilteredDeals.map((d) => d.id))}
+                        aria-label="Selecionar todos os leads visíveis"
+                        title="Selecionar todos"
+                        className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500 cursor-pointer align-middle"
+                      />
+                    </th>
+                  )}
                   <th scope="col" className="px-2 py-3">
                     <span className="sr-only">Próxima atividade</span>
                   </th>
@@ -526,6 +610,15 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                     onToggleOwnerMenu={handleToggleOwnerMenu}
                     onCloseOwnerMenu={handleCloseOwnerMenu}
                     onChangeOwner={handleChangeOwner}
+                    canEditTags={podeEditarCards}
+                    tagSuggestions={tagSuggestions}
+                    isTagsMenuOpen={openTagsMenuId === deal.id}
+                    onToggleTagsMenu={handleToggleTagsMenu}
+                    onCloseTagsMenu={handleCloseTagsMenu}
+                    onChangeTags={handleChangeTags}
+                    selectionMode={selectionMode}
+                    selected={selectedSet.has(deal.id)}
+                    onToggleSelect={onToggleDealSelection}
                   />
                 ))}
               {sortedGroups.map((group, groupIndex) => {
@@ -544,11 +637,25 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                           aria-hidden="true"
                           className={`absolute inset-y-0 left-0 w-[3px] ${group.stage.color || 'bg-slate-500'}`}
                         />
+                        <div className="flex w-full items-center gap-2">
+                        {/* Checkbox do GRUPO (modo seleção): marca/desmarca todos
+                            os leads da etapa, igual ao checkbox da coluna no kanban */}
+                        {selectionMode && group.deals.length > 0 && (
+                          <input
+                            type="checkbox"
+                            checked={group.deals.every((d) => selectedSet.has(d.id))}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={() => onToggleManySelection?.(group.deals.map((d) => d.id))}
+                            aria-label={`Selecionar todos os leads de ${group.stage.label}`}
+                            title="Selecionar todos da etapa"
+                            className="w-4 h-4 shrink-0 rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500 cursor-pointer"
+                          />
+                        )}
                         <button
                           type="button"
                           onClick={() => toggleGroup(group.stage.id)}
                           aria-expanded={!isCollapsed}
-                          className="flex w-full items-center gap-2 rounded-md py-0.5 text-left transition-colors hover:text-slate-900 dark:hover:text-white focus-visible-ring"
+                          className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-0.5 text-left transition-colors hover:text-slate-900 dark:hover:text-white focus-visible-ring"
                         >
                           <ChevronDown
                             size={14}
@@ -571,6 +678,7 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                             {formatTotalBRL(group.deals.reduce((sum, d) => sum + (d.value || 0), 0))}
                           </span>
                         </button>
+                        </div>
                       </td>
                     </tr>
                     {!isCollapsed &&
@@ -602,6 +710,15 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
                           onToggleOwnerMenu={handleToggleOwnerMenu}
                           onCloseOwnerMenu={handleCloseOwnerMenu}
                           onChangeOwner={handleChangeOwner}
+                          canEditTags={podeEditarCards}
+                          tagSuggestions={tagSuggestions}
+                          isTagsMenuOpen={openTagsMenuId === deal.id}
+                          onToggleTagsMenu={handleToggleTagsMenu}
+                          onCloseTagsMenu={handleCloseTagsMenu}
+                          onChangeTags={handleChangeTags}
+                          selectionMode={selectionMode}
+                          selected={selectedSet.has(deal.id)}
+                          onToggleSelect={onToggleDealSelection}
                         />
                       ))}
                   </React.Fragment>

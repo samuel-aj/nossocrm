@@ -765,3 +765,23 @@ export const usePrefetchContact = () => {
     });
   };
 };
+
+/**
+ * Leads (deals) dos contatos visíveis na lista, numa consulta só.
+ * Alimenta o botão "abrir o card do lead" de cada linha: com um lead vai
+ * direto, com vários abre o menu para escolher. Chave depende dos ids, então
+ * trocar de página/filtro busca de novo (e o cache evita repetir).
+ */
+export const useDealsForContacts = (contactIds: string[]) => {
+  const ids = [...contactIds].sort();
+  return useQuery({
+    queryKey: [...queryKeys.contacts.all, 'deals', ids],
+    queryFn: async () => {
+      const { data, error } = await contactsService.dealsForContacts(ids);
+      if (error) throw error;
+      return data;
+    },
+    enabled: ids.length > 0,
+    staleTime: 60 * 1000,
+  });
+};

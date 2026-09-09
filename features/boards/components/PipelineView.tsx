@@ -15,6 +15,7 @@ import { CheckCircle2, XCircle, Trash2, X, Tag, Pencil, ArrowRightLeft, Archive 
 import { DealView, CustomFieldDefinition, Board, BoardStage } from '@/types';
 import { ExportTemplateModal } from './Modals/ExportTemplateModal';
 import { useAuth } from '@/context/AuthContext';
+import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
 import PageLoader from '@/components/PageLoader';
 import { UserRole } from '@/types/constants';
 
@@ -152,6 +153,8 @@ interface PipelineViewProps {
   toggleDealSelection: (dealId: string) => void;
   clearDealSelection: () => void;
   toggleStageSelection: (stageId: string) => void;
+  /** Seleciona/deseleciona um grupo de leads de uma vez (lista: selecionar todos/grupo) */
+  toggleManySelection: (dealIds: string[]) => void;
   bulkMoveToStage: (stageId: string, lossReason?: string, lossCategory?: 'qualified' | 'disqualified') => void;
   bulkEditTags: (mode: 'add' | 'remove', tag: string) => void;
   bulkSetCustomField: (key: string, value: string) => void;
@@ -321,6 +324,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   toggleDealSelection,
   clearDealSelection,
   toggleStageSelection,
+  toggleManySelection,
   bulkMoveToStage,
   bulkEditTags,
   bulkSetCustomField,
@@ -388,6 +392,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
 }) => {
   const { profile } = useAuth();
   const isAdmin = profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN;
+  const minhasAcoes = useMyActionPermissions();
   const [isExportModalOpen, setIsExportModalOpen] = React.useState(false);
   // Modo Automatizar (kanban): colunas mostram o que dispara ao entrar na etapa
   const [automationMode, setAutomationMode] = React.useState(false);
@@ -416,9 +421,12 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   // Visão padrão ("Em Aberto") esconde as COLUNAS de ganho/perdido do Kanban —
   // elas só aparecem ao filtrar por Ganhos/Perdidos/Todos. Marcar ganho/perdido
   // no dia a dia é pelas zonas flutuantes do drag (ou trocando o filtro).
+  // EXCEÇÃO: no modo Automatizar TODAS as etapas aparecem, senão não haveria
+  // como criar automação ao entrar em Ganho ou Perdido (que é justamente onde
+  // moram avisos de contrato fechado e de perda).
   const kanbanStages = !activeBoard
     ? []
-    : statusFilter === 'open'
+    : statusFilter === 'open' && !automationActive
       ? activeBoard.stages.filter(
           (s) => s.id !== activeBoard.wonStageId && s.id !== activeBoard.lostStageId
         )
@@ -534,8 +542,8 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
           />
 
           {/* Barra de ações da seleção múltipla — no TOPO, estilo Kommo.
-              Só no kanban, a única view com UI de seleção (checkboxes). */}
-          {selectionMode && viewMode === 'kanban' && !automationActive && (
+              Vale pro kanban e pra lista (as duas têm checkboxes). */}
+          {selectionMode && !automationActive && (
             <div className="flex items-center gap-4 px-4 py-2 mb-4 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50/80 dark:bg-white/5 backdrop-blur-sm max-md:flex-wrap max-md:gap-x-3 max-md:gap-y-1.5">
               <button
                 type="button"
@@ -553,14 +561,17 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
               >
                 <Pencil size={13} /> alterar o campo
               </button>
-              <button
-                type="button"
-                disabled={selectedDealIds.length === 0}
-                onClick={() => setBulkDeleteOpen(true)}
-                className={`${selActionClass} hover:!text-red-500 dark:hover:!text-red-400`}
-              >
-                <Trash2 size={13} /> excluir
-              </button>
+              {/* Sem permissão de excluir cards, o botão some (o banco recusa de qualquer jeito) */}
+              {minhasAcoes.deals.delete && (
+                <button
+                  type="button"
+                  disabled={selectedDealIds.length === 0}
+                  onClick={() => setBulkDeleteOpen(true)}
+                  className={`${selActionClass} hover:!text-red-500 dark:hover:!text-red-400`}
+                >
+                  <Trash2 size={13} /> excluir
+                </button>
+              )}
               <button
                 type="button"
                 disabled={selectedDealIds.length === 0}
@@ -629,6 +640,10 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                 setOpenActivityMenuId={setOpenActivityMenuId}
                 handleQuickAddActivity={handleQuickAddActivity}
                 onMoveDealToStage={handleMoveDealToStage}
+                selectionMode={selectionMode}
+                selectedDealIds={selectedDealIds}
+                onToggleDealSelection={toggleDealSelection}
+                onToggleManySelection={toggleManySelection}
               />
             )}
           </div>

@@ -1,7 +1,10 @@
 import React from 'react';
 import { useRouter } from 'next/navigation';
-import { Trash2, X } from 'lucide-react';
+import { Trash2, X, Tag as TagIcon } from 'lucide-react';
 import { useContactsController } from './hooks/useContactsController';
+import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
+import { useDealsForContacts } from '@/lib/query/hooks/useContactsQuery';
+import { useBoards } from '@/lib/query/hooks/useBoardsQuery';
 import { contactsService } from '@/lib/supabase/contacts';
 import { ContactsHeader } from './components/ContactsHeader';
 import { ContactsFilters } from './components/ContactsFilters';
@@ -12,6 +15,7 @@ import { ContactFormModal } from './components/ContactFormModal';
 import { CompanyFormModal } from './components/CompanyFormModal';
 import { SelectBoardModal } from './components/SelectBoardModal';
 import { PaginationControls } from './components/PaginationControls';
+import { BulkTagsModal } from './components/BulkTagsModal';
 import { ContactsImportExportModal } from './components/ContactsImportExportModal';
 import ConfirmModal from '@/components/ConfirmModal';
 
@@ -21,6 +25,7 @@ import ConfirmModal from '@/components/ConfirmModal';
  */
 export const ContactsPage: React.FC = () => {
     const controller = useContactsController();
+    const minhasAcoes = useMyActionPermissions();
 
     // DEEP LINK: /contacts?contactId=... (vindo do Kanban, Inbox, Timeline)
     // abre o CONTATO direto, não só a aba. Roda uma vez, quando a lista chega;
@@ -83,6 +88,23 @@ export const ContactsPage: React.FC = () => {
         router.push(`/boards?deal=${dealId}`);
     };
 
+    // Leads dos contatos da página atual, numa consulta só (botão "abrir card")
+    const contatosVisiveis = React.useMemo(
+        () => controller.filteredContacts.map(c => c.id),
+        [controller.filteredContacts]
+    );
+    const { data: dealsByContact } = useDealsForContacts(contatosVisiveis);
+    const { data: boards = [] } = useBoards();
+    const nomeDoQuadro = React.useCallback(
+        (boardId: string | null) => boards.find(b => b.id === boardId)?.name ?? 'Quadro removido',
+        [boards]
+    );
+    // Chat do contato: a página Chats abre a conversa por ?contact=
+    const goToChat = React.useCallback(
+        (contactId: string) => router.push(`/chats?contact=${contactId}`),
+        [router]
+    );
+
     return (
         <div className="space-y-6 p-8 max-md:p-4 max-w-[1600px] mx-auto">
             <ContactsHeader
@@ -142,13 +164,36 @@ export const ContactsPage: React.FC = () => {
                         </button>
                     </div>
                     <div className="flex items-center gap-2">
-                        <button
-                            onClick={() => controller.setBulkDeleteConfirm(true)}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-sm font-medium rounded-lg transition-colors"
-                        >
-                            <Trash2 size={14} />
-                            Excluir selecionados
-                        </button>
+                        {/* Tags em massa: só na aba de pessoas (empresa não tem tag) e
+                            com permissão de EDITAR contatos */}
+                        {controller.viewMode === 'people' && minhasAcoes.contacts.edit && (
+                            <>
+                                <button
+                                    onClick={() => controller.setBulkTagsMode('add')}
+                                    className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-white/10 border border-primary-200 dark:border-primary-800 text-primary-700 dark:text-primary-300 text-sm font-medium rounded-lg hover:bg-primary-100 dark:hover:bg-white/20 transition-colors"
+                                >
+                                    <TagIcon size={14} />
+                                    Adicionar tags
+                                </button>
+                                <button
+                                    onClick={() => controller.setBulkTagsMode('remove')}
+                                    className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-white/10 border border-primary-200 dark:border-primary-800 text-primary-700 dark:text-primary-300 text-sm font-medium rounded-lg hover:bg-primary-100 dark:hover:bg-white/20 transition-colors"
+                                >
+                                    <TagIcon size={14} />
+                                    Remover tags
+                                </button>
+                            </>
+                        )}
+                        {/* Sem permissão de excluir contatos, o botão some (o banco recusa de qualquer jeito) */}
+                        {minhasAcoes.contacts.delete && (
+                            <button
+                                onClick={() => controller.setBulkDeleteConfirm(true)}
+                                className="flex items-center gap-2 px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-sm font-medium rounded-lg transition-colors"
+                            >
+                                <Trash2 size={14} />
+                                Excluir selecionados
+                            </button>
+                        )}
                     </div>
                 </div>
             )}
@@ -167,6 +212,10 @@ export const ContactsPage: React.FC = () => {
                 convertContactToDeal={controller.convertContactToDeal}
                 openEditModal={controller.openEditModal}
                 setDeleteId={controller.setDeleteId}
+                dealsByContact={dealsByContact}
+                getBoardName={nomeDoQuadro}
+                onOpenChat={(contact) => goToChat(contact.id)}
+                onOpenDeal={goToDeal}
                 openEditCompanyModal={controller.openEditCompanyModal}
                 setDeleteCompanyId={controller.setDeleteCompanyId}
                 sortBy={controller.sortBy}
@@ -210,6 +259,18 @@ export const ContactsPage: React.FC = () => {
                 boards={controller.boards}
                 contactName={controller.contactForDeal?.name || ''}
             />
+
+            {controller.bulkTagsMode && (
+                <BulkTagsModal
+                    mode={controller.bulkTagsMode}
+                    count={controller.selectedIds.size}
+                    busy={controller.bulkTagsBusy}
+                    onClose={() => controller.setBulkTagsMode(null)}
+                    onConfirm={tags => {
+                        if (controller.bulkTagsMode) void controller.confirmBulkTags(controller.bulkTagsMode, tags);
+                    }}
+                />
+            )}
 
             <ConfirmModal
                 isOpen={!!controller.deleteId}

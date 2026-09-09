@@ -12,6 +12,8 @@ import {
 } from 'lucide-react';
 import { Board } from '@/types';
 import { useCRM } from '@/context/CRMContext';
+import { useToast } from '@/context/ToastContext';
+import ConfirmModal from '@/components/ConfirmModal';
 
 // Performance: reuse formatter instances.
 const BRL_CURRENCY_FORMATTER = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -28,7 +30,10 @@ interface BoardStrategyHeaderProps {
  */
 export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board }) => {
   const { updateBoard, setIsGlobalAIOpen, boards, deals } = useCRM();
+  const { addToast } = useToast();
   const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false);
   const [editedBoard, setEditedBoard] = useState(board);
 
   // Calculate Progress Automatically
@@ -109,13 +114,56 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
     return null;
   }
 
-  const handleSave = () => {
-    updateBoard(board.id, {
-      goal: editedBoard.goal,
-      agentPersona: editedBoard.agentPersona,
-      entryTrigger: editedBoard.entryTrigger,
+  const handleSave = async () => {
+    // Normaliza antes de gravar: campos só com espaços não contam, e uma seção
+    // toda vazia vira null (o service LIMPA as colunas no banco — apagar os
+    // textos e salvar é o jeito de excluir aquela parte da estratégia).
+    const g = editedBoard.goal;
+    const goal =
+      g && (g.description?.trim() || g.kpi?.trim() || g.targetValue?.trim())
+        ? {
+            description: g.description?.trim() || '',
+            kpi: g.kpi?.trim() || '',
+            targetValue: g.targetValue?.trim() || '',
+            type: g.type,
+          }
+        : null;
+    const p = editedBoard.agentPersona;
+    const agentPersona =
+      p && (p.name?.trim() || p.role?.trim() || p.behavior?.trim())
+        ? { name: p.name?.trim() || '', role: p.role?.trim() || '', behavior: p.behavior?.trim() || '' }
+        : null;
+
+    setIsSaving(true);
+    const ok = await updateBoard(board.id, {
+      goal,
+      agentPersona,
+      entryTrigger: editedBoard.entryTrigger?.trim() || '',
       nextBoardId: editedBoard.nextBoardId,
     });
+    setIsSaving(false);
+    if (!ok) {
+      // Editor continua aberto: nada digitado se perde
+      addToast('Não foi possível salvar a estratégia. Tente de novo.', 'error');
+      return;
+    }
+    addToast(goal || agentPersona ? 'Estratégia salva.' : 'Estratégia removida.', 'success');
+    setIsEditing(false);
+  };
+
+  // Apaga a estratégia COMPLETA do board: objetivo, agente do board (a persona
+  // nome/cargo/comportamento) e regras de entrada. Não tem relação com os
+  // Agentes de IA do WhatsApp, que ficam intactos. A confirmação é um modal do
+  // próprio CRM (ConfirmModal), não o alert do navegador.
+  const handleRemove = async () => {
+    setIsSaving(true);
+    const ok = await updateBoard(board.id, { goal: null, agentPersona: null, entryTrigger: '' });
+    setIsSaving(false);
+    if (!ok) {
+      addToast('Não foi possível remover a estratégia. Tente de novo.', 'error');
+      return;
+    }
+    addToast('Estratégia removida.', 'success');
     setIsEditing(false);
   };
 
@@ -136,7 +184,12 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
         {/* Edit Button - Only visible on hover */}
         {!isEditing && (
           <button
-            onClick={() => setIsEditing(true)}
+            onClick={() => {
+              // Sempre parte do board ATUAL: o estado inicial do useState fica
+              // defasado quando o board recarrega (o editor abria com valores velhos)
+              setEditedBoard(board);
+              setIsEditing(true);
+            }}
             className="absolute top-2 right-2 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:text-white dark:hover:bg-white/10 rounded-full transition-all opacity-0 group-hover/header:opacity-100"
             title="Editar Estratégia"
           >
@@ -164,18 +217,30 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
                   </p>
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
+                {hasStrategy && (
+                  <button
+                    onClick={() => setConfirmRemoveOpen(true)}
+                    disabled={isSaving}
+                    title="Apaga objetivo, agente do board e regras de entrada"
+                    className="px-3 py-1.5 text-xs font-medium text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 transition-colors disabled:opacity-50"
+                  >
+                    Remover estratégia
+                  </button>
+                )}
                 <button
                   onClick={handleCancel}
-                  className="px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors"
+                  disabled={isSaving}
+                  className="px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors disabled:opacity-50"
                 >
                   Cancelar
                 </button>
                 <button
                   onClick={handleSave}
-                  className="px-4 py-1.5 bg-primary-600 hover:bg-primary-700 text-white text-xs font-bold rounded-lg transition-colors"
+                  disabled={isSaving}
+                  className="px-4 py-1.5 bg-primary-600 hover:bg-primary-700 text-white text-xs font-bold rounded-lg transition-colors disabled:opacity-60"
                 >
-                  Salvar Alterações
+                  {isSaving ? 'Salvando...' : 'Salvar Alterações'}
                 </button>
               </div>
             </div>
@@ -440,6 +505,16 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
           </>
         )}
       </div>
+
+      <ConfirmModal
+        isOpen={confirmRemoveOpen}
+        onClose={() => setConfirmRemoveOpen(false)}
+        onConfirm={handleRemove}
+        title="Remover estratégia"
+        message="Objetivo, agente do board e regras de entrada serão apagados. Seus Agentes de IA do WhatsApp não têm relação com isso e continuam intactos."
+        confirmText="Remover"
+        variant="danger"
+      />
     </div>
   );
 };

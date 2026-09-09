@@ -53,6 +53,8 @@ export async function GET() {
     // null = organização usa os motivos padrão do sistema
     loss_reasons_qualified: (row.loss_reasons_qualified as string[] | null | undefined) ?? null,
     loss_reasons_disqualified: (row.loss_reasons_disqualified as string[] | null | undefined) ?? null,
+    // null = quadro abre em "Em aberto" (comportamento de sempre)
+    default_deal_status_filter: (row.default_deal_status_filter as string | null | undefined) ?? null,
   });
 }
 
@@ -82,6 +84,8 @@ const PatchSchema = z.object({
   inactive_leads_enabled: z.boolean().optional(),
   loss_reasons_qualified: LossReasonsSchema,
   loss_reasons_disqualified: LossReasonsSchema,
+  // Filtro com que o quadro abre; null volta ao padrão ("Em aberto")
+  default_deal_status_filter: z.union([z.enum(['open', 'won', 'lost', 'all']), z.null()]).optional(),
 }).strict();
 
 export async function PATCH(req: Request) {
@@ -110,6 +114,11 @@ export async function PATCH(req: Request) {
     const clean = sanitizeReasons(parsed.data.loss_reasons_disqualified ?? []);
     updates.loss_reasons_disqualified = clean.length > 0 ? clean : null;
   }
+  if (parsed.data.default_deal_status_filter !== undefined) {
+    // 'open' é o padrão do sistema: grava null pra não fixar o valor à toa
+    const v = parsed.data.default_deal_status_filter;
+    updates.default_deal_status_filter = v && v !== 'open' ? v : null;
+  }
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: 'Invalid payload' }, { status: 422 });
   }
@@ -125,6 +134,16 @@ export async function PATCH(req: Request) {
       { onConflict: 'organization_id' }
     );
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    // Banco ainda sem a coluna (migração pendente): mensagem clara em vez de
+    // "erro ao salvar" genérico
+    if (/default_deal_status_filter/i.test(error.message)) {
+      return NextResponse.json(
+        { error: 'Filtro padrão do quadro ainda não está habilitado neste banco (migração pendente).' },
+        { status: 503 }
+      );
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
   return NextResponse.json({ ok: true, ...updates });
 }

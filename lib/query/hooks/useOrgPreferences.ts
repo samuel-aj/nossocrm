@@ -7,10 +7,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 
+/** Filtro de status com que o quadro abre. */
+export type DealStatusFilter = 'open' | 'won' | 'lost' | 'all';
+
 interface OrgPreferences {
   inactive_leads_enabled: boolean;
   loss_reasons_qualified: string[] | null;
   loss_reasons_disqualified: string[] | null;
+  /** null = "open" (padrão do sistema) */
+  default_deal_status_filter: DealStatusFilter | null;
 }
 
 /**
@@ -58,6 +63,20 @@ export const useOrgPreferences = () => {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['orgPreferences'] }),
   });
 
+  const setDefaultDealStatusFilter = useMutation({
+    mutationFn: async (value: DealStatusFilter) => {
+      const res = await fetch('/api/settings/org', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ default_deal_status_filter: value }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((json as { error?: string }).error || 'Falha ao salvar preferência');
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['orgPreferences'] }),
+  });
+
   const setLossReasons = useMutation({
     mutationFn: async (update: LossReasonsUpdate) => {
       const body: Record<string, unknown> = {};
@@ -80,8 +99,11 @@ export const useOrgPreferences = () => {
     /** null = organização usa os motivos padrão do sistema. */
     lossReasonsQualified: query.data?.loss_reasons_qualified ?? null,
     lossReasonsDisqualified: query.data?.loss_reasons_disqualified ?? null,
+    /** Filtro com que o quadro abre; undefined enquanto carrega (não força nada) */
+    defaultDealStatusFilter: query.data ? (query.data.default_deal_status_filter ?? 'open') : undefined,
     isLoading: query.isLoading,
     setInactiveLeadsEnabled,
+    setDefaultDealStatusFilter,
     setLossReasons,
   };
 };

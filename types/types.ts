@@ -164,6 +164,8 @@ export interface Contact {
   stage: string; // ID do LifecycleStage (antes era ContactStage enum)
   source?: 'WEBSITE' | 'LINKEDIN' | 'REFERRAL' | 'MANUAL'; // Origem do contato
   notes?: string; // Anotações gerais
+  /** Tags do contato (independentes das tags do negócio); sem duplicatas */
+  tags?: string[];
   lastPurchaseDate?: string;
   totalValue?: number; // LTV
   createdAt: string;
@@ -353,7 +355,8 @@ export interface Board {
   // AI Strategy Fields
   /** null = objetivo removido (o service limpa as colunas goal_* no banco) */
   goal?: BoardGoal | null;
-  agentPersona?: AgentPersona;
+  /** null = agente removido (o service limpa as colunas agent_* no banco) */
+  agentPersona?: AgentPersona | null;
   entryTrigger?: string; // "Quem deve entrar aqui?"
 
   createdAt: string;
