@@ -1,4 +1,4 @@
-﻿# Preview com dados de demonstração
+# Preview com dados de demonstração
 
 A staging incorpora a main d77ec24231baaecb3027e8639a3ce7208379dd52 (30 commits ausentes), preservando o relatório por eventos. A integração resolve a remoção dos controles de estratégia na página de relatórios que já tinha ocorrido na main.
 
@@ -17,6 +17,8 @@ Identificador dos contatos/leads: DEMO-RELATORIOS-202609
 
 Exemplos: AGO 26 a 35 qualificaram em agosto e avançaram para proposta em setembro; AGO 36 a 45 entraram em agosto e qualificaram em setembro. AGO 26 a 30 e 36 a 40 fecharam em setembro. Todos os eventos simulados são anteriores a 9 de setembro; a criação de dados fictícios não altera o histórico dos leads existentes.
 
-Validação: contagens mensais conferidas no banco, leitura dos 100 leads permitida sob RLS com a identidade de Samuel, 16 testes específicos do relatório e typecheck passaram. O navegador de automação ficou indisponível; não foi feita inspeção visual autenticada.
+Validação: contagens mensais conferidas no banco, leitura dos 100 leads permitida sob RLS com a identidade de Samuel, 17 testes específicos do relatório e typecheck passaram. O navegador de automação ficou indisponível; não foi feita inspeção visual autenticada.
 
 Para testar, selecione o funil acima em Relatórios > Performance e alterne Mês Passado / Este Mês. Em Boards, escolha Todos para visualizar também ganhos e perdas. As configurações e os dados particulares de produção continuam separados do preview.
+
+A verificação da demonstração identificou e corrigiu um falso aviso de histórico ausente ao consultar agosto para leads qualificados apenas em setembro. A cobertura consulta todo o histórico disponível; as métricas continuam restritas às datas do período.

@@ -62,8 +62,9 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   const reached = new Map(board.stages.map(stage => [stage.id, new Set<string>()]));
   const priorStages = new Map<string, string>();
   const seenEvents = new Set<string>();
+  // Coverage uses all known history; only inPeriod events enter monthly metrics.
   const validEvents = events.filter(event => byId.has(event.dealId) && (!event.boardId || event.boardId === board.id) &&
-    Number.isFinite(Date.parse(event.date)) && Date.parse(event.date) <= range.end.getTime())
+    Number.isFinite(Date.parse(event.date)))
     .sort((a, b) => Date.parse(a.date) - Date.parse(b.date) || Number(!!b.fromStageId) - Number(!!a.fromStageId));
 
   for (const event of validEvents) {

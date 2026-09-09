@@ -39,6 +39,16 @@ describe('Performance por acontecimentos', () => {
     expect(data.qualifiedCount).toBe(0);
     expect(data.closingRate).toBeNull();
   });
+  it('não sinaliza histórico ausente quando a qualificação ocorreu depois do período', () => {
+    const leads = [deal('a', { createdAt: '2026-08-10', status: 'won', isWon: true, closedAt: '2026-09-07' })];
+    const history = [event('a', 'new', '2026-08-10'), event('a', 'q', '2026-09-04'), event('a', 'won', '2026-09-07')];
+    const data = calculatePerformance(leads, history, board, august);
+    expect(data.entries).toHaveLength(1);
+    expect(data.qualifiedCount).toBe(0);
+    expect(data.wonDeals).toHaveLength(0);
+    expect(data.unknownQualification).toHaveLength(0);
+    expect(data.stageData.find(s => s.name === 'Qualificado')?.count).toBe(0);
+  });
   it('não usa perdas desqualificadas no denominador', () => {
     const leads = [deal('q'), deal('win', { isWon: true, closedAt: '2026-08-20' }), deal('lost', { isLost: true, lossCategory: 'disqualified', closedAt: '2026-08-20' })];
     expect(calculatePerformance(leads, [event('q', 'q')], board, august).closingRate).toBe(100);

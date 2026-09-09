@@ -47,19 +47,19 @@ export function usePerformanceReport(board: Board | undefined, range: PeriodRang
         const ids = deals.slice(offset, offset + 100).map(deal => deal.id);
         const history = await collectPages<Record<string, any>>((from, to) => supabase.from('deal_stage_events')
           .select('deal_id,board_id,from_stage_id,to_stage_id,occurred_at').eq('organization_id', orgId)
-          .eq('board_id', board.id).in('deal_id', ids).lte('occurred_at', range.end.toISOString()).order('id').range(from, to));
+          .eq('board_id', board.id).in('deal_id', ids).order('id').range(from, to));
         for (const row of history) events.push({ dealId: row.deal_id, boardId: row.board_id,
           fromStageId: row.from_stage_id || undefined, stageId: row.to_stage_id, date: row.occurred_at });
         const batch = await collectPages<MovementActivity>((from, to) => supabase.from('activities')
           .select('deal_id,title,date').eq('organization_id', orgId).eq('type', 'STATUS_CHANGE')
-          .in('deal_id', ids).is('deleted_at', null).lte('date', range.end.toISOString()).order('id').range(from, to));
+          .in('deal_id', ids).is('deleted_at', null).order('id').range(from, to));
         activities.push(...batch);
         if (!webhookUnavailable) {
           try {
             const webhooks = await collectPages<Record<string, any>>((from, to) => supabase.from('webhook_events_out')
               .select('deal_id,to_stage_id,from_stage_id,created_at,payload')
               .eq('organization_id', orgId).in('event_type', ['deal.stage_changed', 'deal.created']).in('deal_id', ids)
-              .lte('created_at', range.end.toISOString()).order('id').range(from, to));
+              .order('id').range(from, to));
             for (const row of webhooks) {
               if (row.to_stage_id) events.push({ dealId: row.deal_id, stageId: row.to_stage_id,
                 fromStageId: row.from_stage_id || undefined, boardId: row.payload?.deal?.board_id,
