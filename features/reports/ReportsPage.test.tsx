@@ -10,7 +10,7 @@ vi.mock('@/context/CRMContext', () => ({ useCRM: () => ({ boards: [{ id: 'board'
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ profile: { first_name: 'Teste' } }) }));
 vi.mock('./usePerformanceReport', () => ({ usePerformanceReport: () => ({ ...state, refetch: vi.fn() }) }));
 vi.mock('@/components/charts', () => ({ ChartWrapper: ({ children }: any) => <div>{children}</div>, LazyStageConversionChart: ({ data }: any) => <div>{JSON.stringify(data)}</div> }));
-vi.mock('@/features/dashboard/hooks/useDashboardMetrics', () => ({ getDateRange: () => ({ start: new Date('2026-08-01'), end: new Date('2026-08-31') }), PERIOD_LABELS: { this_month: 'Este mês' } }));
+vi.mock('@/features/dashboard/hooks/useDashboardMetrics', () => ({ getDateRange: () => ({ start: new Date('2026-08-01'), end: new Date('2026-08-31') }), PERIOD_LABELS: { this_month: 'Este mês' }, COMPARISON_LABELS: { this_month: 'vs mês passado' } }));
 vi.mock('./utils/generateReportPDF', () => ({ generateReportPDF: (...args: any[]) => state.pdf(...args) }));
 
 describe('tela Performance', () => {
@@ -31,13 +31,18 @@ describe('tela Performance', () => {
     state.data = { entries: [], qualifiedCount: 40, qualificationRate: 80, closingRate: 37.5,
       hasQualifiedStage: true, wonDeals: Array.from({length:15}, (_, i) => ({ id: String(i), value: 100, owner: { name: 'Samuel' } })),
       lostDeals: [...Array(10).fill({ lossCategory: 'qualified' }), ...Array(5).fill({ lossCategory: 'disqualified' })],
-      wonRevenue: 1500, avgSalesCycle: 18, stageData: [], unknownQualification: [], unknownClosure: [],
+      wonRevenue: 1500, revenueChange: -31.6, fastestSalesCycle: 3, slowestSalesCycle: 50, avgSalesCycle: 18, stageData: [], unknownQualification: [], unknownClosure: [],
       webhookUnavailable: false, deals: [], qualifiedIds: new Set() };
     render(<ReportsPage />);
-    const card = screen.getByText('Encerramentos qualificados').parentElement!.parentElement!;
+    const card = screen.getByText('Fechamentos').parentElement!.parentElement!;
     expect(within(card).getByText('15')).toBeInTheDocument();
     expect(within(card).getByText('10')).toBeInTheDocument();
-    expect(within(card).getByText('Ganhos / Perdas qualificadas · Por encerramento')).toBeInTheDocument();
+    expect(screen.getByText('Faturamento fechado')).toBeInTheDocument();
+    expect(screen.getByText('-31,6% vs mês passado')).toBeInTheDocument();
+    expect(screen.getByText('Rápido: 3d | Lento: 50d')).toBeInTheDocument();
+    expect(screen.queryByText('Receita ganha no período')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Conferir qualificados no período/)).not.toBeInTheDocument();
+    expect(within(card).getByText('Ganhos / Perdas qualificadas')).toBeInTheDocument();
   });
   it('mostra a taxa acima de 100% e exporta exatamente os mesmos dados', () => {
     state.data = { entries: Array(10).fill({}), qualifiedCount: 12, qualificationRate: 120, closingRate: 25,
@@ -45,9 +50,9 @@ describe('tela Performance', () => {
       stageData: [{ name: 'Qualificado', count: 12 }], unknownQualification: [], unknownClosure: [],
       webhookUnavailable: false, deals: [], qualifiedIds: new Set() };
     render(<ReportsPage />);
-    expect(screen.getByText('120.0%')).toBeInTheDocument();
-    expect(screen.getByText('25.0%')).toBeInTheDocument();
-    expect(screen.getByText('12 qualificados no período ÷ 10 entradas')).toBeInTheDocument();
+    expect(screen.getByText('120,0%')).toBeInTheDocument();
+    expect(screen.getByText('25,0%')).toBeInTheDocument();
+    expect(screen.getByText('12 qualificados de 10 leads')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'PDF' }));
     expect(state.pdf).toHaveBeenCalledWith(state.data, expect.objectContaining({ boardName: 'Teste', owner: 'Todos os vendedores' }));
   });

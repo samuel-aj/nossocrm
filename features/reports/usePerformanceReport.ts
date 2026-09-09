@@ -7,10 +7,10 @@ import { activityEvents, calculatePerformance, type MovementActivity, type Perio
 
 import { collectPages } from './collectPages';
 
-export function usePerformanceReport(board: Board | undefined, range: PeriodRange, ownerId: string) {
+export function usePerformanceReport(board: Board | undefined, range: PeriodRange, ownerId: string, comparisonRange?: PeriodRange) {
   const { user, organizationId, loading } = useAuth();
   return useQuery({
-    queryKey: ['performance-report', organizationId, user?.id, board?.id, range.start.toISOString(), range.end.toISOString(), ownerId],
+    queryKey: ['performance-report', organizationId, user?.id, board?.id, range.start.toISOString(), range.end.toISOString(), ownerId, comparisonRange?.start.toISOString(), comparisonRange?.end.toISOString()],
     enabled: !loading && !!user && !!organizationId && !!board,
     staleTime: 0,
     refetchOnWindowFocus: true,
@@ -71,7 +71,7 @@ export function usePerformanceReport(board: Board | undefined, range: PeriodRang
         }
       }
       events.push(...activityEvents(activities, board));
-      const metrics = calculatePerformance(deals, events, board, range, ownerId);
+      const metrics = calculatePerformance(deals, events, board, range, ownerId, comparisonRange);
       return { ...metrics, deals, webhookUnavailable };
     },
   });

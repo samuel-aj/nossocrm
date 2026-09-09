@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import { TrendingUp, Clock, Target, DollarSign, Trophy, Users, Download, ThumbsDown, UserX, CheckCircle2 } from 'lucide-react';
-import { getDateRange, PeriodFilter, PERIOD_LABELS } from '../dashboard/hooks/useDashboardMetrics';
+import { getDateRange, PeriodFilter, PERIOD_LABELS, COMPARISON_LABELS } from '../dashboard/hooks/useDashboardMetrics';
 import { PeriodFilterSelect } from '@/components/filters/PeriodFilterSelect';
 import { LazyStageConversionChart, ChartWrapper } from '@/components/charts';
 import { generateReportPDF } from './utils/generateReportPDF';
 import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
+import { performanceComparisonRange } from './performanceMetrics';
 import { usePerformanceReport } from './usePerformanceReport';
 
 /**
@@ -44,7 +45,8 @@ const ReportsPage: React.FC = () => {
   }, [boards, boardIdEfetivo]);
 
   const range = useMemo(() => getDateRange(period), [period]);
-  const report = usePerformanceReport(selectedBoard, range, selectedOwnerId);
+  const comparisonRange = useMemo(() => performanceComparisonRange(range, period), [range, period]);
+  const report = usePerformanceReport(selectedBoard, range, selectedOwnerId, comparisonRange);
   const metrics = report.data;
   const ownersList = useMemo(() => {
     const map = new Map<string, string>();
@@ -312,10 +314,12 @@ const ReportsPage: React.FC = () => {
             <div className="p-2 rounded-lg bg-blue-500/10">
               <DollarSign className="text-blue-500" size={18} />
             </div>
-            <span className="text-xs text-slate-500">Entradas no período</span>
+            <span className="text-xs text-slate-500">Faturamento fechado</span>
           </div>
-          <p className="text-2xl font-bold text-slate-900 dark:text-white">{metrics.entries.length}</p>
-          <p className="text-xs text-slate-500">Leads criados no período selecionado</p>
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatCurrency(wonRevenue)}</p>
+          <p className={`text-xs ${metrics.revenueChange == null ? 'text-slate-500' : metrics.revenueChange < 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+            {period === 'all' ? 'Ganhos em todo o período' : metrics.revenueChange == null ? 'Sem base no período anterior' : `${metrics.revenueChange >= 0 ? '+' : ''}${metrics.revenueChange.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% ${COMPARISON_LABELS[period]}`}
+          </p>
         </div>
 
         {/* Taxa de Qualificação = qualificados ÷ total de leads do funil */}
@@ -327,11 +331,11 @@ const ReportsPage: React.FC = () => {
             <span className="text-xs text-slate-500">Taxa de Qualificação</span>
           </div>
           <p className="text-2xl font-bold text-slate-900 dark:text-white">
-            {funnelRates.qualificationRate !== null ? `${funnelRates.qualificationRate.toFixed(1)}%` : '--'}
+            {funnelRates.qualificationRate !== null ? `${funnelRates.qualificationRate.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%` : '--'}
           </p>
           <p className="text-xs text-slate-500">
             {funnelRates.hasQualifiedStage
-              ? `${funnelRates.qualified} qualificados no período ÷ ${funnelRates.total} entradas`
+              ? `${funnelRates.qualified} qualificados de ${funnelRates.total} leads`
               : 'Board sem etapa "Qualificado"'}
           </p>
         </div>
@@ -345,11 +349,11 @@ const ReportsPage: React.FC = () => {
             <span className="text-xs text-slate-500">Taxa de Fechamento</span>
           </div>
           <p className="text-2xl font-bold text-slate-900 dark:text-white">
-            {funnelRates.conversionRate !== null ? `${funnelRates.conversionRate.toFixed(1)}%` : '--'}
+            {funnelRates.conversionRate !== null ? `${funnelRates.conversionRate.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%` : '--'}
           </p>
           <p className="text-xs text-slate-500">
             {funnelRates.hasQualifiedStage
-              ? `${funnelRates.wonCount} ganhos ÷ ${funnelRates.qualified} qualificados no período`
+              ? `${funnelRates.wonCount} ganhos de ${funnelRates.qualified} qualificados`
               : 'Pipeline sem etapa de qualificação'}
           </p>
         </div>
@@ -364,7 +368,7 @@ const ReportsPage: React.FC = () => {
           </div>
           <p className="text-2xl font-bold text-slate-900 dark:text-white">{metrics.avgSalesCycle === null ? '—' : metrics.avgSalesCycle + ' dias'}</p>
           <p className="text-xs text-slate-500">
-            Da criação ao encerramento dos ganhos do período
+            {metrics.fastestSalesCycle == null ? 'Sem ganhos no período' : `Rápido: ${metrics.fastestSalesCycle}d | Lento: ${metrics.slowestSalesCycle}d`}
           </p>
         </div>
 
@@ -374,7 +378,7 @@ const ReportsPage: React.FC = () => {
             <div className="p-2 rounded-lg bg-orange-500/10">
               <TrendingUp className="text-orange-500" size={18} />
             </div>
-            <span className="text-xs text-slate-500">Encerramentos qualificados</span>
+            <span className="text-xs text-slate-500">Fechamentos</span>
           </div>
           <p className="text-2xl font-bold text-slate-900 dark:text-white">
             <span className="text-emerald-500">{wonDeals.length}</span>
@@ -382,13 +386,11 @@ const ReportsPage: React.FC = () => {
             <span className="text-red-500">{lostDeals.filter(deal => deal.lossCategory === 'qualified').length}</span>
           </p>
           <p className="text-xs text-slate-500">
-            Ganhos / Perdas qualificadas · Por encerramento
+            Ganhos / Perdas qualificadas
           </p>
         </div>
       </div>
 
-      <p className="text-xs text-slate-500">Qualificação = qualificados ÷ entradas. Fechamento = ganhos ÷ qualificados. As taxas podem ultrapassar 100%, pois os acontecimentos podem ser de leads de meses diferentes. “—” indica denominador zero ou etapa de qualificação não identificada.</p>
-      <p className="text-xs text-slate-500">Cada lead conta uma vez por etapa no período. As barras mostram chegadas registradas; Ganho usa a data de fechamento. Percentuais comparam volumes da próxima etapa com a atual; em Ganho, ganhos ÷ entradas. Podem superar 100% e não representam conversão dos mesmos leads.</p>
       {/* Fileira: Leads Perdidos + Conversão por Etapa lado a lado */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Loss by Category */}
@@ -550,13 +552,6 @@ const ReportsPage: React.FC = () => {
           a altura fixa do container, padding no root não aparece (fica no
           limite nominal da caixa, não abaixo do conteúdo transbordado) —
           este elemento garante a margem inferior em qualquer cenário */}
-      <section className="glass p-5 rounded-xl border border-slate-200 dark:border-white/10">
-        <h2 className="font-bold mb-2">Receita ganha no período</h2><p className="text-2xl font-bold text-emerald-500">{formatCurrency(wonRevenue)}</p>
-      </section>
-      <details className="glass p-5 rounded-xl border border-slate-200 dark:border-white/10">
-        <summary className="cursor-pointer font-bold">Conferir qualificados no período ({metrics.qualifiedCount})</summary>
-        <ul className="mt-3 space-y-2 text-sm">{metrics.deals.filter(deal => metrics.qualifiedIds.has(deal.id)).map(deal => <li key={deal.id}>{deal.title} · {metrics.qualificationDates?.get(deal.id) ? new Date(metrics.qualificationDates.get(deal.id)!).toLocaleDateString('pt-BR') : 'Data não disponível'} · {deal.isWon ? 'Ganho' : deal.isLost ? 'Perdido' : selectedBoard?.stages.find(stage => stage.id === deal.status)?.label || 'Em aberto'}</li>)}</ul>
-      </details>
       <div className="shrink-0 h-2" aria-hidden="true" />
       </>}
     </div>

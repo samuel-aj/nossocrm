@@ -1,5 +1,5 @@
 ﻿import { describe, expect, it } from 'vitest';
-import { activityEvents, calculatePerformance, type StageEvent } from './performanceMetrics';
+import { activityEvents, calculatePerformance, performanceComparisonRange, type StageEvent } from './performanceMetrics';
 import type { Board, Deal } from '@/types';
 
 const board: Board = { id: 'board', name: 'Vendas', createdAt: '2026-01-01', wonStageId: 'won', lostStageId: 'lost', stages: [
@@ -65,6 +65,20 @@ describe('Performance por acontecimentos', () => {
     const data = calculatePerformance([deal('a'), deal('b'), deal('c')], [event('a', 'q'), event('a', 'proposal'), event('b', 'proposal')], coloredBoard, august);
     expect(data.stageData.find(s => s.name === 'Qualificado')).toMatchObject({ fill: '#f97316', conversionRate: 200 });
     expect(data.stageData.find(s => s.name === 'Novo Lead')).toMatchObject({ fill: '#a855f7', conversionRate: null });
+  });
+  it('compara faturamento ganho com o mês anterior completo e calcula ciclos', () => {
+    const range = { start: new Date(2026, 8, 1), end: new Date(2026, 8, 9, 23, 59, 59, 999) };
+    const previous = performanceComparisonRange(range, 'this_month')!;
+    expect(previous.start).toEqual(new Date(2026, 7, 1));
+    expect(previous.end).toEqual(new Date(2026, 7, 31, 23, 59, 59, 999));
+    const leads = [deal('prior', { isWon: true, closedAt: '2026-08-02T12:00:00Z', value: 200 }),
+      deal('fast', { isWon: true, createdAt: '2026-09-01T12:00:00Z', closedAt: '2026-09-04T12:00:00Z', value: 50 }),
+      deal('slow', { isWon: true, createdAt: '2026-08-20T12:00:00Z', closedAt: '2026-09-09T12:00:00Z', value: 50 }),
+      deal('open', { value: 9999 })];
+    const data = calculatePerformance(leads, [], board, range, '', previous);
+    expect(data).toMatchObject({ wonRevenue: 100, previousRevenue: 200, revenueChange: -50, fastestSalesCycle: 3, slowestSalesCycle: 20, avgSalesCycle: 12 });
+    expect(calculatePerformance([], [], board, range, '', previous).revenueChange).toBeNull();
+    expect(performanceComparisonRange(range, 'all')).toBeUndefined();
   });
   it('não usa perdas desqualificadas no denominador', () => {
     const leads = [deal('q'), deal('win', { isWon: true, closedAt: '2026-08-20' }), deal('lost', { isLost: true, lossCategory: 'disqualified', closedAt: '2026-08-20' })];

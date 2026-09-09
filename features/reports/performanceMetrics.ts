@@ -51,7 +51,15 @@ export function getStageRules(board: Board) {
   return { won, lost, steps, qualifiedIndex };
 }
 
-export function calculatePerformance(deals: Deal[], events: StageEvent[], board: Board, range: PeriodRange, ownerId = '') {
+export function performanceComparisonRange(range: PeriodRange, period: string): PeriodRange | undefined {
+  if (period === 'all') return undefined;
+  const months = period.includes('month') && !period.includes('days') ? 1 : period.includes('quarter') ? 3 : period.includes('year') ? 12 : 0;
+  const end = new Date(range.start.getTime() - 1);
+  const start = months ? new Date(range.start.getFullYear(), range.start.getMonth() - months, 1) : new Date(range.start.getTime() - (range.end.getTime() - range.start.getTime() + 1));
+  return { start, end };
+}
+
+export function calculatePerformance(deals: Deal[], events: StageEvent[], board: Board, range: PeriodRange, ownerId = '', comparisonRange?: PeriodRange) {
   const scoped = deals.filter(deal => deal.boardId === board.id && (!ownerId || deal.ownerId === ownerId));
   const byId = new Map(scoped.map(deal => [deal.id, deal]));
   const inPeriod = (date?: string) => {
@@ -106,6 +114,11 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   const unknownClosure = scoped.filter(deal => (deal.isWon || deal.isLost) && !Number.isFinite(Date.parse(deal.closedAt || '')));
   const cycles = wonDeals.map(deal => (Date.parse(deal.closedAt!) - Date.parse(deal.createdAt)) / 86400000)
     .filter(days => Number.isFinite(days) && days >= 0);
+  const wonRevenue = wonDeals.reduce((sum, deal) => sum + deal.value, 0);
+  const previousRevenue = comparisonRange ? scoped.filter(deal => deal.isWon && !deal.isLost &&
+    Date.parse(deal.closedAt || '') >= comparisonRange.start.getTime() && Date.parse(deal.closedAt || '') <= comparisonRange.end.getTime())
+    .reduce((sum, deal) => sum + deal.value, 0) : null;
+  const revenueChange = previousRevenue !== null && previousRevenue > 0 ? (wonRevenue - previousRevenue) / previousRevenue * 100 : null;
   const rate = (numerator: number, denominator: number) => denominator > 0 ? numerator / denominator * 100 : null;
   const chartStages = board.stages.filter(stage => !rules.lost(stage.id));
   const stageCount = (id: string) => rules.won(id) ? wonDeals.length : reached.get(id)?.size || 0;
@@ -128,7 +141,9 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
     closingRate: rules.qualifiedIndex >= 0 ? rate(wonDeals.length, qualified.size) : null,
     hasQualifiedStage: rules.qualifiedIndex >= 0,
     wonDeals, lostDeals, unknownQualification, unknownClosure,
-    wonRevenue: wonDeals.reduce((sum, deal) => sum + deal.value, 0),
+    wonRevenue, previousRevenue, revenueChange,
+    fastestSalesCycle: cycles.length ? Math.round(Math.min(...cycles)) : null,
+    slowestSalesCycle: cycles.length ? Math.round(Math.max(...cycles)) : null,
     avgSalesCycle: cycles.length ? Math.round(cycles.reduce((a, b) => a + b, 0) / cycles.length) : null,
     stageData,
   };

@@ -18,11 +18,12 @@ export function generateReportPDF(data: PerformanceMetrics & { webhookUnavailabl
     ['Taxa de qualificação', rate(data.qualificationRate), `${data.qualifiedCount} qualificados / ${data.entries.length} entradas`],
     ['Taxa de fechamento', rate(data.closingRate), `${data.wonDeals.length} ganhos / ${data.qualifiedCount} qualificados`],
     ['Ganhos', String(data.wonDeals.length), 'Data de encerramento'],
-    ['Receita ganha', money(data.wonRevenue), 'Ganhos do período'],
+    ['Faturamento fechado', money(data.wonRevenue), 'Ganhos do período'],
+    ['Variação do faturamento', data.revenueChange == null ? '-' : rate(data.revenueChange), 'vs período anterior'],
     ['Perdas qualificadas', String(data.lostDeals.filter(d => d.lossCategory === 'qualified').length), 'Data de encerramento'],
     ['Perdas desqualificadas', String(data.lostDeals.filter(d => d.lossCategory === 'disqualified').length), 'Data de encerramento'],
     ['Perdas sem classificação', String(data.lostDeals.filter(d => !d.lossCategory).length), 'Data de encerramento'],
-    ['Ciclo médio dos ganhos', data.avgSalesCycle === null ? '-' : `${data.avgSalesCycle} dias`, 'Criação até encerramento'],
+    ['Ciclo médio dos ganhos', data.avgSalesCycle === null ? '-' : `${data.avgSalesCycle} dias`, data.fastestSalesCycle == null ? 'Sem ganhos no período' : `Rápido: ${data.fastestSalesCycle}d | Lento: ${data.slowestSalesCycle}d`],
   ], styles: { fontSize: 9 }, headStyles: { fillColor: [30, 41, 59] } });
   autoTable(doc, { head: [['Avanços por etapa no período', 'Leads distintos', 'Percentual / Base']], body: data.stageData.map(stage => [stage.name, stage.count, rate(stage.conversionRate) + ' · ' + stage.comparisonBase]), styles: { fontSize: 9 } });
   const reasons = new Map<string, number>();
