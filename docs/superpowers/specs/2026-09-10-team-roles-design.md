@@ -94,4 +94,4 @@ Validar tudo em staging e só propor promoção a main após revisão dos testes
 
 ## Estado
 
-Especificação consolidada para revisão do usuário. Implementação das novas permissões ainda não iniciada.
+Implementado e validado na branch staging. Consulte o plano em ../plans/2026-09-10-team-roles.md para os testes e o registro de publicação. A definição dos Mestres continua manual, pelos super admins.
