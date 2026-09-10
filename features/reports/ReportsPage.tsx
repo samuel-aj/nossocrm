@@ -169,9 +169,9 @@ const ReportsPage: React.FC = () => {
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-3 max-md:w-full">
-          <div className="min-w-[180px] max-w-[280px] flex-1"><FilterSelect label="Selecionar Pipeline" value={boardIdEfetivo} onChange={setSelectedBoardId} options={boards.map(board => ({value:board.id,label:board.name}))} /></div>
+          <div className="w-[340px] min-w-0 shrink-0 max-md:w-full"><FilterSelect label="Selecionar Pipeline" value={boardIdEfetivo} onChange={setSelectedBoardId} options={boards.map(board => ({value:board.id,label:board.name}))} /></div>
 
-          <div className="min-w-[190px] max-w-[280px] flex-1"><FilterSelect label="Filtrar por Vendedor" value={selectedOwnerId} onChange={setSelectedOwnerId} options={[{value:'',label:'Todos os vendedores'}, ...ownersList.map(owner => ({value:owner.id,label:owner.name}))]} /></div>
+          <div className="w-[300px] min-w-0 shrink-0 max-md:w-full"><FilterSelect label="Filtrar por Vendedor" value={selectedOwnerId} onChange={setSelectedOwnerId} options={[{value:'',label:'Todos os vendedores'}, ...ownersList.map(owner => ({value:owner.id,label:owner.name}))]} /></div>
 
           <PeriodFilterSelect value={period} onChange={setPeriod} />
 
