@@ -1,3 +1,4 @@
+import { FilterSelect } from '@/components/filters/FilterSelect';
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCRM } from '@/context/CRMContext';
@@ -109,16 +110,7 @@ const DashboardPage: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-3 max-md:flex-wrap max-md:w-full">
-          <select
-            value={selectedBoardId}
-            onChange={(e) => setSelectedBoardId(e.target.value)}
-            aria-label="Selecionar Pipeline de Vendas"
-            className="px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-medium text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500"
-          >
-            {boards.map(board => (
-              <option key={board.id} value={board.id}>{board.name}</option>
-            ))}
-          </select>
+          <div className="min-w-[180px] max-w-[280px] flex-1"><FilterSelect label="Selecionar Pipeline de Vendas" value={selectedBoardId} onChange={setSelectedBoardId} options={boards.map(board => ({value:board.id,label:board.name}))} /></div>
 
           <PeriodFilterSelect value={period} onChange={setPeriod} />
 
