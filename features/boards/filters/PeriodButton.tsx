@@ -1,10 +1,12 @@
+import { FilterSelect, FILTER_PANEL, FILTER_INPUT } from './FilterControls';
+import { FormCheckbox } from '@/components/ui/FormControls';
 import React from 'react';
 import { CalendarDays, Pin } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { EMPTY_PERIOD, PERIOD_LABELS, periodRange, periodSchema } from './boardFilters';
 import { BoardFilterControls } from './useBoardFilters';
 
-const inputClass = 'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500';
+const inputClass = FILTER_INPUT + " w-full";
 export function FilterPin({ controls, group }: { controls: BoardFilterControls; group: 'period' | 'general' }) {
   const saved = controls.saved?.[group];
   const current = controls[group];
@@ -29,8 +31,8 @@ export function PeriodButton({ controls }: { controls: BoardFilterControls }) {
       <CalendarDays size={15} /><span className="max-md:hidden">{active ? PERIOD_LABELS[value.preset] : 'Período'}</span>
       {controls.saved?.period && <Pin size={12} className="text-primary-600" />}
     </button></PopoverTrigger>
-    <PopoverContent align="end" className="max-h-[calc(100dvh-100px)] w-[min(420px,calc(100vw-24px))] overflow-y-auto space-y-4 rounded-xl p-4">
-      <div className="flex items-center gap-3"><h3 className="font-semibold">Período</h3><button type="button" onClick={() => { controls.setPeriod(EMPTY_PERIOD); setDraft(EMPTY_PERIOD); setError(''); }} className="text-xs text-primary-600 hover:underline">Limpar</button>      <FilterPin controls={{ ...controls, period: draft, pin: patch => {
+    <PopoverContent align="end" collisionPadding={12} aria-label="Período" className={FILTER_PANEL}>
+      <div className="flex items-center gap-3 border-b border-slate-100 pb-3 dark:border-white/10"><h3 className="font-semibold">Período</h3><button type="button" onClick={() => { controls.setPeriod(EMPTY_PERIOD); setDraft(EMPTY_PERIOD); setError(''); }} className="text-xs text-primary-600 hover:underline">Limpar</button>      <FilterPin controls={{ ...controls, period: draft, pin: patch => {
         if (patch.period === null) { controls.pin(patch); return; }
         const result = periodSchema.safeParse(draft);
         if (!result.success) { setError(result.error.issues[0].message); return; }
@@ -45,12 +47,10 @@ export function PeriodButton({ controls }: { controls: BoardFilterControls }) {
         <label className="space-y-1 text-xs">Data final<input type="date" value={draft.end} min={draft.start || undefined} onChange={e => update({ end: e.target.value })} className={inputClass} /></label>
       </div>}
       <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">Filtrar pela data de</legend><div className="flex gap-5">
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.created} onChange={e => update({ created: e.target.checked })} className="h-4 w-4 accent-primary-600" />Criação</label>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.closed} onChange={e => update({ closed: e.target.checked })} className="h-4 w-4 accent-primary-600" />Encerramento</label>
+        <FormCheckbox label="Criação" checked={draft.created} onChange={created => update({created})}><span className="text-sm">Criação</span></FormCheckbox>
+        <FormCheckbox label="Encerramento" checked={draft.closed} onChange={closed => update({closed})}><span className="text-sm">Encerramento</span></FormCheckbox>
       </div></fieldset>
-      {draft.created && draft.closed && <label className="block space-y-1 text-xs">Combinar as datas<select value={draft.logic} onChange={e => update({ logic: e.target.value as 'AND' | 'OR' })} className={inputClass}>
-        <option value="AND">As duas datas no período (E)</option><option value="OR">Qualquer uma das datas no período (OU)</option>
-      </select></label>}
+      {draft.created && draft.closed && <label className="block space-y-1 text-xs">Combinar as datas<FilterSelect label="Combinar as datas" value={draft.logic} onChange={logic => update({logic: logic as 'AND' | 'OR'})} options={[{value:'AND',label:'As duas datas no período (E)'},{value:'OR',label:'Qualquer uma das datas no período (OU)'}]} /></label>}
       <p className="text-xs text-slate-500">Encerramento considera ganhos e perdas. O status escolhido em Filtros também é aplicado.</p>
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
       <button type="button" onClick={() => { const result = periodSchema.safeParse(draft); if (!result.success) { setError(result.error.issues[0].message); return; } controls.setPeriod(result.data); setOpen(false); }} className="w-full rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white">Aplicar período</button>

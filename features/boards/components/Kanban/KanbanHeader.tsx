@@ -1,3 +1,4 @@
+import { FilterSelect, FILTER_PANEL, FILTER_INPUT } from '../../filters/FilterControls';
 import { BoardFilterControls } from '../../filters/useBoardFilters';
 import { PeriodButton, FilterPin } from '../../filters/PeriodButton';
 import { useCRM } from '@/context/CRMContext';
@@ -73,10 +74,6 @@ const CONTROL_BUTTON_CLASS =
     'h-[38px] flex items-center gap-2 px-3 max-md:px-2.5 rounded-lg border text-sm transition-colors backdrop-blur-sm';
 const CONTROL_IDLE = 'border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-white/5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10';
 const CONTROL_ACTIVE = 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300';
-const PANEL_CLASS =
-    'absolute z-50 mt-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg p-3 space-y-3 max-md:fixed max-md:inset-x-3 max-md:top-24 max-md:mt-0 max-md:w-auto';
-const INPUT_CLASS =
-    'px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white';
 const SECTION_TITLE = 'text-[11px] font-bold text-slate-400 uppercase border-b border-slate-100 dark:border-white/10 pb-1';
 const BADGE_CLASS = 'ml-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-primary-600 text-white text-[11px] font-bold flex items-center justify-center';
 
@@ -124,9 +121,6 @@ function FiltersButton({
     options: Array<{ key: string; label: string; kind: 'select' | 'text'; options: string[] }>;
 }) {
     const [open, setOpen] = React.useState(false);
-    const ref = React.useRef<HTMLDivElement>(null);
-    const close = React.useCallback(() => setOpen(false), []);
-    useClickOutside(open, ref, close);
 
     const { products } = useCRM();
     const activeConditions = conditions.filter(
@@ -152,10 +146,10 @@ function FiltersButton({
     };
 
     return (
-        <div ref={ref} className="relative">
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
             <button
                 type="button"
-                onClick={() => setOpen((o) => !o)}
                 aria-expanded={open}
                 title="Filtros: produto, responsável, status, tag, campos e UTMs"
                 className={`${CONTROL_BUTTON_CLASS} ${activeCount > 0 ? CONTROL_ACTIVE : CONTROL_IDLE}`}
@@ -164,10 +158,9 @@ function FiltersButton({
                 <span className="max-md:hidden">Filtros</span>
                 {controls.saved?.general && <Pin size={12} className="text-primary-600" />}
                 {activeCount > 0 && <span className={BADGE_CLASS}>{activeCount}</span>}
-            </button>
-            {open && (
-                <div className={`${PANEL_CLASS} w-80 max-h-[28rem] max-md:max-h-[calc(100dvh-13rem)] overflow-y-auto scrollbar-custom`}>
-                    <div className="flex items-center gap-3">
+            </button></PopoverTrigger>
+                <PopoverContent align="end" collisionPadding={12} aria-label="Filtros" className={FILTER_PANEL}>
+                    <div className="flex items-center gap-3 border-b border-slate-100 pb-3 dark:border-white/10">
                         <p className="text-xs font-bold text-slate-400 uppercase">Filtros</p>
                         {activeCount > 0 && (
                             <button type="button" onClick={clearAll} className="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline">
@@ -178,11 +171,11 @@ function FiltersButton({
                     </div>
                     <label className="block space-y-2">
                         <span className={SECTION_TITLE}>Produto</span>
-                        <select aria-label="Filtrar por produto" value={controls.general.product} onChange={e => controls.setGeneral({ product: e.target.value })} className={INPUT_CLASS + ' w-full'}>
-                            <option value="">Todos os produtos</option>
-                            {controls.general.product && !products.some(p => p.id === controls.general.product) && <option value={controls.general.product}>Produto indisponível</option>}
-                            {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
+                        <FilterSelect label="Filtrar por produto" value={controls.general.product} onChange={product => controls.setGeneral({ product })} options={[
+ { value: '', label: 'Todos os produtos' },
+ ...(controls.general.product && !products.some(p => p.id === controls.general.product) ? [{value: controls.general.product, label: 'Produto indisponível'}] : []),
+ ...products.map(p => ({value:p.id,label:p.name}))
+]} />
                     </label>
                     {/* Status */}
                     <div className="space-y-2">
@@ -217,44 +210,17 @@ function FiltersButton({
                     {/* Responsável */}
                     <div className="space-y-2">
                         <p className={SECTION_TITLE}>Responsável</p>
-                        <select
-                            value={ownerFilter}
-                            onChange={(e) => onOwnerChange(e.target.value)}
-                            aria-label="Filtrar negócios por responsável"
-                            className={`${INPUT_CLASS} w-full cursor-pointer`}
-                        >
-                            <option value="all">Todos os donos</option>
-                            <option value="mine">Meus negócios</option>
-                            {owners.length > 0 && (
-                                <>
-                                    <option value="none">Sem responsável</option>
-                                    <optgroup label="Responsáveis">
-                                        {owners.map((u) => (
-                                            <option key={u.id} value={u.id}>
-                                                {u.name}{u.role === 'admin' ? ' (admin)' : ''}
-                                            </option>
-                                        ))}
-                                    </optgroup>
-                                </>
-                            )}
-                        </select>
+                        <FilterSelect label="Filtrar negócios por responsável" value={ownerFilter} onChange={onOwnerChange} options={[
+ {value:'all',label:'Todos os donos'}, {value:'mine',label:'Meus negócios'},
+ ...(owners.length > 0 ? [{value:'none',label:'Sem responsável'}, ...owners.map(u => ({value:u.id,label:u.name + (u.role === 'admin' ? ' (admin)' : '')}))] : [])
+]} />
                     </div>
 
                     {/* Tag */}
                     {tagOptions.length > 0 && (
                         <div className="space-y-2">
                             <p className={SECTION_TITLE}>Tag</p>
-                            <select
-                                value={tagFilter}
-                                onChange={(e) => onTagFilterChange(e.target.value)}
-                                aria-label="Filtrar por tag"
-                                className={`${INPUT_CLASS} w-full cursor-pointer`}
-                            >
-                                <option value="">Todas</option>
-                                {tagOptions.map((t) => (
-                                    <option key={t} value={t}>{t}</option>
-                                ))}
-                            </select>
+                            <FilterSelect label="Filtrar por tag" value={tagFilter} onChange={onTagFilterChange} options={[{value:'',label:'Todas'}, ...tagOptions.map(t => ({value:t,label:t}))]} />
                         </div>
                     )}
 
@@ -289,16 +255,7 @@ function FiltersButton({
                                 return (
                                     <div key={c.id} className="rounded-lg border border-slate-200 dark:border-white/10 p-2 space-y-1.5">
                                         <div className="flex items-center gap-1.5">
-                                            <select
-                                                value={c.field}
-                                                onChange={(e) => updateCondition(c.id, { field: e.target.value, value: '' })}
-                                                aria-label="Campo"
-                                                className={`${INPUT_CLASS} flex-1 min-w-0 cursor-pointer`}
-                                            >
-                                                {options.map((o) => (
-                                                    <option key={o.key} value={o.key}>{o.label}</option>
-                                                ))}
-                                            </select>
+                                            <FilterSelect label="Campo" value={c.field} onChange={field => updateCondition(c.id, {field, value:''})} options={options.map(o => ({value:o.key,label:o.label}))} />
                                             <button
                                                 type="button"
                                                 onClick={() => removeCondition(c.id)}
@@ -310,31 +267,12 @@ function FiltersButton({
                                             </button>
                                         </div>
                                         <div className="flex items-center gap-1.5">
-                                            <select
-                                                value={c.operator}
-                                                onChange={(e) => updateCondition(c.id, { operator: e.target.value as CfCondition['operator'] })}
-                                                aria-label="Operador"
-                                                className={`${INPUT_CLASS} w-32 shrink-0 cursor-pointer`}
-                                            >
-                                                <option value="contains">contém</option>
-                                                <option value="not_contains">não contém</option>
-                                                <option value="equals">é igual a</option>
-                                                <option value="empty">está vazio</option>
-                                                <option value="not_empty">está preenchido</option>
-                                            </select>
+                                            <FilterSelect label="Operador" value={c.operator} onChange={operator => updateCondition(c.id, {operator: operator as CfCondition['operator']})} options={[
+ {value:'contains',label:'contém'}, {value:'not_contains',label:'não contém'}, {value:'equals',label:'é igual a'}, {value:'empty',label:'está vazio'}, {value:'not_empty',label:'está preenchido'}
+]} />
                                             {needsValue && (
                                                 fieldDef?.kind === 'select' && fieldDef.options.length > 0 && c.operator === 'equals' ? (
-                                                    <select
-                                                        value={c.value}
-                                                        onChange={(e) => updateCondition(c.id, { value: e.target.value })}
-                                                        aria-label="Valor"
-                                                        className={`${INPUT_CLASS} flex-1 min-w-0 cursor-pointer`}
-                                                    >
-                                                        <option value="">Selecione...</option>
-                                                        {fieldDef.options.map((v) => (
-                                                            <option key={v} value={v}>{v}</option>
-                                                        ))}
-                                                    </select>
+                                                    <FilterSelect label="Valor" value={c.value} onChange={value => updateCondition(c.id, {value})} options={[{value:'',label:'Selecione...'}, ...fieldDef.options.map(v => ({value:v,label:v}))]} />
                                                 ) : (
                                                     <input
                                                         type="text"
@@ -342,7 +280,7 @@ function FiltersButton({
                                                         onChange={(e) => updateCondition(c.id, { value: e.target.value })}
                                                         placeholder="valor..."
                                                         aria-label="Valor"
-                                                        className={`${INPUT_CLASS} flex-1 min-w-0`}
+                                                        className={`${FILTER_INPUT} flex-1 min-w-0`}
                                                     />
                                                 )
                                             )}
@@ -359,9 +297,8 @@ function FiltersButton({
                             </button>
                         </div>
                     )}
-                </div>
-            )}
-        </div>
+                </PopoverContent>
+        </Popover>
     );
 }
 
