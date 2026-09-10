@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({}) }));
-vi.mock('@/components/ui/Modal', () => ({ Modal: ({ isOpen, title, children }: { isOpen: boolean; title: string; children: React.ReactNode }) => isOpen ? <div role="dialog" aria-label={title}>{children}</div> : null }));
+vi.mock('@/components/ui/Modal', () => ({ useModalOverlay: () => {}, Modal: ({ isOpen, title, children }: { isOpen: boolean; title: string; children: React.ReactNode }) => isOpen ? <div role="dialog" aria-label={title}>{children}</div> : null }));
 import { TeamRolesPanel, MemberAccess, type TeamConfig } from './TeamRoles';
 const id = '11111111-1111-4111-8111-111111111111';
 const member = { id, email: 'member@example.test', role: 'vendedor' };
@@ -21,6 +21,19 @@ describe('team access configuration', () => {
     await waitFor(() => expect(fetch).toHaveBeenCalled());
     const init = vi.mocked(fetch).mock.calls[0][1];
     expect(JSON.parse(String(init?.body))).toEqual({ action: 'saveRole', data: { name: 'Atendimento A', description: '', boards: [{ boardId: id, scope: 'own', create: false, edit: false, move: true, delete: false }] } });
+  });
+  it('opens the visibility dropdown by keyboard and saves all leads', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    mount(<TeamRolesPanel config={config} members={[member]} onSaved={() => {}} />);
+    fireEvent.click(screen.getByText('Nova função'));
+    fireEvent.change(screen.getByPlaceholderText('Ex.: Atendimento BPC'), { target: { value: 'Todos A' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Funil A' }));
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Leads visíveis em Funil A' }), { key: 'Enter' });
+    fireEvent.click(await screen.findByRole('option', { name: 'Todos os leads deste funil' }));
+    expect(screen.queryByRole('listbox')).toBeNull();
+    fireEvent.click(screen.getByText('Salvar função'));
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body)).data.boards[0].scope).toBe('all');
   });
   it('ordinary administrators see team information without management controls', () => {
     mount(<TeamRolesPanel config={{ ...config, canManage: false }} members={[member]} onSaved={() => {}} />);
