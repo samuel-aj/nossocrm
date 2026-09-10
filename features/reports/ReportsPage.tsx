@@ -1,3 +1,4 @@
+import { FilterSelect } from '@/components/filters/FilterSelect';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
@@ -158,7 +159,7 @@ const ReportsPage: React.FC = () => {
     // (p-6 do <main>, igual laterais/topo) dá o respiro — sem pb extra aqui.
     <div className="flex flex-col min-h-[calc(100vh-7rem)] max-md:min-h-0 space-y-4">
       {/* Header com Filtros */}
-      <div className="flex justify-between items-center shrink-0 max-md:flex-wrap max-md:gap-y-3">
+      <div className="flex flex-wrap justify-between items-center gap-3 shrink-0">
         <div>
           <h1 className="text-3xl font-bold text-slate-900 dark:text-white font-display tracking-tight">
             Relatórios de Performance
@@ -167,29 +168,10 @@ const ReportsPage: React.FC = () => {
             Análise detalhada de vendas e tendências.
           </p>
         </div>
-        <div className="flex items-center gap-3 max-md:flex-wrap max-md:w-full">
-          <select
-            value={selectedBoardId}
-            onChange={(e) => setSelectedBoardId(e.target.value)}
-            aria-label="Selecionar Pipeline"
-            className="px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-medium text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500"
-          >
-            {boards.map(board => (
-              <option key={board.id} value={board.id}>{board.name}</option>
-            ))}
-          </select>
+        <div className="flex flex-wrap items-center justify-end gap-3 max-md:w-full">
+          <div className="min-w-[180px] max-w-[280px] flex-1"><FilterSelect label="Selecionar Pipeline" value={boardIdEfetivo} onChange={setSelectedBoardId} options={boards.map(board => ({value:board.id,label:board.name}))} /></div>
 
-          <select
-            value={selectedOwnerId}
-            onChange={(e) => setSelectedOwnerId(e.target.value)}
-            aria-label="Filtrar por Vendedor"
-            className="px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-medium text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500"
-          >
-            <option value="">Todos os vendedores</option>
-            {ownersList.map(owner => (
-              <option key={owner.id} value={owner.id}>{owner.name}</option>
-            ))}
-          </select>
+          <div className="min-w-[190px] max-w-[280px] flex-1"><FilterSelect label="Filtrar por Vendedor" value={selectedOwnerId} onChange={setSelectedOwnerId} options={[{value:'',label:'Todos os vendedores'}, ...ownersList.map(owner => ({value:owner.id,label:owner.name}))]} /></div>
 
           <PeriodFilterSelect value={period} onChange={setPeriod} />
 
