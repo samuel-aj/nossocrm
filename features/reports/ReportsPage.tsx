@@ -11,6 +11,7 @@ import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
 import { performanceComparisonRange } from './performanceMetrics';
 import { usePerformanceReport } from './usePerformanceReport';
+import { StageLeadsModal } from './StageLeadsModal';
 
 /**
  * Componente React `ReportsPage`.
@@ -22,6 +23,8 @@ const ReportsPage: React.FC = () => {
   const [period, setPeriod] = useState<PeriodFilter>('this_month');
   const [selectedBoardId, setSelectedBoardId] = useState<string>('');
   const [selectedOwnerId, setSelectedOwnerId] = useState<string>('');
+  const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
+  useEffect(() => { setSelectedStageId(null); }, [period, selectedBoardId, selectedOwnerId]);
 
   // Performance: avoid recomputing the "default board id" logic inside the effect.
   const defaultBoardId = useMemo(() => {
@@ -92,6 +95,7 @@ const ReportsPage: React.FC = () => {
   }, []);
 
   const stageConversionData = metrics?.stageData || [];
+  const selectedStage = stageConversionData.find(stage => stage.stageId === selectedStageId);
   const funnelRates = {
     total: metrics?.entries.length || 0, wonCount: wonDeals.length,
     qualified: metrics?.qualifiedCount || 0,
@@ -356,7 +360,7 @@ const ReportsPage: React.FC = () => {
           <div className="flex-1 min-h-0 relative max-md:min-h-[280px]">
             <div className="absolute inset-0">
               <ChartWrapper height="100%">
-                <LazyStageConversionChart data={stageConversionData} />
+                <LazyStageConversionChart data={stageConversionData} onStageClick={setSelectedStageId} />
               </ChartWrapper>
             </div>
           </div>
@@ -452,6 +456,8 @@ const ReportsPage: React.FC = () => {
           limite nominal da caixa, não abaixo do conteúdo transbordado) —
           este elemento garante a margem inferior em qualquer cenário */}
       <div className="shrink-0 h-2" aria-hidden="true" />
+      {selectedStage && metrics && <StageLeadsModal stage={selectedStage}
+        qualificationDates={metrics.leadQualificationDates} onClose={() => setSelectedStageId(null)} />}
       </>}
     </div>
   );
