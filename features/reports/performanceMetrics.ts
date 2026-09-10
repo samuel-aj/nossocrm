@@ -72,6 +72,7 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   const qualified = new Set<string>();
   const qualificationKnown = new Set<string>();
   const qualificationDates = new Map<string, string>();
+  const leadQualificationDates = new Map<string, string>();
   const reached = new Map(board.stages.map(stage => [stage.id, new Set<string>()]));
   const priorStages = new Map<string, string>();
   const seenEvents = new Set<string>();
@@ -93,6 +94,9 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
       (event.stageId === qualifiedStage ||
         (previousIndex >= 0 && previousIndex < rules.qualifiedIndex && currentIndex >= rules.qualifiedIndex));
     if (crossedQualification) {
+      if (Date.parse(event.date) <= snapshotDate.getTime() && !leadQualificationDates.has(event.dealId)) {
+        leadQualificationDates.set(event.dealId, event.date);
+      }
       qualificationKnown.add(event.dealId);
       if (inPeriod(event.date)) {
         qualified.add(event.dealId);
@@ -182,6 +186,8 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
     const numerator = isWon ? wonDeals.length : next ? stageCount(next.id) : 0;
     const denominator = isWon ? entries.length : stageCount(stage.id);
     return {
+      stageId: stage.id,
+      deals: isWon ? wonDeals : entries.filter(deal => cohortReached.get(stage.id)?.has(deal.id)),
       name: stage.label, count: stageCount(stage.id),
       fill: STAGE_COLORS[stage.color] || (/^#[0-9a-f]{6}$/i.test(stage.color || '') ? stage.color : isWon ? '#22c55e' : '#3b82f6'),
       conversionRate: rate(numerator, denominator),
@@ -191,7 +197,7 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
     };
   });
   return {
-    entries, qualifiedIds: qualified, qualificationDates, qualifiedCount: qualified.size,
+    entries, qualifiedIds: qualified, qualificationDates, leadQualificationDates, qualifiedCount: qualified.size,
     qualificationRate: rules.qualifiedIndex >= 0 ? rate(qualified.size, entries.length) : null,
     closingRate: rules.qualifiedIndex >= 0 ? rate(wonDeals.length, qualified.size) : null,
     hasQualifiedStage: rules.qualifiedIndex >= 0,

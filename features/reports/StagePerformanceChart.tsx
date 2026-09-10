@@ -7,11 +7,12 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Cell,
+  Rectangle,
   LabelList,
 } from 'recharts';
 
 interface StageConversionData {
+  stageId: string;
   name: string;
   count: number;
   fill: string;
@@ -23,6 +24,7 @@ interface StageConversionData {
 
 interface StageConversionChartProps {
   data: StageConversionData[];
+  onStageClick?: (stageId: string) => void;
 }
 
 const CustomTooltip = ({ active, payload }: any) => {
@@ -82,7 +84,7 @@ const abbreviateStage = (name: string) => {
   return shortened.length > 14 ? shortened.slice(0, 13).trimEnd() + '…' : shortened;
 };
 
-export const StageConversionChart: React.FC<StageConversionChartProps> = ({ data }) => (
+export const StageConversionChart: React.FC<StageConversionChartProps> = ({ data, onStageClick }) => (
   <ResponsiveContainer width="100%" height="100%">
     <BarChart data={data} margin={{ top: 24, right: 12, bottom: 8, left: 4 }}>
       <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
@@ -105,10 +107,21 @@ export const StageConversionChart: React.FC<StageConversionChartProps> = ({ data
         allowDecimals={false}
       />
       <Tooltip content={<CustomTooltip />} cursor={{ fill: 'var(--chart-grid)', opacity: 0.5 }} />
-      <Bar dataKey="count" radius={[6, 6, 0, 0]} maxBarSize={56}>
-        {data.map((entry, index) => (
-          <Cell key={index} fill={entry.fill} />
-        ))}
+      <Bar isAnimationActive={false} dataKey="count" radius={[6, 6, 0, 0]} maxBarSize={56}
+        cursor={onStageClick ? 'pointer' : undefined}
+        shape={(props: any) => (
+          <Rectangle {...props}
+            tabIndex={onStageClick ? 0 : undefined}
+            role={onStageClick ? 'button' : undefined}
+            aria-label={'Ver ' + props.payload.count + ' leads em ' + props.payload.name}
+            onClick={() => onStageClick?.(props.payload.stageId)}
+            onKeyDown={event => {
+              if (onStageClick && (event.key === 'Enter' || event.key === ' ')) {
+                event.preventDefault();
+                onStageClick(props.payload.stageId);
+              }
+            }} />
+        )}>
         {data.some(entry => entry.conversionRate !== undefined) ? <LabelList dataKey="conversionRate" content={renderConversionLabel} /> : <LabelList dataKey="count" position="top" fill="var(--chart-text)" fontSize={11} />}
       </Bar>
     </BarChart>
