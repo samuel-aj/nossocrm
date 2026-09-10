@@ -9,17 +9,13 @@ export function FilterPin({ controls, group }: { controls: BoardFilterControls; 
   const saved = controls.saved?.[group];
   const current = controls[group];
   const equal = !!saved && JSON.stringify(saved) === JSON.stringify(current);
-  return <div className="space-y-2 border-t border-slate-100 pt-3 dark:border-slate-700">
-    <p className="text-xs text-slate-500">Padrão só para você, neste funil.</p>
-    {controls.loadError && <p role="alert" className="text-xs text-red-600">Não foi possível carregar seu padrão. Reabra a página para tentar novamente.</p>}
-    <div className="flex items-center gap-3">
-      <button type="button" disabled={!controls.ready || controls.saving || equal} onClick={() => controls.pin({ [group]: current })}
-        className="flex items-center gap-2 rounded-lg bg-primary-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
-        <Pin size={14} />{equal ? 'Padrão fixado' : saved ? 'Atualizar padrão' : group === 'period' ? 'Fixar período' : 'Fixar filtros'}
-      </button>
-      {saved && <button type="button" disabled={controls.saving} onClick={() => controls.pin({ [group]: null })} className="text-xs text-slate-500 hover:text-primary-600">Desafixar</button>}
-    </div>
-  </div>;
+  return <button type="button" disabled={!controls.ready || controls.saving}
+    aria-pressed={equal}
+    title={controls.loadError ? 'Falha ao carregar seu padrão. Reabra a página para tentar novamente.' : equal ? 'Desafixar seu padrão deste funil' : 'Fixar como seu padrão neste funil'}
+    onClick={() => controls.pin({ [group]: equal ? null : current })}
+    className={`ml-auto inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:opacity-50 ${equal ? 'text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
+    <Pin size={13} className={equal ? 'fill-current' : ''} aria-hidden="true" />{equal ? 'Fixado' : 'Fixar'}
+  </button>;
 }
 export function PeriodButton({ controls }: { controls: BoardFilterControls }) {
   const value = controls.period;
@@ -34,7 +30,13 @@ export function PeriodButton({ controls }: { controls: BoardFilterControls }) {
       {controls.saved?.period && <Pin size={12} className="text-primary-600" />}
     </button></PopoverTrigger>
     <PopoverContent align="end" className="max-h-[calc(100dvh-100px)] w-[min(420px,calc(100vw-24px))] overflow-y-auto space-y-4 rounded-xl p-4">
-      <div className="flex items-center justify-between"><h3 className="font-semibold">Período</h3><button type="button" onClick={() => { controls.setPeriod(EMPTY_PERIOD); setDraft(EMPTY_PERIOD); setError(''); }} className="text-xs text-primary-600">Limpar</button></div>
+      <div className="flex items-center gap-3"><h3 className="font-semibold">Período</h3><button type="button" onClick={() => { controls.setPeriod(EMPTY_PERIOD); setDraft(EMPTY_PERIOD); setError(''); }} className="text-xs text-primary-600 hover:underline">Limpar</button>      <FilterPin controls={{ ...controls, period: draft, pin: patch => {
+        if (patch.period === null) { controls.pin(patch); return; }
+        const result = periodSchema.safeParse(draft);
+        if (!result.success) { setError(result.error.issues[0].message); return; }
+        controls.setPeriod(result.data);
+        controls.pin({ period: result.data });
+      } }} group="period" /></div>
       <div className="grid grid-cols-2 gap-2">{Object.entries(PERIOD_LABELS).map(([key, label]) => <button key={key} type="button" aria-pressed={draft.preset === key}
         onClick={() => update({ preset: key as typeof draft.preset, ...(key === 'custom' && draft.preset !== 'all' ? periodRange(draft) : {}) })}
         className={`rounded-lg border px-3 py-2 text-left text-sm ${draft.preset === key ? 'border-primary-400 bg-primary-50 text-primary-700 dark:bg-primary-900/30' : 'border-slate-200 dark:border-slate-700 hover:border-primary-300'}`}>{label}</button>)}</div>
@@ -52,13 +54,7 @@ export function PeriodButton({ controls }: { controls: BoardFilterControls }) {
       <p className="text-xs text-slate-500">Encerramento considera ganhos e perdas. O status escolhido em Filtros também é aplicado.</p>
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
       <button type="button" onClick={() => { const result = periodSchema.safeParse(draft); if (!result.success) { setError(result.error.issues[0].message); return; } controls.setPeriod(result.data); setOpen(false); }} className="w-full rounded-lg bg-primary-600 px-3 py-2 text-sm font-semibold text-white">Aplicar período</button>
-      <FilterPin controls={{ ...controls, period: draft, pin: patch => {
-        if (patch.period === null) { controls.pin(patch); return; }
-        const result = periodSchema.safeParse(draft);
-        if (!result.success) { setError(result.error.issues[0].message); return; }
-        controls.setPeriod(result.data);
-        controls.pin({ period: result.data });
-      } }} group="period" />
+
     </PopoverContent>
   </Popover>;
 }
