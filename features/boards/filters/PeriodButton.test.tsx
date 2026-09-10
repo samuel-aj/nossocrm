@@ -13,7 +13,7 @@ describe('period panel', () => {
     fireEvent.click(screen.getByText('Mês passado'));
     fireEvent.click(screen.getByLabelText('Encerramento'));
     expect(screen.getByRole('combobox')).toHaveValue('AND');
-    fireEvent.click(screen.getByText('Fixar período'));
+    fireEvent.click(screen.getByText('Fixar'));
     expect(c.pin).toHaveBeenCalledWith({ period: { ...EMPTY_PERIOD, preset: 'lastMonth', closed: true } });
     expect(c.setPeriod).toHaveBeenCalledWith({ ...EMPTY_PERIOD, preset: 'lastMonth', closed: true });
   });
@@ -21,7 +21,7 @@ describe('period panel', () => {
     const c = controls(); render(<PeriodButton controls={c} />);
     fireEvent.click(screen.getByLabelText('Filtrar por período'));
     fireEvent.click(screen.getByText('Personalizado'));
-    fireEvent.click(screen.getByText('Fixar período'));
+    fireEvent.click(screen.getByText('Fixar'));
     expect(screen.getByRole('alert')).toHaveTextContent('intervalo válido');
     expect(c.pin).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText('Hoje'));
@@ -34,7 +34,7 @@ describe('period panel', () => {
     const c = controls(); c.saved = { general: EMPTY_GENERAL, period: EMPTY_PERIOD };
     render(<PeriodButton controls={c} />);
     fireEvent.click(screen.getByLabelText('Filtrar por período'));
-    fireEvent.click(screen.getByText('Desafixar'));
+    fireEvent.click(screen.getByText('Fixado'));
     expect(c.pin).toHaveBeenCalledWith({ period: null });
   });
 });

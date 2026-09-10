@@ -167,16 +167,15 @@ function FiltersButton({
             </button>
             {open && (
                 <div className={`${PANEL_CLASS} w-80 max-h-[28rem] max-md:max-h-[calc(100dvh-13rem)] overflow-y-auto scrollbar-custom`}>
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
                         <p className="text-xs font-bold text-slate-400 uppercase">Filtros</p>
                         {activeCount > 0 && (
                             <button type="button" onClick={clearAll} className="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline">
                                 Limpar ({activeCount})
                             </button>
                         )}
+                        <FilterPin controls={controls} group="general" />
                     </div>
-
-                    <FilterPin controls={controls} group="general" />
                     <label className="block space-y-2">
                         <span className={SECTION_TITLE}>Produto</span>
                         <select aria-label="Filtrar por produto" value={controls.general.product} onChange={e => controls.setGeneral({ product: e.target.value })} className={INPUT_CLASS + ' w-full'}>
