@@ -104,7 +104,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
   contactInactive,
 }) => {
   const [localDragging, setLocalDragging] = useState(false);
-  const podeMover = useMyActionPermissions().deals.move;
+  const podeMover = useMyActionPermissions(deal.boardId).deals.move;
   const isClosed = isDealClosed(deal);
 
   const handleToggleMenu = (e: React.MouseEvent) => {

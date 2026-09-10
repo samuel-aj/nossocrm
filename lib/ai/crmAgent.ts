@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { ToolLoopAgent, stepCountIs } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
@@ -452,7 +453,8 @@ export async function createCRMAgent(
     userId: string,
     apiKey: string,
     modelId: string = 'gemini-2.0-flash-exp',
-    provider: AIProvider = AIProviderConst.GOOGLE
+    provider: AIProvider = AIProviderConst.GOOGLE,
+    scopedClient?: SupabaseClient
 ) {
     console.log('[CRMAgent] 🤖 Creating agent with context:', {
         boardId: context.boardId,
@@ -504,7 +506,7 @@ export async function createCRMAgent(
     })();
 
     // Create tools with context injected
-    const tools = createCRMTools(context, userId);
+    const tools = createCRMTools(context, userId, scopedClient);
 
     console.log('[CRMAgent] 🛠️ Tools created. Checking markDealAsWon config:', {
         needsApproval: (tools.markDealAsWon as any).needsApproval,

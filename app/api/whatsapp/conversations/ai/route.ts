@@ -1,3 +1,4 @@
+import { conversationAllowed } from '@/lib/permissions/conversationAccess';
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { isValidUUID } from '@/lib/supabase/utils';
@@ -25,6 +26,7 @@ export async function POST(req: Request) {
     return json({ error: 'conversationId e status (active|paused|stopped) são obrigatórios' }, 400);
   }
 
+  if (!(await conversationAllowed(auth.admin, auth.user, { id: conversationId }))) return json({ error: 'Conversa indisponível' }, 404);
   const { data, error } = await auth.admin
     .from('wa_conversations')
     .update({

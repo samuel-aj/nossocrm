@@ -77,7 +77,7 @@ export async function GET() {
           p.email ||
           'Usuário',
         /** pode ser responsável por lead/atividade nesta org */
-        member: linked || (!isSuperAdmin && p.organization_id === orgId),
+        member: !isSuperAdmin && (linked || p.organization_id === orgId),
         isSuperAdmin,
       };
     })

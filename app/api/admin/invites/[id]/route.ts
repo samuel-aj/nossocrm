@@ -1,3 +1,4 @@
+import { canManageTeam } from '@/lib/permissions/teamAccessServer';
 import { createClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { UserRole } from '@/types/constants';
@@ -40,7 +41,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
   // ORG POR ABA: honra o header x-org-id validado (ver lib/supabase/tabOrgScope)
   const scoped = await withTabOrg({ id: user.id, role: me.role, organization_id: me.organization_id });
   if (!scoped) return json({ error: 'Acesso negado a esta organização' }, 403);
-  if (scoped.role !== UserRole.ADMIN && scoped.role !== UserRole.SUPER_ADMIN) return json({ error: 'Forbidden' }, 403);
+  if (!(await canManageTeam(scoped))) return json({ error: 'Somente o Mestre pode gerenciar a equipe' }, 403);
 
   const { error } = await supabase
     .from('organization_invites')

@@ -545,7 +545,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
     onToggleAutomationMode,
     totalLeads,
 }) => {
-    const podeCriarCard = useMyActionPermissions().deals.create;
+    const podeCriarCard = useMyActionPermissions(activeBoard?.id).deals.create;
     // Lista de responsáveis da org (admin/super_admin); para vendedor vem vazia
     // (hook desabilitado), então só aparecem "Todos" e "Meus".
     const { users: orgUsers } = useOrgUsers();

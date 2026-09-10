@@ -1,3 +1,4 @@
+import { canManageTeam } from '@/lib/permissions/teamAccessServer';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { UserRole } from '@/types/constants';
@@ -41,7 +42,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
   // ORG POR ABA: honra o header x-org-id validado (ver lib/supabase/tabOrgScope)
   const scoped = await withTabOrg({ id: user.id, role: me.role, organization_id: me.organization_id });
   if (!scoped) return json({ error: 'Acesso negado a esta organização' }, 403);
-  if (scoped.role !== UserRole.ADMIN && scoped.role !== UserRole.SUPER_ADMIN) return json({ error: 'Forbidden' }, 403);
+  if (!(await canManageTeam(scoped))) return json({ error: 'Somente o Mestre pode gerenciar a equipe' }, 403);
 
   if (id === user.id) return json({ error: 'Você não pode remover a si mesmo' }, 400);
 
@@ -53,6 +54,9 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
 
   if (targetError) return json({ error: targetError.message }, 500);
   if (!target) return json({ error: 'User not found' }, 404);
+  const { data: settings, error: settingsError } = await admin.from('org_team_settings').select('master_user_id').eq('organization_id', scoped.organization_id).maybeSingle();
+  if (settingsError) return json({ error: 'Falha ao consultar o Mestre' }, 500);
+  if (target.role === UserRole.SUPER_ADMIN || settings?.master_user_id === id) return json({ error: 'Este membro não pode ser removido. Transfira a função de Mestre primeiro.' }, 403);
 
   // Usuário multi-org: remover daqui NÃO pode apagar a conta inteira (ele
   // continua nas outras organizações). Remove só o vínculo com ESTA org e,

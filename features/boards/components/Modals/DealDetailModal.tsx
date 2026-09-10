@@ -1,3 +1,4 @@
+import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
 import React, { useState, useRef, useEffect, useId, useMemo, useCallback } from 'react';
 import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
@@ -116,8 +117,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const {
     deals,
     contacts,
-    updateDeal,
-    updateContact,
+    updateDeal: updateDealRaw,
+    updateContact: updateContactRaw,
     deleteDeal,
     activities,
     addActivity,
@@ -178,6 +179,18 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const shouldFetch = !!dealId && !!isOpen && !dealFromCache;
   const { data: fetchedDeal } = useDeal(shouldFetch ? dealId : undefined);
   const deal = dealFromCache ?? (fetchedDeal as unknown as typeof dealFromCache | undefined);
+  const permissions = useMyActionPermissions(deal?.boardId);
+  const updateDeal: typeof updateDealRaw = async (id, updates) => {
+    const moving = updates.status !== undefined || updates.boardId !== undefined;
+    if (moving ? !permissions.deals.move : !permissions.deals.edit) {
+      addToast('Sem permissão para esta ação', 'error'); return;
+    }
+    return updateDealRaw(id, updates);
+  };
+  const updateContact: typeof updateContactRaw = async (id, updates) => {
+    if (!permissions.deals.edit) { addToast('Sem permissão para editar', 'error'); return; }
+    return updateContactRaw(id, updates);
+  };
   const contact = deal ? (contactsById.get(deal.contactId) ?? null) : null;
 
   // Determine the correct board for this deal
@@ -733,7 +746,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   };
 
   const confirmDeleteDeal = () => {
-    if (deleteId) {
+    if (deleteId && permissions.deals.delete) {
       deleteDeal(deleteId);
       addToast('Negócio excluído com sucesso', 'success');
       setDeleteId(null);
@@ -894,7 +907,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
               <div className="flex-1 mr-8 max-md:mr-0 max-md:basis-full max-md:pr-20">
                 {isEditingTitle ? (
                   <div className="flex gap-2 mb-1">
-                    <input
+                    <input readOnly={!permissions.deals.edit}
                       autoFocus
                       type="text"
                       className="text-2xl font-bold text-slate-900 dark:text-white bg-white dark:bg-black/20 border border-slate-300 dark:border-slate-600 rounded px-2 py-1 w-full outline-none focus:ring-2 focus:ring-primary-500"
@@ -966,7 +979,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                           <div className="absolute left-0 top-7 z-50 w-60 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 p-1.5 animate-in fade-in slide-in-from-top-2 duration-150">
                             {tagCreating ? (
                               <div className="flex gap-1.5 p-1">
-                                <input
+                                <input readOnly={!permissions.deals.edit}
                                   type="text"
                                   autoFocus
                                   value={tagQuery}
@@ -1057,7 +1070,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                   {isEditingValue ? (
                     <div className="flex items-baseline gap-1.5">
                       <span className="text-lg font-mono font-bold text-primary-600 dark:text-primary-400">R$</span>
-                      <input
+                      <input readOnly={!permissions.deals.edit}
                         autoFocus
                         type="number"
                         inputMode="decimal"
@@ -1303,6 +1316,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                 {/* Celular: lixeira e X ancorados no canto superior direito
                     (na linha do título) em vez de ocuparem uma linha própria */}
                 <button
+                  disabled={!permissions.deals.delete}
                   onClick={() => setDeleteId(deal.id)}
                   className="ml-2 max-md:absolute max-md:top-4 max-md:right-12 max-md:ml-0 max-md:p-1 text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
                   title="Excluir Negócio"
@@ -1633,7 +1647,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                                       const isChecked = current.includes(opt);
                                       return (
                                         <label key={opt} className="flex items-center gap-2 cursor-pointer text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5 px-2 py-1 rounded">
-                                          <input
+                                          <input readOnly={!permissions.deals.edit}
                                             type="checkbox"
                                             checked={isChecked}
                                             onChange={() => {
@@ -1657,7 +1671,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                                 ) : field.type === 'currency' ? (
                                   <div className="relative">
                                     <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-slate-400">R$</span>
-                                    <input
+                                    <input readOnly={!permissions.deals.edit}
                                       autoFocus
                                       type="text"
                                       inputMode="decimal"
@@ -1674,7 +1688,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                                     />
                                   </div>
                                 ) : (
-                                  <input
+                                  <input readOnly={!permissions.deals.edit}
                                     type={field.type === 'date' ? 'date' : field.type}
                                     ref={el => {
                                       // foco (com seleção do texto) + abre o calendário direto na data
@@ -1914,7 +1928,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                   <div className="space-y-6">
                     {/* Descrição fixa — sempre visível, persistente (salva no blur) */}
                     <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-4 shadow-sm">
-                      <textarea
+                      <textarea readOnly={!permissions.deals.edit}
                         ref={descriptionTextareaRef}
                         className="w-full bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none resize-none overflow-hidden min-h-[120px]"
                         placeholder="Adicione uma descrição..."
@@ -1952,7 +1966,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                             <X size={16} />
                           </button>
                         </div>
-                        <textarea
+                        <textarea readOnly={!permissions.deals.edit}
                           ref={noteTextareaRef}
                           autoFocus
                           className="w-full bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none resize-none min-h-[80px]"
@@ -1991,7 +2005,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                             <X size={16} />
                           </button>
                         </div>
-                        <input
+                        <input readOnly={!permissions.deals.edit}
                           type="text"
                           required
                           className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
@@ -2010,14 +2024,14 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                             <option value="EMAIL">Email</option>
                             <option value="TASK">Tarefa</option>
                           </select>
-                          <input
+                          <input readOnly={!permissions.deals.edit}
                             type="date"
                             required
                             className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
                             value={quickActivityDate}
                             onChange={e => setQuickActivityDate(e.target.value)}
                           />
-                          <input
+                          <input readOnly={!permissions.deals.edit}
                             type="time"
                             required
                             className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
@@ -2025,7 +2039,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                             onChange={e => setQuickActivityTime(e.target.value)}
                           />
                         </div>
-                        <textarea
+                        <textarea readOnly={!permissions.deals.edit}
                           className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500 min-h-[60px] resize-none"
                           placeholder="Descrição (opcional)..."
                           value={quickActivityDesc}
@@ -2098,7 +2112,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                             <X size={16} />
                           </button>
                         </div>
-                        <input
+                        <input readOnly={!permissions.deals.edit}
                           type="text"
                           className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
                           placeholder="Título da atividade..."
@@ -2116,20 +2130,20 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                             <option value="EMAIL">Email</option>
                             <option value="TASK">Tarefa</option>
                           </select>
-                          <input
+                          <input readOnly={!permissions.deals.edit}
                             type="date"
                             className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
                             value={quickActivityDate}
                             onChange={e => setQuickActivityDate(e.target.value)}
                           />
-                          <input
+                          <input readOnly={!permissions.deals.edit}
                             type="time"
                             className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
                             value={quickActivityTime}
                             onChange={e => setQuickActivityTime(e.target.value)}
                           />
                         </div>
-                        <textarea
+                        <textarea readOnly={!permissions.deals.edit}
                           className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500 min-h-[60px] resize-none"
                           placeholder="Descrição (opcional)..."
                           value={quickActivityDesc}
@@ -2185,7 +2199,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                 {activeTab === 'notes' && (
                   <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
                     <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-4 shadow-sm">
-                      <textarea
+                      <textarea readOnly={!permissions.deals.edit}
                         className="w-full bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none resize-none min-h-[80px]"
                         placeholder="Escreva uma nota..."
                         value={newNote}
@@ -2269,7 +2283,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                           <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
                             Qtd
                           </label>
-                          <input
+                          <input readOnly={!permissions.deals.edit}
                             type="number"
                             min="1"
                             className="w-full bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
@@ -2281,7 +2295,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                           <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
                             Preço (R$)
                           </label>
-                          <input
+                          <input readOnly={!permissions.deals.edit}
                             inputMode="decimal"
                             placeholder="Preço padrão"
                             title="Preço só neste lead. O cadastro do produto em Configurações não muda."
@@ -2320,7 +2334,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                           <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
                             <div className="sm:col-span-6">
                               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Nome do item</label>
-                              <input
+                              <input readOnly={!permissions.deals.edit}
                                 value={customItemName}
                                 onChange={e => setCustomItemName(e.target.value)}
                                 placeholder="Ex.: Pacote personalizado, Procedimento X…"
@@ -2329,7 +2343,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                             </div>
                             <div className="sm:col-span-3">
                               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Preço</label>
-                              <input
+                              <input readOnly={!permissions.deals.edit}
                                 value={customItemPrice}
                                 onChange={e => setCustomItemPrice(e.target.value)}
                                 inputMode="decimal"
@@ -2338,7 +2352,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                             </div>
                             <div className="sm:col-span-2">
                               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Qtd</label>
-                              <input
+                              <input readOnly={!permissions.deals.edit}
                                 type="number"
                                 min={1}
                                 value={customItemQuantity}
@@ -2389,7 +2403,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                                 </td>
                                 <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">
                                   {editingItemId === item.id ? (
-                                    <input
+                                    <input readOnly={!permissions.deals.edit}
                                       autoFocus
                                       inputMode="decimal"
                                       aria-label={`Preço de ${item.name} neste lead`}
@@ -2555,7 +2569,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                       </div>
 
                       <div className="flex gap-2 mb-4">
-                        <input
+                        <input readOnly={!permissions.deals.edit}
                           type="text"
                           className="flex-1 bg-white dark:bg-white/5 border border-rose-200 dark:border-rose-500/20 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-rose-500 dark:text-white"
                           placeholder="Ex: 'Achamos o preço muito alto' ou 'Preciso falar com meu sócio'"

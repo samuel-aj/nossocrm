@@ -1,3 +1,4 @@
+import { canManageTeam } from '@/lib/permissions/teamAccessServer';
 import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
@@ -88,7 +89,7 @@ export async function GET() {
       // estar navegando nesta org (org ativa aqui) não o coloca na lista.
       const isSuperAdmin = p.role === UserRole.SUPER_ADMIN;
       const linked = membershipRoleByUser.has(uid);
-      if (isSuperAdmin && !linked) return null;
+      if (isSuperAdmin) return null;
       // Papel exibido = papel NESTA org (vínculo); fallback pro papel do perfil.
       // Vínculo antigo gravado como super_admin conta como admin da org.
       const rawRole = membershipRoleByUser.get(uid) ?? p.role ?? UserRole.VENDEDOR;
@@ -152,7 +153,7 @@ export async function POST(req: Request) {
   // ORG POR ABA: honra o header x-org-id validado (ver lib/supabase/tabOrgScope)
   const scoped = await withTabOrg({ id: user.id, role: me.role, organization_id: me.organization_id });
   if (!scoped) return json({ error: 'Acesso negado a esta organização' }, 403);
-  if (scoped.role !== UserRole.ADMIN && scoped.role !== UserRole.SUPER_ADMIN) return json({ error: 'Forbidden' }, 403);
+  if (!(await canManageTeam(scoped))) return json({ error: 'Somente o Mestre pode gerenciar a equipe' }, 403);
 
   const raw = await req.json().catch(() => null);
   const parsed = CreateUserSchema.safeParse(raw);

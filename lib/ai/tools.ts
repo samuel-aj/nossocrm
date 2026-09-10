@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { tool } from 'ai';
 import { z } from 'zod';
 import { createStaticAdminClient } from '@/lib/supabase/staticAdminClient';
@@ -11,9 +12,9 @@ import { DealPriority } from '@/types/constants';
  * NOTE: Uses createStaticAdminClient (service role, no cookies) to bypass RLS
  * because async AI agent context doesn't have access to request cookies.
  */
-export function createCRMTools(context: CRMCallOptions, userId: string) {
+export function createCRMTools(context: CRMCallOptions, userId: string, scopedClient?: SupabaseClient) {
     // Initialize supabase admin client directly (no async, no cookies needed)
-    const supabase = createStaticAdminClient();
+    const supabase = scopedClient ?? createStaticAdminClient();
     const organizationId = context.organizationId;
 
     // Em UI normal, ações são gateadas por um card de Aprovar/Negar.

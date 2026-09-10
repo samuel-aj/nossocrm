@@ -20,8 +20,12 @@ export async function countOrgMembers(admin: AdminClient, orgId: string): Promis
   ]);
   // Falha de leitura: contribui vazio (mesmo comportamento tolerante de antes,
   // quando o count vinha nulo). Não bloqueia adição legítima por erro passageiro.
+  if (membersRes.error || profilesRes.error) throw new Error('Falha ao contar membros');
   const ids = new Set<string>();
   for (const m of membersRes.data || []) if (m.user_id) ids.add(m.user_id as string);
   for (const p of profilesRes.data || []) if (p.id) ids.add(p.id as string);
-  return ids.size;
+  if (!ids.size) return 0;
+  const { data, error } = await admin.from('profiles').select('id').in('id', [...ids]).neq('role', 'super_admin');
+  if (error) throw error;
+  return data?.length ?? 0;
 }

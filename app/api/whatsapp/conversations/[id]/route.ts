@@ -1,3 +1,4 @@
+import { conversationAllowed } from '@/lib/permissions/conversationAccess';
 /**
  * PATCH /api/whatsapp/conversations/[id]
  *   { labelIds: string[] }
@@ -34,6 +35,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
   const { id } = await ctx.params;
   const orgId = auth.user.organizationId;
+  if (!(await conversationAllowed(auth.admin, auth.user, { id }))) return json({ error: 'Conversa indisponível' }, 404);
 
   // `null` e `[1,2]` são JSON VÁLIDOS: req.json() resolve e o catch não pega.
   // Sem esta conferência, `'labelIds' in body` estoura TypeError e a rota
