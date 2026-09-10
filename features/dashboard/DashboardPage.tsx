@@ -100,7 +100,7 @@ const DashboardPage: React.FC = () => {
     // cresce junto e o padding inferior do site continua valendo (nada
     // fica colado no rodapé)
     <div className="flex flex-col min-h-[calc(100vh-7rem)] space-y-4 pb-2">
-      <div className="flex justify-between items-center shrink-0 max-md:flex-wrap max-md:gap-y-3">
+      <div className="flex flex-wrap justify-between items-center gap-3 shrink-0">
         <div>
           <h1 className="text-3xl font-bold text-slate-900 dark:text-white font-display tracking-tight">
             Visão Geral
@@ -109,8 +109,8 @@ const DashboardPage: React.FC = () => {
             O pulso do seu negócio em tempo real.
           </p>
         </div>
-        <div className="flex items-center gap-3 max-md:flex-wrap max-md:w-full">
-          <div className="min-w-[180px] max-w-[280px] flex-1"><FilterSelect label="Selecionar Pipeline de Vendas" value={selectedBoardId} onChange={setSelectedBoardId} options={boards.map(board => ({value:board.id,label:board.name}))} /></div>
+        <div className="flex flex-wrap items-center justify-end gap-3 max-md:w-full">
+          <div className="w-[340px] min-w-0 shrink-0 max-md:w-full"><FilterSelect label="Selecionar Pipeline de Vendas" value={selectedBoardId} onChange={setSelectedBoardId} options={boards.map(board => ({value:board.id,label:board.name}))} /></div>
 
           <PeriodFilterSelect value={period} onChange={setPeriod} />
 

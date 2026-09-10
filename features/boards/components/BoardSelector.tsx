@@ -102,7 +102,7 @@ export const BoardSelector: React.FC<BoardSelectorProps> = ({
             className={
               variant === 'title'
                 ? 'font-display font-bold text-xl md:text-2xl tracking-tight text-slate-900 dark:text-white truncate max-md:max-w-[11rem]'
-                : 'font-medium text-slate-900 dark:text-white max-md:max-w-[6rem] max-md:truncate max-md:text-sm'
+                : 'font-medium text-slate-900 dark:text-white max-w-[340px] truncate max-md:max-w-[6rem] max-md:text-sm'
             }
           >
             {activeBoard.name}
@@ -117,9 +117,9 @@ export const BoardSelector: React.FC<BoardSelectorProps> = ({
             className="fixed inset-0 z-10"
             onClick={() => setIsOpen(false)}
           />
-          <div className="absolute top-full left-0 mt-2 z-50 w-72 bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-xl shadow-xl overflow-hidden">
+          <div className="absolute top-full left-0 mt-2 z-50 w-[380px] max-w-[calc(100vw-24px)] bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/15 rounded-xl shadow-xl overflow-hidden">
             {/* Board List */}
-            <div className="max-h-80 overflow-y-auto py-1">
+            <div className="max-h-80 overflow-y-auto py-1 divide-y divide-slate-200/70 dark:divide-white/10">
               {displayBoards.map(board => (
                 <div
                   key={board.id}
