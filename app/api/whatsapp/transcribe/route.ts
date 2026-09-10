@@ -1,3 +1,4 @@
+import { conversationAllowed } from '@/lib/permissions/conversationAccess';
 /**
  * POST /api/whatsapp/transcribe { messageId }
  * Transcreve o áudio de uma mensagem do WhatsApp com a IA da organização
@@ -36,6 +37,8 @@ export async function POST(req: Request) {
   const messageId = (body.messageId || '').trim();
   if (!messageId) return json({ error: 'messageId é obrigatório' }, 400);
 
+  const { data: messageAccess } = await auth.admin.from('wa_messages').select('conversation_id').eq('id', messageId).eq('organization_id', auth.user.organizationId).maybeSingle();
+  if (!messageAccess || !(await conversationAllowed(auth.admin, auth.user, { id: messageAccess.conversation_id }))) return json({ error: 'Mensagem indisponível' }, 404);
   const { data: msg } = await auth.admin
     .from('wa_messages')
     .select(

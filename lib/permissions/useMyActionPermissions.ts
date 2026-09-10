@@ -1,25 +1,36 @@
 'use client';
-
-/**
- * Permissões de AÇÃO do usuário logado (GET /api/permissions/me), para a
- * interface esconder/desabilitar botões. Enquanto carrega (ou em erro), tudo
- * fica liberado na tela — a imposição real é no banco, que recusa a escrita
- * com mensagem clara; aqui é só pra não oferecer o que vai ser negado.
- */
-import { useQuery } from '@tanstack/react-query';
-import { DEFAULT_ACTION_PERMISSIONS, type ActionPermissions } from './types';
-
-export function useMyActionPermissions(): ActionPermissions {
-  const { data } = useQuery({
-    queryKey: ['permissions', 'me'],
-    queryFn: async (): Promise<ActionPermissions> => {
-      const res = await fetch('/api/permissions/me', { credentials: 'include' });
-      if (!res.ok) return DEFAULT_ACTION_PERMISSIONS;
-      const body = (await res.json().catch(() => null)) as { actions?: ActionPermissions } | null;
-      return body?.actions ?? DEFAULT_ACTION_PERMISSIONS;
+import { useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '@/context/AuthContext';
+import { type ActionPermissions } from './types';
+import { DENIED_ACTIONS, type BoardAccess } from './teamRoles';
+interface MyPermissions { fullAccess: boolean; boards: BoardAccess[]; actions: ActionPermissions }
+const observedAccess = new WeakMap<object, string>();
+export function useMyActionPermissions(boardId?: string): ActionPermissions {
+  const { organizationId, user, refreshProfile } = useAuth();
+  const client = useQueryClient();
+  const { data, isError } = useQuery({
+    queryKey: ['permissions', 'me', organizationId, user?.id],
+    enabled: !!organizationId && !!user,
+    queryFn: async (): Promise<MyPermissions> => {
+      const res = await fetch('/api/permissions/me', { credentials: 'include', cache: 'no-store' });
+      if (!res.ok) throw new Error('Falha ao consultar permissões');
+      return res.json();
     },
-    staleTime: 5 * 60_000,
-    gcTime: 30 * 60_000,
+    staleTime: 10_000, refetchInterval: 15_000, refetchOnWindowFocus: 'always', retry: 1,
   });
-  return data ?? DEFAULT_ACTION_PERMISSIONS;
+  useEffect(() => {
+    const next = JSON.stringify([organizationId, user?.id, isError ? null : data]);
+    if (observedAccess.has(client) && observedAccess.get(client) !== next) {
+      void client.resetQueries({ predicate: q => q.queryKey[0] !== 'permissions' });
+      void refreshProfile?.();
+    }
+    observedAccess.set(client, next);
+  }, [data, isError, organizationId, user?.id, client, refreshProfile]);
+  if (isError || !data) return DENIED_ACTIONS;
+  if (data.fullAccess) return data.actions;
+  const rule = data.boards.find(b => b.boardId === boardId);
+  return { contacts: data.actions.contacts, deals: rule ? {
+    create: rule.create, edit: rule.edit, move: rule.move, delete: rule.delete,
+  } : DENIED_ACTIONS.deals };
 }

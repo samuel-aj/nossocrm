@@ -1,3 +1,4 @@
+import { conversationAllowed } from '@/lib/permissions/conversationAccess';
 /**
  * POST /api/whatsapp/forward -> encaminha mensagens do chat para outros contatos
  * (estilo "encaminhar" do WhatsApp), reenviando texto ou mídia pelo provedor.
@@ -82,11 +83,14 @@ export async function POST(req: Request) {
   // Mensagens SEMPRE da própria org (nunca cross-tenant), em ordem cronológica
   const { data: rows, error: msgErr } = await auth.admin
     .from('wa_messages')
-    .select('id, body, media_type, media_mime, media_url, created_at')
+    .select('id, body, media_type, media_mime, media_url, created_at, conversation_id')
     .eq('organization_id', orgId)
     .in('id', messageIds)
     .order('created_at', { ascending: true });
   if (msgErr) return json({ error: msgErr.message }, 500);
+  for (const conversationId of new Set((rows || []).map(m => m.conversation_id))) {
+    if (!(await conversationAllowed(auth.admin, auth.user, { id: conversationId }))) return json({ error: 'Mensagem indisponível' }, 404);
+  }
   const messages = (rows ?? []) as ForwardableRow[];
   if (messages.length === 0) return json({ error: 'Mensagens não encontradas' }, 404);
 

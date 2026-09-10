@@ -1,3 +1,4 @@
+import { conversationAllowed } from '@/lib/permissions/conversationAccess';
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
 
@@ -24,6 +25,7 @@ export async function POST(req: Request) {
 
   const conversationId = (body?.conversationId || '').trim();
   if (conversationId) {
+    if (!(await conversationAllowed(auth.admin, auth.user, { id: conversationId }))) return json({ error: 'Conversa indisponível' }, 404);
     const { error } = await auth.admin
       .from('wa_conversations')
       .update({ unread_count: 1 })
@@ -37,6 +39,7 @@ export async function POST(req: Request) {
   const phone = normalizePhoneE164(body?.phone || '');
   if (!phone) return json({ error: 'phone ou conversationId é obrigatório' }, 400);
 
+  if (!(await conversationAllowed(auth.admin, auth.user, { phone, connectionId: body?.connectionId || undefined }))) return json({ error: 'Conversa indisponível' }, 404);
   const variants = brPhoneVariants(phone);
   let q = auth.admin
     .from('wa_conversations')

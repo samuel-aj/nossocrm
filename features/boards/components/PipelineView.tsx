@@ -392,7 +392,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
 }) => {
   const { profile } = useAuth();
   const isAdmin = profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN;
-  const minhasAcoes = useMyActionPermissions();
+  const minhasAcoes = useMyActionPermissions(activeBoard?.id);
   const [isExportModalOpen, setIsExportModalOpen] = React.useState(false);
   // Modo Automatizar (kanban): colunas mostram o que dispara ao entrar na etapa
   const [automationMode, setAutomationMode] = React.useState(false);

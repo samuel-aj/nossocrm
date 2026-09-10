@@ -1,3 +1,4 @@
+import { useTeamConfig, TeamRolesPanel, MemberAccess } from './TeamRoles';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
@@ -59,6 +60,8 @@ const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 export const UsersPage: React.FC = () => {
     const { profile: currentUserProfile } = useAuth();
     const { addToast } = useToast();
+    const team = useTeamConfig();
+    const canManage = team.data?.canManage === true;
     const [users, setUsers] = useState<Profile[]>([]);
     // Permissões de visualização por usuário (uma entrada por usuário restringido)
     const [visRules, setVisRules] = useState<Record<string, VisibilityRules>>({});
@@ -215,10 +218,10 @@ export const UsersPage: React.FC = () => {
 
             // Force refresh of active invites and ensure state updates
             await fetchActiveInvites();
-            
+
             // Small delay to ensure state propagation
             await new Promise(resolve => setTimeout(resolve, 100));
-            
+
             addToast('Novo link gerado!', 'success');
         } catch (err: any) {
             setError(err.message || 'Erro ao gerar link');
@@ -435,16 +438,19 @@ export const UsersPage: React.FC = () => {
                             {users.length} {users.length === 1 ? 'membro' : 'membros'} • {admins.length} admin{admins.length !== 1 && 's'}, {vendedores.length} vendedor{vendedores.length !== 1 && 'es'}
                         </p>
                     </div>
-                    <button
+                    {canManage && (<button
+
                         onClick={() => setIsModalOpen(true)}
                         className="group flex items-center gap-2 px-5 py-2.5 bg-primary-600 text-white rounded-xl hover:bg-primary-500 transition-all shadow-lg shadow-primary-600/25 hover:shadow-xl hover:shadow-primary-600/30 hover:-translate-y-0.5 font-medium"
                     >
                         <UserPlus className="w-4 h-4 transition-transform group-hover:scale-110" />
                         Convidar
-                    </button>
+                    </button>)}
                 </div>
             </div>
 
+            {team.error && <p role="alert" className="mb-4 text-red-600">{team.error.message}</p>}
+            {team.data && <TeamRolesPanel config={team.data} members={users} onSaved={() => void fetchUsers()} />}
             {/* User Grid */}
             <div className="grid gap-3">
                 {users.map((user) => {
@@ -459,7 +465,7 @@ export const UsersPage: React.FC = () => {
                                 : 'border-slate-200 dark:border-white/10 hover:border-slate-300 dark:hover:border-white/20'
                                 }`}
                         >
-                            <div className="flex items-center gap-4">
+                            <div className="flex flex-wrap items-center gap-4">
                                 {/* Avatar */}
                                 <div className={`relative flex-shrink-0 h-14 w-14 rounded-2xl bg-gradient-to-br ${gradient} flex items-center justify-center text-white font-bold text-lg shadow-lg`}>
                                     {initials}
@@ -533,8 +539,9 @@ export const UsersPage: React.FC = () => {
                                     </div>
                                 </div>
 
+                                {team.data && <MemberAccess member={user} config={team.data} onSaved={() => void fetchUsers()} />}
                                 {/* Actions */}
-                                {!isCurrentUser && (
+                                {canManage && !isCurrentUser && user.id !== team.data?.masterUserId && (
                                     <div className="flex items-center gap-1">
                                         {actionLoading === user.id ? (
                                             <div className="p-2">
@@ -543,7 +550,7 @@ export const UsersPage: React.FC = () => {
                                         ) : (
                                             <>
                                                 {/* Resend Invite removed as we don't use email invites anymore */}
-                                                {user.role === UserRole.VENDEDOR && user.status !== 'pending' && (
+                                                {user.role === UserRole.VENDEDOR && user.status !== 'pending' && team.data?.assignments.find(a => a.user_id === user.id)?.legacy && (
                                                     <button
                                                         onClick={() => setPermUser(user)}
                                                         className="opacity-0 group-hover:opacity-100 max-md:opacity-100 p-2 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-all"
@@ -579,13 +586,14 @@ export const UsersPage: React.FC = () => {
                     <p className="text-slate-500 dark:text-slate-400 mb-6 max-w-sm mx-auto">
                         Comece convidando membros da sua equipe para colaborar no CRM.
                     </p>
-                    <button
+                    {canManage && (<button
+
                         onClick={() => setIsModalOpen(true)}
                         className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary-600 text-white rounded-xl hover:bg-primary-500 transition-all font-medium"
                     >
                         <UserPlus className="w-4 h-4" />
                         Convidar primeiro membro
-                    </button>
+                    </button>)}
                 </div>
             )}
 

@@ -1,3 +1,4 @@
+import { conversationAllowed } from '@/lib/permissions/conversationAccess';
 /**
  * POST /api/wa-agents/conversation  (qualquer membro da org)
  * body { conversationId: uuid,
@@ -39,6 +40,7 @@ export async function POST(req: Request) {
   if (!parsed.success) return validationError(parsed.error);
   const { conversationId, action, agentId, botId, context } = parsed.data;
   const organizationId = auth.user.organizationId;
+  if (!(await conversationAllowed(auth.admin, auth.user, { id: conversationId }))) return json({ error: 'Conversa indisponível' }, 404);
 
   try {
     const result = await applyConversationAction(auth.admin, {

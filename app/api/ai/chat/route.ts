@@ -228,7 +228,7 @@ export async function POST(req: Request) {
     // 6. Create agent with API key and context
     let agent: Awaited<ReturnType<typeof createCRMAgent>>;
     try {
-        agent = await createCRMAgent(context, user.id, apiKey, resolvedModelId, provider);
+        agent = await createCRMAgent(context, user.id, apiKey, resolvedModelId, provider, supabase);
     } catch (err: any) {
         const message = String(err?.message || err || 'Erro desconhecido');
         // Ex.: quando o provider é Gemini mas o modelId é OpenAI (ou vice-versa), o SDK retorna mensagens parecidas.

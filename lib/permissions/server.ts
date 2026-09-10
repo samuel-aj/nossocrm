@@ -1,3 +1,4 @@
+import { getTeamAccess, visibleLead } from './teamAccessServer';
 /**
  * Leitura das permissões de visualização no SERVIDOR (rotas com service role).
  *
@@ -32,7 +33,8 @@ export async function getVisibilityRules(
     .eq('organization_id', organizationId)
     .eq('user_id', userId)
     .maybeSingle();
-  if (error || !data) return null;
+  if (error) throw error;
+  if (!data) return null;
   return normalizeVisibilityRules((data as { rules: unknown }).rules);
 }
 
@@ -100,6 +102,17 @@ export async function filterConversationsByOwner<T extends { contact_id?: string
   userId: string,
   conversations: T[]
 ): Promise<T[]> {
+  const access = await getTeamAccess(admin, organizationId, userId);
+  if (!access.fullAccess) {
+    const contactIds = [...new Set(conversations.map(c => c.contact_id).filter((id): id is string => !!id))];
+    const visible = new Set<string>();
+    for (let start = 0; start < contactIds.length; start += 100) {
+      const { data, error } = await admin.from('deals').select('contact_id,board_id,owner_id').eq('organization_id', organizationId).in('contact_id', contactIds.slice(start, start + 100)).is('deleted_at', null);
+      if (error) throw error;
+      for (const d of data || []) if (visibleLead(access, userId, d.board_id, d.owner_id)) visible.add(d.contact_id);
+    }
+    conversations = conversations.filter(c => !!c.contact_id && visible.has(c.contact_id));
+  }
   if (!rules || rules.whatsapp.owner_user_ids === null) return conversations;
   const allowed = new Set([userId, ...rules.whatsapp.owner_user_ids]);
   const owners = await effectiveOwnersByContact(
@@ -109,6 +122,6 @@ export async function filterConversationsByOwner<T extends { contact_id?: string
   );
   return conversations.filter(c => {
     const owner = c.contact_id ? owners.get(c.contact_id) : undefined;
-    return !owner || allowed.has(owner);
+    return !!owner && allowed.has(owner);
   });
 }

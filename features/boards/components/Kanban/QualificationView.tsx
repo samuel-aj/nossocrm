@@ -235,7 +235,7 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
 
   // Gravar as tags do lead editadas pelo dropdown da célula. A permissão de
   // EDITAR cards vale (o trigger do banco recusa sem ela; a célula nem abre).
-  const podeEditarCards = useMyActionPermissions().deals.edit;
+  const podeEditarCards = useMyActionPermissions(board.id).deals.edit;
   const { availableTags, addTag } = useSettings();
   const handleChangeTags = useCallback(
     (dealId: string, tags: string[]) => {

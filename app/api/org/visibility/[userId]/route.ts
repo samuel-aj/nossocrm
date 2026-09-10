@@ -1,3 +1,4 @@
+import { canManageTeam } from '@/lib/permissions/teamAccessServer';
 /**
  * PUT /api/org/visibility/[userId]  (admin da organização)
  *   { rules: VisibilityRules } -> { ok, rules | null }
@@ -9,7 +10,7 @@
  * Admin e super admin não podem ser restringidos (as funções do banco já os
  * ignoram; aqui a regra nem é salva).
  */
-import { requireOrgUser, json, isOrgAdmin } from '@/lib/whatsapp/api';
+import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { VisibilityRulesSchema, isUnrestricted } from '@/lib/permissions/types';
@@ -23,11 +24,14 @@ export async function PUT(req: Request, ctx: Ctx) {
   if (!isAllowedOrigin(req)) return json({ error: 'Forbidden' }, 403);
   const auth = await requireOrgUser();
   if (!auth.ok) return auth.response;
-  if (!isOrgAdmin(auth.user.role)) return json({ error: 'Apenas administradores' }, 403);
+  if (!(await canManageTeam({ id: auth.user.id, organization_id: auth.user.organizationId }))) return json({ error: 'Somente o Mestre pode gerenciar a equipe' }, 403);
 
   const { userId } = await ctx.params;
   if (!isValidUUID(userId)) return json({ error: 'ID inválido' }, 400);
   const orgId = auth.user.organizationId;
+  const { data: assignment, error: assignmentError } = await auth.admin.from('team_role_assignments').select('legacy').eq('organization_id', orgId).eq('user_id', userId).maybeSingle();
+  if (assignmentError) return json({ error: 'Falha ao consultar acesso' }, 500);
+  if (!assignment?.legacy) return json({ error: 'Use as funções personalizadas para este membro' }, 400);
 
   let body: { rules?: unknown };
   try {

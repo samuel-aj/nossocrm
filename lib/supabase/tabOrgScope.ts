@@ -30,7 +30,7 @@ export async function withTabOrg<T extends OrgScoped>(me: T): Promise<T | null> 
   } catch {
     return me; // fora de contexto de request (ex.: build): segue org do perfil
   }
-  if (!requested || requested === me.organization_id) return me;
+  if (!requested) requested = me.organization_id;
   if (!UUID_RE.test(requested)) return null;
 
   if (me.role === UserRole.SUPER_ADMIN) {
@@ -44,7 +44,7 @@ export async function withTabOrg<T extends OrgScoped>(me: T): Promise<T | null> 
     .eq('user_id', me.id)
     .eq('organization_id', requested)
     .maybeSingle();
-  if (!link) return null;
+  if (!link) return requested === me.organization_id ? me : null;
 
   return {
     ...me,
