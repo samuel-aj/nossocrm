@@ -1,3 +1,5 @@
+import { useBoardFilters } from '../filters/useBoardFilters';
+import { matchesPeriod, matchesProduct, periodRange } from '../filters/boardFilters';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { DealView, Board, CustomFieldDefinition } from '@/types';
@@ -50,39 +52,6 @@ export const getActivityStatus = (deal: DealView) => {
   if (activityDate.toDateString() === today.toDateString()) return 'green';
   return 'gray';
 };
-
-/**
- * Cache local do status FIXADO (alfinete em Filtros). A preferência real vem do
- * servidor, mas ela chega depois do primeiro desenho — sem este cache o quadro
- * abria em "Em aberto" e trocava de filtro na frente do usuário. Guarda também
- * a organização: ao trocar de org, o valor de outra não é aplicado.
- */
-const STATUS_FIXADO_KEY = 'crm_default_status_filter';
-type StatusFiltro = 'open' | 'won' | 'lost' | 'all';
-
-function lerStatusFixadoCache(orgId?: string | null): StatusFiltro {
-  if (typeof window === 'undefined') return 'open';
-  try {
-    const bruto = localStorage.getItem(STATUS_FIXADO_KEY);
-    if (!bruto) return 'open';
-    const dados = JSON.parse(bruto) as { org?: string; value?: string };
-    // org conhecida e diferente da salva: ignora (o servidor corrige em seguida)
-    if (orgId && dados.org && dados.org !== orgId) return 'open';
-    const v = dados.value;
-    return v === 'won' || v === 'lost' || v === 'all' || v === 'open' ? v : 'open';
-  } catch {
-    return 'open';
-  }
-}
-
-function gravarStatusFixadoCache(orgId: string | null | undefined, value: StatusFiltro): void {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(STATUS_FIXADO_KEY, JSON.stringify({ org: orgId ?? null, value }));
-  } catch {
-    // sem localStorage: só perde o atalho, a preferência do servidor continua valendo
-  }
-}
 
 /**
  * Hook React `useBoardsController` que encapsula uma lógica reutilizável.
@@ -196,31 +165,24 @@ export const useBoardsController = () => {
     []
   );
   // 'all' = todos | 'mine' = meus (profile.id) | 'none' = sem responsável | <userId> = um responsável específico
-  const [ownerFilter, setOwnerFilter] = useState<string>('all');
-  // Abre JÁ no status fixado (cache local); o servidor confirma/corrige depois.
-  const [statusFilter, setStatusFilterState] = useState<StatusFiltro>(() =>
-    lerStatusFixadoCache(organizationId)
-  );
-  // Quadro abre no filtro escolhido em Configurações > CRM. A preferência chega
-  // pela rede, então: só é aplicada UMA vez, e nunca por cima de um filtro que
-  // veio da URL ou que o usuário já trocou na mão.
-  const statusTouchedRef = useRef(false);
-  const statusPrefAppliedRef = useRef(false);
-  const setStatusFilter = useCallback((value: 'open' | 'won' | 'lost' | 'all') => {
-    statusTouchedRef.current = true;
-    setStatusFilterState(value);
-  }, []);
-  const [dateRange, setDateRange] = useState({ start: '', end: '' });
-  // Filtro por campo personalizado / UTM (ex.: utm_source, utm_campaign): { chave, valor }.
-  // Filtro por campo personalizado/UTM (builder de condições): cada condição é
-  // campo + operador (contém / igual / vazio / preenchido) + valor, combinadas
-  // com E (todas) ou OU (qualquer).
-  const [customFieldConditions, setCustomFieldConditions] = useState<
-    Array<{ id: string; field: string; operator: 'contains' | 'not_contains' | 'equals' | 'empty' | 'not_empty'; value: string }>
-  >([]);
-  const [customFieldLogic, setCustomFieldLogic] = useState<'AND' | 'OR'>('AND');
-  // Filtro por TAG (select com as tags cadastradas em Configurações). '' = todas.
-  const [tagFilter, setTagFilter] = useState('');
+  const { inactiveLeadsEnabled, defaultDealStatusFilter } = useOrgPreferences();
+  const urlStatusValue = searchParams?.get('status');
+  const urlStatus = urlStatusValue === 'open' || urlStatusValue === 'won' || urlStatusValue === 'lost' || urlStatusValue === 'all' ? urlStatusValue : undefined;
+  const filterControls = useBoardFilters(profile?.id, organizationId, effectiveActiveBoardId, defaultDealStatusFilter ?? 'open', urlStatus);
+  const { general, period, setGeneral } = filterControls;
+  const ownerFilter = general.owner;
+  const statusFilter = general.status;
+  const tagFilter = general.tag;
+  const customFieldConditions = general.conditions;
+  const customFieldLogic = general.logic;
+  const setOwnerFilter = (owner: string) => setGeneral({ owner });
+  const setStatusFilter = (status: typeof general.status) => setGeneral({ status });
+  const setTagFilter = (tag: string) => setGeneral({ tag });
+  const setCustomFieldConditions = (conditions: typeof general.conditions) => setGeneral({ conditions });
+  const setCustomFieldLogic = (logic: typeof general.logic) => setGeneral({ logic });
+  const [dateClock, setDateClock] = useState(() => new Date());
+  useEffect(() => { const timer = setInterval(() => setDateClock(new Date()), 60_000); return () => clearInterval(timer); }, []);
+  const dateRange = useMemo(() => periodRange(period, dateClock), [period, dateClock]);
 
   // Track last context signature to avoid unnecessary setContext calls
   const lastContextSignatureRef = useRef<string | null>(null);
@@ -346,24 +308,6 @@ export const useBoardsController = () => {
   // Get lifecycle stages from CRM context for automations
   const { lifecycleStages, customFieldDefinitions: orgFieldDefs, deleteDeal, updateDeal, updateContact, availableTags, contacts } = useCRM();
   // Etapa "Inativos" (opcional por organização — Configurações)
-  const { inactiveLeadsEnabled, defaultDealStatusFilter } = useOrgPreferences();
-
-  // Preferência da organização: aplica uma vez, respeitando ?status= da URL e
-  // qualquer troca que o usuário já tenha feito no cabeçalho do quadro.
-  useEffect(() => {
-    if (defaultDealStatusFilter === undefined) return;
-    // Sempre atualiza o cache: é ele que faz o próximo carregamento abrir certo
-    // (inclusive quando o admin acabou de mudar o alfinete).
-    gravarStatusFixadoCache(organizationId, defaultDealStatusFilter);
-    if (statusPrefAppliedRef.current) return;
-    statusPrefAppliedRef.current = true;
-    if (statusTouchedRef.current) return;
-    if (searchParams?.get('status')) return;
-    // Aplica mesmo quando é 'open': corrige um cache velho apontando pra outro status
-    setStatusFilterState(defaultDealStatusFilter);
-  }, [defaultDealStatusFilter, organizationId, searchParams]);
-  // Contatos com status INATIVO: com a etapa Inativos ligada, os leads desses
-  // contatos vão automaticamente pra coluna Inativos.
   const inactiveContactIds = useMemo(
     () => new Set(contacts.filter(c => c.status === 'INACTIVE').map(c => c.id)),
     [contacts]
@@ -411,10 +355,7 @@ export const useBoardsController = () => {
       setViewMode('list');
     }
 
-    const statusParam = searchParams.get('status');
-    if (statusParam === 'open' || statusParam === 'won' || statusParam === 'lost' || statusParam === 'all') {
-      setStatusFilterState(statusParam);
-    }
+
   }, [searchParams]);
 
   // Interaction State
@@ -483,7 +424,7 @@ export const useBoardsController = () => {
   // boards fetch happened (dataUpdatedAt>0). This is more robust than relying solely on `isFetched`,
   // which can be true via cache/hydration even when the live fetch hasn't run yet.
   const hasEverLoadedBoards = boardsUpdatedAt > 0;
-  const isLoading = (boardsLoading || boardsFetching || !hasEverLoadedBoards) && boards.length === 0;
+  const isLoading = ((boardsLoading || boardsFetching || !hasEverLoadedBoards) && boards.length === 0) || (!!effectiveActiveBoardId && filterControls.loading);
 
   useEffect(() => {
     const handleClickOutside = () => setOpenActivityMenuId(null);
@@ -553,37 +494,14 @@ export const useBoardsController = () => {
   }, [availableTags, deals]);
 
   // Filtering Logic
-  const filteredDeals = useMemo(() => {
+  const matchingDeals = useMemo(() => {
     // Condições completas: vazio/preenchido não precisam de valor; contém/igual sim.
     const activeCfConditions = customFieldConditions.filter(
       (c) => c.field && (c.operator === 'empty' || c.operator === 'not_empty' || c.value.trim() !== '')
     );
     const tagTerm = tagFilter.trim().toLowerCase();
 
-    // Filtro por data de criação. 'YYYY-MM-DD' + hora explícita: parseia no
-    // fuso LOCAL do usuário (new Date('YYYY-MM-DD') seria meia-noite UTC, 21h
-    // do dia anterior no Brasil, e pegaria leads da noite errada).
-    // Datas digitadas à mão chegam parciais (ano 0002 no meio da digitação)
-    // ou invertidas; limites sem sentido são ignorados pra não zerar o board.
-    const plausibleDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && s >= '1900-01-01';
-    const startOk = plausibleDate(dateRange.start);
-    const endOk =
-      plausibleDate(dateRange.end) && (!startOk || dateRange.end >= dateRange.start);
-    const createdStart = startOk ? new Date(`${dateRange.start}T00:00:00`) : null;
-    const createdEnd = endOk ? new Date(`${dateRange.end}T23:59:59.999`) : null;
-    const dateFilterActive = Boolean(createdStart || createdEnd);
-
     return deals.filter(l => {
-      // Com a etapa Inativos LIGADA: leads guardados (inactive_at) e leads de
-      // contato INATIVO saem do funil normal — ficam na coluna Inativos
-      // (visível no filtro "Todos"). Com a etapa desligada, nada some.
-      if (
-        inactiveLeadsEnabled &&
-        (l.inactiveAt || (l.contactId && inactiveContactIds.has(l.contactId)))
-      ) {
-        return false;
-      }
-
       const matchesSearch = buscaCasaDeal(l, searchTerm);
 
       const matchesOwner =
@@ -626,13 +544,8 @@ export const useBoardsController = () => {
           : activeCfConditions.some(evalCondition);
       }
 
-      let matchesDate = true;
-      if (createdStart) {
-        matchesDate = matchesDate && new Date(l.createdAt) >= createdStart;
-      }
-      if (createdEnd) {
-        matchesDate = matchesDate && new Date(l.createdAt) <= createdEnd;
-      }
+      const matchesDate = matchesPeriod(l, period, dateClock);
+      const productMatches = matchesProduct(l.items || [], general.product);
 
       // Status Filter Logic
       let matchesStatus = true;
@@ -651,7 +564,7 @@ export const useBoardsController = () => {
       // Filtro por TAG selecionada (case-insensitive, match exato da tag)
       const matchesTag = !tagTerm || (l.tags || []).some((t: string) => String(t).toLowerCase() === tagTerm);
 
-      return matchesSearch && matchesOwner && matchesCustomField && matchesTag && matchesDate && matchesStatus;
+      return matchesSearch && matchesOwner && matchesCustomField && matchesTag && matchesDate && matchesStatus && productMatches;
     }).map(deal => {
       // Enrich owner info if it matches current user
       if (deal.ownerId === profile?.id || deal.ownerId === (profile as any)?.user_id) { // Fallback for some profile types
@@ -665,24 +578,25 @@ export const useBoardsController = () => {
       }
       return deal;
     });
-  }, [deals, searchTerm, ownerFilter, customFieldConditions, customFieldLogic, tagFilter, dateRange, statusFilter, profile, inactiveLeadsEnabled, inactiveContactIds, buscaCasaDeal]);
+  }, [deals, searchTerm, ownerFilter, customFieldConditions, customFieldLogic, tagFilter, period, dateClock, general.product, statusFilter, profile, inactiveLeadsEnabled, inactiveContactIds, buscaCasaDeal]);
+
+  const filteredDeals = useMemo(() => matchingDeals.filter(d => !inactiveLeadsEnabled || !(d.inactiveAt || (d.contactId && inactiveContactIds.has(d.contactId)))), [matchingDeals, inactiveLeadsEnabled, inactiveContactIds]);
 
   // ==== Etapa "Inativos" ====
   // Leads guardados (inactive_at setado), mais antigos primeiro — o countdown
   // de devolução (30d) é derivado do inactiveAt na própria coluna.
   const inactiveDeals = useMemo(() => {
     if (!inactiveLeadsEnabled) return [] as typeof deals;
-    return deals
+    return matchingDeals
       // guardados manualmente (inactive_at) OU contato com status INATIVO
       .filter(d => d.inactiveAt || (d.contactId && inactiveContactIds.has(d.contactId)))
-      .filter(d => buscaCasaDeal(d, searchTerm))
       // guardados com prazo primeiro (mais antigos no topo); contato-inativo no fim
       .sort((a, b) => {
         const ta = a.inactiveAt ? new Date(a.inactiveAt).getTime() : Number.POSITIVE_INFINITY;
         const tb = b.inactiveAt ? new Date(b.inactiveAt).getTime() : Number.POSITIVE_INFINITY;
         return ta - tb;
       });
-  }, [deals, inactiveLeadsEnabled, searchTerm, inactiveContactIds, buscaCasaDeal]);
+  }, [matchingDeals, inactiveLeadsEnabled, inactiveContactIds]);
 
   // Carimbo automático: lead de contato INATIVO entra em Inativos COM data
   // própria (inactive_at = agora). Assim CADA card tem o countdown específico
@@ -1356,8 +1270,7 @@ export const useBoardsController = () => {
     tagOptions,
     statusFilter,
     setStatusFilter,
-    dateRange,
-    setDateRange,
+    filterControls,
 
     draggingId,
     selectedDealId,

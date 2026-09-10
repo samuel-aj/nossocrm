@@ -1,13 +1,14 @@
+import { BoardFilterControls } from '../../filters/useBoardFilters';
+import { PeriodButton, FilterPin } from '../../filters/PeriodButton';
+import { useCRM } from '@/context/CRMContext';
 import React from 'react';
-import { Plus, Search, LayoutGrid, Table as TableIcon, X, Settings, Lightbulb, Download, MoreVertical, CheckSquare, Target, Zap, SlidersHorizontal, CalendarDays, ChevronDown, Pin } from 'lucide-react';
+import { Plus, Search, LayoutGrid, Table as TableIcon, X, Settings, Lightbulb, Download, MoreVertical, CheckSquare, Target, Zap, SlidersHorizontal, Pin } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Board } from '@/types';
 import { BoardSelector } from '../BoardSelector';
 import { useOrgUsers } from '@/lib/query/hooks';
 import { useAuth } from '@/context/AuthContext';
 import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
-import { useOrgPreferences } from '@/lib/query/hooks';
-import { useToast } from '@/context/ToastContext';
 
 type StatusFilter = 'open' | 'won' | 'lost' | 'all';
 
@@ -36,8 +37,7 @@ interface KanbanHeaderProps {
     tagFilter: string;
     setTagFilter: (v: string) => void;
     tagOptions: string[];
-    dateRange: { start: string; end: string };
-    setDateRange: (r: { start: string; end: string }) => void;
+    filterControls: BoardFilterControls;
     statusFilter: StatusFilter;
     setStatusFilter: (filter: StatusFilter) => void;
     onNewDeal: () => void;
@@ -92,122 +92,8 @@ function useClickOutside(open: boolean, ref: React.RefObject<HTMLDivElement | nu
     }, [open, ref, close]);
 }
 
-function toIsoDate(d: Date): string {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-}
-
-function formatShort(iso: string): string {
-    const [y, m, d] = iso.split('-');
-    return y && m && d ? `${d}/${m}/${y.slice(2)}` : iso;
-}
-
-/**
- * Período: data de criação do negócio (De / Até) com atalhos.
- */
-function PeriodButton({ dateRange, onChange }: { dateRange: { start: string; end: string }; onChange: (r: { start: string; end: string }) => void }) {
-    const [open, setOpen] = React.useState(false);
-    const ref = React.useRef<HTMLDivElement>(null);
-    const close = React.useCallback(() => setOpen(false), []);
-    useClickOutside(open, ref, close);
-    const active = Boolean(dateRange.start || dateRange.end);
-
-    const preset = (days: number | 'month') => {
-        const today = new Date();
-        if (days === 'month') {
-            onChange({ start: toIsoDate(new Date(today.getFullYear(), today.getMonth(), 1)), end: toIsoDate(today) });
-            return;
-        }
-        const start = new Date(today);
-        start.setDate(today.getDate() - (days - 1));
-        onChange({ start: toIsoDate(start), end: toIsoDate(today) });
-    };
-
-    const label = !active
-        ? 'Período'
-        : dateRange.start && dateRange.end
-            ? `${formatShort(dateRange.start)} – ${formatShort(dateRange.end)}`
-            : dateRange.start
-                ? `Desde ${formatShort(dateRange.start)}`
-                : `Até ${formatShort(dateRange.end)}`;
-
-    return (
-        <div ref={ref} className="relative">
-            <button
-                type="button"
-                onClick={() => setOpen((o) => !o)}
-                aria-expanded={open}
-                title="Período (data de criação do negócio)"
-                className={`${CONTROL_BUTTON_CLASS} ${active ? CONTROL_ACTIVE : CONTROL_IDLE}`}
-            >
-                <CalendarDays size={15} aria-hidden="true" />
-                <span className="max-md:hidden whitespace-nowrap">{label}</span>
-                <ChevronDown size={13} aria-hidden="true" className={`max-md:hidden text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
-            </button>
-            {open && (
-                <div className={`${PANEL_CLASS} w-72`}>
-                    <div className="flex items-center justify-between">
-                        <p className="text-xs font-bold text-slate-400 uppercase">Data de criação</p>
-                        {active && (
-                            <button type="button" onClick={() => onChange({ start: '', end: '' })} className="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline">
-                                Limpar
-                            </button>
-                        )}
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                        {[
-                            { label: 'Hoje', run: () => preset(1) },
-                            { label: '7 dias', run: () => preset(7) },
-                            { label: '30 dias', run: () => preset(30) },
-                            { label: 'Este mês', run: () => preset('month') },
-                        ].map((p) => (
-                            <button
-                                key={p.label}
-                                type="button"
-                                onClick={p.run}
-                                className="px-2.5 py-1 rounded-full border border-slate-200 dark:border-white/10 text-xs font-medium text-slate-600 dark:text-slate-300 hover:border-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors"
-                            >
-                                {p.label}
-                            </button>
-                        ))}
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <label className="flex-1 min-w-0 space-y-0.5">
-                            <span className="block text-[11px] text-slate-500 dark:text-slate-400">De</span>
-                            <input
-                                type="date"
-                                value={dateRange.start}
-                                max={dateRange.end || undefined}
-                                onChange={(e) => onChange({ ...dateRange, start: e.target.value })}
-                                aria-label="Criado a partir de"
-                                className={`${INPUT_CLASS} w-full`}
-                            />
-                        </label>
-                        <label className="flex-1 min-w-0 space-y-0.5">
-                            <span className="block text-[11px] text-slate-500 dark:text-slate-400">Até</span>
-                            <input
-                                type="date"
-                                value={dateRange.end}
-                                min={dateRange.start || undefined}
-                                onChange={(e) => onChange({ ...dateRange, end: e.target.value })}
-                                aria-label="Criado até"
-                                className={`${INPUT_CLASS} w-full`}
-                            />
-                        </label>
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-}
-
-/**
- * Painel "Filtros": responsável, status, tag e construtor de CONDIÇÕES por
- * campo/UTM (campo + operador + valor; várias combinam com E ou OU).
- */
 function FiltersButton({
+    controls,
     ownerFilter,
     onOwnerChange,
     owners,
@@ -222,6 +108,7 @@ function FiltersButton({
     onLogicChange,
     options,
 }: {
+    controls: BoardFilterControls;
     ownerFilter: string;
     onOwnerChange: (v: string) => void;
     owners: Array<{ id: string; name: string; role?: string }>;
@@ -241,33 +128,12 @@ function FiltersButton({
     const close = React.useCallback(() => setOpen(false), []);
     useClickOutside(open, ref, close);
 
-    // PIN do status: fixa com qual status o quadro abre (preferência da org).
-    // Só admin fixa; para os demais o alfinete some (o servidor também barra).
-    const { defaultDealStatusFilter, setDefaultDealStatusFilter } = useOrgPreferences();
-    const { profile } = useAuth();
-    const { addToast } = useToast();
-    const statusFixado: StatusFilter = defaultDealStatusFilter ?? 'open';
-    const podeFixar = profile?.role === 'admin' || profile?.role === 'super_admin';
-    const fixarStatus = (value: StatusFilter) => {
-        // clicar no alfinete do que já está fixo volta ao padrão do sistema
-        const alvo: StatusFilter = value === statusFixado ? 'open' : value;
-        setDefaultDealStatusFilter.mutate(alvo, {
-            onSuccess: () =>
-                addToast(
-                    alvo === 'open'
-                        ? 'O quadro volta a abrir em "Em aberto".'
-                        : `O quadro passa a abrir em "${STATUS_OPTIONS.find((o) => o.value === alvo)?.label}".`,
-                    'success'
-                ),
-            onError: (e) => addToast((e as Error).message, 'error'),
-        });
-    };
-
+    const { products } = useCRM();
     const activeConditions = conditions.filter(
         (c) => c.field && (c.operator === 'empty' || c.operator === 'not_empty' || c.value.trim() !== '')
     );
     const activeCount =
-        activeConditions.length + (tagFilter ? 1 : 0) + (ownerFilter !== 'all' ? 1 : 0) + (statusFilter !== 'open' ? 1 : 0);
+        activeConditions.length + (controls.general.product ? 1 : 0) + (tagFilter ? 1 : 0) + (ownerFilter !== 'all' ? 1 : 0) + (statusFilter !== 'open' ? 1 : 0);
 
     const updateCondition = (id: string, patch: Partial<CfCondition>) =>
         onConditionsChange(conditions.map((c) => (c.id === id ? { ...c, ...patch } : c)));
@@ -278,6 +144,7 @@ function FiltersButton({
             { id: crypto.randomUUID(), field: options[0]?.key || '', operator: 'contains', value: '' },
         ]);
     const clearAll = () => {
+        controls.setGeneral({ product: '', logic: 'AND' });
         onConditionsChange([]);
         onTagFilterChange('');
         onOwnerChange('all');
@@ -290,11 +157,12 @@ function FiltersButton({
                 type="button"
                 onClick={() => setOpen((o) => !o)}
                 aria-expanded={open}
-                title="Filtros: responsável, status, tag, campos e UTMs"
+                title="Filtros: produto, responsável, status, tag, campos e UTMs"
                 className={`${CONTROL_BUTTON_CLASS} ${activeCount > 0 ? CONTROL_ACTIVE : CONTROL_IDLE}`}
             >
                 <SlidersHorizontal size={15} aria-hidden="true" />
                 <span className="max-md:hidden">Filtros</span>
+                {controls.saved?.general && <Pin size={12} className="text-primary-600" />}
                 {activeCount > 0 && <span className={BADGE_CLASS}>{activeCount}</span>}
             </button>
             {open && (
@@ -308,16 +176,22 @@ function FiltersButton({
                         )}
                     </div>
 
+                    <FilterPin controls={controls} group="general" />
+                    <label className="block space-y-2">
+                        <span className={SECTION_TITLE}>Produto</span>
+                        <select aria-label="Filtrar por produto" value={controls.general.product} onChange={e => controls.setGeneral({ product: e.target.value })} className={INPUT_CLASS + ' w-full'}>
+                            <option value="">Todos os produtos</option>
+                            {controls.general.product && !products.some(p => p.id === controls.general.product) && <option value={controls.general.product}>Produto indisponível</option>}
+                            {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                    </label>
                     {/* Status */}
                     <div className="space-y-2">
                         <p className={SECTION_TITLE}>Status</p>
                         <div className="grid grid-cols-2 gap-1.5">
                             {STATUS_OPTIONS.map((option) => {
                                 const selecionado = statusFilter === option.value;
-                                const fixo = statusFixado === option.value;
                                 return (
-                                    // Alfinete ao lado do rótulo: fixa com qual status o quadro
-                                    // abre. Botões irmãos (não aninhados) para o HTML ser válido.
                                     <div
                                         key={option.value}
                                         className={`group flex items-center rounded-lg border transition-colors ${selecionado
@@ -335,27 +209,6 @@ function FiltersButton({
                                             <span className={`w-2 h-2 shrink-0 rounded-full ${option.dot}`} aria-hidden="true" />
                                             <span className="truncate">{option.label}</span>
                                         </button>
-                                        {(podeFixar || fixo) && (
-                                            <button
-                                                type="button"
-                                                disabled={!podeFixar || setDefaultDealStatusFilter.isPending}
-                                                onClick={() => fixarStatus(option.value)}
-                                                aria-pressed={fixo}
-                                                title={
-                                                    !podeFixar
-                                                        ? 'O quadro abre neste status'
-                                                        : fixo
-                                                            ? 'O quadro abre neste status. Clique para voltar ao padrão (Em aberto).'
-                                                            : 'Fixar: o quadro passa a abrir neste status'
-                                                }
-                                                aria-label={fixo ? `${option.label} é o status que abre o quadro` : `Fixar ${option.label} como status que abre o quadro`}
-                                                className={`mr-1 shrink-0 rounded-md p-1 transition-all disabled:cursor-default ${fixo
-                                                    ? 'text-primary-600 dark:text-primary-400'
-                                                    : 'text-slate-300 dark:text-slate-600 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-slate-500 dark:hover:text-slate-300'}`}
-                                            >
-                                                <Pin size={13} className={fixo ? 'fill-current' : ''} aria-hidden="true" />
-                                            </button>
-                                        )}
                                     </div>
                                 );
                             })}
@@ -538,7 +391,7 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
     statusFilter, setStatusFilter,
     customFieldConditions, setCustomFieldConditions, customFieldLogic, setCustomFieldLogic, customFieldOptions,
     tagFilter, setTagFilter, tagOptions,
-    dateRange, setDateRange,
+    filterControls,
     selectionMode, onEnterSelectionMode, onExitSelectionMode,
     onNewDeal,
     automationMode = false,
@@ -759,9 +612,10 @@ export const KanbanHeader: React.FC<KanbanHeaderProps> = ({
                     )}
                 </div>
 
-                <PeriodButton dateRange={dateRange} onChange={setDateRange} />
+                <PeriodButton key={activeBoard.id} controls={filterControls} />
 
                 <FiltersButton
+                    controls={filterControls}
                     ownerFilter={ownerFilter}
                     onOwnerChange={setOwnerFilter}
                     owners={assignableOwners}
