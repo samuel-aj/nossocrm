@@ -1,7 +1,8 @@
 import { useBoardFilters } from '../filters/useBoardFilters';
 import { matchesPeriod, matchesProduct, periodRange } from '../filters/boardFilters';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
+import { useSelectedDealLink } from './useSelectedDealLink';
 import { DealView, Board, CustomFieldDefinition } from '@/types';
 import {
   useBoards,
@@ -15,6 +16,7 @@ import {
 } from '@/lib/query/hooks/useBoardsQuery';
 import {
   useDealsByBoard,
+  useDeal,
 } from '@/lib/query/hooks/useDealsQuery';
 import { useMoveDeal } from '@/lib/query/hooks/useMoveDeal';
 import { useOrgPreferences } from '@/lib/query/hooks/useOrgPreferences';
@@ -62,7 +64,6 @@ export const useBoardsController = () => {
   const { addToast } = useToast();
   const { profile, organizationId } = useAuth();
   const searchParams = useSearchParams();
-  const router = useRouter();
 
   // AI Context
   const { setContext, clearContext } = useAI();
@@ -360,7 +361,7 @@ export const useBoardsController = () => {
 
   // Interaction State
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
+  const [selectedDealId, setSelectedDealId] = useSelectedDealLink();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [openActivityMenuId, setOpenActivityMenuId] = useState<string | null>(null);
   // When the user picks Ligar/Email/Reunião in the card status-icon dropdown,
@@ -378,38 +379,16 @@ export const useBoardsController = () => {
     stageId: string;
   } | null>(null);
 
-  // Bidirectional URL <-> state sync for the open-deal modal.
-  // Reloading the page inside a lead should land the user back on the same
-  // card. We DON'T clear ?deal=xxx on mount (so reload preserves it), and we
-  // push ?deal=xxx to the URL whenever the user opens/closes a card.
-  const dealUrlInitDoneRef = useRef(false);
-
-  // Mount: adopt ?deal= from URL into state (once).
+  // Direct links resolve by ID, regardless of saved filters or the last board.
+  // Reuse the detail query also consumed by the modal; no separate deal cache.
+  const selectedFromBoard = deals.find(deal => deal.id === selectedDealId);
+  const { data: linkedDeal } = useDeal(selectedDealId && !selectedFromBoard ? selectedDealId : undefined);
+  const linkedBoardId = selectedFromBoard?.boardId || linkedDeal?.boardId;
   useEffect(() => {
-    if (dealUrlInitDoneRef.current) return;
-    if (!searchParams) return;
-    dealUrlInitDoneRef.current = true;
-    const dealIdFromUrl = searchParams.get('deal');
-    if (dealIdFromUrl) {
-      setSelectedDealId(dealIdFromUrl);
+    if (selectedDealId && linkedBoardId && linkedBoardId !== activeBoardId && boards.some(board => board.id === linkedBoardId)) {
+      setActiveBoardId(linkedBoardId);
     }
-  }, [searchParams]);
-
-  // Post-init: mirror selectedDealId into the URL so reload preserves it.
-  useEffect(() => {
-    if (!dealUrlInitDoneRef.current) return;
-    if (!router || !searchParams) return;
-    const urlValue = searchParams.get('deal') ?? null;
-    if ((selectedDealId ?? null) === urlValue) return;
-    const params = new URLSearchParams(searchParams.toString());
-    if (selectedDealId) {
-      params.set('deal', selectedDealId);
-    } else {
-      params.delete('deal');
-    }
-    const qs = params.toString();
-    router.replace(qs ? `?${qs}` : '?', { scroll: false });
-  }, [selectedDealId, router, searchParams]);
+  }, [selectedDealId, linkedBoardId, activeBoardId, boards, setActiveBoardId]);
 
   // Fallback for drag issues
   const lastMouseDownDealId = React.useRef<string | null>(null);
