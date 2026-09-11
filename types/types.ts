@@ -225,6 +225,8 @@ export interface Deal {
   status: string; // Stage ID dentro do board (UUID)
   isWon: boolean; // Deal foi ganho?
   isLost: boolean; // Deal foi perdido?
+  qualifiedAt?: string;
+  qualificationDateSource?: 'transition' | 'history' | 'estimated';
   closedAt?: string; // Quando foi fechado
   createdAt: string;
   updatedAt: string;

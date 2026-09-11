@@ -11,10 +11,11 @@ const formatDate = (value?: string) => {
 interface StageLeadsModalProps {
   stage: PerformanceMetrics['stageData'][number];
   qualificationDates: Map<string, string>;
+  estimatedQualificationIds?: Set<string>;
   onClose: () => void;
 }
 
-export function StageLeadsModal({ stage, qualificationDates, onClose }: StageLeadsModalProps) {
+export function StageLeadsModal({ stage, qualificationDates, estimatedQualificationIds, onClose }: StageLeadsModalProps) {
   const leads = [...stage.deals].sort((a, b) => a.title.localeCompare(b.title, 'pt-BR'));
   return (
     <Modal isOpen onClose={onClose} title={stage.name + ' · ' + leads.length + ' leads'}
@@ -40,8 +41,10 @@ export function StageLeadsModal({ stage, qualificationDates, onClose }: StageLea
                   </a>
                 </td>
                 <td className="px-5 py-3 whitespace-nowrap">{formatDate(lead.createdAt)}</td>
-                <td className="px-5 py-3 whitespace-nowrap">{formatDate(qualificationDates.get(lead.id))}</td>
-                <td className="px-5 py-3 whitespace-nowrap">{formatDate(lead.closedAt)}</td>
+                <td className="px-5 py-3 whitespace-nowrap">{formatDate(qualificationDates.get(lead.id))}
+                  {estimatedQualificationIds?.has(lead.id) && <span className="block text-xs text-amber-600 dark:text-amber-400" title="Data estimada pelo primeiro registro disponível; a primeira qualificação não tem data comprovada.">Estimada</span>}
+                </td>
+                <td className="px-5 py-3 whitespace-nowrap">{formatDate(lead.isWon || lead.isLost ? lead.closedAt : undefined)}</td>
               </tr>
             ))}
             {!leads.length && <tr><td colSpan={4} className="px-5 py-10 text-center text-slate-500">Nenhum lead nesta etapa no período selecionado.</td></tr>}

@@ -1,4 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
+import { useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase/client';
 import { getCurrentOrganizationId } from '@/lib/supabase/orgId';
@@ -9,6 +10,15 @@ import { collectPages } from './collectPages';
 
 export function usePerformanceReport(board: Board | undefined, range: PeriodRange, ownerId: string, comparisonRange?: PeriodRange) {
   const { user, organizationId, loading } = useAuth();
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!organizationId || !board?.id) return;
+    const channel = supabase.channel(`performance:${organizationId}:${board.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'deals', filter: `organization_id=eq.${organizationId}` }, () => {
+        void queryClient.invalidateQueries({ queryKey: ['performance-report', organizationId] });
+      }).subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [organizationId, board?.id, queryClient]);
   return useQuery({
     queryKey: ['performance-report', organizationId, user?.id, board?.id, range.start.toISOString(), range.end.toISOString(), ownerId, comparisonRange?.start.toISOString(), comparisonRange?.end.toISOString()],
     enabled: !loading && !!user && !!organizationId && !!board,
@@ -18,10 +28,11 @@ export function usePerformanceReport(board: Board | undefined, range: PeriodRang
       const orgId = await getCurrentOrganizationId();
       if (!orgId || orgId !== organizationId || !board) throw new Error('Organização indisponível. Atualize a página.');
       const rows = await collectPages<Record<string, any>>((from, to) => supabase.from('deals')
-        .select('id,title,board_id,stage_id,created_at,updated_at,closed_at,is_won,is_lost,value,owner_id,loss_category,loss_reason')
+        .select('id,title,board_id,stage_id,created_at,updated_at,closed_at,qualified_at,qualification_date_source,is_won,is_lost,value,owner_id,loss_category,loss_reason')
         .eq('organization_id', orgId).eq('board_id', board.id).is('deleted_at', null).order('id').range(from, to));
       const deals: Deal[] = rows.map(row => ({
         id: row.id, title: row.title, boardId: row.board_id, status: row.stage_id,
+        qualifiedAt: row.qualified_at, qualificationDateSource: row.qualification_date_source,
         createdAt: row.created_at, updatedAt: row.updated_at, closedAt: row.closed_at,
         isWon: !!row.is_won, isLost: !!row.is_lost, value: Number(row.value) || 0,
         ownerId: row.owner_id || undefined, lossCategory: row.loss_category || undefined,
