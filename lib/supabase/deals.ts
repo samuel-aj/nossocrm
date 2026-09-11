@@ -83,6 +83,8 @@ export interface DbDeal {
   is_lost: boolean;
   /** Data de fechamento. */
   closed_at: string | null;
+  qualified_at?: string | null;
+  qualification_date_source?: Deal['qualificationDateSource'] | null;
   /** Guardado em "Inativos" desde (null = ativo no funil). */
   inactive_at?: string | null;
 }
@@ -133,6 +135,8 @@ const transformDeal = (db: DbDeal, items: DbDealItem[]): Deal => {
     isWon: db.is_won ?? false,
     isLost: db.is_lost ?? false,
     closedAt: db.closed_at || undefined,
+    qualifiedAt: db.qualified_at || undefined,
+    qualificationDateSource: db.qualification_date_source || undefined,
     priority: (db.priority as Deal['priority']) || DealPriority.MEDIUM,
     boardId: db.board_id || '',
     contactId: db.contact_id || '',

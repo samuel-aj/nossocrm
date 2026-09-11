@@ -9,7 +9,7 @@ const board = { id: 'b', stages: [{ id: 'q', label: 'Qualificado', color: '' }] 
 const range = { start: new Date('2026-08-01'), end: new Date('2026-08-31T23:59:59Z') };
 it('mostra as quatro colunas, datas reais, vazios e permite fechar', () => {
   const leads = [
-    { id: 'a', title: 'Ana', boardId: 'b', status: 'q', createdAt: '2026-08-02T12:00:00Z', closedAt: '2026-08-20T12:00:00Z' },
+    { id: 'a', title: 'Ana', boardId: 'b', status: 'q', createdAt: '2026-08-02T12:00:00Z', closedAt: '2026-08-20T12:00:00Z', isWon: true },
     { id: 'b', title: 'Bruno', boardId: 'b', status: 'q', createdAt: '2026-08-03T12:00:00Z' },
   ] as Deal[];
   const stage = calculatePerformance(leads, [], board, range).stageData[0];
@@ -25,4 +25,12 @@ it('mostra as quatro colunas, datas reais, vazios e permite fechar', () => {
   expect(link).toHaveAttribute('rel', 'noopener noreferrer');
   fireEvent.click(screen.getByRole('button', { name: 'Fechar modal' }));
   expect(onClose).toHaveBeenCalledOnce();
+});
+
+it('identifica estimativa e oculta encerramento antigo de lead reaberto', () => {
+  const leads=[{id:'a',title:'Reaberto',boardId:'b',status:'q',createdAt:'2026-08-02',closedAt:'2026-08-20',isWon:false,isLost:false}] as Deal[];
+  const stage=calculatePerformance(leads,[],board,range).stageData[0];
+  render(<StageLeadsModal stage={stage} qualificationDates={new Map([['a','2026-08-10T12:00:00Z']])} estimatedQualificationIds={new Set(['a'])} onClose={()=>{}} />);
+  expect(screen.getByText('Estimada')).toBeInTheDocument();
+  expect(within(screen.getByText('Reaberto').closest('tr')!).getAllByRole('cell')[3]).toHaveTextContent('');
 });

@@ -35,7 +35,7 @@ export function generateReportPDF(data: PerformanceMetrics & { webhookUnavailabl
   if (reasons.size) autoTable(doc, { head: [['Motivos de perda', 'Leads']], body: [...reasons], styles: { fontSize: 9 } });
   autoTable(doc, { head: [['Como ler este relatório']], body: [
     ['Taxas acima de 100% são válidas. Entradas, qualificações e ganhos podem ser de leads diferentes. Denominador zero: traço.'],
-    ['Gráfico: leads criados no período, pela etapa mais avançada alcançada até agora, incluindo as anteriores. Ganho usa a data de encerramento e pode incluir leads criados em outros meses. Os cartões mantêm as datas de cada acontecimento.'],
+    ['Gráfico: leads criados no período, até a etapa atual, incluindo as anteriores; retornos removem etapas posteriores. Ganho usa a data de encerramento e pode incluir leads criados em outros meses. Os cartões mantêm as datas de cada acontecimento.'],
     [`Histórico: ${data.unknownQualification.length} leads com indicação de qualificação sem data recuperável; ${data.unknownClosure.length} encerramentos sem data. Não são atribuídos a um mês por estimativa.`],
     ...(data.webhookUnavailable ? [['Histórico complementar de integrações indisponível. Foram usadas atividades registradas.']] : []),
   ], styles: { fontSize: 9 } });

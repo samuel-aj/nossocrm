@@ -439,7 +439,7 @@ const ReportsPage: React.FC = () => {
           este elemento garante a margem inferior em qualquer cenário */}
       <div className="shrink-0 h-2" aria-hidden="true" />
       {selectedStage && metrics && <StageLeadsModal stage={selectedStage}
-        qualificationDates={metrics.leadQualificationDates} onClose={() => setSelectedStageId(null)} />}
+        qualificationDates={metrics.leadQualificationDates} estimatedQualificationIds={metrics.estimatedQualificationIds} onClose={() => setSelectedStageId(null)} />}
       </>}
     </div>
   );
