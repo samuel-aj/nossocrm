@@ -177,7 +177,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   // instead of silently returning null. The query is disabled when the cache
   // already has the deal to avoid redundant requests.
   const shouldFetch = !!dealId && !!isOpen && !dealFromCache;
-  const { data: fetchedDeal } = useDeal(shouldFetch ? dealId : undefined);
+  const { data: fetchedDeal, isLoading: fetchingDeal, isError: fetchDealError, isSuccess: fetchDealSuccess, refetch: refetchDeal } = useDeal(shouldFetch ? dealId : undefined);
   const deal = dealFromCache ?? (fetchedDeal as unknown as typeof dealFromCache | undefined);
   const permissions = useMyActionPermissions(deal?.boardId);
   const updateDeal: typeof updateDealRaw = async (id, updates) => {
@@ -520,20 +520,27 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   // opens, needs F5" UX regression. `useDeal(shouldFetch)` above populates
   // `deal` as soon as the server responds or Realtime fills the cache.
   if (!deal) {
+    const unavailable = fetchDealError || (fetchDealSuccess && !fetchingDeal);
     return (
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
         role="dialog"
         aria-modal="true"
-        aria-busy="true"
+        aria-busy={!unavailable}
         onClick={onClose}
       >
         <div
           className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl p-8 flex flex-col items-center gap-3"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="h-8 w-8 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm text-slate-500 dark:text-slate-400">Carregando lead…</p>
+          {unavailable ? <>
+            <p className="text-sm text-slate-500 dark:text-slate-400" role="alert">Não foi possível abrir este lead. Ele pode ter sido removido ou seu acesso pode ter mudado.</p>
+            <button type="button" onClick={() => { void refetchDeal(); }} className="text-sm font-medium text-primary-600 dark:text-primary-400">Tentar novamente</button>
+          </> : <>
+            <div className="h-8 w-8 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+            <p className="text-sm text-slate-500 dark:text-slate-400">Carregando lead…</p>
+          </>}
+          <button type="button" onClick={onClose} className="text-sm font-medium text-slate-600 dark:text-slate-300">Fechar</button>
         </div>
       </div>
     );

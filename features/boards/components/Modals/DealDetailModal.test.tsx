@@ -1,9 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
-import { describe, it, expect, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import { DealDetailModal } from './DealDetailModal';
+import type { Deal } from '@/types';
+const detail = vi.hoisted(() => ({ data: null as Deal | null, isLoading: false, isError: false, isSuccess: false, refetch: vi.fn() }));
+beforeEach(() => { detail.data = null; detail.isLoading = false; detail.isError = false; detail.isSuccess = false; detail.refetch.mockClear(); });
 
 // Keep this test focused: we only want to ensure opening/closing the modal
 // never crashes due to hook-order issues (React error #310).
@@ -26,7 +29,7 @@ vi.mock('@/context/ToastContext', () => ({
 
 vi.mock('@/lib/query/hooks', () => ({
   useMoveDealSimple: () => ({ moveDeal: vi.fn() }),
-  useDeal: () => ({ data: null, isLoading: false, error: null }),
+  useDeal: () => detail,
   useOrgUsers: () => ({ users: [], isAdmin: false, isLoading: false }),
   useOrgMembers: () => ({ members: [], isLoading: false }),
 }));
@@ -141,3 +144,23 @@ describe('DealDetailModal', () => {
 });
 
 
+
+it('abre pelo ID um lead ausente da lista filtrada e mostra carregamento até resolver', () => {
+  detail.isLoading=true;
+  const {rerender}=render(<DealDetailModal dealId="amanda" isOpen onClose={()=>{}} />, {wrapper:({children})=><QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>});
+  expect(screen.getByText('Carregando lead…')).toBeInTheDocument();
+  detail.isLoading=false;detail.isSuccess=true;
+  detail.data={id:'amanda',title:'Amanda',boardId:'board-1',status:'stage-1',contactId:'contact-1',value:0,probability:0,tags:[],items:[],customFields:{},createdAt:'2026-09-03',isWon:false,isLost:false} as unknown as Deal;
+  rerender(<DealDetailModal dealId="amanda" isOpen onClose={()=>{}} />);
+  expect(screen.getByText('Amanda')).toBeInTheDocument();
+  expect(screen.queryByText('Carregando lead…')).not.toBeInTheDocument();
+});
+it('mostra erro recuperável em vez de carregar indefinidamente um lead inacessível', () => {
+  detail.isError=true;
+  const onClose=vi.fn();
+  render(<DealDetailModal dealId="missing" isOpen onClose={onClose} />, {wrapper:({children})=><QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>});
+  expect(screen.getByRole('alert')).toHaveTextContent('Não foi possível abrir este lead');
+  expect(screen.getByRole('dialog')).toHaveAttribute('aria-busy','false');
+  fireEvent.click(screen.getByRole('button',{name:'Tentar novamente'}));expect(detail.refetch).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole('button',{name:'Fechar'}));expect(onClose).toHaveBeenCalledOnce();
+});
