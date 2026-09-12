@@ -1,8 +1,9 @@
 ﻿import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { PerformanceMetrics } from '../performanceMetrics';
+import { lossReasonLabel } from '@/lib/utils/lossDetails';
 
-export interface ReportContext { boardName: string; period: string; range: string; owner: string; generatedBy: string }
+export interface ReportContext { boardName: string; period: string; range: string; owner: string; product?: string; generatedBy: string }
 
 export function generateReportPDF(data: PerformanceMetrics & { webhookUnavailable?: boolean }, context: ReportContext) {
   const doc = new jsPDF();
@@ -11,8 +12,9 @@ export function generateReportPDF(data: PerformanceMetrics & { webhookUnavailabl
   doc.setFontSize(20);
   doc.text('Relatório de Performance', 14, 20);
   doc.setFontSize(10);
-  doc.text(doc.splitTextToSize(`${context.boardName} | ${context.period} | ${context.range}\n${context.owner} | Quadro e responsável atuais\nGerado por ${context.generatedBy} em ${new Date().toLocaleString('pt-BR')}`, 180), 14, 29);
-  autoTable(doc, { startY: 52, head: [['Indicador', 'Resultado', 'Base']], body: [
+  const headerLines = doc.splitTextToSize(`${context.boardName} | ${context.period} | ${context.range}\n${context.owner} | Quadro e responsável atuais\nProduto: ${context.product || 'Todos os produtos'}\nGerado por ${context.generatedBy} em ${new Date().toLocaleString('pt-BR')}`, 180);
+  doc.text(headerLines, 14, 29);
+  autoTable(doc, { startY: 29 + headerLines.length * 4.5 + 6, head: [['Indicador', 'Resultado', 'Base']], body: [
     ['Entradas', String(data.entries.length), 'Criados no período'],
     ['Qualificados', data.hasQualifiedStage ? String(data.qualifiedCount) : '-', 'Qualificação comprovada no período'],
     ['Taxa de qualificação', rate(data.qualificationRate), `${data.qualifiedCount} qualificados / ${data.entries.length} entradas`],
@@ -29,7 +31,7 @@ export function generateReportPDF(data: PerformanceMetrics & { webhookUnavailabl
   const reasons = new Map<string, number>();
   for (const deal of data.lostDeals) {
     const category = deal.lossCategory === 'qualified' ? 'Qualificado' : deal.lossCategory === 'disqualified' ? 'Desqualificado' : 'Sem classificação';
-    const key = `${category}: ${deal.lossReason || 'Não informado'}`;
+    const key = `${category}: ${lossReasonLabel(deal.lossReason)}`;
     reasons.set(key, (reasons.get(key) || 0) + 1);
   }
   if (reasons.size) autoTable(doc, { head: [['Motivos de perda', 'Leads']], body: [...reasons], styles: { fontSize: 9 } });

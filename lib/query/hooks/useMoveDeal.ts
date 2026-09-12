@@ -19,6 +19,7 @@ import { activitiesService } from '@/lib/supabase/activities';
 import { contactsService } from '@/lib/supabase/contacts';
 import type { Deal, DealView, Board, Activity } from '@/types';
 import { useAuth } from '@/context/AuthContext';
+import { lossDetailsDescription } from '@/lib/utils/lossDetails';
 
 interface MoveDealParams {
   dealId: string;
@@ -44,7 +45,7 @@ interface MoveDealResult {
 // Context type for optimistic updates
 interface MoveDealContext {
   previousDeals: DealView[] | undefined;
-  previousRawDeals: Deal[] | undefined;
+  previousDetail: Deal | undefined;
 }
 
 /**
@@ -135,7 +136,7 @@ export const useMoveDeal = () => {
         dealTitle: deal.title,
         type: 'STATUS_CHANGE',
         title: `Moveu para ${stageLabel}`,
-        description: lossReason ? `Motivo da perda: ${lossReason}` : undefined,
+        description: isLost ? lossDetailsDescription(lossCategory, lossReason) : undefined,
         date: new Date().toISOString(),
         completed: true,
         user: autor,
@@ -225,13 +226,13 @@ export const useMoveDeal = () => {
     },
 
     // Optimistic update: update UI instantly before server responds
-    onMutate: async ({ dealId, targetStageId, deal, explicitWin, explicitLost, board }) => {
+    onMutate: async ({ dealId, targetStageId, deal, explicitWin, explicitLost, board, lossCategory, lossReason }) => {
       // Cancel any outgoing refetches
       await queryClient.cancelQueries({ queryKey: queryKeys.deals.all });
 
       // Snapshot previous state
       const previousDeals = queryClient.getQueryData<DealView[]>(DEALS_VIEW_KEY);
-      const previousRawDeals = queryClient.getQueryData<Deal[]>(queryKeys.deals.lists());
+      const previousDetail = queryClient.getQueryData<Deal>(queryKeys.deals.detail(dealId));
 
       // Determine new status
       const targetStage = board.stages.find(s => s.id === targetStageId);
@@ -246,6 +247,11 @@ export const useMoveDeal = () => {
         explicitLost
         || (board.lostStageId ? targetStageId === board.lostStageId : targetStage?.linkedLifecycleStage === 'OTHER');
 
+      const lossUpdates = isLost ? {
+        ...(lossCategory && { lossCategory }), ...(lossReason && { lossReason }),
+        closedAt: deal.isLost ? deal.closedAt : new Date().toISOString(),
+      } : { lossCategory: undefined, lossReason: undefined, ...(!isWon && { closedAt: undefined }) };
+
       // Optimistically update APENAS DEALS_VIEW_KEY (única fonte de verdade)
       queryClient.setQueryData<DealView[]>(DEALS_VIEW_KEY, (old) => {
         if (!old) return old;
@@ -258,27 +264,10 @@ export const useMoveDeal = () => {
               lastStageChangeDate: new Date().toISOString(),
               isWon: isWon ?? d.isWon,
               isLost: isLost ?? d.isLost,
+              ...lossUpdates,
               updatedAt: new Date().toISOString(),
             };
             return newDeal;
-          }
-          return d;
-        });
-      });
-
-      // Também atualizar o rawDeals cache (queryKeys.deals.lists()) para que CRMContext reflita
-      queryClient.setQueryData<Deal[]>(queryKeys.deals.lists(), (old) => {
-        if (!old) return old;
-        return old.map(d => {
-          if (d.id === dealId) {
-            return {
-              ...d,
-              status: targetStageId,
-              lastStageChangeDate: new Date().toISOString(),
-              isWon: isWon ?? d.isWon,
-              isLost: isLost ?? d.isLost,
-              updatedAt: new Date().toISOString(),
-            };
           }
           return d;
         });
@@ -293,20 +282,21 @@ export const useMoveDeal = () => {
           lastStageChangeDate: new Date().toISOString(),
           isWon: isWon ?? old.isWon,
           isLost: isLost ?? old.isLost,
+          ...lossUpdates,
           updatedAt: new Date().toISOString(),
         };
       });
 
-      return { previousDeals, previousRawDeals };
+      return { previousDeals, previousDetail };
     },
 
     // Rollback on error
-    onError: (_err, _variables, context) => {
+    onError: (_err, variables, context) => {
       if (context?.previousDeals) {
         queryClient.setQueryData(DEALS_VIEW_KEY, context.previousDeals);
       }
-      if (context?.previousRawDeals) {
-        queryClient.setQueryData(queryKeys.deals.lists(), context.previousRawDeals);
+      if (context?.previousDetail) {
+        queryClient.setQueryData(queryKeys.deals.detail(variables.dealId), context.previousDetail);
       }
     },
 
@@ -343,7 +333,8 @@ export const useMoveDealSimple = (
     targetStageId: string,
     lossReason?: string,
     explicitWin?: boolean,
-    explicitLost?: boolean
+    explicitLost?: boolean,
+    lossCategory?: 'qualified' | 'disqualified'
   ) => {
     if (!board) {
       console.error('[useMoveDealSimple] No board provided');
@@ -354,6 +345,7 @@ export const useMoveDealSimple = (
       dealId: deal.id,
       targetStageId,
       lossReason,
+      lossCategory,
       deal,
       board,
       lifecycleStages,

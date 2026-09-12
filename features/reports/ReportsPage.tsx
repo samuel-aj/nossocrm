@@ -13,19 +13,23 @@ import { useAuth } from '@/context/AuthContext';
 import { performanceComparisonRange } from './performanceMetrics';
 import { usePerformanceReport } from './usePerformanceReport';
 import { StageLeadsModal } from './StageLeadsModal';
+import { ReportLeadsModal } from './ReportLeadsModal';
+import { NO_PRODUCT, lossReasonLabel, reportDrilldown, type ReportSelection } from './reportDrilldown';
 
 /**
  * Componente React `ReportsPage`.
  * @returns {Element} Retorna um valor do tipo `Element`.
  */
 const ReportsPage: React.FC = () => {
-  const { boards, deals: allCrmDeals } = useCRM();
+  const { boards, deals: allCrmDeals, products = [] } = useCRM();
   const { profile } = useAuth();
   const [period, setPeriod] = useState<PeriodFilter>('this_month');
   const [selectedBoardId, setSelectedBoardId] = useState<string>('');
   const [selectedOwnerId, setSelectedOwnerId] = useState<string>('');
+  const [selectedProductId, setSelectedProductId] = useState('');
+  const [selection, setSelection] = useState<ReportSelection | null>(null);
   const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
-  useEffect(() => { setSelectedStageId(null); }, [period, selectedBoardId, selectedOwnerId]);
+  useEffect(() => { setSelectedStageId(null); setSelection(null); }, [period, selectedBoardId, selectedOwnerId, selectedProductId]);
 
   // Performance: avoid recomputing the "default board id" logic inside the effect.
   const defaultBoardId = useMemo(() => {
@@ -52,13 +56,21 @@ const ReportsPage: React.FC = () => {
 
   const range = useMemo(() => getDateRange(period), [period]);
   const comparisonRange = useMemo(() => performanceComparisonRange(range, period), [range, period]);
-  const report = usePerformanceReport(selectedBoard, range, selectedOwnerId, comparisonRange);
+  const report = usePerformanceReport(selectedBoard, range, selectedOwnerId, comparisonRange, selectedProductId);
   const metrics = report.data;
+  const productOptions = useMemo(() => {
+    const options = new Map((metrics?.productOptions || []).map(product => [product.id, product.name]));
+    for (const product of products) options.set(product.id, product.name);
+    return [...options].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+  }, [metrics?.productOptions, products]);
+  const productLabel = selectedProductId === NO_PRODUCT ? 'Sem produto' : productOptions.find(item => item.value === selectedProductId)?.label || 'Todos os produtos';
+  const detail = metrics && selection ? reportDrilldown(metrics, selection) : null;
   const ownersList = useMemo(() => {
     const map = new Map<string, string>();
+    for (const owner of metrics?.ownerOptions || []) map.set(owner.id, owner.name);
     for (const deal of metrics?.deals || allCrmDeals) if (deal.ownerId) map.set(deal.ownerId, deal.owner.name);
     return [...map].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
-  }, [metrics?.deals, allCrmDeals]);
+  }, [metrics?.deals, metrics?.ownerOptions, allCrmDeals]);
   const wonDeals = metrics?.wonDeals || [];
   const lostDeals = metrics?.lostDeals || [];
   const wonRevenue = metrics?.wonRevenue || 0;
@@ -114,18 +126,18 @@ const ReportsPage: React.FC = () => {
     if (!metrics || report.isFetching || report.isError) return;
     generateReportPDF(metrics, {
       boardName: selectedBoard?.name || '', period: PERIOD_LABELS[period],
-      owner: ownersList.find(owner => owner.id === selectedOwnerId)?.name || 'Todos os vendedores',
+      owner: ownersList.find(owner => owner.id === selectedOwnerId)?.name || 'Todos os vendedores', product: productLabel,
       range: range.start.toLocaleDateString('pt-BR') + ' a ' + range.end.toLocaleDateString('pt-BR'), generatedBy,
     });
-  }, [metrics, report.isFetching, report.isError, selectedBoard, period, selectedOwnerId, ownersList, range, generatedBy]);
+  }, [metrics, report.isFetching, report.isError, selectedBoard, period, selectedOwnerId, ownersList, range, generatedBy, productLabel]);
 
   // Ranking de motivos (barra + contagem) usado pelos cards "Motivos de
   // Perda" e "Desqualificação" — cada card recebe só as perdas da sua
   // categoria, então aqui não há mais etiqueta misturando os dois mundos.
-  const renderLossReasons = (dealsSubset: typeof lostDeals, barClass: string) => {
+  const renderLossReasons = (dealsSubset: typeof lostDeals, barClass: string, category: 'qualified' | 'disqualified') => {
     const map = new Map<string, number>();
     for (const d of dealsSubset) {
-      const reason = d.lossReason || 'Não informado';
+      const reason = lossReasonLabel(d.lossReason);
       map.set(reason, (map.get(reason) || 0) + 1);
     }
     const sorted = [...map.entries()].sort((a, b) => b[1] - a[1]);
@@ -136,7 +148,8 @@ const ReportsPage: React.FC = () => {
     return (
       <div className="space-y-2">
         {sorted.map(([reason, count]) => (
-          <div key={reason}>
+          <button key={reason} type="button" onClick={() => setSelection({ kind: 'loss', category, reason })}
+            aria-label={`${reason}: ver ${count} leads`} className="block w-full text-left rounded-lg p-1 -m-1 hover:bg-slate-100 dark:hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-primary-500">
             <div className="flex items-center justify-between mb-1">
               <span className="text-sm text-slate-700 dark:text-slate-300 truncate">{reason}</span>
               <span className="text-sm font-bold text-slate-900 dark:text-white ml-2 shrink-0">{count}</span>
@@ -147,7 +160,7 @@ const ReportsPage: React.FC = () => {
                 style={{ width: `${(count / maxCount) * 100}%` }}
               />
             </div>
-          </div>
+          </button>
         ))}
       </div>
     );
@@ -173,6 +186,8 @@ const ReportsPage: React.FC = () => {
 
           <div className="w-[300px] min-w-0 shrink-0 max-md:w-full"><FilterSelect label="Filtrar por Vendedor" value={selectedOwnerId} onChange={setSelectedOwnerId} options={[{value:'',label:'Todos os vendedores'}, ...ownersList.map(owner => ({value:owner.id,label:owner.name}))]} /></div>
 
+          <div className="w-[300px] min-w-0 shrink-0 max-md:w-full"><FilterSelect label="Filtrar por Produto" value={selectedProductId} onChange={setSelectedProductId} options={[{ value: '', label: 'Todos os produtos' }, { value: NO_PRODUCT, label: 'Sem produto' }, ...productOptions]} /></div>
+
           <PeriodFilterSelect value={period} onChange={setPeriod} />
 
           <button
@@ -194,7 +209,7 @@ const ReportsPage: React.FC = () => {
       {/* KPI Cards Grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 shrink-0">
         {/* Pipeline Value - FEATURE #2 */}
-        <div className="glass p-4 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
+        <button type="button" onClick={() => setSelection({ kind: 'revenue' })} className="glass text-left p-4 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm hover:border-primary-400 dark:hover:border-primary-500/50 focus-visible:ring-2 focus-visible:ring-primary-500 transition-colors">
           <div className="flex items-center gap-2 mb-2">
             <div className="p-2 rounded-lg bg-blue-500/10">
               <DollarSign className="text-blue-500" size={18} />
@@ -205,10 +220,10 @@ const ReportsPage: React.FC = () => {
           <p className={`text-xs ${metrics.revenueChange == null ? 'text-slate-500' : metrics.revenueChange < 0 ? 'text-red-500' : 'text-emerald-500'}`}>
             {period === 'all' ? 'Ganhos em todo o período' : metrics.revenueChange == null ? 'Sem base no período anterior' : `${metrics.revenueChange >= 0 ? '+' : ''}${metrics.revenueChange.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% ${COMPARISON_LABELS[period]}`}
           </p>
-        </div>
+        </button>
 
         {/* Taxa de Qualificação = qualificados ÷ total de leads do funil */}
-        <div className="glass p-4 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
+        <button type="button" onClick={() => setSelection({ kind: 'qualification' })} className="glass text-left p-4 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm hover:border-primary-400 dark:hover:border-primary-500/50 focus-visible:ring-2 focus-visible:ring-primary-500 transition-colors">
           <div className="flex items-center gap-2 mb-2">
             <div className="p-2 rounded-lg bg-emerald-500/10">
               <Target className="text-emerald-500" size={18} />
@@ -223,10 +238,10 @@ const ReportsPage: React.FC = () => {
               ? `${funnelRates.qualified} qualificados de ${funnelRates.total} leads`
               : 'Board sem etapa "Qualificado"'}
           </p>
-        </div>
+        </button>
 
         {/* Taxa de Conversão = ganhos ÷ qualificados */}
-        <div className="glass p-4 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
+        <button type="button" onClick={() => setSelection({ kind: 'closing' })} className="glass text-left p-4 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm hover:border-primary-400 dark:hover:border-primary-500/50 focus-visible:ring-2 focus-visible:ring-primary-500 transition-colors">
           <div className="flex items-center gap-2 mb-2">
             <div className="p-2 rounded-lg bg-teal-500/10">
               <TrendingUp className="text-teal-500" size={18} />
@@ -241,10 +256,10 @@ const ReportsPage: React.FC = () => {
               ? `${funnelRates.wonCount} ganhos de ${funnelRates.qualified} qualificados`
               : 'Pipeline sem etapa de qualificação'}
           </p>
-        </div>
+        </button>
 
         {/* Ciclo Médio */}
-        <div className="glass p-4 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
+        <button type="button" onClick={() => setSelection({ kind: 'cycle' })} className="glass text-left p-4 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm hover:border-primary-400 dark:hover:border-primary-500/50 focus-visible:ring-2 focus-visible:ring-primary-500 transition-colors">
           <div className="flex items-center gap-2 mb-2">
             <div className="p-2 rounded-lg bg-purple-500/10">
               <Clock className="text-purple-500" size={18} />
@@ -255,10 +270,10 @@ const ReportsPage: React.FC = () => {
           <p className="text-xs text-slate-500">
             {metrics.fastestSalesCycle == null ? 'Sem ganhos no período' : `Rápido: ${metrics.fastestSalesCycle}d | Lento: ${metrics.slowestSalesCycle}d`}
           </p>
-        </div>
+        </button>
 
         {/* Deals Fechados */}
-        <div className="glass p-4 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
+        <button type="button" onClick={() => setSelection({ kind: 'closures' })} className="glass text-left p-4 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm hover:border-primary-400 dark:hover:border-primary-500/50 focus-visible:ring-2 focus-visible:ring-primary-500 transition-colors">
           <div className="flex items-center gap-2 mb-2">
             <div className="p-2 rounded-lg bg-orange-500/10">
               <TrendingUp className="text-orange-500" size={18} />
@@ -273,7 +288,7 @@ const ReportsPage: React.FC = () => {
           <p className="text-xs text-slate-500">
             Ganhos / Perdas qualificadas
           </p>
-        </div>
+        </button>
       </div>
 
       {/* Fileira: Leads Perdidos + Conversão por Etapa lado a lado */}
@@ -293,30 +308,30 @@ const ReportsPage: React.FC = () => {
               const noCategory = lostDeals.filter(d => !d.lossCategory);
               return (
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between p-3 rounded-lg bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-500/20">
+                  <button type="button" onClick={() => setSelection({ kind: 'loss', category: 'qualified' })} className="w-full text-left focus-visible:ring-2 focus-visible:ring-primary-500 hover:brightness-110 flex items-center justify-between p-3 rounded-lg bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-500/20">
                     <div className="flex items-center gap-2">
                       <CheckCircle2 size={16} className="text-orange-500" />
                       <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Qualificados</span>
                     </div>
                     <span className="text-lg font-bold text-orange-600 dark:text-orange-400">{qualified.length}</span>
-                  </div>
-                  <div className="flex items-center justify-between p-3 rounded-lg bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-500/20">
+                  </button>
+                  <button type="button" onClick={() => setSelection({ kind: 'loss', category: 'disqualified' })} className="w-full text-left focus-visible:ring-2 focus-visible:ring-primary-500 hover:brightness-110 flex items-center justify-between p-3 rounded-lg bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-500/20">
                     <div className="flex items-center gap-2">
                       <UserX size={16} className="text-red-500" />
                       <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Desqualificados</span>
                     </div>
                     <span className="text-lg font-bold text-red-600 dark:text-red-400">{disqualified.length}</span>
-                  </div>
+                  </button>
                   {noCategory.length > 0 && (
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10">
+                    <button type="button" onClick={() => setSelection({ kind: 'loss', category: 'unknown' })} className="w-full text-left focus-visible:ring-2 focus-visible:ring-primary-500 flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10">
                       <span className="text-sm font-medium text-slate-500">Sem classificação</span>
                       <span className="text-lg font-bold text-slate-400">{noCategory.length}</span>
-                    </div>
+                    </button>
                   )}
-                  <div className="pt-2 border-t border-slate-200 dark:border-white/10 flex items-center justify-between">
+                  <button type="button" onClick={() => setSelection({ kind: 'loss' })} className="w-full text-left focus-visible:ring-2 focus-visible:ring-primary-500 pt-2 border-t border-slate-200 dark:border-white/10 flex items-center justify-between">
                     <span className="text-sm font-medium text-slate-500">Total perdidos</span>
                     <span className="text-lg font-bold text-slate-900 dark:text-white">{lostDeals.length}</span>
-                  </div>
+                  </button>
                 </div>
               );
             })()}
@@ -361,7 +376,7 @@ const ReportsPage: React.FC = () => {
             </h2>
             {renderLossReasons(
               lostDeals.filter(d => d.lossCategory === 'qualified'),
-              'bg-orange-500'
+              'bg-orange-500', 'qualified'
             )}
           </div>
         )}
@@ -375,7 +390,7 @@ const ReportsPage: React.FC = () => {
             </h2>
             {renderLossReasons(
               lostDeals.filter(d => d.lossCategory === 'disqualified'),
-              'bg-red-500'
+              'bg-red-500', 'disqualified'
             )}
           </div>
         )}
@@ -395,9 +410,9 @@ const ReportsPage: React.FC = () => {
           <div className="flex-1 overflow-y-auto min-h-0 space-y-2">
             {leaderboard.length > 0 ? (
               leaderboard.map((rep, index) => (
-                <div
+                <button type="button" onClick={() => setSelection({ kind: 'owner', ownerId: rep.id, ownerName: rep.name })}
                   key={rep.id}
-                  className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50/50 dark:hover:bg-white/5 transition-colors"
+                  className="w-full text-left focus-visible:ring-2 focus-visible:ring-primary-500 flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50/50 dark:hover:bg-white/5 transition-colors"
                 >
                   <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${index === 0 ? 'bg-amber-100 text-amber-600' :
                     index === 1 ? 'bg-slate-100 text-slate-600' :
@@ -421,7 +436,7 @@ const ReportsPage: React.FC = () => {
                   <div className="text-right">
                     <p className="text-sm font-bold text-emerald-500">{formatCurrency(rep.revenue)}</p>
                   </div>
-                </div>
+                </button>
               ))
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-slate-500 py-6">
@@ -438,6 +453,9 @@ const ReportsPage: React.FC = () => {
           limite nominal da caixa, não abaixo do conteúdo transbordado) —
           este elemento garante a margem inferior em qualquer cenário */}
       <div className="shrink-0 h-2" aria-hidden="true" />
+      {detail && metrics && selectedBoard && <ReportLeadsModal key={JSON.stringify(selection)} detail={detail} board={selectedBoard}
+        filtersLabel={`${selectedBoard.name} · ${PERIOD_LABELS[period]} · ${ownersList.find(owner => owner.id === selectedOwnerId)?.name || 'Todos os vendedores'} · ${productLabel}`}
+        qualificationDates={metrics.leadQualificationDates} estimatedQualificationIds={metrics.estimatedQualificationIds} onClose={() => setSelection(null)} />}
       {selectedStage && metrics && <StageLeadsModal stage={selectedStage}
         qualificationDates={metrics.leadQualificationDates} estimatedQualificationIds={metrics.estimatedQualificationIds} onClose={() => setSelectedStageId(null)} />}
       </>}
