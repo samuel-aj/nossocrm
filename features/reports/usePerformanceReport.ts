@@ -7,8 +7,10 @@ import type { Board, Deal } from '@/types';
 import { activityEvents, calculatePerformance, type MovementActivity, type PeriodRange, type StageEvent } from './performanceMetrics';
 
 import { collectPages } from './collectPages';
+import { filterReportProducts } from './reportDrilldown';
+import type { DbDealItem } from '@/lib/supabase/deals';
 
-export function usePerformanceReport(board: Board | undefined, range: PeriodRange, ownerId: string, comparisonRange?: PeriodRange) {
+export function usePerformanceReport(board: Board | undefined, range: PeriodRange, ownerId: string, comparisonRange?: PeriodRange, productId = '') {
   const { user, organizationId, loading } = useAuth();
   const queryClient = useQueryClient();
   useEffect(() => {
@@ -16,11 +18,14 @@ export function usePerformanceReport(board: Board | undefined, range: PeriodRang
     const channel = supabase.channel(`performance:${organizationId}:${board.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'deals', filter: `organization_id=eq.${organizationId}` }, () => {
         void queryClient.invalidateQueries({ queryKey: ['performance-report', organizationId] });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'deal_items', filter: `organization_id=eq.${organizationId}` }, () => {
+        void queryClient.invalidateQueries({ queryKey: ['performance-report', organizationId] });
       }).subscribe();
     return () => { void supabase.removeChannel(channel); };
   }, [organizationId, board?.id, queryClient]);
   return useQuery({
-    queryKey: ['performance-report', organizationId, user?.id, board?.id, range.start.toISOString(), range.end.toISOString(), ownerId, comparisonRange?.start.toISOString(), comparisonRange?.end.toISOString()],
+    queryKey: ['performance-report', organizationId, user?.id, board?.id, range.start.toISOString(), range.end.toISOString(), ownerId, comparisonRange?.start.toISOString(), comparisonRange?.end.toISOString(), productId],
     enabled: !loading && !!user && !!organizationId && !!board,
     staleTime: 0,
     refetchOnWindowFocus: true,
@@ -39,6 +44,19 @@ export function usePerformanceReport(board: Board | undefined, range: PeriodRang
         lossReason: row.loss_reason || undefined, owner: { name: 'Sem responsável', avatar: '' },
         contactId: '', items: [], tags: [], priority: 'medium', probability: 0,
       }));
+      const dealsById = new Map(deals.map(deal => [deal.id, deal]));
+      const productOptions = new Map<string, string>();
+      for (let offset = 0; offset < deals.length; offset += 100) {
+        const ids = deals.slice(offset, offset + 100).map(deal => deal.id);
+        const items = await collectPages<Pick<DbDealItem, 'id' | 'deal_id' | 'product_id' | 'name' | 'quantity' | 'price'>>((from, to) => supabase.from('deal_items')
+          .select('id,deal_id,product_id,name,quantity,price').eq('organization_id', orgId)
+          .in('deal_id', ids).order('id').range(from, to));
+        for (const item of items) {
+          dealsById.get(item.deal_id)?.items.push({ id: item.id, productId: item.product_id || '', name: item.name,
+            quantity: item.quantity, price: Number(item.price) || 0 });
+          if (item.product_id) productOptions.set(item.product_id, item.name);
+        }
+      }
       const ownerIds = [...new Set(deals.map(deal => deal.ownerId).filter((id): id is string => !!id))];
       for (let offset = 0; offset < ownerIds.length; offset += 100) {
         const { data: profiles, error } = await supabase.from('profiles').select('id,first_name,last_name,email,avatar_url')
@@ -50,12 +68,13 @@ export function usePerformanceReport(board: Board | undefined, range: PeriodRang
         }
       }
       for (const deal of deals) if (deal.ownerId && deal.owner.name === 'Sem responsável') deal.owner.name = 'Responsável não disponível';
+      const filteredDeals = filterReportProducts(deals, productId);
       const activities: MovementActivity[] = [];
       const events: StageEvent[] = [];
       let webhookUnavailable = false;
       // Scope each request to deals already returned under the user's RLS.
-      for (let offset = 0; offset < deals.length; offset += 100) {
-        const ids = deals.slice(offset, offset + 100).map(deal => deal.id);
+      for (let offset = 0; offset < filteredDeals.length; offset += 100) {
+        const ids = filteredDeals.slice(offset, offset + 100).map(deal => deal.id);
         const history = await collectPages<Record<string, any>>((from, to) => supabase.from('deal_stage_events')
           .select('deal_id,board_id,from_stage_id,to_stage_id,occurred_at').eq('organization_id', orgId)
           .eq('board_id', board.id).in('deal_id', ids).order('id').range(from, to));
@@ -82,8 +101,10 @@ export function usePerformanceReport(board: Board | undefined, range: PeriodRang
         }
       }
       events.push(...activityEvents(activities, board));
-      const metrics = calculatePerformance(deals, events, board, range, ownerId, comparisonRange);
-      return { ...metrics, deals, webhookUnavailable };
+      const metrics = calculatePerformance(filteredDeals, events, board, range, ownerId, comparisonRange);
+      return { ...metrics, deals: filteredDeals, webhookUnavailable,
+        ownerOptions: [...new Map(deals.filter(deal => deal.ownerId).map(deal => [deal.ownerId!, deal.owner.name]))].map(([id, name]) => ({ id, name })),
+        productOptions: [...productOptions].map(([id, name]) => ({ id, name })) };
     },
   });
 }

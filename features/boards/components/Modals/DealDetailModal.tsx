@@ -5,6 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import ConfirmModal from '@/components/ConfirmModal';
 import { LossReasonModal } from '@/components/ui/LossReasonModal';
+import { LossDetailsBanner } from '@/features/deals/LossDetailsBanner';
 import { useMoveDealSimple, useDeal, useOrgUsers, useOrgMembers } from '@/lib/query/hooks';
 import { FocusTrap, useFocusReturn } from '@/lib/a11y';
 import { Activity, CustomFieldDefinition } from '@/types';
@@ -1435,6 +1436,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                 Board não encontrado para este negócio. Algumas ações (mover estágio) podem ficar indisponíveis.
               </div>
             )}
+            <LossDetailsBanner key={deal.id} deal={deal} canEdit={permissions.deals.edit} />
           </div>
 
           <div className="flex-1 flex flex-col md:flex-row overflow-hidden min-h-0">
@@ -2643,17 +2645,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
             // 2. Explicit Lost Stage on Board
             // 3. Stage linked to 'OTHER' lifecycle
 
-            const lossFields = {
-              isLost: true,
-              isWon: false,
-              closedAt: new Date().toISOString(),
-              lossReason: reason,
-              lossCategory: category,
-            };
-
             if (dealBoard?.lostStayInStage) {
-              moveDeal(deal, deal.status, reason, false, true); // explicitLost = true
-              updateDeal(deal.id, { lossCategory: category });
+              void moveDeal(deal, deal.status, reason, false, true, category).catch(() => addToast('Não foi possível registrar a perda.', 'error'));
               setShowLossReasonModal(false);
               setPendingLostStageId(null);
               if (lossReasonOrigin === 'button') onClose();
@@ -2672,11 +2665,10 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
             }
 
             if (targetStageId) {
-              moveDeal(deal, targetStageId, reason);
-              updateDeal(deal.id, { lossCategory: category });
+              void moveDeal(deal, targetStageId, reason, false, true, category).catch(() => addToast('Não foi possível registrar a perda.', 'error'));
             } else {
-              // Fallback: just mark as lost without moving
-              updateDeal(deal.id, lossFields);
+              // No configured loss stage: record the outcome in the current stage.
+              void moveDeal(deal, deal.status, reason, false, true, category).catch(() => addToast('Não foi possível registrar a perda.', 'error'));
             }
             setShowLossReasonModal(false);
             setPendingLostStageId(null);

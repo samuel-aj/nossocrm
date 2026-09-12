@@ -126,11 +126,12 @@ const ActivityRowComponent: React.FC<ActivityRowProps> = ({
                     <div className="w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-600 ring-4 ring-white dark:ring-dark-card" />
                 </div>
 
-                <div className="flex-1 flex items-center justify-between min-w-0">
-                    <div className="flex items-center gap-2">
+                <div className="flex-1 flex flex-wrap items-start justify-between gap-2 min-w-0">
+                    <div className="min-w-0 flex-1">
                         <span className="text-sm text-slate-600 dark:text-slate-400">
                             {formatTitle(activity.title)}
                         </span>
+                        {activity.description && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 whitespace-pre-wrap break-words">{activity.description}</p>}
                     </div>
 
                     <span className="text-xs text-slate-400 whitespace-nowrap ml-4">
