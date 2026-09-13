@@ -5,7 +5,8 @@ import dynamic from 'next/dynamic';
 const LazyStageConversionChart = dynamic(() => import('./StagePerformanceChart').then(module => module.StageConversionChart), { ssr: false });
 import { TrendingUp, Clock, Target, DollarSign, Trophy, Users, Download, ThumbsDown, UserX, CheckCircle2, SlidersHorizontal } from 'lucide-react';
 import { getDateRange, PeriodFilter, PERIOD_LABELS, COMPARISON_LABELS } from '../dashboard/hooks/useDashboardMetrics';
-import { ReportFiltersModal } from './ReportFiltersModal';
+import { ReportFiltersPopover } from './ReportFiltersPopover';
+import { Popover, PopoverTrigger } from '@/components/ui/popover';
 import { ChartWrapper } from '@/components/charts';
 import { generateReportPDF } from './utils/generateReportPDF';
 import { useCRM } from '@/context/CRMContext';
@@ -185,13 +186,25 @@ const ReportsPage: React.FC = () => {
         </div>
         <div className="flex min-w-0 items-center justify-end gap-2 sm:gap-3 max-md:w-full">
           <div className="w-56 min-w-0 max-md:flex-1"><FilterSelect label="Selecionar Pipeline" value={boardIdEfetivo} onChange={setSelectedBoardId} options={boards.map(board => ({value:board.id,label:board.name}))} /></div>
-          <button type="button" onClick={() => setFiltersOpen(true)} aria-haspopup="dialog" aria-expanded={filtersOpen}
-            title={`Período: ${PERIOD_LABELS[period]} · ${ownersList.find(owner => owner.id === selectedOwnerId)?.name || 'Todos os vendedores'} · ${productLabel}`}
-            className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:border-primary-400 focus-visible:ring-2 focus-visible:ring-primary-500 dark:border-white/15 dark:bg-slate-900 dark:text-slate-200">
-            <SlidersHorizontal size={16} aria-hidden="true" />
-            Filtros
-            {activeFilterCount > 0 && <span aria-label={`${activeFilterCount} filtros ativos`} className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary-500/15 px-1 text-xs text-primary-600 dark:text-primary-300">{activeFilterCount}</span>}
-          </button>
+          <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
+            <PopoverTrigger asChild>
+              <button type="button"
+                title={`Período: ${PERIOD_LABELS[period]} · ${ownersList.find(owner => owner.id === selectedOwnerId)?.name || 'Todos os vendedores'} · ${productLabel}`}
+                className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:border-primary-400 focus-visible:ring-2 focus-visible:ring-primary-500 dark:border-white/15 dark:bg-slate-900 dark:text-slate-200">
+                <SlidersHorizontal size={16} aria-hidden="true" />
+                Filtros
+                {activeFilterCount > 0 && <span aria-label={`${activeFilterCount} filtros ativos`} className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary-500/15 px-1 text-xs text-primary-600 dark:text-primary-300">{activeFilterCount}</span>}
+              </button>
+            </PopoverTrigger>
+            {filtersOpen && <ReportFiltersPopover filters={{ period, ownerId: selectedOwnerId, productId: selectedProductId }}
+              owners={ownersList} products={productOptions} onClose={() => setFiltersOpen(false)}
+              onApply={filters => {
+                setPeriod(filters.period);
+                setSelectedOwnerId(filters.ownerId);
+                setSelectedProductId(filters.productId);
+                setFiltersOpen(false);
+              }} />}
+          </Popover>
 
           <button
             type="button"
@@ -205,15 +218,6 @@ const ReportsPage: React.FC = () => {
           </button>
         </div>
       </div>
-
-      {filtersOpen && <ReportFiltersModal filters={{ period, ownerId: selectedOwnerId, productId: selectedProductId }}
-        owners={ownersList} products={productOptions} onClose={() => setFiltersOpen(false)}
-        onApply={filters => {
-          setPeriod(filters.period);
-          setSelectedOwnerId(filters.ownerId);
-          setSelectedProductId(filters.productId);
-          setFiltersOpen(false);
-        }} />}
 
       {report.isError && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">Não foi possível carregar o relatório. {report.error.message} <button className="underline" onClick={() => void report.refetch()}>Tentar novamente</button></div>}
       {!metrics && !report.isError && <p role="status">Carregando histórico de movimentações…</p>}

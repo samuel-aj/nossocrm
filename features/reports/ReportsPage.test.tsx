@@ -108,7 +108,8 @@ describe('tela Performance', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
     fireEvent.click(screen.getByRole('button', { name: /^Filtros/ }));
     expect(screen.getByRole('combobox', { name: 'Filtrar por Produto' })).toHaveTextContent('Produto Teste');
-    fireEvent.click(screen.getByRole('button', { name: 'Fechar modal' }));
+    fireEvent.keyDown(screen.getByRole('dialog', { name: 'Filtros do relatório' }), { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'PDF' }));
     expect(state.pdf).toHaveBeenCalledWith(state.data, expect.objectContaining({ product: 'Produto Teste' }));
   });
