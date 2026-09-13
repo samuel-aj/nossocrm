@@ -3,9 +3,9 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
 const LazyStageConversionChart = dynamic(() => import('./StagePerformanceChart').then(module => module.StageConversionChart), { ssr: false });
-import { TrendingUp, Clock, Target, DollarSign, Trophy, Users, Download, ThumbsDown, UserX, CheckCircle2 } from 'lucide-react';
+import { TrendingUp, Clock, Target, DollarSign, Trophy, Users, Download, ThumbsDown, UserX, CheckCircle2, SlidersHorizontal } from 'lucide-react';
 import { getDateRange, PeriodFilter, PERIOD_LABELS, COMPARISON_LABELS } from '../dashboard/hooks/useDashboardMetrics';
-import { PeriodFilterSelect } from '@/components/filters/PeriodFilterSelect';
+import { ReportFiltersDrawer } from './ReportFiltersDrawer';
 import { ChartWrapper } from '@/components/charts';
 import { generateReportPDF } from './utils/generateReportPDF';
 import { useCRM } from '@/context/CRMContext';
@@ -27,6 +27,8 @@ const ReportsPage: React.FC = () => {
   const [selectedBoardId, setSelectedBoardId] = useState<string>('');
   const [selectedOwnerId, setSelectedOwnerId] = useState<string>('');
   const [selectedProductId, setSelectedProductId] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const activeFilterCount = Number(period !== 'all') + Number(Boolean(selectedOwnerId)) + Number(Boolean(selectedProductId));
   const [selection, setSelection] = useState<ReportSelection | null>(null);
   const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
   useEffect(() => { setSelectedStageId(null); setSelection(null); }, [period, selectedBoardId, selectedOwnerId, selectedProductId]);
@@ -181,20 +183,21 @@ const ReportsPage: React.FC = () => {
             Análise detalhada de vendas e tendências.
           </p>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-3 max-md:w-full">
-          <div className="w-[340px] min-w-0 shrink-0 max-md:w-full"><FilterSelect label="Selecionar Pipeline" value={boardIdEfetivo} onChange={setSelectedBoardId} options={boards.map(board => ({value:board.id,label:board.name}))} /></div>
-
-          <div className="w-[300px] min-w-0 shrink-0 max-md:w-full"><FilterSelect label="Filtrar por Vendedor" value={selectedOwnerId} onChange={setSelectedOwnerId} options={[{value:'',label:'Todos os vendedores'}, ...ownersList.map(owner => ({value:owner.id,label:owner.name}))]} /></div>
-
-          <div className="w-[300px] min-w-0 shrink-0 max-md:w-full"><FilterSelect label="Filtrar por Produto" value={selectedProductId} onChange={setSelectedProductId} options={[{ value: '', label: 'Todos os produtos' }, { value: NO_PRODUCT, label: 'Sem produto' }, ...productOptions]} /></div>
-
-          <PeriodFilterSelect value={period} onChange={setPeriod} />
+        <div className="flex min-w-0 items-center justify-end gap-2 sm:gap-3 max-md:w-full">
+          <div className="w-56 min-w-0 max-md:flex-1"><FilterSelect label="Selecionar Pipeline" value={boardIdEfetivo} onChange={setSelectedBoardId} options={boards.map(board => ({value:board.id,label:board.name}))} /></div>
+          <button type="button" onClick={() => setFiltersOpen(true)} aria-haspopup="dialog" aria-expanded={filtersOpen}
+            title={`Período: ${PERIOD_LABELS[period]} · ${ownersList.find(owner => owner.id === selectedOwnerId)?.name || 'Todos os vendedores'} · ${productLabel}`}
+            className="flex min-h-11 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:border-primary-400 focus-visible:ring-2 focus-visible:ring-primary-500 dark:border-white/15 dark:bg-slate-900 dark:text-slate-200">
+            <SlidersHorizontal size={16} aria-hidden="true" />
+            Filtros
+            {activeFilterCount > 0 && <span aria-label={`${activeFilterCount} filtros ativos`} className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary-500/15 px-1 text-xs text-primary-600 dark:text-primary-300">{activeFilterCount}</span>}
+          </button>
 
           <button
             type="button"
             disabled={!metrics || report.isFetching || report.isError}
             onClick={handleExportPDF}
-            className="group flex items-center gap-2 px-3 py-2 rounded-lg glass border border-slate-200/50 dark:border-white/10 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:border-slate-300 dark:hover:border-white/20 transition-all duration-200"
+            className="group flex min-h-11 shrink-0 items-center gap-2 px-3 py-2 rounded-lg glass border border-slate-200/50 dark:border-white/10 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:border-slate-300 dark:hover:border-white/20 transition-all duration-200"
             title="Exportar PDF"
           >
             <Download size={16} className="group-hover:scale-110 transition-transform" />
@@ -202,6 +205,15 @@ const ReportsPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {filtersOpen && <ReportFiltersDrawer filters={{ period, ownerId: selectedOwnerId, productId: selectedProductId }}
+        owners={ownersList} products={productOptions} onClose={() => setFiltersOpen(false)}
+        onApply={filters => {
+          setPeriod(filters.period);
+          setSelectedOwnerId(filters.ownerId);
+          setSelectedProductId(filters.productId);
+          setFiltersOpen(false);
+        }} />}
 
       {report.isError && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">Não foi possível carregar o relatório. {report.error.message} <button className="underline" onClick={() => void report.refetch()}>Tentar novamente</button></div>}
       {!metrics && !report.isError && <p role="status">Carregando histórico de movimentações…</p>}

@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import ReportsPage from './ReportsPage';
@@ -9,7 +9,7 @@ const state = vi.hoisted(() => ({ data: null as any, error: null as any, isError
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('next/dynamic', () => ({ default: () => () => null }));
 vi.mock('next/image', () => ({ default: () => null }));
-vi.mock('@/context/CRMContext', () => ({ useCRM: () => ({ boards: [{ id: 'board', name: 'Teste', isDefault: true, stages: [{ id: 'q', label: 'Qualificado' }] }], deals: [] }) }));
+vi.mock('@/context/CRMContext', () => ({ useCRM: () => ({ boards: [{ id: 'board', name: 'Teste', isDefault: true, stages: [{ id: 'q', label: 'Qualificado' }] }, { id: 'other', name: 'Outra pipeline', stages: [] }], deals: [] }) }));
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ profile: { first_name: 'Teste' } }) }));
 vi.mock('./usePerformanceReport', () => ({ usePerformanceReport: (...args: unknown[]) => { state.query(...args); return { ...state, refetch: vi.fn() }; } }));
 vi.mock('@/components/charts', () => ({ ChartWrapper: ({ children }: any) => <div>{children}</div>, LazyStageConversionChart: ({ data }: any) => <div>{JSON.stringify(data)}</div> }));
@@ -17,7 +17,7 @@ vi.mock('@/features/dashboard/hooks/useDashboardMetrics', () => ({ getDateRange:
 vi.mock('./utils/generateReportPDF', () => ({ generateReportPDF: (...args: any[]) => state.pdf(...args) }));
 
 describe('tela Performance', () => {
-  beforeEach(() => { state.data = null; state.isError = false; state.error = null; state.isFetching = false; state.pdf.mockClear(); });
+  beforeEach(() => { state.data = null; state.isError = false; state.error = null; state.isFetching = false; state.pdf.mockClear(); state.query.mockClear(); });
   it('não apresenta zeros como resultado durante carregamento', () => {
     render(<ReportsPage />);
     expect(screen.getByRole('status')).toHaveTextContent('Carregando');
@@ -88,9 +88,27 @@ describe('tela Performance', () => {
     fireEvent.click(within(modal).getByRole('button', { name: 'Total de leads (0)' }));
     expect(within(modal).queryByRole('link')).not.toBeInTheDocument();
     fireEvent.click(within(modal).getByRole('button', { name: /Fechar/i }));
+    expect(screen.getByRole('combobox', { name: 'Selecionar Pipeline' })).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Filtrar por Produto' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Filtros/ }));
+    expect(within(screen.getByRole('dialog')).queryByRole('combobox', { name: 'Selecionar Pipeline' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('combobox', { name: 'Filtrar por Produto' }));
     fireEvent.click(screen.getByRole('option', { name: 'Produto Teste' }));
+    expect(state.query).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), '', expect.anything(), '');
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar filtros' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(state.query).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), '', expect.anything(), 'product');
+    fireEvent.click(screen.getByRole('combobox', { name: 'Selecionar Pipeline' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Outra pipeline' }));
+    expect(state.query).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'other' }), expect.anything(), '', expect.anything(), 'product');
+    fireEvent.click(screen.getByRole('button', { name: /^Filtros/ }));
+    expect(screen.getByRole('combobox', { name: 'Filtrar por Produto' })).toHaveTextContent('Produto Teste');
+    fireEvent.click(screen.getByRole('combobox', { name: 'Filtrar por Produto' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Sem produto' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Filtros/ }));
+    expect(screen.getByRole('combobox', { name: 'Filtrar por Produto' })).toHaveTextContent('Produto Teste');
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar modal' }));
     fireEvent.click(screen.getByRole('button', { name: 'PDF' }));
     expect(state.pdf).toHaveBeenCalledWith(state.data, expect.objectContaining({ product: 'Produto Teste' }));
   });
