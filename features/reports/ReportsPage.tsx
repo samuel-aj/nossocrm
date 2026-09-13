@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 const LazyStageConversionChart = dynamic(() => import('./StagePerformanceChart').then(module => module.StageConversionChart), { ssr: false });
 import { TrendingUp, Clock, Target, DollarSign, Trophy, Users, Download, ThumbsDown, UserX, CheckCircle2, SlidersHorizontal } from 'lucide-react';
 import { getDateRange, PeriodFilter, PERIOD_LABELS, COMPARISON_LABELS } from '../dashboard/hooks/useDashboardMetrics';
-import { ReportFiltersDrawer } from './ReportFiltersDrawer';
+import { ReportFiltersModal } from './ReportFiltersModal';
 import { ChartWrapper } from '@/components/charts';
 import { generateReportPDF } from './utils/generateReportPDF';
 import { useCRM } from '@/context/CRMContext';
@@ -206,7 +206,7 @@ const ReportsPage: React.FC = () => {
         </div>
       </div>
 
-      {filtersOpen && <ReportFiltersDrawer filters={{ period, ownerId: selectedOwnerId, productId: selectedProductId }}
+      {filtersOpen && <ReportFiltersModal filters={{ period, ownerId: selectedOwnerId, productId: selectedProductId }}
         owners={ownersList} products={productOptions} onClose={() => setFiltersOpen(false)}
         onApply={filters => {
           setPeriod(filters.period);
