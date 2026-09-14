@@ -382,12 +382,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     [setActiveBoardId]
   );
 
-  // Bolinha de não lidas no item Chats: mesma queryKey da página de chats
-  // (na página o polling de 10s assume; aqui um ritmo mais leve basta).
-  const waConvsQ = useQuery<{ data: Array<{ unread_count: number | null }> }>({
-    queryKey: ['waConversations'],
+  // Bolinha de não lidas no item Chats: rota leve só com o total (esta busca
+  // roda em toda tela). A chave fica sob ['waConversations'] pra que marcar
+  // como lida / apagar conversa nos Chats também atualize a bolinha.
+  const waUnreadQ = useQuery<{ total: number }>({
+    queryKey: ['waConversations', 'unread'],
     queryFn: async () => {
-      const res = await fetch('/api/whatsapp/conversations', { credentials: 'include' });
+      const res = await fetch('/api/whatsapp/conversations/unread', { credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     },
@@ -396,7 +397,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     refetchOnWindowFocus: true,
     staleTime: 15000,
   });
-  const unreadChatsCount = (waConvsQ.data?.data ?? []).reduce((sum, c) => sum + (c.unread_count || 0), 0);
+  const unreadChatsCount = waUnreadQ.data?.total ?? 0;
   // Contador estilo WhatsApp: acima de 999 vira "999+"
   const unreadChatsNotif = unreadChatsCount > 0 ? (unreadChatsCount > 999 ? '999+' : String(unreadChatsCount)) : undefined;
   const isAdminRole = profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN;

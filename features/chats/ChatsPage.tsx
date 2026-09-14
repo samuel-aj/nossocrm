@@ -275,9 +275,12 @@ export const ChatsPage: React.FC = () => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     },
-    refetchInterval: 10000,
+    // 20s: cada aba de Chats aberta repete esta busca sozinha (a conversa
+    // aberta tem polling próprio de 4s). Com 10s, somado às outras abas,
+    // ajudou a esgotar as conexões do banco em 14/09/2026.
+    refetchInterval: 20000,
     refetchOnWindowFocus: true,
-    staleTime: 5000,
+    staleTime: 10000,
   });
 
   // Filtros extras da lista: responsável ('all' | 'none' | id) e etiqueta.
