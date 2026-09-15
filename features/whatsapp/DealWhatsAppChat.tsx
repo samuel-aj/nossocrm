@@ -751,7 +751,7 @@ function origemDaMensagem(
   }
 }
 
-function MessageBubble({
+export function MessageBubble({
   m,
   searchQuery = '',
   isCurrentMatch = false,
