@@ -1,3 +1,4 @@
+import { messageEditError, type EditableMessage } from '@/lib/whatsapp/messageEditing';
 /**
  * GET /api/whatsapp/messages?phone=<telefone>[&connectionId=...]
  * GET /api/whatsapp/messages?conversationId=<id>          (grupos)
@@ -20,7 +21,7 @@ import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
 import { getConversationAiInfo, getConversationBotInfo } from '@/lib/wa-agents/conversation';
 
 const MESSAGE_COLUMNS =
-  'id, conversation_id, direction, status, body, media_type, media_mime, media_url, from_phone, to_phone, wa_timestamp, created_at, sent_by, source, error, transcription, quoted_message_id, quoted, forwarded, sender_name, edited_at';
+  'id, conversation_id, direction, status, body, media_type, media_mime, media_url, from_phone, to_phone, wa_timestamp, created_at, sent_by, source, error, transcription, quoted_message_id, quoted, forwarded, sender_name, edited_at, evolution_message_id';
 
 /**
  * As 300 mensagens mais RECENTES das conversas (desc + limit, revertidas
@@ -30,7 +31,9 @@ const MESSAGE_COLUMNS =
  */
 async function loadMessages(
   admin: SupabaseClient,
-  convs: Array<{ id: string; connection_id: string | null }>
+  convs: Array<{ id: string; connection_id: string | null }>,
+  userId: string,
+  connections: Array<{ id: string; provider: string; status: string }>
 ): Promise<unknown[]> {
   if (convs.length === 0) return [];
   const connByConv = new Map(convs.map(c => [c.id, c.connection_id]));
@@ -49,6 +52,9 @@ async function loadMessages(
   // Anota de QUAL número cada mensagem veio (divisórias por número no chat)
   for (const r of rows) {
     r.connection_id = connByConv.get(r.conversation_id as string) ?? null;
+    const connection = connections.find(c => c.id === r.connection_id);
+    r.can_edit = connection?.status === 'connected' && messageEditError(r as unknown as EditableMessage, userId, connection.provider) === null;
+    delete r.evolution_message_id;
     delete r.conversation_id;
   }
 
@@ -168,7 +174,7 @@ export async function GET(req: Request) {
       }
     }
     const groupConn = all.find(c => c.id === group.connection_id) ?? null;
-    const messages = await loadMessages(auth.admin, [{ id: group.id, connection_id: group.connection_id }]);
+    const messages = await loadMessages(auth.admin, [{ id: group.id, connection_id: group.connection_id }], auth.user.id, all);
     return json({
       connected: groupConn ? groupConn.status === 'connected' : false,
       hasConnection: !!groupConn,
@@ -233,7 +239,7 @@ export async function GET(req: Request) {
   const aiConv = convs.find(c => c.ai_status) ?? null;
   const conv = convs.find(c => c.contact_id) ?? convs[0] ?? null;
 
-  const messages = await loadMessages(auth.admin, convs);
+  const messages = await loadMessages(auth.admin, convs, auth.user.id, all);
 
   // Janela de 24 h da API oficial (Meta): conta da ÚLTIMA MENSAGEM RECEBIDA do
   // contato, olhando todas as conversas consideradas (visão unificada por

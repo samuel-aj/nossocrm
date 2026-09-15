@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState, useEffect} from 'react';
+import React, { useCallback, useMemo, useState} from 'react';
 import { DealView, BoardStage, CustomFieldDefinition } from '@/types';
 import { DealCard } from './DealCard';
 import { isDealRotting } from '@/features/boards/hooks/useBoardsController';
@@ -260,6 +260,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   // lado; tocar num chip pula direto pra etapa. Visual apenas, sem mudar
   // nenhuma funcionalidade do board.
   const boardScrollRef = React.useRef<HTMLDivElement>(null);
+  const columnsRef = React.useRef<HTMLDivElement>(null);
   const [mobileStageIndex, setMobileStageIndex] = useState(0);
 
   const mobileColumns = useMemo(() => {
@@ -278,84 +279,17 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   const handleBoardScroll = useCallback(() => {
     if (typeof window === 'undefined' || window.innerWidth >= 768) return;
     const el = boardScrollRef.current;
-    if (!el || el.children.length === 0) return;
-    const first = el.children[0] as HTMLElement;
+    if (!el || (columnsRef.current?.children.length ?? 0) === 0) return;
+    const first = columnsRef.current!.children[0] as HTMLElement;
     const step = first.offsetWidth + 12; // gap-3 do mobile
-    const idx = Math.max(0, Math.min(Math.round(el.scrollLeft / step), el.children.length - 1));
+    const idx = Math.max(0, Math.min(Math.round(el.scrollLeft / step), (columnsRef.current?.children.length ?? 0) - 1));
     setMobileStageIndex((prev) => (prev === idx ? prev : idx));
-  }, []);
-
-  // Roda do mouse rola o BOARD lateralmente (visão geral), não a etapa.
-  // Exceção: cursor sobre uma coluna que ainda pode rolar na direção do giro
-  // rola a COLUNA (senão não haveria como descer numa etapa longa); chegou no
-  // fim, a roda volta a mover o board. Shift/trackpad horizontal = nativo.
-  useEffect(() => {
-    const el = boardScrollRef.current;
-    if (!el) return;
-    // FLUIDEZ: a roda não pula em degraus; acumula um ALVO e anima até ele
-    // com easing (requestAnimationFrame) — giros seguidos somam embalo.
-    let alvo = 0;
-    let raf = 0;
-    // última posição que NÓS escrevemos: se a posição real divergir disso, o
-    // usuário assumiu (arrastou a barra) e a animação se desliga sem brigar.
-    let ultimaEscrita = -1;
-    const anima = () => {
-      if (ultimaEscrita >= 0 && Math.abs(el.scrollLeft - ultimaEscrita) > 2) {
-        raf = 0;
-        ultimaEscrita = -1;
-        return;
-      }
-      const dist = alvo - el.scrollLeft;
-      if (Math.abs(dist) < 0.5) {
-        el.scrollLeft = alvo;
-        raf = 0;
-        ultimaEscrita = -1;
-        return;
-      }
-      el.scrollLeft += dist * 0.16;
-      ultimaEscrita = el.scrollLeft;
-      raf = requestAnimationFrame(anima);
-    };
-    // Agarrar a barra (ou clicar no board) cancela a animação na hora
-    const cancelaAnim = () => {
-      if (raf) {
-        cancelAnimationFrame(raf);
-        raf = 0;
-      }
-      ultimaEscrita = -1;
-    };
-    el.addEventListener('pointerdown', cancelaAnim);
-    const onWheel = (e: WheelEvent) => {
-      if (typeof window !== 'undefined' && window.innerWidth < 768) return;
-      if (e.deltaY === 0 || e.shiftKey || e.ctrlKey) return;
-      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
-      const col = (e.target as HTMLElement).closest?.('[data-kanban-col-scroll]') as HTMLElement | null;
-      if (col) {
-        const desce = e.deltaY > 0 && col.scrollTop + col.clientHeight < col.scrollHeight - 1;
-        const sobe = e.deltaY < 0 && col.scrollTop > 0;
-        if (desce || sobe) return;
-      }
-      // sem animação em curso, parte da posição real (barra pode ter sido arrastada)
-      if (!raf) {
-        alvo = el.scrollLeft;
-        ultimaEscrita = -1;
-      }
-      alvo = Math.max(0, Math.min(alvo + e.deltaY * 1.6, el.scrollWidth - el.clientWidth));
-      if (!raf) raf = requestAnimationFrame(anima);
-      e.preventDefault();
-    };
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => {
-      el.removeEventListener('wheel', onWheel);
-      el.removeEventListener('pointerdown', cancelaAnim);
-      if (raf) cancelAnimationFrame(raf);
-    };
   }, []);
 
   const handleJumpToStage = useCallback((index: number) => {
     const el = boardScrollRef.current;
-    if (!el || el.children.length === 0) return;
-    const first = el.children[0] as HTMLElement;
+    if (!el || (columnsRef.current?.children.length ?? 0) === 0) return;
+    const first = columnsRef.current!.children[0] as HTMLElement;
     const step = first.offsetWidth + 12;
     el.scrollTo({ left: index * step, behavior: 'smooth' });
   }, []);
@@ -390,8 +324,10 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
     <div
       ref={boardScrollRef}
       onScroll={handleBoardScroll}
-      className="flex gap-4 h-full overflow-x-auto pb-2 w-full max-md:snap-x max-md:snap-mandatory max-md:gap-3 max-md:h-auto max-md:flex-1 max-md:min-h-0"
+      className="h-full min-h-0 overflow-auto scrollbar-custom pb-2 w-full max-md:snap-x max-md:snap-mandatory max-md:h-auto max-md:flex-1"
+      aria-label="Etapas do board"
     >
+      <div ref={columnsRef} className="flex w-max min-w-full min-h-full items-stretch gap-3">
       {stages.map((stage, stageIndex) => {
         const stageDeals = dealsByStageId.map.get(stage.id) ?? [];
         const stageValue = dealsByStageId.totals.get(stage.id) ?? 0;
@@ -423,17 +359,17 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
             }}
             onDragEnter={() => setDragOverStage(stage.id)}
             onDragLeave={() => setDragOverStage(null)}
-            className={`min-w-[20rem] max-md:min-w-[calc(100vw-5.5rem)] max-md:flex-none max-md:snap-center flex-1 flex flex-col rounded-xl border-2 overflow-visible h-full max-h-full transition-all duration-200
+            className={`w-[280px] shrink-0 max-md:w-[calc(100vw-5.5rem)] max-md:snap-center flex flex-col rounded-xl border-2 overflow-visible transition-all duration-200
                             ${isOver
                 ? `${dropHighlightClasses(stage.color)} scale-[1.02]`
                 : 'border-slate-200/50 dark:border-white/10 glass'
               }
                         `}
           >
-            <div className={`h-1.5 w-full ${stage.color}`}></div>
+            <div className={`sticky top-0 z-20 h-1.5 shrink-0 w-full ${stage.color}`}></div>
 
             <div
-              className={`p-3 border-b border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/5 shrink-0`}
+              className={`sticky top-1.5 z-10 p-3 border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-dark-card shrink-0`}
             >
               <div className="flex justify-between items-center mb-1">
                 <span className="flex items-center gap-2 font-bold text-slate-700 dark:text-slate-200 font-display text-sm tracking-wide uppercase">
@@ -508,8 +444,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
             </div>
 
             <div
-              data-kanban-col-scroll
-              className={`flex-1 p-2 overflow-y-auto scrollbar-custom space-y-2 bg-slate-100/50 dark:bg-black/20 min-h-[100px]`}
+              className={`flex-1 p-2 space-y-2 bg-slate-100/50 dark:bg-black/20 min-h-[100px]`}
             >
               {/* Modo Automatizar: as automações no lugar dos leads */}
               {automation ? (
@@ -586,10 +521,10 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
             const dealId = e.dataTransfer.getData('dealId');
             if (dealId) onMarkInactive(dealId);
           }}
-          className="min-w-[20rem] max-md:min-w-[calc(100vw-5.5rem)] max-md:flex-none max-md:snap-center flex-1 flex flex-col rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 overflow-visible h-full max-h-full glass"
+          className="w-[280px] shrink-0 max-md:w-[calc(100vw-5.5rem)] max-md:snap-center flex flex-col rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 overflow-visible glass"
         >
-          <div className="h-1.5 w-full bg-slate-400"></div>
-          <div className="p-3 border-b border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/5 shrink-0">
+          <div className="sticky top-0 z-20 h-1.5 shrink-0 w-full bg-slate-400"></div>
+          <div className="sticky top-1.5 z-10 p-3 border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-dark-card shrink-0">
             <div className="flex justify-between items-center mb-1">
               <span className="flex items-center gap-2 font-bold text-slate-500 dark:text-slate-400 font-display text-sm tracking-wide uppercase">
                 <Archive size={14} aria-hidden="true" /> Inativos
@@ -602,7 +537,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
               Devolvidos automaticamente ao funil após 30 dias
             </p>
           </div>
-          <div data-kanban-col-scroll className="flex-1 p-2 overflow-y-auto scrollbar-custom space-y-2 bg-slate-100/50 dark:bg-black/20 min-h-[100px]">
+          <div className="flex-1 p-2 space-y-2 bg-slate-100/50 dark:bg-black/20 min-h-[100px]">
             {inactiveDeals.length === 0 && (
               <div className="h-full flex items-center justify-center text-slate-400 dark:text-slate-600 text-sm py-8 text-center px-4">
                 Arraste aqui os leads que não respondem
@@ -667,6 +602,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
         </div>
       )}
 
+      </div>
       {/* Keyboard-accessible modal for moving deals between stages */}
       {moveToStageModal && (
         <MoveToStageModal

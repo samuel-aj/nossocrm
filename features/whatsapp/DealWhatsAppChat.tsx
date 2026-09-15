@@ -41,9 +41,12 @@ import {
   Sparkles,
   Plug,
   Smartphone,
+  Pencil,
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { quotedPreviewText, type QuotedSnapshot } from '@/lib/whatsapp/quote';
+import { EditMessageModal } from './EditMessageModal';
+import { useChatImageTransfer } from './useChatImageTransfer';
 import { ForwardMessageModal } from './ForwardMessageModal';
 import {
   fillTemplate,
@@ -630,7 +633,7 @@ function FailBadge({ reason }: { reason: string }) {
   );
 }
 
-type BubbleAction = 'reply' | 'forward';
+type BubbleAction = 'reply' | 'forward' | 'edit';
 
 /** GRUPO: cor estável por participante (nome em cima da bolha, como no WhatsApp). */
 const SENDER_COLORS = [
@@ -914,7 +917,7 @@ function MessageBubble({
               }}
               aria-label="Opções da mensagem"
               aria-expanded={menuOpen}
-              title="Responder ou encaminhar"
+              title="Opções da mensagem"
               className={`absolute top-1 right-1.5 z-20 h-5 w-5 inline-flex items-center justify-center rounded transition-opacity focus-visible:opacity-100 ${chevronVisible} ${chevronTone}`}
             >
               <ChevronDown size={18} strokeWidth={2.2} />
@@ -944,6 +947,10 @@ function MessageBubble({
             >
               <Forward size={16} className="text-sky-500" /> Encaminhar
             </button>
+            {m.can_edit && <button type="button" role="menuitem" onClick={() => act('edit')}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm hover:bg-slate-100 dark:hover:bg-white/10">
+              <Pencil size={16} className="text-emerald-500" /> Editar
+            </button>}
           </div>
         )}
         {senderName && (
@@ -1108,8 +1115,9 @@ export function DealWhatsAppChat({
 }) {
   const isGroup = !!group;
   const phone = useMemo(() => (isGroup ? '' : normalizePhoneE164(contact?.phone || '')), [contact?.phone, isGroup]);
-  const { data, isLoading, error, send } = useWhatsAppChat(phone || null, connectionId, group?.conversationId ?? null);
+  const { data, isLoading, error, send, edit } = useWhatsAppChat(phone || null, connectionId, group?.conversationId ?? null);
   const [text, setText] = useState('');
+  const [editingMessage, setEditingMessage] = useState<WaChatMessage | null>(null);
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
@@ -1631,19 +1639,44 @@ export function DealWhatsAppChat({
     };
   }, []);
 
-  if (!isGroup && !contact) return <CenterMsg>Este lead não tem contato vinculado.</CenterMsg>;
-  if (!isGroup && !phone)
-    return <CenterMsg>O contato não tem telefone. Adicione um número pra conversar pelo WhatsApp.</CenterMsg>;
-
-  const contactName = group?.name ?? (contact?.name || data?.conversation?.wa_name || 'Contato');
-  const participantsCount = data?.conversation?.participants_count ?? group?.participantsCount ?? null;
-
   const clearAttachment = () => {
     setAttachment(prev => {
       if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
       return null;
     });
   };
+
+  const onPickFile = (f: File | null) => {
+    if (!f) return;
+    clearAttachment();
+    const kind = forcedKindRef.current === 'document' ? 'document' : kindFromFile(f);
+    forcedKindRef.current = null;
+    setAttachment({
+      file: f,
+      kind,
+      previewUrl: kind === 'image' ? URL.createObjectURL(f) : null,
+      asSticker: false,
+    });
+  };
+
+  const imageTransfer = useChatImageTransfer({
+    blocked: !data?.connected || notConnected || windowLocked || recording || !!voiceNote || preparingVoice || send.isPending || !!pendingTemplate || !!editingMessage,
+    onFile: file => {
+      forcedKindRef.current = null;
+      onPickFile(file);
+      setAttachMenuOpen(false);
+      setEmojiOpen(false);
+      textareaRef.current?.focus();
+    },
+    onError: message => showToast(message, 'error'),
+  });
+
+  if (!isGroup && !contact) return <CenterMsg>Este lead não tem contato vinculado.</CenterMsg>;
+  if (!isGroup && !phone)
+    return <CenterMsg>O contato não tem telefone. Adicione um número pra conversar pelo WhatsApp.</CenterMsg>;
+
+  const contactName = group?.name ?? (contact?.name || data?.conversation?.wa_name || 'Contato');
+  const participantsCount = data?.conversation?.participants_count ?? group?.participantsCount ?? null;
 
   /** "Pular para" a mensagem citada: rola até ela e destaca por um instante. */
   const jumpToMessage = (id: string) => {
@@ -1695,19 +1728,7 @@ export function DealWhatsAppChat({
       return;
     }
     if (action === 'forward') setForwardMsg(m);
-  };
-
-  const onPickFile = (f: File | null) => {
-    if (!f) return;
-    clearAttachment();
-    const kind = forcedKindRef.current === 'document' ? 'document' : kindFromFile(f);
-    forcedKindRef.current = null;
-    setAttachment({
-      file: f,
-      kind,
-      previewUrl: kind === 'image' ? URL.createObjectURL(f) : null,
-      asSticker: false,
-    });
+    if (action === 'edit' && m.can_edit) setEditingMessage(m);
   };
 
   /** Abre o seletor de arquivo já filtrado pela opção escolhida no menu do 📎. */
@@ -2005,7 +2026,8 @@ export function DealWhatsAppChat({
   };
 
   return (
-    <div className="flex flex-col h-full min-h-0 overflow-hidden">
+    <div className="relative flex flex-col h-full min-h-0 overflow-hidden" {...imageTransfer.dropHandlers}>
+      {imageTransfer.draggingImage && <div className="pointer-events-none absolute inset-2 z-50 flex items-center justify-center rounded-xl border-2 border-dashed border-emerald-500 bg-white/95 text-emerald-700 dark:bg-dark-card/95 dark:text-emerald-300" role="status">Solte a imagem para anexar</div>}
       {/* Cabeçalho da conversa */}
       <div className="shrink-0 flex items-center gap-2 px-4 py-2.5 border-b border-slate-200 dark:border-white/10 bg-white/60 dark:bg-white/5">
         <span className="w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 flex items-center justify-center">
@@ -2839,6 +2861,7 @@ export function DealWhatsAppChat({
             />
             <textarea
               ref={textareaRef}
+              onPaste={imageTransfer.onPaste}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
@@ -2880,6 +2903,9 @@ export function DealWhatsAppChat({
           </div>
         )}
       </div>
+
+      {editingMessage && <EditMessageModal key={editingMessage.id} message={editingMessage}
+        onClose={() => setEditingMessage(null)} onSave={input => edit.mutateAsync(input)} />}
 
       {/* ENCAMINHAR: escolhe um ou mais contatos/conversas e reenvia */}
       {forwardMsg && (

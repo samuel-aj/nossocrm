@@ -218,6 +218,18 @@ export class EvolutionProvider implements WhatsAppProvider {
     return { ok: true, providerMessageId: data?.key?.id, raw: data };
   }
 
+  async editText(input: { to: string; providerMessageId: string; text: string }): Promise<SendResult> {
+    const number = toEvolutionNumber(input.to);
+    const remoteJid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
+    const { ok, status, data } = await this.call<{ key?: { id?: string } }>(
+      'POST', `/chat/updateMessage/${encodeURIComponent(this.instanceName)}`,
+      { number, key: { id: input.providerMessageId, fromMe: true, remoteJid }, text: input.text }
+    );
+    if (!ok) return { ok: false, error: describeEvolutionError(status, data) };
+    if (!data?.key?.id) return { ok: false, error: 'O WhatsApp não confirmou a edição. Atualize a conversa antes de tentar novamente.' };
+    return { ok: true, providerMessageId: input.providerMessageId };
+  }
+
   async logout(): Promise<void> {
     const { ok, status } = await this.call(
       'DELETE',
