@@ -542,46 +542,50 @@ export const UsersPage: React.FC = () => {
                                 </div>
 
                                 {team.data && <MemberAccess member={user} config={team.data} onSaved={() => void fetchUsers()} />}
-                                {/* Só super admin: alterar a senha da conta */}
-                                {currentUserProfile?.role === UserRole.SUPER_ADMIN && !isCurrentUser && user.status !== 'pending' && (
-                                    <button
-                                        onClick={() => setPasswordUser(user)}
-                                        className="opacity-0 group-hover:opacity-100 max-md:opacity-100 p-2 rounded-lg text-slate-400 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-all"
-                                        title="Alterar senha"
-                                    >
-                                        <KeyRound className="h-4 w-4" />
-                                    </button>
-                                )}
-                                {/* Actions */}
-                                {canManage && !isCurrentUser && user.id !== team.data?.masterUserId && (
-                                    <div className="flex items-center gap-1">
-                                        {actionLoading === user.id ? (
-                                            <div className="p-2">
-                                                <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
-                                            </div>
-                                        ) : (
-                                            <>
-                                                {/* Resend Invite removed as we don't use email invites anymore */}
-                                                {user.role === UserRole.VENDEDOR && user.status !== 'pending' && team.data?.assignments.find(a => a.user_id === user.id)?.legacy && (
-                                                    <button
-                                                        onClick={() => setPermUser(user)}
-                                                        className="opacity-0 group-hover:opacity-100 max-md:opacity-100 p-2 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-all"
-                                                        title="Permissões de visualização"
-                                                    >
-                                                        <Eye className="h-4 w-4" />
-                                                    </button>
-                                                )}
+                                {/* Actions (chave, olho e lixeira no mesmo grupo = mesmo espaçamento) */}
+                                {(() => {
+                                    const canResetPassword = currentUserProfile?.role === UserRole.SUPER_ADMIN && !isCurrentUser && user.status !== 'pending';
+                                    const canManageRow = canManage && !isCurrentUser && user.id !== team.data?.masterUserId;
+                                    if (!canResetPassword && !canManageRow) return null;
+                                    return (
+                                        <div className="flex items-center gap-1">
+                                            {/* Só super admin: alterar a senha da conta */}
+                                            {canResetPassword && (
                                                 <button
-                                                    onClick={() => handleDeleteUser(user)}
-                                                    className="opacity-0 group-hover:opacity-100 max-md:opacity-100 p-2 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
-                                                    title={user.status === 'pending' ? 'Cancelar convite' : 'Remover usuário'}
+                                                    onClick={() => setPasswordUser(user)}
+                                                    className="opacity-0 group-hover:opacity-100 max-md:opacity-100 p-2 rounded-lg text-slate-400 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-all"
+                                                    title="Alterar senha"
                                                 >
-                                                    <Trash2 className="h-4 w-4" />
+                                                    <KeyRound className="h-4 w-4" />
                                                 </button>
-                                            </>
-                                        )}
-                                    </div>
-                                )}
+                                            )}
+                                            {canManageRow && (actionLoading === user.id ? (
+                                                <div className="p-2">
+                                                    <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    {user.role === UserRole.VENDEDOR && user.status !== 'pending' && team.data?.assignments.find(a => a.user_id === user.id)?.legacy && (
+                                                        <button
+                                                            onClick={() => setPermUser(user)}
+                                                            className="opacity-0 group-hover:opacity-100 max-md:opacity-100 p-2 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-all"
+                                                            title="Permissões de visualização"
+                                                        >
+                                                            <Eye className="h-4 w-4" />
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        onClick={() => handleDeleteUser(user)}
+                                                        className="opacity-0 group-hover:opacity-100 max-md:opacity-100 p-2 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
+                                                        title={user.status === 'pending' ? 'Cancelar convite' : 'Remover usuário'}
+                                                    >
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </button>
+                                                </>
+                                            ))}
+                                        </div>
+                                    );
+                                })()}
                             </div>
                         </div>
                     );
