@@ -66,6 +66,8 @@ export const UsersPage: React.FC = () => {
     // Permissões de visualização por usuário (uma entrada por usuário restringido)
     const [visRules, setVisRules] = useState<Record<string, VisibilityRules>>({});
     const [permUser, setPermUser] = useState<Profile | null>(null);
+    // Super admin: definir senha nova de qualquer conta
+    const [passwordUser, setPasswordUser] = useState<Profile | null>(null);
     const [loading, setLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [newUserRole, setNewUserRole] = useState<string>(UserRole.VENDEDOR);
@@ -540,6 +542,16 @@ export const UsersPage: React.FC = () => {
                                 </div>
 
                                 {team.data && <MemberAccess member={user} config={team.data} onSaved={() => void fetchUsers()} />}
+                                {/* Só super admin: alterar a senha da conta */}
+                                {currentUserProfile?.role === UserRole.SUPER_ADMIN && !isCurrentUser && user.status !== 'pending' && (
+                                    <button
+                                        onClick={() => setPasswordUser(user)}
+                                        className="opacity-0 group-hover:opacity-100 max-md:opacity-100 p-2 rounded-lg text-slate-400 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-all"
+                                        title="Alterar senha (super admin)"
+                                    >
+                                        <KeyRound className="h-4 w-4" />
+                                    </button>
+                                )}
                                 {/* Actions */}
                                 {canManage && !isCurrentUser && user.id !== team.data?.masterUserId && (
                                     <div className="flex items-center gap-1">
@@ -908,6 +920,10 @@ export const UsersPage: React.FC = () => {
                 </div>
             )}
 
+            {passwordUser && (
+                <PasswordResetModal user={passwordUser} onClose={() => setPasswordUser(null)} />
+            )}
+
             {/* Delete Confirmation Modal */}
             <ConfirmModal
                 isOpen={!!userToDelete}
@@ -926,6 +942,95 @@ export const UsersPage: React.FC = () => {
     );
 };
 
+
+// ---------------------------------------------------------------------------
+// Super admin: definir uma senha nova para a conta (Configurações > Equipe)
+// ---------------------------------------------------------------------------
+const PasswordResetModal: React.FC<{ user: Profile; onClose: () => void }> = ({ user, onClose }) => {
+    const { addToast } = useToast();
+    const [password, setPassword] = useState('');
+    const [show, setShow] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const tooShort = password.length < 6;
+
+    const save = async () => {
+        if (tooShort || saving) return;
+        setSaving(true);
+        setError(null);
+        try {
+            const res = await fetch(`/api/superadmin/users/${user.id}/password`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ password }),
+            });
+            const data = await res.json().catch(() => null);
+            if (!res.ok) throw new Error(data?.error || 'Não foi possível alterar a senha');
+            addToast(`Senha de ${user.email} alterada`, 'success');
+            onClose();
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Não foi possível alterar a senha');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+            onClick={(e) => { if (e.target === e.currentTarget && !saving) onClose(); }}
+        >
+            <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 shadow-2xl p-6">
+                <div className="flex items-start justify-between gap-3 mb-4">
+                    <div className="min-w-0">
+                        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Alterar senha</h2>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 truncate">{user.email}</p>
+                    </div>
+                    <button onClick={onClose} disabled={saving} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5" aria-label="Fechar">
+                        <X className="h-4 w-4" />
+                    </button>
+                </div>
+
+                <form onSubmit={(e) => { e.preventDefault(); void save(); }}>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Nova senha</label>
+                    <div className="relative">
+                        <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                        <input
+                            type={show ? 'text' : 'password'}
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            placeholder="Mínimo 6 caracteres"
+                            autoComplete="new-password"
+                            autoFocus
+                            className="w-full pl-9 pr-10 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
+                        />
+                        <button
+                            type="button"
+                            onClick={() => setShow(v => !v)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-slate-400 hover:text-slate-600"
+                            aria-label={show ? 'Esconder senha' : 'Mostrar senha'}
+                        >
+                            {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-400">A pessoa passa a entrar com essa senha. A senha antiga deixa de funcionar.</p>
+                    {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
+
+                    <div className="mt-6 flex justify-end gap-3">
+                        <button type="button" onClick={onClose} disabled={saving} className="px-4 py-2 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5">
+                            Cancelar
+                        </button>
+                        <button type="submit" disabled={tooShort || saving} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-primary-600 text-white hover:bg-primary-500 disabled:opacity-50">
+                            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+                            Salvar senha
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
 
 // ---------------------------------------------------------------------------
 // Permissões de visualização de um vendedor (Configurações > Equipe)

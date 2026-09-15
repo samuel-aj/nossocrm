@@ -10,6 +10,7 @@ type AuditAction =
   | 'superadmin.user.promote'
   | 'superadmin.user.demote'
   | 'superadmin.user.memberships'
+  | 'superadmin.user.password_reset'
   | 'superadmin.setup';
 
 interface AuditEntry {
