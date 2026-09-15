@@ -547,7 +547,7 @@ export const UsersPage: React.FC = () => {
                                     <button
                                         onClick={() => setPasswordUser(user)}
                                         className="opacity-0 group-hover:opacity-100 max-md:opacity-100 p-2 rounded-lg text-slate-400 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-all"
-                                        title="Alterar senha (super admin)"
+                                        title="Alterar senha"
                                     >
                                         <KeyRound className="h-4 w-4" />
                                     </button>
