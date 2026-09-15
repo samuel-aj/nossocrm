@@ -23,6 +23,7 @@ export async function GET(req: Request) {
   let conn = targetId
     ? all.find(c => c.id === targetId) ?? null
     : all.find(c => !isBusinessConnection(c)) ?? null;
+  if (targetId && !conn) return json({ error: 'Conexão não encontrada' }, 404);
   if (conn && isBusinessConnection(conn)) {
     return json({ error: 'Conexão via API oficial não usa QR code' }, 400);
   }

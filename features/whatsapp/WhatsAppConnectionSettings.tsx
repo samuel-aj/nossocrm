@@ -64,6 +64,8 @@ interface ConnResponse {
   metaCredentials?: MetaCreds | null;
   /** MULTI-NÚMERO: todas as conexões da org (a de cima é a "padrão") */
   connections?: ConnWithCreds[];
+  /** Conexões repetidas (mesmo número) que o servidor acabou de unificar */
+  removed?: Array<{ id: string; phoneNumber: string | null; duplicate: boolean; keptId: string }>;
 }
 
 interface QrResponse {
@@ -178,6 +180,28 @@ export function WhatsAppConnectionSettings() {
   // a linha, o refetch pode ainda não tê-la trazido: considera "pareando".
   const qrTarget = qrTargetId ? conns.find(c => c.id === qrTargetId) ?? null : null;
   const waitingScan = !!qrTargetId && (qrTarget?.status ?? 'connecting') !== 'connected';
+
+  // UM NÚMERO = UMA CONEXÃO: o servidor removeu conexões repetidas. Avisa e,
+  // se era o QR que estava sendo pareado, fecha o painel sem o "conectado!".
+  const removedList = connQ.data?.removed;
+  React.useEffect(() => {
+    if (!removedList?.length) return;
+    const numero = removedList[0].phoneNumber ? ` (${removedList[0].phoneNumber})` : '';
+    const doPareamento = qrTargetId
+      ? removedList.find(r => r.id === qrTargetId || r.keptId === qrTargetId)
+      : undefined;
+    // Removida uma linha antiga desconectada enquanto o QR novo pareava: segue o
+    // fluxo normal (o "conectado!" aparece). Repetição de verdade fecha o painel.
+    if (doPareamento && (doPareamento.duplicate || doPareamento.id === qrTargetId)) {
+      setQrTargetId(null);
+      addToast(
+        `Este número${numero} já está conectado no CRM. Ficou uma conexão só, com todas as conversas.`,
+        'error'
+      );
+    } else if (!doPareamento) {
+      addToast(`Havia mais de uma conexão do mesmo número${numero}. Ficou uma só, com todas as conversas.`, 'warning');
+    }
+  }, [removedList]);
 
   // Pareou: fecha o painel e avisa (a linha vira mais um cartão do hub)
   React.useEffect(() => {

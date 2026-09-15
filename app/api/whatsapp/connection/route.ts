@@ -29,6 +29,12 @@ import {
   registerWebhook,
 } from '@/lib/whatsapp/admin';
 import { setupMetaWebhooks, validateMetaCredentials } from '@/lib/whatsapp/metaCloudSetup';
+import {
+  enforceOneConnectionPerNumber,
+  findConnectedSameNumber,
+  mergeConnectionConversations,
+  tearDownEvolutionInstance,
+} from '@/lib/whatsapp/dedupe';
 
 function mask(conn: WaConnectionRow) {
   return {
@@ -75,17 +81,13 @@ export async function GET() {
   const auth = await requireOrgUser();
   if (!auth.ok) return auth.response;
 
-  // Permissões de visualização: vendedor restrito só vê os números permitidos
-  const vis = await getVisibilityRules(auth.admin, auth.user.organizationId, auth.user.id, auth.user.role);
-  const conns = filterAllowedConnections(vis, await getConnectionsByOrg(auth.admin, auth.user.organizationId));
-  if (conns.length === 0) {
-    return json({ connected: false, connection: null, metaWebhook: null, connections: [] });
-  }
+  const allConns = await getConnectionsByOrg(auth.admin, auth.user.organizationId);
 
   // Status ao vivo POR conexão (meta_cloud é checagem local; Evolution é rede,
-  // em paralelo e com fallback pro status salvo).
-  const withStatus = await Promise.all(
-    conns.map(async c => {
+  // em paralelo e com fallback pro status salvo). Consulta TODAS as conexões da
+  // org (e não só as visíveis) porque a regra de número único abaixo vale para a org.
+  const liveAll = await Promise.all(
+    allConns.map(async c => {
       let status = c.status;
       try {
         const live = await getProvider(c).getConnectionState();
@@ -103,6 +105,28 @@ export async function GET() {
       return { conn: c, status };
     })
   );
+
+  // UM NÚMERO = UMA CONEXÃO: o mesmo celular pareado duas vezes partia o chat
+  // (cada mensagem caía numa conexão só). As repetidas somem aqui, com as
+  // conversas unificadas na que fica. A tela é avisada por `removed`.
+  const liveById = new Map(liveAll.map(w => [w.conn.id, w.status]));
+  const removed = await enforceOneConnectionPerNumber(
+    auth.admin,
+    auth.user.organizationId,
+    allConns,
+    c => liveById.get(c.id) ?? c.status
+  );
+  const removedIds = new Set(removed.map(r => r.id));
+
+  // Permissões de visualização: vendedor restrito só vê os números permitidos
+  const vis = await getVisibilityRules(auth.admin, auth.user.organizationId, auth.user.id, auth.user.role);
+  const allowedIds = new Set(
+    filterAllowedConnections(vis, allConns.filter(c => !removedIds.has(c.id))).map(c => c.id)
+  );
+  const withStatus = liveAll.filter(w => allowedIds.has(w.conn.id));
+  if (withStatus.length === 0) {
+    return json({ connected: false, connection: null, metaWebhook: null, connections: [], removed });
+  }
 
   // Só pra ADMIN e só no modo API oficial: as credenciais salvas, pra tela de
   // edição abrir preenchida (o admin foi quem cadastrou o token — poder rever
@@ -168,6 +192,7 @@ export async function GET() {
     metaWebhook: metaWebhookInfo(auth.user.role, def.conn),
     metaCredentials: credsOf(def.conn),
     connections,
+    removed,
   });
 }
 
@@ -260,6 +285,19 @@ export async function POST(req: Request) {
     // Desconectar LIMPA as credenciais da linha (meta_phone_number_id vira
     // null): reconectar reaproveita essa "vaga" em vez de criar linha zumbi.
     const emptySlot = metaConns.find(c => !c.meta_phone_number_id && c.status !== 'connected');
+    // Número JÁ conectado em OUTRA conexão da org (QR ou API): proíbe, senão o
+    // chat se divide entre as duas. Editar a própria linha continua liberado.
+    if (check.displayPhoneNumber) {
+      const phone = `+${check.displayPhoneNumber.replace(/\D/g, '')}`;
+      const own = new Set([samePhone?.id, editing?.id].filter(Boolean));
+      const taken = findConnectedSameNumber(existing.filter(c => !own.has(c.id)), phone);
+      if (taken) {
+        return json(
+          { error: `O número ${taken.phone_number} já está conectado no CRM. Desconecte a conexão atual antes de conectar de novo.` },
+          409
+        );
+      }
+    }
     const base = instanceNameForOrg(auth.user.organizationId);
     // Nome de linha NOVA leva sufixo aleatório: nomes derivados do número já
     // causaram colisão (vaga reusada guarda outro número sob o nome antigo).
@@ -419,26 +457,12 @@ async function migrateConversationsToSibling(
   // gravado, ou conexão antiga já sem telefone depois de desconectar)
   const target = sameNumber[0] ?? (connected.length === 1 ? connected[0] : undefined);
   if (!target) return 0;
-  let total = 0;
-  // 1) presas à conexão antiga
-  const { data: moved, error } = await admin
-    .from('wa_conversations')
-    .update({ connection_id: target.id })
-    .eq('organization_id', orgId)
-    .eq('connection_id', conn.id)
-    .select('id');
-  if (error) console.error('[whatsapp] migrar conversas para a conexão nova falhou:', error.message);
-  else total += moved?.length ?? 0;
-  // 2) órfãs (conexão excluída antes: a FK deixou connection_id nulo) também vão para a que funciona
-  const { data: orphans, error: orphanError } = await admin
-    .from('wa_conversations')
-    .update({ connection_id: target.id })
-    .eq('organization_id', orgId)
-    .is('connection_id', null)
-    .select('id');
-  if (orphanError) console.error('[whatsapp] migrar conversas órfãs falhou:', orphanError.message);
-  else total += orphans?.length ?? 0;
-  return total;
+  // Unifica em vez de só trocar a conexão: conversa do mesmo telefone que já
+  // existe no destino batia na trava (org, conexão, telefone) e nada migrava.
+  // 1) presas à conexão antiga; 2) órfãs (conexão excluída antes, FK SET NULL)
+  const fromConn = await mergeConnectionConversations(admin, orgId, conn.id, target.id);
+  const fromOrphans = await mergeConnectionConversations(admin, orgId, null, target.id);
+  return fromConn + fromOrphans;
 }
 
 export async function DELETE(req: Request) {
@@ -517,11 +541,16 @@ export async function DELETE(req: Request) {
   } catch (e) {
     logoutError = (e as Error).message;
   }
+  if (logoutError) {
+    // Logout recusado = sessão presa na Evolution, que seguia pareada com o
+    // celular e mandando mensagens mesmo "desconectada" no CRM. Derruba a
+    // instância de vez; Reconectar recria sozinha pela rota do QR.
+    await tearDownEvolutionInstance(conn);
+  }
   const migrated = await migrateConversationsToSibling(auth.admin, auth.user.organizationId, conn);
-  await updateConnectionStatus(auth.admin, conn.id, {
-    status: 'disconnected',
-    phone_number: null,
-    profile_name: null,
-  });
+  // O número FICA gravado na linha: se a pessoa parear o mesmo número de novo
+  // em outra conexão, a regra de número único reconhece esta linha e unifica
+  // as conversas dela na nova (sem o número, o histórico ficava escondido).
+  await updateConnectionStatus(auth.admin, conn.id, { status: 'disconnected' });
   return json({ ok: true, migrated, logoutError });
 }

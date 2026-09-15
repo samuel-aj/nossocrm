@@ -18,7 +18,8 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireOrgUser, isOrgAdmin, json } from '@/lib/whatsapp/api';
-import { upsertConnection, updateConnectionStatus } from '@/lib/whatsapp/service';
+import { getConnectionsByOrg, upsertConnection, updateConnectionStatus } from '@/lib/whatsapp/service';
+import { findConnectedSameNumber } from '@/lib/whatsapp/dedupe';
 import { instanceNameForOrg } from '@/lib/whatsapp/admin';
 import { setupMetaWebhooks, validateMetaCredentials } from '@/lib/whatsapp/metaCloudSetup';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
@@ -216,6 +217,19 @@ export async function POST(req: Request) {
     .eq('meta_phone_number_id', check.phoneNumberId)
     .limit(1)
     .maybeSingle();
+  if (check.displayPhoneNumber) {
+    const conns = await getConnectionsByOrg(auth.admin, orgId);
+    const taken = findConnectedSameNumber(
+      conns.filter(c => c.instance_name !== jaExiste?.instance_name),
+      `+${check.displayPhoneNumber.replace(/\D/g, '')}`
+    );
+    if (taken) {
+      return json(
+        { error: `O número ${taken.phone_number} já está conectado no CRM. Desconecte a conexão atual antes de conectar de novo.` },
+        409
+      );
+    }
+  }
   const instanceName =
     (jaExiste?.instance_name as string | undefined) ??
     `${base}_cloud_${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
