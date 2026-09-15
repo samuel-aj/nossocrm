@@ -553,11 +553,10 @@ export const UsersPage: React.FC = () => {
                                                 {user.role === UserRole.VENDEDOR && user.status !== 'pending' && team.data?.assignments.find(a => a.user_id === user.id)?.legacy && (
                                                     <button
                                                         onClick={() => setPermUser(user)}
-                                                        className="opacity-0 group-hover:opacity-100 max-md:opacity-100 flex items-center gap-1.5 p-2 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-all"
+                                                        className="opacity-0 group-hover:opacity-100 max-md:opacity-100 p-2 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-all"
                                                         title="Permissões de visualização"
                                                     >
                                                         <Eye className="h-4 w-4" />
-                                                        <span className="text-xs">Permissões</span>
                                                     </button>
                                                 )}
                                                 <button
