@@ -125,6 +125,8 @@ export type InboundEvent =
 
 export interface WhatsAppProvider {
   readonly instanceName: string;
+  /** Edit an already sent text, preserving its original provider message ID. */
+  editText?(input: { to: string; providerMessageId: string; text: string }): Promise<SendResult>;
   /** Estado atual da conexão da instância. */
   getConnectionState(): Promise<WaConnectionState>;
   /** Inicia/obtém o QR para conectar o número. */
