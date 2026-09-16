@@ -52,16 +52,30 @@ export async function resolveOwnerId(opts: {
   if (!id && !email) return { ok: true, ownerId: null };
 
   const sb = createStaticAdminClient();
-  let query = sb.from('profiles').select('id').eq('organization_id', opts.organizationId).limit(1);
-  query = id ? query.eq('id', id) : query.ilike('email', email);
+  // organization_id is the active workspace, not the complete membership list.
+  // Match the assignment options from /api/org/members, including multi-org users.
+  let query = sb.from('profiles').select('id, organization_id, role').limit(1);
+  const exactEmail = email.replace(/[\\%_]/g, '\\$&');
+  query = id ? query.eq('id', id) : query.ilike('email', exactEmail);
   const { data, error } = await query.maybeSingle();
   if (error) throw error;
-  if (!data) {
+  let isMember = !!data && data.organization_id === opts.organizationId && data.role !== 'super_admin';
+  if (data && !isMember) {
+    const { data: membership, error: membershipError } = await sb
+      .from('user_organizations')
+      .select('user_id')
+      .eq('organization_id', opts.organizationId)
+      .eq('user_id', data.id)
+      .maybeSingle();
+    if (membershipError) throw membershipError;
+    isMember = !!membership;
+  }
+  if (!data || !isMember) {
     return {
       ok: false,
       error: id ? 'owner_id não pertence a esta organização' : 'owner_email não encontrado nesta organização',
     };
   }
-  return { ok: true, ownerId: (data as any).id as string };
+  return { ok: true, ownerId: data.id as string };
 }
 
