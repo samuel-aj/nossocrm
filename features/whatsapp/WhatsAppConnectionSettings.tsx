@@ -1101,6 +1101,18 @@ export function WhatsAppConnectionSettings() {
                             <QrCode size={14} /> Reconectar (QR)
                           </button>
                         )}
+                        {/* Sessão caiu (ex.: reinício do servidor): reiniciar costuma voltar sem ler o QR */}
+                        {!rowBiz && !rowOn && !rowPairing && c.phoneNumber && (
+                          <button
+                            type="button"
+                            onClick={() => void restartConn(c.id)}
+                            disabled={restartingId === c.id}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 text-xs font-bold hover:bg-slate-50 dark:hover:bg-white/5 transition-colors disabled:opacity-60"
+                          >
+                            {restartingId === c.id ? <Loader2 size={14} className="animate-spin" /> : <RotateCw size={14} />}
+                            Reiniciar conexão
+                          </button>
+                        )}
                         {rowEditable && rowOn && (
                           <button
                             type="button"
