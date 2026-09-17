@@ -36,6 +36,20 @@ it('supports direct extended text as well as nested protocol edits', async () =>
   const { envelope, original } = fixture(field(6, field(1, 'Texto longo')));
   expect((await decryptIncomingEdit(envelope, original)).text).toBe('Texto longo');
 });
+it('decrypts live Evolution webhooks after remoteJid is replaced with remoteJidAlt', async () => {
+  const f = fixture();
+  // Evolution 2.3.7 changes LID to PN before sendDataWebhook, but its stored
+  // record retains both. A replay of chat/findMessages alone misses this case.
+  f.envelope.key.remoteJid = f.original.key.remoteJidAlt;
+  Object.assign(f.envelope.key, { remoteJidAlt: f.original.key.remoteJidAlt });
+  expect((await decryptIncomingEdit(f.envelope, f.original)).text).toBe('Texto atualizado');
+});
+it('requires matching sender aliases as well as a matching group conversation', async () => {
+  const f = fixture();
+  Object.assign(f.original.key, { remoteJid: 'group@g.us', remoteJidAlt: '', participant: author });
+  Object.assign(f.envelope.key, { remoteJid: 'group@g.us', participant: 'other@lid' });
+  await expect(decryptIncomingEdit(f.envelope, f.original)).rejects.toThrow('sender mismatch');
+});
 it('rejects tampering and wrong targets instead of accepting unauthenticated text', async () => {
   const f = fixture();
   f.envelope.message.secretEncryptedMessage.encPayload = Buffer.alloc(64, 5).toString('base64');

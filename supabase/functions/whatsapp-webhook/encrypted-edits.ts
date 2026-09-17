@@ -99,20 +99,22 @@ export async function decryptIncomingEdit(item: unknown, originalValue: unknown)
   if (!secretEdit || editKey.fromMe !== false || originalKey.fromMe !== false || originalKey.id !== targetId) throw new Error('Invalid incoming edit identity');
   const chatIds = [editKey.remoteJid, editKey.remoteJidAlt].map(jid).filter(Boolean);
   if (![originalKey.remoteJid, originalKey.remoteJidAlt].map(jid).some(id => id && chatIds.includes(id))) throw new Error('Encrypted edit conversation mismatch');
+  const authors = senders(originalKey), editors = senders(editKey);
+  if (!authors.some(author => editors.includes(author))) throw new Error('Encrypted edit sender mismatch');
   const secret = bytes(object(object(original.message).messageContextInfo).messageSecret);
   const iv = bytes(secretEdit.encIv), payload = bytes(secretEdit.encPayload);
   if (secret.length !== 32 || iv.length !== 12 || payload.length < 17 || payload.length > 65536) throw new Error('Invalid encrypted edit sizes');
   const keyMaterial = await crypto.subtle.importKey('raw', secret, 'HKDF', false, ['deriveKey']);
   let plain: ArrayBuffer | undefined;
-  for (const author of senders(originalKey)) {
-    for (const editor of senders(editKey)) {
-      if (author !== editor) continue;
+  // Evolution 2.3.7 replaces remoteJid with remoteJidAlt before delivering
+  // the webhook, losing the LID on the wire. The original provider record
+  // retains the authenticated sender's PN/LID pair. After matching sender
+  // aliases above, try that pair for both identities in this self-edit.
+  for (const author of authors) {
       const key = await crypto.subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0),
-        info: encoder.encode(targetId + author + editor + 'Message Edit') }, keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+        info: encoder.encode(targetId + author + author + 'Message Edit') }, keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
       try { plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv, tagLength: 128 }, key, payload); break; }
       catch { /* Try the alternate PN/LID identity; never accept unauthenticated text. */ }
-    }
-    if (plain) break;
   }
   if (!plain) throw new Error('Encrypted edit authentication failed');
   const rawTime = root.messageTimestamp;
