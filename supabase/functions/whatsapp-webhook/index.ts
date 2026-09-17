@@ -17,6 +17,7 @@
  */
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { parseMessageDeletion, applyMessageDeletion } from "./deletions.ts";
+import { encryptedEdit, resolveEncryptedEdit } from "./encrypted-edits.ts";
 import { parseMessageEdit, applyMessageEdit } from "./edits.ts";
 
 const corsHeaders = {
@@ -598,7 +599,7 @@ Deno.serve(async (req) => {
       for (const item of items) {
         const deletion = parseMessageDeletion(event, item);
         if (deletion) { await applyMessageDeletion(supabase, orgId, conn.id, deletion); continue; }
-        const edit = parseMessageEdit(event, item);
+        const edit = parseMessageEdit(event, item) ?? await resolveEncryptedEdit(supabase, orgId, { ...conn, instance_name: String(instanceName), base_url: conn.base_url ?? Deno.env.get("EVOLUTION_BASE_URL") }, item);
         if (edit) await applyMessageEdit(supabase, orgId, conn.id, edit);
       }
     } catch (error) {
@@ -680,7 +681,7 @@ Deno.serve(async (req) => {
       const senderPhone = isGroup ? jidToE164(participantJid) : phone;
       const senderName: string | null = isGroup && !fromMe ? (m.pushName ?? null) : null;
       // Already applied above, before normal messages/statuses are processed.
-      if (parseMessageEdit(event, m) || parseMessageDeletion(event, m)) continue;
+      if (parseMessageEdit(event, m) || parseMessageDeletion(event, m) || encryptedEdit(m)) continue;
 
       const { text, mediaType, mediaMime, fileName, skip } = extractContent(m.message);
       if (skip) continue;
