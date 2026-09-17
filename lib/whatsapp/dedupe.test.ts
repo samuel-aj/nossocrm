@@ -35,6 +35,8 @@ function fakeDb(tables: Record<string, Row[]>) {
       eq: (c: string, v: unknown) => (filters.push(r => r[c] === v), b),
       is: (c: string, v: unknown) => (filters.push(r => (r[c] ?? null) === v), b),
       in: (c: string, vs: unknown[]) => (filters.push(r => vs.includes(r[c])), b),
+      contains: (c: string, vs: unknown[]) =>
+        (filters.push(r => vs.every(v => ((r[c] as unknown[] | null) ?? []).includes(v))), b),
       then: (resolve: (v: { data: Row[] | null; error: null }) => void) => {
         const hit = rows().filter(r => filters.every(f => f(r)));
         if (op === 'update') hit.forEach(r => Object.assign(r, patch));
@@ -117,7 +119,12 @@ describe('número único por organização', () => {
       ],
       wa_ai_agent_runs: [{ id: 'r1', conversation_id: 'c-old' }],
       wa_bot_runs: [],
-      wa_bots: [{ id: 'b1', connection_id: 'old' }],
+      wa_bots: [{ id: 'b1', organization_id: 'org', connection_id: 'old', connection_ids: ['old'] }],
+      wa_ai_agents: [
+        { id: 'a1', organization_id: 'org', connection_ids: ['old'] },
+        { id: 'a2', organization_id: 'org', connection_ids: ['old', 'new'] },
+        { id: 'a3', organization_id: 'org', connection_ids: ['outro'] },
+      ],
       message_templates: [{ id: 't1', connection_id: 'old' }],
     };
 
@@ -145,6 +152,9 @@ describe('número único por organização', () => {
     // conversa que só existia na antiga passa para a que ficou
     expect(tables.wa_conversations.find(c => c.id === 'c-only')!.connection_id).toBe('new');
     expect(tables.wa_bots[0].connection_id).toBe('new');
+    expect(tables.wa_bots[0].connection_ids).toEqual(['new']);
+    // agentes de IA passam a atender no número que ficou (sem repetir o id)
+    expect(tables.wa_ai_agents.map(a => a.connection_ids)).toEqual([['new'], ['new'], ['outro']]);
     expect(tables.message_templates[0].connection_id).toBe('new');
   });
 

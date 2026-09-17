@@ -188,6 +188,21 @@ export async function connectionsBelongToOrg(admin: SupabaseClient, orgId: strin
   return (data ?? []).length === unique.length;
 }
 
+/**
+ * Tira da lista os números que NÃO EXISTEM MAIS (conexão excluída ou
+ * substituída ao reconectar). Sem isso, o agente/robô que guardava o id antigo
+ * nunca mais salvava ("Número não encontrado nesta organização"). Número de
+ * OUTRA organização continua na lista e é barrado por connectionsBelongToOrg.
+ */
+export async function dropDeletedConnections(admin: SupabaseClient, ids: string[]): Promise<string[]> {
+  const unique = Array.from(new Set(ids.filter(Boolean)));
+  if (unique.length === 0) return [];
+  const { data, error } = await admin.from('wa_connections').select('id').in('id', unique);
+  if (error) throw new Error(error.message);
+  const existing = new Set((data ?? []).map(r => r.id as string));
+  return unique.filter(id => existing.has(id));
+}
+
 /** Resposta padrão quando um número informado não é da organização. */
 export function connectionNotFoundError(): Response {
   return json({ error: 'Número não encontrado nesta organização', code: 'CONNECTION_NOT_FOUND' }, 400);

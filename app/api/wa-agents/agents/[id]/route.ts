@@ -21,6 +21,7 @@ import { AgentInputSchema, type AgentRow, type AgentTriggers } from '@/lib/wa-ag
 import {
   connectionNotFoundError,
   connectionsBelongToOrg,
+  dropDeletedConnections,
   getErrorMessage,
   guardRoute,
   normalizeApiKeyInput,
@@ -129,6 +130,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
   }
 
   try {
+    if (Array.isArray(present.connection_ids)) {
+      present.connection_ids = await dropDeletedConnections(auth.admin, present.connection_ids);
+      patch.connection_ids = present.connection_ids;
+    }
     if (
       Array.isArray(present.connection_ids) &&
       !(await connectionsBelongToOrg(auth.admin, orgId, present.connection_ids))

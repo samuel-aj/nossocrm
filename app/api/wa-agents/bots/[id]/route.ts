@@ -12,6 +12,7 @@ import { BotInputSchema, BotStepSchema, normalizeBotLayout, type BotRow, type Bo
 import {
   connectionNotFoundError,
   connectionsBelongToOrg,
+  dropDeletedConnections,
   getErrorMessage,
   guardRoute,
   pickPresentKeys,
@@ -65,6 +66,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
   };
 
   try {
+    if (Array.isArray(patch.connection_ids)) {
+      patch.connection_ids = await dropDeletedConnections(auth.admin, patch.connection_ids as string[]);
+    }
     const numeros = Array.isArray(patch.connection_ids)
       ? (patch.connection_ids as string[])
       : typeof patch.connection_id === 'string' && patch.connection_id

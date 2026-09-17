@@ -33,6 +33,7 @@ import {
   enforceOneConnectionPerNumber,
   findConnectedSameNumber,
   mergeConnectionConversations,
+  repointConnectionRefs,
   tearDownEvolutionInstance,
 } from '@/lib/whatsapp/dedupe';
 
@@ -460,6 +461,8 @@ async function migrateConversationsToSibling(
   // Unifica em vez de só trocar a conexão: conversa do mesmo telefone que já
   // existe no destino batia na trava (org, conexão, telefone) e nada migrava.
   // 1) presas à conexão antiga; 2) órfãs (conexão excluída antes, FK SET NULL)
+  // Agentes, robôs e modelos acompanham (senão ficam presos ao id que some)
+  if (sameNumber[0]) await repointConnectionRefs(admin, orgId, conn.id, target.id);
   const fromConn = await mergeConnectionConversations(admin, orgId, conn.id, target.id);
   const fromOrphans = await mergeConnectionConversations(admin, orgId, null, target.id);
   return fromConn + fromOrphans;
