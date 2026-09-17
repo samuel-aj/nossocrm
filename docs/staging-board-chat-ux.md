@@ -11,3 +11,9 @@ Base: staging `3890616`. Publicar primeiro em STAGING; MAIN depende da validaç�
 Validação: 28 testes de WhatsApp (incluindo 14 novos), typecheck e lint dos arquivos alterados. Layout do componente real KanbanBoard com cards de teste verificado em Chromium e WebKit: largura 280, rolagem conjunta de 300 px, cabeçalhos fixos, ausência de scroll vertical nas colunas, sem overflow da página no mobile. Nenhuma mensagem real enviada ou editada durante a verificação; confirmação com a conexão real deve ser feita no STAGING.
 
 Referências de integração: Evolution `POST /chat/updateMessage/{instance}` (src/api/routes/chat.router.ts e UpdateMessageDto em src/api/dto/chat.dto.ts, repositório EvolutionAPI/evolution-api). Prazo de edição: https://faq.whatsapp.com/iphone/chats/how-to-delete-messages/?lang=pt_br.
+
+## Promoção autorizada — 17/09/2026
+
+Candidata criada sobre MAIN `9b5e8ca`, aplicando somente o commit funcional aprovado. As correções posteriores de sessão Evolution travada, responsáveis via memberships e migração de vínculos de agentes/robôs permanecem preservadas. Nenhuma página, componente ou flag da demonstração é incluída na produção.
+
+Validação: 43 testes de WhatsApp e resolução de responsáveis, TypeScript e lint; comparação dos arquivos das correções recentes sem diferenças, exceto adição de `editText` no provedor Evolution. STAGING atualizado com as mesmas correções de MAIN antes da promoção. Sem migração de banco e sem envio/edição de mensagens reais durante os testes.
