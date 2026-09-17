@@ -121,6 +121,38 @@ export async function mergeConnectionConversations(
   return moved;
 }
 
+/**
+ * Tudo que guarda o id de uma conexão passa para outra: robôs (coluna antiga e
+ * lista de números), modelos e AGENTES DE IA (lista de números). Sem isto, o
+ * agente ficava preso ao id apagado: parava de atender e não salvava mais.
+ */
+export async function repointConnectionRefs(
+  admin: SupabaseClient,
+  orgId: string,
+  fromId: string,
+  toId: string
+): Promise<void> {
+  const swap = (ids: string[] | null) =>
+    Array.from(new Set((ids ?? []).map(id => (id === fromId ? toId : id))));
+  await admin.from('wa_bots').update({ connection_id: toId }).eq('organization_id', orgId).eq('connection_id', fromId);
+  await admin.from('message_templates').update({ connection_id: toId }).eq('connection_id', fromId);
+  for (const table of ['wa_ai_agents', 'wa_bots'] as const) {
+    const { data, error } = await admin
+      .from(table)
+      .select('id, connection_ids')
+      .eq('organization_id', orgId)
+      .contains('connection_ids', [fromId]);
+    if (error) {
+      console.error(`[whatsapp] repontar ${table} falhou:`, error.message);
+      continue;
+    }
+    for (const row of (data ?? []) as Array<{ id: string; connection_ids: string[] | null }>) {
+      const { error: upError } = await admin.from(table).update({ connection_ids: swap(row.connection_ids) }).eq('id', row.id);
+      if (upError) console.error(`[whatsapp] repontar ${table} ${row.id} falhou:`, upError.message);
+    }
+  }
+}
+
 /** Derruba a instância na Evolution (logout + exclusão), só quando ela é do nosso servidor. */
 export async function tearDownEvolutionInstance(conn: WaConnectionRow): Promise<void> {
   if (isBusinessConnection(conn)) return;
@@ -182,10 +214,9 @@ export async function enforceOneConnectionPerNumber(
     for (const extra of rows) {
       if (extra.id === keeper.id || isBusinessConnection(extra)) continue;
       const wasConnected = statusOf(extra) === 'connected';
-      // Robôs e modelos presos à linha repetida passam para a que fica
+      // Agentes, robôs e modelos presos à linha repetida passam para a que fica
       // (modelos seriam apagados junto com a linha: a FK deles é CASCADE)
-      await admin.from('wa_bots').update({ connection_id: keeper.id }).eq('connection_id', extra.id);
-      await admin.from('message_templates').update({ connection_id: keeper.id }).eq('connection_id', extra.id);
+      await repointConnectionRefs(admin, orgId, extra.id, keeper.id);
       const { data: convs } = await admin
         .from('wa_conversations')
         .select('id')

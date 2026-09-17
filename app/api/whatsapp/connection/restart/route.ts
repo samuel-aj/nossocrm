@@ -35,7 +35,7 @@ export async function POST(req: Request) {
 
   // A sessão volta em alguns segundos: espera um pouco pelo estado final
   let status: string = 'connecting';
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 8; i++) {
     await sleep(1500);
     try {
       status = await provider.getConnectionState();

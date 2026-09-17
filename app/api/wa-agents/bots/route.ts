@@ -12,6 +12,7 @@ import { BotInputSchema, type BotMinimal, type BotRow } from '@/lib/wa-agents/ty
 import {
   connectionNotFoundError,
   connectionsBelongToOrg,
+  dropDeletedConnections,
   getErrorMessage,
   guardRoute,
   readJsonBody,
@@ -63,6 +64,7 @@ export async function POST(req: Request) {
   if (stepsError) return stepsError;
 
   try {
+    if (input.connection_ids?.length) input.connection_ids = await dropDeletedConnections(auth.admin, input.connection_ids);
     const numeros = input.connection_ids?.length ? input.connection_ids : input.connection_id ? [input.connection_id] : [];
     if (numeros.length > 0 && !(await connectionsBelongToOrg(auth.admin, auth.user.organizationId, numeros))) {
       return connectionNotFoundError();

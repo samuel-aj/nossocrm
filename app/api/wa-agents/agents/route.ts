@@ -12,6 +12,7 @@ import { AgentInputSchema, type AgentInput, type AgentMinimal, type AgentRow } f
 import {
   connectionNotFoundError,
   connectionsBelongToOrg,
+  dropDeletedConnections,
   getErrorMessage,
   guardRoute,
   normalizeApiKeyInput,
@@ -100,6 +101,7 @@ export async function POST(req: Request) {
 
   let helperIds: string[] = [];
   try {
+    input.connection_ids = await dropDeletedConnections(auth.admin, input.connection_ids);
     if (!(await connectionsBelongToOrg(auth.admin, orgId, input.connection_ids))) {
       return connectionNotFoundError();
     }

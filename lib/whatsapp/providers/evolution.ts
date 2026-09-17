@@ -100,6 +100,12 @@ function describeEvolutionError(status: number, data: unknown): string {
   return `Evolution respondeu ${status}${detail ? `: ${detail}` : ''}${hint}`;
 }
 
+// Checagem de sessão viva (ver probeSession): número fixo qualquer, só para a
+// Evolution precisar do socket do WhatsApp para responder.
+const SESSION_PROBE_NUMBER = '5511999999999';
+const SESSION_PROBE_TTL_MS = 60_000;
+const sessionProbeCache = new Map<string, { alive: boolean; at: number }>();
+
 export class EvolutionProvider implements WhatsAppProvider {
   readonly instanceName: string;
   private readonly baseUrl: string;
@@ -142,7 +148,45 @@ export class EvolutionProvider implements WhatsAppProvider {
       `/instance/connectionState/${encodeURIComponent(this.instanceName)}`
     );
     if (!ok || !data) return 'disconnected';
-    return mapState(data.instance?.state ?? data.state);
+    const state = mapState(data.instance?.state ?? data.state);
+    if (state !== 'connected') return state;
+    // SESSÃO ZUMBI: depois de um reinício do servidor a Evolution segue dizendo
+    // "open", mas o socket do WhatsApp está morto (não chega nem sai mensagem).
+    // Confirma com uma consulta que só funciona com a sessão viva.
+    return (await this.probeSession()) === false ? 'disconnected' : state;
+  }
+
+  /**
+   * true = sessão viva; false = a Evolution respondeu "Connection Closed";
+   * null = não deu para saber (rede/timeout), e aí vale o estado informado.
+   * Cache de 1 minuto por instância: a tela consulta o status a cada poucos
+   * segundos e não precisa bater no WhatsApp toda vez.
+   */
+  private async probeSession(): Promise<boolean | null> {
+    const cached = sessionProbeCache.get(this.instanceName);
+    if (cached && cached.at > Date.now() - SESSION_PROBE_TTL_MS) return cached.alive;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 6000);
+    let alive: boolean | null = null;
+    try {
+      const res = await fetch(`${this.baseUrl}/chat/whatsappNumbers/${encodeURIComponent(this.instanceName)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: this.token },
+        body: JSON.stringify({ numbers: [SESSION_PROBE_NUMBER] }),
+        cache: 'no-store',
+        signal: ctrl.signal,
+      });
+      if (res.ok) alive = true;
+      else if (/connection closed/i.test(await res.text().catch(() => ''))) alive = false;
+    } catch {
+      alive = null;
+    } finally {
+      clearTimeout(timer);
+    }
+    // Só guarda sessão VIVA: a morta responde na hora (sem ir ao WhatsApp) e
+    // precisa ser reavaliada logo, senão o "Reiniciar" ficaria 1 min sem ver a volta.
+    if (alive === true) sessionProbeCache.set(this.instanceName, { alive, at: Date.now() });
+    return alive;
   }
 
   async getQrCode(): Promise<QrResult> {
@@ -243,6 +287,7 @@ export class EvolutionProvider implements WhatsAppProvider {
   }
 
   async restart(): Promise<void> {
+    sessionProbeCache.delete(this.instanceName);
     const { ok, status } = await this.call('PUT', `/instance/restart/${encodeURIComponent(this.instanceName)}`);
     if (!ok) throw new Error(`Evolution respondeu ${status} ao reiniciar a instância`);
   }
