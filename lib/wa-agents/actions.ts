@@ -10,6 +10,12 @@ import { buildActionSystemVars, resolveActionTexts, resolveAiVarValues } from '.
 import type { ConversationContext } from './context';
 import { errorMessage } from './errors';
 import type { AgentRow, CustomAction, EndAction, Outcome } from './types';
+
+/**
+ * Ação que não pôde ser aplicada (ex.: contato sem lead). Não é erro do sistema,
+ * mas também não é sucesso: aparece no histórico como pulada, com o motivo.
+ */
+export class ActionSkipped extends Error {}
 import { buildWebhookPayload, postWebhook } from './webhooks';
 
 export type OutcomeActionsResult = {
@@ -109,7 +115,7 @@ async function runAction(
       return 'nota registrada';
     }
     case 'move_stage': {
-      if (!dealId) return 'sem negócio: etapa ignorada';
+      if (!dealId) throw new ActionSkipped('contato sem lead aberto: etapa não alterada');
       const r = await moveStageByDealId({
         organizationId: orgId,
         dealId,
@@ -121,12 +127,13 @@ async function runAction(
       return 'negócio movido de etapa';
     }
     case 'add_tag': {
-      if (!dealId) return 'sem negócio: rótulo ignorado';
+      if (!dealId) throw new ActionSkipped(`contato sem lead aberto: tag "${action.tag}" não adicionada`);
+      if (!action.tag.trim()) throw new ActionSkipped('tag vazia depois de preencher as variáveis');
       await addDealTag(admin, orgId, dealId, action.tag);
       return `rótulo "${action.tag}" adicionado`;
     }
     case 'mark_lost': {
-      if (!dealId) return 'sem negócio: perda ignorada';
+      if (!dealId) throw new ActionSkipped('contato sem lead aberto: perda não registrada');
       const { error } = await admin
         .from('deals')
         .update({
@@ -142,9 +149,9 @@ async function runAction(
       return 'negócio marcado como perdido';
     }
     case 'append_description': {
-      if (!dealId) return 'sem negócio: descrição ignorada';
+      if (!dealId) throw new ActionSkipped('contato sem lead aberto: descrição não alterada');
       const texto = summary.trim();
-      if (!texto) return 'sem resumo: descrição ignorada';
+      if (!texto) throw new ActionSkipped('sem resumo: descrição não alterada');
       const prefixo = action.prefix?.trim();
       const trecho = prefixo ? `${prefixo}\n${texto}` : texto;
       const { data: atual } = await admin
@@ -166,7 +173,7 @@ async function runAction(
       return 'descrição do negócio atualizada';
     }
     case 'set_product': {
-      if (!dealId) return 'sem negócio: produto ignorado';
+      if (!dealId) throw new ActionSkipped('contato sem lead aberto: produto não lançado');
       const { data: product } = await admin
         .from('products')
         .select('id, name, price')
@@ -306,15 +313,18 @@ export async function executeActions(
     pushEvent,
   });
 
-  for (const action of input.actions ?? []) {
+  // Todas as ações rodam na ordem configurada; a falha de uma não impede as seguintes.
+  // `pos` identifica qual delas (duas do mesmo tipo ficam distinguíveis no histórico).
+  for (const [pos, action] of (input.actions ?? []).entries()) {
     const at = new Date().toISOString();
     if (input.renewLock) await input.renewLock();
     try {
       const resolved = resolveActionTexts(action, aiValues, systemVars);
       const note = await runAction(admin, input, resolved, result);
-      input.runEvents.push({ type: 'action', at, action: action.type, ok: true, note, ...origin });
+      input.runEvents.push({ type: 'action', at, pos, action: action.type, ok: true, note, ...origin });
     } catch (e) {
-      input.runEvents.push({ type: 'action', at, action: action.type, ok: false, error: errorMessage(e), ...origin });
+      const skipped = e instanceof ActionSkipped;
+      input.runEvents.push({ type: 'action', at, pos, action: action.type, ok: false, ...(skipped ? { skipped: true } : {}), error: errorMessage(e), ...origin });
     }
   }
   return result;

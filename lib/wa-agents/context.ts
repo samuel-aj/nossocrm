@@ -22,6 +22,7 @@ import {
   AgentWebhookSchema,
   AI_PROVIDERS,
   CustomActionSchema,
+  EndActionSchema,
   DEFAULT_AGENT_AUTO_LEAD,
   DEFAULT_AGENT_LEAD_CONTEXT,
   DEFAULT_AGENT_MEDIA_UNDERSTANDING,
@@ -213,6 +214,26 @@ export function normalizeHelperIds(raw: unknown): string[] {
 }
 
 /** Linha crua de wa_ai_agents -> AgentRow (jsonb validado, números coeridos). */
+/**
+ * Resultado/ação durante a conversa com UMA ação inválida (tipo que o servidor não
+ * conhece, campo fora do limite): antes o item inteiro sumia em silêncio e o motor
+ * registrava "não encontrado". Agora só a ação inválida sai (com aviso no log).
+ */
+function parseWithValidActions<T>(schema: { safeParse: (v: unknown) => { success: boolean; data?: unknown } }, item: unknown): T | null {
+  const direct = schema.safeParse(item);
+  if (direct.success) return direct.data as T;
+  if (!item || typeof item !== 'object' || !Array.isArray((item as { actions?: unknown }).actions)) return null;
+  const actions = (item as { actions: unknown[] }).actions;
+  const valid = actions.filter(a => EndActionSchema.safeParse(a).success);
+  if (valid.length === actions.length) return null;
+  const retry = schema.safeParse({ ...(item as Record<string, unknown>), actions: valid });
+  if (!retry.success) return null;
+  console.warn(
+    `[wa-agents] ${actions.length - valid.length} ação(ões) inválida(s) ignorada(s) em "${String((item as { key?: unknown }).key ?? '')}"`
+  );
+  return retry.data as T;
+}
+
 export function normalizeAgentRow(raw: Record<string, unknown>): AgentRow {
   const provider = AI_PROVIDERS.includes(raw.provider as AgentProvider)
     ? (raw.provider as AgentProvider)
@@ -243,18 +264,12 @@ export function normalizeAgentRow(raw: Record<string, unknown>): AgentRow {
       const p = AgentFollowupSchema.safeParse(item);
       return p.success ? p.data : null;
     }),
-    outcomes: parseArray<Outcome>(raw.outcomes, item => {
-      const p = OutcomeSchema.safeParse(item);
-      return p.success ? p.data : null;
-    }),
+    outcomes: parseArray<Outcome>(raw.outcomes, item => parseWithValidActions(OutcomeSchema, item)),
     webhooks: parseArray<AgentWebhook>(raw.webhooks, item => {
       const p = AgentWebhookSchema.safeParse(item);
       return p.success ? p.data : null;
     }),
-    custom_actions: parseArray<CustomAction>(raw.custom_actions, item => {
-      const p = CustomActionSchema.safeParse(item);
-      return p.success ? p.data : null;
-    }),
+    custom_actions: parseArray<CustomAction>(raw.custom_actions, item => parseWithValidActions(CustomActionSchema, item)),
     triggers: normalizeTriggers(raw.triggers),
     helper_agent_ids: normalizeHelperIds(raw.helper_agent_ids),
     tools: normalizeTools(raw.tools),
@@ -790,7 +805,7 @@ export function buildCustomActionsBlock(agent: Pick<AgentRow, 'custom_actions'>)
     lines.push(`- acao=${a.key} (${a.label}): quando ${a.description.trim()}${final}`);
   }
   lines.push(
-    'Chame executar_acao no momento em que a situação descrita acontecer, uma vez por ocorrência, com "acao" igual à chave e "detalhes" resumindo o que o cliente disse.'
+    'Chame executar_acao no momento em que a situação descrita acontecer, uma vez por ocorrência, com "acao" igual à chave e "detalhes" resumindo o que o cliente disse. Se várias situações acontecerem ao mesmo tempo, chame executar_acao para cada uma delas na mesma resposta: todas são executadas.'
   );
   if (actions.some(a => !finals.has(a.key))) {
     lines.push('Nas ações que não são finais, continue a conversa normalmente depois: a ação não encerra o atendimento.');

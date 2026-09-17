@@ -285,9 +285,19 @@ export const AgentInputSchema = z.object({
   start_mode: z.enum(AGENT_START_MODES).default('speak_first'),
   /** Régua de follow-ups por tempo sem resposta do lead (em ordem de tempo) */
   followups: z.array(AgentFollowupSchema).max(10).default([]),
-  outcomes: z.array(OutcomeSchema).default([]),
+  outcomes: z
+    .array(OutcomeSchema)
+    .default([])
+    .refine(list => new Set(list.map(o => o.key)).size === list.length, {
+      message: 'Dois resultados com o mesmo nome: renomeie um deles',
+    }),
   webhooks: z.array(AgentWebhookSchema).default([]),
-  custom_actions: z.array(CustomActionSchema).default([]),
+  custom_actions: z
+    .array(CustomActionSchema)
+    .default([])
+    .refine(list => new Set(list.map(a => a.key)).size === list.length, {
+      message: 'Duas ações durante a conversa com o mesmo nome: renomeie uma delas',
+    }),
   triggers: AgentTriggersSchema.default(DEFAULT_AGENT_TRIGGERS),
   /** Agentes da org que este agente pode consultar durante a conversa (ferramenta consultar_agente) */
   helper_agent_ids: z.array(z.string().uuid()).max(20).default([]),
@@ -764,7 +774,16 @@ export type BotRunRow = {
   updated_at: string;
 };
 /** Entrada do `log` de uma execução do robô */
-export type BotLogEntry = { at: string; step_id: string | null; type: string; note: string };
+export type BotLogEntry = {
+  at: string;
+  step_id: string | null;
+  type: string;
+  note: string;
+  /** Resultado do passo: ok, pulado (ex.: sem lead) ou falhou. Entradas antigas não têm. */
+  status?: 'ok' | 'skipped' | 'failed';
+  /** Motivo da falha ou do pulo */
+  error?: string;
+};
 
 // ---------------------------------------------------------------------------
 // Estado do agente na conversa
