@@ -80,6 +80,8 @@ const WEBHOOK_EVENTS = [
   // Sem MESSAGES_EDITED a Evolution NÃO avisa quando alguém edita uma
   // mensagem no WhatsApp — o CRM ficava com o texto antigo para sempre.
   'MESSAGES_EDITED',
+  'MESSAGES_DELETE',
+  'SEND_MESSAGE_UPDATE',
   'CONNECTION_UPDATE',
   'QRCODE_UPDATED',
 ] as const;
@@ -260,6 +262,18 @@ export class EvolutionProvider implements WhatsAppProvider {
     const { ok, status, data } = await this.call<{ key?: { id?: string } }>('POST', path, body);
     if (!ok) return { ok: false, error: describeEvolutionError(status, data), raw: data };
     return { ok: true, providerMessageId: data?.key?.id, raw: data };
+  }
+
+  async deleteMessage(input: { to: string; providerMessageId: string }): Promise<SendResult> {
+    const number = toEvolutionNumber(input.to);
+    const remoteJid = number.includes('@') ? number : `${number}@s.whatsapp.net`;
+    const { ok, status, data } = await this.call<{ key?: { id?: string } }>(
+      'DELETE', `/chat/deleteMessageForEveryone/${encodeURIComponent(this.instanceName)}`,
+      { id: input.providerMessageId, fromMe: true, remoteJid }
+    );
+    if (!ok) return { ok: false, error: describeEvolutionError(status, data) };
+    if (!data?.key?.id) return { ok: false, error: 'O WhatsApp não confirmou a exclusão. Atualize a conversa antes de tentar novamente.' };
+    return { ok: true, providerMessageId: input.providerMessageId };
   }
 
   async editText(input: { to: string; providerMessageId: string; text: string }): Promise<SendResult> {

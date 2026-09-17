@@ -48,7 +48,10 @@ export interface WaChatMessage {
   sender_name?: string | null;
   /** Quando a mensagem foi EDITADA no WhatsApp (null = nunca); body já traz o texto novo */
   edited_at?: string | null;
+  original_body?: string | null;
   can_edit?: boolean;
+  deleted_at?: string | null;
+  can_delete?: boolean;
 }
 
 /** Número conectado disponível pra ENVIAR (multi-número). */
@@ -308,13 +311,13 @@ export function useWhatsAppChat(phoneE164: string | null, connectionId?: string 
         headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || 'Não foi possível editar a mensagem.');
-      return result as { id: string; body: string; edited_at?: string };
+      return result as { id: string; body: string; edited_at?: string; original_body?: string | null };
     },
     onSuccess: async result => {
       await qc.cancelQueries({ queryKey: ['waChat'] });
       qc.setQueriesData<WaChatData>({ queryKey: ['waChat'] }, old => old && ({ ...old,
         messages: old.messages.map(message => message.id === result.id
-          ? { ...message, body: result.body, ...(result.edited_at ? { edited_at: result.edited_at } : {}) } : message),
+          ? { ...message, body: result.body, original_body: result.original_body ?? message.original_body, ...(result.edited_at ? { edited_at: result.edited_at } : {}) } : message),
       }));
     },
     onSettled: () => {
@@ -323,5 +326,25 @@ export function useWhatsAppChat(phoneE164: string | null, connectionId?: string 
     },
   });
 
-  return { ...query, send, edit };
+  const remove = useMutation({
+    mutationFn: async (input: { messageId: string }) => {
+      const response = await fetch('/api/whatsapp/delete', { method: 'POST', credentials: 'include',
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Não foi possível excluir a mensagem.');
+      return result as { id: string; deleted_at: string };
+    },
+    onSuccess: async result => {
+      await qc.cancelQueries({ queryKey: ['waChat'] });
+      qc.setQueriesData<WaChatData>({ queryKey: ['waChat'] }, old => old && ({ ...old,
+        messages: old.messages.map(message => message.id === result.id
+          ? { ...message, deleted_at: result.deleted_at, can_edit: false, can_delete: false } : message),
+      }));
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['waChat'] });
+      void qc.invalidateQueries({ queryKey: ['waConversations'] });
+    },
+  });
+  return { ...query, send, edit, remove };
 }

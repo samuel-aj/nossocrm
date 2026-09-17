@@ -16,6 +16,8 @@
  * Usa SUPABASE_SERVICE_ROLE_KEY (ignora RLS).
  */
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { parseMessageDeletion, applyMessageDeletion } from "./deletions.ts";
+import { parseMessageEdit, applyMessageEdit } from "./edits.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -291,6 +293,7 @@ const EVENTOS_WEBHOOK = [
   "MESSAGES_UPSERT",
   "MESSAGES_UPDATE",
   "MESSAGES_EDITED",
+  "MESSAGES_DELETE",
   // Edição feita VIA API da Evolution (chat/updateMessage) sai neste evento,
   // não em MESSAGES_EDITED; o payload é o mesmo protocolMessage.
   "SEND_MESSAGE_UPDATE",
@@ -382,7 +385,7 @@ Deno.serve(async (req) => {
   // edição) ficam em wa_webhook_debug pra inspeção. Best-effort; derrubar a
   // tabela e este bloco quando o diagnóstico terminar.
   try {
-    const conhecidos = ["messages.upsert", "messages.update", "connection.update", "qrcode.updated", "diag.webhook", "diag.edit", "heal.ping"];
+    const conhecidos = ["messages.upsert", "messages.update", "connection.update", "qrcode.updated", "diag.webhook", "diag.edit", "diag.find", "heal.ping"];
     const citaEdicao = rawBody.includes("editedMessage") || rawBody.includes("protocolMessage") || event.includes("edit");
     if (!conhecidos.includes(event) || citaEdicao) {
       await supabase.from("wa_webhook_debug").insert({ event, payload });
@@ -588,6 +591,23 @@ Deno.serve(async (req) => {
     return json(200, { ok: true });
   }
 
+  // Edits and revocations can arrive on their own or inside upsert/update envelopes.
+  if (["messages.delete", "messages.edited", "send.message.update", "messages.update", "messages.upsert"].includes(event)) {
+    const items = Array.isArray(data) ? data : Array.isArray(data?.messages) ? data.messages : [data];
+    try {
+      for (const item of items) {
+        const deletion = parseMessageDeletion(event, item);
+        if (deletion) { await applyMessageDeletion(supabase, orgId, conn.id, deletion); continue; }
+        const edit = parseMessageEdit(event, item);
+        if (edit) await applyMessageEdit(supabase, orgId, conn.id, edit);
+      }
+    } catch (error) {
+      console.error("[wa-webhook] message change persistence:", String(error));
+      return json(500, { error: "Não foi possível registrar a alteração da mensagem" });
+    }
+    if (event === "messages.delete" || event === "messages.edited" || event === "send.message.update") return json(200, { ok: true });
+  }
+
   // --- Status de entrega/leitura (✓✓) ---
   if (event === "messages.update") {
     // a Evolution pode mandar VÁRIOS updates num só evento — processa todos
@@ -659,72 +679,8 @@ Deno.serve(async (req) => {
       const participantJid: string = rawPart.endsWith("@lid") && altPart ? altPart : rawPart;
       const senderPhone = isGroup ? jidToE164(participantJid) : phone;
       const senderName: string | null = isGroup && !fromMe ? (m.pushName ?? null) : null;
-      // EDIÇÃO DE MENSAGEM: chega como protocolMessage com editedMessage (o
-      // Baileys às vezes embrulha em editedMessage.message). Em vez de
-      // descartar (o CRM ficava com o texto antigo para sempre), atualiza o
-      // corpo da mensagem ORIGINAL e carimba edited_at; se ela for a última
-      // da conversa, a prévia da lista acompanha.
-      {
-        // deno-lint-ignore no-explicit-any
-        const rawEdit: any = m.message ?? {};
-        const inner = unwrapMessage(rawEdit.editedMessage?.message ?? rawEdit);
-        const proto = inner?.protocolMessage;
-        const editTargetId = proto?.editedMessage ? proto?.key?.id : null;
-        if (editTargetId) {
-          const novoConteudo = extractContent(proto.editedMessage);
-          const novoTexto = (novoConteudo.text ?? "").trim();
-          if (novoTexto) {
-            const tsE = typeof m.messageTimestamp === "string" ? parseInt(m.messageTimestamp, 10) : m.messageTimestamp;
-            const editadoEm = tsE ? new Date(tsE * 1000).toISOString() : new Date().toISOString();
-            const buscarAlvo = async () =>
-              (await supabase
-                .from("wa_messages")
-                .select("id, conversation_id, sender_name")
-                .eq("organization_id", orgId)
-                .eq("evolution_message_id", editTargetId)
-                .maybeSingle()).data;
-            let alvoMsg = await buscarAlvo();
-            if (!alvoMsg) {
-              // Edição COLADA no envio (pessoa corrige na hora): o evento da
-              // edição pode chegar antes de a mensagem original terminar de
-              // ser gravada. Espera um instante e tenta de novo.
-              await new Promise((r) => setTimeout(r, 1500));
-              alvoMsg = await buscarAlvo();
-            }
-            if (!alvoMsg) {
-              console.error(`[wa-webhook] edicao: mensagem original nao encontrada (provider_id=${editTargetId})`);
-            }
-            if (alvoMsg) {
-              let { error: edErr } = await supabase
-                .from("wa_messages")
-                .update({ body: novoTexto, edited_at: editadoEm })
-                .eq("id", alvoMsg.id);
-              // Banco ainda sem a coluna edited_at (migração pendente): grava só o texto
-              if (edErr && /column/i.test(String(edErr.message)) && /edited_at/i.test(String(edErr.message))) {
-                ({ error: edErr } = await supabase.from("wa_messages").update({ body: novoTexto }).eq("id", alvoMsg.id));
-              }
-              if (edErr) console.error("[wa-webhook] edicao:", edErr.message);
-              // Prévia: só quando a editada é a ÚLTIMA mensagem da conversa
-              const { data: ultima } = await supabase
-                .from("wa_messages")
-                .select("id")
-                .eq("conversation_id", alvoMsg.conversation_id)
-                .order("created_at", { ascending: false })
-                .limit(1)
-                .maybeSingle();
-              if (ultima?.id === alvoMsg.id) {
-                const nome = (alvoMsg.sender_name ?? "").trim();
-                const previa = (nome ? `${nome}: ${novoTexto}` : novoTexto).slice(0, 140);
-                await supabase
-                  .from("wa_conversations")
-                  .update({ last_message_preview: previa })
-                  .eq("id", alvoMsg.conversation_id);
-              }
-            }
-          }
-          continue; // edição tratada: não vira bolha nova
-        }
-      }
+      // Already applied above, before normal messages/statuses are processed.
+      if (parseMessageEdit(event, m) || parseMessageDeletion(event, m)) continue;
 
       const { text, mediaType, mediaMime, fileName, skip } = extractContent(m.message);
       if (skip) continue;
@@ -1027,77 +983,6 @@ Deno.serve(async (req) => {
       // zera quando a conversa é aberta no CRM (GET /api/whatsapp/messages).
       if (!fromMe) {
         await supabase.rpc("wa_increment_unread", { p_conversation_id: convId });
-      }
-    }
-    return json(200, { ok: true });
-  }
-
-  // --- Edição de mensagem ---
-  // MESSAGES_EDITED = edição vinda de um celular; SEND_MESSAGE_UPDATE = edição
-  // feita via API da Evolution. Os dois carregam o MESMO protocolMessage
-  // ({ key: { id da ORIGINAL }, editedMessage: { texto novo } }).
-  if (event === "messages.edited" || event === "send.message.update") {
-    const items = Array.isArray(data) ? data : [data];
-    for (const it of items) {
-      if (!it) continue;
-      // Log de diagnóstico: o formato deste evento varia por versão da
-      // Evolution; com o payload no log dá pra cobrir o que faltar.
-      try {
-        console.log("[wa-webhook] messages.edited:", JSON.stringify(it).slice(0, 1500));
-      } catch {
-        // payload não serializável: segue sem log
-      }
-      const targetId = it?.key?.id ?? it?.keyId ?? it?.id ?? null;
-      let novoTexto = "";
-      if (typeof it?.conversation === "string") novoTexto = it.conversation;
-      else if (typeof it?.text === "string") novoTexto = it.text;
-      else {
-        const c = extractContent(it?.editedMessage ?? it?.message ?? {});
-        novoTexto = c.text ?? "";
-      }
-      novoTexto = novoTexto.trim();
-      if (!targetId || !novoTexto) continue;
-      const buscarAlvo = async () =>
-        (await supabase
-          .from("wa_messages")
-          .select("id, body, conversation_id, sender_name")
-          .eq("organization_id", orgId)
-          .eq("evolution_message_id", String(targetId))
-          .maybeSingle()).data;
-      let alvoMsg = await buscarAlvo();
-      if (!alvoMsg) {
-        // Edição COLADA no envio (pessoa corrige na hora): o evento da edição
-        // pode chegar antes de a mensagem original terminar de ser gravada.
-        // Espera um instante e tenta de novo antes de desistir.
-        await new Promise((r) => setTimeout(r, 1500));
-        alvoMsg = await buscarAlvo();
-      }
-      if (!alvoMsg) {
-        console.error(`[wa-webhook] edicao: mensagem original nao encontrada (provider_id=${String(targetId)})`);
-        continue;
-      }
-      console.log(
-        `[wa-webhook] edicao: msg=${alvoMsg.id} de="${String(alvoMsg.body ?? "").slice(0, 80)}" para="${novoTexto.slice(0, 80)}"`
-      );
-      let { error: edErr } = await supabase
-        .from("wa_messages")
-        .update({ body: novoTexto, edited_at: new Date().toISOString() })
-        .eq("id", alvoMsg.id);
-      if (edErr && /column/i.test(String(edErr.message)) && /edited_at/i.test(String(edErr.message))) {
-        ({ error: edErr } = await supabase.from("wa_messages").update({ body: novoTexto }).eq("id", alvoMsg.id));
-      }
-      if (edErr) console.error("[wa-webhook] edicao (evento):", edErr.message);
-      const { data: ultima } = await supabase
-        .from("wa_messages")
-        .select("id")
-        .eq("conversation_id", alvoMsg.conversation_id)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (ultima?.id === alvoMsg.id) {
-        const nome = (alvoMsg.sender_name ?? "").trim();
-        const previa = (nome ? `${nome}: ${novoTexto}` : novoTexto).slice(0, 140);
-        await supabase.from("wa_conversations").update({ last_message_preview: previa }).eq("id", alvoMsg.conversation_id);
       }
     }
     return json(200, { ok: true });

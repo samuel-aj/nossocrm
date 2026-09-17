@@ -1,3 +1,4 @@
+import { messageDeleteError } from '@/lib/whatsapp/messageDeletion';
 import { messageEditError, type EditableMessage } from '@/lib/whatsapp/messageEditing';
 /**
  * GET /api/whatsapp/messages?phone=<telefone>[&connectionId=...]
@@ -21,7 +22,7 @@ import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
 import { getConversationAiInfo, getConversationBotInfo } from '@/lib/wa-agents/conversation';
 
 const MESSAGE_COLUMNS =
-  'id, conversation_id, direction, status, body, media_type, media_mime, media_url, from_phone, to_phone, wa_timestamp, created_at, sent_by, source, error, transcription, quoted_message_id, quoted, forwarded, sender_name, edited_at, evolution_message_id';
+  'id, conversation_id, direction, status, body, media_type, media_mime, media_url, from_phone, to_phone, wa_timestamp, created_at, sent_by, source, error, transcription, quoted_message_id, quoted, forwarded, sender_name, edited_at, original_body, deleted_at, evolution_message_id';
 
 /**
  * As 300 mensagens mais RECENTES das conversas (desc + limit, revertidas
@@ -54,6 +55,7 @@ async function loadMessages(
     r.connection_id = connByConv.get(r.conversation_id as string) ?? null;
     const connection = connections.find(c => c.id === r.connection_id);
     r.can_edit = connection?.status === 'connected' && messageEditError(r as unknown as EditableMessage, userId, connection.provider) === null;
+    r.can_delete = connection?.status === 'connected' && messageDeleteError(r as unknown as EditableMessage, userId, connection.provider) === null;
     delete r.evolution_message_id;
     delete r.conversation_id;
   }
