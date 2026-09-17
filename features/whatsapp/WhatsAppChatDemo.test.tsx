@@ -23,7 +23,8 @@ describe('local WhatsApp demonstration', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(screen.getByText('Texto corrigido')).toBeInTheDocument();
-    expect(screen.getByText('Editada')).toBeInTheDocument();
+    expect(screen.getAllByText(/^Editada \d{2}:\d{2}$/)).toHaveLength(2);
+    expect(screen.getByText('Texto local')).toHaveClass('line-through');
     expect(network).not.toHaveBeenCalled();
   });
 

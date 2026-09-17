@@ -347,7 +347,8 @@ const DealCardComponent: React.FC<DealCardProps> = ({
       )}
 
       <h4
-        className={`text-sm font-bold font-display leading-snug mb-0.5 ${isRotting ? 'text-slate-600 dark:text-slate-400' : 'text-slate-900 dark:text-white'}`}
+        title={deal.title}
+        className={`truncate text-sm font-bold font-display leading-snug mb-0.5 ${isRotting ? 'text-slate-600 dark:text-slate-400' : 'text-slate-900 dark:text-white'}`}
       >
         {deal.title}
       </h4>

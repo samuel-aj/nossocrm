@@ -982,6 +982,11 @@ export function MessageBubble({
           />
         )}
         <MediaContent m={m} contactName={contactName} />
+        {m.edited_at && m.original_body && (
+          <p className={`mb-1 whitespace-pre-wrap break-words text-xs line-through ${isOut ? 'text-emerald-100/70' : 'text-slate-500 dark:text-slate-400'}`} aria-label="Mensagem original">
+            {m.original_body}
+          </p>
+        )}
         {m.body && m.media_type !== 'contact' ? (
           searchQuery ? (
             <HighlightedText
@@ -1015,10 +1020,10 @@ export function MessageBubble({
                 return isNaN(d.getTime()) ? '' : `${DATE_FMT.format(d)} às ${TIME_FMT.format(d)}`;
               })()}`}
             >
-              Editada
+              Editada {(() => { const d = new Date(m.edited_at); return isNaN(d.getTime()) ? time : TIME_FMT.format(d); })()}
             </span>
           )}
-          <span>{time}</span>
+          {!m.edited_at && <span>{time}</span>}
           {isOut && (
             <span
               className="inline-flex items-center"

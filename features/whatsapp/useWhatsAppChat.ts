@@ -48,6 +48,7 @@ export interface WaChatMessage {
   sender_name?: string | null;
   /** Quando a mensagem foi EDITADA no WhatsApp (null = nunca); body já traz o texto novo */
   edited_at?: string | null;
+  original_body?: string | null;
   can_edit?: boolean;
 }
 
@@ -308,13 +309,13 @@ export function useWhatsAppChat(phoneE164: string | null, connectionId?: string 
         headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || 'Não foi possível editar a mensagem.');
-      return result as { id: string; body: string; edited_at?: string };
+      return result as { id: string; body: string; edited_at?: string; original_body?: string | null };
     },
     onSuccess: async result => {
       await qc.cancelQueries({ queryKey: ['waChat'] });
       qc.setQueriesData<WaChatData>({ queryKey: ['waChat'] }, old => old && ({ ...old,
         messages: old.messages.map(message => message.id === result.id
-          ? { ...message, body: result.body, ...(result.edited_at ? { edited_at: result.edited_at } : {}) } : message),
+          ? { ...message, body: result.body, original_body: result.original_body ?? message.original_body, ...(result.edited_at ? { edited_at: result.edited_at } : {}) } : message),
       }));
     },
     onSettled: () => {

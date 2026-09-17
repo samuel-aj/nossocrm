@@ -15,9 +15,17 @@ function demoMessage(body: string, createdAt: string, id: string): WaChatMessage
     sent_by: SELF, sent_by_name: 'Você', source: 'crm', error: null, transcription: null };
 }
 
+function sampleMessages(at: string): WaChatMessage[] {
+  return [
+    demoMessage('Esta é sua mensagem de teste. Abra a seta e escolha Editar.', at, 'demo-initial'),
+    { ...demoMessage('Beleza Samuel', at, 'demo-incoming'), direction: 'in', sent_by: null,
+      source: null, original_body: 'Beleza', edited_at: at },
+  ];
+}
+
 /** Local-only fixture: no chat hook, upload, provider, or persistence is called. */
 export function WhatsAppChatDemo({ startedAt, embedded = false }: { startedAt: string; embedded?: boolean }) {
-  const [messages, setMessages] = useState<WaChatMessage[]>(() => [demoMessage('Esta é sua mensagem de teste. Abra a seta e escolha Editar.', startedAt, 'demo-initial')]);
+  const [messages, setMessages] = useState<WaChatMessage[]>(() => sampleMessages(startedAt));
   const [now, setNow] = useState(() => Date.parse(startedAt));
   const [text, setText] = useState('');
   const [editing, setEditing] = useState<WaChatMessage | null>(null);
@@ -45,7 +53,7 @@ export function WhatsAppChatDemo({ startedAt, embedded = false }: { startedAt: s
   const reset = () => {
     urls.current.forEach(url => URL.revokeObjectURL(url)); urls.current.clear();
     const date = new Date().toISOString();
-    setMessages([demoMessage('Esta é sua mensagem de teste. Abra a seta e escolha Editar.', date, 'demo-initial')]);
+    setMessages(sampleMessages(date));
     setNow(Date.parse(date)); setText(''); setAttachment(null); setEditing(null); setNotice('Demonstração reiniciada.');
   };
   const send = () => {
@@ -69,10 +77,10 @@ export function WhatsAppChatDemo({ startedAt, embedded = false }: { startedAt: s
         <MessageCircle size={22} className="text-emerald-600" /><div><h2 className="font-bold">Contato de demonstração</h2><p className="text-xs text-slate-500 dark:text-slate-400">Conversa fictícia · edição de textos por até 15 minutos</p></div>
       </header>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
-        {messages.map(m => <MessageBubble key={m.id} m={{ ...m, can_edit: canEdit(m) }} onAction={(action, message) => {
+        {messages.map(m => <MessageBubble key={m.id} m={{ ...m, can_edit: canEdit(m) }} onAction={m.direction === 'out' ? (action, message) => {
           if (action === 'edit') setEditing(message);
           else setNotice('Nesta demonstração, teste a edição de texto e o envio de imagens.');
-        }} />)}
+        } : undefined} />)}
         <div ref={bottom} />
       </div>
       <div className="border-t border-slate-200 bg-white p-3 dark:border-white/10 dark:bg-dark-card">
@@ -96,7 +104,7 @@ export function WhatsAppChatDemo({ startedAt, embedded = false }: { startedAt: s
     </div>
     {editing && <EditMessageModal key={editing.id} message={editing} onClose={() => setEditing(null)} onSave={async ({ messageId, text: body }) => {
       if (!canEdit(editing, Date.now())) throw new Error('O prazo de edição terminou. Reinicie o teste para tentar novamente.');
-      setMessages(previous => previous.map(m => m.id === messageId ? { ...m, body, edited_at: new Date().toISOString() } : m));
+      setMessages(previous => previous.map(m => m.id === messageId ? { ...m, original_body: m.original_body ?? m.body, body, edited_at: new Date().toISOString() } : m));
       setNotice('Texto editado somente nesta demonstração.');
     }} />}
   </div>;

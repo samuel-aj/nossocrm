@@ -14,7 +14,7 @@ export async function POST(req: Request) {
   if (!input.success) return json({ error: 'Informe a mensagem e um texto de até 4096 caracteres.' }, 400);
   const { admin, user } = auth;
   const { data: message, error } = await admin.from('wa_messages')
-    .select('id,conversation_id,direction,sent_by,status,body,media_type,evolution_message_id,wa_timestamp,created_at')
+    .select('id,conversation_id,direction,sent_by,status,body,original_body,media_type,evolution_message_id,wa_timestamp,created_at')
     .eq('id', input.data.messageId).eq('organization_id', user.organizationId).maybeSingle();
   if (error) return json({ error: 'Não foi possível consultar a mensagem.' }, 500);
   if (!message || !(await conversationAllowed(admin, user, { id: message.conversation_id }))) return json({ error: 'Mensagem indisponível.' }, 404);
@@ -27,7 +27,7 @@ export async function POST(req: Request) {
   if (reason) return json({ error: reason }, 403);
   const provider = getProvider(conn);
   if (!provider.editText) return json({ error: 'Esta conexão não permite editar mensagens.' }, 409);
-  if (message.body === input.data.text) return json({ ok: true, id: message.id, body: message.body });
+  if (message.body === input.data.text) return json({ ok: true, id: message.id, body: message.body, original_body: message.original_body });
   try {
     const result = await provider.editText({ to: conv!.is_group ? conv!.group_jid || conv!.wa_phone : conv!.wa_phone,
       providerMessageId: message.evolution_message_id!, text: input.data.text });
@@ -46,5 +46,5 @@ export async function POST(req: Request) {
     await admin.from('wa_conversations').update({ last_message_preview: input.data.text.slice(0, 140) })
       .eq('id', conv!.id).eq('organization_id', user.organizationId).eq('last_message_at', conv!.last_message_at);
   }
-  return json({ ok: true, id: message.id, body: input.data.text, edited_at: editedAt });
+  return json({ ok: true, id: message.id, body: input.data.text, edited_at: editedAt, original_body: message.original_body ?? message.body });
 }
