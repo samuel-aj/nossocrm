@@ -16,6 +16,7 @@
  * Usa SUPABASE_SERVICE_ROLE_KEY (ignora RLS).
  */
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { parseMessageDeletion, applyMessageDeletion } from "./deletions.ts";
 import { parseMessageEdit, applyMessageEdit } from "./edits.ts";
 
 const corsHeaders = {
@@ -292,6 +293,7 @@ const EVENTOS_WEBHOOK = [
   "MESSAGES_UPSERT",
   "MESSAGES_UPDATE",
   "MESSAGES_EDITED",
+  "MESSAGES_DELETE",
   // Edição feita VIA API da Evolution (chat/updateMessage) sai neste evento,
   // não em MESSAGES_EDITED; o payload é o mesmo protocolMessage.
   "SEND_MESSAGE_UPDATE",
@@ -589,19 +591,21 @@ Deno.serve(async (req) => {
     return json(200, { ok: true });
   }
 
-  // Edits can arrive on their own or inside upsert/update envelopes.
-  if (["messages.edited", "send.message.update", "messages.update", "messages.upsert"].includes(event)) {
+  // Edits and revocations can arrive on their own or inside upsert/update envelopes.
+  if (["messages.delete", "messages.edited", "send.message.update", "messages.update", "messages.upsert"].includes(event)) {
     const items = Array.isArray(data) ? data : Array.isArray(data?.messages) ? data.messages : [data];
     try {
       for (const item of items) {
+        const deletion = parseMessageDeletion(event, item);
+        if (deletion) { await applyMessageDeletion(supabase, orgId, conn.id, deletion); continue; }
         const edit = parseMessageEdit(event, item);
         if (edit) await applyMessageEdit(supabase, orgId, conn.id, edit);
       }
     } catch (error) {
-      console.error("[wa-webhook] edit persistence:", String(error));
-      return json(500, { error: "Não foi possível registrar a edição" });
+      console.error("[wa-webhook] message change persistence:", String(error));
+      return json(500, { error: "Não foi possível registrar a alteração da mensagem" });
     }
-    if (event === "messages.edited" || event === "send.message.update") return json(200, { ok: true });
+    if (event === "messages.delete" || event === "messages.edited" || event === "send.message.update") return json(200, { ok: true });
   }
 
   // --- Status de entrega/leitura (✓✓) ---
@@ -676,7 +680,7 @@ Deno.serve(async (req) => {
       const senderPhone = isGroup ? jidToE164(participantJid) : phone;
       const senderName: string | null = isGroup && !fromMe ? (m.pushName ?? null) : null;
       // Already applied above, before normal messages/statuses are processed.
-      if (parseMessageEdit(event, m)) continue;
+      if (parseMessageEdit(event, m) || parseMessageDeletion(event, m)) continue;
 
       const { text, mediaType, mediaMime, fileName, skip } = extractContent(m.message);
       if (skip) continue;

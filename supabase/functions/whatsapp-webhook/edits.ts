@@ -50,7 +50,7 @@ export function parseMessageEdit(event: string, item: unknown, now = new Date().
 // deno-lint-ignore no-explicit-any
 export async function applyMessageEdit(db: any, organizationId: string, connectionId: string, edit: MessageEdit): Promise<void> {
   const find = () => db.from('wa_messages')
-    .select('id, body, edited_at, conversation_id, sender_name, wa_conversations!inner(connection_id)')
+    .select('id, body, edited_at, deleted_at, conversation_id, sender_name, wa_conversations!inner(connection_id)')
     .eq('organization_id', organizationId).eq('evolution_message_id', edit.targetId)
     .eq('wa_conversations.connection_id', connectionId).maybeSingle();
   let found = await find();
@@ -58,10 +58,11 @@ export async function applyMessageEdit(db: any, organizationId: string, connecti
   if (!found.data) { await new Promise(resolve => setTimeout(resolve, 1500)); found = await find(); }
   if (found.error || !found.data) throw new Error('Original message for edit not found');
   const message = found.data;
+  if (message.deleted_at) return;
   if (message.body === edit.text || (message.edited_at && Date.parse(message.edited_at) > Date.parse(edit.editedAt))) return;
   // Compare-and-set prevents an older concurrent handler from undoing a newer edit.
   let update = db.from('wa_messages').update({ body: edit.text, edited_at: edit.editedAt })
-    .eq('id', message.id).eq('organization_id', organizationId);
+    .eq('id', message.id).eq('organization_id', organizationId).is('deleted_at', null);
   update = message.edited_at ? update.eq('edited_at', message.edited_at) : update.is('edited_at', null);
   const result = await update.select('id');
   if (result.error) throw new Error('Failed to persist message edit');

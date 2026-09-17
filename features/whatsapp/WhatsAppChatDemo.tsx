@@ -3,6 +3,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { MessageCircle, Paperclip, RotateCcw, Send, X } from 'lucide-react';
 import { MessageBubble } from './DealWhatsAppChat';
+import { DeleteMessageModal } from './DeleteMessageModal';
+import { messageDeleteError } from '@/lib/whatsapp/messageDeletion';
 import { EditMessageModal } from './EditMessageModal';
 import { useChatImageTransfer } from './useChatImageTransfer';
 import type { WaChatMessage } from './useWhatsAppChat';
@@ -20,6 +22,7 @@ function sampleMessages(at: string): WaChatMessage[] {
     demoMessage('Esta é sua mensagem de teste. Abra a seta e escolha Editar.', at, 'demo-initial'),
     { ...demoMessage('Beleza Samuel', at, 'demo-incoming'), direction: 'in', sent_by: null,
       source: null, original_body: 'Beleza', edited_at: at },
+    { ...demoMessage('Podemos conversar amanhã?', at, 'demo-deleted'), direction: 'in', sent_by: null, source: null, deleted_at: at },
   ];
 }
 
@@ -28,6 +31,7 @@ export function WhatsAppChatDemo({ startedAt, embedded = false }: { startedAt: s
   const [messages, setMessages] = useState<WaChatMessage[]>(() => sampleMessages(startedAt));
   const [now, setNow] = useState(() => Date.parse(startedAt));
   const [text, setText] = useState('');
+  const [deleting, setDeleting] = useState<WaChatMessage | null>(null);
   const [editing, setEditing] = useState<WaChatMessage | null>(null);
   const [attachment, setAttachment] = useState<{ file: File; url: string } | null>(null);
   const [notice, setNotice] = useState('');
@@ -48,13 +52,13 @@ export function WhatsAppChatDemo({ startedAt, embedded = false }: { startedAt: s
     const url = URL.createObjectURL(file);
     urls.current.add(url); setAttachment({ file, url }); setNotice('Imagem pronta para o envio simulado.');
   };
-  const transfer = useChatImageTransfer({ onFile, blocked: !!editing, onError: setNotice });
+  const transfer = useChatImageTransfer({ onFile, blocked: !!editing || !!deleting, onError: setNotice });
   const canEdit = (m: WaChatMessage, at = now) => messageEditError({ ...m, evolution_message_id: m.id }, SELF, 'evolution', at) === null;
   const reset = () => {
     urls.current.forEach(url => URL.revokeObjectURL(url)); urls.current.clear();
     const date = new Date().toISOString();
     setMessages(sampleMessages(date));
-    setNow(Date.parse(date)); setText(''); setAttachment(null); setEditing(null); setNotice('Demonstração reiniciada.');
+    setNow(Date.parse(date)); setText(''); setAttachment(null); setEditing(null); setDeleting(null); setNotice('Demonstração reiniciada.');
   };
   const send = () => {
     if ((!text.trim() && !attachment) || editing) return;
@@ -70,15 +74,16 @@ export function WhatsAppChatDemo({ startedAt, embedded = false }: { startedAt: s
       <button type="button" onClick={reset} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-white/10"><RotateCcw size={15} /> Reiniciar teste</button>
     </div>
     <p className="mb-4 rounded-xl border border-purple-200 bg-purple-50 p-3 text-sm text-purple-800 dark:border-purple-500/30 dark:bg-purple-500/10 dark:text-purple-200">
-      <strong>Simulação — nenhum envio real.</strong> Edite o texto pela seta da mensagem. Cole uma imagem no campo ou arraste-a para a conversa. Ao atualizar a página, o teste recomeça.
+      <strong>Simulação — nenhum envio real.</strong> Edite ou exclua pela seta da sua mensagem. Cole uma imagem no campo ou arraste-a para a conversa. Ao atualizar a página, o teste recomeça.
     </p>
     <div {...transfer.dropHandlers} className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 dark:border-white/10 dark:bg-dark-bg">
       <header className="flex items-center gap-3 border-b border-slate-200 bg-white p-4 dark:border-white/10 dark:bg-dark-card">
         <MessageCircle size={22} className="text-emerald-600" /><div><h2 className="font-bold">Contato de demonstração</h2><p className="text-xs text-slate-500 dark:text-slate-400">Conversa fictícia · edição de textos por até 15 minutos</p></div>
       </header>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
-        {messages.map(m => <MessageBubble key={m.id} m={{ ...m, can_edit: canEdit(m) }} onAction={m.direction === 'out' ? (action, message) => {
-          if (action === 'edit') setEditing(message);
+        {messages.map(m => <MessageBubble key={m.id} m={{ ...m, can_edit: canEdit(m), can_delete: messageDeleteError({ ...m, evolution_message_id: m.id }, SELF, 'evolution', now) === null }} onAction={m.direction === 'out' ? (action, message) => {
+          if (action === 'delete') setDeleting(message);
+          else if (action === 'edit') setEditing(message);
           else setNotice('Nesta demonstração, teste a edição de texto e o envio de imagens.');
         } : undefined} />)}
         <div ref={bottom} />
@@ -102,6 +107,12 @@ export function WhatsAppChatDemo({ startedAt, embedded = false }: { startedAt: s
       </div>
       {transfer.draggingImage && <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center border-2 border-dashed border-emerald-500 bg-emerald-50/95 text-lg font-semibold text-emerald-800 dark:bg-slate-900/95 dark:text-emerald-300">Solte a imagem para anexar</div>}
     </div>
+    {deleting && <DeleteMessageModal simulated onClose={() => setDeleting(null)} onConfirm={async () => {
+      const reason = messageDeleteError({ ...deleting, evolution_message_id: deleting.id }, SELF, 'evolution');
+      if (reason) throw new Error(reason);
+      setMessages(previous => previous.map(m => m.id === deleting.id ? { ...m, deleted_at: new Date().toISOString() } : m));
+      setNotice('Mensagem excluída somente nesta demonstração.');
+    }} />}
     {editing && <EditMessageModal key={editing.id} message={editing} onClose={() => setEditing(null)} onSave={async ({ messageId, text: body }) => {
       if (!canEdit(editing, Date.now())) throw new Error('O prazo de edição terminou. Reinicie o teste para tentar novamente.');
       setMessages(previous => previous.map(m => m.id === messageId ? { ...m, original_body: m.original_body ?? m.body, body, edited_at: new Date().toISOString() } : m));

@@ -86,6 +86,7 @@ export async function POST(req: Request) {
     .select('id, body, media_type, media_mime, media_url, created_at, conversation_id')
     .eq('organization_id', orgId)
     .in('id', messageIds)
+    .is('deleted_at', null)
     .order('created_at', { ascending: true });
   if (msgErr) return json({ error: msgErr.message }, 500);
   for (const conversationId of new Set((rows || []).map(m => m.conversation_id))) {

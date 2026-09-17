@@ -24,7 +24,23 @@ describe('local WhatsApp demonstration', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(screen.getByText('Texto corrigido')).toBeInTheDocument();
     expect(screen.getAllByText(/^Editada \d{2}:\d{2}$/)).toHaveLength(2);
-    expect(screen.getByText('Texto local')).toHaveClass('line-through');
+    expect(screen.queryByText('Texto local')).not.toBeInTheDocument();
+    expect(network).not.toHaveBeenCalled();
+  });
+
+  it('confirms and deletes only locally, retaining the incoming deleted text', async () => {
+    render(<WhatsAppChatDemo startedAt={new Date().toISOString()} />);
+    expect(screen.getByLabelText('Conteúdo excluído pelo cliente')).toHaveClass('line-through');
+    fireEvent.click(screen.getByRole('button', { name: 'Opções da mensagem' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Excluir' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+    expect(screen.queryByText('Você excluiu esta mensagem')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Opções da mensagem' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Excluir' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Excluir para todos' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByText('Você excluiu esta mensagem')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Opções da mensagem' })).not.toBeInTheDocument();
     expect(network).not.toHaveBeenCalled();
   });
 

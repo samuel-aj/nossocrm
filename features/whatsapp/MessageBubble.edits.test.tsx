@@ -13,3 +13,17 @@ it('shows the original incoming text struck through and only the edit time', () 
   expect(screen.getByText('Editada 08:50')).toBeInTheDocument();
   expect(screen.queryByText('08:45')).not.toBeInTheDocument();
 });
+
+it('shows only the current text for an outgoing edit', () => {
+  render(<MessageBubble m={{ id: 'own', direction: 'out', body: 'Corrigida', original_body: 'Antes', edited_at: new Date().toISOString(), created_at: new Date().toISOString() } as WaChatMessage} />);
+  expect(screen.queryByText('Antes')).not.toBeInTheDocument();
+  expect(screen.getByText('Corrigida')).not.toHaveClass('line-through');
+});
+it('keeps deleted incoming text struck through and suppresses all actions', () => {
+  render(<MessageBubble onAction={() => {}} m={{ id: 'in', direction: 'in', body: 'Último texto', original_body: 'Original', deleted_at: new Date().toISOString(), edited_at: new Date().toISOString(), created_at: new Date().toISOString() } as WaChatMessage} />);
+  expect(screen.getByText('Último texto')).toHaveClass('line-through');
+  expect(screen.queryByText('Original')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  expect(screen.queryByText(/^Editada/)).not.toBeInTheDocument();
+  expect(screen.getByText(/^Excluída/)).toBeInTheDocument();
+});

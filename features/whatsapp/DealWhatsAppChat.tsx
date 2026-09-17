@@ -45,6 +45,7 @@ import {
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { quotedPreviewText, type QuotedSnapshot } from '@/lib/whatsapp/quote';
+import { DeleteMessageModal } from './DeleteMessageModal';
 import { EditMessageModal } from './EditMessageModal';
 import { useChatImageTransfer } from './useChatImageTransfer';
 import { ForwardMessageModal } from './ForwardMessageModal';
@@ -633,7 +634,7 @@ function FailBadge({ reason }: { reason: string }) {
   );
 }
 
-type BubbleAction = 'reply' | 'forward' | 'edit';
+type BubbleAction = 'reply' | 'forward' | 'edit' | 'delete';
 
 /** GRUPO: cor estável por participante (nome em cima da bolha, como no WhatsApp). */
 const SENDER_COLORS = [
@@ -786,7 +787,7 @@ export function MessageBubble({
   const bubbleRef = useRef<HTMLDivElement>(null);
   const pressTimerRef = useRef<number | null>(null);
   const pressStartRef = useRef<{ x: number; y: number } | null>(null);
-  const canAct = !!onAction && !m.id.startsWith('temp-');
+  const canAct = !!onAction && !m.deleted_at && !m.id.startsWith('temp-');
   useEffect(() => {
     if (!menuOpen) return;
     const onDown = (e: Event) => {
@@ -809,7 +810,7 @@ export function MessageBubble({
     const scroller = el?.closest('.overflow-y-auto');
     if (el && scroller) {
       const room = scroller.getBoundingClientRect().bottom - el.getBoundingClientRect().bottom;
-      setMenuAbove(room < 150);
+      setMenuAbove(room < 205);
     }
     setMenuOpen(true);
   };
@@ -924,7 +925,7 @@ export function MessageBubble({
             </button>
           </>
         )}
-        {menuOpen && (
+        {menuOpen && canAct && (
           <div
             role="menu"
             className={`absolute ${menuAbove ? 'bottom-full mb-1' : 'top-7'} ${
@@ -951,6 +952,10 @@ export function MessageBubble({
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm hover:bg-slate-100 dark:hover:bg-white/10">
               <Pencil size={16} className="text-emerald-500" /> Editar
             </button>}
+            {m.can_delete && <button type="button" role="menuitem" onClick={() => act('delete')}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-red-600 dark:text-red-400 hover:bg-slate-100 dark:hover:bg-white/10">
+              <Trash2 size={16} /> Excluir
+            </button>}
           </div>
         )}
         {senderName && (
@@ -972,7 +977,7 @@ export function MessageBubble({
             <Forward size={11} /> Encaminhada
           </p>
         )}
-        {m.quoted && (
+        {!m.deleted_at && m.quoted && (
           <QuotedBlock
             q={m.quoted}
             isOut={isOut}
@@ -981,13 +986,17 @@ export function MessageBubble({
             onJump={m.quoted_message_id && onJumpToQuoted ? () => onJumpToQuoted(m.quoted_message_id as string) : undefined}
           />
         )}
-        <MediaContent m={m} contactName={contactName} />
-        {m.edited_at && m.original_body && (
-          <p className={`mb-1 whitespace-pre-wrap break-words text-xs line-through ${isOut ? 'text-emerald-100/70' : 'text-slate-500 dark:text-slate-400'}`} aria-label="Mensagem original">
+        {!m.deleted_at && <MediaContent m={m} contactName={contactName} />}
+        {!isOut && !m.deleted_at && m.edited_at && m.original_body && (
+          <p className="mb-1 whitespace-pre-wrap break-words text-xs line-through text-slate-500 dark:text-slate-400" aria-label="Mensagem original">
             {m.original_body}
           </p>
         )}
-        {m.body && m.media_type !== 'contact' ? (
+        {m.deleted_at ? (
+          <p className={`whitespace-pre-wrap break-words ${isOut ? 'italic opacity-80' : 'line-through text-slate-500 dark:text-slate-400'}`} aria-label={isOut ? 'Mensagem excluída' : 'Conteúdo excluído pelo cliente'}>
+            {isOut ? 'Você excluiu esta mensagem' : m.body || m.transcription || '[Mídia excluída]'}
+          </p>
+        ) : m.body && m.media_type !== 'contact' ? (
           searchQuery ? (
             <HighlightedText
               text={m.body}
@@ -1008,11 +1017,11 @@ export function MessageBubble({
             // áudio: o horário SOBE pra linha da duração (à direita dela) e
             // fica um tico maior que o texto da duração; -10px (não -16px)
             // pra dar 6px de respiro abaixo da foto do contato
-            m.media_type === 'audio' ? '-mt-[10px] h-4 text-[11px]' : 'mt-1 text-[10px]'
+            !m.deleted_at && m.media_type === 'audio' ? '-mt-[10px] h-4 text-[11px]' : 'mt-1 text-[10px]'
           } ${isOut ? 'text-emerald-100' : 'text-slate-400'}`}
         >
           {failReason && <FailBadge reason={failReason} />}
-          {m.edited_at && (
+          {!m.deleted_at && m.edited_at && (
             <span
               className="italic cursor-default"
               title={`Editada em ${(() => {
@@ -1023,8 +1032,9 @@ export function MessageBubble({
               Editada {(() => { const d = new Date(m.edited_at); return isNaN(d.getTime()) ? time : TIME_FMT.format(d); })()}
             </span>
           )}
-          {!m.edited_at && <span>{time}</span>}
-          {isOut && (
+          {m.deleted_at && <span className="italic">Excluída {TIME_FMT.format(new Date(m.deleted_at))}</span>}
+          {!m.deleted_at && !m.edited_at && <span>{time}</span>}
+          {isOut && !m.deleted_at && (
             <span
               className="inline-flex items-center"
               title={
@@ -1120,8 +1130,9 @@ export function DealWhatsAppChat({
 }) {
   const isGroup = !!group;
   const phone = useMemo(() => (isGroup ? '' : normalizePhoneE164(contact?.phone || '')), [contact?.phone, isGroup]);
-  const { data, isLoading, error, send, edit } = useWhatsAppChat(phone || null, connectionId, group?.conversationId ?? null);
+  const { data, isLoading, error, send, edit, remove } = useWhatsAppChat(phone || null, connectionId, group?.conversationId ?? null);
   const [text, setText] = useState('');
+  const [deletingMessage, setDeletingMessage] = useState<WaChatMessage | null>(null);
   const [editingMessage, setEditingMessage] = useState<WaChatMessage | null>(null);
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -1665,7 +1676,7 @@ export function DealWhatsAppChat({
   };
 
   const imageTransfer = useChatImageTransfer({
-    blocked: !data?.connected || notConnected || windowLocked || recording || !!voiceNote || preparingVoice || send.isPending || !!pendingTemplate || !!editingMessage,
+    blocked: !data?.connected || notConnected || windowLocked || recording || !!voiceNote || preparingVoice || send.isPending || !!pendingTemplate || !!editingMessage || !!deletingMessage,
     onFile: file => {
       forcedKindRef.current = null;
       onPickFile(file);
@@ -1724,6 +1735,8 @@ export function DealWhatsAppChat({
 
   /** Menu da bolha: Responder arma a citação no composer; Encaminhar abre o modal. */
   const onBubbleAction = (action: BubbleAction, m: WaChatMessage) => {
+    if (m.deleted_at) return;
+    if (action === 'delete' && m.can_delete) setDeletingMessage(m);
     if (action === 'reply') {
       setReplyTo(m);
       setEmojiOpen(false);
@@ -2909,6 +2922,10 @@ export function DealWhatsAppChat({
         )}
       </div>
 
+      {deletingMessage && <DeleteMessageModal onClose={() => setDeletingMessage(null)} onConfirm={async () => {
+        await remove.mutateAsync({ messageId: deletingMessage.id });
+        if (replyTo?.id === deletingMessage.id) setReplyTo(null);
+      }} />}
       {editingMessage && <EditMessageModal key={editingMessage.id} message={editingMessage}
         onClose={() => setEditingMessage(null)} onSave={input => edit.mutateAsync(input)} />}
 

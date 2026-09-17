@@ -110,6 +110,7 @@ export async function getQuotableMessage(
     .from('wa_messages')
     .select('id, organization_id, conversation_id, direction, status, body, media_type, media_url, media_mime, from_phone, sender_name, evolution_message_id, created_at')
     .eq('id', messageId)
+    .is('deleted_at', null)
     .eq('organization_id', orgId)
     .maybeSingle();
   if (!msg) return null;
