@@ -13,6 +13,11 @@ const h = vi.hoisted(() => ({
   tags: [] as Array<{ dealId: string; tag: string }>,
   moveFails: false,
   deal: null as null | Record<string, unknown>,
+  moveOpts: [] as Array<Record<string, unknown>>,
+  removed: [] as string[],
+  created: [] as Array<Record<string, unknown>>,
+  updated: [] as Array<Record<string, unknown>>,
+  lossHistory: 0,
 }));
 
 vi.mock('@/lib/whatsapp', () => ({
@@ -33,9 +38,11 @@ vi.mock('@/lib/whatsapp/service', () => ({
   replicateOutboundToSiblings: async () => {},
 }));
 vi.mock('@/lib/public-api/dealsMoveStage', () => ({
-  moveStageByDealId: async ({ dealId, target }: { dealId: string; target: { to_stage_id: string } }) => {
+  moveStageByDealId: async (opts: { dealId: string; target: { to_stage_id: string } }) => {
+    const { dealId, target } = opts;
     if (h.moveFails) return { ok: false, body: { error: 'Stage not found for this board' } };
     h.moves.push({ dealId, stageId: target.to_stage_id });
+    h.moveOpts.push(opts as unknown as Record<string, unknown>);
     return { ok: true, body: {} };
   },
 }));
@@ -50,6 +57,24 @@ vi.mock('./context', () => ({
   loadAgent: async () => null,
   loadConversationContext: async () => null,
   loadLastInboundProviderId: async () => null,
+}));
+vi.mock('./leadOps', () => ({
+  removeDealTag: async (_a: unknown, _o: string, _d: string, tag: string) => {
+    h.removed.push(tag);
+    return tag === 'tem';
+  },
+  ensureLeadForContact: async (_a: unknown, input: Record<string, unknown>) => {
+    h.created.push(input);
+    h.deal = { id: 'deal-new', contact_id: 'contact-1', title: 'Novo', stage_id: input.stageId, board_id: input.boardId, tags: [], stage_label: 'Entrada' };
+    return { created: true, dealId: 'deal-new', contactId: 'contact-1', problems: [] };
+  },
+  applyLeadChanges: async (_a: unknown, input: { changes: Array<{ value?: string }>; render: (t: string) => string }) => {
+    h.updated.push({ ...input, rendered: input.changes.map((c) => input.render(c.value ?? '')) });
+    return { changed: ['description'], problems: [] };
+  },
+  recordLossHistory: async () => {
+    h.lossHistory++;
+  },
 }));
 vi.mock('./engine', () => ({ runAgentOnConversation: async () => ({ status: 'ok' }) }));
 vi.mock('./beta', () => ({ isAiAgentsApproved: async () => true }));
@@ -155,6 +180,11 @@ beforeEach(() => {
   h.moves = [];
   h.tags = [];
   h.moveFails = false;
+  h.moveOpts = [];
+  h.removed = [];
+  h.created = [];
+  h.updated = [];
+  h.lossHistory = 0;
   h.deal = { id: 'deal-1', contact_id: 'contact-1', title: 'Lead', stage_id: 's1', board_id: 'b1', tags: [], stage_label: 'Novo' };
 });
 
@@ -299,5 +329,73 @@ describe('motor dos robôs', () => {
     const elapsed = Date.now() - t0;
     expect(h.sent).toEqual(['Oi']);
     expect(elapsed).toBeLessThan(1800);
+  });
+
+  it('remove tag (sem erro quando o lead não tem), cria lead e segue usando o lead novo', async () => {
+    h.deal = null;
+    const steps = chain([
+      { id: 'rm', type: 'remove_tag', tag: 'nao-tem' },
+      { id: 'cr', type: 'create_lead', board_id: '00000000-0000-4000-8000-00000000000b', stage_id: '00000000-0000-4000-8000-00000000000c', changes: [] },
+      { id: 'rm2', type: 'remove_tag', tag: 'tem' },
+      { id: 'tg', type: 'add_tag', tag: 'novo' },
+      { id: 'up', type: 'update_lead', changes: [{ field: 'description', mode: 'append', value: 'Contato {{nome}}' }] },
+    ]);
+    const tables = db(bot(steps), [run()]);
+    await processBotRun(fakeDb(tables), run());
+    const saved = tables.wa_bot_runs[0];
+    // antes de existir lead, remover tag é pulado (visível); depois, tudo roda no lead criado
+    expect((saved.log as Array<{ step_id: string; status?: string }>).find((e) => e.step_id === 'rm')?.status).toBe('skipped');
+    expect(h.created).toHaveLength(1);
+    expect(h.removed).toEqual(['tem']);
+    expect(h.tags).toEqual([{ dealId: 'deal-new', tag: 'novo' }]);
+    expect(h.updated[0].rendered).toEqual(['Contato Maria Souza']);
+    expect(saved.deal_id).toBe('deal-new');
+    expect(saved.status).toBe('done');
+  });
+
+  it('mover para etapa de perda leva motivo (com variável) e classificação, e registra no histórico', async () => {
+    const steps = chain([
+      {
+        id: 'mv',
+        type: 'move_stage',
+        stage_id: '00000000-0000-4000-8000-000000000009',
+        loss_reason: 'Sem retorno de {{primeiro_nome}}',
+        loss_category: 'disqualified',
+      },
+    ]);
+    const tables = db(bot(steps), [run()]);
+    await processBotRun(fakeDb(tables), run());
+    expect(h.moveOpts[0]).toMatchObject({ lossReason: 'Sem retorno de Maria', lossCategory: 'disqualified' });
+    expect(h.lossHistory).toBe(1);
+  });
+
+  it('digitando dentro da mensagem acontece antes de enviar', async () => {
+    const order: string[] = [];
+    const steps = chain([{ id: 'tx', type: 'send_text', text: 'Oi', typing_seconds: 1 }]);
+    const tables = db(bot(steps), [run()]);
+    const service = await import('@/lib/whatsapp');
+    const spy = vi.spyOn(service, 'getProvider').mockReturnValue({
+      sendText: async ({ text }: { text: string }) => (order.push(`envio:${text}`), { ok: true }),
+      sendTyping: async ({ ms }: { ms: number }) => {
+        order.push(`digitando:${ms}`);
+      },
+    } as never);
+    const t0 = Date.now();
+    await processBotRun(fakeDb(tables), run());
+    spy.mockRestore();
+    expect(order).toEqual(['digitando:1000', 'envio:Oi']);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(900);
+  });
+
+  it('esperar resposta usa o prazo em segundos quando configurado', async () => {
+    const steps = chain([{ id: 'wr', type: 'wait_reply', timeout_minutes: 1, timeout_seconds: 45 }]);
+    const tables = db(bot(steps), [run()]);
+    const before = Date.now();
+    await processBotRun(fakeDb(tables), run());
+    const saved = tables.wa_bot_runs[0];
+    expect(saved.status).toBe('waiting_reply');
+    const wait = new Date(String(saved.wake_at)).getTime() - before;
+    expect(wait).toBeGreaterThanOrEqual(44000);
+    expect(wait).toBeLessThan(47000);
   });
 });

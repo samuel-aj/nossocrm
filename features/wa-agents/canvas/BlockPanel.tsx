@@ -9,6 +9,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, Trash2, X } from 'lucide-react';
 import { AgentSelect, StageSelect, TagInput } from '../OutcomesEditor';
+import { LeadChangesEditor, LossFields } from '../LeadEditors';
 import { useWaBotsList } from '../useWaAgents';
 import { BTN_ICON, HELP_CLASS, INPUT_CLASS, newId } from '../ui';
 import { BlockIcon, NODE_META } from './catalog';
@@ -18,8 +19,10 @@ import {
   BOT_VARIABLES,
   CONDITION_FIELD_LABELS,
   CONDITION_OP_LABELS,
-  MAX_REPLY_MINUTES,
+  MAX_REPLY_SECONDS,
+  MAX_TYPING_SECONDS,
   MAX_WAIT_SECONDS,
+  MIN_REPLY_SECONDS,
   WAIT_UNIT_LABELS,
   WAIT_UNIT_SECONDS,
   type Block,
@@ -29,6 +32,7 @@ import {
   type ConditionField,
   type ConditionOp,
   type ConditionRuleDraft,
+  type LeadChangeDraft,
   type WaitUnit,
   conditionOpsFor,
   newConditionClause,
@@ -102,6 +106,75 @@ function autoResize(el: HTMLTextAreaElement | null) {
 
 type EditorProps<T extends Block['type']> = { block: BlockOfType<T>; update: (block: Block) => void };
 
+/** Quantidade + unidade (segundos, minutos, horas, dias) com o limite aplicado ao total. */
+function DurationField({
+  id,
+  amount,
+  unit,
+  minSeconds,
+  maxSeconds,
+  onChange,
+  ariaLabel,
+}: {
+  id: string;
+  amount: number;
+  unit: WaitUnit;
+  minSeconds: number;
+  maxSeconds: number;
+  onChange: (value: { amount: number; unit: WaitUnit }) => void;
+  ariaLabel: string;
+}) {
+  const maxFor = (u: WaitUnit) => Math.max(1, Math.floor(maxSeconds / WAIT_UNIT_SECONDS[u]));
+  const minFor = (u: WaitUnit) => Math.max(1, Math.ceil(minSeconds / WAIT_UNIT_SECONDS[u]));
+  return (
+    <div className="flex items-center gap-2">
+      <NumberField
+        id={id}
+        className={`${INPUT_CLASS} w-24`}
+        value={amount}
+        min={minFor(unit)}
+        max={maxFor(unit)}
+        onCommit={(value) => onChange({ amount: value, unit })}
+        ariaLabel={ariaLabel}
+      />
+      <select
+        className={INPUT_CLASS}
+        value={unit}
+        aria-label={`${ariaLabel} (unidade)`}
+        onChange={(e) => {
+          const next = e.target.value as WaitUnit;
+          onChange({ unit: next, amount: Math.max(minFor(next), Math.min(amount, maxFor(next))) });
+        }}
+      >
+        {(Object.keys(WAIT_UNIT_LABELS) as WaitUnit[]).map((u) => (
+          <option key={u} value={u}>
+            {WAIT_UNIT_LABELS[u]}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+/** "Digitando..." antes da mensagem, no próprio bloco. */
+function TypingBeforeField({ id, seconds, onChange }: { id: string; seconds: number; onChange: (seconds: number) => void }) {
+  return (
+    <div className="rounded-lg border border-slate-200 dark:border-white/10 p-2 space-y-1">
+      <label htmlFor={id} className={LABEL_CLASS}>
+        Mostrar "digitando..." antes de enviar
+      </label>
+      <div className="flex items-center gap-2">
+        <NumberField id={id} className={`${INPUT_CLASS} w-24`} value={seconds} min={0} max={MAX_TYPING_SECONDS} onCommit={onChange} ariaLabel="Segundos digitando antes de enviar" />
+        <span className="text-xs text-slate-500 dark:text-slate-400">segundos (0 = envia na hora)</span>
+      </div>
+      <p className={HELP_CLASS}>
+        O contato vê "digitando..." por esse tempo e só então a mensagem sai. Vale só para esta mensagem. Na API oficial da
+        Meta o aviso aparece depois que o contato já escreveu; o tempo de espera vale sempre.
+      </p>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- Mensagem
 
 function MessageEditor({ block, update }: EditorProps<'send_text'>) {
@@ -112,7 +185,7 @@ function MessageEditor({ block, update }: EditorProps<'send_text'>) {
     autoResize(textRef.current);
   }, [text]);
 
-  const setText = (value: string) => update({ ...block, data: { text: value } });
+  const setText = (value: string) => update({ ...block, data: { ...block.data, text: value } });
 
   const insert = (key: string) => {
     const el = textRef.current;
@@ -163,6 +236,11 @@ function MessageEditor({ block, update }: EditorProps<'send_text'>) {
         {text.length}/4000 caracteres. Cada bloco Mensagem vira uma mensagem separada no WhatsApp: para mandar várias em
         sequência, empilhe blocos no mesmo balão.
       </p>
+      <TypingBeforeField
+        id={`block-${block.id}-typing`}
+        seconds={block.data.typing_seconds}
+        onChange={(typing_seconds) => update({ ...block, data: { ...block.data, typing_seconds } })}
+      />
     </>
   );
 }
@@ -206,7 +284,7 @@ function WaitEditor({ block, update }: EditorProps<'wait'>) {
           ))}
         </select>
       </div>
-      <p className={HELP_CLASS}>No máximo 7 dias. Depois da espera, o robô segue para o próximo bloco.</p>
+      <p className={HELP_CLASS}>No máximo 30 dias. Depois da espera, o robô segue para o próximo bloco.</p>
     </>
   );
 }
@@ -217,19 +295,20 @@ function WaitReplyEditor({ block, update }: EditorProps<'wait_reply'>) {
   return (
     <>
       <label htmlFor={`block-${block.id}-timeout`} className={LABEL_CLASS}>
-        Aguardar por (minutos)
+        Aguardar a resposta por
       </label>
-      <NumberField
+      <DurationField
         id={`block-${block.id}-timeout`}
-        value={block.data.timeout_minutes}
-        min={1}
-        max={MAX_REPLY_MINUTES}
-        onCommit={(timeout_minutes) => update({ ...block, data: { timeout_minutes } })}
-        ariaLabel="Minutos aguardando resposta"
+        amount={block.data.amount}
+        unit={block.data.unit}
+        minSeconds={MIN_REPLY_SECONDS}
+        maxSeconds={MAX_REPLY_SECONDS}
+        onChange={(value) => update({ ...block, data: value })}
+        ariaLabel="Prazo para a resposta"
       />
       <p className={HELP_CLASS}>
-        Até 30 dias (43200 minutos). Se o lead responder, segue pela saída "Respondeu"; sem resposta no prazo, pela
-        saída "Sem resposta". As duas saídas ficam no rodapé do balão.
+        De 30 segundos a 30 dias (o prazo é conferido a cada 30 segundos). Se o lead responder, segue pela saída
+        "Respondeu"; sem resposta no prazo, pela saída "Sem resposta". As duas saídas ficam no rodapé do balão.
       </p>
     </>
   );
@@ -418,6 +497,8 @@ function ConditionEditor({ block, update }: EditorProps<'condition'>) {
 
 function MoveStageEditor({ block, update }: EditorProps<'move_stage'>) {
   const { options } = useCanvasContext();
+  const board = (options?.boards ?? []).find((b) => b.stages.some((s) => s.id === block.data.stage_id));
+  const isLoss = !!board?.lost_stage_id && board.lost_stage_id === block.data.stage_id;
   return (
     <>
       <label htmlFor={`block-${block.id}-stage`} className={LABEL_CLASS}>
@@ -426,30 +507,151 @@ function MoveStageEditor({ block, update }: EditorProps<'move_stage'>) {
       <StageSelect
         id={`block-${block.id}-stage`}
         value={block.data.stage_id}
-        onChange={(stage_id) => update({ ...block, data: { stage_id } })}
+        onChange={(stage_id) => {
+          // o pipeline da etapa vai junto: etapa de outro pipeline move o lead de pipeline
+          const owner = (options?.boards ?? []).find((b) => b.stages.some((s) => s.id === stage_id));
+          const lost = !!owner?.lost_stage_id && owner.lost_stage_id === stage_id;
+          update({
+            ...block,
+            data: {
+              ...block.data,
+              stage_id,
+              board_id: owner?.id ?? '',
+              ...(lost ? {} : { loss_reason: '', loss_category: '' as const }),
+            },
+          });
+        }}
         options={options}
         ariaLabel="Etapa de destino"
       />
-      <p className={HELP_CLASS}>Sem negócio ligado à conversa, este bloco é pulado.</p>
+      {isLoss ? (
+        <LossFields
+          idPrefix={`block-${block.id}-loss`}
+          category={block.data.loss_category}
+          reason={block.data.loss_reason}
+          onChange={(patch) =>
+            update({
+              ...block,
+              data: {
+                ...block.data,
+                ...(patch.category !== undefined ? { loss_category: patch.category } : {}),
+                ...(patch.reason !== undefined ? { loss_reason: patch.reason.slice(0, 200) } : {}),
+              },
+            })
+          }
+        />
+      ) : null}
+      <p className={HELP_CLASS}>
+        Etapa de outro pipeline muda o lead de pipeline. Sem lead ligado à conversa, o bloco é pulado e isso aparece no
+        histórico da execução.
+      </p>
     </>
   );
 }
 
-function TagEditor({ block, update }: EditorProps<'add_tag'>) {
+function TagEditor({ block, update }: { block: BlockOfType<'add_tag'> | BlockOfType<'remove_tag'>; update: (block: Block) => void }) {
   const { options } = useCanvasContext();
+  const removing = block.type === 'remove_tag';
   return (
     <>
       <label htmlFor={`block-${block.id}-tag`} className={LABEL_CLASS}>
-        Rótulo
+        {removing ? 'Tag a remover' : 'Tag a adicionar'}
       </label>
       <TagInput
         id={`block-${block.id}-tag`}
         value={block.data.tag}
-        onChange={(tag) => update({ ...block, data: { tag } })}
+        onChange={(tag) => update({ ...block, data: { tag } } as Block)}
         options={options}
-        ariaLabel="Rótulo a adicionar"
+        ariaLabel={removing ? 'Tag a remover' : 'Tag a adicionar'}
       />
-      <p className={HELP_CLASS}>Adiciona o rótulo ao negócio da conversa.</p>
+      <p className={HELP_CLASS}>
+        {removing
+          ? 'Tira a tag do lead da conversa. Se ele não tiver a tag, o robô segue normalmente.'
+          : 'Adiciona a tag ao lead da conversa (sem repetir).'}
+      </p>
+    </>
+  );
+}
+
+function LeadChangesField({
+  block,
+  update,
+  createMode,
+}: {
+  block: BlockOfType<'create_lead'> | BlockOfType<'update_lead'>;
+  update: (block: Block) => void;
+  createMode: boolean;
+}) {
+  const { options } = useCanvasContext();
+  return (
+    <LeadChangesEditor<LeadChangeDraft>
+      rows={block.data.changes}
+      onChange={(changes) => update({ ...block, data: { ...block.data, changes } } as Block)}
+      makeRow={(row) => ({ ...row, id: newId() })}
+      options={options}
+      idPrefix={`block-${block.id}-change`}
+      createMode={createMode}
+    />
+  );
+}
+
+function CreateLeadEditor({ block, update }: EditorProps<'create_lead'>) {
+  const { options } = useCanvasContext();
+  const boards = options?.boards ?? [];
+  const board = boards.find((b) => b.id === block.data.board_id);
+  return (
+    <>
+      <label htmlFor={`block-${block.id}-board`} className={LABEL_CLASS}>
+        Pipeline
+      </label>
+      <select
+        id={`block-${block.id}-board`}
+        className={INPUT_CLASS}
+        value={block.data.board_id}
+        onChange={(e) => {
+          const next = boards.find((b) => b.id === e.target.value);
+          update({ ...block, data: { ...block.data, board_id: e.target.value, stage_id: next?.stages[0]?.id ?? '' } });
+        }}
+      >
+        <option value="">Escolha o pipeline</option>
+        {boards.map((b) => (
+          <option key={b.id} value={b.id}>
+            {b.name}
+          </option>
+        ))}
+      </select>
+      <label htmlFor={`block-${block.id}-stage`} className={LABEL_CLASS}>
+        Etapa inicial
+      </label>
+      <select
+        id={`block-${block.id}-stage`}
+        className={INPUT_CLASS}
+        value={block.data.stage_id}
+        disabled={!board}
+        onChange={(e) => update({ ...block, data: { ...block.data, stage_id: e.target.value } })}
+      >
+        <option value="">{board ? 'Escolha a etapa' : 'Escolha o pipeline primeiro'}</option>
+        {(board?.stages ?? []).map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.label}
+          </option>
+        ))}
+      </select>
+      <p className={HELP_CLASS}>
+        O contato é identificado pelo telefone (com e sem o nono dígito). Se ele já tiver um lead aberto, nada é criado e
+        o robô segue usando esse lead.
+      </p>
+      <p className={`${LABEL_CLASS} pt-1`}>Dados iniciais (opcional)</p>
+      <LeadChangesField block={block} update={update} createMode />
+    </>
+  );
+}
+
+function UpdateLeadEditor({ block, update }: EditorProps<'update_lead'>) {
+  return (
+    <>
+      <p className={HELP_CLASS}>Sem lead ligado à conversa, o bloco é pulado e isso aparece no histórico da execução.</p>
+      <LeadChangesField block={block} update={update} createMode={false} />
     </>
   );
 }
@@ -605,15 +807,21 @@ function TemplateEditor({ block, update }: EditorProps<'send_template'>) {
         </p>
       ) : null}
       <label htmlFor={`block-${block.id}-timeout`} className={`${LABEL_CLASS} mt-3`}>
-        Aguardar a resposta por (minutos)
+        Aguardar a resposta por
       </label>
-      <NumberField
+      <DurationField
         id={`block-${block.id}-timeout`}
-        value={block.data.timeout_minutes}
-        min={1}
-        max={MAX_REPLY_MINUTES}
-        onCommit={(timeout_minutes) => update({ ...block, data: { ...block.data, timeout_minutes } })}
-        ariaLabel="Minutos aguardando resposta"
+        amount={block.data.amount}
+        unit={block.data.unit}
+        minSeconds={MIN_REPLY_SECONDS}
+        maxSeconds={MAX_REPLY_SECONDS}
+        onChange={(value) => update({ ...block, data: { ...block.data, ...value } })}
+        ariaLabel="Prazo para a resposta"
+      />
+      <TypingBeforeField
+        id={`block-${block.id}-typing`}
+        seconds={block.data.typing_seconds}
+        onChange={(typing_seconds) => update({ ...block, data: { ...block.data, typing_seconds } })}
       />
       <p className={HELP_CLASS}>
         Depois de enviar, o robô espera a resposta: botão → saída do botão; outra resposta → "Outra resposta"; sem
@@ -718,7 +926,12 @@ function BlockFields({ block, update }: { block: Block; update: (block: Block) =
     case 'move_stage':
       return <MoveStageEditor block={block} update={update} />;
     case 'add_tag':
+    case 'remove_tag':
       return <TagEditor block={block} update={update} />;
+    case 'create_lead':
+      return <CreateLeadEditor block={block} update={update} />;
+    case 'update_lead':
+      return <UpdateLeadEditor block={block} update={update} />;
     case 'webhook':
       return <WebhookEditor block={block} update={update} />;
     case 'handoff_agent':

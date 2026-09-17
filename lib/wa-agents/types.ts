@@ -60,6 +60,22 @@ export const AGENT_EVENT_LABELS: Record<AgentEvent, string> = {
 /** URL de webhook: http/https para host público (sem localhost, redes privadas ou link-local). */
 export const WebhookUrlSchema = z.string().url().refine(isPublicHttpUrl, 'URL precisa ser pública (http/https)');
 
+/** Categoria da perda (mesma do CRM): qualificado que não fechou ou desqualificado */
+export const LOSS_CATEGORIES = ['qualified', 'disqualified'] as const;
+
+/**
+ * Uma alteração do lead feita por robô ou agente. Campo que não aparece na lista
+ * fica como está. replace = substitui; append = anexa (texto, descrição, múltipla
+ * seleção); clear = limpa. Aceita variáveis no valor.
+ */
+export const LeadChangeSchema = z.object({
+  field: z.enum(['title', 'value', 'description', 'owner_id', 'custom_field']),
+  key: z.string().max(80).optional(),
+  mode: z.enum(['replace', 'append', 'clear']).default('replace'),
+  value: z.string().max(4000).optional(),
+});
+export type LeadChangeInput = z.infer<typeof LeadChangeSchema>;
+
 export const EndActionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('handoff'), agent_id: z.string().uuid() }),
   z.object({ type: z.literal('approval'), agent_id: z.string().uuid() }),
@@ -68,8 +84,15 @@ export const EndActionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('start_bot'), bot_id: z.string().uuid() }),
   z.object({ type: z.literal('note'), title: z.string().max(120).optional() }),
   /** loss_reason: motivo da perda quando a etapa de destino é a etapa de perda do quadro (aceita variáveis) */
-  z.object({ type: z.literal('move_stage'), stage_id: z.string().uuid(), loss_reason: z.string().max(200).optional() }),
+  z.object({
+    type: z.literal('move_stage'),
+    stage_id: z.string().uuid(),
+    loss_reason: z.string().max(200).optional(),
+    loss_category: z.enum(LOSS_CATEGORIES).optional(),
+  }),
   z.object({ type: z.literal('add_tag'), tag: z.string().min(1).max(60) }),
+  /** Atualiza campos do lead (inclusive personalizados), respeitando o tipo de cada campo */
+  z.object({ type: z.literal('update_lead'), changes: z.array(LeadChangeSchema).min(1).max(30) }),
   z.object({ type: z.literal('mark_lost'), loss_reason: z.string().max(200).optional() }),
   z.object({ type: z.literal('assign_owner'), owner_id: z.string().uuid() }),
   /** Produto do catálogo da org lançado como item do negócio (não duplica) */
@@ -615,7 +638,8 @@ export const BotConditionRuleSchema = z.object({
 export type BotConditionRule = z.infer<typeof BotConditionRuleSchema>;
 
 export const BotStepSchema = z.discriminatedUnion('type', [
-  z.object({ ...botStepBase, type: z.literal('send_text'), text: z.string().min(1).max(4000) }),
+  /** typing_seconds: "digitando..." antes de enviar esta mensagem (0 = direto) */
+  z.object({ ...botStepBase, type: z.literal('send_text'), text: z.string().min(1).max(4000), typing_seconds: z.number().int().min(0).max(60).optional() }),
   /**
    * Modelo de mensagem (Configurações → Modelos): do WhatsApp API sai como template pela Meta; geral/QR vai
    * como texto. Depois de enviar, espera a resposta do lead por até timeout_minutes: botão de resposta rápida
@@ -627,11 +651,15 @@ export const BotStepSchema = z.discriminatedUnion('type', [
     template_id: z.string().uuid(),
     template_name: z.string().max(120).optional(),
     /** corpo do modelo (cópia para o quadro mostrar o texto; a Meta usa o modelo aprovado) */
-    template_body: z.string().max(2000).optional(),
+    template_body: z.string().max(4000).optional(),
+    /** "digitando..." antes de enviar o modelo (0 = direto) */
+    typing_seconds: z.number().int().min(0).max(60).optional(),
     /** textos dos botões de resposta rápida do modelo (uma saída por botão) */
     buttons: z.array(z.string().max(60)).max(10).default([]),
     button_step_ids: z.array(z.string().nullable()).max(10).default([]),
     timeout_minutes: z.number().int().min(1).max(43200).default(1440),
+    /** Prazo exato em segundos (unidade escolhida no editor); vale no lugar de timeout_minutes */
+    timeout_seconds: z.number().int().min(30).max(2592000).optional(),
     on_timeout_step_id: z.string().optional().nullable(),
   }),
   /** "Digitando..." por N segundos (presença composing no número por QR; na API oficial só espera) */
@@ -648,6 +676,8 @@ export const BotStepSchema = z.discriminatedUnion('type', [
     ...botStepBase,
     type: z.literal('wait_reply'),
     timeout_minutes: z.number().int().min(1).max(43200),
+    /** Prazo exato em segundos (unidade escolhida no editor); vale no lugar de timeout_minutes */
+    timeout_seconds: z.number().int().min(30).max(2592000).optional(),
     on_timeout_step_id: z.string().optional().nullable(),
   }),
   z.object({
@@ -657,8 +687,32 @@ export const BotStepSchema = z.discriminatedUnion('type', [
     else_step_id: z.string().optional().nullable(),
   }),
   /** Quadro de destino opcional: com outro quadro, o negócio troca de pipeline junto com a etapa */
-  z.object({ ...botStepBase, type: z.literal('move_stage'), stage_id: z.string().uuid(), board_id: z.string().uuid().nullable().optional() }),
+  z.object({
+    ...botStepBase,
+    type: z.literal('move_stage'),
+    stage_id: z.string().uuid(),
+    board_id: z.string().uuid().nullable().optional(),
+    /** Só vale quando a etapa marca o lead como perdido: motivo (aceita variáveis) e categoria */
+    loss_reason: z.string().max(200).optional(),
+    loss_category: z.enum(LOSS_CATEGORIES).optional(),
+  }),
   z.object({ ...botStepBase, type: z.literal('add_tag'), tag: z.string().min(1).max(60) }),
+  /** Tira a tag do lead; tag que ele não tem não é erro */
+  z.object({ ...botStepBase, type: z.literal('remove_tag'), tag: z.string().min(1).max(60) }),
+  /**
+   * Cria o lead quando o contato ainda não tem um aberto (identificado pelo telefone,
+   * com e sem o nono dígito). Já tendo lead aberto, nada é criado.
+   */
+  z.object({
+    ...botStepBase,
+    type: z.literal('create_lead'),
+    board_id: z.string().uuid(),
+    stage_id: z.string().uuid(),
+    /** Dados iniciais (título, valor, descrição, responsável, campos personalizados) */
+    changes: z.array(LeadChangeSchema).max(30).default([]),
+  }),
+  /** Atualiza o lead da conversa: só os campos listados mudam */
+  z.object({ ...botStepBase, type: z.literal('update_lead'), changes: z.array(LeadChangeSchema).min(1).max(30) }),
   z.object({
     ...botStepBase,
     type: z.literal('webhook'),

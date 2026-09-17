@@ -61,7 +61,7 @@ export async function GET() {
     admin.from('products').select('id, name, active').eq('organization_id', orgId).order('name', { ascending: true }).limit(300),
     admin
       .from('custom_field_definitions')
-      .select('key, label')
+      .select('key, label, type, options')
       .eq('organization_id', orgId)
       .eq('entity_type', 'deal')
       .order('label', { ascending: true })
@@ -116,13 +116,22 @@ export async function GET() {
 
   // Campos personalizados do negócio: viram variáveis nos campos das ações e nos webhooks
   const custom_fields = (fieldsRes.data ?? [])
-    .map(cf => ({ key: String(cf.key ?? '').trim(), label: String(cf.label ?? '').trim() || String(cf.key ?? '') }))
+    .map(cf => ({
+      key: String(cf.key ?? '').trim(),
+      label: String(cf.label ?? '').trim() || String(cf.key ?? ''),
+      // tipo e opções: robôs e agentes gravam o valor no formato certo do campo
+      type: String(cf.type ?? 'text'),
+      options: Array.isArray(cf.options) ? (cf.options as unknown[]).map(String) : [],
+    }))
     .filter(cf => cf.key !== '');
 
   return json({
     connections: connections.map(c => ({
       id: c.id,
       label: `${c.profile_name || c.provider} ${c.phone_number ?? ''}`.trim(),
+      // separados: a tela mostra o número inteiro mesmo quando o nome é longo
+      name: c.profile_name || c.provider,
+      phone_number: c.phone_number ?? null,
       provider: c.provider,
       status: c.status,
     })),

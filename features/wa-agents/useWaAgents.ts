@@ -29,7 +29,7 @@ export const WA_AGENTS_QUERY_KEY = 'waAgents';
 export type WaAgentListItem = AgentMinimal & Partial<AgentPublic>;
 
 export type WaAgentOptions = {
-  connections: Array<{ id: string; label: string; provider: string; status: string }>;
+  connections: Array<{ id: string; label: string; provider: string; status: string; name?: string; phone_number?: string | null }>;
   boards: Array<{
     id: string;
     name: string;
@@ -41,7 +41,7 @@ export type WaAgentOptions = {
   tags: string[];
   products: Array<{ id: string; name: string }>;
   /** Campos personalizados do negócio (variáveis das ações e dos webhooks); ausente em versões antigas da API */
-  custom_fields?: Array<{ key: string; label: string }>;
+  custom_fields?: Array<{ key: string; label: string; type?: string; options?: string[] }>;
 };
 
 export type WaRunsFilters = {
@@ -223,6 +223,8 @@ export function useWaAgentOptions() {
         owners: json.owners ?? [],
         tags: json.tags ?? [],
         products: json.products ?? [],
+        // antes ficava de fora e nenhuma tela via os campos personalizados
+        custom_fields: json.custom_fields ?? [],
       };
       return options;
     },
@@ -505,6 +507,20 @@ export function useSaveWaBot() {
       const json = id
         ? await waAgentsFetch<{ bot: BotRow }>(`/api/wa-agents/bots/${id}`, { method: 'PATCH', body: input })
         : await waAgentsFetch<{ bot: BotRow }>('/api/wa-agents/bots', { method: 'POST', body: input });
+      return json.bot;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: [WA_AGENTS_QUERY_KEY, 'bots'] });
+    },
+  });
+}
+
+/** Duplica um robô: cópia independente, desligada, com "Cópia de" no nome. */
+export function useDuplicateWaBot() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string): Promise<BotRow> => {
+      const json = await waAgentsFetch<{ bot: BotRow }>(`/api/wa-agents/bots/${id}/duplicate`, { method: 'POST' });
       return json.bot;
     },
     onSuccess: () => {

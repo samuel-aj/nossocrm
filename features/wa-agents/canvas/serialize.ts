@@ -14,9 +14,7 @@
  *   passo liga ao seguinte da lista, com layout vertical automático.
  */
 import type { XYPosition } from '@xyflow/react';
-import type { BotInput, BotLayoutGroup, BotRow, BotStep ,
-  BotConditionRule,
-} from '@/lib/wa-agents/types';
+import type { BotInput, BotLayoutGroup, BotRow, BotStep, BotConditionRule, LeadChangeInput } from '@/lib/wa-agents/types';
 import { newId } from '../ui';
 import {
   BLOCK_KIND,
@@ -25,7 +23,10 @@ import {
   HANDLE_NEXT,
   HANDLE_TIMEOUT,
   MAX_REPLY_MINUTES,
+  MAX_REPLY_SECONDS,
+  MAX_TYPING_SECONDS,
   MAX_WAIT_SECONDS,
+  MIN_REPLY_SECONDS,
   STEP_LABELS,
   TRIGGER_NODE_ID,
   WAIT_UNIT_SECONDS,
@@ -46,6 +47,7 @@ import {
   type FlowGraph,
   type FlowHeader,
   type FlowNode,
+  type LeadChangeDraft,
   type StepType,
   type TriggerNode,
   type WaitData,
@@ -98,6 +100,32 @@ export function waitSeconds(data: WaitData): number {
   return Math.round(data.amount * WAIT_UNIT_SECONDS[data.unit]);
 }
 
+/** Prazo em segundos a partir da quantidade + unidade (Esperar resposta / Modelo). */
+export function replySeconds(data: { amount: number; unit: WaitData['unit'] }): number {
+  return Math.round(data.amount * WAIT_UNIT_SECONDS[data.unit]);
+}
+
+/** Segundos salvos -> quantidade + unidade mais natural. */
+function amountUnit(seconds: number): { amount: number; unit: WaitData['unit'] } {
+  const unit = unitFor(seconds);
+  return { amount: Math.max(1, Math.round(seconds / WAIT_UNIT_SECONDS[unit])), unit };
+}
+
+/** Alterações salvas -> linhas do editor */
+function changesToDrafts(changes: LeadChangeInput[] | undefined): LeadChangeDraft[] {
+  return (changes ?? []).map((c) => ({ id: newId(), field: c.field, key: c.key ?? '', mode: c.mode ?? 'replace', value: c.value ?? '' }));
+}
+
+/** Linhas do editor -> alterações salvas (valor só quando o modo usa) */
+function draftsToChanges(drafts: LeadChangeDraft[]): LeadChangeInput[] {
+  return drafts.map((d) => ({
+    field: d.field,
+    ...(d.field === 'custom_field' ? { key: d.key.trim() } : {}),
+    mode: d.mode,
+    ...(d.mode === 'clear' ? {} : { value: d.value.trim() }),
+  }));
+}
+
 export function isTriggerNode(node: FlowNode): node is TriggerNode {
   return node.type === 'trigger';
 }
@@ -129,19 +157,29 @@ export function bubbleTitle(data: BubbleData): string {
 export function createBlock(type: StepType, id: string = newId()): Block {
   switch (type) {
     case 'send_text':
-      return { id, type, data: { text: '' } };
+      return { id, type, data: { text: '', typing_seconds: 0 } };
     case 'send_template':
-      return { id, type, data: { template_id: '', template_name: '', template_body: '', buttons: [], timeout_minutes: 1440 } };
+      return {
+        id,
+        type,
+        data: { template_id: '', template_name: '', template_body: '', buttons: [], amount: 1, unit: 'd', typing_seconds: 0 },
+      };
     case 'wait':
       return { id, type, data: { amount: 1, unit: 'h' } };
     case 'wait_reply':
-      return { id, type, data: { timeout_minutes: 60 } };
+      return { id, type, data: { amount: 1, unit: 'h' } };
     case 'condition':
       return { id, type, data: { rules: [newConditionRule(newId())] } };
     case 'move_stage':
-      return { id, type, data: { stage_id: '' } };
+      return { id, type, data: { stage_id: '', board_id: '', loss_reason: '', loss_category: '' } };
     case 'add_tag':
       return { id, type, data: { tag: '' } };
+    case 'remove_tag':
+      return { id, type, data: { tag: '' } };
+    case 'create_lead':
+      return { id, type, data: { board_id: '', stage_id: '', changes: [] } };
+    case 'update_lead':
+      return { id, type, data: { changes: [{ id: newId(), field: 'description', key: '', mode: 'append', value: '' }] } };
     case 'webhook':
       return { id, type, data: { url: '', secret: '', body_template: '' } };
     case 'handoff_agent':
@@ -190,6 +228,9 @@ export function cloneBlock(block: Block, handleMap?: Map<string, string>): Block
     });
     return { id, type: 'condition', data: { rules } };
   }
+  if (block.type === 'create_lead' || block.type === 'update_lead') {
+    return { ...block, id, data: { ...block.data, changes: block.data.changes.map((c) => ({ ...c, id: newId() })) } } as Block;
+  }
   return { ...block, id, data: { ...block.data } } as Block;
 }
 
@@ -215,7 +256,7 @@ function stepToBlock(step: BotStep): Block {
   const id = step.id;
   switch (step.type) {
     case 'send_text':
-      return { id, type: 'send_text', data: { text: step.text } };
+      return { id, type: 'send_text', data: { text: step.text, typing_seconds: step.typing_seconds ?? 0 } };
     case 'send_template':
       return {
         id,
@@ -225,7 +266,8 @@ function stepToBlock(step: BotStep): Block {
           template_name: step.template_name ?? '',
           template_body: step.template_body ?? '',
           buttons: [...(step.buttons ?? [])],
-          timeout_minutes: step.timeout_minutes ?? 1440,
+          ...amountUnit(step.timeout_seconds ?? (step.timeout_minutes ?? 1440) * 60),
+          typing_seconds: step.typing_seconds ?? 0,
         },
       };
     case 'wait': {
@@ -237,7 +279,7 @@ function stepToBlock(step: BotStep): Block {
       };
     }
     case 'wait_reply':
-      return { id, type: 'wait_reply', data: { timeout_minutes: step.timeout_minutes } };
+      return { id, type: 'wait_reply', data: amountUnit(step.timeout_seconds ?? step.timeout_minutes * 60) };
     case 'condition':
       return {
         id,
@@ -253,9 +295,24 @@ function stepToBlock(step: BotStep): Block {
         },
       };
     case 'move_stage':
-      return { id, type: 'move_stage', data: { stage_id: step.stage_id } };
+      return {
+        id,
+        type: 'move_stage',
+        data: {
+          stage_id: step.stage_id,
+          board_id: step.board_id ?? '',
+          loss_reason: step.loss_reason ?? '',
+          loss_category: step.loss_category ?? '',
+        },
+      };
     case 'add_tag':
       return { id, type: 'add_tag', data: { tag: step.tag } };
+    case 'remove_tag':
+      return { id, type: 'remove_tag', data: { tag: step.tag } };
+    case 'create_lead':
+      return { id, type: 'create_lead', data: { board_id: step.board_id, stage_id: step.stage_id, changes: changesToDrafts(step.changes) } };
+    case 'update_lead':
+      return { id, type: 'update_lead', data: { changes: changesToDrafts(step.changes) } };
     case 'webhook':
       return {
         id,
@@ -364,6 +421,9 @@ export function botToFlow(bot: BotRow | null, fallbackSteps: BotStep[]): FlowGra
       case 'typing':
       case 'move_stage':
       case 'add_tag':
+      case 'remove_tag':
+      case 'create_lead':
+      case 'update_lead':
       case 'webhook':
         link(bubble.id, HANDLE_NEXT, next);
         break;
@@ -442,28 +502,41 @@ function blockToStep(block: Block, to: (handle: string) => string | null, ui: { 
   const id = block.id;
   switch (block.type) {
     case 'send_text':
-      return { id, type: 'send_text', text: block.data.text.trim(), next_step_id: to(HANDLE_NEXT), ui };
-    case 'send_template':
+      return {
+        id,
+        type: 'send_text',
+        text: block.data.text.trim(),
+        ...(block.data.typing_seconds > 0 ? { typing_seconds: block.data.typing_seconds } : {}),
+        next_step_id: to(HANDLE_NEXT),
+        ui,
+      };
+    case 'send_template': {
+      const seconds = replySeconds(block.data);
       return {
         id,
         type: 'send_template',
         template_id: block.data.template_id,
         template_name: block.data.template_name.trim() || undefined,
-        template_body: block.data.template_body.trim().slice(0, 2000) || undefined,
+        template_body: block.data.template_body.trim().slice(0, 4000) || undefined,
         buttons: block.data.buttons.map((b) => b.trim()),
         button_step_ids: block.data.buttons.map((_, i) => to(buttonHandleId(i))),
-        timeout_minutes: block.data.timeout_minutes,
+        // minutos continuam gravados (quem ainda lê o campo antigo); os segundos valem
+        timeout_minutes: Math.max(1, Math.min(MAX_REPLY_MINUTES, Math.ceil(seconds / 60))),
+        timeout_seconds: seconds,
+        ...(block.data.typing_seconds > 0 ? { typing_seconds: block.data.typing_seconds } : {}),
         on_timeout_step_id: to(HANDLE_TIMEOUT),
         next_step_id: to(HANDLE_NEXT),
         ui,
       };
+    }
     case 'wait':
       return { id, type: 'wait', seconds: waitSeconds(block.data), next_step_id: to(HANDLE_NEXT), ui };
     case 'wait_reply':
       return {
         id,
         type: 'wait_reply',
-        timeout_minutes: block.data.timeout_minutes,
+        timeout_minutes: Math.max(1, Math.min(MAX_REPLY_MINUTES, Math.ceil(replySeconds(block.data) / 60))),
+        timeout_seconds: replySeconds(block.data),
         on_timeout_step_id: to(HANDLE_TIMEOUT),
         next_step_id: to(HANDLE_NEXT),
         ui,
@@ -489,9 +562,33 @@ function blockToStep(block: Block, to: (handle: string) => string | null, ui: { 
         ui,
       };
     case 'move_stage':
-      return { id, type: 'move_stage', stage_id: block.data.stage_id, next_step_id: to(HANDLE_NEXT), ui };
+      return {
+        id,
+        type: 'move_stage',
+        stage_id: block.data.stage_id,
+        // o pipeline da etapa vai junto (antes se perdia e etapa de outro pipeline falhava na execução)
+        board_id: block.data.board_id || null,
+        ...(block.data.loss_reason.trim() ? { loss_reason: block.data.loss_reason.trim().slice(0, 200) } : {}),
+        ...(block.data.loss_category ? { loss_category: block.data.loss_category } : {}),
+        next_step_id: to(HANDLE_NEXT),
+        ui,
+      };
     case 'add_tag':
       return { id, type: 'add_tag', tag: block.data.tag.trim(), next_step_id: to(HANDLE_NEXT), ui };
+    case 'remove_tag':
+      return { id, type: 'remove_tag', tag: block.data.tag.trim(), next_step_id: to(HANDLE_NEXT), ui };
+    case 'create_lead':
+      return {
+        id,
+        type: 'create_lead',
+        board_id: block.data.board_id,
+        stage_id: block.data.stage_id,
+        changes: draftsToChanges(block.data.changes),
+        next_step_id: to(HANDLE_NEXT),
+        ui,
+      };
+    case 'update_lead':
+      return { id, type: 'update_lead', changes: draftsToChanges(block.data.changes), next_step_id: to(HANDLE_NEXT), ui };
     case 'webhook':
       return {
         id,
@@ -635,6 +732,15 @@ export function pruneEdges(nodes: FlowNode[], edges: FlowEdge[]): FlowEdge[] {
 
 // ---------------------------------------------------------------- Validação
 
+/** Problema de uma linha de alteração do lead (null = ok). */
+export function leadChangeProblem(c: LeadChangeDraft): string | null {
+  if (c.field === 'custom_field' && !c.key.trim()) return 'escolha o campo personalizado';
+  if (c.mode === 'clear') return c.field === 'title' ? 'o título do lead não pode ser limpo' : null;
+  if (!c.value.trim()) return 'informe o valor';
+  if (c.mode === 'append' && (c.field === 'value' || c.field === 'owner_id')) return 'esse campo não aceita acrescentar: use substituir';
+  return null;
+}
+
 export type FlowIssue = { nodeId?: string; blockId?: string; message: string };
 export type FlowValidation = { errors: FlowIssue[]; warnings: FlowIssue[] };
 
@@ -737,24 +843,28 @@ export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowH
         case 'send_text':
           if (!block.data.text.trim()) fail('a mensagem está vazia');
           else if (block.data.text.length > 4000) fail('a mensagem passa de 4000 caracteres');
+          if (!(block.data.typing_seconds >= 0) || block.data.typing_seconds > MAX_TYPING_SECONDS) fail('o "digitando" vai de 0 a 60 segundos');
           break;
-        case 'send_template':
+        case 'send_template': {
           if (!block.data.template_id) fail('escolha o modelo de mensagem');
-          if (!(block.data.timeout_minutes >= 1) || block.data.timeout_minutes > MAX_REPLY_MINUTES) {
-            fail('o prazo de resposta precisa ficar entre 1 e 43200 minutos (30 dias)');
+          const seconds = replySeconds(block.data);
+          if (!(block.data.amount >= 1) || seconds < MIN_REPLY_SECONDS || seconds > MAX_REPLY_SECONDS) {
+            fail('o prazo de resposta precisa ficar entre 30 segundos e 30 dias');
           }
+          if (!(block.data.typing_seconds >= 0) || block.data.typing_seconds > MAX_TYPING_SECONDS) fail('o "digitando" vai de 0 a 60 segundos');
           break;
+        }
         case 'wait': {
           const seconds = waitSeconds(block.data);
           if (!(block.data.amount >= 1) || !(seconds >= 1) || seconds > MAX_WAIT_SECONDS) {
-            fail('informe um tempo entre 1 segundo e 7 dias');
+            fail('informe um tempo entre 1 segundo e 30 dias');
           }
           break;
         }
         case 'wait_reply': {
-          const minutes = block.data.timeout_minutes;
-          if (!(minutes >= 1) || minutes > MAX_REPLY_MINUTES) {
-            fail('o prazo precisa ficar entre 1 e 43200 minutos (30 dias)');
+          const seconds = replySeconds(block.data);
+          if (!(block.data.amount >= 1) || seconds < MIN_REPLY_SECONDS || seconds > MAX_REPLY_SECONDS) {
+            fail('o prazo precisa ficar entre 30 segundos e 30 dias');
           }
           break;
         }
@@ -775,8 +885,23 @@ export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowH
           if (!block.data.stage_id) fail('escolha a etapa de destino');
           break;
         case 'add_tag':
-          if (!block.data.tag.trim()) fail('informe o rótulo');
-          else if (block.data.tag.trim().length > 60) fail('o rótulo passa de 60 caracteres');
+        case 'remove_tag':
+          if (!block.data.tag.trim()) fail('informe a tag');
+          else if (block.data.tag.trim().length > 60) fail('a tag passa de 60 caracteres');
+          break;
+        case 'create_lead':
+          if (!block.data.board_id || !block.data.stage_id) fail('escolha o pipeline e a etapa do lead');
+          block.data.changes.forEach((c, i) => {
+            const problem = leadChangeProblem(c);
+            if (problem) fail(`dado ${i + 1}: ${problem}`);
+          });
+          break;
+        case 'update_lead':
+          if (block.data.changes.length === 0) fail('adicione ao menos um campo para alterar');
+          block.data.changes.forEach((c, i) => {
+            const problem = leadChangeProblem(c);
+            if (problem) fail(`alteração ${i + 1}: ${problem}`);
+          });
           break;
         case 'webhook':
           if (!isHttpUrl(block.data.url.trim())) fail('informe uma URL válida, começando com http:// ou https://');

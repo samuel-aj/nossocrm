@@ -412,14 +412,27 @@ const BOT_STEP_LABELS: Record<BotStep['type'], string> = {
   wait_reply: 'Esperar resposta',
   condition: 'Condição',
   move_stage: 'Mover etapa',
-  add_tag: 'Rótulo',
+  add_tag: 'Adicionar tag',
+  remove_tag: 'Remover tag',
+  create_lead: 'Criar lead',
+  update_lead: 'Editar lead',
   webhook: 'Webhook',
   handoff_agent: 'Entregar a agente',
   end: 'Encerrar',
 };
 
 /** Blocos com uma única saída: podem ficar em qualquer posição do balão. */
-const LINEAR_BOT_STEP_TYPES = new Set<BotStep['type']>(['send_text', 'typing', 'wait', 'move_stage', 'add_tag', 'webhook']);
+const LINEAR_BOT_STEP_TYPES = new Set<BotStep['type']>([
+  'send_text',
+  'typing',
+  'wait',
+  'move_stage',
+  'add_tag',
+  'remove_tag',
+  'create_lead',
+  'update_lead',
+  'webhook',
+]);
 
 /**
  * Passos do robô:

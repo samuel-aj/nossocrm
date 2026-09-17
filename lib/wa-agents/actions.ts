@@ -17,6 +17,7 @@ import type { AgentRow, CustomAction, EndAction, Outcome } from './types';
  */
 export class ActionSkipped extends Error {}
 import { buildWebhookPayload, postWebhook } from './webhooks';
+import { applyLeadChanges, recordLossHistory } from './leadOps';
 
 export type OutcomeActionsResult = {
   handoffAgentId?: string;
@@ -122,8 +123,17 @@ async function runAction(
         target: { to_stage_id: action.stage_id },
         // só é aplicado quando a etapa de destino marca o negócio como perdido
         lossReason: action.loss_reason?.trim() || null,
+        lossCategory: action.loss_category ?? null,
       });
       if (!r.ok) throw new Error((r.body as { error?: string }).error || 'falha ao mover etapa');
+      await recordLossHistory(admin, {
+        organizationId: orgId,
+        dealId,
+        stageId: action.stage_id,
+        lossReason: action.loss_reason?.trim() || null,
+        lossCategory: action.loss_category ?? null,
+        by: `agente ${agent.persona_name || agent.name}`,
+      });
       return 'negócio movido de etapa';
     }
     case 'add_tag': {
@@ -147,6 +157,15 @@ async function runAction(
         .eq('id', dealId);
       if (error) throw new Error(error.message);
       return 'negócio marcado como perdido';
+    }
+    case 'update_lead': {
+      if (!dealId) throw new ActionSkipped('contato sem lead aberto: nada foi alterado');
+      // Os valores já chegam com as variáveis preenchidas (resolveActionTexts)
+      const r = await applyLeadChanges(admin, { organizationId: orgId, dealId, changes: action.changes, render: t => t });
+      if (r.problems.length > 0) {
+        throw new Error(`${r.changed.length > 0 ? `alterado: ${r.changed.join(', ')}; ` : ''}não aplicado: ${r.problems.join('; ')}`);
+      }
+      return r.changed.length > 0 ? `lead atualizado: ${r.changed.join(', ')}` : 'nada para alterar';
     }
     case 'append_description': {
       if (!dealId) throw new ActionSkipped('contato sem lead aberto: descrição não alterada');

@@ -84,24 +84,42 @@ export function minimapColor(node: FlowNode): string {
 
 const WAIT_UNIT_SINGULAR: Record<WaitUnit, string> = { s: 'segundo', min: 'minuto', h: 'hora', d: 'dia' };
 
+function durationText(amount: number, unit: WaitUnit): string {
+  return `${amount} ${amount === 1 ? WAIT_UNIT_SINGULAR[unit] : WAIT_UNIT_LABELS[unit]}`;
+}
+
+/** Resumo das alterações do lead: "Descrição (acrescentar), Campo origem" */
+function changesSummary(changes: Array<{ field: string; key: string; mode: string }>, options: WaAgentOptions | undefined): string {
+  if (changes.length === 0) return 'Nenhum campo';
+  const names = changes.map((c) => {
+    const label =
+      c.field === 'custom_field'
+        ? (options?.custom_fields ?? []).find((f) => f.key === c.key)?.label || c.key || 'campo'
+        : ({ title: 'Título', value: 'Valor', description: 'Descrição', owner_id: 'Responsável' } as Record<string, string>)[c.field] ?? c.field;
+    return c.mode === 'clear' ? `${label} (limpar)` : c.mode === 'append' ? `${label} (acrescentar)` : label;
+  });
+  return names.join(', ');
+}
+
 /** Resumo curto de um bloco, mostrado dentro do balão. */
 export function blockSummary(block: Block, options: WaAgentOptions | undefined, agents: WaAgentListItem[]): string {
   switch (block.type) {
-    case 'send_text':
-      return block.data.text.trim() || 'Sem texto ainda';
+    case 'send_text': {
+      const text = block.data.text.trim() || 'Sem texto ainda';
+      return block.data.typing_seconds > 0 ? `Digitando ${block.data.typing_seconds}s, depois envia:
+${text}` : text;
+    }
     case 'send_template': {
       const name = block.data.template_name.trim() || (block.data.template_id ? 'Modelo escolhido' : 'Escolha o modelo');
       const n = block.data.buttons.length;
-      const head = n > 0 ? `${name} · ${n} ${n === 1 ? 'botão' : 'botões'}` : name;
+      const head = `${n > 0 ? `${name} · ${n} ${n === 1 ? 'botão' : 'botões'}` : name} · aguarda ${durationText(block.data.amount, block.data.unit)}`;
       const body = block.data.template_body.replace(/\s+/g, ' ').trim();
       return body ? `${head}\n${body.length > 220 ? `${body.slice(0, 220)}…` : body}` : head;
     }
-    case 'wait': {
-      const { amount, unit } = block.data;
-      return `${amount} ${amount === 1 ? WAIT_UNIT_SINGULAR[unit] : WAIT_UNIT_LABELS[unit]}`;
-    }
+    case 'wait':
+      return durationText(block.data.amount, block.data.unit);
     case 'wait_reply':
-      return `Aguarda a resposta por até ${block.data.timeout_minutes} min`;
+      return `Aguarda a resposta por até ${durationText(block.data.amount, block.data.unit)}`;
     case 'typing':
       return `Digitando por ${block.data.seconds}s`;
     case 'start_bot':
@@ -113,12 +131,27 @@ export function blockSummary(block: Block, options: WaAgentOptions | undefined, 
     case 'move_stage': {
       for (const board of options?.boards ?? []) {
         const stage = board.stages.find((s) => s.id === block.data.stage_id);
-        if (stage) return `${board.name} › ${stage.label}`;
+        if (!stage) continue;
+        const lost = board.lost_stage_id === stage.id;
+        const reason = lost && block.data.loss_reason.trim() ? `
+Motivo: ${block.data.loss_reason.trim()}` : '';
+        return `${board.name} › ${stage.label}${lost ? ' (perdido)' : ''}${reason}`;
       }
       return block.data.stage_id ? 'Etapa não encontrada' : 'Escolha a etapa';
     }
     case 'add_tag':
-      return block.data.tag.trim() || 'Informe o rótulo';
+      return block.data.tag.trim() ? `+ ${block.data.tag.trim()}` : 'Informe a tag';
+    case 'remove_tag':
+      return block.data.tag.trim() ? `− ${block.data.tag.trim()}` : 'Informe a tag';
+    case 'create_lead': {
+      const board = (options?.boards ?? []).find((b) => b.id === block.data.board_id);
+      const stage = board?.stages.find((s) => s.id === block.data.stage_id);
+      const where = board && stage ? `${board.name} › ${stage.label}` : 'Escolha o pipeline e a etapa';
+      return block.data.changes.length > 0 ? `${where}
+Com: ${changesSummary(block.data.changes, options)}` : where;
+    }
+    case 'update_lead':
+      return changesSummary(block.data.changes, options);
     case 'webhook': {
       const url = block.data.url.trim();
       if (!url) return 'Informe a URL';

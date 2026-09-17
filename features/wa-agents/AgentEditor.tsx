@@ -489,6 +489,19 @@ type FriendlyIssue = { message: string; tab: EditorTab };
  * corrigir, ou null se está tudo certo. Cobre o que o zod descreveria mal:
  * chaves repetidas, gatilhos incompletos, webhooks sem URL, auxiliar desligado.
  */
+/** Problema na ação "Atualizar campos do lead" (campo sem escolher, valor vazio). */
+function updateLeadIssue(actions: Array<{ type: string; changes?: Array<{ field: string; key?: string; mode?: string; value?: string }> }>): string | null {
+  for (const a of actions) {
+    if (a.type !== 'update_lead') continue;
+    if (!a.changes || a.changes.length === 0) return 'em "Atualizar campos do lead", adicione ao menos um campo';
+    for (const [i, c] of a.changes.entries()) {
+      if (c.field === 'custom_field' && !c.key?.trim()) return `em "Atualizar campos do lead", escolha o campo ${i + 1}`;
+      if (c.mode !== 'clear' && !c.value?.trim()) return `em "Atualizar campos do lead", informe o valor do campo ${i + 1}`;
+    }
+  }
+  return null;
+}
+
 function findFriendlyIssue(form: AgentFormState, agents: WaAgentListItem[]): FriendlyIssue | null {
   if (!form.name.trim()) return { message: 'Informe o nome do agente', tab: 'roteiro' };
 
@@ -504,6 +517,8 @@ function findFriendlyIssue(form: AgentFormState, agents: WaAgentListItem[]): Fri
     if (!o.key) return { message: `Resultado "${o.label}": informe a chave`, tab: 'acoes' };
     if (o.actions.some((a) => a.type === 'webhook' && !a.url.trim()))
       return { message: `Resultado "${o.label}": informe a URL do webhook`, tab: 'acoes' };
+    const leadIssue = updateLeadIssue(o.actions);
+    if (leadIssue) return { message: `Resultado "${o.label}": ${leadIssue}`, tab: 'acoes' };
   }
   for (const [i, a] of form.custom_actions.entries()) {
     if (!a.label.trim()) return { message: `Ação durante a conversa ${i + 1}: informe o nome`, tab: 'acoes' };
@@ -511,6 +526,8 @@ function findFriendlyIssue(form: AgentFormState, agents: WaAgentListItem[]): Fri
     if (!a.description.trim()) return { message: `Ação "${a.label}": descreva quando ela deve acontecer`, tab: 'acoes' };
     if (a.actions.some((x) => x.type === 'webhook' && !x.url.trim()))
       return { message: `Ação "${a.label}": informe a URL do webhook`, tab: 'acoes' };
+    const leadIssue = updateLeadIssue(a.actions);
+    if (leadIssue) return { message: `Ação "${a.label}": ${leadIssue}`, tab: 'acoes' };
   }
 
   for (const id of form.helper_agent_ids) {
@@ -525,6 +542,11 @@ function findFriendlyIssue(form: AgentFormState, agents: WaAgentListItem[]): Fri
   if (deal.enabled) {
     if (!deal.connection_id)
       return { message: 'Gatilhos: escolha o número que inicia a conversa no gatilho por pipeline', tab: 'gatilhos' };
+    if (!form.connection_ids.includes(deal.connection_id))
+      return {
+        message: 'Gatilhos: o número que inicia a conversa pelo pipeline precisa ser um dos números em que o agente atende',
+        tab: 'gatilhos',
+      };
     if (deal.event === 'deal_stage_entered' && !deal.stage_id)
       return { message: 'Gatilhos: escolha a etapa que dispara o gatilho por pipeline', tab: 'gatilhos' };
   }

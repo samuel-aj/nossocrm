@@ -30,7 +30,10 @@ export const STEP_LABELS: Record<StepType, string> = {
   wait_reply: 'Esperar resposta',
   condition: 'Condição',
   move_stage: 'Mover etapa',
-  add_tag: 'Rótulo',
+  add_tag: 'Adicionar tag',
+  remove_tag: 'Remover tag',
+  create_lead: 'Criar lead',
+  update_lead: 'Editar lead',
   webhook: 'Webhook',
   handoff_agent: 'Entregar a agente',
   end: 'Encerrar',
@@ -44,8 +47,11 @@ export const STEP_TYPES: StepType[] = [
   'typing',
   'wait_reply',
   'condition',
+  'create_lead',
+  'update_lead',
   'move_stage',
   'add_tag',
+  'remove_tag',
   'webhook',
   'handoff_agent',
   'start_bot',
@@ -73,6 +79,9 @@ export const BLOCK_KIND: Record<StepType, BlockKind> = {
   condition: 'branch',
   move_stage: 'linear',
   add_tag: 'linear',
+  remove_tag: 'linear',
+  create_lead: 'linear',
+  update_lead: 'linear',
   webhook: 'linear',
   handoff_agent: 'terminal',
   start_bot: 'terminal',
@@ -123,8 +132,13 @@ export const BOT_VARIABLES: Array<{ key: string; description: string }> = [
 export type WaitUnit = 's' | 'min' | 'h' | 'd';
 export const WAIT_UNIT_SECONDS: Record<WaitUnit, number> = { s: 1, min: 60, h: 3600, d: 86400 };
 export const WAIT_UNIT_LABELS: Record<WaitUnit, string> = { s: 'segundos', min: 'minutos', h: 'horas', d: 'dias' };
-export const MAX_WAIT_SECONDS = 604800;
+export const MAX_WAIT_SECONDS = 2592000;
 export const MAX_REPLY_MINUTES = 43200;
+/** Prazo de resposta: de 30 segundos a 30 dias (o relógio do robô confere a cada 30 s) */
+export const MIN_REPLY_SECONDS = 30;
+export const MAX_REPLY_SECONDS = 2592000;
+/** "Digitando..." antes de uma mensagem: até 60 s */
+export const MAX_TYPING_SECONDS = 60;
 
 /** Unidade mais natural para um total de segundos. */
 export function unitFor(seconds: number): WaitUnit {
@@ -143,9 +157,11 @@ export type TriggerData = {
   /** Número que inicia a conversa quando o gatilho dispara ('' = primeiro do robô) */
   connection_id: string;
 };
-export type MessageData = { text: string };
+/** typing_seconds: "digitando..." antes de enviar (0 = envia direto) */
+export type MessageData = { text: string; typing_seconds: number };
 export type WaitData = { amount: number; unit: WaitUnit };
-export type WaitReplyData = { timeout_minutes: number };
+/** Prazo de resposta com a unidade escolhida (salvo em segundos) */
+export type WaitReplyData = { amount: number; unit: WaitUnit };
 /** Regra em edição: as palavras-chave ficam como texto (separadas por vírgula). */
 export type ConditionField =
   | 'reply'
@@ -242,8 +258,36 @@ export function conditionRulePreview(rule: ConditionRuleDraft): string {
   return `${field} ${CONDITION_OP_LABELS[c.op]}${value}${more}`;
 }
 export type ConditionData = { rules: ConditionRuleDraft[] };
-export type MoveStageData = { stage_id: string };
+/** board_id: pipeline da etapa; loss_*: só valem quando a etapa marca o lead como perdido */
+export type MoveStageData = {
+  stage_id: string;
+  board_id: string;
+  loss_reason: string;
+  loss_category: '' | 'qualified' | 'disqualified';
+};
 export type TagData = { tag: string };
+/** Uma alteração do lead em edição (campo · o que fazer · valor) */
+export type LeadChangeDraft = {
+  id: string;
+  field: 'title' | 'value' | 'description' | 'owner_id' | 'custom_field';
+  key: string;
+  mode: 'replace' | 'append' | 'clear';
+  value: string;
+};
+export const LEAD_FIELD_LABELS: Record<LeadChangeDraft['field'], string> = {
+  title: 'Título do lead',
+  value: 'Valor',
+  description: 'Descrição',
+  owner_id: 'Responsável',
+  custom_field: 'Campo personalizado',
+};
+export const LEAD_MODE_LABELS: Record<LeadChangeDraft['mode'], string> = {
+  replace: 'Substituir por',
+  append: 'Acrescentar',
+  clear: 'Limpar',
+};
+export type CreateLeadData = { board_id: string; stage_id: string; changes: LeadChangeDraft[] };
+export type UpdateLeadData = { changes: LeadChangeDraft[] };
 export type WebhookData = { url: string; secret: string; body_template: string };
 export type HandoffData = { agent_id: string };
 export type TypingData = { seconds: number };
@@ -255,7 +299,10 @@ export type TemplateData = {
   /** corpo do modelo (mostrado no balão) */
   template_body: string;
   buttons: string[];
-  timeout_minutes: number;
+  /** Prazo de resposta com a unidade escolhida (salvo em segundos) */
+  amount: number;
+  unit: WaitUnit;
+  typing_seconds: number;
 };
 export type EndData = Record<string, never>;
 
@@ -268,6 +315,9 @@ export type Block =
   | { id: string; type: 'condition'; data: ConditionData }
   | { id: string; type: 'move_stage'; data: MoveStageData }
   | { id: string; type: 'add_tag'; data: TagData }
+  | { id: string; type: 'remove_tag'; data: TagData }
+  | { id: string; type: 'create_lead'; data: CreateLeadData }
+  | { id: string; type: 'update_lead'; data: UpdateLeadData }
   | { id: string; type: 'webhook'; data: WebhookData }
   | { id: string; type: 'handoff_agent'; data: HandoffData }
   | { id: string; type: 'typing'; data: TypingData }
@@ -349,6 +399,9 @@ export function blockOutputs(block: Block): BubbleOutput[] {
     case 'typing':
     case 'move_stage':
     case 'add_tag':
+    case 'remove_tag':
+    case 'create_lead':
+    case 'update_lead':
     case 'webhook':
       return [{ handleId: HANDLE_NEXT, label: 'Depois', tone: 'slate' }];
     case 'send_template':
