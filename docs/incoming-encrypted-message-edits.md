@@ -25,3 +25,15 @@ and passes after it. Both newly reported edits also decrypt successfully with
 the wire transformation applied. The 26 focused edit/deletion/rendering tests
 and standalone strict TypeScript check pass. Stored-event replay is not proof
 of a newly delivered live edit; verify a fresh client edit separately.
+
+Second live-format correction: `deserializeMessageBuffers` returns Uint8Array,
+which JSON serializes as indexed objects (`{"0":byte,...}`) in the webhook.
+Prisma's stored-record query returns base64 instead. The bounded byte decoder
+now accepts indexed byte objects, arrays, Node buffers and base64, and rejects
+sparse keys, non-byte values and oversized containers. A regression test
+combines both the PN/LID and byte serialization transformations; it fails on
+the previous release and passes with this fix. Both latest reported examples
+decrypt locally with the complete wire transformation. 28 focused tests pass.
+The receiver records edit application/failure metadata in the existing
+service-role-only diagnostics table, without content, ciphertext or secrets,
+so fresh automated delivery can be distinguished from manual replay.

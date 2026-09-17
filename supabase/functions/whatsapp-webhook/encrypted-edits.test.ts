@@ -44,6 +44,24 @@ it('decrypts live Evolution webhooks after remoteJid is replaced with remoteJidA
   Object.assign(f.envelope.key, { remoteJidAlt: f.original.key.remoteJidAlt });
   expect((await decryptIncomingEdit(f.envelope, f.original)).text).toBe('Texto atualizado');
 });
+it('decrypts the complete live JSON wire format including serialized Uint8Array bytes', async () => {
+  const f = fixture();
+  f.envelope.key.remoteJid = f.original.key.remoteJidAlt;
+  const encrypted = f.envelope.message.secretEncryptedMessage;
+  // deserializeMessageBuffers emits Uint8Array; JSON.stringify turns it into
+  // {"0": byte, ...}. Prisma's stored record/API instead returns base64.
+  for (const key of ['encIv', 'encPayload'] as const) {
+    Object.assign(encrypted, { [key]: JSON.parse(JSON.stringify(new Uint8Array(Buffer.from(encrypted[key], 'base64')))) });
+  }
+  expect((await decryptIncomingEdit(f.envelope, f.original)).text).toBe('Texto atualizado');
+});
+it('rejects sparse, non-byte and oversized serialized byte containers', async () => {
+  for (const invalid of [{ 1: 3 }, { 0: -1 }, { 0: 256 }, { 0: 1.5 }, { 0: '3' }, { 0: 3, extra: 1 }, new Array(65537).fill(0)]) {
+    const f = fixture();
+    Object.assign(f.envelope.message.secretEncryptedMessage, { encIv: invalid });
+    await expect(decryptIncomingEdit(f.envelope, f.original)).rejects.toThrow();
+  }
+});
 it('requires matching sender aliases as well as a matching group conversation', async () => {
   const f = fixture();
   Object.assign(f.original.key, { remoteJid: 'group@g.us', remoteJidAlt: '', participant: author });

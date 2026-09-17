@@ -600,10 +600,26 @@ Deno.serve(async (req) => {
         const deletion = parseMessageDeletion(event, item);
         if (deletion) { await applyMessageDeletion(supabase, orgId, conn.id, deletion); continue; }
         const edit = parseMessageEdit(event, item) ?? await resolveEncryptedEdit(supabase, orgId, { ...conn, instance_name: String(instanceName), base_url: conn.base_url ?? Deno.env.get("EVOLUTION_BASE_URL") }, item);
-        if (edit) await applyMessageEdit(supabase, orgId, conn.id, edit);
+        if (edit) {
+          await applyMessageEdit(supabase, orgId, conn.id, edit);
+          if (encryptedEdit(item)) {
+            // Metadata only: observe live delivery without storing plaintext,
+            // ciphertext, message secrets, phone numbers or provider tokens.
+            try { await supabase.from("wa_webhook_debug").insert({ event: "encrypted.edit.applied", payload: {
+              connection_id: conn.id, event_id: item?.key?.id, target_id: edit.targetId, edited_at: edit.editedAt,
+            } }); } catch { /* Diagnostic failure must not fail delivery. */ }
+          }
+        }
       }
     } catch (error) {
       console.error("[wa-webhook] message change persistence:", String(error));
+      if (items.some((item: unknown) => encryptedEdit(item))) {
+        try { await supabase.from("wa_webhook_debug").insert({ event: "encrypted.edit.failed", payload: {
+          connection_id: conn.id,
+          event_ids: items.filter((item: unknown) => encryptedEdit(item)).map((item: { key?: { id?: string } }) => item?.key?.id),
+          reason: error instanceof Error ? error.message.slice(0, 160) : "Unknown edit processing error",
+        } }); } catch { /* Diagnostic failure must not hide the retryable error. */ }
+      }
       return json(500, { error: "Não foi possível registrar a alteração da mensagem" });
     }
     if (event === "messages.delete" || event === "messages.edited" || event === "send.message.update") return json(200, { ok: true });
