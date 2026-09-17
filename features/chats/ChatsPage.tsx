@@ -23,6 +23,7 @@ import { FocusTrap } from '@/lib/a11y';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { DealWhatsAppChat } from '@/features/whatsapp/DealWhatsAppChat';
+import { WhatsAppChatDemo } from '@/features/whatsapp/WhatsAppChatDemo';
 import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
 import { Contact, Deal } from '@/types';
 
@@ -168,7 +169,7 @@ const AvatarCircle: React.FC<{ name: string; src?: string; size?: string }> = ({
   )
 );
 
-export const ChatsPage: React.FC = () => {
+export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = false }) => {
   const { contacts, deals, boards, addContact, addDeal } = useCRM();
   // Nomes pro filtro e pro seletor de responsável da conversa
   const { data: orgMembers = [] } = useOrgMembers();
@@ -178,7 +179,14 @@ export const ChatsPage: React.FC = () => {
   const { addToast } = useToast();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [selected, setSelected] = useState<ChatTarget | null>(null);
+  const [selected, setSelectedState] = useState<ChatTarget | null>(null);
+  const [demoOpen, setDemoOpen] = useState(stagingDemo);
+  const [demoStartedAt, setDemoStartedAt] = useState(() => new Date().toISOString());
+  const setSelected = useCallback((target: ChatTarget | null) => {
+    setDemoOpen(false);
+    setSelectedState(target);
+  }, []);
+  const showingDemo = stagingDemo && demoOpen;
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<ChatFilter>('all');
   // Menu da setinha (⌄) em cada conversa — estilo WhatsApp. Guarda a POSIÇÃO
@@ -669,7 +677,7 @@ export const ChatsPage: React.FC = () => {
     const alvo = chatList.find(i => i.contactId === contactId);
     if (alvo) setSelected(alvo);
     window.history.replaceState({}, '', '/chats');
-  }, [searchParams, chatList]);
+  }, [searchParams, chatList, setSelected]);
 
   const labels = useMemo(() => labelsQ.data?.labels ?? [], [labelsQ.data]);
   const labelById = useMemo(() => new Map(labels.map(l => [l.id, l])), [labels]);
@@ -1096,7 +1104,7 @@ export const ChatsPage: React.FC = () => {
           ("AJ Marketing - ...") e cortava antes de chegar na parte que
           identifica o grupo. */}
       <aside
-        className={`${selected ? 'hidden md:flex' : 'flex'} w-full md:w-[var(--chat-list-w)] shrink-0 flex-col border-r border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card`}
+        className={`${selected || showingDemo ? 'hidden md:flex' : 'flex'} w-full md:w-[var(--chat-list-w)] shrink-0 flex-col border-r border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card`}
         style={{ ['--chat-list-w' as string]: `${listWidth}px` }}
       >
         {/* Cabeçalho */}
@@ -1444,6 +1452,14 @@ export const ChatsPage: React.FC = () => {
 
         {/* Lista única: contatos do CRM — com conversa em cima, resto A→Z */}
         <div className="flex-1 min-h-0 overflow-y-auto scrollbar-custom">
+          {stagingDemo && <button type="button" aria-label="Abrir número de teste QR" aria-pressed={showingDemo}
+            onClick={() => { setSelectedState(null); setDemoStartedAt(new Date().toISOString()); setDemoOpen(true); }}
+            className={`w-full flex items-center gap-3 border-b border-emerald-200 p-4 text-left dark:border-emerald-800 ${showingDemo ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'hover:bg-slate-50 dark:hover:bg-white/5'}`}>
+            <AvatarCircle name="Teste QR" />
+            <span className="min-w-0 flex-1"><span className="block font-bold text-slate-900 dark:text-white">Número de teste · QR</span>
+              <span className="mt-1 block text-xs font-semibold text-emerald-700 dark:text-emerald-300">SIMULADO · SEM ENVIO REAL</span>
+              <span className="mt-1 block text-sm text-slate-500 dark:text-slate-400">Texto, imagens e edição liberados para teste</span></span>
+          </button>}
           {chatList.length === 0 && (
             <div className="text-center py-10 px-6 text-slate-400">
               <Users size={28} className="mx-auto mb-2 opacity-40" />
@@ -1674,8 +1690,13 @@ export const ChatsPage: React.FC = () => {
       </div>
 
       {/* ============ COLUNA DIREITA: chat ============ */}
-      <section className={`${selected ? 'flex' : 'hidden md:flex'} flex-1 min-w-0 flex-col bg-slate-50/40 dark:bg-black/10`}>
-        {selected ? (
+      <section className={`${selected || showingDemo ? 'flex' : 'hidden md:flex'} flex-1 min-w-0 flex-col bg-slate-50/40 dark:bg-black/10`}>
+        {showingDemo ? <>
+          <div className="md:hidden shrink-0 border-b border-slate-200 p-2 dark:border-white/10">
+            <button type="button" onClick={() => setDemoOpen(false)} className="inline-flex items-center gap-2 p-1 text-sm"><ArrowLeft size={16} /> Contatos</button>
+          </div>
+          <WhatsAppChatDemo key={demoStartedAt} startedAt={demoStartedAt} embedded />
+        </> : selected ? (
           <>
             {/* Voltar (só mobile — no desktop a lista fica sempre visível) */}
             <div className="md:hidden shrink-0 px-2 py-1.5 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card">

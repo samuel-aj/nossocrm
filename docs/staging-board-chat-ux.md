@@ -19,3 +19,11 @@ Largura e rolagem aprovadas. O usuário não conseguiu testar o chat porque o ba
 O usuário escolheu uma demonstração simulada, sem mensagens reais. `/chats/demo` reutiliza `MessageBubble`, `EditMessageModal`, `useChatImageTransfer` e a regra de prazo de edição. Texto, arquivos e alterações permanecem em memória no navegador; não utiliza o hook de envio nem endpoints/storage. Imagens usam URLs blob locais, liberadas no descarte/reinício/desmontagem. A página exige login e só renderiza com `VERCEL_ENV=preview` e `VERCEL_GIT_COMMIT_REF=staging`; em produção retorna 404. Não altera a conexão Meta nem os dados existentes.
 
 A simulação permite validar menu, edição, prévia por colagem/arraste e envio local. Não comprova entrega/edição por um provedor real. Dois testes cobrem as interações com os componentes reais e confirmam ausência de chamadas fetch.
+
+## 16/09 — teste dentro de Chats
+
+O usuário voltou à tela `/chats`, onde a conexão fictícia Meta continuava bloqueada. A simulação agora abre automaticamente nessa tela em STAGING e fica fixada na primeira linha da lista como **Número de teste · QR**, identificada como simulada e sem envio real. É possível alternar para conversas existentes e voltar ao teste; no mobile há o botão Contatos. O teste reaproveita a demonstração local, com texto inicial recente/editável, anexos por colagem/arraste e reinício. A conexão Meta e suas regras permanecem intactas.
+
+A habilitação é calculada no servidor, exclusivamente para preview da branch staging. Em produção o comportamento de Chats permanece igual. Testes de integração verificam abertura automática, menu Editar, alternância e ausência da simulação sem a flag de staging.
+
+Base remota encontrada: `57d8fdf`, que já não continha os commits anteriores `0d79b73` e `00acef9`. Ambos foram reaplicados em cima dessa base, sem conflitos, preservando a correção de conexões duplicadas. Validação: 23 testes específicos, incluindo os de deduplicação; TypeScript e lint dos arquivos modificados.

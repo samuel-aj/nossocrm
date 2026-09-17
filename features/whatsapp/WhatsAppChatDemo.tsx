@@ -16,7 +16,7 @@ function demoMessage(body: string, createdAt: string, id: string): WaChatMessage
 }
 
 /** Local-only fixture: no chat hook, upload, provider, or persistence is called. */
-export function WhatsAppChatDemo({ startedAt }: { startedAt: string }) {
+export function WhatsAppChatDemo({ startedAt, embedded = false }: { startedAt: string; embedded?: boolean }) {
   const [messages, setMessages] = useState<WaChatMessage[]>(() => [demoMessage('Esta é sua mensagem de teste. Abra a seta e escolha Editar.', startedAt, 'demo-initial')]);
   const [now, setNow] = useState(() => Date.parse(startedAt));
   const [text, setText] = useState('');
@@ -56,9 +56,9 @@ export function WhatsAppChatDemo({ startedAt }: { startedAt: string }) {
     setMessages(previous => [...previous, m]); setNow(Date.parse(date)); setText(''); setAttachment(null);
     setNotice('Adicionada apenas nesta demonstração. Nada foi enviado ao WhatsApp.');
   };
-  return <div className="flex h-full min-h-0 flex-col p-3 sm:p-6 text-slate-900 dark:text-white">
+  return <div className={`flex h-full min-h-0 flex-col text-slate-900 dark:text-white ${embedded ? 'p-3' : 'p-3 sm:p-6'}`}>
     <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-      <div><h1 className="text-xl font-bold">Teste do chat</h1><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Demonstração de conexão QR · STAGING</p></div>
+      <div><h1 className="text-xl font-bold">{embedded ? 'Número de teste · QR' : 'Teste do chat'}</h1><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Número comum simulado · sem janela de API</p></div>
       <button type="button" onClick={reset} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-white/10"><RotateCcw size={15} /> Reiniciar teste</button>
     </div>
     <p className="mb-4 rounded-xl border border-purple-200 bg-purple-50 p-3 text-sm text-purple-800 dark:border-purple-500/30 dark:bg-purple-500/10 dark:text-purple-200">

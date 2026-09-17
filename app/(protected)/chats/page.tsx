@@ -1,13 +1,8 @@
-'use client'
+import { ChatsClient } from '@/features/chats/ChatsClient';
 
-import dynamic from 'next/dynamic'
-import { PageLoader } from '@/components/PageLoader'
-
-const ChatsPage = dynamic(
-    () => import('@/features/chats/ChatsPage').then(m => ({ default: m.ChatsPage })),
-    { loading: () => <PageLoader />, ssr: false }
-)
+export const dynamic = 'force-dynamic';
 
 export default function Chats() {
-    return <ChatsPage />
+    const stagingDemo = process.env.VERCEL_ENV === 'preview' && process.env.VERCEL_GIT_COMMIT_REF === 'staging';
+    return <ChatsClient stagingDemo={stagingDemo} />;
 }
