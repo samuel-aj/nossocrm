@@ -750,7 +750,15 @@ export type FlowValidation = { errors: FlowIssue[]; warnings: FlowIssue[] };
  * balões, gatilho solto com o robô desligado, balões fora do fluxo).
  * Ligar o robô (enabled) exige o gatilho ligado a um balão.
  */
-export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowHeader): FlowValidation {
+export type TemplateCheck = {
+  id: string;
+  type: string;
+  meta_status?: string | null;
+  connection_id?: string | null;
+  buttons?: Array<{ type: string; text: string }> | null;
+};
+
+export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowHeader, templates?: TemplateCheck[]): FlowValidation {
   const errors: FlowIssue[] = [];
   const warnings: FlowIssue[] = [];
   const targets = edgeTargets(nodes, edges);
@@ -847,6 +855,22 @@ export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowH
           break;
         case 'send_template': {
           if (!block.data.template_id) fail('escolha o modelo de mensagem');
+          else if (templates) {
+            // Confere com o modelo ATUAL: apagado, não aprovado, de outro número ou botões mudados
+            const live = templates.find((t) => t.id === block.data.template_id);
+            if (!live) fail('o modelo escolhido não existe mais: escolha outro');
+            else {
+              if (live.type === 'whatsapp_api' && live.meta_status !== 'APPROVED') fail('o modelo ainda não foi aprovado pela Meta');
+              if (live.type === 'whatsapp_api' && live.connection_id && (header.connection_ids ?? []).length > 0 && !(header.connection_ids ?? []).includes(live.connection_id)) {
+                fail('o modelo é de um número que este robô não usa');
+              }
+              const liveButtons = (live.buttons ?? []).filter((b) => b.type === 'QUICK_REPLY').map((b) => b.text.trim());
+              const savedButtons = block.data.buttons.map((b) => b.trim());
+              if (liveButtons.join('\u0000') !== savedButtons.join('\u0000')) {
+                fail('os botões do modelo mudaram: abra o bloco e clique em "Atualizar do modelo"');
+              }
+            }
+          }
           const seconds = replySeconds(block.data);
           if (!(block.data.amount >= 1) || seconds < MIN_REPLY_SECONDS || seconds > MAX_REPLY_SECONDS) {
             fail('o prazo de resposta precisa ficar entre 30 segundos e 30 dias');

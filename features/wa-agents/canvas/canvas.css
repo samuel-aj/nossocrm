@@ -193,3 +193,21 @@
   border-color: var(--color-dark-border);
   color: var(--color-text-muted);
 }
+
+/* Posição não permitida para o bloco arrastado */
+.wa-drop-line.wa-drop-line--bad {
+  background-color: var(--color-red-500);
+}
+.wa-drop-hint {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  z-index: 5;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 10px;
+  line-height: 1.3;
+  pointer-events: none;
+  color: #fff;
+  background-color: var(--color-red-500);
+}

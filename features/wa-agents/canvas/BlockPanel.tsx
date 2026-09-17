@@ -6,13 +6,13 @@
  * aqui (o balão só mostra ícone, título e resumo).
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { Plus, Trash2, X } from 'lucide-react';
 import { AgentSelect, StageSelect, TagInput } from '../OutcomesEditor';
 import { LeadChangesEditor, LossFields } from '../LeadEditors';
 import { useWaBotsList } from '../useWaAgents';
 import { BTN_ICON, HELP_CLASS, INPUT_CLASS, newId } from '../ui';
 import { BlockIcon, NODE_META } from './catalog';
+import { TemplateBubble, quickReplyTexts, templateFitsNumbers, useMessageTemplates, type TemplateOption } from './templatePreview';
 import { useCanvasContext } from './context';
 import { bubbleTitle } from './serialize';
 import {
@@ -711,35 +711,22 @@ function WebhookEditor({ block, update }: EditorProps<'webhook'>) {
   );
 }
 
-type TemplateOption = {
-  id: string;
-  name: string;
-  type: 'general' | 'whatsapp_api';
-  meta_status?: string | null;
-  body: string;
-  buttons?: Array<{ type: string; text: string }> | null;
-};
-
 function TemplateEditor({ block, update }: EditorProps<'send_template'>) {
-  const templatesQ = useQuery<{ data: TemplateOption[] }>({
-    queryKey: ['messageTemplates'],
-    queryFn: async () => {
-      const res = await fetch('/api/message-templates', { credentials: 'include' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
-    },
-    staleTime: 60000,
-  });
-  const all = templatesQ.data?.data ?? [];
-  const api = all.filter((t) => t.type === 'whatsapp_api');
-  const general = all.filter((t) => t.type === 'general');
+  const { botConnectionIds } = useCanvasContext();
+  const templatesQ = useMessageTemplates();
+  const all: TemplateOption[] = templatesQ.data?.data ?? [];
+  // Modelo da API oficial pertence a um número: só aparecem os dos números do robô
+  const usable = all.filter((t) => templateFitsNumbers(t, botConnectionIds ?? []) || t.id === block.data.template_id);
+  const api = usable.filter((t) => t.type === 'whatsapp_api');
+  const general = usable.filter((t) => t.type === 'general');
   const chosen = all.find((t) => t.id === block.data.template_id);
   const pick = (id: string) => {
     const t = all.find((x) => x.id === id);
     // Só botões de resposta rápida viram saídas (link/telefone não geram resposta)
-    const buttons = (t?.buttons ?? []).filter((b) => b.type === 'QUICK_REPLY').map((b) => b.text);
+    const buttons = quickReplyTexts(t);
     update({ ...block, data: { ...block.data, template_id: id, template_name: t?.name ?? '', template_body: t?.body ?? '', buttons } });
   };
+  const buttonsChanged = !!chosen && quickReplyTexts(chosen).join('\u0000') !== block.data.buttons.join('\u0000');
   const statusLabel = (status: string | null | undefined) =>
     status === 'APPROVED' ? '' : status === 'REJECTED' ? ' (rejeitado pela Meta)' : ' (aguardando aprovação)';
   return (
@@ -779,26 +766,27 @@ function TemplateEditor({ block, update }: EditorProps<'send_template'>) {
       {!templatesQ.isLoading && all.length === 0 ? (
         <p className={HELP_CLASS}>Nenhum modelo cadastrado. Crie em Configurações → Modelos.</p>
       ) : null}
+      {block.data.template_id && templatesQ.data && !chosen ? (
+        <p className="rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-900/20 px-2 py-1.5 text-xs text-red-700 dark:text-red-300">
+          O modelo "{block.data.template_name || 'escolhido'}" não existe mais. Escolha outro.
+        </p>
+      ) : null}
       {chosen ? (
-        <div className="mt-2 rounded-2xl rounded-tl-md bg-[#d9fdd3] dark:bg-[#005c4b] px-3 py-2 text-sm leading-snug text-slate-900 dark:text-white whitespace-pre-wrap">
-          {chosen.body}
+        <div className="mt-2">
+          <p className="mb-1 text-[11px] text-slate-500 dark:text-slate-400">Prévia (variáveis com dados de exemplo)</p>
+          <TemplateBubble body={chosen.body} buttons={chosen.buttons ?? []} />
+        </div>
+      ) : block.data.template_body ? (
+        <div className="mt-2">
+          <TemplateBubble body={block.data.template_body} buttons={block.data.buttons.map((text) => ({ type: 'QUICK_REPLY', text }))} />
         </div>
       ) : null}
-      {chosen && (chosen.buttons ?? []).length > 0 ? (
-        <div className="mt-1.5 flex flex-wrap gap-1">
-          {(chosen.buttons ?? []).map((b, i) => (
-            <span
-              key={i}
-              className={`px-2 py-0.5 rounded-full text-xs border ${
-                b.type === 'QUICK_REPLY'
-                  ? 'border-emerald-300 text-emerald-700 dark:border-emerald-500/50 dark:text-emerald-300'
-                  : 'border-slate-300 text-slate-500 dark:border-white/20 dark:text-slate-400'
-              }`}
-            >
-              {b.text}
-              {b.type === 'QUICK_REPLY' ? '' : b.type === 'URL' ? ' (link)' : ' (telefone)'}
-            </span>
-          ))}
+      {buttonsChanged ? (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-900/20 px-2 py-1.5 text-xs text-amber-800 dark:text-amber-200">
+          <span className="flex-1">Os botões deste modelo mudaram desde que ele foi escolhido.</span>
+          <button type="button" className="font-semibold underline" onClick={() => chosen && pick(chosen.id)}>
+            Atualizar do modelo
+          </button>
         </div>
       ) : null}
       {chosen && block.data.buttons.length > 0 ? (

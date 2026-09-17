@@ -8,6 +8,7 @@
 import { createContext, useContext } from 'react';
 import type { WaAgentListItem, WaAgentOptions } from '../useWaAgents';
 import type { BlockRef, StepType } from './types';
+import type { TemplateOption } from './templatePreview';
 
 /** Ações do editor disponíveis para os nós (referência estável). */
 export type CanvasActions = {
@@ -17,6 +18,8 @@ export type CanvasActions = {
   addBlock: (bubbleId: string, type: StepType, index?: number) => void;
   /** Move um bloco (dentro do mesmo balão ou para outro) para a posição `index` do balão de destino. */
   moveBlock: (from: BlockRef, toBubbleId: string, index: number) => void;
+  /** Tira o bloco do balão e cria um balão novo com ele na posição do quadro. */
+  detachBlock: (from: BlockRef, position: { x: number; y: number }) => void;
   removeBlock: (ref: BlockRef) => void;
   renameBubble: (bubbleId: string, name: string) => void;
   duplicateBubbles: (ids: string[]) => void;
@@ -40,6 +43,10 @@ export type CanvasContextValue = {
   issues: CanvasIssues;
   /** Ids de aresta ("origem__saída") que têm ligação: a saída sem ligação é marcada no balão. */
   connected: ReadonlySet<string>;
+  /** Modelos de mensagem atuais (undefined enquanto carrega): prévia e validação ao vivo */
+  templates?: TemplateOption[];
+  /** Números escolhidos no robô (filtra o gatilho e os modelos da API oficial) */
+  botConnectionIds?: string[];
 };
 
 const noop = () => {};
@@ -50,6 +57,7 @@ export const NOOP_ACTIONS: CanvasActions = {
   selectBlock: noop,
   addBlock: noop,
   moveBlock: noop,
+  detachBlock: noop,
   removeBlock: noop,
   renameBubble: noop,
   duplicateBubbles: noop,

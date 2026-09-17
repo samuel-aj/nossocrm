@@ -40,6 +40,8 @@ import { HELP_CLASS, INPUT_CLASS } from '../ui';
 import { BlockCatalog, BlockIcon, NODE_META, toneClass } from './catalog';
 import { useCanvasContext, type IssueSummary } from './context';
 import { bubbleTitle } from './serialize';
+import { endDragSession, getDragSession, startDragSession } from './dragSession';
+import { quickReplyTexts, templatePlainPreview, type TemplateOption } from './templatePreview';
 import {
   DND_BLOCK_MIME,
   DND_MIME,
@@ -102,7 +104,12 @@ function changesSummary(changes: Array<{ field: string; key: string; mode: strin
 }
 
 /** Resumo curto de um bloco, mostrado dentro do balão. */
-export function blockSummary(block: Block, options: WaAgentOptions | undefined, agents: WaAgentListItem[]): string {
+export function blockSummary(
+  block: Block,
+  options: WaAgentOptions | undefined,
+  agents: WaAgentListItem[],
+  templates?: TemplateOption[]
+): string {
   switch (block.type) {
     case 'send_text': {
       const text = block.data.text.trim() || 'Sem texto ainda';
@@ -110,10 +117,13 @@ export function blockSummary(block: Block, options: WaAgentOptions | undefined, 
 ${text}` : text;
     }
     case 'send_template': {
-      const name = block.data.template_name.trim() || (block.data.template_id ? 'Modelo escolhido' : 'Escolha o modelo');
-      const n = block.data.buttons.length;
+      // Modelo ATUAL quando a lista já carregou (a cópia salva no bloco pode estar velha)
+      const live = templates?.find((t) => t.id === block.data.template_id);
+      if (templates && block.data.template_id && !live) return `${block.data.template_name || 'Modelo'} (não existe mais)`;
+      const name = live?.name || block.data.template_name.trim() || (block.data.template_id ? 'Modelo escolhido' : 'Escolha o modelo');
+      const n = live ? quickReplyTexts(live).length : block.data.buttons.length;
       const head = `${n > 0 ? `${name} · ${n} ${n === 1 ? 'botão' : 'botões'}` : name} · aguarda ${durationText(block.data.amount, block.data.unit)}`;
-      const body = block.data.template_body.replace(/\s+/g, ' ').trim();
+      const body = templatePlainPreview(live?.body ?? block.data.template_body).replace(/\s+/g, ' ').trim();
       return body ? `${head}\n${body.length > 220 ? `${body.slice(0, 220)}…` : body}` : head;
     }
     case 'wait':
@@ -301,7 +311,7 @@ function MenuItem({
 
 function TriggerNodeView({ id, data, selected }: NodeProps<TriggerNode>) {
   const { updateNodeData } = useReactFlow<FlowNode, FlowEdge>();
-  const { options, issues, connected } = useCanvasContext();
+  const { options, issues, connected, botConnectionIds } = useCanvasContext();
   const boards = options?.boards ?? [];
   const board = boards.find((b) => b.id === data.board_id) ?? null;
   const set = (patch: Partial<TriggerData>) => updateNodeData(id, patch);
@@ -393,7 +403,9 @@ function TriggerNodeView({ id, data, selected }: NodeProps<TriggerNode>) {
             onChange={(e) => set({ connection_id: e.target.value })}
           >
             <option value="">Número que inicia: o primeiro do robô</option>
-            {(options?.connections ?? []).map((c) => (
+            {(options?.connections ?? [])
+              .filter((c) => (botConnectionIds ?? []).length === 0 || (botConnectionIds ?? []).includes(c.id) || c.id === data.connection_id)
+              .map((c) => (
               <option key={c.id} value={c.id}>
                 Inicia por {c.label}
                 {c.status === 'connected' ? '' : ' (desconectado)'}
@@ -412,18 +424,26 @@ function TriggerNodeView({ id, data, selected }: NodeProps<TriggerNode>) {
 
 // ---------------------------------------------------------------- Balão
 
-type DropTarget = 'bubble' | number | null;
+type DropTarget = number | null;
 
 function acceptsDrop(e: React.DragEvent): boolean {
   const types = e.dataTransfer.types;
   return types.includes(DND_MIME) || types.includes(DND_BLOCK_MIME);
 }
 
-/** Índice de inserção (antes ou depois da linha) pela posição vertical do mouse. */
-function insertionIndex(e: React.DragEvent, el: HTMLElement | null, index: number): number {
-  if (!el) return index + 1;
-  const rect = el.getBoundingClientRect();
-  return e.clientY < rect.top + rect.height / 2 ? index : index + 1;
+/**
+ * Índice de inserção pela posição vertical do mouse sobre as linhas do balão.
+ * Vale também nos espaços entre as linhas e no cabeçalho/rodapé (antes, soltar
+ * no espaço entre dois blocos jogava o bloco para o fim do balão).
+ */
+function insertionIndexAt(list: HTMLElement | null, clientY: number, count: number): number {
+  if (!list) return count;
+  const rows = Array.from(list.querySelectorAll<HTMLElement>(':scope > li[data-block-row]'));
+  for (let i = 0; i < rows.length; i++) {
+    const rect = rows[i].getBoundingClientRect();
+    if (clientY < rect.top + rect.height / 2) return i;
+  }
+  return rows.length;
 }
 
 function BlockRow({
@@ -435,8 +455,7 @@ function BlockRow({
   issue,
   summary,
   dropIndex,
-  onDragOverRow,
-  onDropRow,
+  dropBad,
 }: {
   bubbleId: string;
   block: Block;
@@ -446,8 +465,7 @@ function BlockRow({
   issue: IssueSummary | undefined;
   summary: string;
   dropIndex: DropTarget;
-  onDragOverRow: (index: number) => void;
-  onDropRow: (e: React.DragEvent, index: number) => void;
+  dropBad: boolean;
 }) {
   const { actions, connected } = useCanvasContext();
   const rowRef = useRef<HTMLLIElement>(null);
@@ -476,27 +494,18 @@ function BlockRow({
           actions.selectBlock(ref);
         }
       }}
-      onDragOver={(e) => {
-        if (!acceptsDrop(e)) return;
-        e.preventDefault();
-        e.stopPropagation();
-        onDragOverRow(insertionIndex(e, rowRef.current, index));
-      }}
-      onDrop={(e) => {
-        if (!acceptsDrop(e)) return;
-        e.preventDefault();
-        e.stopPropagation();
-        onDropRow(e, insertionIndex(e, rowRef.current, index));
-      }}
+      data-block-row=""
       tabIndex={0}
       role="button"
       aria-pressed={selected}
       aria-label={`${label}: ${summary}`}
     >
-      {dropIndex === index ? <span className="wa-drop-line -top-1" aria-hidden="true" /> : null}
-      {isLast && dropIndex === index + 1 ? <span className="wa-drop-line -bottom-1" aria-hidden="true" /> : null}
+      {dropIndex === index ? <span className={`wa-drop-line -top-1 ${dropBad ? 'wa-drop-line--bad' : ''}`} aria-hidden="true" /> : null}
+      {isLast && dropIndex === index + 1 ? (
+        <span className={`wa-drop-line -bottom-1 ${dropBad ? 'wa-drop-line--bad' : ''}`} aria-hidden="true" />
+      ) : null}
       <span
-        className="nodrag wa-block-grip mt-1 shrink-0 text-slate-300 hover:text-slate-500 dark:text-slate-600 dark:hover:text-slate-300 cursor-grab active:cursor-grabbing"
+        className="nodrag wa-block-grip -ml-0.5 mt-0.5 shrink-0 rounded p-0.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:text-slate-500 dark:hover:text-slate-200 dark:hover:bg-white/10 cursor-grab active:cursor-grabbing"
         draggable
         onClick={(e) => e.stopPropagation()}
         onDragStart={(e) => {
@@ -504,11 +513,13 @@ function BlockRow({
           e.dataTransfer.setData(DND_BLOCK_MIME, JSON.stringify(ref));
           e.dataTransfer.effectAllowed = 'move';
           if (rowRef.current) e.dataTransfer.setDragImage(rowRef.current, 16, 16);
+          startDragSession({ kind: 'block', ref, type: block.type });
         }}
-        title="Arraste para reordenar ou levar a outro balão"
+        onDragEnd={endDragSession}
+        title="Arraste para reordenar, levar a outro balão ou soltar no quadro para criar um balão"
         aria-label={`Arrastar o bloco ${label}`}
       >
-        <GripVertical size={12} aria-hidden="true" />
+        <GripVertical size={16} aria-hidden="true" />
       </span>
       <BlockIcon type={block.type} />
       <div className="min-w-0 flex-1">
@@ -621,7 +632,7 @@ function BlockRow({
 }
 
 function BubbleNodeView({ id, data, selected }: NodeProps<BubbleNode>) {
-  const { actions, issues, connected, selectedBlock, options, agents } = useCanvasContext();
+  const { actions, issues, connected, selectedBlock, options, agents, templates } = useCanvasContext();
   const updateNodeInternals = useUpdateNodeInternals();
   const blocks = data.blocks;
   const types = blocks.map((b) => b.type);
@@ -639,6 +650,8 @@ function BubbleNodeView({ id, data, selected }: NodeProps<BubbleNode>) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [drop, setDrop] = useState<DropTarget>(null);
+  const [dropProblem, setDropProblem] = useState<string | null>(null);
+  const listRef = useRef<HTMLOListElement>(null);
   const menuRef = useDismiss(menuOpen, () => setMenuOpen(false));
   const addRef = useDismiss(addOpen, () => setAddOpen(false));
 
@@ -659,8 +672,23 @@ function BubbleNodeView({ id, data, selected }: NodeProps<BubbleNode>) {
     if (draftName.trim() !== data.name.trim()) actions.renameBubble(id, draftName.trim().slice(0, 80));
   };
 
+  /** Motivo de a posição não servir para o que está sendo arrastado (null = pode soltar). */
+  const problemAt = (index: number): string | null => {
+    const session = getDragSession();
+    if (!session) return null;
+    if (session.kind === 'palette') return placementProblem(types, session.type, index);
+    const from = session.ref.bubbleId === id ? blocks.findIndex((b) => b.id === session.ref.blockId) : -1;
+    if (from >= 0) {
+      if (index === from || index === from + 1) return null; // mesmo lugar
+      return moveProblem(types, from, index);
+    }
+    return placementProblem(types, session.type, index);
+  };
+
   const handleDrop = (e: React.DragEvent, index: number) => {
     setDrop(null);
+    setDropProblem(null);
+    endDragSession();
     const type = e.dataTransfer.getData(DND_MIME);
     if (type && isStepType(type)) {
       actions.addBlock(id, type, index);
@@ -684,21 +712,28 @@ function BubbleNodeView({ id, data, selected }: NodeProps<BubbleNode>) {
           : hasError
             ? 'border-red-400 dark:border-red-500/60'
             : 'border-slate-200 dark:border-white/10'
-      } ${drop === 'bubble' ? 'ring-2 ring-emerald-400/70' : ''}`}
+      } ${drop !== null ? (dropProblem ? 'ring-2 ring-red-400/70' : 'ring-2 ring-emerald-400/70') : ''}`}
       onDragOver={(e) => {
         if (!acceptsDrop(e)) return;
         e.preventDefault();
-        e.dataTransfer.dropEffect = e.dataTransfer.types.includes(DND_BLOCK_MIME) ? 'move' : 'copy';
-        setDrop('bubble');
+        e.stopPropagation();
+        const index = insertionIndexAt(listRef.current, e.clientY, blocks.length);
+        const problem = problemAt(index);
+        e.dataTransfer.dropEffect = problem ? 'none' : e.dataTransfer.types.includes(DND_BLOCK_MIME) ? 'move' : 'copy';
+        if (index !== drop) setDrop(index);
+        if (problem !== dropProblem) setDropProblem(problem);
       }}
       onDragLeave={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDrop(null);
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+          setDrop(null);
+          setDropProblem(null);
+        }
       }}
       onDrop={(e) => {
         if (!acceptsDrop(e)) return;
         e.preventDefault();
         e.stopPropagation();
-        handleDrop(e, blocks.length);
+        handleDrop(e, insertionIndexAt(listRef.current, e.clientY, blocks.length));
       }}
       data-bubble-id={id}
     >
@@ -788,7 +823,12 @@ function BubbleNodeView({ id, data, selected }: NodeProps<BubbleNode>) {
         </div>
       </div>
 
-      <ol className="p-2 space-y-1.5" aria-label={`Blocos do balão ${title}`}>
+      <ol ref={listRef} className="relative p-2 space-y-1.5" aria-label={`Blocos do balão ${title}`}>
+        {drop !== null && dropProblem ? (
+          <li className="wa-drop-hint -top-5" role="status">
+            {dropProblem}
+          </li>
+        ) : null}
         {blocks.map((block, index) => (
           <BlockRow
             key={block.id}
@@ -798,10 +838,9 @@ function BubbleNodeView({ id, data, selected }: NodeProps<BubbleNode>) {
             types={types}
             selected={selectedBlock?.bubbleId === id && selectedBlock.blockId === block.id}
             issue={issues.byBlock.get(block.id)}
-            summary={blockSummary(block, options, agents)}
+            summary={blockSummary(block, options, agents, templates)}
             dropIndex={drop}
-            onDragOverRow={(i) => setDrop(i)}
-            onDropRow={(e, i) => handleDrop(e, i)}
+            dropBad={!!dropProblem}
           />
         ))}
         {blocks.length === 0 ? (

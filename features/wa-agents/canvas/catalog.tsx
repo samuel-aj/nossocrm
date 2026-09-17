@@ -25,6 +25,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { DND_MIME, STEP_LABELS, STEP_TYPES, type StepType } from './types';
+import { endDragSession, startDragSession } from './dragSession';
 
 export type NodeTone = 'amber' | 'green' | 'sky' | 'blue' | 'purple' | 'pink' | 'orange' | 'slate' | 'red';
 
@@ -167,7 +168,9 @@ export function BlockCatalog({
             onDragStart={(e) => {
               e.dataTransfer.setData(DND_MIME, type);
               e.dataTransfer.effectAllowed = 'copy';
+              startDragSession({ kind: 'palette', type });
             }}
+            onDragEnd={endDragSession}
             onClick={() => {
               if (!disabledReason) onPick(type);
             }}

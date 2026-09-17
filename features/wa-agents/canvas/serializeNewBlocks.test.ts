@@ -120,4 +120,27 @@ describe('blocos novos: salvar e reabrir sem perder nada', () => {
     expect(text).toContain('escolha o pipeline e a etapa');
     expect(text).toContain('informe o valor');
   });
+
+  it('modelo apagado, não aprovado ou com botões mudados impede salvar', () => {
+    const tpl = createBlock('send_template', 't');
+    if (tpl.type === 'send_template') {
+      tpl.data = { ...tpl.data, template_id: 'tpl-1', template_name: 'Boas-vindas', buttons: ['Sim', 'Não'] };
+    }
+    const nodes: FlowNode[] = [trigger(), createBubble([tpl], { x: 0, y: 0 }, '', 'g1')];
+    const edges = [edge(TRIGGER_NODE_ID, HANDLE_NEXT, 'g1')];
+    const msgs = (templates: Parameters<typeof validateFlow>[3]) =>
+      validateFlow(nodes, edges, HEADER, templates).errors.map((e) => e.message).join(' | ');
+    expect(msgs([])).toContain('não existe mais');
+    expect(msgs([{ id: 'tpl-1', type: 'whatsapp_api', meta_status: 'PENDING', buttons: [] }])).toContain('não foi aprovado');
+    expect(
+      msgs([{ id: 'tpl-1', type: 'general', buttons: [{ type: 'QUICK_REPLY', text: 'Sim' }] }])
+    ).toContain('os botões do modelo mudaram');
+    expect(
+      msgs([
+        { id: 'tpl-1', type: 'general', buttons: [{ type: 'QUICK_REPLY', text: 'Sim' }, { type: 'QUICK_REPLY', text: 'Não' }, { type: 'URL', text: 'Site' }] },
+      ])
+    ).not.toContain('modelo');
+    // lista ainda carregando: não acusa nada
+    expect(msgs(undefined)).not.toContain('modelo');
+  });
 });

@@ -29,7 +29,8 @@ import {
 import { CircleHelp, Map as MapIcon, Maximize, Plus } from 'lucide-react';
 import { edgeTypes } from './edges';
 import { minimapColor, nodeTypes } from './nodes';
-import { DND_MIME, NODE_WIDTH, TRIGGER_NODE_ID, isStepType, type FlowEdge, type FlowNode, type StepType } from './types';
+import { DND_BLOCK_MIME, DND_MIME, NODE_WIDTH, TRIGGER_NODE_ID, isStepType, type BlockRef, type FlowEdge, type FlowNode, type StepType } from './types';
+import { endDragSession } from './dragSession';
 
 export type BotCanvasProps = {
   nodes: FlowNode[];
@@ -39,6 +40,8 @@ export type BotCanvasProps = {
   onConnect: (connection: Connection) => void;
   /** Bloco solto no quadro vazio pela paleta (posição já em coordenadas do quadro): vira um balão novo. */
   onDropStep: (type: StepType, position: XYPosition) => void;
+  /** Bloco existente solto no fundo do quadro: vira um balão novo */
+  onDropBlock: (from: BlockRef, position: XYPosition) => void;
   /** Clique no fundo do quadro (fecha o painel do bloco). */
   onPaneClick: () => void;
   /** Quadro sem balões: mostra o estado vazio com o botão de começar. */
@@ -88,6 +91,7 @@ export function BotCanvas({
   onEdgesChange,
   onConnect,
   onDropStep,
+  onDropBlock,
   onPaneClick,
   empty,
   onQuickStart,
@@ -109,21 +113,35 @@ export function BotCanvas({
   }, [helpOpen]);
 
   const onDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    if (!event.dataTransfer.types.includes(DND_MIME)) return;
+    const types = event.dataTransfer.types;
+    if (!types.includes(DND_MIME) && !types.includes(DND_BLOCK_MIME)) return;
     event.preventDefault();
-    event.dataTransfer.dropEffect = 'copy';
+    event.dataTransfer.dropEffect = types.includes(DND_BLOCK_MIME) ? 'move' : 'copy';
   }, []);
 
   // Solto no fundo do quadro (os balões tratam o próprio drop e param a propagação).
   const onDrop = useCallback(
     (event: React.DragEvent<HTMLDivElement>) => {
+      endDragSession();
+      const point = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      const position = { x: Math.round(point.x - NODE_WIDTH / 2), y: Math.round(point.y - 20) };
+      const raw = event.dataTransfer.getData(DND_BLOCK_MIME);
+      if (raw) {
+        event.preventDefault();
+        try {
+          const from = JSON.parse(raw) as BlockRef;
+          if (from && typeof from.bubbleId === 'string' && typeof from.blockId === 'string') onDropBlock(from, position);
+        } catch {
+          // conteúdo inesperado no arrasto: ignora
+        }
+        return;
+      }
       const type = event.dataTransfer.getData(DND_MIME);
       if (!isStepType(type)) return;
       event.preventDefault();
-      const point = screenToFlowPosition({ x: event.clientX, y: event.clientY });
-      onDropStep(type, { x: Math.round(point.x - NODE_WIDTH / 2), y: Math.round(point.y - 20) });
+      onDropStep(type, position);
     },
-    [onDropStep, screenToFlowPosition]
+    [onDropBlock, onDropStep, screenToFlowPosition]
   );
 
   // O gatilho nunca é apagado, nem em seleção múltipla.
