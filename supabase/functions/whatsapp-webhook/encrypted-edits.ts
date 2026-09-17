@@ -19,11 +19,27 @@ export function encryptedEdit(item: unknown): Obj | null {
 }
 
 function bytes(value: unknown): Uint8Array<ArrayBuffer> {
-  if (typeof value === 'string') return Uint8Array.from(atob(value), c => c.charCodeAt(0));
-  if (value instanceof Uint8Array) return new Uint8Array(value);
+  if (typeof value === 'string') {
+    if (value.length > 87384) throw new Error('Encrypted edit bytes exceed size limit');
+    return Uint8Array.from(atob(value), c => c.charCodeAt(0));
+  }
+  if (value instanceof Uint8Array) {
+    if (value.length > 65536) throw new Error('Encrypted edit bytes exceed size limit');
+    return new Uint8Array(value);
+  }
   const buffer = object(value);
-  if (Array.isArray(buffer.data)) return Uint8Array.from(buffer.data);
-  throw new Error('Missing encrypted edit bytes');
+  let values: unknown[];
+  if (Array.isArray(value)) values = value;
+  else if (Array.isArray(buffer.data)) values = buffer.data;
+  else {
+    // Evolution's live webhook JSON serializes Uint8Array as indexed objects;
+    // chat/findMessages returns base64 for the same bytes stored by Prisma.
+    const keys = Object.keys(buffer);
+    if (!keys.length || keys.length > 65536 || !keys.every((key, index) => key === String(index))) throw new Error('Invalid encrypted edit bytes');
+    values = keys.map(key => buffer[key]);
+  }
+  if (values.length > 65536 || !Array.from(values).every(v => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 255)) throw new Error('Invalid encrypted edit bytes');
+  return Uint8Array.from(values as number[]);
 }
 function jid(value: unknown): string {
   return typeof value === 'string' ? value.replace(/:\d+@/, '@').replace(/@c\.us$/, '@s.whatsapp.net') : '';
