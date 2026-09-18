@@ -32,6 +32,7 @@ import {
   MODAL_BODY_CLASS,
   MODAL_CLOSE_BUTTON_CLASS,
   MODAL_HEADER_CLASS,
+  MODAL_FOOTER_CLASS,
   MODAL_OVERLAY_CLASS,
   MODAL_PANEL_BASE_CLASS,
   MODAL_TITLE_CLASS,
@@ -43,6 +44,8 @@ interface ModalProps {
   onClose: () => void;
   title: string;
   children: React.ReactNode;
+  /** Actions kept visible outside the scrolling body. */
+  footer?: React.ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl';
   /** Optional extra classes for the dialog container */
   className?: string;
@@ -76,6 +79,7 @@ const sizeClasses = {
   onClose, 
   title, 
   children, 
+  footer,
   size = 'md',
   className,
   bodyClassName,
@@ -88,6 +92,7 @@ const sizeClasses = {
   onClose, 
   title, 
   children, 
+  footer,
   size = 'md',
   className,
   bodyClassName,
@@ -103,6 +108,7 @@ export const Modal: React.FC<ModalProps> = ({
   onClose, 
   title, 
   children, 
+  footer,
   size = 'md',
   className,
   bodyClassName,
@@ -169,6 +175,7 @@ export const Modal: React.FC<ModalProps> = ({
           </button>
         </div>
         <div className={cn(MODAL_BODY_CLASS, bodyClassName)}>{children}</div>
+        {footer && <div className={MODAL_FOOTER_CLASS}>{footer}</div>}
       </div>
     </div>
   );
