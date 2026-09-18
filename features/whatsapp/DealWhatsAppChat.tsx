@@ -1112,6 +1112,8 @@ export type ComposerMode = 'message' | 'note' | 'activity';
 export type ChatTimelineProps = {
   entries: ChatTimelineEntry[];
   headerExtra?: React.ReactNode;
+  /** Depois da lupa de pesquisa (ex.: fechar o lead) */
+  headerEnd?: React.ReactNode;
   aboveComposer?: React.ReactNode;
   composerMode: ComposerMode;
   onComposerModeChange: (mode: ComposerMode) => void;
@@ -2204,6 +2206,7 @@ export function DealWhatsAppChat({
           >
             <Search size={16} />
           </button>
+          {timeline?.headerEnd}
         </div>
       </div>
 

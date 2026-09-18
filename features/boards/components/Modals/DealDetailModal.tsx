@@ -1871,6 +1871,10 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                 >
                   <BrainCircuit size={14} /> <span className="max-lg:sr-only">IA Insights</span>
                 </button>
+                </>
+              ),
+              headerEnd: (
+                <>
                 {!isMobile && (
                   <button
                     type="button"
