@@ -11,11 +11,12 @@ import { JoinClient } from './JoinClient'
 }`.
  * @returns {Element} Retorna um valor do tipo `Element`.
  */
-export default function JoinPage({
-  searchParams,
+export default async function JoinPage({
+  searchParams: pendingSearchParams,
 }: {
-  searchParams?: { token?: string | string[] }
+  searchParams?: Promise<{ token?: string | string[] }>
 }) {
+  const searchParams = await pendingSearchParams;
   const token =
     typeof searchParams?.token === 'string'
       ? searchParams.token

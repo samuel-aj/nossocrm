@@ -21,11 +21,12 @@ function toQueryString(searchParams: SearchParams | undefined) {
  * Alias route: `/pipeline` (legacy) -> `/boards` (current).
  * Preserves search params like `status`, `view`, `deal`, etc.
  */
-export default function PipelinePage({
-  searchParams,
+export default async function PipelinePage({
+  searchParams: pendingSearchParams,
 }: {
-  searchParams?: SearchParams;
+  searchParams?: Promise<SearchParams>;
 }) {
+  const searchParams = await pendingSearchParams;
   const qs = toQueryString(searchParams);
   redirect(qs ? `/boards?${qs}` : '/boards');
 }

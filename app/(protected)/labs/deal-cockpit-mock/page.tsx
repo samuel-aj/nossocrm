@@ -6,11 +6,12 @@ import DealCockpitClient from '@/features/deals/cockpit/DealCockpitClient';
  * Cockpit mock (high-density, everything in one place)
  * Access at: /labs/deal-cockpit-mock
  */
-export default function DealCockpitMockPage({
-  searchParams,
+export default async function DealCockpitMockPage({
+  searchParams: pendingSearchParams,
 }: {
-  searchParams?: { dealId?: string; mode?: string };
+  searchParams?: Promise<{ dealId?: string; mode?: string }>;
 }) {
+  const searchParams = await pendingSearchParams;
   // Dev-only. Em dev, habilitado por padrão.
   const envFlag = process.env.ALLOW_UI_MOCKS_ROUTE;
   const isEnabled =
