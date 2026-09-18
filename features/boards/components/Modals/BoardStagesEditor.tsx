@@ -22,6 +22,7 @@ import { KebabMenu } from '@/components/ui/KebabMenu';
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/context/ToastContext';
 import type { BoardStage, LifecycleStage } from '@/types';
+import { StageFollowupSection } from './StageFollowupSection';
 
 export const STAGE_COLORS = [
   'bg-blue-500',
@@ -69,6 +70,8 @@ export function BoardStagesEditor({
   const rafRef = useRef<number | null>(null);
 
   useEffect(() => setMounted(true), []);
+  // Etapas que já existem no banco (as criadas agora só existem depois de salvar o funil)
+  const [savedStageIds] = useState(() => new Set(showIds ? stages.map((s) => s.id) : []));
 
   // O pai precisa pausar o foco preso ANTES de o menu/modal receber o foco: o aviso
   // vai no mesmo lote de estado do clique (síncrono) e o efeito só garante consistência.
@@ -223,6 +226,7 @@ export function BoardStagesEditor({
               </button>
             ) : null}
           </div>
+          <StageFollowupSection stageId={current.id} stageSaved={savedStageIds.has(current.id)} />
           <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-100 dark:border-white/5">
             <div className="flex items-center gap-2">
               {showIds ? <CopyId value={current.id} label="ID da etapa" /> : null}

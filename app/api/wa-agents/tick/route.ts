@@ -15,6 +15,7 @@ import { resumeDueConversations } from '@/lib/wa-agents/engine';
 import { processDealStarts } from '@/lib/wa-agents/dealStarts';
 import { processDueBotRuns } from '@/lib/wa-agents/bots';
 import { processFollowups } from '@/lib/wa-agents/followups';
+import { processStageFollowups } from '@/lib/wa-agents/stageFollowups';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -47,6 +48,11 @@ async function handle(req: Request): Promise<Response> {
       await processFollowups(admin, { limit: 5, deadlineMs });
     } catch (err) {
       console.error('[wa-agents/tick] falha nos follow-ups', err);
+    }
+    try {
+      await processStageFollowups(admin, { limit: 10, deadlineMs });
+    } catch (err) {
+      console.error('[wa-agents/tick] falha nos follow-ups por inatividade da etapa', err);
     }
   });
 

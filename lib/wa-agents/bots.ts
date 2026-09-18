@@ -402,6 +402,35 @@ async function sendBotTemplate(
   return tpl.name;
 }
 
+/**
+ * Envio avulso numa conversa (follow-up por inatividade da etapa), com as mesmas
+ * regras do robô: número conectado, mensagem gravada no chat e réplica nas
+ * outras orgs do mesmo número. Lança em caso de falha.
+ */
+export async function sendTextToConversation(
+  admin: SupabaseClient,
+  input: { organizationId: string; conversationId: string; connection: WaConnectionRow; phone: string; text: string }
+): Promise<void> {
+  const st = { run: { organization_id: input.organizationId, conversation_id: input.conversationId }, log: [], vars: {} } as unknown as RunState;
+  await sendBotText(admin, st, input.connection, input.phone, input.text);
+}
+
+/** Modelo de mensagem avulso numa conversa (mesma lógica do bloco do robô). Devolve o nome do modelo. */
+export async function sendTemplateToConversation(
+  admin: SupabaseClient,
+  input: {
+    organizationId: string;
+    conversationId: string;
+    connection: WaConnectionRow;
+    phone: string;
+    templateId: string;
+    values: Record<string, string | undefined>;
+  }
+): Promise<string> {
+  const st = { run: { organization_id: input.organizationId, conversation_id: input.conversationId }, log: [], vars: {} } as unknown as RunState;
+  return sendBotTemplate(admin, st, input.connection, input.phone, input.templateId, input.values);
+}
+
 // ---------------------------------------------------------------------------
 // Condição (estilo Typebot/Switch): campo · operador · valor, combinados por E/OU
 // ---------------------------------------------------------------------------
