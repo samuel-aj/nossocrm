@@ -211,3 +211,22 @@
   color: #fff;
   background-color: var(--color-red-500);
 }
+
+/* O texto do quadro não entra na seleção de texto da página (Shift + arrastar); campos continuam editáveis */
+.wa-bot-canvas .react-flow__renderer {
+  -webkit-user-select: none;
+  user-select: none;
+}
+.wa-bot-canvas input,
+.wa-bot-canvas textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+/*
+ * Depois da caixa de seleção o React Flow desenha um retângulo em volta dos balões
+ * escolhidos que fica na tela e engole os cliques nos blocos. Os balões selecionados
+ * já têm o próprio destaque e continuam sendo arrastados juntos por qualquer um deles.
+ */
+.wa-bot-canvas .react-flow__nodesselection {
+  display: none;
+}

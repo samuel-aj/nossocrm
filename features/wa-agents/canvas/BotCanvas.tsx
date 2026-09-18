@@ -18,6 +18,7 @@ import {
   Panel,
   ReactFlow,
   useReactFlow,
+  useStoreApi,
   type Connection,
   type DefaultEdgeOptions,
   type Edge,
@@ -100,7 +101,63 @@ export function BotCanvas({
   darkMode,
 }: BotCanvasProps) {
   const { screenToFlowPosition, fitView } = useReactFlow<FlowNode, FlowEdge>();
+  const store = useStoreApi();
   const [helpOpen, setHelpOpen] = useState(false);
+
+  /**
+   * Shift + arrastar = caixa de seleção. A tecla é acompanhada AQUI (e não pelo
+   * `selectionKeyCode` do React Flow) porque a biblioteca ignora o Shift quando
+   * o foco está num campo de texto: com o painel de um bloco aberto, o arrasto
+   * movia o quadro em vez de selecionar, e o navegador ainda estendia a seleção
+   * de texto da página até o ponto clicado.
+   */
+  const [shiftDown, setShiftDown] = useState(false);
+  const cancelBoxSelection = useCallback(() => {
+    const { userSelectionRect, userSelectionActive, resetSelectedElements } = store.getState();
+    if (!userSelectionRect && !userSelectionActive) return false;
+    resetSelectedElements();
+    store.setState({ userSelectionActive: false, userSelectionRect: null, nodesSelectionActive: false });
+    return true;
+  }, [store]);
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') setShiftDown(true);
+      // Esc cancela a caixa em andamento (e não fecha o editor nesse caso)
+      if (e.key === 'Escape' && cancelBoxSelection()) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') setShiftDown(false);
+    };
+    // Janela perdeu o foco (Alt+Tab) no meio do arrasto: sem isto a caixa ficava presa na tela
+    const onBlur = () => {
+      setShiftDown(false);
+      cancelBoxSelection();
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [cancelBoxSelection]);
+
+  // Shift + clique no quadro: tira o foco do campo de texto e impede o navegador de
+  // estender a seleção de texto da página (os eventos de ponteiro seguem normalmente)
+  const onMouseDownCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (!event.shiftKey || event.button !== 0) return;
+    const target = event.target as HTMLElement;
+    if (target.closest('input, textarea, select, [contenteditable="true"]')) return;
+    event.preventDefault();
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active !== document.body && active.matches('input, textarea, select')) active.blur();
+    window.getSelection()?.removeAllRanges();
+    if (!shiftDown) setShiftDown(true);
+  }, [shiftDown]);
   const helpRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -177,6 +234,13 @@ export function BotCanvas({
       maxZoom={1.75}
       deleteKeyCode={DELETE_KEYS}
       multiSelectionKeyCode={MULTI_SELECT_KEYS}
+      // Caixa de seleção controlada pelo Shift acompanhado acima: só começa no FUNDO do
+      // quadro (em cima de um balão o Shift soma à seleção ou arrasta o grupo) e, enquanto
+      // o Shift está apertado, arrastar o fundo não move o quadro
+      selectionKeyCode={null}
+      selectionOnDrag={shiftDown}
+      panOnDrag={!shiftDown}
+      onMouseDownCapture={onMouseDownCapture}
       onBeforeDelete={onBeforeDelete}
       isValidConnection={isValidConnection}
       defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
