@@ -72,7 +72,10 @@ export const FocusTrap: React.FC<FocusTrapProps> = ({
       focusTrapOptions={{
         initialFocus: getInitialFocus(),
         returnFocusOnDeactivate: returnFocus,
-        escapeDeactivates: onEscape ? () => {
+        escapeDeactivates: onEscape ? (e: KeyboardEvent) => {
+          // Popover/editor que trata o próprio Esc (data-esc-local): fecha só ele
+          const target = e?.target as Element | null;
+          if (target?.closest?.('[data-esc-local]')) return false;
           onEscape();
           return false; // Don't deactivate, let parent handle it
         } : true,

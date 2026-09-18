@@ -3,6 +3,7 @@ import { messageEditError, type EditableMessage } from '@/lib/whatsapp/messageEd
 /**
  * GET /api/whatsapp/messages?phone=<telefone>[&connectionId=...]
  * GET /api/whatsapp/messages?conversationId=<id>          (grupos)
+ * &before=<ISO>: página anterior ({ messages, hasMore }), para rolar o histórico.
  * Retorna a conversa de WhatsApp daquele telefone (na org) + as mensagens.
  * Usado pelo chat dentro do card do lead e pela página Chats.
  *
@@ -21,6 +22,8 @@ import { connectionAllowed, filterAllowedConnections, filterConversationsByOwner
 import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
 import { getConversationAiInfo, getConversationBotInfo } from '@/lib/wa-agents/conversation';
 
+const PAGE_SIZE = 300;
+
 const MESSAGE_COLUMNS =
   'id, conversation_id, direction, status, body, media_type, media_mime, media_url, from_phone, to_phone, wa_timestamp, created_at, sent_by, source, error, transcription, quoted_message_id, quoted, forwarded, sender_name, edited_at, original_body, deleted_at, evolution_message_id';
 
@@ -34,16 +37,20 @@ async function loadMessages(
   admin: SupabaseClient,
   convs: Array<{ id: string; connection_id: string | null }>,
   userId: string,
-  connections: Array<{ id: string; provider: string; status: string }>
-): Promise<unknown[]> {
-  if (convs.length === 0) return [];
+  connections: Array<{ id: string; provider: string; status: string }>,
+  opts: { before?: string | null } = {}
+): Promise<{ rows: unknown[]; hasMore: boolean }> {
+  if (convs.length === 0) return { rows: [], hasMore: false };
   const connByConv = new Map(convs.map(c => [c.id, c.connection_id]));
-  const { data } = await admin
+  let msgQ = admin
     .from('wa_messages')
     .select(MESSAGE_COLUMNS)
-    .in('conversation_id', convs.map(c => c.id))
-    .order('created_at', { ascending: false })
-    .limit(300);
+    .in('conversation_id', convs.map(c => c.id));
+  // Página ANTERIOR (rolar para cima no histórico): só o que é mais antigo que a
+  // mensagem mais velha já carregada.
+  if (opts.before) msgQ = msgQ.lt('created_at', opts.before);
+  const { data } = await msgQ.order('created_at', { ascending: false }).limit(PAGE_SIZE);
+  const hasMore = (data?.length ?? 0) === PAGE_SIZE;
   // Linhas SEM conteúdo nenhum (sobras de eventos de protocolo, como fixar
   // mensagem, gravadas antes da correção no webhook): não viram bolha — o
   // chat mostrava "[mensagem não suportada]" e parecia um erro.
@@ -99,14 +106,16 @@ async function loadMessages(
     }
   }
 
-  // Visualizou = leu: zera o contador de não lidas (badge da página Chats)
+  // Visualizou = leu: zera o contador de não lidas (badge da página Chats).
+  // Página antiga não conta como "abriu a conversa".
+  if (opts.before) return { rows, hasMore };
   await admin
     .from('wa_conversations')
     .update({ unread_count: 0 })
     .in('id', convs.map(c => c.id))
     .gt('unread_count', 0);
 
-  return rows;
+  return { rows, hasMore };
 }
 
 export async function GET(req: Request) {
@@ -118,6 +127,8 @@ export async function GET(req: Request) {
   const phone = normalizePhoneE164(url.searchParams.get('phone') || '');
   if (!phone && !conversationId) return json({ error: 'phone é obrigatório' }, 400);
   const connectionId = url.searchParams.get('connectionId');
+  const beforeRaw = url.searchParams.get('before');
+  const before = beforeRaw && !Number.isNaN(Date.parse(beforeRaw)) ? new Date(beforeRaw).toISOString() : null;
 
   // Multi-número: a conexão "padrão" (1ª conectada) mantém o contrato antigo;
   // senders lista os números conectados PERMITIDOS pro seletor de envio.
@@ -176,7 +187,14 @@ export async function GET(req: Request) {
       }
     }
     const groupConn = all.find(c => c.id === group.connection_id) ?? null;
-    const messages = await loadMessages(auth.admin, [{ id: group.id, connection_id: group.connection_id }], auth.user.id, all);
+    const { rows: messages, hasMore } = await loadMessages(
+      auth.admin,
+      [{ id: group.id, connection_id: group.connection_id }],
+      auth.user.id,
+      all,
+      { before }
+    );
+    if (before) return json({ messages, hasMore });
     return json({
       connected: groupConn ? groupConn.status === 'connected' : false,
       hasConnection: !!groupConn,
@@ -198,6 +216,7 @@ export async function GET(req: Request) {
       ai: null,
       bot: null,
       messages,
+      hasMore,
     });
   }
 
@@ -241,7 +260,8 @@ export async function GET(req: Request) {
   const aiConv = convs.find(c => c.ai_status) ?? null;
   const conv = convs.find(c => c.contact_id) ?? convs[0] ?? null;
 
-  const messages = await loadMessages(auth.admin, convs, auth.user.id, all);
+  const { rows: messages, hasMore } = await loadMessages(auth.admin, convs, auth.user.id, all, { before });
+  if (before) return json({ messages, hasMore });
 
   // Janela de 24 h da API oficial (Meta): conta da ÚLTIMA MENSAGEM RECEBIDA do
   // contato, olhando todas as conversas consideradas (visão unificada por
@@ -289,5 +309,6 @@ export async function GET(req: Request) {
     ai,
     bot,
     messages,
+    hasMore,
   });
 }

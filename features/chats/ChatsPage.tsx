@@ -23,6 +23,7 @@ import { FocusTrap } from '@/lib/a11y';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { DealWhatsAppChat } from '@/features/whatsapp/DealWhatsAppChat';
+import { DealStageControl } from '@/features/deals/lead/DealStageControl';
 import { WhatsAppChatDemo } from '@/features/whatsapp/WhatsAppChatDemo';
 import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
 import { Contact, Deal } from '@/types';
@@ -851,14 +852,23 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
 
   // Lead do contato selecionado: prefere um deal ABERTO (nem ganho nem
   // perdido); entre vários, o mais recente. null = "Criar lead" disponível.
-  const selectedDeal = useMemo(() => {
-    if (!selected?.contactId) return null;
+  // Vários negócios do mesmo contato: a barra mostra QUAL está em foco e deixa
+  // trocar (nada muda no negócio errado por escolha automática).
+  const contactDeals = useMemo(() => {
+    if (!selected?.contactId) return [];
     const list = deals.filter(d => d.contactId === selected.contactId);
-    if (list.length === 0) return null;
     const open = list.filter(d => !d.isWon && !d.isLost);
     const pool = open.length ? open : list;
-    return pool.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0];
+    return pool.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   }, [deals, selected?.contactId]);
+  const [pickedDealId, setPickedDealId] = useState<string | null>(null);
+  useEffect(() => {
+    setPickedDealId(null);
+  }, [selected?.contactId]);
+  const selectedDeal = useMemo(
+    () => contactDeals.find(d => d.id === pickedDealId) ?? contactDeals[0] ?? null,
+    [contactDeals, pickedDealId]
+  );
 
 
   const selectedDealBoard = useMemo(
@@ -1721,12 +1731,24 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                 </span>
               ) : selectedDeal ? (
                 <span className="flex items-center gap-2 min-w-0 text-xs text-slate-600 dark:text-slate-300">
-                  <KanbanSquare size={14} className="text-primary-500 shrink-0" />
-                  <span className="font-bold truncate">{selectedDealBoard?.name ?? 'Board'}</span>
-                  <span className="text-slate-300 dark:text-slate-600 shrink-0">•</span>
-                  <span className="inline-flex items-center gap-1.5 min-w-0">
-                    <span className={`w-2 h-2 rounded-full shrink-0 ${selectedDealStage?.color ?? 'bg-slate-400'}`} />
-                    <span className="truncate">{selectedDealStage?.label ?? 'Etapa'}</span>
+                  <KanbanSquare size={14} className="text-primary-500 shrink-0" aria-hidden="true" />
+                  {contactDeals.length > 1 && (
+                    <select
+                      value={selectedDeal.id}
+                      onChange={e => setPickedDealId(e.target.value)}
+                      aria-label="Negócio deste contato que será alterado"
+                      title={`Este contato tem ${contactDeals.length} negócios${contactDeals.some(d => !d.isWon && !d.isLost) ? ' abertos' : ''}. Escolha qual alterar.`}
+                      className="max-w-[160px] truncate rounded-lg border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-1 text-xs font-semibold text-amber-800 dark:text-amber-200 outline-none focus:ring-2 focus:ring-primary-500"
+                    >
+                      {contactDeals.map(d => (
+                        <option key={d.id} value={d.id}>
+                          {d.title}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <span className="min-w-0 w-[260px] max-w-full">
+                    <DealStageControl deal={selectedDeal} size="sm" />
                   </span>
                 </span>
               ) : selected.contactId ? (

@@ -1,4 +1,5 @@
 import { createStaticAdminClient } from '@/lib/supabase/server';
+import { withActor } from '@/lib/supabase/actorClient';
 import { normalizeEmail, normalizePhone } from '@/lib/public-api/sanitize';
 import { resolveBoardId } from '@/lib/public-api/resolve';
 import { sanitizeUUID } from '@/lib/supabase/utils';
@@ -14,7 +15,7 @@ async function resolveStageIdForBoard(opts: {
   toStageId?: string | null;
   toStageLabel?: string | null;
 }) {
-  const sb = createStaticAdminClient();
+  const sb = withActor(createStaticAdminClient(), { kind: 'integration' });
   const idFromBody = sanitizeUUID(opts.toStageId || null);
   const label = (opts.toStageLabel || '').trim();
 
@@ -55,7 +56,7 @@ export async function moveStageByDealId(opts: {
   /** Categoria da perda (qualified/disqualified); mesma regra do motivo */
   lossCategory?: 'qualified' | 'disqualified' | null;
 }) {
-  const sb = createStaticAdminClient();
+  const sb = withActor(createStaticAdminClient(), { kind: 'integration' });
   const dealId = sanitizeUUID(opts.dealId);
   if (!dealId) return { ok: false as const, status: 422, body: { error: 'Invalid deal id', code: 'VALIDATION_ERROR' } };
 
@@ -144,7 +145,7 @@ export async function moveStageByIdentity(opts: {
   const email = normalizeEmail(opts.email);
   if (!phone && !email) return { ok: false as const, status: 422, body: { error: 'Invalid phone/email', code: 'VALIDATION_ERROR' } };
 
-  const sb = createStaticAdminClient();
+  const sb = withActor(createStaticAdminClient(), { kind: 'integration' });
   const { data: boardCfg, error: boardCfgError } = await sb
     .from('boards')
     .select('won_stage_id,lost_stage_id')

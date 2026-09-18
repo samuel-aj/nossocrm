@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { authPublicApi } from '@/lib/public-api/auth';
 import { createStaticAdminClient } from '@/lib/supabase/server';
+import { withActor } from '@/lib/supabase/actorClient';
 import { isValidUUID, sanitizeUUID } from '@/lib/supabase/utils';
 import { normalizeText } from '@/lib/public-api/sanitize';
 import { moveStageByDealId } from '@/lib/public-api/dealsMoveStage';
@@ -82,7 +83,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ dealId: str
     return NextResponse.json({ error: 'Invalid deal id', code: 'VALIDATION_ERROR' }, { status: 422 });
   }
 
-  const sb = createStaticAdminClient();
+  const sb = withActor(createStaticAdminClient(), { kind: 'integration' });
   const { data, error } = await sb
     .from('deals')
     .select('id,title,description,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id,tags,custom_fields,probability,priority')
@@ -142,7 +143,7 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
     );
   }
 
-  const sb = createStaticAdminClient();
+  const sb = withActor(createStaticAdminClient(), { kind: 'integration' });
 
   // Always fetch the current row to (a) validate ownership up-front with a
   // clear 404 and (b) compute merged tags/custom_fields when the caller asks

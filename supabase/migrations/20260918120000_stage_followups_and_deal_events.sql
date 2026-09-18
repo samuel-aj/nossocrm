@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS public.deal_events (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS deal_events_deal_idx ON public.deal_events (deal_id, created_at DESC);
+-- início do histórico na organização (antes disso a linha do tempo usa os registros antigos)
+CREATE INDEX IF NOT EXISTS deal_events_org_idx ON public.deal_events (organization_id, created_at);
 
 ALTER TABLE public.stage_followup_rules ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.deal_followup_schedules ENABLE ROW LEVEL SECURITY;
@@ -94,24 +96,29 @@ DECLARE
   h_id text;
 BEGIN
   BEGIN
-    headers := nullif(current_setting('request.headers', true), '')::jsonb;
-  EXCEPTION WHEN OTHERS THEN headers := NULL;
-  END;
-  h_kind := headers ->> 'x-crm-actor-kind';
-  h_id := headers ->> 'x-crm-actor-id';
-  IF h_kind IN ('user', 'bot', 'agent', 'integration', 'system') THEN
-    kind := h_kind;
-    id := CASE WHEN h_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN h_id::uuid END;
-    RETURN;
-  END IF;
-  BEGIN
     claims := nullif(current_setting('request.jwt.claims', true), '')::jsonb;
   EXCEPTION WHEN OTHERS THEN claims := NULL;
   END;
+  -- Usuário logado: é sempre ele (o cabeçalho é ignorado, senão daria para se
+  -- passar por robô mandando o cabeçalho pelo navegador).
   IF claims ->> 'role' = 'authenticated' AND (claims ->> 'sub') IS NOT NULL THEN
     kind := 'user';
     id := (claims ->> 'sub')::uuid;
     RETURN;
+  END IF;
+  -- Só o servidor (service role) informa o autor pelo cabeçalho.
+  IF claims ->> 'role' = 'service_role' THEN
+    BEGIN
+      headers := nullif(current_setting('request.headers', true), '')::jsonb;
+    EXCEPTION WHEN OTHERS THEN headers := NULL;
+    END;
+    h_kind := headers ->> 'x-crm-actor-kind';
+    h_id := headers ->> 'x-crm-actor-id';
+    IF h_kind IN ('user', 'bot', 'agent', 'integration', 'system') THEN
+      kind := h_kind;
+      id := CASE WHEN h_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN h_id::uuid END;
+      RETURN;
+    END IF;
   END IF;
   kind := 'system';
   id := NULL;
@@ -240,18 +247,72 @@ CREATE TRIGGER trg_capture_deal_item_events
   FOR EACH ROW EXECUTE FUNCTION crm_internal.capture_deal_item_events();
 
 -- ---------------------------------------------------------------- Histórico: atividade concluída
+-- Autor das atividades e notas (antes nada era gravado: registros antigos
+-- ficam sem autor, sem inventar) e marca de edição das notas.
+ALTER TABLE public.activities ADD COLUMN IF NOT EXISTS created_by uuid;
+ALTER TABLE public.activities ADD COLUMN IF NOT EXISTS created_actor_kind text;
+ALTER TABLE public.activities ADD COLUMN IF NOT EXISTS edited_at timestamptz;
+ALTER TABLE public.activities ADD COLUMN IF NOT EXISTS edited_by uuid;
+
+CREATE OR REPLACE FUNCTION crm_internal.stamp_activity_author()
+RETURNS trigger LANGUAGE plpgsql SET search_path TO '' AS $$
+DECLARE
+  a record;
+BEGIN
+  SELECT * INTO a FROM crm_internal.current_actor();
+  IF TG_OP = 'INSERT' THEN
+    NEW.created_actor_kind := coalesce(NEW.created_actor_kind, a.kind);
+    NEW.created_by := coalesce(NEW.created_by, a.id);
+    NEW.edited_at := NULL;
+    NEW.edited_by := NULL;
+  ELSIF NEW.title IS DISTINCT FROM OLD.title OR NEW.description IS DISTINCT FROM OLD.description THEN
+    NEW.edited_at := now();
+    NEW.edited_by := a.id;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_stamp_activity_author ON public.activities;
+CREATE TRIGGER trg_stamp_activity_author
+  BEFORE INSERT OR UPDATE ON public.activities
+  FOR EACH ROW EXECUTE FUNCTION crm_internal.stamp_activity_author();
+
 CREATE OR REPLACE FUNCTION crm_internal.capture_activity_events()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path TO '' AS $$
 DECLARE
   a record;
 BEGIN
-  IF NEW.deal_id IS NULL OR NEW.completed IS NOT DISTINCT FROM OLD.completed THEN
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.deal_id IS NULL OR OLD.type = 'STATUS_CHANGE' THEN
+      RETURN NULL;
+    END IF;
+    SELECT * INTO a FROM crm_internal.current_actor();
+    INSERT INTO public.deal_events (organization_id, deal_id, kind, field, old_value, detail, actor_kind, actor_id)
+    VALUES (OLD.organization_id, OLD.deal_id, 'activity_deleted', OLD.title,
+            CASE WHEN OLD.type IN ('NOTE', 'note') THEN to_jsonb(left(coalesce(OLD.description, ''), 300)) END,
+            jsonb_build_object('activity_id', OLD.id, 'type', OLD.type), a.kind, a.id);
+    RETURN NULL;
+  END IF;
+  IF NEW.deal_id IS NULL OR NEW.type IN ('NOTE', 'note', 'STATUS_CHANGE') THEN
     RETURN NULL;
   END IF;
   SELECT * INTO a FROM crm_internal.current_actor();
-  INSERT INTO public.deal_events (organization_id, deal_id, kind, field, new_value, detail, actor_kind, actor_id)
-  VALUES (NEW.organization_id, NEW.deal_id, CASE WHEN NEW.completed THEN 'activity_done' ELSE 'activity_reopened' END,
-          NEW.title, to_jsonb(NEW.completed), jsonb_build_object('activity_id', NEW.id, 'type', NEW.type), a.kind, a.id);
+  IF NEW.completed IS DISTINCT FROM OLD.completed THEN
+    INSERT INTO public.deal_events (organization_id, deal_id, kind, field, new_value, detail, actor_kind, actor_id)
+    VALUES (NEW.organization_id, NEW.deal_id, CASE WHEN NEW.completed THEN 'activity_done' ELSE 'activity_reopened' END,
+            NEW.title, to_jsonb(NEW.completed), jsonb_build_object('activity_id', NEW.id, 'type', NEW.type), a.kind, a.id);
+  END IF;
+  IF NEW.date IS DISTINCT FROM OLD.date THEN
+    INSERT INTO public.deal_events (organization_id, deal_id, kind, field, old_value, new_value, detail, actor_kind, actor_id)
+    VALUES (NEW.organization_id, NEW.deal_id, 'activity_rescheduled', NEW.title, to_jsonb(OLD.date), to_jsonb(NEW.date),
+            jsonb_build_object('activity_id', NEW.id, 'type', NEW.type), a.kind, a.id);
+  END IF;
+  IF NEW.deleted_at IS NOT NULL AND OLD.deleted_at IS NULL THEN
+    INSERT INTO public.deal_events (organization_id, deal_id, kind, field, detail, actor_kind, actor_id)
+    VALUES (NEW.organization_id, NEW.deal_id, 'activity_deleted', NEW.title,
+            jsonb_build_object('activity_id', NEW.id, 'type', NEW.type), a.kind, a.id);
+  END IF;
   RETURN NULL;
 EXCEPTION WHEN OTHERS THEN
   RAISE WARNING 'capture_activity_events falhou: %', SQLERRM;
@@ -261,7 +322,7 @@ $$;
 
 DROP TRIGGER IF EXISTS trg_capture_activity_events ON public.activities;
 CREATE TRIGGER trg_capture_activity_events
-  AFTER UPDATE OF completed ON public.activities
+  AFTER UPDATE OR DELETE ON public.activities
   FOR EACH ROW EXECUTE FUNCTION crm_internal.capture_activity_events();
 
 -- ---------------------------------------------------------------- Follow-up: cálculo

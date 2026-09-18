@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { authPublicApi } from '@/lib/public-api/auth';
 import { createStaticAdminClient } from '@/lib/supabase/server';
+import { withActor } from '@/lib/supabase/actorClient';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { normalizeText } from '@/lib/public-api/sanitize';
 
@@ -28,7 +29,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ dealId: st
     return NextResponse.json({ error: 'Invalid payload', code: 'VALIDATION_ERROR' }, { status: 422 });
   }
 
-  const sb = createStaticAdminClient();
+  const sb = withActor(createStaticAdminClient(), { kind: 'integration' });
   const now = new Date().toISOString();
   const updates: any = {
     is_lost: true,

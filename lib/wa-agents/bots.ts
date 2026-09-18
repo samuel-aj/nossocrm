@@ -33,6 +33,7 @@ import {
   type BotStep,
 } from './types';
 import { dispatchAgentEvent, postWebhook } from './webhooks';
+import { withActor } from '@/lib/supabase/actorClient';
 
 export { normalizeKeyword };
 
@@ -604,7 +605,9 @@ async function moveDealToBoardStage(
   if (error) throw new Error(error.message);
 }
 
-export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Promise<void> {
+export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): Promise<void> {
+  // o que o robô altera no lead entra no histórico como "robô"
+  const admin = withActor(adminRaw, { kind: 'bot', id: run.bot_id });
   const st: RunState = {
     run,
     log: Array.isArray(run.log) ? ([...run.log] as BotLogEntry[]) : [],

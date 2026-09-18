@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { authPublicApi } from '@/lib/public-api/auth';
 import { createStaticAdminClient } from '@/lib/supabase/server';
+import { withActor } from '@/lib/supabase/actorClient';
 import { decodeOffsetCursor, encodeOffsetCursor, parseLimit } from '@/lib/public-api/cursor';
 import { sanitizeUUID } from '@/lib/supabase/utils';
 import { normalizeText } from '@/lib/public-api/sanitize';
@@ -30,7 +31,7 @@ export async function GET(request: Request) {
   const limit = parseLimit(url.searchParams.get('limit'));
   const offset = decodeOffsetCursor(url.searchParams.get('cursor'));
 
-  const sb = createStaticAdminClient();
+  const sb = withActor(createStaticAdminClient(), { kind: 'integration' });
   let query = sb
     .from('activities')
     .select('id,title,description,type,date,completed,deal_id,contact_id,client_company_id,created_at', { count: 'exact' })
@@ -86,7 +87,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid date', code: 'VALIDATION_ERROR' }, { status: 422 });
   }
 
-  const sb = createStaticAdminClient();
+  const sb = withActor(createStaticAdminClient(), { kind: 'integration' });
   const insertPayload: any = {
     organization_id: auth.organizationId,
     title: normalizeText(parsed.data.title) || parsed.data.title,

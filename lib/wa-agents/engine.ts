@@ -15,6 +15,7 @@ import {
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { getProvider, type SendResult } from '@/lib/whatsapp';
 import { recordOutboundMessage, replicateOutboundToSiblings } from '@/lib/whatsapp/service';
+import { withActor } from '@/lib/supabase/actorClient';
 import { executeCustomAction, executeOutcomeActions, type OutcomeActionsResult } from './actions';
 import { ensureAutoLead } from './autoLead';
 import { isAiAgentsApproved } from './beta';
@@ -569,7 +570,8 @@ async function sendLines(
 // Execução do agente numa conversa
 // ---------------------------------------------------------------------------
 export async function runAgentOnConversation(input: RunAgentInput): Promise<RunResult> {
-  const admin = createStaticAdminClient();
+  // o que o agente altera no lead entra no histórico como "agente de IA"
+  const admin = withActor(createStaticAdminClient(), { kind: 'agent', id: input.agentId ?? null });
   const { organizationId, conversationId, trigger } = input;
   const depth = input.depth ?? 0;
   const startedAt = Date.now();

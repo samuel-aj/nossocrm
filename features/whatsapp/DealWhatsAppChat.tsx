@@ -58,7 +58,7 @@ import {
   type TemplateButton,
 } from '@/lib/messageTemplates';
 import { formatRemaining, getServiceWindow } from '@/lib/whatsapp/serviceWindow';
-import { useWhatsAppChat, type WaChatMessage, type WaMediaKind, type WaSender } from './useWhatsAppChat';
+import { useOlderWhatsAppMessages, useWhatsAppChat, type WaChatMessage, type WaMediaKind, type WaSender } from './useWhatsAppChat';
 import { transcodeToMp3 } from './audioTranscode';
 import { useWaAgentsAccess } from '@/hooks/useWaAgentsAccess';
 import { useToast } from '@/context/ToastContext';
@@ -70,12 +70,6 @@ import type { AgentMinimal, BotMinimal, ConversationAiAction } from '@/lib/wa-ag
 const ALTURA_MAX_COMPOSITOR = 160;
 const TIME_FMT = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const DATE_FMT = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-
-/** Chave do DIA da mensagem (ano-mes-dia local); '' quando a data é inválida. */
-function diaDaMensagem(m: { wa_timestamp: string | null; created_at: string }): string {
-  const d = new Date(m.wa_timestamp || m.created_at);
-  return isNaN(d.getTime()) ? '' : `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-}
 
 const WEEKDAY_FMT = new Intl.DateTimeFormat('pt-BR', { weekday: 'long' });
 
@@ -1104,6 +1098,37 @@ function fmtSeconds(s: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
+/** Item do histórico do lead (nota, atividade, alteração) mostrado ENTRE as mensagens, na ordem do tempo. */
+export type ChatTimelineEntry = { id: string; at: string; node: React.ReactNode };
+
+export type ComposerMode = 'message' | 'note' | 'activity';
+
+/**
+ * Tela do lead: a conversa vira a linha do tempo unificada. O chat recebe os
+ * itens do histórico, os controles extras do cabeçalho, a faixa acima do
+ * compositor e os compositores de nota e atividade (os rascunhos de cada modo
+ * ficam guardados ao alternar, porque nada é desmontado).
+ */
+export type ChatTimelineProps = {
+  entries: ChatTimelineEntry[];
+  headerExtra?: React.ReactNode;
+  aboveComposer?: React.ReactNode;
+  composerMode: ComposerMode;
+  onComposerModeChange: (mode: ComposerMode) => void;
+  noteComposer: React.ReactNode;
+  activityComposer: React.ReactNode;
+  /** Sem permissão de editar o lead: modos Nota e Atividade ficam desabilitados */
+  canWriteCrm?: boolean;
+  /** Muda quando a própria pessoa salva nota/atividade: a conversa vai ao fim para mostrar */
+  scrollToEndKey?: number;
+};
+
+const COMPOSER_MODES: Array<{ id: ComposerMode; label: string }> = [
+  { id: 'message', label: 'Mensagem' },
+  { id: 'note', label: 'Nota interna' },
+  { id: 'activity', label: 'Atividade' },
+];
+
 interface Attachment {
   file: File;
   kind: WaMediaKind;
@@ -1116,6 +1141,7 @@ export function DealWhatsAppChat({
   templateContext,
   connectionId = null,
   group = null,
+  timeline = null,
 }: {
   contact: { id: string; name?: string | null; phone?: string | null } | null;
   /** Valores extras pras variáveis dos modelos (lead.titulo, escritorio.nome...) */
@@ -1127,6 +1153,8 @@ export function DealWhatsAppChat({
   /** GRUPO do WhatsApp: a conversa é o grupo (sem contato nem telefone); as
    * mensagens recebidas mostram quem escreveu; sem agente, robô nem janela de 24 h. */
   group?: { conversationId: string; name: string; participantsCount?: number | null } | null;
+  /** Tela do lead: histórico unificado e compositor com modos (ver ChatTimelineProps) */
+  timeline?: ChatTimelineProps | null;
 }) {
   const isGroup = !!group;
   const phone = useMemo(() => (isGroup ? '' : normalizePhoneE164(contact?.phone || '')), [contact?.phone, isGroup]);
@@ -1381,7 +1409,22 @@ export function DealWhatsAppChat({
   const previewUrlRef = useRef<string | null>(null); // p/ revogar blob URL no unmount
   const forceScrollRef = useRef(false); // rola pro fim após envio próprio
 
-  const messages = data?.messages ?? [];
+  const latestMessages = useMemo(() => data?.messages ?? [], [data?.messages]);
+  const older = useOlderWhatsAppMessages(
+    { phone: phone || null, connectionId, conversationId: group?.conversationId ?? null },
+    latestMessages,
+    !!data?.hasMore
+  );
+  const messages = older.messages;
+  const composerMode: ComposerMode = timeline?.composerMode ?? 'message';
+  // Mensagens + itens do histórico do lead, em ordem cronológica
+  type ListItem = { kind: 'msg'; m: WaChatMessage; at: number } | { kind: 'entry'; e: ChatTimelineEntry; at: number };
+  const listItems = useMemo<ListItem[]>(() => {
+    const out: ListItem[] = messages.map(m => ({ kind: 'msg' as const, m, at: Date.parse(m.wa_timestamp || m.created_at) || 0 }));
+    for (const e of timeline?.entries ?? []) out.push({ kind: 'entry', e, at: Date.parse(e.at) || 0 });
+    // estável: empate mantém mensagens antes dos itens do CRM do mesmo instante
+    return out.map((it, i) => ({ it, i })).sort((a, b) => a.it.at - b.it.at || a.i - b.i).map(x => x.it);
+  }, [messages, timeline?.entries]);
   // Mensagens por id: a bolha de resposta acha a original (miniatura + pular para)
   const messagesById = useMemo(() => new Map(messages.map(m => [m.id, m])), [messages]);
   // Números conectados + o remetente ATIVO (escolhido ou o padrão). O ref
@@ -1485,14 +1528,89 @@ export function DealWhatsAppChat({
       (!!connectionId && !senders.some(s => s.id === connectionId)));
   // primeira carga da conversa: abre DIRETO na mensagem mais recente (embaixo)
   const initialScrollDoneRef = useRef(false);
+  // Página antiga carregada: mantém na tela o que a pessoa estava lendo
+  const keepFromBottomRef = useRef<number | null>(null);
+  // Chegou algo novo enquanto a pessoa lia o histórico: aviso, sem arrastar a rolagem
+  const [newBelow, setNewBelow] = useState(0);
+  const lastItemKeyRef = useRef<string | null>(null);
   useEffect(() => {
     initialScrollDoneRef.current = false;
+    setNewBelow(0);
   }, [phone]);
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el || keepFromBottomRef.current === null) return;
+    el.scrollTop = el.scrollHeight - keepFromBottomRef.current;
+    keepFromBottomRef.current = null;
+  }, [listItems]);
+  const loadOlderKeepingPosition = () => {
+    const el = listRef.current;
+    if (!el || older.loadingOlder || !older.hasOlder) return;
+    keepFromBottomRef.current = el.scrollHeight - el.scrollTop;
+    void older.loadOlder().finally(() => {
+      // nada novo chegou: não reposiciona depois
+      window.setTimeout(() => {
+        keepFromBottomRef.current = null;
+      }, 0);
+    });
+  };
+  // A pessoa está no fim da conversa? (atualizado a cada rolagem)
+  const atBottomRef = useRef(true);
+  const onListScroll = () => {
+    const el = listRef.current;
+    if (!el) return;
+    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    if (atBottomRef.current) setNewBelow(0);
+    if (el.scrollTop < 80 && initialScrollDoneRef.current) loadOlderKeepingPosition();
+  };
+  const scrollToEnd = () => {
+    setNewBelow(0);
+    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  };
+  // A área da conversa muda de altura (compositor de nota/atividade, faixa de
+  // pendentes): quem estava no fim continua no fim.
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      if (atBottomRef.current && initialScrollDoneRef.current) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  // Nota/atividade salva pela própria pessoa: mostra no fim (como mensagem enviada)
+  const ownKey = timeline?.scrollToEndKey ?? 0;
+  useEffect(() => {
+    if (!ownKey) return;
+    forceScrollRef.current = true;
+    atBottomRef.current = true;
+    setNewBelow(0);
+    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [ownKey]);
+  // Novidade = mensagem nova no fim OU item novo do CRM (nota/atividade/alteração).
+  // Perto do fim: desce; lendo o histórico: só avisa.
+  const lastMsgId = messages.length ? messages[messages.length - 1].id : '';
+  const contentKey = `${lastMsgId}|${timeline?.entries.length ?? 0}`;
+  useEffect(() => {
+    const key = listItems.length ? contentKey : null;
+    const prev = lastItemKeyRef.current;
+    lastItemKeyRef.current = key;
+    const el = listRef.current;
+    if (!el || !initialScrollDoneRef.current || !key || key === prev || prev === null) return;
+    const nearBottom = atBottomRef.current || el.scrollHeight - el.scrollTop - el.clientHeight < 300;
+    if (nearBottom || forceScrollRef.current) {
+      forceScrollRef.current = false;
+      atBottomRef.current = true;
+      endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } else {
+      setNewBelow(n => n + 1);
+    }
+  }, [contentKey, listItems.length]);
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
     if (!initialScrollDoneRef.current) {
-      if (messages.length > 0) {
+      if (listItems.length > 0 && (!isLoading || messages.length > 0)) {
         el.scrollTop = el.scrollHeight; // instantâneo, sem animação
         // mídias carregam depois e aumentam a altura — reancora no fim
         window.setTimeout(() => {
@@ -1502,14 +1620,9 @@ export function DealWhatsAppChat({
       }
       return;
     }
-    // depois: só auto-rola se o usuário já está perto do fim (ou acabou de
-    // enviar) — senão o polling arranca a rolagem de quem lê o histórico
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 300;
-    if (nearBottom || forceScrollRef.current) {
-      forceScrollRef.current = false;
-      endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
-  }, [messages.length, phone]);
+    // depois: o efeito do último item decide (desce só se a pessoa já está
+    // perto do fim ou acabou de enviar; senão mostra o aviso de novidades)
+  }, [listItems.length, isLoading, messages.length, phone]);
 
   // espelha o previewUrl atual num ref pra conseguir revogar no unmount
   useEffect(() => {
@@ -2062,6 +2175,7 @@ export function DealWhatsAppChat({
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          {timeline?.headerExtra}
           {data && !data.connected && (
             <span className="text-[11px] text-amber-600 dark:text-amber-400">WhatsApp desconectado</span>
           )}
@@ -2150,21 +2264,76 @@ export function DealWhatsAppChat({
 
       {/* O aviso de não-conectado agora fica no lugar do composer, embaixo */}
 
-      {/* Mensagens */}
+      {/* Mensagens (na tela do lead: + notas, atividades e alterações, na ordem do tempo) */}
+      <div className="relative flex-1 min-h-0 flex flex-col">
       <div
         ref={listRef}
+        onScroll={onListScroll}
+        role={timeline ? 'log' : undefined}
+        aria-label={timeline ? 'Histórico do lead' : undefined}
         className="flex-1 min-h-0 overflow-y-auto scrollbar-custom px-4 py-3 space-y-2 bg-slate-50/40 dark:bg-black/10"
       >
-        {isLoading && (
+        {isLoading && listItems.length === 0 && (
           <div className="h-full flex items-center justify-center text-slate-400">
             <Loader2 className="animate-spin" size={20} />
           </div>
         )}
         {error && <p className="text-sm text-red-500 text-center">{(error as Error).message}</p>}
-        {!isLoading && !error && messages.length === 0 && (
-          <CenterMsg>Nenhuma mensagem ainda. Envie a primeira mensagem 👇</CenterMsg>
+        {(older.hasOlder || older.loadingOlder || older.olderError) && messages.length > 0 && (
+          <div className="flex justify-center py-1">
+            {older.loadingOlder ? (
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-400">
+                <Loader2 size={12} className="animate-spin" /> Carregando mensagens anteriores…
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={loadOlderKeepingPosition}
+                className={`text-[11px] font-semibold hover:underline ${older.olderError ? 'text-red-500' : 'text-slate-500 dark:text-slate-400'}`}
+              >
+                {older.olderError ? 'Não foi possível carregar. Tentar de novo' : 'Carregar mensagens anteriores'}
+              </button>
+            )}
+          </div>
         )}
-        {messages.map((m, i) => (
+        {!isLoading && !error && listItems.length === 0 && (
+          <CenterMsg>
+            {timeline ? 'Nada no histórico deste lead ainda.' : 'Nenhuma mensagem ainda. Envie a primeira mensagem 👇'}
+          </CenterMsg>
+        )}
+        {listItems.map((it, i) => {
+          const prev = i > 0 ? listItems[i - 1] : null;
+          const dayOf = (x: ListItem) => {
+            const d = new Date(x.at);
+            return isNaN(d.getTime()) ? '' : `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+          };
+          const iso = (x: ListItem) => new Date(x.at).toISOString();
+          const dayLabel = it.at ? rotuloDoDia({ wa_timestamp: iso(it), created_at: iso(it) }) : '';
+          const dayDivider = (!prev || dayOf(prev) !== dayOf(it)) && dayLabel && (
+            <div className="flex justify-center py-1.5 select-none" aria-label={`Histórico de ${dayLabel}`}>
+              <span className="text-[11px] font-medium px-2.5 py-[3px] rounded-md bg-slate-200/80 text-slate-600 dark:bg-white/10 dark:text-slate-300 shadow-sm">
+                {dayLabel}
+              </span>
+            </div>
+          );
+          if (it.kind === 'entry') {
+            return (
+              <div key={`e:${it.e.id}`}>
+                {dayDivider}
+                {it.e.node}
+              </div>
+            );
+          }
+          const m = it.m;
+          let prevMsg: WaChatMessage | null = null;
+          for (let j = i - 1; j >= 0; j--) {
+            const x = listItems[j];
+            if (x.kind === 'msg') {
+              prevMsg = x.m;
+              break;
+            }
+          }
+          return (
           <div
             key={m.id}
             ref={el => {
@@ -2172,15 +2341,9 @@ export function DealWhatsAppChat({
               else msgRefs.current.delete(m.id);
             }}
           >
-            {(i === 0 || diaDaMensagem(messages[i - 1]) !== diaDaMensagem(m)) && rotuloDoDia(m) && (
-              <div className="flex justify-center py-1.5 select-none" aria-label={`Mensagens de ${rotuloDoDia(m)}`}>
-                <span className="text-[11px] font-medium px-2.5 py-[3px] rounded-md bg-slate-200/80 text-slate-600 dark:bg-white/10 dark:text-slate-300 shadow-sm">
-                  {rotuloDoDia(m)}
-                </span>
-              </div>
-            )}
+            {dayDivider}
             {showConnDividers &&
-              (i === 0 || (messages[i - 1].connection_id ?? null) !== (m.connection_id ?? null)) && (
+              (!prevMsg || (prevMsg.connection_id ?? null) !== (m.connection_id ?? null)) && (
                 <div className="flex items-center gap-2 pt-2 pb-1 select-none">
                   <span className="flex-1 h-px bg-slate-200 dark:bg-white/10" />
                   <span className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-1 rounded-full bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-300 border border-sky-200/70 dark:border-sky-500/20">
@@ -2202,14 +2365,81 @@ export function DealWhatsAppChat({
               senderName={isGroup && m.direction === 'in' ? m.sender_name || m.from_phone || undefined : undefined}
             />
           </div>
-        ))}
+          );
+        })}
         <div ref={endRef} />
       </div>
+      {newBelow > 0 && (
+        <button
+          type="button"
+          onClick={scrollToEnd}
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg"
+        >
+          <ChevronDown size={14} /> {newBelow === 1 ? 'Nova mensagem abaixo' : `${newBelow} novidades abaixo`}
+        </button>
+      )}
+      </div>
+
+      {/* Tela do lead: faixa de atividades pendentes + seletor de modo do compositor */}
+      {timeline && (
+        <div className="shrink-0 border-t border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card">
+          {timeline.aboveComposer}
+          <div role="tablist" aria-label="O que escrever" className="flex items-center gap-1 px-3 pt-2">
+            {COMPOSER_MODES.map(mode => {
+              const active = composerMode === mode.id;
+              const disabled = mode.id !== 'message' && timeline.canWriteCrm === false;
+              return (
+                <button
+                  key={mode.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  tabIndex={active ? 0 : -1}
+                  disabled={disabled}
+                  onClick={() => timeline.onComposerModeChange(mode.id)}
+                  onKeyDown={e => {
+                    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+                    e.preventDefault();
+                    const idx = COMPOSER_MODES.findIndex(x => x.id === composerMode);
+                    const step = e.key === 'ArrowRight' ? 1 : COMPOSER_MODES.length - 1;
+                    const next = COMPOSER_MODES[(idx + step) % COMPOSER_MODES.length];
+                    timeline.onComposerModeChange(next.id);
+                    const tabs = e.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+                    tabs?.[COMPOSER_MODES.indexOf(next)]?.focus();
+                  }}
+                  title={disabled ? 'Sem permissão para editar este lead' : undefined}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    active
+                      ? mode.id === 'note'
+                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300'
+                        : mode.id === 'activity'
+                          ? 'bg-primary-100 text-primary-700 dark:bg-primary-500/15 dark:text-primary-300'
+                          : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
+                      : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-white dark:hover:bg-white/10'
+                  }`}
+                >
+                  {mode.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className={composerMode === 'note' ? '' : 'hidden'}>{timeline.noteComposer}</div>
+          <div className={composerMode === 'activity' ? '' : 'hidden'}>{timeline.activityComposer}</div>
+        </div>
+      )}
 
       {/* Sem WhatsApp ativo: aviso claro no LUGAR da caixa de digitação
           (nem deixa tentar enviar; o botão leva direto pra Conexão) */}
-      {notConnected && (
-        <div className="shrink-0 border-t border-slate-200 dark:border-white/10 p-3 bg-white dark:bg-dark-card">
+      {/* Lead sem telefone: não há com quem conversar */}
+      {timeline && composerMode === 'message' && !isGroup && !phone && (
+        <div className="shrink-0 px-3 pb-3 pt-2 bg-white dark:bg-dark-card">
+          <p className="rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20 px-3 py-2.5 text-xs text-slate-500 dark:text-slate-400">
+            Este contato não tem telefone. Cadastre um telefone no contato para conversar pelo WhatsApp.
+          </p>
+        </div>
+      )}
+      {notConnected && composerMode === 'message' && (!timeline || !!phone || isGroup) && (
+        <div className={`shrink-0 p-3 bg-white dark:bg-dark-card ${timeline ? '' : 'border-t border-slate-200 dark:border-white/10'}`}>
           <div className="flex items-center gap-3 rounded-xl border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-900/15 px-4 py-3">
             <span className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
               <Unplug size={17} />
@@ -2233,8 +2463,8 @@ export function DealWhatsAppChat({
       {/* Composer */}
       <div
         ref={composerRef}
-        className={`shrink-0 border-t border-slate-200 dark:border-white/10 p-3 bg-white dark:bg-dark-card relative ${
-          notConnected ? 'hidden' : ''
+        className={`shrink-0 p-3 bg-white dark:bg-dark-card relative ${timeline ? 'pt-2' : 'border-t border-slate-200 dark:border-white/10'} ${
+          notConnected || composerMode !== 'message' || (!!timeline && !isGroup && !phone) ? 'hidden' : ''
         }`}
       >
         {send.isError && (

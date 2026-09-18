@@ -104,8 +104,9 @@ export const useMoveDeal = () => {
         isWon = false;
         closedAt = new Date().toISOString();
       } else {
-        // Moving to a regular stage - reopen if was closed
-        if (deal.isWon || deal.isLost) {
+        // Moving to a regular stage - reopen if was closed (trocar de funil
+        // sempre recomeça a jornada: ganho/perda do funil antigo não acompanham)
+        if (deal.isWon || deal.isLost || board.id !== deal.boardId) {
           isWon = false;
           isLost = false;
           closedAt = null;
@@ -113,7 +114,9 @@ export const useMoveDeal = () => {
       }
 
       // Build updates object
+      const changingBoard = board.id !== deal.boardId;
       const updates: Partial<Deal> = {
+        ...(changingBoard && { boardId: board.id }),
         status: targetStageId,
         lastStageChangeDate: new Date().toISOString(),
         ...(lossReason && { lossReason }),
@@ -135,7 +138,7 @@ export const useMoveDeal = () => {
         dealId,
         dealTitle: deal.title,
         type: 'STATUS_CHANGE',
-        title: `Moveu para ${stageLabel}`,
+        title: changingBoard ? `Moveu para ${board.name}, etapa ${stageLabel}` : `Moveu para ${stageLabel}`,
         description: isLost ? lossDetailsDescription(lossCategory, lossReason) : undefined,
         date: new Date().toISOString(),
         completed: true,
@@ -246,6 +249,7 @@ export const useMoveDeal = () => {
       const isLost =
         explicitLost
         || (board.lostStageId ? targetStageId === board.lostStageId : targetStage?.linkedLifecycleStage === 'OTHER');
+      const boardUpdate = board.id !== deal.boardId ? { boardId: board.id } : {};
 
       const lossUpdates = isLost ? {
         ...(lossCategory && { lossCategory }), ...(lossReason && { lossReason }),
@@ -260,6 +264,7 @@ export const useMoveDeal = () => {
           if (d.id === dealId) {
             const newDeal = {
               ...d,
+              ...boardUpdate,
               status: targetStageId,
               lastStageChangeDate: new Date().toISOString(),
               isWon: isWon ?? d.isWon,
@@ -278,6 +283,7 @@ export const useMoveDeal = () => {
         if (!old) return old;
         return {
           ...old,
+          ...boardUpdate,
           status: targetStageId,
           lastStageChangeDate: new Date().toISOString(),
           isWon: isWon ?? old.isWon,

@@ -7,7 +7,7 @@
  * upload — não passa pela Vercel, que limita o body a ~4,5MB) e o /send recebe
  * só o caminho.
  */
-import { useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createClient } from '@/lib/supabase/client';
 import type { ConversationAiInfo, ConversationBotInfo } from '@/lib/wa-agents/types';
@@ -90,6 +90,8 @@ export interface WaChatData {
   /** Rótulo de TODOS os números da org (inclui desconectados), por id */
   numbers?: Record<string, { phoneNumber: string | null; profileName: string | null }>;
   messages: WaChatMessage[];
+  /** Há mensagens mais antigas que as carregadas (rolar para cima busca a página anterior) */
+  hasMore?: boolean;
 }
 
 export type WaMediaKind = 'image' | 'video' | 'document' | 'audio' | 'sticker';
@@ -347,4 +349,83 @@ export function useWhatsAppChat(phoneE164: string | null, connectionId?: string 
     },
   });
   return { ...query, send, edit, remove };
+}
+
+/**
+ * Histórico ANTERIOR às mensagens mais recentes (que o polling mantém): rolar
+ * para cima busca páginas com ?before=. Mensagens que saem da janela recente
+ * (chegaram muitas novas) são guardadas aqui para não abrir buraco no meio.
+ */
+export function useOlderWhatsAppMessages(
+  target: { phone: string | null; connectionId?: string | null; conversationId?: string | null },
+  latest: WaChatMessage[],
+  latestHasMore: boolean
+) {
+  const key = `${target.conversationId ?? ''}|${target.phone ?? ''}|${target.connectionId ?? ''}`;
+  const [older, setOlder] = useState<WaChatMessage[]>([]);
+  const [olderHasMore, setOlderHasMore] = useState<boolean | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const keyRef = useRef(key);
+  const prevLatestRef = useRef<WaChatMessage[]>([]);
+
+  useEffect(() => {
+    keyRef.current = key;
+    setOlder([]);
+    setOlderHasMore(null);
+    setError(null);
+    prevLatestRef.current = [];
+  }, [key]);
+
+  // Mensagens que saíram da janela recente continuam visíveis (só depois de já
+  // ter paginado; sem isso a janela recente é a conversa inteira que aparece).
+  useEffect(() => {
+    const prev = prevLatestRef.current;
+    prevLatestRef.current = latest;
+    if (olderHasMore === null || prev.length === 0 || latest.length === 0) return;
+    const ids = new Set(latest.map(m => m.id));
+    const oldest = Date.parse(latest[0].created_at);
+    const dropped = prev.filter(m => !ids.has(m.id) && Date.parse(m.created_at) < oldest && !m.id.startsWith('tmp'));
+    if (dropped.length) setOlder(o => [...o, ...dropped.filter(d => !o.some(x => x.id === d.id))]);
+  }, [latest, olderHasMore]);
+
+  const messages = useMemo(() => {
+    if (older.length === 0) return latest;
+    const ids = new Set(latest.map(m => m.id));
+    const merged = older.filter(m => !ids.has(m.id)).concat(latest);
+    return merged.sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+  }, [older, latest]);
+
+  const hasOlder = olderHasMore ?? latestHasMore;
+
+  const loadOlder = useCallback(async () => {
+    if (loading || !hasOlder || messages.length === 0) return;
+    if (!target.phone && !target.conversationId) return;
+    const myKey = keyRef.current;
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      if (target.conversationId) params.set('conversationId', target.conversationId);
+      else params.set('phone', target.phone!);
+      if (target.connectionId) params.set('connectionId', target.connectionId);
+      params.set('before', messages[0].created_at);
+      const res = await fetch(`/api/whatsapp/messages?${params}`, { credentials: 'include', headers: { accept: 'application/json' } });
+      const json = (await res.json().catch(() => ({}))) as { messages?: WaChatMessage[]; hasMore?: boolean; error?: string };
+      if (!res.ok) throw new Error(json.error || 'Falha ao carregar mensagens anteriores');
+      if (keyRef.current !== myKey) return;
+      const page = json.messages ?? [];
+      setOlder(o => {
+        const ids = new Set(o.map(m => m.id));
+        return [...page.filter(m => !ids.has(m.id)), ...o];
+      });
+      setOlderHasMore(!!json.hasMore);
+    } catch (e) {
+      if (keyRef.current === myKey) setError((e as Error).message);
+    } finally {
+      if (keyRef.current === myKey) setLoading(false);
+    }
+  }, [loading, hasOlder, messages, target.phone, target.conversationId, target.connectionId]);
+
+  return { messages, loadOlder, loadingOlder: loading, hasOlder, olderError: error };
 }

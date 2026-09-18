@@ -12,7 +12,20 @@ import { Activity, CustomFieldDefinition } from '@/types';
 
 import { useResponsiveMode } from '@/hooks/useResponsiveMode';
 import { DealSheet } from '../DealSheet';
-import { DealWhatsAppChat } from '@/features/whatsapp/DealWhatsAppChat';
+import { DealWhatsAppChat, type ComposerMode } from '@/features/whatsapp/DealWhatsAppChat';
+import { useQueryClient } from '@tanstack/react-query';
+import { DealStageControl } from '@/features/deals/lead/DealStageControl';
+import { FollowupStatus } from '@/features/deals/lead/FollowupStatus';
+import { useLeadTimelineEntries } from '@/features/deals/lead/LeadTimeline';
+import { PendingActivitiesStrip } from '@/features/deals/lead/PendingActivitiesStrip';
+import {
+  ActivityComposer,
+  EMPTY_ACTIVITY_DRAFT,
+  NoteComposer,
+  draftFromActivity,
+  type ActivityDraft,
+} from '@/features/deals/lead/LeadComposers';
+import { dealHistoryKey, useDealHistory } from '@/features/deals/lead/useDealHistory';
 import {
   analyzeLead,
   generateEmailDraft,
@@ -22,7 +35,6 @@ import {
   BrainCircuit,
   Mail,
   Phone,
-  Calendar,
   Check,
   X,
   Trash2,
@@ -35,21 +47,16 @@ import {
   FolderOpen,
   Package,
   Sword,
-  CheckCircle2,
   Bot,
   Tag as TagIcon,
-  Plus,
   Maximize2,
   Minimize2,
   Copy,
   ExternalLink,
-  MessageCircle,
-  ChevronDown, ChevronLeft, ChevronRight, KanbanSquare,
+  ChevronDown,
   Archive,
   Undo2,
 } from 'lucide-react';
-import { StageProgressBar } from '../StageProgressBar';
-import { ActivityRow } from '@/features/activities/components/ActivityRow';
 import { formatPriorityPtBr } from '@/lib/utils/priority';
 
 interface DealDetailModalProps {
@@ -168,7 +175,6 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const dealsById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
   const contactsById = useMemo(() => new Map(contacts.map((c) => [c.id, c])), [contacts]);
   const boardsById = useMemo(() => new Map(boards.map((b) => [b.id, b])), [boards]);
-  const lifecycleStageById = useMemo(() => new Map(lifecycleStages.map((s) => [s.id, s])), [lifecycleStages]);
   const productsById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
 
   const dealFromCache = dealId ? dealsById.get(dealId) : undefined;
@@ -181,12 +187,18 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const { data: fetchedDeal, isLoading: fetchingDeal, isError: fetchDealError, isSuccess: fetchDealSuccess, refetch: refetchDeal } = useDeal(shouldFetch ? dealId : undefined);
   const deal = dealFromCache ?? (fetchedDeal as unknown as typeof dealFromCache | undefined);
   const permissions = useMyActionPermissions(deal?.boardId);
+  const queryClient = useQueryClient();
+  const historyQuery = useDealHistory(deal?.id, isOpen);
+  const refreshHistory = () => {
+    if (deal?.id) void queryClient.invalidateQueries({ queryKey: dealHistoryKey(deal.id) });
+  };
   const updateDeal: typeof updateDealRaw = async (id, updates) => {
     const moving = updates.status !== undefined || updates.boardId !== undefined;
     if (moving ? !permissions.deals.move : !permissions.deals.edit) {
       addToast('Sem permissão para esta ação', 'error'); return;
     }
-    return updateDealRaw(id, updates);
+    await updateDealRaw(id, updates);
+    refreshHistory();
   };
   const updateContact: typeof updateContactRaw = async (id, updates) => {
     if (!permissions.deals.edit) { addToast('Sem permissão para editar', 'error'); return; }
@@ -209,48 +221,30 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const [isDrafting, setIsDrafting] = useState(false);
   const [aiResult, setAiResult] = useState<{ suggestion: string; score: number } | null>(null);
   const [emailDraft, setEmailDraft] = useState<string | null>(null);
-  const [newNote, setNewNote] = useState('');
-  const [showNewNote, setShowNewNote] = useState(false);
+  // Compositor da coluna da conversa: modo atual e rascunho de cada modo
+  const [composerMode, setComposerMode] = useState<ComposerMode>('message');
+  const [noteDraft, setNoteDraft] = useState('');
+  const [activityDraft, setActivityDraft] = useState<ActivityDraft>(EMPTY_ACTIVITY_DRAFT);
+  const [deleteNoteId, setDeleteNoteId] = useState<string | null>(null);
+  // Nota/atividade salva aqui: a conversa desce até ela
+  const [ownSaveKey, setOwnSaveKey] = useState(0);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [productsOpen, setProductsOpen] = useState(false);
+  // Celular: uma coluna por vez (dados do lead ou conversa)
+  const [mobilePane, setMobilePane] = useState<'data' | 'chat'>('chat');
   const [descriptionDraft, setDescriptionDraft] = useState('');
   const descriptionTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [utmsOpen, setUtmsOpen] = useState(false);
   const [ownerMenuOpen, setOwnerMenuOpen] = useState(false);
   // Grupos de campos personalizados abertos (sanfona por grupo, estilo UTMs)
   const [openFieldGroups, setOpenFieldGroups] = useState<Record<string, boolean>>({});
-  const [activeTab, setActiveTab] = useState<'whatsapp' | 'timeline' | 'activities' | 'notes' | 'products' | 'info'>('timeline');
-  const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Quick activity creation / edition from deal card (same form).
-  const [showQuickActivity, setShowQuickActivity] = useState(false);
-  const [editingActivityId, setEditingActivityId] = useState<string | null>(null);
-  const [quickActivityType, setQuickActivityType] = useState<'CALL' | 'MEETING' | 'EMAIL' | 'TASK'>('CALL');
-  const [quickActivityTitle, setQuickActivityTitle] = useState('');
-  const [quickActivityDate, setQuickActivityDate] = useState('');
-  const [quickActivityTime, setQuickActivityTime] = useState('');
-  const [quickActivityDesc, setQuickActivityDesc] = useState('');
-
-  const resetQuickActivityForm = useCallback(() => {
-    setShowQuickActivity(false);
-    setEditingActivityId(null);
-    setQuickActivityType('CALL');
-    setQuickActivityTitle('');
-    setQuickActivityDate('');
-    setQuickActivityTime('');
-    setQuickActivityDesc('');
-  }, []);
-
-  // Stable reference so the memoized ActivityRow children don't re-render
-  // on every parent state change just because the callback was inline.
-  const startEditActivity = useCallback((a: Activity) => {
-    const d = new Date(a.date);
-    setEditingActivityId(a.id);
-    setQuickActivityType((a.type === 'TASK' ? 'TASK' : a.type) as typeof quickActivityType);
-    setQuickActivityTitle(a.title);
-    setQuickActivityDate(d.toISOString().split('T')[0]);
-    setQuickActivityTime(d.toTimeString().slice(0, 5));
-    setQuickActivityDesc(a.description || '');
-    setShowQuickActivity(true);
-    setActiveTab('activities');
+  // Abrir uma atividade (faixa de pendentes ou linha do tempo): vai para o
+  // compositor em modo Atividade, pronta para editar, remarcar ou concluir.
+  const openActivityInComposer = useCallback((a: Activity) => {
+    setActivityDraft(draftFromActivity(a));
+    setComposerMode('activity');
+    setMobilePane('chat');
   }, []);
 
   const [objection, setObjection] = useState('');
@@ -273,32 +267,6 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [showLossReasonModal, setShowLossReasonModal] = useState(false);
 
-  // Mover o lead pra OUTRO board direto do card: menu no chip do board (acima
-  // da régua de etapas) lista os demais boards e as etapas do escolhido.
-  const [boardMenuOpen, setBoardMenuOpen] = useState(false);
-  const [boardPick, setBoardPick] = useState<(typeof boards)[number] | null>(null);
-  useEffect(() => {
-    if (!boardMenuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (!(e.target as Element | null)?.closest?.('[data-board-menu]')) {
-        setBoardMenuOpen(false);
-        setBoardPick(null);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setBoardMenuOpen(false);
-        setBoardPick(null);
-      }
-    };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [boardMenuOpen]);
-
   // Toda mudança relevante do lead vira uma entrada na Timeline, com autor.
   const autorAtual =
     profile?.nickname ||
@@ -309,6 +277,9 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     'Usuário';
   const logAlteracao = (titulo: string, descricao?: string) => {
     if (!deal) return;
+    // Histórico novo ligado: o banco já registra a alteração, com autor e
+    // valor anterior e novo. O registro antigo só vale sem ele.
+    if (historyQuery.data?.available) return;
     void addActivity({
       dealId: deal.id,
       dealTitle: deal.title,
@@ -321,21 +292,6 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     } as Parameters<typeof addActivity>[0]);
   };
 
-  const moveToBoardStage = (targetBoard: (typeof boards)[number], stage: { id: string; label: string }) => {
-    if (!deal) return;
-    setBoardMenuOpen(false);
-    setBoardPick(null);
-    updateDeal(deal.id, {
-      boardId: targetBoard.id,
-      status: stage.id,
-      // Mudou de funil = recomeça a jornada nele; ganho/perda do board antigo não acompanham
-      isWon: false,
-      isLost: false,
-      lastStageChangeDate: new Date().toISOString(),
-    });
-    logAlteracao(`${autorAtual} moveu o lead para o board ${targetBoard.name}, etapa ${stage.label}`);
-    addToast(`Lead movido para ${targetBoard.name} (${stage.label})`, 'success');
-  };
   const [pendingLostStageId, setPendingLostStageId] = useState<string | null>(null);
   const [lossReasonOrigin, setLossReasonOrigin] = useState<'button' | 'stage'>('button');
   // Edição INLINE de campos personalizados: clicar no valor edita na hora
@@ -350,9 +306,6 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const [tagMenuOpen, setTagMenuOpen] = useState(false);
   // Padrão: abre em tela cheia; o botão no topo alterna pro modo pequeno.
   const [viewMode, setViewMode] = useState<'modal' | 'fullscreen'>('fullscreen');
-  // Celular: a coluna de dados (Empresa/Contato/UTMs/Detalhes) fica recolhida
-  // por padrão pra Timeline/WhatsApp aparecerem logo; no desktop é sempre aberta.
-  const [mobileInfoOpen, setMobileInfoOpen] = useState(false);
 
   const normalizeTag = (value: string) => value.trim().replace(/\s+/g, ' ');
   const tagsLower = useMemo(() => new Set((deal?.tags || []).map(t => t.toLowerCase())), [deal?.tags]);
@@ -394,7 +347,10 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
       setEmailDraft(null);
       setObjectionResponses([]);
       setObjection('');
-      setActiveTab('timeline');
+      setComposerMode('message');
+      setAiOpen(false);
+      setMobilePane('chat');
+      setProductsOpen((deal.items || []).length > 0);
       setIsEditingTitle(false);
       setIsEditingValue(false);
       setShowLossReasonModal(false);
@@ -415,10 +371,10 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
         }
       }
       setOpenFieldGroups(initialOpenGroups);
-      setShowNewNote(false);
-      setNewNote('');
+      setNoteDraft('');
+      setActivityDraft(EMPTY_ACTIVITY_DRAFT);
+      setDeleteNoteId(null);
       setDescriptionDraft(deal.description ?? '');
-      resetQuickActivityForm();
     }
   }, [isOpen, dealId]); // Depend on dealId to reset when switching deals
 
@@ -441,7 +397,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     if (!el) return;
     el.style.height = 'auto';
     el.style.height = `${el.scrollHeight}px`;
-  }, [descriptionDraft, isOpen, activeTab]);
+  }, [descriptionDraft, isOpen, mobilePane]);
 
   // Apply schedule hint (coming from the Kanban status icon) after the
   // base reset effect above, so the user lands directly on the activities
@@ -449,21 +405,20 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   // the hint via `onScheduleHintConsumed` so it only fires once per intent.
   useEffect(() => {
     if (!isOpen || !deal || !scheduleHint) return;
-    setActiveTab('activities');
-    setEditingActivityId(null);
-    setQuickActivityType(scheduleHint.type);
-    setQuickActivityTitle(QUICK_ACTIVITY_TITLE_BY_TYPE[scheduleHint.type]);
-    setQuickActivityDate('');
-    setQuickActivityTime('');
-    setQuickActivityDesc('');
-    setShowQuickActivity(true);
+    setActivityDraft({
+      ...EMPTY_ACTIVITY_DRAFT,
+      type: scheduleHint.type,
+      title: QUICK_ACTIVITY_TITLE_BY_TYPE[scheduleHint.type],
+    });
+    setComposerMode('activity');
+    setMobilePane('chat');
     onScheduleHintConsumed?.();
   }, [isOpen, dealId, scheduleHint]);
 
   // UX: preselect board's default product when opening the Products tab (non-invasive).
   useEffect(() => {
     if (!isOpen) return;
-    if (activeTab !== 'products') return;
+    if (!productsOpen) return;
     const defaultId = dealBoard?.defaultProductId;
     if (!defaultId) return;
     if (selectedProductId) return;
@@ -473,7 +428,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     setSelectedProductId(defaultId);
     setProductQuantity(1);
     setProductPrice(precoParaCampo(p.price));
-  }, [activeTab, dealBoard?.defaultProductId, isOpen, productsById, selectedProductId]);
+  }, [productsOpen, dealBoard?.defaultProductId, isOpen, productsById, selectedProductId]);
 
   // Pre-compute stage label once for tool prompts (avoid repeated stage lookup).
   const stageLabel = useMemo(() => {
@@ -494,24 +449,33 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     });
   }, [activities, deal]);
 
-  // Quem criou o lead: vem da atividade de criação (integrações não geram)
-  const quemCriou = useMemo(() => {
-    const criacao = dealActivities.find(
-      a => a.title === 'Negócio Criado' || a.title.includes('converteu o contato em lead')
-    );
-    const nome = criacao?.user?.name;
-    return nome && !['Sistema', 'Eu'].includes(nome) ? nome : null;
-  }, [dealActivities]);
 
-  // Notes-only view for the Notas tab
-  const dealNotes = useMemo(() => {
-    return dealActivities.filter((a) => a.type === 'NOTE');
-  }, [dealActivities]);
-
-  // Activities-only (tasks, calls, meetings, emails — no notes/status changes)
-  const dealTaskActivities = useMemo(() => {
-    return dealActivities.filter((a) => a.type !== 'NOTE' && a.type !== 'STATUS_CHANGE');
-  }, [dealActivities]);
+  const memberNameById = useMemo(() => {
+    const m = new Map(orgMembers.map(u => [u.id, u.name]));
+    return (id: string) => m.get(id) ?? null;
+  }, [orgMembers]);
+  const saveNoteEdit = useCallback(
+    async (id: string, text: string) => {
+      await updateActivity(id, { description: text });
+      if (deal?.id) void queryClient.invalidateQueries({ queryKey: dealHistoryKey(deal.id) });
+    },
+    [updateActivity, queryClient, deal?.id]
+  );
+  const askDeleteNote = useCallback((id: string) => setDeleteNoteId(id), []);
+  const toggleActivity = useCallback((a: Activity) => void toggleActivityCompletion(a.id), [toggleActivityCompletion]);
+  const timelineEntries = useLeadTimelineEntries({
+    deal: deal ?? ({ createdAt: '' } as never),
+    activities: dealActivities,
+    history: historyQuery.data,
+    boards,
+    memberName: memberNameById,
+    customFields: customFieldDefinitions,
+    canEdit: permissions.deals.edit,
+    onSaveNote: saveNoteEdit,
+    onDeleteNote: askDeleteNote,
+    onOpenActivity: openActivityInComposer,
+    onToggleActivity: toggleActivity,
+  });
 
   if (!isOpen) return null;
 
@@ -630,58 +594,53 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     }
   };
 
-  const handleAddNote = () => {
-    if (!newNote.trim()) return;
-
-    const noteActivity: Activity = {
-      id: crypto.randomUUID(),
+  // Nota interna: fica só no CRM (nunca vai para o WhatsApp)
+  const saveNote = async (text: string) => {
+    if (!permissions.deals.edit) throw new Error('Sem permissão para editar este lead');
+    const created = await addActivity({
       dealId: deal.id,
       dealTitle: deal.title,
       type: 'NOTE',
-      title: 'Nota Adicionada',
-      description: newNote,
+      title: 'Nota interna',
+      description: text,
       date: new Date().toISOString(),
-      user: { name: 'Eu', avatar: 'https://i.pravatar.cc/150?u=me' },
+      user: { name: autorAtual, avatar: profile?.avatar_url || '' },
       completed: true,
-    };
-
-    addActivity(noteActivity);
-    setNewNote('');
+    } as Parameters<typeof addActivity>[0]);
+    if (!created) throw new Error('Não foi possível salvar a nota. O texto continua aqui.');
+    setOwnSaveKey(k => k + 1);
+    refreshHistory();
   };
 
-  const handleAddQuickActivity = () => {
-    if (!quickActivityTitle.trim() || !quickActivityDate || !quickActivityTime) return;
-
-    const dateTime = new Date(`${quickActivityDate}T${quickActivityTime}`).toISOString();
-
-    if (editingActivityId) {
-      updateActivity(editingActivityId, {
-        type: quickActivityType,
-        title: quickActivityTitle,
-        description: quickActivityDesc || undefined,
+  const submitActivity = async (d: ActivityDraft) => {
+    if (!permissions.deals.edit) throw new Error('Sem permissão para editar este lead');
+    const dateTime = new Date(`${d.date}T${d.time}`).toISOString();
+    if (d.editingId) {
+      await updateActivity(d.editingId, {
+        type: d.type,
+        title: d.title.trim(),
+        description: d.description.trim() || undefined,
         date: dateTime,
       });
       addToast('Atividade atualizada', 'success');
-      resetQuickActivityForm();
-      return;
+    } else {
+      const created = await addActivity({
+        dealId: deal.id,
+        dealTitle: deal.title,
+        type: d.type,
+        title: d.title.trim(),
+        description: d.description.trim() || undefined,
+        date: dateTime,
+        user: { name: autorAtual, avatar: profile?.avatar_url || '' },
+        // começa pendente; só a pessoa conclui
+        completed: false,
+      } as Parameters<typeof addActivity>[0]);
+      if (!created) throw new Error('Não foi possível criar a atividade. Os dados continuam aqui.');
+      setOwnSaveKey(k => k + 1);
+      addToast('Atividade criada', 'success');
     }
-
-    const newActivity: Activity = {
-      id: crypto.randomUUID(),
-      dealId: deal.id,
-      dealTitle: deal.title,
-      type: quickActivityType,
-      title: quickActivityTitle,
-      description: quickActivityDesc || undefined,
-      date: dateTime,
-      user: { name: 'Eu', avatar: 'https://i.pravatar.cc/150?u=me' },
-      // Activities always start pending. Only the user can mark as completed.
-      completed: false,
-    };
-
-    addActivity(newActivity);
-    addToast('Atividade agendada', 'success');
-    resetQuickActivityForm();
+    setActivityDraft(EMPTY_ACTIVITY_DRAFT);
+    refreshHistory();
   };
 
   const handleAddProduct = () => {
@@ -891,6 +850,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
 
   // Handle escape key to close modal (não fecha se um campo inline está em edição)
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.target as Element | null)?.closest?.('[data-esc-local]')) return;
     if (e.key === 'Escape' && !isEditingTitle && !isEditingValue && !editingFieldKey) {
       onClose();
     }
@@ -904,211 +864,238 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
           ? 'bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 w-full h-[100dvh] flex flex-col overflow-hidden pb-[var(--app-safe-area-bottom,0px)] animate-in slide-in-from-bottom-8 fade-in duration-300 ease-out'
           : viewMode === 'fullscreen'
             ? 'bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-none w-full max-w-full h-full flex flex-col overflow-hidden animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-300 ease-out transition-all'
-            : 'bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-300 ease-out transition-all'
+            : 'bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl w-full max-w-6xl h-[88vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-300 ease-out transition-all'
       }
     >
-          {/* HEADER (Stage Bar + Won/Lost). No mobile o grupo de ações quebra
-              de linha; sem isso, PERDIDO e o X de fechar eram cortados fora
-              da tela e o usuário ficava preso dentro do lead. */}
-          <div className="relative bg-slate-50 dark:bg-black/20 border-b border-slate-200 dark:border-white/10 p-6 max-md:p-4 shrink-0">
-            <div className="flex justify-between items-start mb-6 max-md:flex-wrap max-md:gap-y-2 max-md:mb-3">
-              <div className="flex-1 mr-8 max-md:mr-0 max-md:basis-full max-md:pr-20">
-                {isEditingTitle ? (
-                  <div className="flex gap-2 mb-1">
-                    <input readOnly={!permissions.deals.edit}
-                      autoFocus
-                      type="text"
-                      className="text-2xl font-bold text-slate-900 dark:text-white bg-white dark:bg-black/20 border border-slate-300 dark:border-slate-600 rounded px-2 py-1 w-full outline-none focus:ring-2 focus:ring-primary-500"
-                      value={editTitle}
-                      onChange={e => setEditTitle(e.target.value)}
-                      onBlur={saveTitle}
-                      onKeyDown={e => e.key === 'Enter' && saveTitle()}
-                    />
-                    <button onClick={saveTitle} className="text-green-500 hover:text-green-400">
-                      <Check size={24} />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h2
-                      id={headingId}
-                      onClick={() => {
-                        setEditTitle(deal.title);
-                        setIsEditingTitle(true);
-                      }}
-                      className="text-2xl font-bold text-slate-900 dark:text-white font-display leading-tight cursor-pointer hover:text-primary-600 dark:hover:text-primary-400 flex items-center gap-2 group transition-colors"
-                      title="Clique para editar"
-                    >
-                      {deal.title}
-                      <Pencil size={16} className="opacity-0 group-hover:opacity-50 max-md:opacity-50 text-slate-400" />
-                    </h2>
+      {/* Celular: alterna entre os dados do lead e a conversa */}
+      {isMobile && (
+        <div role="tablist" aria-label="Seção do lead" className="shrink-0 flex items-center gap-1 border-b border-slate-200 dark:border-white/10 px-2 py-1.5">
+          {([['data', 'Dados do lead'], ['chat', 'Conversa']] as const).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={mobilePane === id}
+              onClick={() => setMobilePane(id)}
+              className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-bold ${mobilePane === id ? 'bg-primary-100 text-primary-700 dark:bg-primary-500/15 dark:text-primary-300' : 'text-slate-500 dark:text-slate-400'}`}
+            >
+              {label}
+            </button>
+          ))}
+          <button type="button" onClick={onClose} className="shrink-0 p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-white" aria-label="Fechar lead">
+            <X size={20} />
+          </button>
+        </div>
+      )}
 
-                    {/* TAGS como MARCADORES junto do nome (cor por tag; × no hover) */}
-                    {(deal.tags || []).map((tag) => {
-                      const style = tagMarkerStyle(tag);
-                      return (
-                        <span
-                          key={tag}
-                          className={`group inline-flex items-center gap-1.5 pl-2 pr-1 py-0.5 rounded-md border text-[11px] font-semibold ${style.chip}`}
-                        >
-                          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${style.dot}`} aria-hidden="true" />
-                          {tag}
-                          <button
-                            type="button"
-                            onClick={() => removeDealTag(tag)}
-                            className="opacity-0 group-hover:opacity-70 max-md:opacity-70 hover:!opacity-100 transition-opacity"
-                            aria-label={`Remover tag ${tag}`}
-                            title="Remover tag"
-                          >
-                            <X size={11} />
-                          </button>
-                        </span>
-                      );
-                    })}
-
-                    {/* + Tag: popover de SELEÇÃO (criar nova é exceção; oficial em Configurações) */}
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setTagMenuOpen(o => !o);
-                          setTagCreating(false);
-                          setTagQuery('');
-                        }}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-dashed border-slate-300 dark:border-slate-600 text-[11px] font-semibold text-slate-400 hover:text-primary-600 hover:border-primary-400 dark:hover:text-primary-400 dark:hover:border-primary-500/60 transition-colors"
-                        title="Adicionar tag"
-                        aria-label="Adicionar tag"
-                      >
-                        <TagIcon size={11} /> Tag
+      <div className="flex-1 min-h-0 flex overflow-hidden">
+        {/* ESQUERDA: dados e controles do negócio */}
+        <aside
+          aria-label="Dados do lead"
+          className={`${isMobile ? (mobilePane === 'data' ? 'flex w-full' : 'hidden') : 'flex w-[380px] xl:w-[420px] shrink-0 border-r border-slate-200 dark:border-white/10'} flex-col min-h-0 bg-white dark:bg-dark-card`}
+        >
+          <div className="shrink-0 px-4 pt-4 pb-3 space-y-3 border-b border-slate-100 dark:border-white/5">
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                  {isEditingTitle ? (
+                    <div className="flex gap-2 mb-1">
+                      <input readOnly={!permissions.deals.edit}
+                        autoFocus
+                        type="text"
+                        className="text-xl font-bold text-slate-900 dark:text-white bg-white dark:bg-black/20 border border-slate-300 dark:border-slate-600 rounded px-2 py-1 w-full outline-none focus:ring-2 focus:ring-primary-500"
+                        value={editTitle}
+                        onChange={e => setEditTitle(e.target.value)}
+                        onBlur={saveTitle}
+                        onKeyDown={e => e.key === 'Enter' && saveTitle()}
+                      />
+                      <button onClick={saveTitle} className="text-green-500 hover:text-green-400">
+                        <Check size={24} />
                       </button>
-                      {tagMenuOpen && (
-                        <>
-                          <div className="fixed inset-0 z-40" onClick={() => setTagMenuOpen(false)} aria-hidden="true" />
-                          <div className="absolute left-0 top-7 z-50 w-60 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 p-1.5 animate-in fade-in slide-in-from-top-2 duration-150">
-                            {tagCreating ? (
-                              <div className="flex gap-1.5 p-1">
-                                <input readOnly={!permissions.deals.edit}
-                                  type="text"
-                                  autoFocus
-                                  value={tagQuery}
-                                  onChange={(e) => setTagQuery(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Escape') {
-                                      setTagCreating(false);
-                                      setTagQuery('');
-                                    }
-                                    if (e.key === 'Enter' && normalizeTag(tagQuery)) {
-                                      e.preventDefault();
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h2
+                        id={headingId}
+                        onClick={() => {
+                          setEditTitle(deal.title);
+                          setIsEditingTitle(true);
+                        }}
+                        className="text-xl font-bold text-slate-900 dark:text-white font-display leading-tight cursor-pointer hover:text-primary-600 dark:hover:text-primary-400 flex items-center gap-2 group transition-colors"
+                        title="Clique para editar"
+                      >
+                        {deal.title}
+                        <Pencil size={16} className="opacity-0 group-hover:opacity-50 max-md:opacity-50 text-slate-400" />
+                      </h2>
+
+                      {/* TAGS como MARCADORES junto do nome (cor por tag; × no hover) */}
+                      {(deal.tags || []).map((tag) => {
+                        const style = tagMarkerStyle(tag);
+                        return (
+                          <span
+                            key={tag}
+                            className={`group inline-flex items-center gap-1.5 pl-2 pr-1 py-0.5 rounded-md border text-[11px] font-semibold ${style.chip}`}
+                          >
+                            <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${style.dot}`} aria-hidden="true" />
+                            {tag}
+                            <button
+                              type="button"
+                              onClick={() => removeDealTag(tag)}
+                              className="opacity-0 group-hover:opacity-70 max-md:opacity-70 hover:!opacity-100 transition-opacity"
+                              aria-label={`Remover tag ${tag}`}
+                              title="Remover tag"
+                            >
+                              <X size={11} />
+                            </button>
+                          </span>
+                        );
+                      })}
+
+                      {/* + Tag: popover de SELEÇÃO (criar nova é exceção; oficial em Configurações) */}
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTagMenuOpen(o => !o);
+                            setTagCreating(false);
+                            setTagQuery('');
+                          }}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-dashed border-slate-300 dark:border-slate-600 text-[11px] font-semibold text-slate-400 hover:text-primary-600 hover:border-primary-400 dark:hover:text-primary-400 dark:hover:border-primary-500/60 transition-colors"
+                          title="Adicionar tag"
+                          aria-label="Adicionar tag"
+                        >
+                          <TagIcon size={11} /> Tag
+                        </button>
+                        {tagMenuOpen && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={() => setTagMenuOpen(false)} aria-hidden="true" />
+                            <div className="absolute left-0 top-7 z-50 w-60 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 p-1.5 animate-in fade-in slide-in-from-top-2 duration-150">
+                              {tagCreating ? (
+                                <div className="flex gap-1.5 p-1">
+                                  <input readOnly={!permissions.deals.edit}
+                                    type="text"
+                                    autoFocus
+                                    value={tagQuery}
+                                    onChange={(e) => setTagQuery(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Escape') {
+                                        setTagCreating(false);
+                                        setTagQuery('');
+                                      }
+                                      if (e.key === 'Enter' && normalizeTag(tagQuery)) {
+                                        e.preventDefault();
+                                        addDealTag(tagQuery);
+                                        setTagCreating(false);
+                                        setTagMenuOpen(false);
+                                      }
+                                    }}
+                                    placeholder="Nome da nova tag..."
+                                    className="min-w-0 flex-1 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                                    aria-label="Nome da nova tag"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
                                       addDealTag(tagQuery);
                                       setTagCreating(false);
                                       setTagMenuOpen(false);
-                                    }
-                                  }}
-                                  placeholder="Nome da nova tag..."
-                                  className="min-w-0 flex-1 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
-                                  aria-label="Nome da nova tag"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    addDealTag(tagQuery);
-                                    setTagCreating(false);
-                                    setTagMenuOpen(false);
-                                  }}
-                                  disabled={!normalizeTag(tagQuery)}
-                                  className="shrink-0 px-2.5 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold transition-colors"
-                                >
-                                  Criar
-                                </button>
-                              </div>
-                            ) : (
-                              <>
-                                <div className="max-h-52 overflow-y-auto scrollbar-custom">
-                                  {selectableTags.length === 0 && (
-                                    <p className="px-2.5 py-2 text-xs text-slate-400 italic">
-                                      Todas as tags da organização já estão no lead.
-                                    </p>
-                                  )}
-                                  {selectableTags.map((t) => {
-                                    const style = tagMarkerStyle(t);
-                                    return (
-                                      <button
-                                        key={t}
-                                        type="button"
-                                        onClick={() => {
-                                          addDealTag(t);
-                                          setTagMenuOpen(false);
-                                        }}
-                                        className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-left text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
-                                      >
-                                        <span className={`h-2 w-2 rounded-full shrink-0 ${style.dot}`} aria-hidden="true" />
-                                        <span className="truncate">{t}</span>
-                                      </button>
-                                    );
-                                  })}
+                                    }}
+                                    disabled={!normalizeTag(tagQuery)}
+                                    className="shrink-0 px-2.5 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold transition-colors"
+                                  >
+                                    Criar
+                                  </button>
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setTagCreating(true);
-                                    setTagQuery('');
-                                  }}
-                                  className="w-full mt-1 border-t border-slate-100 dark:border-white/10 pt-1.5 px-2.5 pb-1 text-left text-xs font-semibold text-primary-600 dark:text-primary-400 hover:underline"
-                                >
-                                  ➕ Criar nova tag…
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </>
-                      )}
+                              ) : (
+                                <>
+                                  <div className="max-h-52 overflow-y-auto scrollbar-custom">
+                                    {selectableTags.length === 0 && (
+                                      <p className="px-2.5 py-2 text-xs text-slate-400 italic">
+                                        Todas as tags da organização já estão no lead.
+                                      </p>
+                                    )}
+                                    {selectableTags.map((t) => {
+                                      const style = tagMarkerStyle(t);
+                                      return (
+                                        <button
+                                          key={t}
+                                          type="button"
+                                          onClick={() => {
+                                            addDealTag(t);
+                                            setTagMenuOpen(false);
+                                          }}
+                                          className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-left text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
+                                        >
+                                          <span className={`h-2 w-2 rounded-full shrink-0 ${style.dot}`} aria-hidden="true" />
+                                          <span className="truncate">{t}</span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setTagCreating(true);
+                                      setTagQuery('');
+                                    }}
+                                    className="w-full mt-1 border-t border-slate-100 dark:border-white/10 pt-1.5 px-2.5 pb-1 text-left text-xs font-semibold text-primary-600 dark:text-primary-400 hover:underline"
+                                  >
+                                    ➕ Criar nova tag…
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )}
-
-                {/* Valor: editar TROCA só a linha do número por um input da MESMA
-                    altura (borda embaixo, sem caixa) — nada de empurrar o layout.
-                    Enter/clicar fora salva; Esc cancela. */}
-                <div className="flex flex-col">
-                  {deal.items && deal.items.length > 0 && (
-                    <span className="text-xs text-slate-500 dark:text-slate-400 mb-0.5">
-                      {deal.items.map(i => i.name).join(', ')}
-                    </span>
                   )}
-                  {isEditingValue ? (
-                    <div className="flex items-baseline gap-1.5">
-                      <span className="text-lg font-mono font-bold text-primary-600 dark:text-primary-400">R$</span>
-                      <input readOnly={!permissions.deals.edit}
-                        autoFocus
-                        type="number"
-                        inputMode="decimal"
-                        min={0}
-                        step="0.01"
-                        className="text-lg font-mono font-bold leading-normal text-primary-600 dark:text-primary-400 bg-transparent border-0 border-b-2 border-primary-400 focus:border-primary-500 w-32 p-0 outline-none focus:ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                        value={editValue}
-                        onChange={e => setEditValue(e.target.value)}
-                        onBlur={saveValue}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') saveValue();
-                          if (e.key === 'Escape') setIsEditingValue(false);
-                        }}
-                      />
-                    </div>
-                  ) : (
-                    <p
-                      onClick={() => {
-                        setEditValue(deal.value.toString());
-                        setIsEditingValue(true);
-                      }}
-                      className="text-lg text-primary-600 dark:text-primary-400 font-mono font-bold cursor-pointer hover:underline decoration-dashed underline-offset-4"
-                      title="Clique para editar valor"
-                    >
-                      R$ {deal.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                    </p>
-                  )}
-                </div>
               </div>
-              <div className="flex gap-3 items-center max-md:flex-wrap max-md:w-full max-md:justify-start">
+              <div className="shrink-0 flex items-center gap-1">
+                {!isMobile && (
+                  <button
+                    type="button"
+                    onClick={() => setViewMode(v => (v === 'modal' ? 'fullscreen' : 'modal'))}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
+                    title={viewMode === 'modal' ? 'Tela cheia' : 'Modo janela'}
+                    aria-label={viewMode === 'modal' ? 'Tela cheia' : 'Modo janela'}
+                  >
+                    {viewMode === 'modal' ? <Maximize2 size={16} /> : <Minimize2 size={16} />}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={!permissions.deals.delete}
+                  onClick={() => setDeleteId(deal.id)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Excluir negócio"
+                  aria-label="Excluir negócio"
+                >
+                  <Trash2 size={16} />
+                </button>
+                {!isMobile && (
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10"
+                    title="Fechar"
+                    aria-label="Fechar lead"
+                  >
+                    <X size={18} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Funil e etapa (mesma lógica central do Kanban e do chat) */}
+            {dealBoard ? (
+              <DealStageControl deal={deal} />
+            ) : (
+              <p className="rounded-lg border border-slate-200/60 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
+                Funil não encontrado para este negócio. Mover de etapa fica indisponível.
+              </p>
+            )}
+
+            <div className="flex items-center justify-between gap-3 flex-wrap">
                 {/* RESPONSÁVEL — bolinha de perfil no topo (clica pra trocar; só admin) */}
                 {(canAssignOwner || deal.ownerId) && (() => {
                   const dealOwner = orgMembers.find(u => u.id === deal.ownerId) ?? null;
@@ -1167,7 +1154,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                       {ownerMenuOpen && (
                         <>
                           <div className="fixed inset-0 z-40" onClick={() => setOwnerMenuOpen(false)} aria-hidden="true" />
-                          <div className="absolute right-0 max-md:left-0 max-md:right-auto top-11 z-50 w-60 max-h-72 overflow-y-auto scrollbar-custom bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 p-1.5 animate-in fade-in slide-in-from-top-2 duration-150">
+                          <div className="absolute left-0 top-11 z-50 w-60 max-h-72 overflow-y-auto scrollbar-custom bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 p-1.5 animate-in fade-in slide-in-from-top-2 duration-150">
                             <p className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Responsável</p>
                             <button
                               type="button"
@@ -1223,6 +1210,50 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                     </div>
                   );
                 })()}
+                {/* Valor: editar TROCA só a linha do número por um input da MESMA
+                    altura (borda embaixo, sem caixa) — nada de empurrar o layout.
+                    Enter/clicar fora salva; Esc cancela. */}
+                <div className="flex flex-col">
+                  {deal.items && deal.items.length > 0 && (
+                    <span className="text-xs text-slate-500 dark:text-slate-400 mb-0.5">
+                      {deal.items.map(i => i.name).join(', ')}
+                    </span>
+                  )}
+                  {isEditingValue ? (
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-lg font-mono font-bold text-primary-600 dark:text-primary-400">R$</span>
+                      <input readOnly={!permissions.deals.edit}
+                        autoFocus
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        step="0.01"
+                        className="text-lg font-mono font-bold leading-normal text-primary-600 dark:text-primary-400 bg-transparent border-0 border-b-2 border-primary-400 focus:border-primary-500 w-32 p-0 outline-none focus:ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                        value={editValue}
+                        onChange={e => setEditValue(e.target.value)}
+                        onBlur={saveValue}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') saveValue();
+                          if (e.key === 'Escape') setIsEditingValue(false);
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <p
+                      onClick={() => {
+                        setEditValue(deal.value.toString());
+                        setIsEditingValue(true);
+                      }}
+                      className="text-lg text-primary-600 dark:text-primary-400 font-mono font-bold cursor-pointer hover:underline decoration-dashed underline-offset-4"
+                      title="Clique para editar valor"
+                    >
+                      R$ {deal.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </p>
+                  )}
+                </div>
+            </div>
+
+            <div className="flex items-center gap-2">
                 {/* Se fechado: mostra badge + botão Reabrir */}
                 {(deal.isWon || deal.isLost) ? (
                   <>
@@ -1284,7 +1315,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                         }
                         onClose();
                       }}
-                      className="px-4 py-2 max-md:px-3 max-md:py-2 max-md:text-xs max-md:flex-1 max-md:justify-center bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold text-sm shadow-sm flex items-center gap-2"
+                      className="px-3 py-2 text-xs flex-1 justify-center bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold text-sm shadow-sm flex items-center gap-2"
                     >
                       <ThumbsUp size={16} /> GANHO
                     </button>
@@ -1306,161 +1337,19 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                         setLossReasonOrigin('button');
                         setShowLossReasonModal(true);
                       }}
-                      className="px-4 py-2 max-md:px-3 max-md:py-2 max-md:text-xs max-md:flex-1 max-md:justify-center bg-transparent border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg font-bold text-sm shadow-sm flex items-center gap-2"
+                      className="px-3 py-2 text-xs flex-1 justify-center bg-transparent border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg font-bold text-sm shadow-sm flex items-center gap-2"
                     >
                       <ThumbsDown size={16} /> PERDIDO
                     </button>
                   </>
                 )}
-                <button
-                  onClick={() => setViewMode(v => v === 'modal' ? 'fullscreen' : 'modal')}
-                  // No mobile o card é sempre tela cheia (viewMode é ignorado),
-                  // então o botão não faz nada e só ocupa espaço no header.
-                  className="ml-2 max-md:hidden text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
-                  title={viewMode === 'modal' ? 'Tela cheia' : 'Modo modal'}
-                >
-                  {viewMode === 'modal' ? <Maximize2 size={20} /> : <Minimize2 size={20} />}
-                </button>
-                {/* Celular: lixeira e X ancorados no canto superior direito
-                    (na linha do título) em vez de ocuparem uma linha própria */}
-                <button
-                  disabled={!permissions.deals.delete}
-                  onClick={() => setDeleteId(deal.id)}
-                  className="ml-2 max-md:absolute max-md:top-4 max-md:right-12 max-md:ml-0 max-md:p-1 text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
-                  title="Excluir Negócio"
-                >
-                  <Trash2 size={24} className="max-md:w-5 max-md:h-5" />
-                </button>
-                <button
-                  onClick={onClose}
-                  className="ml-2 max-md:absolute max-md:top-4 max-md:right-3 max-md:ml-0 max-md:p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white"
-                >
-                  <X size={24} className="max-md:w-5 max-md:h-5" />
-                </button>
-              </div>
             </div>
 
-            {dealBoard ? (
-              <div className="mt-3 flex items-center gap-3 max-md:flex-wrap">
-                <div className="shrink-0" data-board-menu>
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setBoardMenuOpen(o => !o);
-                        setBoardPick(null);
-                      }}
-                      aria-expanded={boardMenuOpen}
-                      title="Board deste lead. Clique para mover para outro board"
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/15 transition-colors"
-                    >
-                      <KanbanSquare size={12} />
-                      <span className="max-w-[180px] truncate">{dealBoard.name}</span>
-                      <ChevronDown size={12} className={`transition-transform ${boardMenuOpen ? 'rotate-180' : ''}`} />
-                    </button>
-                    {boardMenuOpen && (
-                      <div className="absolute left-0 top-full mt-1.5 z-40 min-w-[240px] max-h-[300px] overflow-y-auto rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card shadow-xl p-1.5">
-                        {!boardPick ? (
-                          <>
-                            <p className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                              Mover para outro board
-                            </p>
-                            {boards.filter(b => b.id !== dealBoard.id).map(b => (
-                              <button
-                                key={b.id}
-                                type="button"
-                                onClick={() => setBoardPick(b)}
-                                className="w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
-                              >
-                                <span className="truncate">{b.name}</span>
-                                <ChevronRight size={13} className="shrink-0 text-slate-400" />
-                              </button>
-                            ))}
-                            {boards.filter(b => b.id !== dealBoard.id).length === 0 && (
-                              <p className="px-2.5 py-2 text-xs text-slate-400">Não há outros boards nesta organização.</p>
-                            )}
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => setBoardPick(null)}
-                              className="w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-left text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
-                            >
-                              <ChevronLeft size={13} /> {boardPick.name}: escolha a etapa
-                            </button>
-                            {boardPick.stages.map(st => (
-                              <button
-                                key={st.id}
-                                type="button"
-                                onClick={() => moveToBoardStage(boardPick, st)}
-                                className="w-full px-2.5 py-2 rounded-lg text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors"
-                              >
-                                {st.label}
-                              </button>
-                            ))}
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className="flex-1 min-w-0">
-                <StageProgressBar
-                stages={dealBoard.stages}
-                currentStatus={deal.status}
-                variant="timeline"
-                onStageClick={stageId => {
-                  // Check if clicking on a LOST stage
-                  const targetStage = dealBoard.stages.find(s => s.id === stageId);
-                  // Check if it matches configured Lost Stage OR explicitly linked 'OTHER' stage
-                  const isLostStage =
-                    dealBoard.lostStageId === stageId ||
-                    targetStage?.linkedLifecycleStage === 'OTHER';
-
-                  if (isLostStage) {
-                    // Show loss reason modal
-                    setPendingLostStageId(stageId);
-                    setLossReasonOrigin('stage');
-                    setShowLossReasonModal(true);
-                  } else {
-                    // Regular move
-                    moveDeal(deal, stageId);
-                  }
-                }}
-              />
-                </div>
-              </div>
-            ) : (
-              <div className="mt-4 rounded-lg border border-slate-200/60 bg-slate-50 px-4 py-3 text-xs text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
-                Board não encontrado para este negócio. Algumas ações (mover estágio) podem ficar indisponíveis.
-              </div>
-            )}
             <LossDetailsBanner key={deal.id} deal={deal} canEdit={permissions.deals.edit} />
+            {deal.status && <FollowupStatus dealId={deal.id} stageId={deal.status} />}
           </div>
 
-          <div className="flex-1 flex flex-col md:flex-row overflow-hidden min-h-0">
-            {/* Left Sidebar (Static Info + Custom Fields) */}
-            <div className={`w-full md:w-1/3 border-b md:border-b-0 md:border-r border-slate-200 dark:border-white/5 p-4 sm:p-6 overflow-y-auto overflow-x-hidden scrollbar-custom bg-white dark:bg-dark-card md:max-h-none ${mobileInfoOpen ? 'max-h-[38vh]' : 'max-md:max-h-none max-md:overflow-visible max-md:py-3 max-h-[38vh]'}`}>
-              {/* Celular: cabeçalho que abre/fecha os dados do lead */}
-              <button
-                type="button"
-                onClick={() => setMobileInfoOpen(o => !o)}
-                aria-expanded={mobileInfoOpen}
-                className="md:hidden w-full flex items-center justify-between text-left focus-visible-ring rounded-md"
-              >
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Dados do lead
-                </span>
-                <ChevronDown
-                  size={16}
-                  aria-hidden="true"
-                  className={`text-slate-400 transition-transform ${mobileInfoOpen ? 'rotate-180' : ''}`}
-                />
-              </button>
-              {/* space-y-4: 16px entre seções = mesmo pt-4 após cada divisória →
-                  cabeçalhos centralizados (16/16) em TODAS as faixas da lateral */}
-              <div className={`space-y-4 ${mobileInfoOpen ? 'max-md:mt-4' : 'max-md:hidden'}`}>
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden scrollbar-custom px-4 py-4 space-y-4">
                 {/* Banner Inativos: quanto tempo falta pro lead sair (devolução automática) */}
                 {deal.inactiveAt && (() => {
                   const daysLeft = Math.max(
@@ -1586,6 +1475,29 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                     <p className="text-sm text-slate-500">Sem contato</p>
                   )}
                 </div>
+            {/* Descrição (editável, salva ao sair do campo) */}
+            <div className="pt-4 border-t border-slate-100 dark:border-white/5">
+              <h3 className="mb-2 text-xs font-bold text-slate-400 uppercase">Descrição</h3>
+              <textarea
+                readOnly={!permissions.deals.edit}
+                ref={descriptionTextareaRef}
+                aria-label="Descrição do lead"
+                className="w-full rounded-lg border border-transparent hover:border-slate-200 focus:border-primary-300 dark:hover:border-white/10 bg-transparent px-2 py-1.5 -mx-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none resize-none overflow-hidden min-h-[64px] focus:ring-2 focus:ring-primary-500/20"
+                placeholder="Adicione uma descrição..."
+                value={descriptionDraft}
+                onChange={e => setDescriptionDraft(e.target.value)}
+                onBlur={() => {
+                  const next = descriptionDraft;
+                  if (next !== (deal.description ?? '')) {
+                    logAlteracao(
+                      `${autorAtual} atualizou a descrição do lead`,
+                      next ? (next.length > 120 ? `${next.slice(0, 120)}…` : next) : 'Descrição removida'
+                    );
+                    updateDeal(deal.id, { description: next });
+                  }
+                }}
+              />
+            </div>
 
                 {/* DYNAMIC CUSTOM FIELDS INPUTS (grupos ocultos pelo board já filtrados) */}
                 {(ungroupedFieldDefs.length > 0 || groupedFieldDefs.length > 0) && (
@@ -1804,6 +1716,174 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                     })()}
                   </div>
                 )}
+            {/* Produtos (seção da coluna de dados) */}
+            <div className="pt-4 border-t border-slate-100 dark:border-white/5">
+              <button
+                type="button"
+                onClick={() => setProductsOpen(o => !o)}
+                aria-expanded={productsOpen}
+                className="w-full flex items-center justify-between text-xs font-bold text-slate-400 uppercase hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+              >
+                <span className="flex items-center gap-2">
+                  <Package size={14} /> Produtos
+                  <span className="font-normal normal-case">({(deal.items || []).length})</span>
+                </span>
+                <ChevronDown size={14} className={`transition-transform ${productsOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {productsOpen && (
+                <div className="mt-3 space-y-3">
+                  {(deal.items || []).length === 0 ? (
+                    <p className="text-xs italic text-slate-500">Nenhum produto. O valor do negócio é manual.</p>
+                  ) : (
+                    <ul className="divide-y divide-slate-100 dark:divide-white/5 rounded-lg border border-slate-200 dark:border-white/10">
+                      {(deal.items || []).map(item => (
+                        <li key={item.id} className="flex items-center gap-2 px-2.5 py-2 text-sm">
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate font-medium text-slate-900 dark:text-white">{item.name}</span>
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                              {item.quantity} ×{' '}
+                              {editingItemId === item.id ? (
+                                <input
+                                  readOnly={!permissions.deals.edit}
+                                  autoFocus
+                                  inputMode="decimal"
+                                  aria-label={`Preço de ${item.name} neste lead`}
+                                  className="w-24 bg-white dark:bg-black/20 border border-primary-300 dark:border-primary-500/50 rounded px-1.5 py-0.5 text-xs outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                                  value={editingItemPrice}
+                                  onChange={e => setEditingItemPrice(e.target.value)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') salvarPrecoItem(item.id);
+                                    if (e.key === 'Escape') { setEditingItemId(null); setEditingItemPrice(''); }
+                                  }}
+                                  onBlur={() => salvarPrecoItem(item.id)}
+                                />
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => { setEditingItemId(item.id); setEditingItemPrice(precoParaCampo(item.price)); }}
+                                  title="Alterar o preço só neste lead"
+                                  className="hover:text-primary-600 dark:hover:text-primary-400 underline decoration-dotted underline-offset-2"
+                                >
+                                  {fmtBRL(item.price)}
+                                </button>
+                              )}
+                            </span>
+                          </span>
+                          <span className="shrink-0 text-sm font-bold text-slate-900 dark:text-white">{fmtBRL(item.price * item.quantity)}</span>
+                          <button
+                            type="button"
+                            onClick={() => removeItemFromDeal(deal.id, item.id)}
+                            disabled={!permissions.deals.edit}
+                            className="shrink-0 text-slate-400 hover:text-red-500 transition-colors disabled:opacity-40"
+                            aria-label={`Remover ${item.name}`}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </li>
+                      ))}
+                      <li className="flex items-center justify-between px-2.5 py-2 bg-slate-50 dark:bg-black/20 text-xs font-bold uppercase tracking-wide text-slate-500">
+                        Total
+                        <span className="text-sm normal-case text-primary-600 dark:text-primary-400">
+                          {fmtBRL((deal.items || []).reduce((sum, i) => sum + i.price * i.quantity, 0))}
+                        </span>
+                      </li>
+                    </ul>
+                  )}
+                  {permissions.deals.edit && (
+                    <div className="space-y-2 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20 p-2.5">
+                      <select
+                        aria-label="Produto ou serviço"
+                        className="w-full bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                        value={selectedProductId}
+                        onChange={e => {
+                          const id = e.target.value;
+                          setSelectedProductId(id);
+                          const p = productsById.get(id);
+                          setProductPrice(p ? precoParaCampo(p.price) : '');
+                        }}
+                      >
+                        <option value="">Adicionar produto ou serviço...</option>
+                        {products.map(p => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} - {fmtBRL(p.price)}
+                          </option>
+                        ))}
+                      </select>
+                      {selectedProductId && (
+                        <div className="flex gap-2">
+                          <input
+                            type="number"
+                            min="1"
+                            aria-label="Quantidade"
+                            className="w-16 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                            value={productQuantity}
+                            onChange={e => setProductQuantity(parseInt(e.target.value))}
+                          />
+                          <input
+                            inputMode="decimal"
+                            aria-label="Preço neste lead"
+                            placeholder="Preço"
+                            title="Preço só neste lead. O cadastro do produto em Configurações não muda."
+                            className="min-w-0 flex-1 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                            value={productPrice}
+                            onChange={e => setProductPrice(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            onClick={handleAddProduct}
+                            className="shrink-0 bg-primary-600 hover:bg-primary-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold"
+                          >
+                            Adicionar
+                          </button>
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setShowCustomItem(v => !v)}
+                        className="text-[11px] font-bold text-primary-600 dark:text-primary-400 hover:underline"
+                      >
+                        {showCustomItem ? 'Fechar item personalizado' : 'Item personalizado (fora do catálogo)'}
+                      </button>
+                      {showCustomItem && (
+                        <div className="space-y-2">
+                          <input
+                            value={customItemName}
+                            onChange={e => setCustomItemName(e.target.value)}
+                            placeholder="Nome do item"
+                            aria-label="Nome do item"
+                            className="w-full bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                          />
+                          <div className="flex gap-2">
+                            <input
+                              value={customItemPrice}
+                              onChange={e => setCustomItemPrice(e.target.value)}
+                              inputMode="decimal"
+                              aria-label="Preço"
+                              className="min-w-0 flex-1 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                            />
+                            <input
+                              type="number"
+                              min={1}
+                              value={customItemQuantity}
+                              onChange={e => setCustomItemQuantity(parseInt(e.target.value))}
+                              aria-label="Quantidade"
+                              className="w-16 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleAddCustomItem}
+                              className="shrink-0 bg-primary-600 hover:bg-primary-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold"
+                            >
+                              Adicionar
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
 
                 {/* UTMs — padrão em todos os cards, colapsável (fica escondido até abrir) */}
                 <div className="pt-4 border-t border-slate-100 dark:border-white/5">
@@ -1866,613 +1946,95 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                     </div>
                   </div>
                 </div>
+          </div>
+        </aside>
 
+        {/* DIREITA: conversa + histórico unificado + compositor */}
+        <section
+          aria-label="Conversa e histórico do lead"
+          className={`${isMobile ? (mobilePane === 'chat' ? 'flex' : 'hidden') : 'flex'} relative flex-1 min-w-0 min-h-0 flex-col bg-white dark:bg-dark-card`}
+        >
+          <DealWhatsAppChat
+            contact={contact}
+            templateContext={{
+              'contato.email': contact?.email || '',
+              'lead.titulo': deal.title,
+              'lead.valor': Number(deal.value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+              'lead.etapa': dealBoard?.stages.find(s => s.id === deal.status)?.label || '',
+              'responsavel.nome': orgMembers.find(u => u.id === deal.ownerId)?.name || '',
+              'escritorio.nome': profile?.organization_name || '',
+            }}
+            timeline={{
+              entries: timelineEntries,
+              canWriteCrm: permissions.deals.edit,
+              scrollToEndKey: ownSaveKey,
+              composerMode,
+              onComposerModeChange: setComposerMode,
+              headerExtra: (
+                <button
+                  type="button"
+                  onClick={() => setAiOpen(o => !o)}
+                  aria-expanded={aiOpen}
+                  className={`h-8 px-2 inline-flex items-center gap-1.5 rounded-lg text-xs font-bold transition-colors ${
+                    aiOpen
+                      ? 'bg-primary-100 text-primary-700 dark:bg-primary-500/20 dark:text-primary-300'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20'
+                  }`}
+                  title="Análise do negócio, rascunho de e-mail e respostas a objeções"
+                >
+                  <BrainCircuit size={14} /> IA Insights
+                </button>
+              ),
+              aboveComposer: (
+                <PendingActivitiesStrip
+                  activities={dealActivities}
+                  onOpen={openActivityInComposer}
+                  onComplete={a => void toggleActivityCompletion(a.id)}
+                  canEdit={permissions.deals.edit}
+                  isPending={isActivityPending}
+                />
+              ),
+              noteComposer: (
+                <NoteComposer value={noteDraft} onChange={setNoteDraft} onSave={saveNote} disabled={!permissions.deals.edit} />
+              ),
+              activityComposer: (
+                <ActivityComposer
+                  draft={activityDraft}
+                  onChange={setActivityDraft}
+                  onSubmit={submitActivity}
+                  onCancelEdit={() => setActivityDraft(EMPTY_ACTIVITY_DRAFT)}
+                  onComplete={async id => {
+                    const a = dealActivities.find(x => x.id === id);
+                    if (a && !a.completed) await toggleActivityCompletion(id);
+                    setActivityDraft(EMPTY_ACTIVITY_DRAFT);
+                    addToast('Atividade concluída', 'success');
+                  }}
+                  disabled={!permissions.deals.edit}
+                />
+              ),
+            }}
+          />
+          {historyQuery.isError && (
+            <p role="alert" className="absolute top-12 left-1/2 -translate-x-1/2 z-10 rounded-lg bg-red-50 dark:bg-red-900/30 px-3 py-1.5 text-xs text-red-600 dark:text-red-300 shadow">
+              Não foi possível carregar o histórico de alterações.{' '}
+              <button type="button" className="font-bold underline" onClick={() => void historyQuery.refetch()}>
+                Tentar de novo
+              </button>
+            </p>
+          )}
+
+          {/* IA Insights: painel sobre a conversa (não perde a posição do chat) */}
+          {aiOpen && (
+            <div data-esc-local="" onKeyDown={e => { if (e.key === 'Escape') setAiOpen(false); }} className="absolute inset-y-0 right-0 z-20 w-full sm:w-[440px] max-w-full border-l border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card shadow-2xl flex flex-col animate-in slide-in-from-right-4 fade-in duration-200">
+              <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-slate-200 dark:border-white/10">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <BrainCircuit size={16} className="text-primary-500" /> IA Insights
+                </h3>
+                <button type="button" onClick={() => setAiOpen(false)} className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white" aria-label="Fechar IA Insights">
+                  <X size={16} />
+                </button>
               </div>
-            </div>
-
-            {/* Right Content (Tabs & Timeline) */}
-            <div className="flex-1 min-h-0 flex flex-col bg-white dark:bg-dark-card">
-              {/* Mobile: barra de abas rola na horizontal; sem isso Produtos e
-                  IA Insights eram cortadas e ficavam inacessíveis no celular */}
-              <div className="h-14 border-b border-slate-200 dark:border-white/5 flex items-center px-6 shrink-0 max-md:overflow-x-auto max-md:px-4 scrollbar-none">
-                <div className="flex gap-6 max-md:gap-4">
-                  <button
-                    onClick={() => setActiveTab('timeline')}
-                    className={`text-sm font-bold h-14 border-b-2 transition-colors shrink-0 whitespace-nowrap ${activeTab === 'timeline' ? 'border-primary-500 text-primary-600 dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
-                  >
-                    Timeline
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('whatsapp')}
-                    className={`text-sm font-bold h-14 border-b-2 transition-colors shrink-0 whitespace-nowrap flex items-center gap-1.5 ${activeTab === 'whatsapp' ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
-                  >
-                    <MessageCircle size={15} /> WhatsApp
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('activities')}
-                    className={`text-sm font-bold h-14 border-b-2 transition-colors shrink-0 whitespace-nowrap ${activeTab === 'activities' ? 'border-primary-500 text-primary-600 dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
-                  >
-                    Atividades
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('notes')}
-                    className={`text-sm font-bold h-14 border-b-2 transition-colors shrink-0 whitespace-nowrap ${activeTab === 'notes' ? 'border-primary-500 text-primary-600 dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
-                  >
-                    Notas
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('products')}
-                    className={`text-sm font-bold h-14 border-b-2 transition-colors shrink-0 whitespace-nowrap ${activeTab === 'products' ? 'border-primary-500 text-primary-600 dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
-                  >
-                    Produtos
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('info')}
-                    className={`text-sm font-bold h-14 border-b-2 transition-colors shrink-0 whitespace-nowrap ${activeTab === 'info' ? 'border-primary-500 text-primary-600 dark:text-white' : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-white'}`}
-                  >
-                    IA Insights
-                  </button>
-                </div>
-              </div>
-
-              {/* WhatsApp ocupa a área inteira da aba (sem padding — o chat
-                  rola por dentro); as demais abas mantêm o p-6 com scroll */}
-              <div className={`flex-1 min-h-0 bg-slate-50/30 dark:bg-black/10 ${activeTab === 'whatsapp' ? 'overflow-hidden' : 'overflow-y-auto scrollbar-custom p-6'}`}>
-                {activeTab === 'whatsapp' && (
-                  <div className="h-full">
-                    <DealWhatsAppChat
-                      contact={contact}
-                      templateContext={{
-                        'contato.email': contact?.email || '',
-                        'lead.titulo': deal.title,
-                        'lead.valor': Number(deal.value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
-                        'lead.etapa': dealBoard?.stages.find(s => s.id === deal.status)?.label || '',
-                        'responsavel.nome': orgMembers.find(u => u.id === deal.ownerId)?.name || '',
-                        'escritorio.nome': profile?.organization_name || '',
-                      }}
-                    />
-                  </div>
-                )}
-                {activeTab === 'timeline' && (
-                  <div className="space-y-6">
-                    {/* Descrição fixa — sempre visível, persistente (salva no blur) */}
-                    <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-4 shadow-sm">
-                      <textarea readOnly={!permissions.deals.edit}
-                        ref={descriptionTextareaRef}
-                        className="w-full bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none resize-none overflow-hidden min-h-[120px]"
-                        placeholder="Adicione uma descrição..."
-                        value={descriptionDraft}
-                        onChange={e => setDescriptionDraft(e.target.value)}
-                        onBlur={() => {
-                          const next = descriptionDraft;
-                          if (next !== (deal.description ?? '')) {
-                            logAlteracao(
-                              `${autorAtual} atualizou a descrição do lead`,
-                              next ? (next.length > 120 ? `${next.slice(0, 120)}…` : next) : 'Descrição removida'
-                            );
-                            updateDeal(deal.id, { description: next });
-                          }
-                        }}
-                      />
-                    </div>
-
-                    {/* Nova Nota — editor só aparece após clique */}
-                    {!showNewNote ? (
-                      <button
-                        onClick={() => setShowNewNote(true)}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-500 dark:text-slate-400 hover:border-primary-400 hover:text-primary-600 dark:hover:border-primary-500 dark:hover:text-primary-400 transition-colors"
-                      >
-                        <Plus size={16} /> Nova Nota
-                      </button>
-                    ) : (
-                      <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-4 shadow-sm">
-                        <div className="flex items-center justify-between mb-2">
-                          <h4 className="text-sm font-bold text-slate-700 dark:text-white">Nova Nota</h4>
-                          <button
-                            onClick={() => { setShowNewNote(false); setNewNote(''); }}
-                            className="text-slate-400 hover:text-slate-600 dark:hover:text-white"
-                          >
-                            <X size={16} />
-                          </button>
-                        </div>
-                        <textarea readOnly={!permissions.deals.edit}
-                          ref={noteTextareaRef}
-                          autoFocus
-                          className="w-full bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none resize-none min-h-[80px]"
-                          placeholder="Escreva uma nota..."
-                          value={newNote}
-                          onChange={e => setNewNote(e.target.value)}
-                        />
-                        <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-100 dark:border-white/5">
-                          <div />
-                          <button
-                            onClick={() => { handleAddNote(); setShowNewNote(false); }}
-                            disabled={!newNote.trim()}
-                            className="bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-all"
-                          >
-                            <Check size={14} /> Enviar
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Quick Activity Creation */}
-                    {!showQuickActivity ? (
-                      <button
-                        onClick={() => setShowQuickActivity(true)}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-500 dark:text-slate-400 hover:border-primary-400 hover:text-primary-600 dark:hover:border-primary-500 dark:hover:text-primary-400 transition-colors"
-                      >
-                        <Plus size={16} /> Nova Atividade
-                      </button>
-                    ) : (
-                      <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-4 shadow-sm space-y-3">
-                        <div className="flex items-center justify-between">
-                          <h4 className="text-sm font-bold text-slate-700 dark:text-white">
-                            {editingActivityId ? 'Editar Atividade' : 'Nova Atividade'}
-                          </h4>
-                          <button onClick={resetQuickActivityForm} className="text-slate-400 hover:text-slate-600 dark:hover:text-white">
-                            <X size={16} />
-                          </button>
-                        </div>
-                        <input readOnly={!permissions.deals.edit}
-                          type="text"
-                          required
-                          className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
-                          placeholder="Título da atividade..."
-                          value={quickActivityTitle}
-                          onChange={e => setQuickActivityTitle(e.target.value)}
-                        />
-                        <div className="grid grid-cols-3 gap-2">
-                          <select
-                            className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
-                            value={quickActivityType}
-                            onChange={e => setQuickActivityType(e.target.value as typeof quickActivityType)}
-                          >
-                            <option value="CALL">Ligação</option>
-                            <option value="MEETING">Reunião</option>
-                            <option value="EMAIL">Email</option>
-                            <option value="TASK">Tarefa</option>
-                          </select>
-                          <input readOnly={!permissions.deals.edit}
-                            type="date"
-                            required
-                            className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
-                            value={quickActivityDate}
-                            onChange={e => setQuickActivityDate(e.target.value)}
-                          />
-                          <input readOnly={!permissions.deals.edit}
-                            type="time"
-                            required
-                            className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
-                            value={quickActivityTime}
-                            onChange={e => setQuickActivityTime(e.target.value)}
-                          />
-                        </div>
-                        <textarea readOnly={!permissions.deals.edit}
-                          className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500 min-h-[60px] resize-none"
-                          placeholder="Descrição (opcional)..."
-                          value={quickActivityDesc}
-                          onChange={e => setQuickActivityDesc(e.target.value)}
-                        />
-                        <button
-                          onClick={handleAddQuickActivity}
-                          disabled={!quickActivityTitle.trim() || !quickActivityDate || !quickActivityTime}
-                          className="w-full bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-bold transition-all"
-                        >
-                          {editingActivityId ? 'Salvar alterações' : 'Criar Atividade'}
-                        </button>
-                      </div>
-                    )}
-
-                    <div className="space-y-3 pl-4 border-l border-slate-200 dark:border-slate-800">
-                      {dealActivities.length === 0 && (
-                        <p className="text-sm text-slate-500 italic pl-4">
-                          Nenhuma atividade registrada.
-                        </p>
-                      )}
-                      {dealActivities.map(activity => (
-                        <ActivityRow
-                          key={activity.id}
-                          activity={activity}
-                          deal={deal}
-                          onToggleComplete={toggleActivityCompletion}
-                          onEdit={startEditActivity}
-                          onDelete={deleteActivity}
-                          isPending={isActivityPending(activity.id)}
-                        />
-                      ))}
-                      {/* Marco fixo: criação do lead (sempre o evento mais antigo) */}
-                      <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 pt-1">
-                        <Calendar size={13} className="text-primary-500 shrink-0" />
-                        <span>
-                          Lead criado em{' '}
-                          <span className="font-semibold text-slate-700 dark:text-slate-200">
-                            {PT_BR_DATETIME_FORMATTER.format(new Date(deal.createdAt))}
-                          </span>
-                          {quemCriou && (
-                            <>
-                              {' '}por{' '}
-                              <span className="font-semibold text-slate-700 dark:text-slate-200">{quemCriou}</span>
-                            </>
-                          )}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {activeTab === 'activities' && (
-                  <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-                    {/* Quick Activity Creation */}
-                    {!showQuickActivity ? (
-                      <button
-                        onClick={() => setShowQuickActivity(true)}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-500 dark:text-slate-400 hover:border-primary-400 hover:text-primary-600 dark:hover:border-primary-500 dark:hover:text-primary-400 transition-colors"
-                      >
-                        <Plus size={16} /> Nova Atividade
-                      </button>
-                    ) : (
-                      <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-4 shadow-sm space-y-3">
-                        <div className="flex items-center justify-between">
-                          <h4 className="text-sm font-bold text-slate-700 dark:text-white">
-                            {editingActivityId ? 'Editar Atividade' : 'Nova Atividade'}
-                          </h4>
-                          <button onClick={resetQuickActivityForm} className="text-slate-400 hover:text-slate-600 dark:hover:text-white">
-                            <X size={16} />
-                          </button>
-                        </div>
-                        <input readOnly={!permissions.deals.edit}
-                          type="text"
-                          className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
-                          placeholder="Título da atividade..."
-                          value={quickActivityTitle}
-                          onChange={e => setQuickActivityTitle(e.target.value)}
-                        />
-                        <div className="grid grid-cols-3 gap-2">
-                          <select
-                            className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
-                            value={quickActivityType}
-                            onChange={e => setQuickActivityType(e.target.value as typeof quickActivityType)}
-                          >
-                            <option value="CALL">Ligação</option>
-                            <option value="MEETING">Reunião</option>
-                            <option value="EMAIL">Email</option>
-                            <option value="TASK">Tarefa</option>
-                          </select>
-                          <input readOnly={!permissions.deals.edit}
-                            type="date"
-                            className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
-                            value={quickActivityDate}
-                            onChange={e => setQuickActivityDate(e.target.value)}
-                          />
-                          <input readOnly={!permissions.deals.edit}
-                            type="time"
-                            className="bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
-                            value={quickActivityTime}
-                            onChange={e => setQuickActivityTime(e.target.value)}
-                          />
-                        </div>
-                        <textarea readOnly={!permissions.deals.edit}
-                          className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500 min-h-[60px] resize-none"
-                          placeholder="Descrição (opcional)..."
-                          value={quickActivityDesc}
-                          onChange={e => setQuickActivityDesc(e.target.value)}
-                        />
-                        <button
-                          onClick={handleAddQuickActivity}
-                          disabled={!quickActivityTitle.trim() || !quickActivityDate || !quickActivityTime}
-                          className="w-full bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-bold transition-all"
-                        >
-                          {editingActivityId ? 'Salvar alterações' : 'Criar Atividade'}
-                        </button>
-                      </div>
-                    )}
-
-                    <div className="space-y-3">
-                      {dealTaskActivities.length === 0 && (
-                        <p className="text-sm text-slate-500 italic text-center py-4">
-                          Nenhuma atividade registrada.
-                        </p>
-                      )}
-                      {dealTaskActivities.map(activity => (
-                        <ActivityRow
-                          key={activity.id}
-                          activity={activity}
-                          deal={deal}
-                          onToggleComplete={toggleActivityCompletion}
-                          onEdit={startEditActivity}
-                          onDelete={deleteActivity}
-                          isPending={isActivityPending(activity.id)}
-                        />
-                      ))}
-                      {/* Marco fixo: criação do lead (com horário) */}
-                      <div className="flex items-center justify-center gap-2 text-xs text-slate-500 dark:text-slate-400 pt-1">
-                        <Calendar size={13} className="text-primary-500 shrink-0" />
-                        <span>
-                          Lead criado em{' '}
-                          <span className="font-semibold text-slate-700 dark:text-slate-200">
-                            {PT_BR_DATETIME_FORMATTER.format(new Date(deal.createdAt))}
-                          </span>
-                          {quemCriou && (
-                            <>
-                              {' '}por{' '}
-                              <span className="font-semibold text-slate-700 dark:text-slate-200">{quemCriou}</span>
-                            </>
-                          )}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {activeTab === 'notes' && (
-                  <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-                    <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-4 shadow-sm">
-                      <textarea readOnly={!permissions.deals.edit}
-                        className="w-full bg-transparent text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none resize-none min-h-[80px]"
-                        placeholder="Escreva uma nota..."
-                        value={newNote}
-                        onChange={e => setNewNote(e.target.value)}
-                      />
-                      <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-100 dark:border-white/5">
-                        <div />
-                        <button
-                          onClick={handleAddNote}
-                          disabled={!newNote.trim()}
-                          className="bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-all"
-                        >
-                          <Check size={14} /> Enviar
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="space-y-3">
-                      {dealNotes.length === 0 && (
-                        <p className="text-sm text-slate-500 italic text-center py-4">
-                          Nenhuma nota registrada.
-                        </p>
-                      )}
-                      {dealNotes.map(note => (
-                        <div
-                          key={note.id}
-                          className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl p-4 group"
-                        >
-                          <p className="text-sm text-slate-900 dark:text-white whitespace-pre-wrap">
-                            {note.description}
-                          </p>
-                          <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-100 dark:border-white/5">
-                            <span className="text-xs text-slate-400">
-                              {new Date(note.date).toLocaleDateString('pt-BR')} às {new Date(note.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                            <button
-                              onClick={() => deleteActivity(note.id)}
-                              className="text-slate-400 hover:text-red-500 p-1 rounded opacity-0 group-hover:opacity-100 max-md:opacity-100 transition-all"
-                              title="Excluir nota"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {activeTab === 'products' && (
-                  <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-                    <div className="bg-slate-50 dark:bg-black/20 p-4 rounded-xl border border-slate-200 dark:border-white/10">
-                      <h3 className="text-sm font-bold text-slate-700 dark:text-white mb-3 flex items-center gap-2">
-                        <Package size={16} /> Adicionar Produto/Serviço
-                      </h3>
-                      <div className="flex gap-3 items-end max-md:flex-wrap">
-                        <div className="flex-1 max-md:min-w-full">
-                          <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                            Produto/Serviço
-                          </label>
-                          <select
-                            className="w-full bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
-                            value={selectedProductId}
-                            onChange={e => {
-                              const id = e.target.value;
-                              setSelectedProductId(id);
-                              // Preço padrão do catálogo entra sozinho; dá pra editar antes de adicionar
-                              const p = productsById.get(id);
-                              setProductPrice(p ? precoParaCampo(p.price) : '');
-                            }}
-                          >
-                            <option value="">Selecione um item...</option>
-                            {products.map(p => (
-                              <option key={p.id} value={p.id}>
-                                {p.name} - {fmtBRL(p.price)}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="w-20 max-md:flex-1">
-                          <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                            Qtd
-                          </label>
-                          <input readOnly={!permissions.deals.edit}
-                            type="number"
-                            min="1"
-                            className="w-full bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
-                            value={productQuantity}
-                            onChange={e => setProductQuantity(parseInt(e.target.value))}
-                          />
-                        </div>
-                        <div className="w-32 max-md:flex-1">
-                          <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                            Preço (R$)
-                          </label>
-                          <input readOnly={!permissions.deals.edit}
-                            inputMode="decimal"
-                            placeholder="Preço padrão"
-                            title="Preço só neste lead. O cadastro do produto em Configurações não muda."
-                            className="w-full bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
-                            value={productPrice}
-                            onChange={e => setProductPrice(e.target.value)}
-                          />
-                        </div>
-                        <button
-                          onClick={handleAddProduct}
-                          disabled={!selectedProductId}
-                          className="bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors max-md:w-full"
-                        >
-                          Adicionar
-                        </button>
-                      </div>
-                      <p className="mt-2 text-[11px] text-slate-400 dark:text-slate-500">
-                        O preço vale só para este lead. O preço padrão do produto, em Configurações, continua o mesmo.
-                      </p>
-
-                      <div className="mt-3 flex items-center justify-between gap-3">
-                        <div className="text-xs text-slate-500 dark:text-slate-400">
-                          Produto depende do cliente? Use um item personalizado (não precisa estar no catálogo).
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setShowCustomItem(v => !v)}
-                          className="text-xs font-bold text-primary-600 dark:text-primary-400 hover:underline"
-                        >
-                          {showCustomItem ? 'Fechar' : 'Adicionar item personalizado'}
-                        </button>
-                      </div>
-
-                      {showCustomItem && (
-                        <div className="mt-3 rounded-xl border border-slate-200 dark:border-white/10 bg-white/60 dark:bg-white/5 p-3">
-                          <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
-                            <div className="sm:col-span-6">
-                              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Nome do item</label>
-                              <input readOnly={!permissions.deals.edit}
-                                value={customItemName}
-                                onChange={e => setCustomItemName(e.target.value)}
-                                placeholder="Ex.: Pacote personalizado, Procedimento X…"
-                                className="w-full bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
-                              />
-                            </div>
-                            <div className="sm:col-span-3">
-                              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Preço</label>
-                              <input readOnly={!permissions.deals.edit}
-                                value={customItemPrice}
-                                onChange={e => setCustomItemPrice(e.target.value)}
-                                inputMode="decimal"
-                                className="w-full bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
-                              />
-                            </div>
-                            <div className="sm:col-span-2">
-                              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Qtd</label>
-                              <input readOnly={!permissions.deals.edit}
-                                type="number"
-                                min={1}
-                                value={customItemQuantity}
-                                onChange={e => setCustomItemQuantity(parseInt(e.target.value))}
-                                className="w-full bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
-                              />
-                            </div>
-                            <div className="sm:col-span-1">
-                              <button
-                                type="button"
-                                onClick={handleAddCustomItem}
-                                className="w-full bg-primary-600 hover:bg-primary-500 text-white px-3 py-2 rounded-lg text-sm font-bold transition-colors"
-                              >
-                                +
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/5 rounded-xl overflow-hidden max-md:overflow-x-auto">
-                      <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-50 dark:bg-black/20 border-b border-slate-200 dark:border-white/5 text-slate-500 dark:text-slate-400 font-medium">
-                          <tr>
-                            <th className="px-4 py-3">Item</th>
-                            <th className="px-4 py-3 w-20 text-center">Qtd</th>
-                            <th className="px-4 py-3 w-32 text-right">Preço Unit.</th>
-                            <th className="px-4 py-3 w-32 text-right">Total</th>
-                            <th className="px-4 py-3 w-10"></th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 dark:divide-white/5">
-                          {!deal.items || deal.items.length === 0 ? (
-                            <tr>
-                              <td colSpan={5} className="px-4 py-8 text-center text-slate-500 italic">
-                                Nenhum produto adicionado. O valor do negócio é manual.
-                              </td>
-                            </tr>
-                          ) : (
-                            deal.items.map(item => (
-                              <tr key={item.id}>
-                                <td className="px-4 py-3 text-slate-900 dark:text-white font-medium">
-                                  {item.name}
-                                </td>
-                                <td className="px-4 py-3 text-center text-slate-600 dark:text-slate-300">
-                                  {item.quantity}
-                                </td>
-                                <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">
-                                  {editingItemId === item.id ? (
-                                    <input readOnly={!permissions.deals.edit}
-                                      autoFocus
-                                      inputMode="decimal"
-                                      aria-label={`Preço de ${item.name} neste lead`}
-                                      className="w-28 bg-white dark:bg-black/20 border border-primary-300 dark:border-primary-500/50 rounded-lg px-2 py-1 text-sm text-right outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
-                                      value={editingItemPrice}
-                                      onChange={e => setEditingItemPrice(e.target.value)}
-                                      onKeyDown={e => {
-                                        if (e.key === 'Enter') salvarPrecoItem(item.id);
-                                        if (e.key === 'Escape') { setEditingItemId(null); setEditingItemPrice(''); }
-                                      }}
-                                      onBlur={() => salvarPrecoItem(item.id)}
-                                    />
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      onClick={() => { setEditingItemId(item.id); setEditingItemPrice(precoParaCampo(item.price)); }}
-                                      title="Alterar o preço só neste lead"
-                                      className="group inline-flex items-center gap-1.5 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
-                                    >
-                                      {fmtBRL(item.price)}
-                                      <Pencil size={12} className="opacity-0 group-hover:opacity-100 max-md:opacity-60 transition-opacity" />
-                                    </button>
-                                  )}
-                                </td>
-                                <td className="px-4 py-3 text-right font-bold text-slate-900 dark:text-white">
-                                  {fmtBRL(item.price * item.quantity)}
-                                </td>
-                                <td className="px-4 py-3 text-center">
-                                  <button
-                                    onClick={() => removeItemFromDeal(deal.id, item.id)}
-                                    className="text-slate-400 hover:text-red-500 transition-colors"
-                                  >
-                                    <Trash2 size={14} />
-                                  </button>
-                                </td>
-                              </tr>
-                            ))
-                          )}
-                        </tbody>
-                        <tfoot className="bg-slate-50 dark:bg-black/20 border-t border-slate-200 dark:border-white/5">
-                          <tr>
-                            <td
-                              colSpan={3}
-                              className="px-4 py-3 text-right font-bold text-slate-700 dark:text-slate-300 uppercase text-xs tracking-wider"
-                            >
-                              Total do Pedido
-                            </td>
-                            <td className="px-4 py-3 text-right font-bold text-primary-600 dark:text-primary-400 text-lg">
-                              ${(deal.items || []).reduce((sum, i) => sum + i.price * i.quantity, 0).toLocaleString()}
-                            </td>
-                            <td></td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                  </div>
-                )}
-
-                {activeTab === 'info' && (
-                  <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+              <div className="flex-1 min-h-0 overflow-y-auto scrollbar-custom p-4 space-y-6">
                     <div className="bg-linear-to-br from-primary-50 to-white dark:from-primary-900/10 dark:to-dark-card p-6 rounded-xl border border-primary-100 dark:border-primary-500/20">
                       <div className="flex items-center gap-3 mb-4">
                         <div className="p-2 bg-primary-100 dark:bg-primary-500/20 rounded-lg text-primary-600 dark:text-primary-400">
@@ -2614,12 +2176,12 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                         </div>
                       )}
                     </div>
-                  </div>
-                )}
               </div>
             </div>
-          </div>
-        </div>
+          )}
+        </section>
+      </div>
+    </div>
 
         <ConfirmModal
           isOpen={Boolean(deleteId)}
@@ -2676,6 +2238,18 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
             if (lossReasonOrigin === 'button') onClose();
           }}
           dealTitle={deal.title}
+        />
+        <ConfirmModal
+          isOpen={Boolean(deleteNoteId)}
+          onClose={() => setDeleteNoteId(null)}
+          onConfirm={() => {
+            if (deleteNoteId) void deleteActivity(deleteNoteId);
+            setDeleteNoteId(null);
+          }}
+          title="Excluir nota"
+          message="Excluir esta nota interna? A exclusão fica registrada no histórico do lead."
+          confirmText="Excluir"
+          variant="danger"
         />
     </>
   );
