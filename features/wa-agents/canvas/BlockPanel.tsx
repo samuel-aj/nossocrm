@@ -712,13 +712,15 @@ function WebhookEditor({ block, update }: EditorProps<'webhook'>) {
 }
 
 function TemplateEditor({ block, update }: EditorProps<'send_template'>) {
-  const { botConnectionIds } = useCanvasContext();
+  const { botConnectionIds, options } = useCanvasContext();
   const templatesQ = useMessageTemplates();
   const all: TemplateOption[] = templatesQ.data?.data ?? [];
-  // Modelo da API oficial pertence a um número: só aparecem os dos números do robô
-  const usable = all.filter((t) => templateFitsNumbers(t, botConnectionIds ?? []) || t.id === block.data.template_id);
-  const api = usable.filter((t) => t.type === 'whatsapp_api');
-  const general = usable.filter((t) => t.type === 'general');
+  const general = all.filter(t => t.type === 'general');
+  const apiGroups = [...new Set(all.filter(t => t.type === 'whatsapp_api').map(t => t.connection_id ?? ''))].map(id => {
+    const connection = options?.connections.find(c => c.id === id);
+    const label = connection ? [connection.phone_number, connection.name || connection.label].filter(Boolean).join(' · ') : id ? 'Número indisponível' : 'Sem número vinculado';
+    return { id, label, templates: all.filter(t => t.type === 'whatsapp_api' && (t.connection_id ?? '') === id) };
+  });
   const chosen = all.find((t) => t.id === block.data.template_id);
   const pick = (id: string) => {
     const t = all.find((x) => x.id === id);
@@ -742,16 +744,15 @@ function TemplateEditor({ block, update }: EditorProps<'send_template'>) {
         aria-label="Modelo de mensagem"
       >
         <option value="">{templatesQ.isLoading ? 'Carregando...' : 'Escolha o modelo'}</option>
-        {api.length > 0 ? (
-          <optgroup label="WhatsApp API (modelos da Meta)">
-            {api.map((t) => (
+        {apiGroups.map(group => (
+          <optgroup key={group.id} label={`WhatsApp API — ${group.label}`}>
+            {group.templates.map(t => (
               <option key={t.id} value={t.id} disabled={t.meta_status !== 'APPROVED'}>
-                {t.name}
-                {statusLabel(t.meta_status)}
+                {t.name} — {group.label}{statusLabel(t.meta_status)}
               </option>
             ))}
           </optgroup>
-        ) : null}
+        ))}
         {general.length > 0 ? (
           <optgroup label="Modelos gerais (vão como texto)">
             {general.map((t) => (
@@ -771,6 +772,11 @@ function TemplateEditor({ block, update }: EditorProps<'send_template'>) {
           O modelo "{block.data.template_name || 'escolhido'}" não existe mais. Escolha outro.
         </p>
       ) : null}
+      {chosen && !templateFitsNumbers(chosen, botConnectionIds ?? []) && (
+        <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">
+          Para ativar este robô, selecione somente o número ao qual este modelo de API pertence.
+        </p>
+      )}
       {chosen ? (
         <div className="mt-2">
           <p className="mb-1 text-[11px] text-slate-500 dark:text-slate-400">Prévia (variáveis com dados de exemplo)</p>

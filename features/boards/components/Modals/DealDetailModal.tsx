@@ -4,9 +4,8 @@ import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import ConfirmModal from '@/components/ConfirmModal';
-import { LossReasonModal } from '@/components/ui/LossReasonModal';
 import { LossDetailsBanner } from '@/features/deals/LossDetailsBanner';
-import { useMoveDealSimple, useDeal, useOrgUsers, useOrgMembers } from '@/lib/query/hooks';
+import { useDeal, useOrgUsers, useOrgMembers } from '@/lib/query/hooks';
 import { FocusTrap, useFocusReturn } from '@/lib/a11y';
 import { Activity, CustomFieldDefinition } from '@/types';
 
@@ -39,8 +38,6 @@ import {
   X,
   Trash2,
   Pencil,
-  ThumbsUp,
-  ThumbsDown,
   Building2,
   User,
   UserPlus,
@@ -141,7 +138,6 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     customFieldDefinitions,
     activeBoard,
     boards,
-    lifecycleStages,
     availableTags,
     addTag,
     sidebarCollapsed,
@@ -210,7 +206,6 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const dealBoard = deal ? (boardsById.get(deal.boardId) ?? activeBoard) : activeBoard;
 
   // Use unified TanStack Query hook for moving deals
-  const { moveDeal } = useMoveDealSimple(dealBoard, lifecycleStages);
 
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isEditingValue, setIsEditingValue] = useState(false);
@@ -265,7 +260,6 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const [customItemQuantity, setCustomItemQuantity] = useState(1);
 
   const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [showLossReasonModal, setShowLossReasonModal] = useState(false);
 
   // Toda mudança relevante do lead vira uma entrada na Timeline, com autor.
   const autorAtual =
@@ -292,8 +286,6 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     } as Parameters<typeof addActivity>[0]);
   };
 
-  const [pendingLostStageId, setPendingLostStageId] = useState<string | null>(null);
-  const [lossReasonOrigin, setLossReasonOrigin] = useState<'button' | 'stage'>('button');
   // Edição INLINE de campos personalizados: clicar no valor edita na hora
   // (um campo por vez). Enter/clicar fora salva; Esc cancela.
   const [editingFieldKey, setEditingFieldKey] = useState<string | null>(null);
@@ -353,9 +345,6 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
       setProductsOpen((deal.items || []).length > 0);
       setIsEditingTitle(false);
       setIsEditingValue(false);
-      setShowLossReasonModal(false);
-      setPendingLostStageId(null);
-      setLossReasonOrigin('button');
       setEditingFieldKey(null);
       setTagQuery('');
       setTagCreating(false);
@@ -1086,15 +1075,6 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
               </div>
             </div>
 
-            {/* Funil e etapa (mesma lógica central do Kanban e do chat) */}
-            {dealBoard ? (
-              <DealStageControl deal={deal} />
-            ) : (
-              <p className="rounded-lg border border-slate-200/60 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
-                Funil não encontrado para este negócio. Mover de etapa fica indisponível.
-              </p>
-            )}
-
             <div className="flex items-center justify-between gap-3 flex-wrap">
                 {/* RESPONSÁVEL — bolinha de perfil no topo (clica pra trocar; só admin) */}
                 {(canAssignOwner || deal.ownerId) && (() => {
@@ -1253,97 +1233,14 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                 </div>
             </div>
 
-            <div className="flex items-center gap-2">
-                {/* Se fechado: mostra badge + botão Reabrir */}
-                {(deal.isWon || deal.isLost) ? (
-                  <>
-                    <span className={`text-xs font-bold px-3 py-1.5 rounded-lg ${deal.isWon ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}`}>
-                      {deal.isWon ? '✓ GANHO' : '✗ PERDIDO'}
-                    </span>
-                    <button
-                      onClick={() => {
-                        // Find first non-won/lost stage to reopen to
-                        const firstRegularStage = dealBoard?.stages.find(
-                          s => s.linkedLifecycleStage !== 'CUSTOMER' && s.linkedLifecycleStage !== 'OTHER'
-                        );
-                        if (firstRegularStage) {
-                          moveDeal(deal, firstRegularStage.id);
-                        } else {
-                          // Fallback: just clear the won/lost flags
-                          updateDeal(deal.id, { isWon: false, isLost: false, closedAt: '' });
-                        }
-                      }}
-                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg font-bold text-sm flex items-center gap-2 transition-all"
-                    >
-                      ↩ Reabrir
-                    </button>
-                  </>
-                ) : (
-                  /* Se aberto: mostra botões Ganho e Perdido */
-                  <>
-                    <button
-                      onClick={() => {
-                        // Intelligent "Won" Logic:
-                        // 0. Check for "Stay in Stage" flag (Archive/Close in place)
-                        if (dealBoard?.wonStayInStage) {
-                          moveDeal(deal, deal.status, undefined, true, false);
-                          onClose();
-                          return;
-                        }
-
-                        // 1. Check if board has explicit Won Stage configured
-                        if (dealBoard?.wonStageId) {
-                          moveDeal(deal, dealBoard.wonStageId);
-                          onClose();
-                          return;
-                        }
-
-                        // 2. Find the appropriate "Success Stage" for this board based on lifecycle
-                        const successStage = dealBoard?.stages.find(
-                          s => s.linkedLifecycleStage === 'CUSTOMER'
-                        ) || dealBoard?.stages.find(
-                          s => s.linkedLifecycleStage === 'MQL'
-                        ) || dealBoard?.stages.find(
-                          s => s.linkedLifecycleStage === 'SALES_QUALIFIED'
-                        );
-
-                        if (successStage) {
-                          moveDeal(deal, successStage.id);
-                        } else {
-                          // Fallback: just mark as won without moving
-                          updateDeal(deal.id, { isWon: true, isLost: false, closedAt: new Date().toISOString() });
-                        }
-                        onClose();
-                      }}
-                      className="px-3 py-2 text-xs flex-1 justify-center bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold text-sm shadow-sm flex items-center gap-2"
-                    >
-                      <ThumbsUp size={16} /> GANHO
-                    </button>
-                    <button
-                      onClick={() => {
-                        // 0. Check for "Stay in Stage" flag
-                        if (dealBoard?.lostStayInStage) {
-                          // We don't set pendingLostStageId because we aren't moving to a new stage ID
-                          // But the modal logic relies on it? No, if pendingLostStageId is null, we might need another flag.
-                          // Actually, let's keep it clean.
-                          // setPendingLostStageId(deal.status); // Hack?
-                          // Better: Just open modal, and handle logic in confirm.
-                        }
-
-                        // If board has explicit Lost Stage, queue it
-                        if (dealBoard?.lostStageId) {
-                          setPendingLostStageId(dealBoard.lostStageId);
-                        }
-                        setLossReasonOrigin('button');
-                        setShowLossReasonModal(true);
-                      }}
-                      className="px-3 py-2 text-xs flex-1 justify-center bg-transparent border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg font-bold text-sm shadow-sm flex items-center gap-2"
-                    >
-                      <ThumbsDown size={16} /> PERDIDO
-                    </button>
-                  </>
-                )}
-            </div>
+            {/* Funil e etapa (mesma lógica central do Kanban e do chat) */}
+            {dealBoard ? (
+              <DealStageControl deal={deal} />
+            ) : (
+              <p className="rounded-lg border border-slate-200/60 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
+                Funil não encontrado para este negócio. Mover de etapa fica indisponível.
+              </p>
+            )}
 
             <LossDetailsBanner key={deal.id} deal={deal} canEdit={permissions.deals.edit} />
             {deal.status && <FollowupStatus dealId={deal.id} stageId={deal.status} />}
@@ -1411,70 +1308,6 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                     </button>
                   </div>
                 )}
-                <div>
-                  <h3 className="text-xs font-bold text-slate-400 uppercase mb-2 flex items-center gap-2">
-                    <Building2 size={14} /> Empresa (Conta)
-                  </h3>
-                  <p className="text-slate-900 dark:text-white font-medium">{deal.companyName}</p>
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold text-slate-400 uppercase mb-2 flex items-center gap-2">
-                    <User size={14} /> Contato Principal
-                  </h3>
-                  {contact ? (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
-                          {(contact.name || '?').charAt(0)}
-                        </div>
-                        <a
-                          href={`/contacts?contactId=${contact.id}`}
-                          className="text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline truncate"
-                          title="Abrir contato"
-                        >
-                          {contact.name}
-                        </a>
-                        <a
-                          href={`/contacts?contactId=${contact.id}`}
-                          className="text-slate-400 hover:text-primary-500 transition-colors flex-shrink-0"
-                          title="Abrir contato"
-                        >
-                          <ExternalLink size={12} />
-                        </a>
-                      </div>
-                      {contact.phone && (
-                        <div className="flex items-center gap-2 ml-9">
-                          <Phone size={13} className="text-slate-400 flex-shrink-0" />
-                          <span className="text-sm text-slate-600 dark:text-slate-300 truncate">{contact.phone}</span>
-                          <button
-                            type="button"
-                            onClick={() => { navigator.clipboard.writeText(contact.phone); addToast('Telefone copiado!', 'success'); }}
-                            className="text-slate-400 hover:text-primary-500 transition-colors flex-shrink-0"
-                            title="Copiar telefone"
-                          >
-                            <Copy size={13} />
-                          </button>
-                        </div>
-                      )}
-                      {contact.email && (
-                        <div className="flex items-center gap-2 ml-9">
-                          <Mail size={13} className="text-slate-400 flex-shrink-0" />
-                          <span className="text-sm text-slate-600 dark:text-slate-300 truncate">{contact.email}</span>
-                          <button
-                            type="button"
-                            onClick={() => { navigator.clipboard.writeText(contact.email); addToast('Email copiado!', 'success'); }}
-                            className="text-slate-400 hover:text-primary-500 transition-colors flex-shrink-0"
-                            title="Copiar email"
-                          >
-                            <Copy size={11} />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-slate-500">Sem contato</p>
-                  )}
-                </div>
             {/* Descrição (editável, salva ao sair do campo) */}
             <div className="pt-4 border-t border-slate-100 dark:border-white/5">
               <h3 className="mb-2 text-xs font-bold text-slate-400 uppercase">Descrição</h3>
@@ -1716,6 +1549,45 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                     })()}
                   </div>
                 )}
+                {/* UTMs — padrão em todos os cards, colapsável (fica escondido até abrir) */}
+                <div className="pt-4 border-t border-slate-100 dark:border-white/5">
+                  <button
+                    type="button"
+                    onClick={() => setUtmsOpen((o) => !o)}
+                    aria-expanded={utmsOpen}
+                    className="w-full flex items-center justify-between text-xs font-bold text-slate-400 uppercase hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                  >
+                    <span className="flex items-center gap-2"><TagIcon size={14} /> UTMs</span>
+                    <ChevronDown size={14} className={`transition-transform ${utmsOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {utmsOpen && (
+                    <div className="mt-2 space-y-2">
+                      {([
+                        ['utm_source', 'Source'],
+                        ['utm_medium', 'Medium'],
+                        ['utm_campaign', 'Campaign'],
+                        ['utm_content', 'Content'],
+                        ['utm_term', 'Term'],
+                      ] as const).map(([key, label]) => {
+                        const raw = deal.customFields?.[key];
+                        const value = raw !== undefined && raw !== null && String(raw).trim() !== '' ? String(raw) : null;
+                        return (
+                          <div key={key} className="flex justify-between gap-2 text-sm">
+                            <span className="text-slate-500 shrink-0">{label}</span>
+                            {value ? (
+                              <span className="min-w-0 text-right text-slate-900 dark:text-white truncate" title={value}>
+                                {value}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 italic">—</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
             {/* Produtos (seção da coluna de dados) */}
             <div className="pt-4 border-t border-slate-100 dark:border-white/5">
               <button
@@ -1885,46 +1757,71 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
               )}
             </div>
 
-                {/* UTMs — padrão em todos os cards, colapsável (fica escondido até abrir) */}
-                <div className="pt-4 border-t border-slate-100 dark:border-white/5">
-                  <button
-                    type="button"
-                    onClick={() => setUtmsOpen((o) => !o)}
-                    aria-expanded={utmsOpen}
-                    className="w-full flex items-center justify-between text-xs font-bold text-slate-400 uppercase hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
-                  >
-                    <span className="flex items-center gap-2"><TagIcon size={14} /> UTMs</span>
-                    <ChevronDown size={14} className={`transition-transform ${utmsOpen ? 'rotate-180' : ''}`} />
-                  </button>
-                  {utmsOpen && (
-                    <div className="mt-2 space-y-2">
-                      {([
-                        ['utm_source', 'Source'],
-                        ['utm_medium', 'Medium'],
-                        ['utm_campaign', 'Campaign'],
-                        ['utm_content', 'Content'],
-                        ['utm_term', 'Term'],
-                      ] as const).map(([key, label]) => {
-                        const raw = deal.customFields?.[key];
-                        const value = raw !== undefined && raw !== null && String(raw).trim() !== '' ? String(raw) : null;
-                        return (
-                          <div key={key} className="flex justify-between gap-2 text-sm">
-                            <span className="text-slate-500 shrink-0">{label}</span>
-                            {value ? (
-                              <span className="min-w-0 text-right text-slate-900 dark:text-white truncate" title={value}>
-                                {value}
-                              </span>
-                            ) : (
-                              <span className="text-slate-400 italic">—</span>
-                            )}
-                          </div>
-                        );
-                      })}
+                <div>
+                  <h3 className="text-xs font-bold text-slate-400 uppercase mb-2 flex items-center gap-2">
+                    <User size={14} /> Contato Principal
+                  </h3>
+                  {contact ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                          {(contact.name || '?').charAt(0)}
+                        </div>
+                        <a
+                          href={`/contacts?contactId=${contact.id}`}
+                          className="text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline truncate"
+                          title="Abrir contato"
+                        >
+                          {contact.name}
+                        </a>
+                        <a
+                          href={`/contacts?contactId=${contact.id}`}
+                          className="text-slate-400 hover:text-primary-500 transition-colors flex-shrink-0"
+                          title="Abrir contato"
+                        >
+                          <ExternalLink size={12} />
+                        </a>
+                      </div>
+                      {contact.phone && (
+                        <div className="flex items-center gap-2 ml-9">
+                          <Phone size={13} className="text-slate-400 flex-shrink-0" />
+                          <span className="text-sm text-slate-600 dark:text-slate-300 truncate">{contact.phone}</span>
+                          <button
+                            type="button"
+                            onClick={() => { navigator.clipboard.writeText(contact.phone); addToast('Telefone copiado!', 'success'); }}
+                            className="text-slate-400 hover:text-primary-500 transition-colors flex-shrink-0"
+                            title="Copiar telefone"
+                          >
+                            <Copy size={13} />
+                          </button>
+                        </div>
+                      )}
+                      {contact.email && (
+                        <div className="flex items-center gap-2 ml-9">
+                          <Mail size={13} className="text-slate-400 flex-shrink-0" />
+                          <span className="text-sm text-slate-600 dark:text-slate-300 truncate">{contact.email}</span>
+                          <button
+                            type="button"
+                            onClick={() => { navigator.clipboard.writeText(contact.email); addToast('Email copiado!', 'success'); }}
+                            className="text-slate-400 hover:text-primary-500 transition-colors flex-shrink-0"
+                            title="Copiar email"
+                          >
+                            <Copy size={11} />
+                          </button>
+                        </div>
+                      )}
                     </div>
+                  ) : (
+                    <p className="text-sm text-slate-500">Sem contato</p>
                   )}
                 </div>
-
-                {/* Detalhes — abaixo das UTMs */}
+                <div>
+                  <h3 className="text-xs font-bold text-slate-400 uppercase mb-2 flex items-center gap-2">
+                    <Building2 size={14} /> Empresa (Conta)
+                  </h3>
+                  <p className="text-slate-900 dark:text-white font-medium">{deal.companyName}</p>
+                </div>
+                {/* Detalhes */}
                 <div className="pt-4 border-t border-slate-100 dark:border-white/5">
                   <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Detalhes</h3>
                   <div className="space-y-2">
@@ -2193,52 +2090,6 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
           variant="danger"
         />
 
-        <LossReasonModal
-          isOpen={showLossReasonModal}
-          onClose={() => {
-            setShowLossReasonModal(false);
-            setPendingLostStageId(null);
-            setLossReasonOrigin('button');
-          }}
-          onConfirm={(reason, category) => {
-            // Priority:
-            // 0. Stay in stage flag (Archive)
-            // 1. Pending Stage (if set via click or explicit button)
-            // 2. Explicit Lost Stage on Board
-            // 3. Stage linked to 'OTHER' lifecycle
-
-            if (dealBoard?.lostStayInStage) {
-              void moveDeal(deal, deal.status, reason, false, true, category).catch(() => addToast('Não foi possível registrar a perda.', 'error'));
-              setShowLossReasonModal(false);
-              setPendingLostStageId(null);
-              if (lossReasonOrigin === 'button') onClose();
-              return;
-            }
-
-            let targetStageId = pendingLostStageId;
-
-            if (!targetStageId && dealBoard?.lostStageId) {
-              targetStageId = dealBoard.lostStageId;
-            }
-
-            if (!targetStageId) {
-              targetStageId =
-                dealBoard?.stages.find(s => s.linkedLifecycleStage === 'OTHER')?.id ?? null;
-            }
-
-            if (targetStageId) {
-              void moveDeal(deal, targetStageId, reason, false, true, category).catch(() => addToast('Não foi possível registrar a perda.', 'error'));
-            } else {
-              // No configured loss stage: record the outcome in the current stage.
-              void moveDeal(deal, deal.status, reason, false, true, category).catch(() => addToast('Não foi possível registrar a perda.', 'error'));
-            }
-            setShowLossReasonModal(false);
-            setPendingLostStageId(null);
-            // Only close the deal modal if it was triggered via the "PERDIDO" button
-            if (lossReasonOrigin === 'button') onClose();
-          }}
-          dealTitle={deal.title}
-        />
         <ConfirmModal
           isOpen={Boolean(deleteNoteId)}
           onClose={() => setDeleteNoteId(null)}

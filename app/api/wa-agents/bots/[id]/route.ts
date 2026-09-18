@@ -1,3 +1,4 @@
+import { botTemplateConnectionError } from '@/lib/wa-agents/templateConnections';
 /**
  * /api/wa-agents/bots/[id]  (admin)
  *   GET    -> { bot }  (segredo do passo webhook mascarado)
@@ -68,6 +69,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
   try {
     if (Array.isArray(patch.connection_ids)) {
       patch.connection_ids = await dropDeletedConnections(auth.admin, patch.connection_ids as string[]);
+    } else if ('connection_id' in present) {
+      patch.connection_ids = typeof patch.connection_id === 'string' ? [patch.connection_id] : [];
     }
     const numeros = Array.isArray(patch.connection_ids)
       ? (patch.connection_ids as string[])
@@ -88,7 +91,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const sendsStart = 'start_step_id' in present;
     const sendsLayout = 'layout' in present;
     const sendsEnabled = typeof present.enabled === 'boolean';
-    if (sendsSteps || sendsStart || sendsLayout || sendsEnabled) {
+    if (sendsSteps || sendsStart || sendsLayout || sendsEnabled || 'connection_ids' in present || 'connection_id' in present || 'trigger' in present) {
       const { data: existing, error: existingError } = await auth.admin
         .from('wa_bots')
         .select('steps, start_step_id, layout, enabled, connection_ids, connection_id, trigger')
@@ -119,7 +122,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
       if (stepsError) return stepsError;
       // Ligar (inclusive pelo botão da lista, que só manda "enabled") confere o mesmo
       // que o editor: número escolhido, gatilho completo e nenhum bloco inválido salvo
-      if (enabled && (sendsEnabled || sendsSteps)) {
+      if (enabled) {
         const numerosFinais = Array.isArray(patch.connection_ids)
           ? (patch.connection_ids as string[])
           : (saved.connection_ids ?? []).length > 0
@@ -130,6 +133,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
         if (numerosFinais.length === 0) {
           return json({ error: 'Escolha em quais números o robô atende antes de ligá-lo' }, 400);
         }
+        const templateError = await botTemplateConnectionError(auth.admin, orgId, steps, numerosFinais);
+        if (templateError) return json({ error: templateError }, 400);
         const trigger = (present.trigger ?? saved.trigger) as { type?: string; stage_id?: string | null } | null;
         if (trigger?.type === 'deal_stage_entered' && !trigger.stage_id) {
           return json({ error: 'O gatilho "Entrou na etapa" está sem etapa: abra o robô e escolha a etapa antes de ligar' }, 400);

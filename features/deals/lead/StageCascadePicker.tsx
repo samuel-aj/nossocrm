@@ -15,6 +15,8 @@ type Props = {
   boardId: string;
   stageId: string;
   onPick: (board: Board, stage: BoardStage) => void;
+  onOutcome?: (outcome: 'won' | 'lost') => void;
+  outcome?: 'won' | 'lost' | null;
   disabled?: boolean;
   disabledReason?: string;
   busy?: boolean;
@@ -28,6 +30,8 @@ export function StageCascadePicker({
   boardId,
   stageId,
   onPick,
+  onOutcome,
+  outcome,
   disabled = false,
   disabledReason,
   busy = false,
@@ -46,7 +50,18 @@ export function StageCascadePicker({
   const board = boards.find(b => b.id === boardId) ?? null;
   const stage = board?.stages.find(s => s.id === stageId) ?? null;
   const focusBoard = boards[boardIdx] ?? null;
-  const focusStages = useMemo(() => focusBoard?.stages ?? [], [focusBoard]);
+  const focusStages = useMemo(() => {
+    const stages = [...(focusBoard?.stages ?? [])];
+    if (onOutcome && focusBoard?.id === boardId) {
+      if (focusBoard.wonStayInStage || !stages.some(s => focusBoard.wonStageId ? s.id === focusBoard.wonStageId : s.linkedLifecycleStage === 'CUSTOMER')) {
+        stages.push({ id: '__won', label: 'Ganho', color: 'bg-emerald-500' });
+      }
+      if (focusBoard.lostStayInStage || !stages.some(s => focusBoard.lostStageId ? s.id === focusBoard.lostStageId : s.linkedLifecycleStage === 'OTHER')) {
+        stages.push({ id: '__lost', label: 'Perdido', color: 'bg-red-500' });
+      }
+    }
+    return stages;
+  }, [focusBoard, boardId, onOutcome]);
 
   const openPanel = () => {
     if (disabled || busy) return;
@@ -81,7 +96,11 @@ export function StageCascadePicker({
 
   const choose = (b: Board, s: BoardStage) => {
     close();
-    if (b.id === boardId && s.id === stageId) return;
+    if (s.id === '__won' || s.id === '__lost') {
+      onOutcome?.(s.id === '__won' ? 'won' : 'lost');
+      return;
+    }
+    if (b.id === boardId && s.id === stageId && !outcome) return;
     onPick(b, s);
   };
 
@@ -151,6 +170,7 @@ export function StageCascadePicker({
           <span className={`truncate text-slate-500 dark:text-slate-400 ${sm ? 'max-w-[110px]' : 'max-w-[45%]'}`}>{board?.name ?? 'Funil'}</span>
           <ChevronRight size={11} className="shrink-0 self-center text-slate-300 dark:text-slate-600" aria-hidden="true" />
           <span className="truncate font-semibold text-slate-800 dark:text-white">{stage?.label ?? 'Sem etapa'}</span>
+          {outcome && <span className={`shrink-0 text-xs font-bold ${outcome === 'won' ? 'text-emerald-600' : 'text-red-500'}`}>{outcome === 'won' ? 'Ganho' : 'Perdido'}</span>}
         </span>
         {busy ? (
           <Loader2 size={13} className="shrink-0 animate-spin text-slate-400" />
@@ -213,7 +233,7 @@ export function StageCascadePicker({
                 const current = focusBoard?.id === boardId && s.id === stageId;
                 const focused = pane === 'stages' && i === stageIdx;
                 const lost = focusBoard?.lostStageId === s.id || (!focusBoard?.lostStageId && s.linkedLifecycleStage === 'OTHER');
-                const won = focusBoard?.wonStageId === s.id;
+                const won = focusBoard?.wonStageId === s.id || (!focusBoard?.wonStageId && s.linkedLifecycleStage === 'CUSTOMER');
                 return (
                   <div
                     key={s.id}

@@ -54,7 +54,7 @@ export function NoteComposer({
     const el = ref.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+    el.style.height = `${Math.max(120, Math.min(el.scrollHeight, 240))}px`;
   }, [value]);
   const save = async () => {
     const text = value.trim();
@@ -73,7 +73,7 @@ export function NoteComposer({
   return (
     <div className="p-3 pt-2">
       {error && <p role="alert" className="mb-1.5 text-xs text-red-500">{error}</p>}
-      <div className="flex items-end gap-2">
+      <div className="flex flex-col gap-2">
         <textarea
           ref={ref}
           value={value}
@@ -84,17 +84,17 @@ export function NoteComposer({
               void save();
             }
           }}
-          rows={2}
+          rows={4}
           disabled={disabled}
           aria-label="Nota interna"
           placeholder="Escreva uma nota interna. Ela fica só no CRM e não vai para o WhatsApp."
-          className="flex-1 resize-none overflow-y-auto rounded-xl border border-amber-200 dark:border-amber-500/30 bg-amber-50/60 dark:bg-amber-900/10 px-3 py-2.5 text-sm leading-relaxed text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-60"
+          className="w-full min-h-[120px] resize-none overflow-y-auto rounded-xl border border-amber-200 dark:border-amber-500/30 bg-amber-50/60 dark:bg-amber-900/10 px-3 py-2.5 text-sm leading-relaxed text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-60"
         />
         <button
           type="button"
           onClick={() => void save()}
           disabled={disabled || saving || !value.trim()}
-          className="shrink-0 h-10 px-3 inline-flex items-center gap-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold transition-colors"
+          className="self-end shrink-0 h-10 px-3 inline-flex items-center gap-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold transition-colors"
         >
           {saving && <Loader2 size={14} className="animate-spin" />}
           Salvar nota

@@ -1,3 +1,4 @@
+import { botTemplateConnectionError } from '@/lib/wa-agents/templateConnections';
 /**
  * /api/wa-agents/bots
  *   GET  -> admin: { bots: BotRow[] }  (segredo do passo webhook mascarado)
@@ -66,6 +67,10 @@ export async function POST(req: Request) {
   try {
     if (input.connection_ids?.length) input.connection_ids = await dropDeletedConnections(auth.admin, input.connection_ids);
     const numeros = input.connection_ids?.length ? input.connection_ids : input.connection_id ? [input.connection_id] : [];
+    if (input.enabled) {
+      const templateError = await botTemplateConnectionError(auth.admin, auth.user.organizationId, steps, numeros);
+      if (templateError) return json({ error: templateError }, 400);
+    }
     if (numeros.length > 0 && !(await connectionsBelongToOrg(auth.admin, auth.user.organizationId, numeros))) {
       return connectionNotFoundError();
     }

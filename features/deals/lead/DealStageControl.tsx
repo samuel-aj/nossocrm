@@ -33,7 +33,7 @@ export function DealStageControl({ deal, size = 'md', align = 'left' }: Props) {
   const move = useMoveDeal();
   const [pendingLost, setPendingLost] = useState<{ board: Board; stage: BoardStage } | null>(null);
 
-  const doMove = async (board: Board, stage: BoardStage, loss?: { reason: string; category: 'qualified' | 'disqualified' }) => {
+  const doMove = async (board: Board, stage: BoardStage, loss?: { reason: string; category: 'qualified' | 'disqualified' }, win = false) => {
     try {
       await move.mutateAsync({
         dealId: deal.id,
@@ -44,6 +44,7 @@ export function DealStageControl({ deal, size = 'md', align = 'left' }: Props) {
         lossReason: loss?.reason,
         lossCategory: loss?.category,
         explicitLost: !!loss,
+        explicitWin: win,
       });
       addToast(
         board.id !== deal.boardId ? `Lead movido para ${board.name}, etapa ${stage.label}` : `Etapa alterada para ${stage.label}`,
@@ -52,6 +53,15 @@ export function DealStageControl({ deal, size = 'md', align = 'left' }: Props) {
     } catch (e) {
       addToast(`Não foi possível mudar a etapa. Nada foi alterado. ${(e as Error)?.message ?? ''}`.trim(), 'error');
     }
+  };
+
+  const onOutcome = (outcome: 'won' | 'lost') => {
+    if (!permissions.deals.move || move.isPending) return;
+    const board = boards.find(b => b.id === deal.boardId);
+    const stage = board?.stages.find(s => s.id === deal.status);
+    if (!board || !stage) return;
+    if (outcome === 'lost') setPendingLost({ board, stage });
+    else void doMove(board, stage, undefined, true);
   };
 
   const onPick = (board: Board, stage: BoardStage) => {
@@ -73,6 +83,8 @@ export function DealStageControl({ deal, size = 'md', align = 'left' }: Props) {
         boardId={deal.boardId}
         stageId={deal.status}
         onPick={onPick}
+        onOutcome={onOutcome}
+        outcome={deal.isWon ? 'won' : deal.isLost ? 'lost' : null}
         disabled={!permissions.deals.move}
         disabledReason="Sem permissão para mover este lead"
         busy={move.isPending}

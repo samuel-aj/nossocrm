@@ -1,3 +1,4 @@
+import { templateFitsConnections } from '@/lib/wa-agents/templateConnections';
 /**
  * Serialização entre o quadro (balões e arestas do React Flow) e o formato salvo
  * do robô (BotInput: passos planos com next_step_id / goto_step_id / else_step_id /
@@ -861,8 +862,8 @@ export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowH
             if (!live) fail('o modelo escolhido não existe mais: escolha outro');
             else {
               if (live.type === 'whatsapp_api' && live.meta_status !== 'APPROVED') fail('o modelo ainda não foi aprovado pela Meta');
-              if (live.type === 'whatsapp_api' && live.connection_id && (header.connection_ids ?? []).length > 0 && !(header.connection_ids ?? []).includes(live.connection_id)) {
-                fail('o modelo é de um número que este robô não usa');
+              if (!templateFitsConnections(live, header.connection_ids ?? [])) {
+                fail('o modelo da API exige que o robô use somente o número ao qual ele pertence');
               }
               const liveButtons = (live.buttons ?? []).filter((b) => b.type === 'QUICK_REPLY').map((b) => b.text.trim());
               const savedButtons = block.data.buttons.map((b) => b.trim());

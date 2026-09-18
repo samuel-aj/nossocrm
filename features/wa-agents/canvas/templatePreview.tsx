@@ -6,6 +6,7 @@
  * todos os botões (resposta rápida vira saída; link e telefone só aparecem).
  */
 import React from 'react';
+import { templateFitsConnections } from '@/lib/wa-agents/templateConnections';
 import { useQuery } from '@tanstack/react-query';
 import { TEMPLATE_VARIABLES } from '@/lib/messageTemplates';
 
@@ -17,6 +18,7 @@ export type TemplateOption = {
   meta_status?: string | null;
   body: string;
   connection_id?: string | null;
+  connectionId?: string | null;
   buttons?: TemplateButton[] | null;
 };
 
@@ -28,8 +30,14 @@ export function useMessageTemplates() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     },
+    select: normalizeTemplates,
     staleTime: 60000,
   });
+}
+
+// Other screens populate this same cache with the API's camelCase field.
+function normalizeTemplates(response: { data: TemplateOption[] }) {
+  return { data: response.data.map(t => ({ ...t, connection_id: t.connectionId ?? null })) };
 }
 
 /** Textos dos botões de resposta rápida (os que viram saídas do balão). */
@@ -39,8 +47,7 @@ export function quickReplyTexts(template: Pick<TemplateOption, 'buttons'> | unde
 
 /** true quando o modelo pode ser usado por um robô desses números (geral vale em todos). */
 export function templateFitsNumbers(template: TemplateOption, connectionIds: string[]): boolean {
-  if (template.type !== 'whatsapp_api' || !template.connection_id) return true;
-  return connectionIds.length === 0 || connectionIds.includes(template.connection_id);
+  return templateFitsConnections(template, connectionIds);
 }
 
 const SAMPLE_BY_KEY = new Map(TEMPLATE_VARIABLES.map((v) => [v.key, v]));

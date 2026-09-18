@@ -313,6 +313,7 @@ async function sendBotText(
 }
 
 type BotTemplateRow = {
+  connection_id: string | null;
   id: string;
   name: string;
   type: string;
@@ -333,8 +334,8 @@ export function botConnectionIds(bot: Pick<BotRow, 'connection_ids' | 'connectio
 
 /**
  * Bloco "Modelo de mensagem": modelo do WhatsApp API sai como TEMPLATE de verdade pela
- * Meta (funciona fora da janela de 24 h e leva os botões aprovados); modelo geral, ou
- * número conectado por QR, vai como texto já preenchido. As variáveis ({{contato.nome}},
+ * Meta (funciona fora da janela de 24 h e leva os botões aprovados), exclusivamente
+ * no número vinculado; modelo geral vai como texto. As variáveis ({{contato.nome}},
  * {{lead.titulo}}...) vêm do contato e do negócio, como no chat. Devolve o nome do modelo.
  */
 async function sendBotTemplate(
@@ -347,16 +348,23 @@ async function sendBotTemplate(
 ): Promise<string> {
   const { data, error } = await admin
     .from('message_templates')
-    .select('id, name, type, language, body, meta_name, meta_status')
+    .select('id, name, type, language, body, meta_name, meta_status, connection_id')
     .eq('organization_id', st.run.organization_id)
     .eq('id', templateId)
     .maybeSingle();
   if (error) throw new Error(`carregar modelo falhou: ${error.message}`);
   const tpl = data as BotTemplateRow | null;
   if (!tpl) throw new Error('modelo de mensagem não encontrado');
+  if (tpl.type === 'whatsapp_api' && (!tpl.connection_id || tpl.connection_id !== connection.id)) {
+    throw new Error('Este modelo de API pertence a outro número. O envio foi bloqueado.');
+  }
+  if (tpl.type === 'whatsapp_api' && tpl.meta_status !== 'APPROVED') throw new Error('Modelo não aprovado pela Meta');
   if (connection.status !== 'connected') throw new Error('número desconectado');
   const provider = getProvider(connection);
   const sendTemplate = provider.sendTemplate?.bind(provider);
+  if (tpl.type === 'whatsapp_api' && (!tpl.meta_name || !sendTemplate)) {
+    throw new Error('O modelo de API exige envio pela API oficial do número vinculado.');
+  }
   const text = fillTemplate(tpl.body, values) || `[Modelo: ${tpl.name}]`;
   let result: SendResult;
   try {
