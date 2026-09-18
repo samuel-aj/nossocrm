@@ -29,6 +29,7 @@ import {
   Webhook,
   HelpCircle,
   Bot,
+  UserPen,
   type LucideIcon,
 } from 'lucide-react';
 import { WEBHOOK_VARIABLE_GROUPS, withCustomFieldVariables } from '@/lib/wa-agents/catalog';
@@ -37,6 +38,7 @@ import type { WaAgentListItem, WaAgentOptions } from './useWaAgents';
 import { RuleEditorModal, RuleList } from './RuleList';
 import { BTN_ICON, BTN_SMALL, Disclosure, Field, HELP_CLASS, INPUT_CLASS, TEXTAREA_CLASS } from './ui';
 import { VarField } from './VarField';
+import { LeadChangesEditor, LossFields, type LeadChangeRow } from './LeadEditors';
 
 export type ActionType = EndAction['type'];
 
@@ -47,7 +49,8 @@ export const ACTION_LABELS: Record<ActionType, string> = {
   start_bot: 'Transferir para um robô',
   note: 'Registrar nota no negócio',
   move_stage: 'Mover para etapa',
-  add_tag: 'Adicionar rótulo',
+  add_tag: 'Adicionar tag',
+  update_lead: 'Atualizar campos do lead',
   mark_lost: 'Marcar como perdido',
   assign_owner: 'Atribuir responsável',
   set_product: 'Cadastrar produto no negócio',
@@ -64,6 +67,7 @@ export const ACTION_ICONS: Record<ActionType, LucideIcon> = {
   note: StickyNote,
   move_stage: ArrowRight,
   add_tag: Tag,
+  update_lead: UserPen,
   mark_lost: CircleX,
   assign_owner: UserCheck,
   set_product: Package,
@@ -148,6 +152,8 @@ export function defaultAction(
       return { type, stage_id: firstStage };
     case 'add_tag':
       return { type, tag: '' };
+    case 'update_lead':
+      return { type, changes: [{ field: 'custom_field', key: options?.custom_fields?.[0]?.key ?? '', mode: 'replace', value: '' }] };
     case 'mark_lost':
       return { type };
     case 'assign_owner':
@@ -214,7 +220,15 @@ export function describeAction(
       return `mover para a etapa ${stage ? stage.label : 'não escolhida'}${motivo ? ` (motivo: ${motivo})` : ''}`;
     }
     case 'add_tag':
-      return `adicionar rótulo ${action.tag.trim() ? `"${action.tag.trim()}"` : 'sem nome'}`;
+      return `adicionar tag ${action.tag.trim() ? `"${action.tag.trim()}"` : 'sem nome'}`;
+    case 'update_lead': {
+      const names = action.changes.map((c) =>
+        c.field === 'custom_field'
+          ? (options?.custom_fields ?? []).find((f) => f.key === c.key)?.label || c.key || 'campo'
+          : ({ title: 'título', value: 'valor', description: 'descrição', owner_id: 'responsável' } as Record<string, string>)[c.field]
+      );
+      return `atualizar ${names.length > 0 ? names.join(', ') : 'campos'} do lead`;
+    }
     case 'mark_lost':
       return action.loss_reason ? `marcar como perdido (${action.loss_reason})` : 'marcar como perdido';
     case 'assign_owner': {
@@ -465,29 +479,70 @@ function ActionFields({
             value={action.stage_id}
             onChange={(stage_id) =>
               // trocar pra uma etapa que não é de perda descarta o motivo
-              onChange({ ...action, stage_id, ...(isLossStage(options, stage_id) ? {} : { loss_reason: undefined }) })
+              onChange({ ...action, stage_id, ...(isLossStage(options, stage_id) ? {} : { loss_reason: undefined, loss_category: undefined }) })
             }
             options={options}
             ariaLabel="Etapa de destino"
           />
           {isLossStage(options, action.stage_id) ? (
-            <div className="space-y-1">
-              <VarField
-                id={`${idPrefix}-move-loss`}
-                value={action.loss_reason ?? ''}
-                onChange={(loss) => onChange({ ...action, loss_reason: loss || undefined })}
-                placeholder="Motivo da perda (opcional)"
-                maxLength={200}
-                ariaLabel="Motivo da perda"
-                aiVars={aiVars}
-                onAiVarsChange={onAiVarsChange}
-              />
-              <p className={HELP_CLASS}>
-                Esta é a etapa de perda do quadro: o negócio será marcado como perdido com este motivo.
-              </p>
-            </div>
+            <LossFields
+              idPrefix={`${idPrefix}-move-loss`}
+              category={action.loss_category ?? ''}
+              reason={action.loss_reason ?? ''}
+              onChange={(patch) =>
+                onChange({
+                  ...action,
+                  ...(patch.category !== undefined ? { loss_category: patch.category || undefined } : {}),
+                  ...(patch.reason !== undefined ? { loss_reason: patch.reason || undefined } : {}),
+                })
+              }
+              renderText={(p) => (
+                <VarField
+                  id={p.id}
+                  value={p.value}
+                  onChange={p.onChange}
+                  placeholder={p.placeholder}
+                  maxLength={200}
+                  ariaLabel={p.ariaLabel}
+                  aiVars={aiVars}
+                  onAiVarsChange={onAiVarsChange}
+                />
+              )}
+            />
           ) : null}
         </div>
+      );
+    case 'update_lead':
+      return (
+        <LeadChangesEditor<LeadChangeRow>
+          rows={action.changes.map((c) => ({ field: c.field, key: c.key ?? '', mode: c.mode ?? 'replace', value: c.value ?? '' }))}
+          onChange={(rows) =>
+            onChange({
+              ...action,
+              changes: rows.map((r) => ({
+                field: r.field,
+                ...(r.field === 'custom_field' ? { key: r.key } : {}),
+                mode: r.mode,
+                ...(r.mode === 'clear' ? {} : { value: r.value }),
+              })),
+            })
+          }
+          makeRow={(row) => row}
+          options={options}
+          idPrefix={`${idPrefix}-lead`}
+          renderText={(p) => (
+            <VarField
+              id={p.id}
+              value={p.value}
+              onChange={p.onChange}
+              placeholder={p.placeholder}
+              maxLength={4000}
+              ariaLabel={p.ariaLabel}
+              aiVars={aiVars}
+              onAiVarsChange={onAiVarsChange}
+            />
+          )}
+        />
       );
     case 'add_tag':
       return (

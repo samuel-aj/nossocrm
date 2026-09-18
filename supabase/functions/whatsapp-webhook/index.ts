@@ -386,7 +386,7 @@ Deno.serve(async (req) => {
   // edição) ficam em wa_webhook_debug pra inspeção. Best-effort; derrubar a
   // tabela e este bloco quando o diagnóstico terminar.
   try {
-    const conhecidos = ["messages.upsert", "messages.update", "connection.update", "qrcode.updated", "diag.webhook", "diag.edit", "heal.ping"];
+    const conhecidos = ["messages.upsert", "messages.update", "connection.update", "qrcode.updated", "diag.webhook", "diag.edit", "diag.find", "heal.ping"];
     const citaEdicao = rawBody.includes("editedMessage") || rawBody.includes("protocolMessage") || event.includes("edit");
     if (!conhecidos.includes(event) || citaEdicao) {
       await supabase.from("wa_webhook_debug").insert({ event, payload });

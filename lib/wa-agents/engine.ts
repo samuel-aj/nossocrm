@@ -601,6 +601,15 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     status: RunStatus,
     extra: { reason?: string; error?: string; text?: string; lines?: string[] } = {}
   ): Promise<RunResult> => {
+    // Ação que falhou ou foi pulada fica visível na execução (antes só no JSON de eventos)
+    const problems = events.filter(
+      e => (e as { type?: string }).type === 'action' && (e as { ok?: boolean }).ok === false
+    ) as Array<{ action?: string; error?: string; key?: string }>;
+    const actionsError =
+      problems.length > 0
+        ? `${problems.length} ação(ões) com problema: ` +
+          problems.map(p => `${p.action ?? 'ação'}${p.key ? ` [${p.key}]` : ''}: ${p.error ?? 'erro'}`).join('; ').slice(0, 900)
+        : null;
     const runId = await logRun(admin, {
       organization_id: organizationId,
       agent_id: agent?.id ?? input.agentId ?? null,
@@ -615,7 +624,7 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
       usage,
       model: modelId,
       duration_ms: Date.now() - startedAt,
-      error: extra.error ?? null,
+      error: extra.error ?? actionsError,
     });
     return { status, reason: extra.reason, runId, text: extra.text, lines: extra.lines };
   };
@@ -654,6 +663,12 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     agent = await loadAgent(admin, organizationId, agentId);
     if (!agent) return await finish('skipped', { reason: 'agente não encontrado' });
     if (!agent.enabled) return await finish('skipped', { reason: 'agente desligado' });
+    // O agente só atende os números escolhidos nele (valia só para conversa nova;
+    // conversa antiga, início manual e passagem entre agentes escapavam)
+    const convConnectionId = ctx.conversation.connection_id ?? null;
+    if (convConnectionId && !(agent.connection_ids ?? []).includes(convConnectionId)) {
+      return await finish('skipped', { reason: 'agente não atende o número desta conversa' });
+    }
     lockSeconds = lockSecondsFor(agent);
 
     // 2. Buffer: espera o lead terminar de digitar; só a execução da ÚLTIMA mensagem responde
@@ -906,10 +921,12 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
       !!(acts.approvalAgentId || acts.handoffAgentId || acts.startBotId || acts.stopped);
 
     // 9a. Ações durante a conversa (executar_acao): executam sem encerrar o atendimento.
-    // Uma ação por resposta (a primeira válida); chamada sem "detalhes" é ignorada. O trecho
+    // TODAS as ações diferentes pedidas na mesma resposta rodam, na ordem em que o modelo
+    // chamou (antes só a primeira rodava e as outras sumiam em silêncio). A mesma ação
+    // repetida na mesma resposta roda uma vez só. Chamada sem "detalhes" é ignorada. O trecho
     // da mensagem do lead que motivou a ação fica no registro e no webhook (auditoria).
     const leadExcerpt = (inputText ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
-    let actionExecuted = false;
+    const executedKeys = new Set<string>();
     for (const tc of gen.toolCalls) {
       if (tc.tool !== 'executar_acao') continue;
       const args = (tc.input ?? {}) as { acao?: unknown; detalhes?: unknown };
@@ -924,11 +941,11 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
         pushEvent('custom_action_ignored', { acao: custom.key, motivo: 'sem detalhes' });
         continue;
       }
-      if (actionExecuted) {
-        pushEvent('custom_action_skipped', { acao: custom.key, detalhes, motivo: 'uma ação por resposta' });
+      if (executedKeys.has(custom.key)) {
+        pushEvent('custom_action_duplicate', { acao: custom.key, detalhes, motivo: 'mesma ação repetida na resposta' });
         continue;
       }
-      actionExecuted = true;
+      executedKeys.add(custom.key);
       const acts = await executeCustomAction(admin, {
         agent,
         ctx,
@@ -938,7 +955,8 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
         renewLock: renew,
       });
       await emit('custom_action', { acao: custom.key, label: custom.label, detalhes, mensagem_lead: leadExcerpt });
-      if (requestsTransition(acts)) {
+      // A primeira ação que pede parada/passagem vale; o encerramento ainda prevalece
+      if (requestsTransition(acts) && !transition) {
         transition = {
           acts,
           summary: detalhes,
@@ -1122,11 +1140,7 @@ export async function handleInboundMessage(input: {
   };
 
   try {
-    if (!(await isAiAgentsApproved(admin, organizationId))) {
-      return { status: 'skipped', reason: 'agente de IA não liberado para esta organização' };
-    }
-
-    // Robô esperando resposta nesta conversa tem prioridade
+    // Robô esperando resposta nesta conversa tem prioridade (e robô não depende da liberação do agente de IA)
     const { data: waiting } = await admin
       .from('wa_bot_runs')
       .select('*')
@@ -1150,6 +1164,10 @@ export async function handleInboundMessage(input: {
       };
       await handleBotReply(admin, { run: waiting as BotRunRow, message: m });
       return { status: 'ok', reason: 'robô' };
+    }
+
+    if (!(await isAiAgentsApproved(admin, organizationId))) {
+      return { status: 'skipped', reason: 'agente de IA não liberado para esta organização' };
     }
 
     let ctx = await loadConversationContext(admin, organizationId, conversationId);

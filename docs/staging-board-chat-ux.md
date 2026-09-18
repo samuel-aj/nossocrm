@@ -27,3 +27,8 @@ O usuário voltou à tela `/chats`, onde a conexão fictícia Meta continuava bl
 A habilitação é calculada no servidor, exclusivamente para preview da branch staging. Em produção o comportamento de Chats permanece igual. Testes de integração verificam abertura automática, menu Editar, alternância e ausência da simulação sem a flag de staging.
 
 Base remota encontrada: `57d8fdf`, que já não continha os commits anteriores `0d79b73` e `00acef9`. Ambos foram reaplicados em cima dessa base, sem conflitos, preservando a correção de conexões duplicadas. Validação: 23 testes específicos, incluindo os de deduplicação; TypeScript e lint dos arquivos modificados.
+## Promoção autorizada — 17/09/2026
+
+Candidata criada sobre MAIN `9b5e8ca`, aplicando somente o commit funcional aprovado. As correções posteriores de sessão Evolution travada, responsáveis via memberships e migração de vínculos de agentes/robôs permanecem preservadas. Nenhuma página, componente ou flag da demonstração é incluída na produção.
+
+Validação: 43 testes de WhatsApp e resolução de responsáveis, TypeScript e lint; comparação dos arquivos das correções recentes sem diferenças, exceto adição de `editText` no provedor Evolution. STAGING atualizado com as mesmas correções de MAIN antes da promoção. Sem migração de banco e sem envio/edição de mensagens reais durante os testes.

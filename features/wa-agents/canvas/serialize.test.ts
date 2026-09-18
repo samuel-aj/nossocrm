@@ -280,7 +280,7 @@ describe('validateFlow', () => {
     const { nodes, edges } = botToFlow(bot(steps, null), []);
     const messages = validateFlow(nodes, edges, HEADER).errors.map((e) => e.message);
     expect(messages).toContain('Mensagem 2: a mensagem está vazia');
-    expect(messages).toContain('Rótulo: informe o rótulo');
+    expect(messages).toContain('Adicionar tag: informe a tag');
   });
 
   it('prefixa com o nome do balão e aponta o bloco com problema', () => {

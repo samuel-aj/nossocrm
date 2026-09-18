@@ -17,11 +17,15 @@ import {
   MessageSquareReply,
   MoveRight,
   Tag,
+  TagsIcon,
+  UserPen,
+  UserPlus,
   Webhook,
   Workflow,
   type LucideIcon,
 } from 'lucide-react';
 import { DND_MIME, STEP_LABELS, STEP_TYPES, type StepType } from './types';
+import { endDragSession, startDragSession } from './dragSession';
 
 export type NodeTone = 'amber' | 'green' | 'sky' | 'blue' | 'purple' | 'pink' | 'orange' | 'slate' | 'red';
 
@@ -83,7 +87,22 @@ export const NODE_META: Record<StepType, NodeMeta> = {
     color: '#f97316',
     hint: 'Move o negócio para uma etapa',
   },
-  add_tag: { label: STEP_LABELS.add_tag, icon: Tag, tone: 'pink', color: '#ec4899', hint: 'Adiciona um rótulo ao negócio' },
+  add_tag: { label: STEP_LABELS.add_tag, icon: Tag, tone: 'pink', color: '#ec4899', hint: 'Adiciona uma tag ao lead' },
+  remove_tag: { label: STEP_LABELS.remove_tag, icon: TagsIcon, tone: 'pink', color: '#db2777', hint: 'Tira uma tag do lead (se ele não tiver, segue normalmente)' },
+  create_lead: {
+    label: STEP_LABELS.create_lead,
+    icon: UserPlus,
+    tone: 'orange',
+    color: '#ea580c',
+    hint: 'Cria o lead quando o contato ainda não tem um aberto (sem duplicar)',
+  },
+  update_lead: {
+    label: STEP_LABELS.update_lead,
+    icon: UserPen,
+    tone: 'orange',
+    color: '#c2410c',
+    hint: 'Altera campos do lead, inclusive os personalizados',
+  },
   webhook: { label: STEP_LABELS.webhook, icon: Webhook, tone: 'slate', color: '#64748b', hint: 'Chama uma URL externa' },
   handoff_agent: {
     label: STEP_LABELS.handoff_agent,
@@ -149,7 +168,9 @@ export function BlockCatalog({
             onDragStart={(e) => {
               e.dataTransfer.setData(DND_MIME, type);
               e.dataTransfer.effectAllowed = 'copy';
+              startDragSession({ kind: 'palette', type });
             }}
+            onDragEnd={endDragSession}
             onClick={() => {
               if (!disabledReason) onPick(type);
             }}

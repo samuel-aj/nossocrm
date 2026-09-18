@@ -143,7 +143,7 @@ export function buildAgentTools(agent: AgentRow, runtime: AgentToolRuntime = {})
   if (actionKeys.length > 0) {
     tools.executar_acao = tool({
       description:
-        'Executa uma ação configurada no momento em que a situação descrita acontece na conversa (uma vez por ocorrência). Nas ações marcadas como finais no prompt, escreva a mensagem final ao cliente antes de chamar; as demais não encerram o atendimento.',
+        'Executa uma ação configurada no momento em que a situação descrita acontece na conversa (uma vez por ocorrência). Se mais de uma situação acontecer na mesma mensagem, chame executar_acao uma vez para CADA ação, na mesma resposta. Nas ações marcadas como finais no prompt, escreva a mensagem final ao cliente antes de chamar; as demais não encerram o atendimento.',
       inputSchema: z.object({
         acao: enumOf(actionKeys).describe('Chave da ação'),
         detalhes: z.string().describe('O que o cliente disse ou o contexto que motivou a ação, em uma ou duas frases'),

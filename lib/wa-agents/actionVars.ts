@@ -34,6 +34,8 @@ export function actionTextFields(action: EndAction): string[] {
       return [action.loss_reason ?? ''];
     case 'append_description':
       return [action.prefix ?? ''];
+    case 'update_lead':
+      return action.changes.map(c => c.value ?? '');
     case 'create_task':
       return [action.title];
     case 'webhook':
@@ -170,6 +172,8 @@ export function resolveActionTexts(
       return { ...action, loss_reason: action.loss_reason ? r(action.loss_reason).slice(0, 200) : action.loss_reason };
     case 'append_description':
       return { ...action, prefix: action.prefix ? r(action.prefix).slice(0, 120) : action.prefix };
+    case 'update_lead':
+      return { ...action, changes: action.changes.map(c => (c.value ? { ...c, value: r(c.value).slice(0, 4000) } : c)) };
     case 'create_task':
       return { ...action, title: r(action.title).slice(0, 200) };
     case 'webhook': {

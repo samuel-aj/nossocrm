@@ -52,6 +52,8 @@ export async function moveStageByDealId(opts: {
   mark?: 'won' | 'lost' | null;
   /** Motivo da perda; só é gravado quando o movimento marca o negócio como perdido */
   lossReason?: string | null;
+  /** Categoria da perda (qualified/disqualified); mesma regra do motivo */
+  lossCategory?: 'qualified' | 'disqualified' | null;
 }) {
   const sb = createStaticAdminClient();
   const dealId = sanitizeUUID(opts.dealId);
@@ -110,6 +112,7 @@ export async function moveStageByDealId(opts: {
     updates.closed_at = now;
     // motivo informado pelo chamador; sem motivo, preserva o que já existir
     if (opts.lossReason?.trim()) updates.loss_reason = opts.lossReason.trim().slice(0, 200);
+    if (opts.lossCategory) updates.loss_category = opts.lossCategory;
   }
   const { data, error } = await sb
     .from('deals')

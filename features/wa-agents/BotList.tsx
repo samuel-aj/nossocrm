@@ -8,12 +8,12 @@
  */
 import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { Workflow, Plus, Pencil, Trash2, Play, Phone, Zap, Loader2 } from 'lucide-react';
+import { Workflow, Plus, Pencil, Trash2, Play, Phone, Zap, Loader2, CopyPlus } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/context/ToastContext';
 import type { BotRow } from '@/lib/wa-agents/types';
-import { useDeleteWaBot, useSaveWaBot, useStartWaBot, useWaAgentOptions, useWaBotsList } from './useWaAgents';
+import { useDeleteWaBot, useDuplicateWaBot, useSaveWaBot, useStartWaBot, useWaAgentOptions, useWaBotsList } from './useWaAgents';
 import { TRIGGER_LABELS } from './canvas/types';
 import { isStageAutomationBot } from '@/features/boards/automations/stageAutomationModel';
 import {
@@ -53,6 +53,8 @@ export const BotList: React.FC = () => {
   const [testBot, setTestBot] = useState<BotRow | null>(null);
   const [testPhone, setTestPhone] = useState('');
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const duplicate = useDuplicateWaBot();
 
   // Vindo do board (Automatizar): ?bot=<id> abre o editor e some da URL
   useEffect(() => {
@@ -94,6 +96,19 @@ export const BotList: React.FC = () => {
       showToast(errorMessage(err, 'Falha ao alterar o robô'), 'error');
     } finally {
       setTogglingId(null);
+    }
+  };
+
+  const handleDuplicate = async (bot: BotRow) => {
+    setDuplicatingId(bot.id);
+    try {
+      const copy = await duplicate.mutateAsync(bot.id);
+      showToast(`"${copy.name}" criado desligado. Revise e ligue quando estiver pronto.`, 'success');
+      setEditor({ bot: copy });
+    } catch (err) {
+      showToast(errorMessage(err, 'Falha ao duplicar o robô'), 'error');
+    } finally {
+      setDuplicatingId(null);
     }
   };
 
@@ -221,6 +236,16 @@ export const BotList: React.FC = () => {
                     onClick={() => setEditor({ bot })}
                   >
                     <Pencil size={16} aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className={BTN_ICON}
+                    aria-label={`Duplicar robô ${bot.name}`}
+                    title="Duplicar (a cópia nasce desligada)"
+                    disabled={duplicatingId === bot.id}
+                    onClick={() => void handleDuplicate(bot)}
+                  >
+                    {duplicatingId === bot.id ? <Loader2 size={16} className="animate-spin" aria-hidden="true" /> : <CopyPlus size={16} aria-hidden="true" />}
                   </button>
                   <button
                     type="button"

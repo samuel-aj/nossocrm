@@ -6,7 +6,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { moveStageByDealId } from '@/lib/public-api/dealsMoveStage';
 import { fillTemplate, templateParams } from '@/lib/messageTemplates';
-import { normalizePhoneE164 } from '@/lib/phone';
+import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
 import { getProvider, type SendResult } from '@/lib/whatsapp';
 import {
   ensureConversation,
@@ -16,6 +16,7 @@ import {
   type WaConnectionRow,
 } from '@/lib/whatsapp/service';
 import { addDealTag } from './actions';
+import { applyLeadChanges, ensureLeadForContact, recordLossHistory, removeDealTag } from './leadOps';
 import { isAiAgentsApproved } from './beta';
 import { loadAgent, loadConversationContext, loadDealContext, loadLastInboundProviderId } from './context';
 import { runAgentOnConversation } from './engine';
@@ -48,6 +49,15 @@ const CHAIN_DEPTH_VAR = '_chain_depth';
 const MAX_CHAIN_DEPTH = 5;
 /** Esperas de até isto acontecem dentro da execução (o relógio do tick é de 30 s e atrasaria) */
 const INLINE_WAIT_MAX_S = 25;
+/** Passo onde a execução parou (wait/wait_reply): retomar pelo id, porque editar o quadro reordena o array */
+const RESUME_STEP_VAR = '_resume_step_id';
+/**
+ * Passos de CRM: falha registra no histórico e o fluxo SEGUE (decisão do produto).
+ * Mensagem que não sai, espera e transferências continuam parando a execução.
+ */
+const CONTINUE_ON_FAILURE = new Set<BotStep['type']>(['move_stage', 'add_tag', 'remove_tag', 'create_lead', 'update_lead', 'webhook']);
+/** Mensagem cujo "digitando..." já rodou (retomada depois de uma digitação longa não repete) */
+const TYPED_STEP_VAR = '_typed_step_id';
 /** Passos que falam com o lead: exigem conversa no WhatsApp (telefone + número). */
 const CONVERSATION_STEP_TYPES = new Set<BotStep['type']>(['send_text', 'send_template', 'typing', 'wait_reply', 'handoff_agent', 'start_bot']);
 
@@ -56,6 +66,22 @@ function nowIso(): string {
 }
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+/** "90 segundos" / "15 minutos" / "2 horas" / "3 dias" (histórico da execução) */
+function formatDuration(seconds: number): string {
+  const units: Array<[number, string, string]> = [
+    [86400, 'dia', 'dias'],
+    [3600, 'hora', 'horas'],
+    [60, 'minuto', 'minutos'],
+  ];
+  for (const [size, one, many] of units) {
+    if (seconds >= size && seconds % size === 0) {
+      const n = seconds / size;
+      return `${n} ${n === 1 ? one : many}`;
+    }
+  }
+  return `${seconds} segundos`;
+}
 
 function parseSteps(raw: unknown): BotStep[] {
   if (!Array.isArray(raw)) return [];
@@ -128,6 +154,10 @@ type RunState = {
   run: BotRunRow;
   log: BotLogEntry[];
   vars: Record<string, unknown>;
+  /** Passos do robô (para gravar o id do passo onde a execução parou) */
+  steps?: BotStep[];
+  /** Última falha ou ação pulada: fica em `error` mesmo com a execução concluída */
+  failure?: string | null;
 };
 
 /**
@@ -139,24 +169,105 @@ async function saveRun(
   admin: SupabaseClient,
   st: RunState,
   patch: Record<string, unknown>,
-  opts: { release?: boolean } = {}
+  opts: { release?: boolean; renewLock?: boolean } = {}
 ): Promise<void> {
+  // Retomada pelo id do passo (o índice muda quando o quadro é editado)
+  if (typeof patch.step_index === 'number' && st.steps) {
+    const at = st.steps[patch.step_index as number];
+    if (at) st.vars[RESUME_STEP_VAR] = at.id;
+    else delete st.vars[RESUME_STEP_VAR];
+  }
+  // Execução concluída com ação que falhou ou foi pulada: o motivo fica visível
+  const failure = patch.status === 'done' && st.failure && !('error' in patch) ? { error: st.failure } : {};
+  // Log sem crescer para sempre (robôs longos com várias retomadas)
+  if (st.log.length > 500) st.log = st.log.slice(-500);
   const { error } = await admin
     .from('wa_bot_runs')
     .update({
       ...patch,
+      ...failure,
       log: st.log,
       vars: st.vars,
       updated_at: nowIso(),
       ...(opts.release ? { lock_until: null } : {}),
+      ...(opts.renewLock && !opts.release
+        ? { lock_until: new Date(Date.now() + BOT_LOCK_SECONDS * 1000).toISOString() }
+        : {}),
     })
     .eq('id', st.run.id)
     .eq('organization_id', st.run.organization_id);
   if (error) console.error('[wa-agents] salvar execução do robô falhou:', error.message);
 }
 
-function note(st: RunState, step: BotStep | null, text: string): void {
-  st.log.push({ at: nowIso(), step_id: step?.id ?? null, type: step?.type ?? 'run', note: text });
+function note(st: RunState, step: BotStep | null, text: string, status?: BotLogEntry['status'], error?: string): void {
+  st.log.push({
+    at: nowIso(),
+    step_id: step?.id ?? null,
+    type: step?.type ?? 'run',
+    note: text,
+    ...(status ? { status } : {}),
+    ...(error ? { error } : {}),
+  });
+}
+
+/** Rótulo curto do passo para o histórico e o campo de erro ("Mover etapa (abc123)") */
+const STEP_LABEL: Partial<Record<BotStep['type'], string>> = {
+  send_text: 'Mensagem',
+  send_template: 'Modelo de mensagem',
+  typing: 'Digitando',
+  start_bot: 'Iniciar robô',
+  wait: 'Aguardar',
+  wait_reply: 'Aguardar resposta',
+  condition: 'Condição',
+  move_stage: 'Mover etapa',
+  add_tag: 'Adicionar tag',
+  remove_tag: 'Remover tag',
+  create_lead: 'Criar lead',
+  update_lead: 'Editar lead',
+  webhook: 'Webhook',
+  handoff_agent: 'Transferir para agente',
+  end: 'Encerrar',
+};
+function stepRef(step: BotStep | null): string {
+  if (!step) return 'Robô';
+  return `${STEP_LABEL[step.type] ?? step.type} (${step.id})`;
+}
+
+/** Ação pulada (ex.: sem lead): registrada e visível no erro da execução, sem parar o fluxo */
+function skipNote(st: RunState, step: BotStep, text: string): void {
+  note(st, step, text, 'skipped', text);
+  st.failure = `${stepRef(step)}: ${text}`;
+}
+
+/** Ação que falhou mas não para o fluxo */
+function failNote(st: RunState, step: BotStep, text: string): void {
+  note(st, step, `falhou: ${text}`, 'failed', text);
+  st.failure = `${stepRef(step)}: ${text}`;
+}
+
+/**
+ * Uma conversa tem UM robô por vez (decisão do produto: o mais novo vence).
+ * Cancela as outras execuções ativas da conversa, exceto `keepRunId`.
+ */
+async function cancelOtherRunsInConversation(
+  admin: SupabaseClient,
+  orgId: string,
+  conversationId: string,
+  keepRunId: string
+): Promise<number> {
+  const { data, error } = await admin
+    .from('wa_bot_runs')
+    .update({ status: 'cancelled', wake_at: null, lock_until: null, updated_at: nowIso() })
+    .eq('organization_id', orgId)
+    .eq('conversation_id', conversationId)
+    .in('status', ['running', 'waiting_reply'])
+    .neq('id', keepRunId)
+    .select('id');
+  if (error) {
+    console.error('[wa-agents] cancelar execuções anteriores falhou:', error.message);
+    return 0;
+  }
+  return (data ?? []).length;
 }
 
 async function sendBotText(
@@ -422,7 +533,14 @@ export function evalConditionRule(rule: BotConditionRule, env: ConditionEnv): bo
  * Move o negócio para uma etapa de OUTRO quadro da mesma organização (troca
  * board_id e stage_id juntos). A etapa precisa pertencer ao quadro de destino.
  */
-async function moveDealToBoardStage(admin: SupabaseClient, orgId: string, dealId: string, boardId: string, stageId: string): Promise<void> {
+async function moveDealToBoardStage(
+  admin: SupabaseClient,
+  orgId: string,
+  dealId: string,
+  boardId: string,
+  stageId: string,
+  loss: { reason?: string | null; category?: 'qualified' | 'disqualified' | null } = {}
+): Promise<void> {
   const { data: stage, error: stageError } = await admin
     .from('board_stages')
     .select('id')
@@ -433,9 +551,25 @@ async function moveDealToBoardStage(admin: SupabaseClient, orgId: string, dealId
   if (stageError) throw new Error(stageError.message);
   if (!stage) throw new Error('etapa de destino não pertence ao pipeline escolhido');
   const now = nowIso();
+  // Etapa de ganho/perda do quadro de destino marca o lead (antes a troca de pipeline ignorava)
+  const { data: boardCfg } = await admin
+    .from('boards')
+    .select('won_stage_id, lost_stage_id')
+    .eq('organization_id', orgId)
+    .eq('id', boardId)
+    .maybeSingle();
+  const cfg = (boardCfg as { won_stage_id?: string | null; lost_stage_id?: string | null } | null) ?? {};
+  const updates: Record<string, unknown> = { board_id: boardId, stage_id: stageId, last_stage_change_date: now, updated_at: now };
+  if (cfg.won_stage_id && cfg.won_stage_id === stageId) {
+    Object.assign(updates, { is_won: true, is_lost: false, closed_at: now, loss_reason: null });
+  } else if (cfg.lost_stage_id && cfg.lost_stage_id === stageId) {
+    Object.assign(updates, { is_lost: true, is_won: false, closed_at: now });
+    if (loss.reason?.trim()) updates.loss_reason = loss.reason.trim().slice(0, 200);
+    if (loss.category) updates.loss_category = loss.category;
+  }
   const { error } = await admin
     .from('deals')
-    .update({ board_id: boardId, stage_id: stageId, last_stage_change_date: now, updated_at: now })
+    .update(updates)
     .eq('organization_id', orgId)
     .eq('id', dealId);
   if (error) throw new Error(error.message);
@@ -448,6 +582,7 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
     vars: { ...((run.vars ?? {}) as Record<string, unknown>) },
   };
   const orgId = run.organization_id;
+  let currentStep: BotStep | null = null;
 
   try {
     // Robô roda para QUALQUER organização (saiu da beta). Só o passo
@@ -459,17 +594,52 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
       await saveRun(admin, st, { status: 'cancelled' }, { release: true });
       return;
     }
+    const rawSteps = Array.isArray(bot.steps) ? bot.steps : [];
     const steps = parseSteps(bot.steps);
+    st.steps = steps;
+    if (steps.length < rawSteps.length) {
+      note(st, null, `${rawSteps.length - steps.length} passo(s) inválido(s) ignorado(s)`, 'failed');
+    }
     if (steps.length === 0) {
       note(st, null, 'robô sem passos');
       await saveRun(admin, st, { status: 'done' }, { release: true });
       return;
     }
 
+    // Conversa existente: dela vêm contato e negócio quando a execução não trouxe
+    // (robô iniciado pelo chat, API ou agente). Sem isso "Mover etapa" e "Tag"
+    // eram pulados em silêncio e {{nome}} saía vazio.
+    type ConvLite = { wa_phone: string | null; connection_id: string | null; contact_id: string | null; deal_id: string | null };
+    let convRow: ConvLite | null = null;
+    if (run.conversation_id) {
+      const { data } = await admin
+        .from('wa_conversations')
+        .select('wa_phone, connection_id, contact_id, deal_id')
+        .eq('organization_id', orgId)
+        .eq('id', run.conversation_id)
+        .maybeSingle();
+      convRow = (data as ConvLite | null) ?? null;
+    }
+
     // Negócio e contato
-    const deal = await loadDealContext(admin, orgId, { dealId: run.deal_id });
+    let contactId = run.contact_id ?? convRow?.contact_id ?? null;
+    if (!contactId && !run.deal_id && !convRow?.deal_id) {
+      // Último recurso: contato pelo telefone (com e sem o nono dígito)
+      const variants = brPhoneVariants(run.phone || convRow?.wa_phone || '');
+      if (variants.length > 0) {
+        const { data } = await admin
+          .from('contacts')
+          .select('id')
+          .eq('organization_id', orgId)
+          .in('phone', variants)
+          .is('deleted_at', null)
+          .limit(1)
+          .maybeSingle();
+        contactId = (data as { id?: string } | null)?.id ?? null;
+      }
+    }
+    let deal = await loadDealContext(admin, orgId, { dealId: run.deal_id ?? convRow?.deal_id ?? null, contactId });
     let contact: { id: string; name: string; phone: string | null; email: string | null } | null = null;
-    let contactId = run.contact_id;
     if (!contactId && deal) {
       const { data } = await admin
         .from('deals')
@@ -537,13 +707,7 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
     } else {
       // Execução presa a uma conversa existente (iniciada pelo chat ou retomada):
       // envia pelo número da conversa, para a resposta do lead cair nela
-      const { data } = await admin
-        .from('wa_conversations')
-        .select('wa_phone, connection_id')
-        .eq('organization_id', orgId)
-        .eq('id', run.conversation_id)
-        .maybeSingle();
-      const conv = data as { wa_phone?: string | null; connection_id?: string | null } | null;
+      const conv = convRow;
       convConnectionId = conv?.connection_id ?? null;
       if (!phone) phone = conv?.wa_phone ?? '';
       if (!phone) {
@@ -555,7 +719,8 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
       // número ele não fala (antes, o envio saía pelo número da conversa e podia
       // ir por um número que o robô nem atende).
       const permitidos = botConnectionIds(bot);
-      if (convConnectionId && permitidos.length > 0 && !permitidos.includes(convConnectionId)) {
+      // Lista vazia = robô sem número (antes valia como "todos os números")
+      if (convConnectionId && !permitidos.includes(convConnectionId)) {
         note(st, null, 'a conversa é de um número que este robô não atende');
         await saveRun(
           admin,
@@ -567,6 +732,15 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
       }
     }
     const conversationId: string | null = st.run.conversation_id ?? null;
+    // Guarda na execução o negócio e o contato encontrados (histórico e retomadas)
+    const resolvedIds: Record<string, unknown> = {};
+    if (deal && st.run.deal_id !== deal.id) resolvedIds.deal_id = deal.id;
+    const resolvedContact = contact?.id ?? contactId ?? null;
+    if (resolvedContact && st.run.contact_id !== resolvedContact) resolvedIds.contact_id = resolvedContact;
+    if (Object.keys(resolvedIds).length > 0) {
+      st.run = { ...st.run, ...resolvedIds } as BotRunRow;
+      await saveRun(admin, st, resolvedIds);
+    }
 
     const getConnection = async (): Promise<WaConnectionRow> => {
       if (connection) return connection;
@@ -592,6 +766,33 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
         }).catch(() => null);
       }
       return lastInboundId;
+    };
+
+    /**
+     * "digitando..." pelo tempo pedido. A Evolution segura a chamada pelo tempo da
+     * presença, então só espera o que falta. Tempo acima do limite em linha vira
+     * espera agendada: devolve o instante de acordar (quem chama estaciona a execução).
+     */
+    const showTyping = async (step: BotStep, seconds: number): Promise<string | null> => {
+      const total = Math.min(60, Math.max(1, Math.round(seconds)));
+      const provider = getProvider(await getConnection());
+      const startedTyping = Date.now();
+      if (provider.sendTyping) {
+        try {
+          await provider.sendTyping({
+            to: phone,
+            ms: Math.min(total, INLINE_WAIT_MAX_S) * 1000,
+            providerMessageId: (await getLastInboundId()) ?? undefined,
+          });
+        } catch (e) {
+          note(st, step, `presença "digitando" falhou: ${errorMessage(e)}`);
+        }
+      }
+      note(st, step, `digitando por ${total}s`);
+      const remainingMs = total * 1000 - (Date.now() - startedTyping);
+      if (remainingMs > INLINE_WAIT_MAX_S * 1000) return new Date(Date.now() + remainingMs).toISOString();
+      if (remainingMs > 0) await sleep(remainingMs);
+      return null;
     };
 
     // Dois tiques azuis antes de o robô falar. Enfeite: falha aqui não para o robô.
@@ -623,12 +824,30 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
       'lead.etapa': deal?.stage_label ?? '',
     };
 
+    /** Relê o negócio depois de uma ação de CRM: condições seguintes enxergam a etapa e as tags novas */
+    const reloadDeal = async () => {
+      deal = await loadDealContext(admin, orgId, { dealId: deal?.id ?? null, contactId: contact?.id ?? contactId });
+      tplVars.negocio = { titulo: deal?.title ?? '', etapa: deal?.stage_label ?? '' };
+      templateValues['lead.titulo'] = deal?.title ?? '';
+      templateValues['lead.etapa'] = deal?.stage_label ?? '';
+    };
+
     // Modo quadro: começa no passo inicial e navega só por ids; modo lista: índice + 1
     const canvas = !!(bot.start_step_id && String(bot.start_step_id).trim());
     let idx = st.run.step_index ?? 0;
     // Só entra pelo passo inicial quando a execução é nova: uma execução antiga (criada em modo
     // lista, antes de o robô virar quadro) retoma de onde parou em vez de recomeçar
-    const fresh = idx === 0 && st.log.length === 0;
+    const fresh = idx === 0 && st.log.filter(e => e.type !== 'run').length === 0 && !st.vars[RESUME_STEP_VAR];
+    if (!fresh && typeof st.vars[RESUME_STEP_VAR] === 'string') {
+      // Retoma pelo id: o robô pode ter sido editado enquanto a execução esperava
+      const byId = stepIndexById(steps, st.vars[RESUME_STEP_VAR] as string);
+      if (byId >= 0) idx = byId;
+    }
+    // Conversa com UM robô por vez: execução nova cancela as anteriores da conversa
+    if (fresh && conversationId) {
+      const cancelled = await cancelOtherRunsInConversation(admin, orgId, conversationId, st.run.id);
+      if (cancelled > 0) note(st, null, `${cancelled} execução(ões) anterior(es) desta conversa cancelada(s)`);
+    }
     if (canvas && fresh) {
       const startIdx = stepIndexById(steps, bot.start_step_id);
       if (startIdx < 0) {
@@ -645,6 +864,7 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
 
     for (let guard = 0; guard < MAX_STEPS_PER_RUN; guard++) {
       const step = steps[idx];
+      currentStep = step ?? null;
       if (!step) {
         note(st, null, 'fim dos passos');
         await saveRun(admin, st, { status: 'done', step_index: idx, wake_at: null }, { release: true });
@@ -677,8 +897,23 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
         return;
       }
 
+      // Progresso gravado a cada passo (com a trava renovada): se a instância cair
+      // no meio, a retomada não reenvia o que já foi enviado
+      if (guard > 0) await saveRun(admin, st, { step_index: idx }, { renewLock: true });
+
+      try {
       switch (step.type) {
         case 'send_text': {
+          if ((step.typing_seconds ?? 0) > 0 && st.vars[TYPED_STEP_VAR] !== step.id) {
+            const wakeAt = await showTyping(step, step.typing_seconds ?? 0);
+            if (wakeAt) {
+              // digitação longa: acorda no fim e envia sem repetir o "digitando"
+              st.vars[TYPED_STEP_VAR] = step.id;
+              await saveRun(admin, st, { status: 'running', step_index: idx, wake_at: wakeAt }, { release: true });
+              return;
+            }
+          }
+          delete st.vars[TYPED_STEP_VAR];
           const text = renderTemplate(step.text, tplVars).trim();
           if (text) {
             await sendBotText(admin, st, await getConnection(), phone, text);
@@ -704,12 +939,26 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
             const targetId = hit >= 0 ? (step.button_step_ids[hit] ?? null) : (step.next_step_id ?? null);
             note(st, step, hit >= 0 ? `respondeu pelo botão "${step.buttons[hit]}"` : 'outra resposta');
             idx = stepIndexById(steps, targetId);
+            if (idx < 0) {
+              // Saída sem ligação no quadro: o robô termina aqui (agora com o motivo no histórico)
+              note(st, step, hit >= 0 ? `botão "${step.buttons[hit]}" sem próximo bloco: encerrando` : '"Outra resposta" sem próximo bloco: encerrando');
+            }
             break;
           }
+          if ((step.typing_seconds ?? 0) > 0 && st.vars[TYPED_STEP_VAR] !== step.id) {
+            const wakeAt = await showTyping(step, step.typing_seconds ?? 0);
+            if (wakeAt) {
+              st.vars[TYPED_STEP_VAR] = step.id;
+              await saveRun(admin, st, { status: 'running', step_index: idx, wake_at: wakeAt }, { release: true });
+              return;
+            }
+          }
+          delete st.vars[TYPED_STEP_VAR];
           const tplName = await sendBotTemplate(admin, st, await getConnection(), phone, step.template_id, templateValues);
-          note(st, step, `modelo enviado: ${tplName}; esperando resposta por até ${step.timeout_minutes} min`);
+          const tplSeconds = step.timeout_seconds ?? step.timeout_minutes * 60;
+          note(st, step, `modelo enviado: ${tplName}; esperando resposta por até ${formatDuration(tplSeconds)}`);
           // Espera a resposta (botão ou texto); sem resposta no prazo, segue por "Sem resposta"
-          const wakeAt = new Date(Date.now() + step.timeout_minutes * 60 * 1000).toISOString();
+          const wakeAt = new Date(Date.now() + tplSeconds * 1000).toISOString();
           st.vars[TIMEOUT_STEP_VAR] = step.on_timeout_step_id ?? null;
           st.vars[TEMPLATE_ROUTE_VAR] = step.id;
           await saveRun(admin, st, { status: 'waiting_reply', step_index: idx, wake_at: wakeAt }, { release: true });
@@ -729,21 +978,13 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
           return;
         }
         case 'typing': {
-          const seconds = Math.min(60, Math.max(1, step.seconds));
-          const provider = getProvider(await getConnection());
-          if (provider.sendTyping) {
-            try {
-              await provider.sendTyping({
-                to: phone,
-                ms: seconds * 1000,
-                providerMessageId: (await getLastInboundId()) ?? undefined,
-              });
-            } catch (e) {
-              note(st, step, `presença "digitando" falhou: ${errorMessage(e)}`);
-            }
+          // A Evolution já segura a chamada pelo tempo do "digitando": espera só o que falta
+          // (antes somava as duas coisas e 3 s viravam uns 7 s). Tempo longo vira espera agendada.
+          const wakeAt = await showTyping(step, step.seconds);
+          if (wakeAt) {
+            await saveRun(admin, st, { status: 'running', step_index: next(step), wake_at: wakeAt }, { release: true });
+            return;
           }
-          note(st, step, `digitando por ${seconds}s`);
-          await sleep(Math.min(seconds, INLINE_WAIT_MAX_S) * 1000);
           idx = next(step);
           break;
         }
@@ -767,9 +1008,10 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
           return;
         }
         case 'wait_reply': {
-          const wakeAt = new Date(Date.now() + step.timeout_minutes * 60 * 1000).toISOString();
+          const replySeconds = step.timeout_seconds ?? step.timeout_minutes * 60;
+          const wakeAt = new Date(Date.now() + replySeconds * 1000).toISOString();
           st.vars[TIMEOUT_STEP_VAR] = step.on_timeout_step_id ?? null;
-          note(st, step, `esperando resposta por até ${step.timeout_minutes} min`);
+          note(st, step, `esperando resposta por até ${formatDuration(replySeconds)}`);
           await saveRun(
             admin,
             st,
@@ -821,24 +1063,104 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
         }
         case 'move_stage': {
           if (!deal) {
-            note(st, step, 'sem negócio: etapa ignorada');
-          } else if (step.board_id && step.board_id !== deal.board_id) {
-            await moveDealToBoardStage(admin, orgId, deal.id, step.board_id, step.stage_id);
-            note(st, step, 'negócio movido para outro pipeline');
+            skipNote(st, step, 'contato sem lead aberto: etapa não alterada');
           } else {
-            const r = await moveStageByDealId({ organizationId: orgId, dealId: deal.id, target: { to_stage_id: step.stage_id } });
-            if (!r.ok) throw new Error((r.body as { error?: string }).error || 'falha ao mover etapa');
-            note(st, step, 'negócio movido de etapa');
+            const lossReason = step.loss_reason ? renderTemplate(step.loss_reason, tplVars).trim() : '';
+            const lossCategory = step.loss_category ?? null;
+            if (step.board_id && step.board_id !== deal.board_id) {
+              await moveDealToBoardStage(admin, orgId, deal.id, step.board_id, step.stage_id, { reason: lossReason, category: lossCategory });
+              note(st, step, 'lead movido para outro pipeline', 'ok');
+            } else {
+              const r = await moveStageByDealId({
+                organizationId: orgId,
+                dealId: deal.id,
+                target: { to_stage_id: step.stage_id },
+                lossReason: lossReason || null,
+                lossCategory,
+              });
+              if (!r.ok) throw new Error((r.body as { error?: string }).error || 'falha ao mover etapa');
+              note(st, step, 'lead movido de etapa', 'ok');
+            }
+            // Perda registrada também no histórico do lead (com classificação e motivo)
+            await recordLossHistory(admin, {
+              organizationId: orgId,
+              dealId: deal.id,
+              stageId: step.stage_id,
+              lossReason: lossReason || null,
+              lossCategory,
+              by: `robô ${bot.name}`,
+            });
+            await reloadDeal();
+          }
+          idx = next(step);
+          break;
+        }
+        case 'remove_tag': {
+          if (!deal) {
+            skipNote(st, step, `contato sem lead aberto: tag "${step.tag}" não removida`);
+          } else {
+            const removed = await removeDealTag(admin, orgId, deal.id, renderTemplate(step.tag, tplVars));
+            note(st, step, removed ? `tag "${step.tag}" removida` : `o lead não tinha a tag "${step.tag}"`, 'ok');
+            if (removed) await reloadDeal();
+          }
+          idx = next(step);
+          break;
+        }
+        case 'create_lead': {
+          const render = (text: string) => renderTemplate(text, tplVars);
+          const r = await ensureLeadForContact(admin, {
+            organizationId: orgId,
+            contactId: contact?.id ?? contactId,
+            phone,
+            contactName: contact?.name ?? null,
+            boardId: step.board_id,
+            stageId: step.stage_id,
+            changes: step.changes ?? [],
+            render,
+            conversationId,
+          });
+          contactId = r.contactId;
+          if (!st.run.contact_id) st.run = { ...st.run, contact_id: r.contactId };
+          st.run = { ...st.run, deal_id: r.dealId };
+          await saveRun(admin, st, { deal_id: r.dealId, contact_id: st.run.contact_id });
+          deal = await loadDealContext(admin, orgId, { dealId: r.dealId });
+          await reloadDeal();
+          if (r.created) {
+            if (r.problems.length > 0) failNote(st, step, `lead criado, mas: ${r.problems.join('; ')}`);
+            else note(st, step, 'lead criado', 'ok');
+          } else {
+            note(st, step, `${r.reason}: nada foi criado`, 'ok');
+          }
+          idx = next(step);
+          break;
+        }
+        case 'update_lead': {
+          if (!deal) {
+            skipNote(st, step, 'contato sem lead aberto: nada foi alterado');
+          } else {
+            const r = await applyLeadChanges(admin, {
+              organizationId: orgId,
+              dealId: deal.id,
+              changes: step.changes,
+              render: (text: string) => renderTemplate(text, tplVars),
+            });
+            if (r.problems.length > 0) {
+              failNote(st, step, `${r.changed.length > 0 ? `alterado: ${r.changed.join(', ')}; ` : ''}não aplicado: ${r.problems.join('; ')}`);
+            } else {
+              note(st, step, r.changed.length > 0 ? `lead atualizado: ${r.changed.join(', ')}` : 'nada para alterar', 'ok');
+            }
+            await reloadDeal();
           }
           idx = next(step);
           break;
         }
         case 'add_tag': {
           if (!deal) {
-            note(st, step, 'sem negócio: rótulo ignorado');
+            skipNote(st, step, `contato sem lead aberto: tag "${step.tag}" não adicionada`);
           } else {
             await addDealTag(admin, orgId, deal.id, step.tag);
-            note(st, step, `rótulo "${step.tag}" adicionado`);
+            note(st, step, `tag "${step.tag}" adicionada`, 'ok');
+            await reloadDeal();
           }
           idx = next(step);
           break;
@@ -869,7 +1191,8 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
               vars: publicVars(st.vars),
             },
           });
-          note(st, step, r.ok ? `webhook enviado (HTTP ${r.status ?? '?'})` : `webhook falhou: ${r.error ?? 'erro desconhecido'}`);
+          if (r.ok) note(st, step, `webhook enviado (HTTP ${r.status ?? '?'})`, 'ok');
+          else failNote(st, step, `webhook: ${r.error ?? 'erro desconhecido'}`);
           idx = next(step);
           break;
         }
@@ -933,7 +1256,10 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
           return;
         }
         case 'end': {
-          note(st, step, 'encerrado');
+          // Encerrar vale para a CONVERSA: nenhuma outra execução de robô continua nela
+          // (antes só esta terminava e uma cópia paralela seguia mandando follow-up)
+          const cancelled = conversationId ? await cancelOtherRunsInConversation(admin, orgId, conversationId, st.run.id) : 0;
+          note(st, step, cancelled > 0 ? `encerrado; ${cancelled} outra(s) execução(ões) cancelada(s)` : 'encerrado', 'ok');
           await saveRun(admin, st, { status: 'done', step_index: idx, wake_at: null }, { release: true });
           return;
         }
@@ -942,14 +1268,24 @@ export async function processBotRun(admin: SupabaseClient, run: BotRunRow): Prom
           idx = next(step);
         }
       }
+      } catch (stepError) {
+        // Ação de CRM que falha não derruba o resto do balão: registra e segue
+        if (CONTINUE_ON_FAILURE.has(step.type)) {
+          failNote(st, step, errorMessage(stepError));
+          idx = next(step);
+          continue;
+        }
+        throw stepError;
+      }
     }
     note(st, null, 'limite de passos por execução atingido');
     await saveRun(admin, st, { status: 'error', step_index: idx, error: 'limite de passos' }, { release: true });
   } catch (e) {
     const msg = errorMessage(e);
     console.error('[wa-agents] robô falhou:', msg);
-    note(st, null, `erro: ${msg}`);
-    await saveRun(admin, st, { status: 'error', error: msg, wake_at: null }, { release: true });
+    // Qual passo falhou e por quê (antes o erro ficava sem o passo)
+    note(st, currentStep, `erro: ${msg}`, 'failed', msg);
+    await saveRun(admin, st, { status: 'error', error: `${stepRef(currentStep)}: ${msg}`, wake_at: null }, { release: true });
   }
 }
 
@@ -961,7 +1297,9 @@ export async function handleBotReply(
   const { run, message } = input;
   try {
     const lastReply = (message.body ?? '').trim() || (message.transcription ?? '').trim() || '';
-    const vars = { ...((run.vars ?? {}) as Record<string, unknown>), last_reply: lastReply, last_reply_message_id: message.id };
+    const vars: Record<string, unknown> = { ...((run.vars ?? {}) as Record<string, unknown>), last_reply: lastReply, last_reply_message_id: message.id };
+    // Respondeu: o destino de "sem resposta" não vale mais
+    delete vars[TIMEOUT_STEP_VAR];
     // Primeiro o update condicional; a trava só depois (não fica presa se outra instância já cuidou)
     const { data } = await admin
       .from('wa_bot_runs')
@@ -988,8 +1326,19 @@ async function handleBotTimeout(admin: SupabaseClient, run: BotRunRow): Promise<
     log: Array.isArray(run.log) ? ([...run.log] as BotLogEntry[]) : [],
     vars: { ...((run.vars ?? {}) as Record<string, unknown>) },
   };
+  // A resposta do lead pode ter chegado neste instante: só segue quem tirar a execução de 'waiting_reply'
+  const { data: claimed } = await admin
+    .from('wa_bot_runs')
+    .update({ status: 'running', updated_at: nowIso() })
+    .eq('id', run.id)
+    .eq('organization_id', run.organization_id)
+    .eq('status', 'waiting_reply')
+    .select('id')
+    .maybeSingle();
+  if (!claimed) return;
   const bot = await loadBot(admin, run.organization_id, run.bot_id);
   const steps = bot ? parseSteps(bot.steps) : [];
+  st.steps = steps;
   let timeoutStepId = (st.vars[TIMEOUT_STEP_VAR] as string | null | undefined) ?? null;
   if (!(TIMEOUT_STEP_VAR in st.vars)) {
     // Execução antiga (sem a variável, gravada em modo lista): o passo anterior ao índice salvo é o wait_reply

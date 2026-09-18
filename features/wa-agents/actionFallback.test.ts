@@ -30,6 +30,6 @@ describe('ação de tipo desconhecido', () => {
 
   it('continua descrevendo as ações conhecidas', () => {
     expect(describeAction({ type: 'stop' }, [], undefined)).toBe('encerrar e entregar ao atendente');
-    expect(describeAction({ type: 'add_tag', tag: 'Quente' }, [], undefined)).toBe('adicionar rótulo "Quente"');
+    expect(describeAction({ type: 'add_tag', tag: 'Quente' }, [], undefined)).toBe('adicionar tag "Quente"');
   });
 });

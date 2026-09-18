@@ -55,6 +55,7 @@ import {
   errorMessage,
 } from './ui';
 import { BotCanvas } from './canvas/BotCanvas';
+import { useMessageTemplates } from './canvas/templatePreview';
 import { BlockPanel } from './canvas/BlockPanel';
 import { Palette } from './canvas/Palette';
 import {
@@ -82,6 +83,8 @@ import {
   NODE_WIDTH,
   PASTE_OFFSET,
   TRIGGER_NODE_ID,
+  blockOutputs,
+  bubbleOutputs,
   edgeIdFor,
   placementProblem,
   type Block,
@@ -207,12 +210,9 @@ function BotConnectionsPicker({
 }) {
   const [open, setOpen] = useState(false);
   const escolhidos = connections.filter((c) => selected.includes(c.id));
-  const resumo =
-    escolhidos.length === 0
-      ? 'Números que atende...'
-      : escolhidos.length === 1
-        ? escolhidos[0].label
-        : `${escolhidos.length} números`;
+  // Número salvo que não existe mais (desconectado e excluído): aparece em vez de sumir calado
+  const removidos = selected.filter((id) => !connections.some((c) => c.id === id));
+  const nameOf = (c: WaAgentOptions['connections'][number]) => c.name || c.label.replace(c.phone_number ?? '', '').trim() || 'Número';
 
   const alternar = (id: string) => {
     onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
@@ -222,18 +222,31 @@ function BotConnectionsPicker({
     <div className="relative">
       <button
         type="button"
-        className={`${INPUT_CLASS} w-auto min-w-[160px] max-w-[260px] text-left truncate`}
+        className={`${INPUT_CLASS} w-auto min-w-[160px] max-w-[calc(100vw-2rem)] md:max-w-none text-left flex flex-wrap items-center gap-1`}
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="true"
-        title="Em quais números este robô pode agir"
+        title={escolhidos.map((c) => c.label).join(', ') || 'Em quais números este robô pode agir'}
       >
-        {resumo}
+        {escolhidos.length === 0 && removidos.length === 0 ? (
+          <span className="text-slate-500">Números que atende...</span>
+        ) : null}
+        {escolhidos.map((c) => (
+          <span key={c.id} className="inline-flex items-center gap-1 max-w-full rounded-md bg-slate-100 dark:bg-white/10 px-1.5 py-0.5 text-xs">
+            <span className="truncate max-w-[9rem]">{nameOf(c)}</span>
+            {c.phone_number ? <span className="shrink-0 font-mono whitespace-nowrap">{c.phone_number}</span> : null}
+          </span>
+        ))}
+        {removidos.length > 0 ? (
+          <span className="inline-flex items-center rounded-md bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 px-1.5 py-0.5 text-xs">
+            {removidos.length} número(s) que não existe(m) mais
+          </span>
+        ) : null}
       </button>
       {open ? (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} aria-hidden="true" />
-          <div className="absolute z-20 mt-1 w-72 max-h-64 overflow-y-auto rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 shadow-lg p-1">
+          <div className="absolute z-20 mt-1 w-[min(22rem,calc(100vw-2rem))] max-h-64 overflow-y-auto rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 shadow-lg p-1">
             {connections.length === 0 ? (
               <p className="p-2 text-xs text-slate-500 dark:text-slate-400">Nenhum número conectado.</p>
             ) : (
@@ -248,11 +261,21 @@ function BotConnectionsPicker({
                     checked={selected.includes(c.id)}
                     onChange={() => alternar(c.id)}
                   />
-                  <span className="flex-1 min-w-0 truncate text-slate-900 dark:text-white">{c.label}</span>
+                  <span className="flex-1 min-w-0 truncate text-slate-900 dark:text-white">{nameOf(c)}</span>
+                  {c.phone_number ? <span className="shrink-0 font-mono text-xs text-slate-600 dark:text-slate-300">{c.phone_number}</span> : null}
                   {c.status === 'connected' ? null : <Badge tone="amber">Desconectado</Badge>}
                 </label>
               ))
             )}
+            {removidos.length > 0 ? (
+              <button
+                type="button"
+                className="w-full text-left px-2 py-1.5 rounded-md text-xs text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+                onClick={() => onChange(selected.filter((id) => !removidos.includes(id)))}
+              >
+                Tirar {removidos.length} número(s) que não existe(m) mais
+              </button>
+            ) : null}
             <p className="px-2 py-1 text-[11px] text-slate-500 dark:text-slate-400">
               O robô só age nas conversas destes números.
             </p>
@@ -263,10 +286,37 @@ function BotConnectionsPicker({
   );
 }
 
+/**
+ * Um bloco com saídas saiu do fim do balão `fromId` e virou o último do balão
+ * `toId`: as ligações das saídas dele vão junto (antes eram apagadas e a
+ * condição ou o botão do modelo perdia os caminhos). Só leva a ligação que o
+ * balão de origem não consegue mais usar e que o destino ainda não tem.
+ */
+function carryEdges(
+  edges: FlowEdge[],
+  block: Block,
+  fromId: string,
+  fromBlocksAfter: Block[],
+  toId: string,
+  toBlocksAfter: Block[]
+): FlowEdge[] {
+  if (toBlocksAfter[toBlocksAfter.length - 1]?.id !== block.id) return edges;
+  const handles = new Set(blockOutputs(block).map((o) => o.handleId));
+  const stillValid = new Set(bubbleOutputs(fromBlocksAfter).map((o) => o.handleId));
+  const targetHas = new Set(edges.filter((e) => e.source === toId).map((e) => e.sourceHandle));
+  return edges.map((e) => {
+    if (e.source !== fromId || !e.sourceHandle || !handles.has(e.sourceHandle)) return e;
+    if (stillValid.has(e.sourceHandle) || targetHas.has(e.sourceHandle) || e.target === toId) return e;
+    return { ...e, id: edgeIdFor(toId, e.sourceHandle), source: toId };
+  });
+}
+
 const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({ bot, onClose }) => {
   const { showToast } = useToast();
   const { darkMode } = useTheme();
   const optionsQ = useWaAgentOptions();
+  const templatesQ = useMessageTemplates();
+  const templates = templatesQ.data?.data;
   const agentsQ = useWaAgentsList();
   const save = useSaveWaBot();
   const start = useStartWaBot();
@@ -283,6 +333,13 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
   });
   const [botId, setBotId] = useState<string | null>(bot?.id ?? null);
   const [dirty, setDirty] = useState(false);
+  // Conta cada alteração: salvar só limpa o "Não salvo" se nada mudou durante o envio
+  const changeRef = useRef(0);
+  const markDirty = useCallback(() => {
+    changeRef.current += 1;
+    setDirty(true);
+  }, []);
+  const [issuesOpen, setIssuesOpen] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [pending, setPending] = useState<PendingSave | null>(null);
   const [testOpen, setTestOpen] = useState(false);
@@ -358,12 +415,12 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
 
   const patchHeader = (patch: Partial<FlowHeader>) => {
     setHeader((prev) => ({ ...prev, ...patch }));
-    setDirty(true);
+    markDirty();
   };
 
   const onNodesChange = useCallback(
     (changes: NodeChange<FlowNode>[]) => {
-      if (changes.some((c) => c.type !== 'select' && c.type !== 'dimensions')) setDirty(true);
+      if (changes.some((c) => c.type !== 'select' && c.type !== 'dimensions')) markDirty();
       handleNodeChanges(changes);
     },
     [handleNodeChanges]
@@ -371,7 +428,7 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
 
   const onEdgesChange = useCallback(
     (changes: EdgeChange<FlowEdge>[]) => {
-      if (changes.some((c) => c.type !== 'select')) setDirty(true);
+      if (changes.some((c) => c.type !== 'select')) markDirty();
       handleEdgeChanges(changes);
     },
     [handleEdgeChanges]
@@ -392,7 +449,7 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
           targetHandle: c.targetHandle ?? HANDLE_IN,
         },
       ]);
-      setDirty(true);
+      markDirty();
     },
     [setEdges]
   );
@@ -411,7 +468,7 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
       graphRef.current = { nodes: result.nodes, edges: nextEdges };
       setNodes(result.nodes);
       setEdges(nextEdges);
-      setDirty(true);
+      markDirty();
     },
     [setEdges, setNodes]
   );
@@ -523,10 +580,34 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
         // Balão de origem que ficou vazio some (com as ligações dele).
         if (!same && sourceBlocks.length === 0) next = next.filter((n) => n.id !== source.id);
         setSelectedBlock({ bubbleId: target.id, blockId: block.id });
-        return { nodes: next, edges };
+        const nextEdges = same ? edges : carryEdges(edges, block, source.id, sourceBlocks, target.id, targetBlocks);
+        return { nodes: next, edges: nextEdges };
       });
     },
     [mutateGraph, showToast]
+  );
+
+  /** Bloco arrastado para o fundo do quadro: vira um balão novo naquela posição. */
+  const detachBlock = useCallback(
+    (from: BlockRef, position: XYPosition) => {
+      mutateGraph((nodes, edges) => {
+        const source = bubbleById(nodes, from.bubbleId);
+        if (!source) return null;
+        const block = source.data.blocks.find((b) => b.id === from.blockId);
+        if (!block) return null;
+        const sourceBlocks = source.data.blocks.filter((b) => b.id !== block.id);
+        if (sourceBlocks.length === 0) {
+          // Era o único bloco: basta mover o balão
+          return { nodes: nodes.map((n) => (n.id === source.id ? { ...n, position } : n)), edges };
+        }
+        const bubbles = nodes.filter(isBubbleNode);
+        const bubble = createBubble([block], position, `Balão ${bubbles.length + 1}`);
+        const next = [...nodes.map((n) => (n.id === source.id ? { ...source, data: { ...source.data, blocks: sourceBlocks } } : n)), bubble];
+        setSelectedBlock({ bubbleId: bubble.id, blockId: block.id });
+        return { nodes: next, edges: carryEdges(edges, block, source.id, sourceBlocks, bubble.id, [block]) };
+      });
+    },
+    [mutateGraph]
   );
 
   const removeBlock = useCallback(
@@ -662,12 +743,12 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
   const selectBlock = useCallback((ref: BlockRef | null) => setSelectedBlock(ref), []);
 
   const actions = useMemo<CanvasActions>(
-    () => ({ selectBlock, addBlock, moveBlock, removeBlock, renameBubble, duplicateBubbles, copyBubbles, deleteBubbles }),
-    [selectBlock, addBlock, moveBlock, removeBlock, renameBubble, duplicateBubbles, copyBubbles, deleteBubbles]
+    () => ({ selectBlock, addBlock, moveBlock, detachBlock, removeBlock, renameBubble, duplicateBubbles, copyBubbles, deleteBubbles }),
+    [selectBlock, addBlock, moveBlock, detachBlock, removeBlock, renameBubble, duplicateBubbles, copyBubbles, deleteBubbles]
   );
 
   // Validação a cada mudança: marca balões e blocos com problema no próprio quadro.
-  const validation = useMemo(() => validateFlow(nodes, edges, header), [nodes, edges, header]);
+  const validation = useMemo(() => validateFlow(nodes, edges, header, templates), [nodes, edges, header, templates]);
   const issues = useMemo(() => groupIssues(validation.errors, validation.warnings), [validation]);
   const connected = useMemo(
     () => new Set(edges.filter((e) => e.sourceHandle).map((e) => edgeIdFor(e.source, e.sourceHandle as string))),
@@ -675,8 +756,8 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
   );
 
   const ctx = useMemo<CanvasContextValue>(
-    () => ({ options, agents, actions, selectedBlock, issues, connected }),
-    [options, agents, actions, selectedBlock, issues, connected]
+    () => ({ options, agents, actions, selectedBlock, issues, connected, templates, botConnectionIds: header.connection_ids }),
+    [options, agents, actions, selectedBlock, issues, connected, templates, header.connection_ids]
   );
 
   // Bloco apontado no painel (some se o balão ou o bloco deixarem de existir).
@@ -703,11 +784,24 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
     [flow, setNodes]
   );
 
+  // Fechar a aba ou recarregar com alterações não salvas pede confirmação do navegador
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [dirty]);
+
   const persist = async (payload: BotInput) => {
+    const changeAtSave = changeRef.current;
     try {
       const saved = await save.mutateAsync({ id: botId, input: payload });
       setBotId(saved.id);
-      setDirty(false);
+      // Editou enquanto salvava: continua "Não salvo" (antes marcava como salvo e a edição se perdia)
+      if (changeRef.current === changeAtSave) setDirty(false);
       showToast(botId ? 'Robô salvo' : 'Robô criado', 'success');
     } catch (err) {
       showToast(errorMessage(err, 'Falha ao salvar o robô'), 'error');
@@ -715,10 +809,11 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
   };
 
   const handleSave = () => {
-    const { errors, warnings } = validateFlow(nodes, edges, header);
+    const { errors, warnings } = validateFlow(nodes, edges, header, templates);
     if (errors.length > 0) {
       const first = errors[0];
-      showToast(errors.length > 1 ? `${first.message} (+${errors.length - 1})` : first.message, 'error');
+      showToast(errors.length > 1 ? `${errors.length} problemas para corrigir antes de salvar` : first.message, 'error');
+      if (errors.length > 1) setIssuesOpen(true);
       if (first.nodeId) focusNode(first.nodeId, first.blockId);
       return;
     }
@@ -823,8 +918,46 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
               onChange={(connection_ids) => patchHeader({ connection_ids })}
             />
             <div className="flex items-center gap-2 ml-auto">
+              {validation.errors.length > 0 ? (
+                <div className="relative">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-lg border border-red-200 dark:border-red-500/40 bg-red-50 dark:bg-red-900/20 px-2 py-1 text-xs font-semibold text-red-700 dark:text-red-300"
+                    onClick={() => setIssuesOpen((v) => !v)}
+                    aria-expanded={issuesOpen}
+                    title="Problemas que impedem salvar ou ligar o robô"
+                  >
+                    {validation.errors.length} {validation.errors.length === 1 ? 'problema' : 'problemas'}
+                  </button>
+                  {issuesOpen ? (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setIssuesOpen(false)} aria-hidden="true" />
+                      <ul className="absolute right-0 z-20 mt-1 w-[min(24rem,calc(100vw-2rem))] max-h-72 overflow-y-auto rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 shadow-lg p-1 text-sm">
+                        {validation.errors.map((issue, i) => (
+                          <li key={`${issue.message}-${i}`}>
+                            <button
+                              type="button"
+                              className="w-full text-left px-2 py-1.5 rounded-md text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20"
+                              onClick={() => {
+                                setIssuesOpen(false);
+                                if (issue.nodeId) focusNode(issue.nodeId, issue.blockId);
+                              }}
+                            >
+                              {issue.message}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
               {dirty ? (
-                <span className="hidden sm:inline text-xs font-medium text-amber-600 dark:text-amber-400">Não salvo</span>
+                <span className="text-xs font-medium text-amber-600 dark:text-amber-400" role="status">
+                  Não salvo
+                </span>
+              ) : save.isPending ? null : botId ? (
+                <span className="hidden sm:inline text-xs text-slate-400">Salvo</span>
               ) : null}
               <button type="button" className={BTN_SECONDARY} onClick={openTest} disabled={save.isPending}>
                 <Play size={16} aria-hidden="true" />
@@ -861,6 +994,7 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
                 onDropStep={addStep}
+                onDropBlock={detachBlock}
                 onPaneClick={() => setSelectedBlock(null)}
                 empty={empty}
                 onQuickStart={() => addStep('send_text')}

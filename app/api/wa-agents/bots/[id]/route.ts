@@ -91,13 +91,21 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (sendsSteps || sendsStart || sendsLayout || sendsEnabled) {
       const { data: existing, error: existingError } = await auth.admin
         .from('wa_bots')
-        .select('steps, start_step_id, layout, enabled')
+        .select('steps, start_step_id, layout, enabled, connection_ids, connection_id, trigger')
         .eq('id', id)
         .eq('organization_id', orgId)
         .maybeSingle();
       if (existingError) throw new Error(existingError.message);
       if (!existing) return json({ error: 'Robô não encontrado' }, 404);
-      const saved = existing as { steps?: unknown[]; start_step_id?: string | null; layout?: unknown; enabled?: boolean };
+      const saved = existing as {
+        steps?: unknown[];
+        start_step_id?: string | null;
+        layout?: unknown;
+        enabled?: boolean;
+        connection_ids?: string[] | null;
+        connection_id?: string | null;
+        trigger?: { type?: string; board_id?: string | null; stage_id?: string | null } | null;
+      };
       const savedSteps: BotStep[] = [];
       for (const item of (saved.steps ?? []) as unknown[]) {
         const p = BotStepSchema.safeParse(item);
@@ -109,6 +117,27 @@ export async function PATCH(req: Request, ctx: Ctx) {
       const enabled = sendsEnabled ? present.enabled === true : saved.enabled === true;
       const stepsError = validateBotSteps(steps, startStepId, layout, enabled);
       if (stepsError) return stepsError;
+      // Ligar (inclusive pelo botão da lista, que só manda "enabled") confere o mesmo
+      // que o editor: número escolhido, gatilho completo e nenhum bloco inválido salvo
+      if (enabled && (sendsEnabled || sendsSteps)) {
+        const numerosFinais = Array.isArray(patch.connection_ids)
+          ? (patch.connection_ids as string[])
+          : (saved.connection_ids ?? []).length > 0
+            ? (saved.connection_ids as string[])
+            : saved.connection_id
+              ? [saved.connection_id]
+              : [];
+        if (numerosFinais.length === 0) {
+          return json({ error: 'Escolha em quais números o robô atende antes de ligá-lo' }, 400);
+        }
+        const trigger = (present.trigger ?? saved.trigger) as { type?: string; stage_id?: string | null } | null;
+        if (trigger?.type === 'deal_stage_entered' && !trigger.stage_id) {
+          return json({ error: 'O gatilho "Entrou na etapa" está sem etapa: abra o robô e escolha a etapa antes de ligar' }, 400);
+        }
+        if (!sendsSteps && (saved.steps ?? []).length > savedSteps.length) {
+          return json({ error: 'O robô tem blocos incompletos ou inválidos: abra o editor, corrija e salve antes de ligar' }, 400);
+        }
+      }
       if (sendsSteps) patch.steps = steps;
     }
   } catch (err) {
