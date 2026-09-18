@@ -11,6 +11,7 @@ import { Bot, ExternalLink, Pause, Pencil, Play, Plus, Sparkles, Trash2, Webhook
 import { KebabMenu, type KebabItem } from '@/components/ui/KebabMenu';
 import type { StageAutomation } from './useStageAutomations';
 import { stageActionStep } from './stageAutomationModel';
+import { StageFollowupCard } from './StageFollowupCard';
 
 const KIND_LABEL = { action: 'Ação da etapa', bot: 'Robô', agent: 'Agente de IA', webhook: 'Webhook' } as const;
 
@@ -32,6 +33,8 @@ function iconFor(item: StageAutomation) {
 export const AUTOMATION_DRAG_TYPE = 'automationId';
 
 export function StageAutomationsPanel({
+  stageId,
+  stageLabel,
   items,
   loading,
   onAdd,
@@ -43,6 +46,8 @@ export function StageAutomationsPanel({
   onDragStart,
   onDragEnd,
 }: {
+  stageId: string;
+  stageLabel: string;
   items: StageAutomation[];
   loading: boolean;
   onAdd: () => void;
@@ -152,6 +157,9 @@ export function StageAutomationsPanel({
       >
         <Plus size={14} aria-hidden="true" /> {items.length === 0 ? 'Automatizar esta etapa' : 'Adicionar automação'}
       </button>
+
+      {/* Outro gatilho da etapa: o lead ficou sem responder */}
+      <StageFollowupCard stageId={stageId} stageLabel={stageLabel} />
     </div>
   );
 }

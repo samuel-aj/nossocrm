@@ -1,6 +1,6 @@
 /**
  * GET /api/wa-agents/deal-followup/[dealId]  (membro da org)
- *   -> { followup: { rule, schedule } | null }
+ *   -> { followup: { rule, schedule, firedOnceAt } | null }
  * Estado do follow-up por inatividade do lead, mostrado discretamente na tela dele.
  */
 import { json } from '@/lib/whatsapp/api';
@@ -37,6 +37,11 @@ export async function GET(_req: Request, ctx: Ctx) {
       ? auth.admin.from('stage_followup_rules').select('enabled, delay_seconds, action_type').eq('stage_id', stageId).maybeSingle()
       : Promise.resolve({ data: null }),
   ]);
+  // Já executou nesta etapa para este lead? (uma vez por etapa; sem a tabela, ignora)
+  const { data: fire } = stageId
+    ? await auth.admin.from('deal_followup_fires').select('fired_at').eq('deal_id', dealId).eq('stage_id', stageId).maybeSingle()
+    : { data: null };
+  const firedOnceAt = (fire as { fired_at?: string } | null)?.fired_at ?? null;
   if (error) return json({ followup: null });
   const r = rule as { enabled: boolean; delay_seconds: number; action_type: string } | null;
   const s = sched as {
@@ -49,5 +54,5 @@ export async function GET(_req: Request, ctx: Ctx) {
   } | null;
   if (!r?.enabled) return json({ followup: null });
   // agendamento de outra etapa não vale para a etapa atual
-  return json({ followup: { rule: r, schedule: s && s.stage_id === stageId ? s : null } });
+  return json({ followup: { rule: r, schedule: s && s.stage_id === stageId ? s : null, firedOnceAt } });
 }

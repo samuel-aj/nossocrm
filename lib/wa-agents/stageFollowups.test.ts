@@ -138,6 +138,12 @@ describe('follow-up por inatividade: execução', () => {
     expect(h.texts).toEqual([]);
   });
 
+  it('já executou nesta etapa para este lead: não executa de novo', async () => {
+    const t = base({ deal_followup_fires: [{ deal_id: 'deal-1', stage_id: 'stage-1' }] });
+    expect((await runStageFollowup(fakeDb(t), sched)).status).toBe('cancelled');
+    expect(h.texts).toEqual([]);
+  });
+
   it('API oficial fora da janela de 24 h: falha explicando que precisa de modelo', async () => {
     const t = base({
       wa_conversations: [{ ...base().wa_conversations[0], connection_id: 'conn-meta' }],

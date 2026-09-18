@@ -449,6 +449,8 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
               {/* Modo Automatizar: as automações no lugar dos leads */}
               {automation ? (
                 <StageAutomationsPanel
+                  stageId={stage.id}
+                  stageLabel={stage.label}
                   items={automation.byStage.get(stage.id) ?? []}
                   loading={automation.loading}
                   onAdd={() => automation.onAdd(stage)}

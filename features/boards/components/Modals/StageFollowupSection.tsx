@@ -296,8 +296,9 @@ export function StageFollowupSection({ stageId, stageSaved }: { stageId: string;
                 </div>
               )}
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Um disparo por período de silêncio: depois de executar, só volta a contar quando o lead responder. Mensagens da
-                equipe e de robôs não reiniciam a contagem. Ao ligar, os leads que já estão na etapa começam a contar agora.
+                Dispara uma única vez por lead nesta etapa: depois de executar, não repete, nem se o lead responder ou voltar
+                para a etapa. Mensagens da equipe e de robôs não reiniciam a contagem. Ao ligar, os leads que já estão na
+                etapa começam a contar agora.
               </p>
             </div>
           ) : null}

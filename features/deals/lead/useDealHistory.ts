@@ -63,6 +63,8 @@ export type DealFollowup = {
     last_result: Record<string, unknown> | null;
     anchor_at: string;
   } | null;
+  /** Já executou nesta etapa para este lead (não repete) */
+  firedOnceAt?: string | null;
 } | null;
 
 /** Estado do follow-up por inatividade da etapa atual do lead. */

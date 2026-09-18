@@ -845,6 +845,123 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     }
   };
 
+  // RESPONSÁVEL: chip de perfil (clica pra trocar; só admin). Desktop: no topo
+  // da conversa, à direita; celular: nos dados do lead.
+  const renderOwner = (align: 'left' | 'right') =>
+    (canAssignOwner || deal.ownerId) ? (() => {
+                  const dealOwner = orgMembers.find(u => u.id === deal.ownerId) ?? null;
+                  const initials = (name: string) =>
+                    name.split(/\s+/).slice(0, 2).map(p => p[0]?.toUpperCase() ?? '').join('') || '?';
+                  return (
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => canAssignOwner && setOwnerMenuOpen(o => !o)}
+                        disabled={!canAssignOwner}
+                        className={`group flex items-center gap-2 pl-1 pr-2.5 py-1 rounded-full border shadow-sm transition-all duration-200 ${
+                          canAssignOwner
+                            ? 'cursor-pointer border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 hover:border-primary-400 dark:hover:border-primary-500/60 hover:shadow'
+                            : 'cursor-default border-slate-200 dark:border-white/10 bg-white dark:bg-white/5'
+                        }`}
+                        title={
+                          dealOwner
+                            ? `Responsável: ${dealOwner.name}`
+                            : deal.ownerId
+                              ? 'Responsável não encontrado (usuário removido da organização)'
+                              : 'Definir responsável'
+                        }
+                        aria-label="Responsável pelo lead"
+                      >
+                        <span
+                          className={`flex items-center justify-center h-7 w-7 rounded-full shrink-0 ${
+                            deal.ownerId
+                              ? 'bg-gradient-to-br from-primary-500 to-primary-600 text-white font-bold text-[10px]'
+                              : 'border-2 border-dashed border-amber-400/70 dark:border-amber-500/50 text-amber-500'
+                          }`}
+                        >
+                          {dealOwner ? initials(dealOwner.name) : deal.ownerId ? <User size={13} /> : <UserPlus size={13} />}
+                        </span>
+                        <span className="flex flex-col items-start justify-center gap-0.5 leading-none text-left">
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 leading-none">
+                            Responsável
+                          </span>
+                          {dealOwner || deal.ownerId ? (
+                            <span className="text-xs font-semibold text-slate-800 dark:text-white truncate max-w-[110px] leading-none">
+                              {dealOwner ? dealOwner.name : 'Usuário removido'}
+                            </span>
+                          ) : (
+                            <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 truncate max-w-[110px] leading-none">
+                              Sem responsável
+                            </span>
+                          )}
+                        </span>
+                        {canAssignOwner && (
+                          <ChevronDown
+                            size={13}
+                            className={`text-slate-400 group-hover:text-primary-500 transition-transform duration-200 ${ownerMenuOpen ? 'rotate-180' : ''}`}
+                          />
+                        )}
+                      </button>
+                      {ownerMenuOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setOwnerMenuOpen(false)} aria-hidden="true" />
+                          <div className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-11 z-50 w-60 max-h-72 overflow-y-auto scrollbar-custom bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 p-1.5 animate-in fade-in slide-in-from-top-2 duration-150`}>
+                            <p className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Responsável</p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (deal.ownerId) {
+                                  const antigo = orgMembers.find(m => m.id === deal.ownerId)?.name;
+                                  logAlteracao(`${autorAtual} removeu ${antigo ? `${antigo} de responsável` : 'o responsável'} do lead`);
+                                }
+                                updateDeal(deal.id, { ownerId: '' });
+                                setOwnerMenuOpen(false);
+                              }}
+                              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 ${
+                                !deal.ownerId ? 'bg-primary-500/10 text-primary-600 dark:text-primary-300' : 'text-slate-600 dark:text-slate-300'
+                              }`}
+                            >
+                              <span className="h-7 w-7 rounded-full border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-400 flex items-center justify-center shrink-0">
+                                <UserPlus size={13} />
+                              </span>
+                              <span className="truncate">Sem responsável</span>
+                              {!deal.ownerId && <Check size={14} className="ml-auto shrink-0" />}
+                            </button>
+                            {/* atribuíveis: só vendedores e admins DA organização —
+                                super_admins (agência) ficam de fora das opções,
+                                mas o nome deles ainda resolve no chip se já forem donos */}
+                            {orgMembers
+                              .filter(u => u.member)
+                              .map(u => (
+                                <button
+                                  key={u.id}
+                                  type="button"
+                                  onClick={() => {
+                                    if (deal.ownerId !== u.id) logAlteracao(`${autorAtual} definiu ${u.name} como responsável`);
+                                    updateDeal(deal.id, { ownerId: u.id });
+                                    setOwnerMenuOpen(false);
+                                  }}
+                                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 ${
+                                    deal.ownerId === u.id ? 'bg-primary-500/10 text-primary-600 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200'
+                                  }`}
+                                >
+                                  <span className="h-7 w-7 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+                                    {initials(u.name)}
+                                  </span>
+                                  <span className="truncate">
+                                    {u.name}
+                                    {u.role === 'admin' ? ' (admin)' : ''}
+                                  </span>
+                                  {deal.ownerId === u.id && <Check size={14} className="ml-auto shrink-0" />}
+                                </button>
+                              ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })() : null;
+
   const inner = (
     <>
     <div
@@ -909,7 +1026,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                           setEditTitle(deal.title);
                           setIsEditingTitle(true);
                         }}
-                        className="text-xl font-bold text-slate-900 dark:text-white font-display leading-tight cursor-pointer hover:text-primary-600 dark:hover:text-primary-400 flex items-center gap-2 group transition-colors"
+                        className="w-full text-xl font-bold text-slate-900 dark:text-white font-display leading-tight cursor-pointer hover:text-primary-600 dark:hover:text-primary-400 flex items-center gap-2 group transition-colors"
                         title="Clique para editar"
                       >
                         {deal.title}
@@ -1061,144 +1178,18 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                 >
                   <Trash2 size={16} />
                 </button>
-                {!isMobile && (
-                  <button
-                    type="button"
-                    onClick={onClose}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10"
-                    title="Fechar"
-                    aria-label="Fechar lead"
-                  >
-                    <X size={18} />
-                  </button>
-                )}
               </div>
             </div>
 
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-                {/* RESPONSÁVEL — bolinha de perfil no topo (clica pra trocar; só admin) */}
-                {(canAssignOwner || deal.ownerId) && (() => {
-                  const dealOwner = orgMembers.find(u => u.id === deal.ownerId) ?? null;
-                  const initials = (name: string) =>
-                    name.split(/\s+/).slice(0, 2).map(p => p[0]?.toUpperCase() ?? '').join('') || '?';
-                  return (
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => canAssignOwner && setOwnerMenuOpen(o => !o)}
-                        disabled={!canAssignOwner}
-                        className={`group flex items-center gap-2 pl-1 pr-2.5 py-1 rounded-full border shadow-sm transition-all duration-200 ${
-                          canAssignOwner
-                            ? 'cursor-pointer border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 hover:border-primary-400 dark:hover:border-primary-500/60 hover:shadow'
-                            : 'cursor-default border-slate-200 dark:border-white/10 bg-white dark:bg-white/5'
-                        }`}
-                        title={
-                          dealOwner
-                            ? `Responsável: ${dealOwner.name}`
-                            : deal.ownerId
-                              ? 'Responsável não encontrado (usuário removido da organização)'
-                              : 'Definir responsável'
-                        }
-                        aria-label="Responsável pelo lead"
-                      >
-                        <span
-                          className={`flex items-center justify-center h-7 w-7 rounded-full shrink-0 ${
-                            deal.ownerId
-                              ? 'bg-gradient-to-br from-primary-500 to-primary-600 text-white font-bold text-[10px]'
-                              : 'border-2 border-dashed border-amber-400/70 dark:border-amber-500/50 text-amber-500'
-                          }`}
-                        >
-                          {dealOwner ? initials(dealOwner.name) : deal.ownerId ? <User size={13} /> : <UserPlus size={13} />}
-                        </span>
-                        <span className="flex flex-col items-start justify-center gap-0.5 leading-none text-left">
-                          <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 leading-none">
-                            Responsável
-                          </span>
-                          {dealOwner || deal.ownerId ? (
-                            <span className="text-xs font-semibold text-slate-800 dark:text-white truncate max-w-[110px] leading-none">
-                              {dealOwner ? dealOwner.name : 'Usuário removido'}
-                            </span>
-                          ) : (
-                            <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 truncate max-w-[110px] leading-none">
-                              Sem responsável
-                            </span>
-                          )}
-                        </span>
-                        {canAssignOwner && (
-                          <ChevronDown
-                            size={13}
-                            className={`text-slate-400 group-hover:text-primary-500 transition-transform duration-200 ${ownerMenuOpen ? 'rotate-180' : ''}`}
-                          />
-                        )}
-                      </button>
-                      {ownerMenuOpen && (
-                        <>
-                          <div className="fixed inset-0 z-40" onClick={() => setOwnerMenuOpen(false)} aria-hidden="true" />
-                          <div className="absolute left-0 top-11 z-50 w-60 max-h-72 overflow-y-auto scrollbar-custom bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 p-1.5 animate-in fade-in slide-in-from-top-2 duration-150">
-                            <p className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Responsável</p>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (deal.ownerId) {
-                                  const antigo = orgMembers.find(m => m.id === deal.ownerId)?.name;
-                                  logAlteracao(`${autorAtual} removeu ${antigo ? `${antigo} de responsável` : 'o responsável'} do lead`);
-                                }
-                                updateDeal(deal.id, { ownerId: '' });
-                                setOwnerMenuOpen(false);
-                              }}
-                              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 ${
-                                !deal.ownerId ? 'bg-primary-500/10 text-primary-600 dark:text-primary-300' : 'text-slate-600 dark:text-slate-300'
-                              }`}
-                            >
-                              <span className="h-7 w-7 rounded-full border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-400 flex items-center justify-center shrink-0">
-                                <UserPlus size={13} />
-                              </span>
-                              <span className="truncate">Sem responsável</span>
-                              {!deal.ownerId && <Check size={14} className="ml-auto shrink-0" />}
-                            </button>
-                            {/* atribuíveis: só vendedores e admins DA organização —
-                                super_admins (agência) ficam de fora das opções,
-                                mas o nome deles ainda resolve no chip se já forem donos */}
-                            {orgMembers
-                              .filter(u => u.member)
-                              .map(u => (
-                                <button
-                                  key={u.id}
-                                  type="button"
-                                  onClick={() => {
-                                    if (deal.ownerId !== u.id) logAlteracao(`${autorAtual} definiu ${u.name} como responsável`);
-                                    updateDeal(deal.id, { ownerId: u.id });
-                                    setOwnerMenuOpen(false);
-                                  }}
-                                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 ${
-                                    deal.ownerId === u.id ? 'bg-primary-500/10 text-primary-600 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200'
-                                  }`}
-                                >
-                                  <span className="h-7 w-7 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
-                                    {initials(u.name)}
-                                  </span>
-                                  <span className="truncate">
-                                    {u.name}
-                                    {u.role === 'admin' ? ' (admin)' : ''}
-                                  </span>
-                                  {deal.ownerId === u.id && <Check size={14} className="ml-auto shrink-0" />}
-                                </button>
-                              ))}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  );
-                })()}
+            {/* Etapa (compacta) e valor na mesma linha */}
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1 max-w-[260px]">
+                {dealBoard && <DealStageControl deal={deal} size="sm" />}
+              </div>
                 {/* Valor: editar TROCA só a linha do número por um input da MESMA
                     altura (borda embaixo, sem caixa) — nada de empurrar o layout.
                     Enter/clicar fora salva; Esc cancela. */}
-                <div className="flex flex-col">
-                  {deal.items && deal.items.length > 0 && (
-                    <span className="text-xs text-slate-500 dark:text-slate-400 mb-0.5">
-                      {deal.items.map(i => i.name).join(', ')}
-                    </span>
-                  )}
+                <div className="shrink-0 flex flex-col items-end">
                   {isEditingValue ? (
                     <div className="flex items-baseline gap-1.5">
                       <span className="text-lg font-mono font-bold text-primary-600 dark:text-primary-400">R$</span>
@@ -1232,11 +1223,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                   )}
                 </div>
             </div>
-
-            {/* Funil e etapa (mesma lógica central do Kanban e do chat) */}
-            {dealBoard ? (
-              <DealStageControl deal={deal} />
-            ) : (
+            {isMobile && renderOwner('left')}
+            {dealBoard ? null : (
               <p className="rounded-lg border border-slate-200/60 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
                 Funil não encontrado para este negócio. Mover de etapa fica indisponível.
               </p>
@@ -1309,7 +1297,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                   </div>
                 )}
             {/* Descrição (editável, salva ao sair do campo) */}
-            <div className="pt-4 border-t border-slate-100 dark:border-white/5">
+            <div>
               <h3 className="mb-2 text-xs font-bold text-slate-400 uppercase">Descrição</h3>
               <textarea
                 readOnly={!permissions.deals.edit}
@@ -1868,6 +1856,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
               composerMode,
               onComposerModeChange: setComposerMode,
               headerExtra: (
+                <>
+                {!isMobile && renderOwner('right')}
                 <button
                   type="button"
                   onClick={() => setAiOpen(o => !o)}
@@ -1879,8 +1869,20 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                   }`}
                   title="Análise do negócio, rascunho de e-mail e respostas a objeções"
                 >
-                  <BrainCircuit size={14} /> IA Insights
+                  <BrainCircuit size={14} /> <span className="max-lg:sr-only">IA Insights</span>
                 </button>
+                {!isMobile && (
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="h-8 w-8 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
+                    title="Fechar"
+                    aria-label="Fechar lead"
+                  >
+                    <X size={18} />
+                  </button>
+                )}
+                </>
               ),
               aboveComposer: (
                 <PendingActivitiesStrip

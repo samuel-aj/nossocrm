@@ -105,6 +105,15 @@ export async function runStageFollowup(admin: SupabaseClient, s: FollowupSchedul
   if (deal.is_won || deal.is_lost) return { status: 'cancelled', reason: 'lead ganho ou perdido' };
   if (deal.stage_id !== s.stage_id) return { status: 'cancelled', reason: 'lead mudou de etapa' };
 
+  // UMA vez por etapa para cada lead (o banco também garante; aqui é a rechecagem)
+  const { data: fired } = await admin
+    .from('deal_followup_fires')
+    .select('deal_id')
+    .eq('deal_id', s.deal_id)
+    .eq('stage_id', s.stage_id)
+    .limit(1);
+  if ((fired ?? []).length > 0) return { status: 'cancelled', reason: 'o follow-up desta etapa já foi executado para este lead' };
+
   // Conversas do negócio: as ligadas a ele; sem nenhuma, as do contato
   let convQuery = admin
     .from('wa_conversations')

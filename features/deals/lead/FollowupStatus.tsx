@@ -22,7 +22,11 @@ export function FollowupStatus({ dealId, stageId }: { dealId: string; stageId: s
   let icon = <Clock size={12} aria-hidden="true" />;
   let text: string;
   let tone = 'text-slate-500 dark:text-slate-400';
-  if (!s || s.status === 'cancelled') {
+  if (data.firedOnceAt || s?.status === 'done') {
+    icon = data.rule.action_type === 'bot' ? <Bot size={12} aria-hidden="true" /> : <Zap size={12} aria-hidden="true" />;
+    tone = 'text-emerald-700 dark:text-emerald-400';
+    text = `Follow-up desta etapa já executado em ${DT.format(new Date(data.firedOnceAt ?? s?.fired_at ?? s?.due_at ?? Date.now()))}. Ele só dispara uma vez por etapa para cada lead.`;
+  } else if (!s || s.status === 'cancelled') {
     text = 'Follow-up por inatividade ligado nesta etapa. A contagem começa na próxima entrada ou mensagem do lead.';
   } else if (s.status === 'scheduled' || s.status === 'processing') {
     const ms = Date.parse(s.due_at) - Date.now();
@@ -30,10 +34,6 @@ export function FollowupStatus({ dealId, stageId }: { dealId: string; stageId: s
       ms > 0
         ? `Follow-up: se o lead não responder, vai ${action} em ${inWords(ms)} (${DT.format(new Date(s.due_at))}).`
         : `Follow-up: executando agora.`;
-  } else if (s.status === 'done') {
-    icon = data.rule.action_type === 'bot' ? <Bot size={12} aria-hidden="true" /> : <Zap size={12} aria-hidden="true" />;
-    tone = 'text-emerald-700 dark:text-emerald-400';
-    text = `Follow-up executado em ${DT.format(new Date(s.fired_at ?? s.due_at))}. Uma nova mensagem do lead reinicia a contagem.`;
   } else if (s.status === 'failed') {
     icon = <AlertTriangle size={12} aria-hidden="true" />;
     tone = 'text-red-600 dark:text-red-400';
