@@ -2,6 +2,9 @@ import React, { useRef, useState, useEffect } from 'react';
 import { Bell, AlertTriangle, CheckCircle2, Clock } from 'lucide-react';
 import { useSystemNotifications, SystemNotification } from '@/hooks/useSystemNotifications';
 import Link from 'next/link';
+import { createPortal } from 'react-dom';
+import { usePersonalNotifications } from './usePersonalNotifications';
+import { NotificationPreferences } from './NotificationPreferences';
 
 const getTimeAgo = (date: Date) => {
     const now = new Date();
@@ -19,6 +22,8 @@ const getTimeAgo = (date: Date) => {
  */
 export const NotificationPopover = () => {
     const { notifications, count, hasHighSeverity, markAsRead, markAllAsRead } = useSystemNotifications();
+    const personal = usePersonalNotifications();
+    const [preferencesOpen, setPreferencesOpen] = useState(false);
     const [isOpen, setIsOpen] = useState(false);
     const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -72,11 +77,11 @@ export const NotificationPopover = () => {
                 type="button"
                 onClick={() => setIsOpen(!isOpen)}
                 aria-expanded={isOpen}
-                aria-label={`Notificações: ${count} novas`}
+                aria-label={`Notificações: ${count + personal.notices.length} novas`}
                 className="p-2 max-md:p-1.5 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 rounded-full relative transition-colors focus-visible-ring"
             >
                 <Bell size={20} aria-hidden="true" />
-                {count > 0 && (
+                {(count > 0 || personal.notices.length > 0) && (
                     <span
                         className={`absolute top-1.5 right-1.5 w-2 h-2 rounded-full ring-2 ring-white dark:ring-dark-card ${hasHighSeverity ? 'bg-red-500' : 'bg-blue-500'
                             }`}
@@ -110,8 +115,17 @@ export const NotificationPopover = () => {
                         </div>
                     </div>
 
-                    <div className="max-h-[70vh] overflow-y-auto">
-                        {notifications.length === 0 ? (
+                    <div className="px-4 py-3 border-b border-slate-100 dark:border-white/5">
+                        <button className="text-sm font-medium text-primary-600 dark:text-primary-400 disabled:opacity-50" disabled={!personal.settings} onClick={()=>{setIsOpen(false);setPreferencesOpen(true);}}>Preferências de notificações</button>
+                        {personal.loading && <p className="text-xs text-slate-500">Carregando preferências…</p>}
+                        {personal.error && <p role="status" className="text-xs text-amber-600 mt-1">{personal.error}</p>}
+                    </div>
+                    <div className="max-h-[60vh] overflow-y-auto">
+                        {personal.notices.length>0 && <div>
+                            <div className="flex items-center justify-between px-4 py-2 text-xs text-slate-500"><span>Mensagens e leads recentes</span><button onClick={personal.clear}>Limpar avisos</button></div>
+                            {personal.notices.map(n=><Link key={n.id} href={n.href} onClick={()=>setIsOpen(false)} className="block p-4 border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/5"><p className="text-sm font-semibold text-slate-900 dark:text-white">{n.title}</p><p className="text-sm text-slate-500">{n.message}</p><p className="text-xs text-slate-400 mt-1">{getTimeAgo(new Date(n.createdAt))}</p></Link>)}
+                        </div>}
+                        {notifications.length === 0 && personal.notices.length === 0 ? (
                             <div className="p-8 text-center flex flex-col items-center text-slate-500 dark:text-slate-400">
                                 <div className="w-12 h-12 bg-slate-100 dark:bg-white/5 rounded-full flex items-center justify-center mb-3">
                                     <CheckCircle2 className="w-6 h-6 text-green-500" />
@@ -166,6 +180,11 @@ export const NotificationPopover = () => {
                     </div>
                 </div>
             )}
+            {preferencesOpen && personal.settings && createPortal(<NotificationPreferences settings={personal.settings} onClose={()=>setPreferencesOpen(false)} onSave={personal.save} onTest={personal.test}/>, document.body)}
+            {personal.toast && createPortal(<div role="status" className="fixed bottom-6 right-6 z-[11000] max-w-sm rounded-xl border border-primary-200 dark:border-primary-800 bg-white dark:bg-slate-900 p-4 shadow-xl">
+                <button aria-label="Fechar aviso" className="absolute right-2 top-1 px-2 text-slate-500" onClick={personal.dismiss}>×</button>
+                <Link href={personal.toast.href} onClick={personal.dismiss} className="block pr-6"><p className="font-semibold text-slate-900 dark:text-white">{personal.toast.title}</p><p className="text-sm text-slate-500 mt-1">{personal.toast.message}</p></Link>
+            </div>, document.body)}
         </div>
     );
 };

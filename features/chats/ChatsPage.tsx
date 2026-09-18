@@ -664,18 +664,13 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
   // Espera a lista carregar, seleciona a conversa daquele contato e limpa o
   // parâmetro pra não reabrir sozinho ao voltar pra página.
   const searchParams = useSearchParams();
-  const deepLinkFeito = useRef(false);
   useEffect(() => {
-    if (deepLinkFeito.current) return;
+    const conversationId = searchParams?.get('conversation');
     const contactId = searchParams?.get('contact');
-    if (!contactId) {
-      deepLinkFeito.current = true;
-      return;
-    }
-    if (chatList.length === 0) return; // lista ainda carregando
-    deepLinkFeito.current = true;
-    const alvo = chatList.find(i => i.contactId === contactId);
-    if (alvo) setSelected(alvo);
+    if (!conversationId && !contactId) return;
+    const alvo = chatList.find(i => conversationId ? i.conversationId === conversationId : i.contactId === contactId);
+    if (!alvo) return;
+    setSelected(alvo);
     window.history.replaceState({}, '', '/chats');
   }, [searchParams, chatList, setSelected]);
 
