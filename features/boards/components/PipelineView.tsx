@@ -12,7 +12,8 @@ import { QualificationView } from './Kanban/QualificationView';
 import { DeleteBoardModal } from './Modals/DeleteBoardModal';
 import { LossReasonModal } from '@/components/ui/LossReasonModal';
 import ConfirmModal from '@/components/ConfirmModal';
-import { CheckCircle2, XCircle, Trash2, X, Tag, Pencil, ArrowRightLeft, Archive } from 'lucide-react';
+import { BulkBotModal } from './Modals/BulkBotModal';
+import { Bot, CheckCircle2, XCircle, Trash2, X, Tag, Pencil, ArrowRightLeft, Archive } from 'lucide-react';
 import { DealView, CustomFieldDefinition, Board, BoardStage } from '@/types';
 import { ExportTemplateModal } from './Modals/ExportTemplateModal';
 import { useAuth } from '@/context/AuthContext';
@@ -398,6 +399,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   const automationActive = automationMode && viewMode === 'kanban';
 
   // Modais de ação em massa (estado local: só UI)
+  const [bulkBotOpen, setBulkBotOpen] = React.useState(false);
   const [bulkModal, setBulkModal] = React.useState<null | 'stage' | 'tags' | 'field'>(null);
   const [bulkStageId, setBulkStageId] = React.useState('');
   const [bulkTagMode, setBulkTagMode] = React.useState<'add' | 'remove'>('add');
@@ -559,6 +561,9 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
               >
                 <Pencil size={13} /> alterar o campo
               </button>
+              {isAdmin && <button type="button" disabled={selectedDealIds.length === 0} onClick={() => setBulkBotOpen(true)} className={selActionClass}>
+                <Bot size={13} /> executar robô
+              </button>}
               {/* Sem permissão de excluir cards, o botão some (o banco recusa de qualquer jeito) */}
               {minhasAcoes.deals.delete && (
                 <button
@@ -767,6 +772,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
       />
 
       {/* Modal das ações em massa */}
+      {bulkBotOpen && <BulkBotModal dealIds={selectedDealIds} onClose={() => setBulkBotOpen(false)} />}
       {bulkModal && activeBoard && (
         <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4" onClick={() => setBulkModal(null)}>
           <div

@@ -10,7 +10,7 @@ import { Deal, DealView, DealItem, Company, Contact, Board } from '@/types';
 import { dealsService } from '@/lib/supabase';
 import { useAuth } from '../AuthContext';
 import { queryKeys, DEALS_VIEW_KEY } from '@/lib/query';
-import { useDeals as useTanStackDealsQuery } from '@/lib/query/hooks/useDealsQuery';
+import { useDealsView as useTanStackDealsQuery } from '@/lib/query/hooks/useDealsQuery';
 
 interface DealsContextType {
   // Raw data (agora vem direto do TanStack Query)
@@ -75,8 +75,7 @@ export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       const { data, error: addError } = await dealsService.create(deal);
 
       if (addError) {
-        console.error('Erro ao criar deal:', addError.message);
-        return null;
+        throw new Error(addError.message);
       }
 
       // NÃƒO invalidar deals aqui! O CRMContext jÃ¡ fez insert otimista e o Realtime

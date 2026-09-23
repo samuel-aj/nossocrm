@@ -387,10 +387,10 @@ export const dealsService = {
 
       if (error) {
         // Trata erro de duplicidade do backend
-        if (error.code === '23505' || error.message?.includes('unique_violation') || error.message?.includes('Já existe um negócio')) {
+        if (error.message?.includes('Já existe um negócio')) {
           return {
             data: null,
-            error: new Error('Já existe um negócio com este título para este contato. Altere o título ou selecione outro contato.')
+            error: new Error(error.message)
           };
         }
         return { data: null, error };
@@ -444,9 +444,9 @@ export const dealsService = {
 
       if (error) {
         // Trata erro de duplicidade do backend
-        if (error.code === '23505' || error.message?.includes('unique_violation') || error.message?.includes('Já existe um negócio')) {
+        if (error.message?.includes('Já existe um negócio')) {
           return {
-            error: new Error('Já existe um negócio com este título para este contato. Altere o título ou selecione outro contato.')
+            error: new Error(error.message)
           };
         }
         return { error };

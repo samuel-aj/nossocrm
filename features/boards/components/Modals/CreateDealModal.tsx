@@ -236,7 +236,7 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
             
             // Se retornou null, houve erro (já logado no console)
             if (result === null) {
-                setError('Já existe um negócio com este título para este contato. Altere o título ou selecione outro contato.');
+                setError('Não foi possível criar o negócio. Verifique os dados e tente novamente.');
                 return;
             }
 

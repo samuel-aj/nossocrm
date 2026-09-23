@@ -762,7 +762,10 @@ export const companiesService = {
       if (!supabase) {
         return { data: null, error: new Error('Supabase não configurado') };
       }
+      const orgId = await getCurrentOrganizationId();
+      if (!orgId) return { data: null, error: new Error('Organização não identificada') };
       const insertData = {
+        organization_id: orgId,
         name: company.name,
         industry: sanitizeText(company.industry),
         website: sanitizeText(company.website),

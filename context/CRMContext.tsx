@@ -30,6 +30,7 @@
 import React, { createContext, useContext, useMemo, useEffect, ReactNode, useState, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
+import { useRealtimeSyncAll } from '@/lib/realtime';
 import { queryKeys } from '@/lib/query';
 import {
   Deal,
@@ -308,6 +309,7 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   } = useSettings();
 
   const { profile, user } = useAuth();
+  useRealtimeSyncAll({ enabled: !!user });
 
   // Wrap deleteLifecycleStage to inject contacts for validation
   const deleteLifecycleStage = useCallback(async (id: string) => {
@@ -546,78 +548,74 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       }
     }
 
-    let finalCompanyId = deal.companyId;
-    let finalContactId = deal.contactId;
+    let creationError: unknown;
+    let createdDeal: Deal | null = null;
+    try {
+      let finalCompanyId = deal.clientCompanyId || deal.companyId || contacts.find(c => c.id === deal.contactId)?.clientCompanyId;
+      let finalContactId = deal.contactId;
 
-    // Handle Company
-    if (relatedData?.companyName) {
-      const existingCompany = companies.find(
-        c => (c.name || '').toLowerCase() === relatedData.companyName!.toLowerCase()
-      );
-      if (existingCompany) {
-        finalCompanyId = existingCompany.id;
-      } else {
-        const newCompany = await addCompany({
-          name: relatedData.companyName,
-        });
-        if (newCompany) {
+      // Handle Company
+      if (relatedData?.companyName) {
+        const existingCompany = companies.find(
+          c => (c.name || '').toLowerCase() === relatedData.companyName!.toLowerCase()
+        );
+        if (existingCompany) {
+          finalCompanyId = existingCompany.id;
+        } else {
+          const newCompany = await addCompany({
+            name: relatedData.companyName,
+          });
+          if (!newCompany) throw new Error('Não foi possível criar a empresa informada.');
           finalCompanyId = newCompany.id;
         }
       }
-    } else if (!companies.find(c => c.id === deal.companyId)) {
-      const newCompany = await addCompany({
-        name: 'Nova Empresa (Auto)',
-      });
-      if (newCompany) {
-        finalCompanyId = newCompany.id;
-      }
-    }
 
-    // Handle Contact
-    // Contato EXISTENTE selecionado: o deal já vem com `contactId` preenchido —
-    // usa esse e NUNCA cria outro (corrige a duplicação que acontecia quando o
-    // contato não tinha email pra casar). Só busca-por-email / cria-novo quando
-    // NÃO há contato pré-selecionado.
-    if (deal.contactId) {
-      finalContactId = deal.contactId;
-    } else if (relatedData?.contact && relatedData.contact.name) {
-      const existingContact = relatedData.contact.email
-        ? contacts.find(c => (c.email || '').toLowerCase() === relatedData.contact!.email!.toLowerCase())
-        : undefined;
+      // Handle Contact
+      // Contato EXISTENTE selecionado: o deal já vem com `contactId` preenchido —
+      // usa esse e NUNCA cria outro (corrige a duplicação que acontecia quando o
+      // contato não tinha email pra casar). Só busca-por-email / cria-novo quando
+      // NÃO há contato pré-selecionado.
+      if (deal.contactId) {
+        finalContactId = deal.contactId;
+      } else if (relatedData?.contact && relatedData.contact.name) {
+        const existingContact = relatedData.contact.email
+          ? contacts.find(c => (c.email || '').toLowerCase() === relatedData.contact!.email!.toLowerCase())
+          : undefined;
 
-      if (existingContact) {
-        finalContactId = existingContact.id;
-      } else {
-        let initialStage = 'LEAD';
-        if (activeBoard) {
-          const targetBoardStage = activeBoard.stages.find(s => s.id === deal.status);
-          if (targetBoardStage && targetBoardStage.linkedLifecycleStage) {
-            initialStage = targetBoardStage.linkedLifecycleStage;
+        if (existingContact) {
+          finalContactId = existingContact.id;
+        } else {
+          let initialStage = 'LEAD';
+          if (activeBoard) {
+            const targetBoardStage = activeBoard.stages.find(s => s.id === deal.status);
+            if (targetBoardStage && targetBoardStage.linkedLifecycleStage) {
+              initialStage = targetBoardStage.linkedLifecycleStage;
+            }
           }
-        }
 
-        const newContact = await addContact({
-          companyId: finalCompanyId,
-          name: relatedData.contact.name,
-          email: relatedData.contact.email || '',
-          phone: relatedData.contact.phone || '',
-          role: relatedData.contact.role || '',
-          status: 'ACTIVE',
-          stage: initialStage,
-          lastPurchaseDate: '',
-          totalValue: 0,
-        } as Omit<Contact, 'id' | 'createdAt'>);
-        if (newContact) {
+          const newContact = await addContact({
+            companyId: finalCompanyId,
+            name: relatedData.contact.name,
+            email: relatedData.contact.email || '',
+            phone: relatedData.contact.phone || '',
+            role: relatedData.contact.role || '',
+            status: 'ACTIVE',
+            stage: initialStage,
+            lastPurchaseDate: '',
+            totalValue: 0,
+          } as Omit<Contact, 'id' | 'createdAt'>);
+          if (!newContact) throw new Error('Não foi possível criar o contato informado.');
           finalContactId = newContact.id;
         }
       }
-    }
 
-    const createdDeal = await addDealState({
-      ...deal,
-      companyId: finalCompanyId,
-      contactId: finalContactId,
-    });
+      createdDeal = await addDealState({
+        ...deal,
+        companyId: finalCompanyId,
+        contactId: finalContactId,
+      });
+
+    } catch (error) { creationError = error; }
 
     // Replace/remove the optimistic deal with the real one (avoids duplicates when refetch completes).
     if (optimisticBoardId) {
@@ -664,6 +662,8 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         // Swallow errors from optimistic cache update.
       }
     }
+
+    if (creationError) throw creationError;
 
     if (createdDeal) {
       const autorNome =

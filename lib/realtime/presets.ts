@@ -20,7 +20,7 @@ const REALTIME_PRESETS = {
 
   /** Kanban board: deals, items, stages, notes, activities — everything that
    *  can change the card content/counters stays live across tabs. */
-  kanban: ['deals', 'deal_items', 'deal_notes', 'activities', 'board_stages'] as const,
+  kanban: ['deals', 'deal_items', 'deal_notes', 'contacts', 'activities', 'board_stages'] as const,
 
   /** Activities/Inbox: activities with deals */
   activities: ['activities', 'deals'] as const,

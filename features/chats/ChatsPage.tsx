@@ -1061,6 +1061,8 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
       } else {
         addToast('Falha ao criar o lead. Tente novamente.', 'error');
       }
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Não foi possível criar o lead.', 'error');
     } finally {
       setLeadBusy(false);
     }

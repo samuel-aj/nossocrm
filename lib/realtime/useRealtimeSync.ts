@@ -12,9 +12,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
+import { dealsService } from '@/lib/supabase/deals';
+import { contactsService } from '@/lib/supabase/contacts';
+import { dealPatch } from './dealPayload';
 import { queryKeys, DEALS_VIEW_KEY } from '@/lib/query/queryKeys';
 import { readTabOrg } from '@/lib/tabOrg';
-import type { Activity, Deal, DealItem, DealView } from '@/types';
+import type { Activity, Contact, Deal, DealItem, DealView } from '@/types';
 
 // Translate a Realtime `activities` payload row (snake_case, no joins) into
 // a partial Activity with only the fields Realtime actually carries. Joined
@@ -90,7 +93,7 @@ const getTableQueryKeys = (table: RealtimeTable): readonly (readonly unknown[])[
     // detail query (via prefix match on deals.all) so the modal refetches
     // when a note is added/edited/deleted in another tab.
     deal_notes: [queryKeys.deals.all],
-    contacts: [queryKeys.contacts.all],
+    contacts: [queryKeys.contacts.all, DEALS_VIEW_KEY],
     activities: [queryKeys.activities.all],
     boards: [queryKeys.boards.all],
     board_stages: [queryKeys.boards.all], // stages invalidate boards
@@ -427,61 +430,7 @@ export function useRealtimeSync(
                 return; // Skip this event, already processed by another hook instance
               }
               
-              // Normalize snake_case to camelCase for cache compatibility
-              const normalizedDeal: Record<string, unknown> = { ...newData };
-              if (newData.stage_id !== undefined) {
-                normalizedDeal.status = newData.stage_id;
-                delete normalizedDeal.stage_id;
-              }
-              if (newData.updated_at !== undefined) {
-                normalizedDeal.updatedAt = newData.updated_at;
-                delete normalizedDeal.updated_at;
-              }
-              if (newData.created_at !== undefined) {
-                normalizedDeal.createdAt = newData.created_at;
-                delete normalizedDeal.created_at;
-              }
-              if (newData.is_won !== undefined) {
-                normalizedDeal.isWon = newData.is_won;
-                delete normalizedDeal.is_won;
-              }
-              if (newData.is_lost !== undefined) {
-                normalizedDeal.isLost = newData.is_lost;
-                delete normalizedDeal.is_lost;
-              }
-              if (newData.board_id !== undefined) {
-                normalizedDeal.boardId = newData.board_id;
-                delete normalizedDeal.board_id;
-              }
-              if (newData.contact_id !== undefined) {
-                normalizedDeal.contactId = newData.contact_id;
-                delete normalizedDeal.contact_id;
-              }
-              if (newData.company_id !== undefined) {
-                normalizedDeal.companyId = newData.company_id;
-                delete normalizedDeal.company_id;
-              }
-              if (newData.closed_at !== undefined) {
-                normalizedDeal.closedAt = newData.closed_at;
-                delete normalizedDeal.closed_at;
-              }
-              if (newData.last_stage_change_date !== undefined) {
-                normalizedDeal.lastStageChangeDate = newData.last_stage_change_date;
-                delete normalizedDeal.last_stage_change_date;
-              }
-              if (newData.organization_id !== undefined) {
-                normalizedDeal.organizationId = newData.organization_id;
-                delete normalizedDeal.organization_id;
-              }
-              if (newData.loss_reason !== undefined) {
-                normalizedDeal.lossReason = newData.loss_reason;
-                delete normalizedDeal.loss_reason;
-              }
-              if (newData.loss_category !== undefined) {
-                normalizedDeal.lossCategory = newData.loss_category;
-                delete normalizedDeal.loss_category;
-              }
-
+              const normalizedDeal = { items: [], owner: { name: 'Sem responsável', avatar: '' }, ...dealPatch(newData) };
               // Atualizar DEALS_VIEW_KEY (Kanban / useDealsView) E queryKeys.deals.lists()
               // (useDeals / DealsContext). Antes, só o primeiro era atualizado, causando
               // dessincronia: o deal aparecia no Kanban mas sumia em telas que liam o
@@ -499,7 +448,7 @@ export function useRealtimeSync(
                 if (!old || !Array.isArray(old)) return old;
                 const existingIndex = old.findIndex((d) => d.id === dealId);
                 if (existingIndex !== -1) {
-                  return old.map((d, i) => i === existingIndex ? { ...d, ...(normalizedDeal as unknown as T) } : d);
+                  return old.map((d, i) => i === existingIndex ? { ...d, ...dealPatch(newData) } : d);
                 }
                 const tempDealsRemoved = old.filter((d) => {
                   const isTemp = typeof d.id === 'string' && d.id.startsWith('temp-');
@@ -526,6 +475,26 @@ export function useRealtimeSync(
               queryClient.setQueryData<DealView[]>(DEALS_VIEW_KEY, insertOrUpdate);
               queryClient.setQueryData<Deal[]>(queryKeys.deals.lists(), insertOrUpdate);
 
+              const eventOrg = readTabOrg()?.id;
+              void dealsService.getById(dealId).then(async ({ data }) => {
+                if (!data || readTabOrg()?.id !== eventOrg) return;
+                const contact = data.contactId ? await contactsService.getById(data.contactId) : null;
+                if (readTabOrg()?.id !== eventOrg) return;
+                if (contact?.data) {
+                  const incoming = contact.data;
+                  queryClient.setQueryData<Contact[]>(queryKeys.contacts.lists(), (old = []) => {
+                    const current = old.find(c => c.id === incoming.id);
+                    if (current?.updatedAt && incoming.updatedAt && current.updatedAt > incoming.updatedAt) return old;
+                    return [...old.filter(c => c.id !== incoming.id), incoming];
+                  });
+                }
+                queryClient.setQueryData<DealView[]>(DEALS_VIEW_KEY, (old) => old?.map(d => {
+                  if (d.id !== data.id || (d.updatedAt && d.updatedAt > data.updatedAt)) return d;
+                  return { ...d, ...data, ...(contact?.data ? {
+                    contactName: contact.data.name, contactPhone: contact.data.phone, contactEmail: contact.data.email,
+                  } : {}) };
+                }));
+              }).catch(error => console.warn('[Realtime] Lead hydration failed', error));
               // Don't invalidate for deals INSERT - we've added it directly
               return;
             }
@@ -585,36 +554,7 @@ export function useRealtimeSync(
                   if (!old || !Array.isArray(old)) return old;
 
                   const idx = old.findIndex(d => d.id === dealId);
-                  // Normalize snake_case keys that the cache reads as camelCase.
-                  const normalizedData: Record<string, unknown> = { ...newData };
-                  if (newData.updated_at && !newData.updatedAt) {
-                    normalizedData.updatedAt = newData.updated_at;
-                    delete normalizedData.updated_at;
-                  }
-                  if (newData.created_at && !newData.createdAt) {
-                    normalizedData.createdAt = newData.created_at;
-                    delete normalizedData.created_at;
-                  }
-                  if (newData.stage_id !== undefined) {
-                    normalizedData.status = newData.stage_id;
-                    delete normalizedData.stage_id;
-                  }
-                  if (newData.is_won !== undefined && newData.isWon === undefined) {
-                    normalizedData.isWon = newData.is_won;
-                    delete normalizedData.is_won;
-                  }
-                  if (newData.is_lost !== undefined && newData.isLost === undefined) {
-                    normalizedData.isLost = newData.is_lost;
-                    delete normalizedData.is_lost;
-                  }
-                  if (newData.closed_at !== undefined && newData.closedAt === undefined) {
-                    normalizedData.closedAt = newData.closed_at;
-                    delete normalizedData.closed_at;
-                  }
-                  if (newData.last_stage_change_date !== undefined && newData.lastStageChangeDate === undefined) {
-                    normalizedData.lastStageChangeDate = newData.last_stage_change_date;
-                    delete normalizedData.last_stage_change_date;
-                  }
+                  const normalizedData = dealPatch(newData);
 
                   if (idx === -1) {
                     // Deal is not in local cache (e.g. created in another tab).
@@ -683,6 +623,10 @@ export function useRealtimeSync(
       setIsConnected(status === 'SUBSCRIBED');
       
       if (status === 'SUBSCRIBED') {
+        // Recover changes missed while offline.
+        for (const table of tableList) for (const queryKey of getTableQueryKeys(table)) {
+          void queryClient.invalidateQueries({ queryKey, refetchType: 'active' });
+        }
         if (DEBUG_REALTIME) {
           console.log(`[Realtime] Successfully subscribed to ${tableList.join(', ')}`);
         }
@@ -737,7 +681,7 @@ export function useRealtimeSync(
  * Ideal for the main app layout
  */
 export function useRealtimeSyncAll(options: UseRealtimeSyncOptions = {}) {
-  return useRealtimeSync(['deals', 'deal_items', 'deal_notes', 'contacts', 'activities', 'boards', 'crm_companies'], options);
+  return useRealtimeSync(['deals', 'deal_items', 'deal_notes', 'contacts', 'activities', 'boards', 'board_stages', 'crm_companies'], options);
 }
 
 /**
@@ -745,5 +689,5 @@ export function useRealtimeSyncAll(options: UseRealtimeSyncOptions = {}) {
  * Optimized for the boards page
  */
 export function useRealtimeSyncKanban(options: UseRealtimeSyncOptions = {}) {
-  return useRealtimeSync(['deals', 'deal_items', 'deal_notes', 'activities', 'board_stages'], options);
+  return useRealtimeSync(['deals', 'deal_items', 'deal_notes', 'contacts', 'activities', 'board_stages'], options);
 }
