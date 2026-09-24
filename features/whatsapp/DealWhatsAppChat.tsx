@@ -47,6 +47,9 @@ import { normalizePhoneE164 } from '@/lib/phone';
 import { quotedPreviewText, type QuotedSnapshot } from '@/lib/whatsapp/quote';
 import { DeleteMessageModal } from './DeleteMessageModal';
 import { EditMessageModal } from './EditMessageModal';
+import { GroupMembersModal, MentionSuggestions, useGroupMembers } from './GroupMembers';
+import { mentionQuery, useMentionDraft } from './useMentionDraft';
+import type { GroupParticipant } from '@/lib/whatsapp/groupParticipants';
 import { useChatImageTransfer } from './useChatImageTransfer';
 import { ForwardMessageModal } from './ForwardMessageModal';
 import {
@@ -1144,6 +1147,7 @@ export function DealWhatsAppChat({
   connectionId = null,
   group = null,
   timeline = null,
+  onOpenGroupMember,
 }: {
   contact: { id: string; name?: string | null; phone?: string | null } | null;
   /** Valores extras pras variáveis dos modelos (lead.titulo, escritorio.nome...) */
@@ -1154,6 +1158,7 @@ export function DealWhatsAppChat({
   connectionId?: string | null;
   /** GRUPO do WhatsApp: a conversa é o grupo (sem contato nem telefone); as
    * mensagens recebidas mostram quem escreveu; sem agente, robô nem janela de 24 h. */
+  onOpenGroupMember?: (member: GroupParticipant, connectionId: string) => void;
   group?: { conversationId: string; name: string; participantsCount?: number | null } | null;
   /** Tela do lead: histórico unificado e compositor com modos (ver ChatTimelineProps) */
   timeline?: ChatTimelineProps | null;
@@ -1161,7 +1166,22 @@ export function DealWhatsAppChat({
   const isGroup = !!group;
   const phone = useMemo(() => (isGroup ? '' : normalizePhoneE164(contact?.phone || '')), [contact?.phone, isGroup]);
   const { data, isLoading, error, send, edit, remove } = useWhatsAppChat(phone || null, connectionId, group?.conversationId ?? null);
-  const [text, setText] = useState('');
+  const { text, setText, mentions, selectMention, restoreDraft } = useMentionDraft();
+  const [membersOpen, setMembersOpen] = useState(false);
+  const [mentionCaret, setMentionCaret] = useState(0);
+  const [mentionDismissed, setMentionDismissed] = useState(false);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const mentionCandidate = isGroup && !mentionDismissed ? mentionQuery(text, mentionCaret) : null;
+  const activeMention = mentionCandidate && !mentions.some(m => m.start === mentionCandidate.start) ? mentionCandidate : null;
+  const membersQuery = useGroupMembers(group?.conversationId ?? null, membersOpen || !!activeMention);
+  const mentionMembers = (membersQuery.data?.participants ?? []).filter(m => activeMention && `${m.name} ${m.phone || ''}`.toLocaleLowerCase().includes(activeMention.query)).slice(0, 20);
+  const activeMentionIndex = Math.min(mentionIndex, Math.max(0, mentionMembers.length - 1));
+  const chooseMention = (member: GroupParticipant) => {
+    if (!activeMention) return;
+    const caret = selectMention(member, activeMention);
+    setMentionDismissed(true);
+    window.requestAnimationFrame(() => { textareaRef.current?.focus(); textareaRef.current?.setSelectionRange(caret, caret); });
+  };
   const [deletingMessage, setDeletingMessage] = useState<WaChatMessage | null>(null);
   const [editingMessage, setEditingMessage] = useState<WaChatMessage | null>(null);
   const [attachment, setAttachment] = useState<Attachment | null>(null);
@@ -1885,6 +1905,8 @@ export function DealWhatsAppChat({
     };
     // resposta armada vai junto (e volta pro composer se o envio falhar)
     const replySnapshot = replyTo;
+    const leading = text.length - text.trimStart().length;
+    const sentMentions = mentions.map(m => ({ ...m, start: m.start - leading, end: m.end - leading })).filter(m => m.start >= 0 && m.end <= t.length);
 
     try {
       if (attachment) {
@@ -1907,6 +1929,7 @@ export function DealWhatsAppChat({
         send.mutate(
           {
             text: t,
+            mentions: sentMentions,
             file,
             kind,
             fileName,
@@ -1918,7 +1941,7 @@ export function DealWhatsAppChat({
             onError: () => {
               // restaura sem clobberar o que o usuário fez enquanto enviava,
               // e recria o preview (o blob URL antigo foi revogado no clear)
-              setText(curr => curr || t);
+              restoreDraft(t, sentMentions);
               setReplyTo(curr => curr ?? replySnapshot);
               setAttachment(curr =>
                 curr
@@ -1937,11 +1960,11 @@ export function DealWhatsAppChat({
         setReplyTo(null);
         forceScrollRef.current = true;
         send.mutate(
-          { text: t, connectionId: connectionId ?? senderRef.current?.id, replyTo: replySnapshot ?? undefined },
+          { text: t, mentions: sentMentions, connectionId: connectionId ?? senderRef.current?.id, replyTo: replySnapshot ?? undefined },
           {
             onSettled: releaseGate,
             onError: () => {
-              setText(curr => curr || t);
+              restoreDraft(t, sentMentions);
               setReplyTo(curr => curr ?? replySnapshot);
             },
           }
@@ -2167,14 +2190,10 @@ export function DealWhatsAppChat({
           {isGroup ? <Users size={15} /> : <MessageCircle size={15} />}
         </span>
         <div className="min-w-0">
-          <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
-            {isGroup ? data?.conversation?.wa_name || contactName : contact?.name || data?.conversation?.wa_name || 'Contato'}
-          </p>
-          <p className="text-[11px] text-slate-500">
-            {isGroup
-              ? `Grupo do WhatsApp${participantsCount ? ` · ${participantsCount} participantes` : ''}`
-              : phone}
-          </p>
+          {isGroup ? <button type="button" onClick={() => setMembersOpen(true)} title="Ver participantes do grupo" className="block max-w-full text-left rounded-md hover:bg-black/5 dark:hover:bg-white/5 focus-visible-ring">
+            <span className="block truncate text-sm font-bold text-slate-900 dark:text-white">{data?.conversation?.wa_name || contactName}</span>
+            <span className="block text-[11px] text-slate-500">Grupo do WhatsApp{participantsCount ? ` · ${participantsCount} participantes` : ''} · Ver membros</span>
+          </button> : <><p className="text-sm font-bold text-slate-900 dark:text-white truncate">{contact?.name || data?.conversation?.wa_name || 'Contato'}</p><p className="text-[11px] text-slate-500">{phone}</p></>}
         </div>
         <div className="ml-auto flex items-center gap-2">
           {timeline?.headerExtra}
@@ -3110,12 +3129,23 @@ export function DealWhatsAppChat({
                 e.target.value = '';
               }}
             />
+            <div className="relative flex min-w-0 flex-1">
+            {activeMention && <MentionSuggestions members={mentionMembers} activeIndex={activeMentionIndex} loading={membersQuery.isLoading} error={membersQuery.error?.message ?? null} onSelect={chooseMention} />}
             <textarea
+              aria-controls={activeMention ? 'group-mention-list' : undefined}
+              aria-activedescendant={activeMention && mentionMembers.length ? `group-mention-${activeMentionIndex}` : undefined}
               ref={textareaRef}
               onPaste={imageTransfer.onPaste}
               value={text}
-              onChange={(e) => setText(e.target.value)}
+              onChange={(e) => { setText(e.target.value); setMentionCaret(e.target.selectionStart); setMentionDismissed(false); setMentionIndex(0); }}
+              onSelect={(e) => setMentionCaret(e.currentTarget.selectionStart)}
               onKeyDown={(e) => {
+                if (activeMention) {
+                  if (e.key === 'Escape') { e.preventDefault(); setMentionDismissed(true); return; }
+                  if (mentionMembers.length && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); setMentionIndex((activeMentionIndex + (e.key === 'ArrowDown' ? 1 : -1) + mentionMembers.length) % mentionMembers.length); return; }
+                  if ((e.key === 'Enter' || e.key === 'Tab') && mentionMembers.length) { e.preventDefault(); chooseMention(mentionMembers[activeMentionIndex]); return; }
+                  if (e.key === 'Enter' && membersQuery.isLoading) { e.preventDefault(); return; }
+                }
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   onSend();
@@ -3126,8 +3156,9 @@ export function DealWhatsAppChat({
               // A altura é calculada no useLayoutEffect (cresce com as linhas);
               // overflow-y-auto só entra em ação ao bater no teto.
               style={{ maxHeight: ALTURA_MAX_COMPOSITOR }}
-              className="flex-1 resize-none overflow-y-auto bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2.5 text-sm leading-relaxed text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500"
+              className="min-w-0 w-full flex-1 resize-none overflow-y-auto bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2.5 text-sm leading-relaxed text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500"
             />
+            </div>
             {!text.trim() && !attachment ? (
               <button
                 type="button"
@@ -3155,6 +3186,10 @@ export function DealWhatsAppChat({
         )}
       </div>
 
+      {membersOpen && <GroupMembersModal name={contactName} members={membersQuery.data?.participants ?? []} loading={membersQuery.isLoading} error={membersQuery.error?.message ?? null} onClose={() => setMembersOpen(false)} onRetry={() => void membersQuery.refetch()} onOpenChat={onOpenGroupMember && membersQuery.data ? member => {
+        if (!member.phone || !membersQuery.data) return;
+        setMembersOpen(false); onOpenGroupMember(member, membersQuery.data.connectionId);
+      } : undefined} />}
       {deletingMessage && <DeleteMessageModal onClose={() => setDeletingMessage(null)} onConfirm={async () => {
         await remove.mutateAsync({ messageId: deletingMessage.id });
         if (replyTo?.id === deletingMessage.id) setReplyTo(null);

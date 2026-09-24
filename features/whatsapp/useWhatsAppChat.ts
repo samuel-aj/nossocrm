@@ -97,6 +97,7 @@ export interface WaChatData {
 export type WaMediaKind = 'image' | 'video' | 'document' | 'audio' | 'sticker';
 
 export interface SendChatPayload {
+  mentions?: import('@/lib/whatsapp/groupParticipants').GroupMention[];
   text?: string;
   file?: File | Blob;
   fileName?: string;
@@ -247,6 +248,7 @@ export function useWhatsAppChat(phoneE164: string | null, connectionId?: string 
         body: JSON.stringify({
           to: phoneE164 ?? '',
           text: p.text || '',
+          ...(p.mentions?.length ? { mentions: p.mentions } : {}),
           media,
           // grupo: o destino é a conversa (o servidor resolve o JID do grupo)
           ...(conversationId ? { conversationId } : {}),

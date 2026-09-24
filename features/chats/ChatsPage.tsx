@@ -1881,6 +1881,11 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                       }
                     : null
                 }
+                onOpenGroupMember={(member, memberConnectionId) => {
+                  if (!member.phone) return;
+                  const existing = contacts.find(c => phoneKey(c.phone || '') === phoneKey(member.phone!));
+                  setSelected({ phone: member.phone, name: existing?.name || member.name, contactId: existing?.id ?? null, connectionId: memberConnectionId });
+                }}
                 templateContext={{
                   'contato.email': (selected.contactId && contacts.find(c => c.id === selected.contactId)?.email) || '',
                   'lead.titulo': selectedDeal?.title || '',

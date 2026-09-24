@@ -25,16 +25,23 @@ import {
 } from '@/lib/whatsapp/service';
 import { getProvider, type OutboundMediaKind, type QuotedRef } from '@/lib/whatsapp';
 import { clampQuote, quotedPreviewText, snapshotFromMessage } from '@/lib/whatsapp/quote';
+import { z } from 'zod';
+import { conversationAllowed } from '@/lib/permissions/conversationAccess';
+import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+import { getGroupParticipants } from '@/lib/whatsapp/groups';
+import { resolveGroupMentions, type GroupMention } from '@/lib/whatsapp/groupParticipants';
 import { normalizePhoneE164 } from '@/lib/phone';
 
 const MEDIA_KINDS: OutboundMediaKind[] = ['image', 'video', 'document', 'audio', 'sticker'];
 
 export async function POST(req: Request) {
+  if (!isAllowedOrigin(req)) return json({ error: 'Forbidden' }, 403);
   const auth = await requireOrgUser();
   if (!auth.ok) return auth.response;
 
   let body: {
     to?: string;
+    mentions?: GroupMention[];
     text?: string;
     /** Multi-número: qual conexão envia (omitido = a padrão da org) */
     connectionId?: string;
@@ -54,16 +61,22 @@ export async function POST(req: Request) {
   } catch {
     return json({ error: 'JSON inválido' }, 400);
   }
+  if (!body || typeof body !== 'object' || (body.text !== undefined && typeof body.text !== 'string')) return json({ error: 'Mensagem inválida' }, 400);
+  const parsedMentions = z.array(z.object({ id: z.string().max(100), start: z.number().int().min(0), end: z.number().int().min(1) }).strict()).max(100).safeParse(body.mentions ?? []);
+  if (!parsedMentions.success) return json({ error: 'Menções inválidas' }, 400);
   let to = normalizePhoneE164(body.to || '');
-  const text = (body.text || '').trim();
+  const text = body.text || ''; // span offsets refer to the untrimmed text
+  let wireText = text;
+  let mentioned: string[] = [];
   const media = body.media;
   const mediaKind = media?.kind as OutboundMediaKind | undefined;
   const templateName = (body.template?.name || '').trim();
   const replyToId = (body.replyTo || '').trim();
   const groupConversationId = (body.conversationId || '').trim();
 
+  if (parsedMentions.data.length && !groupConversationId) return json({ error: 'Menções estão disponíveis somente em grupos.' }, 400);
   if (!to && !groupConversationId) return json({ error: 'to é obrigatório' }, 400);
-  if (!text && !media && !templateName) return json({ error: 'text ou media é obrigatório' }, 400);
+  if (!text.trim() && !media && !templateName) return json({ error: 'text ou media é obrigatório' }, 400);
   if (media && (!media.path || !mediaKind || !MEDIA_KINDS.includes(mediaKind))) {
     return json({ error: 'media.path e media.kind (image|video|document|audio|sticker) são obrigatórios' }, 400);
   }
@@ -80,6 +93,7 @@ export async function POST(req: Request) {
     if (!(await getWaGroupsEnabled(auth.admin, auth.user.organizationId))) {
       return json({ error: 'Grupos do WhatsApp estão desligados nesta organização.' }, 403);
     }
+    if (!(await conversationAllowed(auth.admin, auth.user, { id: groupConversationId }))) return json({ error: 'Grupo indisponível' }, 404);
     group = await getGroupConversation(auth.admin, auth.user.organizationId, groupConversationId);
     if (!group) return json({ error: 'Grupo não encontrado.' }, 404);
     conn = group.connection_id
@@ -120,6 +134,16 @@ export async function POST(req: Request) {
       );
     }
     conv = await ensureConversation(auth.admin, auth.user.organizationId, conn.id, to);
+  }
+  if (parsedMentions.data.length) {
+    if (!group || templateName || (media && !['image', 'video', 'document'].includes(mediaKind || ''))) return json({ error: 'Menções estão disponíveis em textos e legendas de grupos.' }, 400);
+    const members = await getGroupParticipants(conn, to);
+    if (!members.ok) return json({ error: members.error }, 422);
+    try {
+      const resolved = resolveGroupMentions(text, parsedMentions.data, members.participants);
+      wireText = resolved.text;
+      mentioned = resolved.mentioned;
+    } catch (error) { return json({ error: (error as Error).message }, 400); }
   }
   const provider = getProvider(conn);
 
@@ -168,7 +192,8 @@ export async function POST(req: Request) {
       kind: mediaKind,
       mimeType: media.mimeType,
       fileName: media.fileName,
-      caption: text || undefined,
+      caption: wireText || undefined,
+      mentioned,
       quoted,
       isGroup: !!group,
     });
@@ -185,7 +210,7 @@ export async function POST(req: Request) {
     });
   } else {
     // provedor sem envio de modelo (QR/Evolution): vai o texto já preenchido
-    result = await provider.sendText({ to, text: text || `[Modelo: ${templateName}]`, quoted, isGroup: !!group });
+    result = await provider.sendText({ to, text: wireText || `[Modelo: ${templateName}]`, quoted, isGroup: !!group, mentioned });
   }
 
   const message = await recordOutboundMessage(auth.admin, {

@@ -167,3 +167,22 @@ export async function getEvolutionGroupInviteLink(
     return { ok: false, error: `Falha ao falar com a Evolution: ${(e as Error).message}` };
   }
 }
+
+/** Evolution/Baileys: GET /group/participants/{instance}?groupJid=. */
+export async function getGroupParticipants(conn: WaConnectionRow, groupJid: string) {
+  if (conn.provider && conn.provider !== 'evolution') {
+    return { ok: false as const, unsupported: true, error: 'Esta conexão não disponibiliza participantes e menções de grupos.' };
+  }
+  const { baseUrl, token } = evolutionBase(conn);
+  if (!baseUrl || !token) return { ok: false as const, error: 'Evolution não configurada.' };
+  try {
+    const response = await fetch(`${baseUrl}/group/participants/${encodeURIComponent(conn.instance_name)}?groupJid=${encodeURIComponent(groupJid)}`, {
+      headers: { apikey: token }, cache: 'no-store', signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) return { ok: false as const, error: `Não foi possível consultar os participantes (HTTP ${response.status}).` };
+    const { normalizeGroupParticipants } = await import('./groupParticipants');
+    return { ok: true as const, participants: normalizeGroupParticipants(await response.json()) };
+  } catch {
+    return { ok: false as const, error: 'Não foi possível consultar os participantes. Tente novamente.' };
+  }
+}

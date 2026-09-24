@@ -39,6 +39,8 @@ export interface QuotedRef {
 }
 
 export interface SendTextInput {
+  /** Verified group participant JIDs (never arbitrary numbers from the client). */
+  mentioned?: string[];
   /** Telefone do destinatário (E.164 ou só dígitos — o adapter normaliza) */
   to: string;
   text: string;
@@ -51,6 +53,7 @@ export interface SendTextInput {
 export type OutboundMediaKind = 'image' | 'video' | 'document' | 'audio' | 'sticker';
 
 export interface SendMediaInput {
+  mentioned?: string[];
   to: string;
   /** URL (pública/assinada) OU base64 do arquivo */
   media: string;

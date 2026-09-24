@@ -222,6 +222,7 @@ export class EvolutionProvider implements WhatsAppProvider {
     }>('POST', `/message/sendText/${encodeURIComponent(this.instanceName)}`, {
       number,
       text: input.text,
+      ...(input.isGroup && input.mentioned?.length ? { mentioned: input.mentioned } : {}),
       ...(buildQuoted(input.quoted) ? { quoted: buildQuoted(input.quoted) } : {}),
     });
 
@@ -259,6 +260,7 @@ export class EvolutionProvider implements WhatsAppProvider {
       };
     }
 
+    if (input.isGroup && input.mentioned?.length) body.mentioned = input.mentioned;
     const { ok, status, data } = await this.call<{ key?: { id?: string } }>('POST', path, body);
     if (!ok) return { ok: false, error: describeEvolutionError(status, data), raw: data };
     return { ok: true, providerMessageId: data?.key?.id, raw: data };
