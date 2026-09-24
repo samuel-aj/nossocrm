@@ -1,3 +1,4 @@
+import { botResourceError } from '@/lib/wa-agents/botTemplateResources';
 import { botTemplateConnectionError } from '@/lib/wa-agents/templateConnections';
 /**
  * /api/wa-agents/bots/[id]  (admin)
@@ -130,11 +131,11 @@ export async function PATCH(req: Request, ctx: Ctx) {
             : saved.connection_id
               ? [saved.connection_id]
               : [];
-        if (numerosFinais.length === 0) {
-          return json({ error: 'Escolha em quais números o robô atende antes de ligá-lo' }, 400);
-        }
         const templateError = await botTemplateConnectionError(auth.admin, orgId, steps, numerosFinais);
         if (templateError) return json({ error: templateError }, 400);
+        const finalBot = BotInputSchema.parse({ ...saved, ...present, name: 'Robô', connection_id: numerosFinais[0] ?? null, connection_ids: numerosFinais, steps, layout, enabled, start_step_id: startStepId });
+        const resourceError = await botResourceError(auth.admin, orgId, finalBot, true);
+        if (resourceError) return json({ error: resourceError }, 400);
         const trigger = (present.trigger ?? saved.trigger) as { type?: string; stage_id?: string | null } | null;
         if (trigger?.type === 'deal_stage_entered' && !trigger.stage_id) {
           return json({ error: 'O gatilho "Entrou na etapa" está sem etapa: abra o robô e escolha a etapa antes de ligar' }, 400);

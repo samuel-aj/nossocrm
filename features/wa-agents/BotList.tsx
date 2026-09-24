@@ -10,6 +10,7 @@ import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Workflow, Plus, Pencil, Trash2, Play, Phone, Zap, Loader2, CopyPlus } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
+import { BotTemplateLibrary } from './templates/BotTemplateLibrary';
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/context/ToastContext';
 import type { BotRow } from '@/lib/wa-agents/types';
@@ -48,6 +49,7 @@ export const BotList: React.FC = () => {
   const del = useDeleteWaBot();
   const start = useStartWaBot();
   const { showToast } = useToast();
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [editor, setEditor] = useState<{ bot: BotRow | null } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<BotRow | null>(null);
   const [testBot, setTestBot] = useState<BotRow | null>(null);
@@ -152,11 +154,13 @@ export const BotList: React.FC = () => {
           Robôs enviam mensagens prontas em sequência quando um negócio é criado ou entra em uma etapa, e podem
           entregar a conversa a um agente de IA.
         </p>
-        <button type="button" className={BTN_PRIMARY} onClick={() => setEditor({ bot: null })}>
+        <button type="button" className={BTN_PRIMARY} onClick={() => setLibraryOpen(true)}>
           <Plus size={16} aria-hidden="true" />
           Novo robô
         </button>
       </div>
+
+      {libraryOpen && <BotTemplateLibrary onClose={() => setLibraryOpen(false)} onBlank={() => { setLibraryOpen(false); setEditor({ bot: null }); }} onCreated={bot => { setLibraryOpen(false); setEditor({ bot }); }} />}
 
       {/* Editor em tela cheia (portal): fica por cima da lista enquanto aberto */}
       {editor ? <BotEditor bot={editor.bot} onClose={() => setEditor(null)} /> : null}
@@ -171,7 +175,7 @@ export const BotList: React.FC = () => {
           title="Nenhum robô ainda"
           description="Monte o fluxo do zero no quadro visual: balões com mensagens, esperas e condições ligados por setas."
           action={
-            <button type="button" className={BTN_PRIMARY} onClick={() => setEditor({ bot: null })}>
+            <button type="button" className={BTN_PRIMARY} onClick={() => setLibraryOpen(true)}>
               <Plus size={16} aria-hidden="true" />
               Novo robô
             </button>

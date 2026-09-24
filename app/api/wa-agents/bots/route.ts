@@ -1,3 +1,4 @@
+import { botResourceError } from '@/lib/wa-agents/botTemplateResources';
 import { botTemplateConnectionError } from '@/lib/wa-agents/templateConnections';
 /**
  * /api/wa-agents/bots
@@ -68,6 +69,8 @@ export async function POST(req: Request) {
     if (input.connection_ids?.length) input.connection_ids = await dropDeletedConnections(auth.admin, input.connection_ids);
     const numeros = input.connection_ids?.length ? input.connection_ids : input.connection_id ? [input.connection_id] : [];
     if (input.enabled) {
+      const resourceError = await botResourceError(auth.admin, auth.user.organizationId, { ...input, steps }, true);
+      if (resourceError) return json({ error: resourceError }, 400);
       const templateError = await botTemplateConnectionError(auth.admin, auth.user.organizationId, steps, numeros);
       if (templateError) return json({ error: templateError }, 400);
     }

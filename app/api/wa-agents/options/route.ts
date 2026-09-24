@@ -25,7 +25,7 @@ type ProfileLike = {
   email?: string | null;
 };
 
-const PROFILE_COLUMNS = 'id, first_name, last_name, nickname, email';
+const PROFILE_COLUMNS = 'id, first_name, last_name, nickname, email, role';
 
 function displayName(p: ProfileLike): string {
   return (
@@ -73,13 +73,13 @@ export async function GET() {
 
   // Responsáveis: perfis da org + membros vinculados por user_organizations
   const ownersById = new Map<string, string>();
-  for (const p of profilesRes.data ?? []) ownersById.set(String(p.id), displayName(p));
+  for (const p of profilesRes.data ?? []) if (p.role !== 'super_admin') ownersById.set(String(p.id), displayName(p));
   const missing = (membersRes.data ?? [])
     .map(m => String(m.user_id ?? ''))
     .filter(uid => uid && !ownersById.has(uid));
   if (missing.length) {
     const { data: extra } = await admin.from('profiles').select(PROFILE_COLUMNS).in('id', missing);
-    for (const p of extra ?? []) ownersById.set(String(p.id), displayName(p));
+    for (const p of extra ?? []) if (p.role !== 'super_admin') ownersById.set(String(p.id), displayName(p));
   }
   const owners = [...ownersById.entries()]
     .map(([id, name]) => ({ id, name }))
