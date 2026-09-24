@@ -1,6 +1,10 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  Bot,
+  Sparkles,
+  Loader2,
+  CircleHelp,
   Phone,
   Mail,
   Calendar,
@@ -9,6 +13,8 @@ import {
   CheckCircle2,
   ArrowRightLeft,
 } from 'lucide-react';
+import { BoardAutomationsContext } from '@/features/boards/hooks/useBoardAutomations';
+import { automationLabel } from '@/lib/boards/automationState';
 import type { DealActivityStatus } from '@/features/boards/utils/dealActivityStatus';
 
 interface ActivityStatusIconProps {
@@ -46,6 +52,9 @@ export const ActivityStatusIcon: React.FC<ActivityStatusIconProps> = ({
   onRequestClose,
   onMoveToStage,
 }) => {
+  const automations = useContext(BoardAutomationsContext);
+  const automation = dealId ? automations?.data[dealId] : null;
+  const unknown = !!automations && !!dealId && automations.data[dealId] === undefined;
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -119,6 +128,10 @@ export const ActivityStatusIcon: React.FC<ActivityStatusIconProps> = ({
     };
   }, [isOpen, onRequestClose]);
 
+  useEffect(() => {
+    if (isOpen && (automation || unknown)) onRequestClose?.();
+  }, [isOpen, automation, unknown, onRequestClose]);
+
   // Simple outlined icons — the icon communicates the status, not the activity type.
   const indicator = (() => {
     switch (status.kind) {
@@ -181,6 +194,22 @@ export const ActivityStatusIcon: React.FC<ActivityStatusIconProps> = ({
         {status.daysOverdue}d
       </span>
     ) : null;
+
+  if (automation) {
+    const label = automationLabel(automation);
+    const Icon = automation.kind === 'bot' ? Bot : Sparkles;
+    return (
+      <span role="img" aria-label={label} title={label} className={`relative inline-flex shrink-0 p-0.5 ${automation.kind === 'bot' ? 'text-sky-600 dark:text-sky-400' : 'text-violet-600 dark:text-violet-400'}`}>
+        <Icon size={22} strokeWidth={2.25} aria-hidden="true" />
+        <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-current motion-safe:animate-pulse" />
+      </span>
+    );
+  }
+  if (unknown) {
+    const label = automations?.loading ? 'Consultando automações' : 'Estado da automação indisponível';
+    const Icon = automations?.loading ? Loader2 : CircleHelp;
+    return <span role="img" aria-label={label} title={label} className="inline-flex text-slate-400"><Icon size={20} aria-hidden="true" className={automations?.loading ? 'motion-safe:animate-spin' : ''} /></span>;
+  }
 
   return (
     <div className="relative flex items-center">

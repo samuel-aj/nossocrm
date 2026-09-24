@@ -1,3 +1,5 @@
+import { useBoardAutomations } from './useBoardAutomations';
+import { matchesAutomation } from '@/lib/boards/automationState';
 import { useBoardFilters } from '../filters/useBoardFilters';
 import { matchesPeriod, matchesProduct, periodRange } from '../filters/boardFilters';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
@@ -145,6 +147,7 @@ export const useBoardsController = () => {
   // and we'll naturally refetch deals for the corrected board.
   const dealsBoardId = activeBoardId || '';
   const { data: deals = [], isLoading: dealsLoading } = useDealsByBoard(dealsBoardId);
+  const automations = useBoardAutomations(organizationId, profile?.id, deals.map(d => d.id));
   const moveDealMutation = useMoveDeal();
 
   // Filter State (declared before AI context useEffect that uses them)
@@ -482,6 +485,7 @@ export const useBoardsController = () => {
 
     return deals.filter(l => {
       if (general.alertsOnly && !l.activeAlert) return false;
+      if (!matchesAutomation(automations.data[l.id], general.automation)) return false;
       const matchesSearch = buscaCasaDeal(l, searchTerm);
 
       const matchesOwner =
@@ -558,7 +562,7 @@ export const useBoardsController = () => {
       }
       return deal;
     });
-  }, [deals, searchTerm, ownerFilter, customFieldConditions, customFieldLogic, tagFilter, period, dateClock, general.alertsOnly, general.product, statusFilter, profile, inactiveLeadsEnabled, inactiveContactIds, buscaCasaDeal]);
+  }, [deals, automations.data, general.automation, searchTerm, ownerFilter, customFieldConditions, customFieldLogic, tagFilter, period, dateClock, general.alertsOnly, general.product, statusFilter, profile, inactiveLeadsEnabled, inactiveContactIds, buscaCasaDeal]);
 
   const filteredDeals = useMemo(() => matchingDeals.filter(d => !inactiveLeadsEnabled || !(d.inactiveAt || (d.contactId && inactiveContactIds.has(d.contactId)))), [matchingDeals, inactiveLeadsEnabled, inactiveContactIds]);
 
@@ -1260,6 +1264,7 @@ export const useBoardsController = () => {
     openActivityMenuId,
     setOpenActivityMenuId,
     filteredDeals,
+    automations,
     customFieldDefinitions,
     isLoading,
     handleDragStart,

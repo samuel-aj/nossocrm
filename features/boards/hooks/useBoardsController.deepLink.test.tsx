@@ -8,6 +8,7 @@ const mocks=vi.hoisted(()=>({
   boards:[{id:'other',name:'Outro funil',stages:[]},{id:'mpl',name:'BPC Autista (Google)',stages:[]}],
   linked:undefined as Deal|undefined,
 }));
+vi.mock('./useBoardAutomations',()=>({useBoardAutomations:()=>({data:{},loading:false,error:false})}));
 vi.mock('next/navigation',()=>({useSearchParams:()=>new URLSearchParams('deal=amanda'),useRouter:()=>({replace:mocks.replace})}));
 vi.mock('@/hooks/usePersistedState',()=>({usePersistedState:()=>useState('other')}));
 vi.mock('@/context/AuthContext',()=>({useAuth:()=>({profile:{id:'seller'},organizationId:'org'})}));

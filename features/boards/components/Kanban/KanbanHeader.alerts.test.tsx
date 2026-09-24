@@ -37,3 +37,18 @@ it('selects and clears Com alertas without retaining the merged filter or active
   expect(screen.queryByRole('button', { name: /Limpar/ })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Filtros' })).not.toHaveTextContent('1');
 });
+
+it('combines automation and alerts, then clears both and the count', async () => {
+  Element.prototype.scrollIntoView = vi.fn();
+  render(<Header />);
+  fireEvent.click(screen.getByRole('button', { name: 'Filtros' }));
+  const combo = screen.getByRole('combobox', { name: 'Filtrar por automação' });
+  fireEvent.keyDown(combo, { key: 'Enter' });
+  fireEvent.click(await screen.findByRole('option', { name: 'Robô em andamento' }));
+  expect(combo).toHaveTextContent('Robô em andamento');
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Com alertas' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Limpar (2)' }));
+  expect(combo).toHaveTextContent('Todas');
+  expect(screen.getByRole('checkbox', { name: 'Com alertas' })).not.toBeChecked();
+  expect(screen.queryByRole('button', { name: /Limpar/ })).not.toBeInTheDocument();
+});

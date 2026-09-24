@@ -14,6 +14,7 @@ export const periodSchema = z.object({
   .refine(v => v.preset !== 'custom' || (!!v.start && !!v.end && v.start <= v.end), 'Informe um intervalo válido.');
 export const generalSchema = z.object({
   alertsOnly: z.boolean().optional(),
+  automation: z.enum(['all', 'bot', 'ai', 'none']).optional(),
   status: z.enum(['open', 'won', 'lost', 'all']),
   owner: z.string().max(80), product: z.string().max(80), tag: z.string().max(200),
   logic: z.enum(['AND', 'OR']),
