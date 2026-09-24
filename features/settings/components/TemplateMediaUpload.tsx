@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { supabase } from '@/lib/supabase/client';
 import { TEMPLATE_MEDIA_BUCKET, TEMPLATE_MEDIA_RULES, validateTemplateMedia, type TemplateHeaderType } from '@/lib/templateMedia';
@@ -8,6 +8,11 @@ export function TemplateMediaUpload({ type, connectionId, templateId, onUploaded
   type: TemplateHeaderType; connectionId: string; templateId?: string;
   onUploaded: (id: string) => void; onBusy?: (busy: boolean) => void;
 }) {
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [preview, setPreview] = useState<string | null>(null);
@@ -26,9 +31,10 @@ export function TemplateMediaUpload({ type, connectionId, templateId, onUploaded
       const { error } = await supabase.storage.from(TEMPLATE_MEDIA_BUCKET).uploadToSignedUrl(prepared.path, prepared.token, file, { contentType: file.type });
       if (error) throw new Error('Falha ao enviar o arquivo. Tente novamente.');
       const completed = await post({ action: 'complete', connectionId, mediaId: prepared.mediaId, ...(templateId ? { templateId } : {}) });
-      setPreview(completed.previewUrl); setName(file.name); onUploaded(completed.mediaId);
+      setPreview(completed.previewUrl); setName(file.name);
+      if (mounted.current) onUploaded(completed.mediaId);
     } catch (e) { setError(e instanceof Error ? e.message : 'Falha no upload'); }
-    finally { setBusy(false); onBusy?.(false); }
+    finally { setBusy(false); if (mounted.current) onBusy?.(false); }
   }
   async function openPreview() {
     setError('');

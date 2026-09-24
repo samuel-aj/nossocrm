@@ -41,3 +41,21 @@ Com `PATH=/Users/samuelmacario/.local/node/bin:$PATH`:
 - https://supabase.com/changelog.md — índice revisado; grants explícitos acomodam exposição Data API; sem alterações relevantes no transporte escolhido.
 
 Skills usadas: Supabase e React best practices. Revisão final independente e verificação em staging pendentes do controlador.
+
+## Polish final após revisão — troca de conexão
+
+Ajuste pontual aprovado pelo controlador sobre `8c3ded3`:
+
+- Trocar o número limpa tipo do cabeçalho, referência da mídia, vínculo com conexão e estado ocupado; nome/corpo permanecem. Meta Cloud → Evolution volta a permitir criar modelo sem mídia. Outra conexão Meta Cloud exige selecionar novo arquivo.
+- Callback de upload desmontado é ignorado, evitando que um upload do número anterior sobrescreva o formulário após a troca.
+- Fixtures dos dois testes novos de rotas foram reformatadas para leitura; sem mudança de comportamento.
+- Regressões de interface: Meta Cloud → Evolution após upload concluído, troca para outra Meta Cloud durante upload e conclusão tardia de upload após desmontagem.
+
+Validação desta onda (`PATH=/Users/samuelmacario/.local/node/bin:$PATH`):
+
+- `npx vitest run features/settings/components/MessageTemplatesManager.media.test.tsx features/settings/components/TemplateMediaUpload.test.tsx app/api/message-templates/media/route.test.ts app/api/whatsapp/send/templateMedia.test.ts`: 4 arquivos, 16 testes passaram.
+- `npx eslint features/settings/components/MessageTemplatesManager.tsx features/settings/components/TemplateMediaUpload.tsx features/settings/components/MessageTemplatesManager.media.test.tsx features/settings/components/TemplateMediaUpload.test.tsx app/api/message-templates/media/route.test.ts app/api/whatsapp/send/templateMedia.test.ts`: passou, zero erros/warnings.
+- `npx tsc --noEmit --incremental false`: passou, zero erros.
+- `git diff --check`: passou.
+
+Nenhum build, servidor, banco, API Meta ou deploy acionado nesta onda. Revisão pontual final com o controlador.

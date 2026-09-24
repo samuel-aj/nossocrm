@@ -144,13 +144,27 @@ export function MessageTemplatesManager() {
   // (Modelo sem número = de uma conexão já excluída; some no Sincronizar.)
   const apiTemplates = templates.filter(t => t.type === 'whatsapp_api' && !!selConnEfetiva && t.connectionId === selConnEfetiva);
 
+  const resetMedia = () => {
+    setHeaderType('');
+    setMediaId(null);
+    setMediaBusy(false);
+    setMediaConnection('');
+  };
+
+  const selectConnection = (connectionId: string) => {
+    if (connectionId === selConnEfetiva) return;
+    resetMedia();
+    setSelConnId(connectionId);
+  };
+
   const resetForm = () => {
     setEditingId(null);
     setName('');
     setCategory('UTILITY');
     setLanguage('pt_BR');
     setBody('');
-    setButtons([]); setHeaderType(''); setMediaId(null); setMediaBusy(false);
+    setButtons([]);
+    resetMedia();
   };
 
   const switchTab = (next: TemplateType) => {
@@ -423,7 +437,7 @@ export function MessageTemplatesManager() {
                     <button
                       key={c.id}
                       type="button"
-                      onClick={() => setSelConnId(c.id)}
+                      onClick={() => selectConnection(c.id)}
                       title={c.profileName || undefined}
                       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-bold transition-colors ${
                         ativo
