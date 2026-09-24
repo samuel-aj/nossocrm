@@ -1,5 +1,7 @@
 -- Staging DEMO fixtures only. All changes, including queued work, are rolled back.
 BEGIN;
+-- Keep existing demo automations from racing with fixture runs inside this transaction.
+UPDATE public.wa_bots SET enabled=false WHERE organization_id='428e1830-2ff5-425a-b9b1-f9379897c2c6';
 CREATE TEMP TABLE crm_test_results(test text, passed boolean);
 GRANT ALL ON crm_test_results TO authenticated;
 UPDATE public.organization_settings SET lead_distribution_enabled=true, lead_distribution_manual=true
