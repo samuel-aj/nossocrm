@@ -44,9 +44,9 @@ export function BotTemplateLibrary({ onClose, onCreated, onBlank }: { onClose: (
   async function createCopy() {
     if (!selected) return; setBusy(true); setError('');
     try {
-      const { bot } = await waAgentsFetch<{ bot: BotRow }>('/api/wa-agents/bot-templates', { method: 'POST', body: { action: 'import', ...(selected.id ? { templateId: selected.id } : { snapshot: selected.snapshot }), bindings, name } });
+      const { bot, pending } = await waAgentsFetch<{ bot: BotRow; pending: string[] }>('/api/wa-agents/bot-templates', { method: 'POST', body: { action: 'import', ...(selected.id ? { templateId: selected.id } : { snapshot: selected.snapshot }), bindings, name } });
       qc.setQueryData<BotRow[]>([WA_AGENTS_QUERY_KEY, 'bots'], current => [...(current ?? []), bot]);
-      showToast('Cópia criada desligada. Revise os vínculos e webhooks antes de ligar.', 'success'); onCreated(bot);
+      showToast(pending.length ? `Cópia criada desligada. Pendências: ${pending.join('; ')}` : 'Cópia criada desligada. Revise os vínculos e webhooks antes de ligar.', pending.length ? 'info' : 'success'); onCreated(bot);
     } catch (err) { setError(errorMessage(err, 'Falha ao criar cópia')); } finally { setBusy(false); }
   }
   async function publish(id: string, published: boolean) {

@@ -1,5 +1,6 @@
 import { botResourceReferences, isAbstractReference } from '@/lib/wa-agents/botTemplateDependencies';
 import { z } from 'zod';
+import { loadBotTemplateRoutingProblems } from '@/lib/wa-agents/templateConnections';
 import { json } from '@/lib/whatsapp/api';
 import { BotInputSchema, toBotPublic, type BotRow } from '@/lib/wa-agents/types';
 import { applyBotTemplate, createBotTemplate, parseBotTemplate, pendingBotBindings } from '@/lib/wa-agents/botTemplates';
@@ -54,8 +55,9 @@ export async function POST(req: Request) {
     const resourceError = await botResourceError(auth.admin, auth.user.organizationId, input, false);
     if (resourceError) return json({ error: resourceError }, 400);
     if (botResourceReferences(input).some(r => r.kind === 'connection' && isAbstractReference(r.value))) return json({ error: 'Reassocie todos os números antes de criar a cópia' }, 400);
+    const pending = [...pendingBotBindings(input), ...await loadBotTemplateRoutingProblems(auth.admin, auth.user.organizationId, input.steps)];
     const { data, error } = await auth.admin.from('wa_bots').insert({ ...input, enabled: false, organization_id: auth.user.organizationId, created_by: auth.user.id }).select('*').single();
     if (error) throw new Error(error.message);
-    return json({ bot: toBotPublic(data as BotRow), pending: pendingBotBindings(input) }, 201);
+    return json({ bot: toBotPublic(data as BotRow), pending }, 201);
   } catch (err) { return json({ error: err instanceof z.ZodError ? 'Formato de modelo inválido' : err instanceof Error ? err.message : 'Falha ao processar modelo' }, 400); }
 }

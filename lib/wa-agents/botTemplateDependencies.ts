@@ -23,7 +23,7 @@ export function mapBotResources(bot: BotInput, replace: (ref: ResourceReference)
       if (key === 'key' && obj.field === 'custom_field') kind = 'custom_field';
       if (key === 'url' && obj.type === 'webhook') kind = 'webhook';
       if (key === 'connection_ids' && Array.isArray(item)) return [key, item.map((id, i) => replace({ kind: 'connection', value: String(id), location: `${location}.${i}` }))];
-      return [key, kind && typeof item === 'string' && item ? replace({ kind, value: item, location }) : visit(item, location)];
+      return [key, kind && typeof item === 'string' && item.trim() ? replace({ kind, value: item, location }) : visit(item, location)];
     }));
   }
   return visit(bot, 'bot') as BotInput;
@@ -39,4 +39,30 @@ export function abstractReference(index: number, kind: DependencyKind): string {
 }
 export function isAbstractReference(value: string): boolean {
   return /^eeeeeeee-eeee-4eee-8eee-\d{12}$/.test(value) || value.startsWith('https://configure.invalid/');
+}
+
+/** A missing required slot is still pending even when no abstract reference remains. */
+export function missingBotResourceSlots(bot: BotInput): string[] {
+  const pending: string[] = [];
+  for (const step of bot.steps) {
+    if (step.type === 'update_lead' || step.type === 'create_lead') {
+      step.changes.forEach((change, index) => {
+        const location = `passo "${step.id}", alteração ${index + 1}`;
+        if (change.field === 'owner_id' && change.mode !== 'clear' && !change.value?.trim()) {
+          pending.push(`Responsável: ${location} está sem responsável`);
+        }
+        if (change.field === 'custom_field' && !change.key?.trim()) {
+          pending.push(`Campo personalizado: ${location} está sem campo`);
+        }
+      });
+    }
+    if (step.type === 'condition') {
+      step.rules.forEach((rule, ruleIndex) => rule.clauses.forEach((clause, clauseIndex) => {
+        if (clause.field === 'custom_field' && !clause.key?.trim()) {
+          pending.push(`Campo personalizado: passo "${step.id}", regra ${ruleIndex + 1}, condição ${clauseIndex + 1} está sem campo`);
+        }
+      }));
+    }
+  }
+  return pending;
 }

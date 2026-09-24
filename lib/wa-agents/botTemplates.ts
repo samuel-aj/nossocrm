@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { BotInputSchema, type BotInput } from './types';
-import { abstractReference, botResourceReferences, DEPENDENCY_KINDS, DEPENDENCY_LABELS, isAbstractReference, mapBotResources } from './botTemplateDependencies';
+import { abstractReference, botResourceReferences, DEPENDENCY_KINDS, DEPENDENCY_LABELS, isAbstractReference, mapBotResources, missingBotResourceSlots } from './botTemplateDependencies';
 
 export const MAX_BOT_TEMPLATE_BYTES = 1_048_576;
 const TemplateSchema = z.object({
@@ -92,6 +92,7 @@ export function applyBotTemplate(raw: unknown, bindings: Record<string, string>)
 }
 export function pendingBotBindings(bot: BotInput): string[] {
   const pending = [...new Set(botResourceReferences(bot).filter(r => isAbstractReference(r.value)).map(r => `${DEPENDENCY_LABELS[r.kind]}: ${r.location.replace(/^bot\./, '')}`))];
+  pending.push(...missingBotResourceSlots(bot));
   if (JSON.stringify(bot).includes('[URL removida')) pending.push('URL removida: revise os textos do fluxo');
   return pending;
 }

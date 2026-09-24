@@ -30,6 +30,7 @@ import { ArrowLeft, Loader2, Play, Save } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
 import { BotTemplateActions } from './templates/BotTemplateActions';
 import { pendingBotBindings } from '@/lib/wa-agents/botTemplates';
+import { botTemplateRoutingProblems } from '@/lib/wa-agents/templateConnections';
 import { Modal } from '@/components/ui/Modal';
 import { FocusTrap } from '@/lib/a11y';
 import { useTheme } from '@/context/ThemeContext';
@@ -750,7 +751,10 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
   );
 
   // Validação a cada mudança: marca balões e blocos com problema no próprio quadro.
-  const pendingBindings = useMemo(() => pendingBotBindings(flowToBot(nodes, edges, header)), [nodes, edges, header]);
+  const pendingBindings = useMemo(() => {
+    const input = flowToBot(nodes, edges, header);
+    return [...pendingBotBindings(input), ...botTemplateRoutingProblems(input.steps, templates ?? [])];
+  }, [nodes, edges, header, templates]);
   const validation = useMemo(() => validateFlow(nodes, edges, header, templates), [nodes, edges, header, templates]);
   const issues = useMemo(() => groupIssues(validation.errors, validation.warnings), [validation]);
   const connected = useMemo(
