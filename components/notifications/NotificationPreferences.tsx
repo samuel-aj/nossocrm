@@ -42,7 +42,12 @@ export function NotificationPreferences({settings,onClose,onSave,onTest}:{settin
         {permission==='denied' && <p className="text-xs text-amber-600">Notificações bloqueadas neste navegador. Libere nas configurações do site para usar os avisos no computador.</p>}
         {permission==='unsupported' && <p className="text-xs text-amber-600">Este navegador não oferece avisos no computador. Os avisos no CRM continuam disponíveis.</p>}
         {draft.desktop && permission==='default' && <button className={button} onClick={()=>void desktop(true)}>Permitir neste navegador</button>}
-        <FormCheckbox label="Reproduzir som" checked={draft.sound} onChange={sound=>{set({sound});if(sound)void unlockNotificationSound().then(()=>playNotificationSound()).catch(()=>setError('Clique em Testar aviso para liberar o som.'));}}>Reproduzir som</FormCheckbox>
+        <FormCheckbox label="Reproduzir som" checked={draft.sound} onChange={sound=>{set({sound});if(sound)void unlockNotificationSound().then(()=>playNotificationSound({soundType:draft.soundType,volume:draft.volume})).catch(()=>setError('Clique em Testar aviso para liberar o som.'));}}>Reproduzir som</FormCheckbox>
+        <div className="space-y-2">
+          <FormSelect label="Tipo de som" value={draft.soundType} onChange={soundType=>set({soundType:soundType as Preferences['soundType']})} options={[{value:'current',label:'Atual'},{value:'chime',label:'Campainha'},{value:'alert',label:'Alerta'}]}/>
+          <label htmlFor="notification-volume" className="flex justify-between text-sm"><span>Volume do aviso</span><output htmlFor="notification-volume">{draft.volume}%</output></label>
+          <input id="notification-volume" type="range" min="0" max="100" step="1" value={draft.volume} onChange={event=>set({volume:Number(event.target.value)})} className="w-full accent-primary-600" />
+        </div>
         <p className="text-xs text-slate-500">Após abrir o CRM, clique na página para liberar o som. Suspensão do computador ou da aba pode atrasar avisos.</p>
         <button className={button} onClick={()=>{if(draft.sound)void unlockNotificationSound().then(()=>onTest(draft)).catch(()=>setError('Não foi possível liberar o som neste navegador.'));else onTest(draft);}}>Testar aviso</button>
       </section>

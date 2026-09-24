@@ -33,6 +33,7 @@ beforeEach(()=>{
 });
 describe('personal notification security and audiences',()=>{
   it('defaults off and rejects arbitrary keys',async()=>{tables.crm_notification_preferences=[];expect((await context(auth)).preferences).toEqual(DEFAULT_PREFERENCES);expect(PreferencesSchema.safeParse({...DEFAULT_PREFERENCES,user_id:'other'}).success).toBe(false);expect(await notices()).toEqual([]);});
+  it('keeps saved subscriptions when sound fields are missing',async()=>{const preferences=tables.crm_notification_preferences[0].preferences;delete preferences.soundType;delete preferences.volume;expect((await context(auth)).preferences).toMatchObject({messages:true,leads:true,scope:'all',soundType:'current',volume:40});});
   it('starts with a baseline without replaying old messages',async()=>{expect((await feed(auth,null,null,null)).events).toEqual([]);});
   it('links to the exact conversation and scopes every database read',async()=>{expect((await notices())[0].href).toBe('/chats?conversation=c');expect(queries.every(q=>q.filters.some(([k,v])=>k==='organization_id' && v===org))).toBe(true);expect(queries.find(q=>q.table==='crm_notification_preferences')?.filters).toContainEqual(['user_id',user]);});
   it('own scope excludes other owners',async()=>{tables.crm_notification_preferences[0].preferences={...DEFAULT_PREFERENCES,messages:true,scope:'own'};tables.deals[0].owner_id='other';expect(await notices()).toEqual([]);});
