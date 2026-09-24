@@ -497,7 +497,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           }`}
         aria-label="Menu principal"
       >
-        <div className="h-16 flex items-center border-b border-[var(--color-border-subtle)] px-5">
+        <div className="min-h-16 shrink-0 py-3 flex items-center border-b border-[var(--color-border-subtle)] px-5">
           {/* Card da org; para super admin vira o seletor de organizações */}
           <OrgSwitcher
             collapsed={sidebarCollapsed}
