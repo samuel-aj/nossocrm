@@ -6,6 +6,7 @@ import { Check, ChevronsUpDown, Search, Loader2 } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 import { pinTabOrg } from '@/lib/tabOrg';
 import { supabase } from '@/lib/supabase/client';
+import { MainOrganizationShortcut } from './MainOrganizationShortcut';
 
 interface OrgSummary {
   id: string;
@@ -167,6 +168,8 @@ export function OrgSwitcher({
       >
         {card}
       </button>
+
+      <MainOrganizationShortcut enabled={isSuperAdmin} currentOrgId={currentOrgId} collapsed={collapsed} busy={!!switchingId} onSelect={handleSwitch} />
 
       {open && (
         <div className="absolute left-0 top-full mt-2 z-[80] w-64 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-xl overflow-hidden">
