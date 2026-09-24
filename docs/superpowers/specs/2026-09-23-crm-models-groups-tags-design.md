@@ -1,0 +1,17 @@
+# Modelos, grupos e etiquetas — direção aprovada em 23/09/2026
+Samuel aprovou o desenho na conversa com “pode seguir”. Entregar no staging; produção só após nova validação.
+
+## Modelos de robôs
+Novo robô: do zero, usar modelo, importar JSON. Editor: salvar como modelo e exportar. Biblioteca privada por organização e modelos oficiais globais, criados/publicados/despublicados somente pelo superadmin. Admins podem salvar seus modelos privados e importar/exportar. Modelos são snapshots; aplicar cria cópia independente DESLIGADA. Preservar passos, conexões entre blocos e layout. Remapear dependências (números, boards/etapas, modelos de mensagens, agentes, outros robôs, responsáveis, campos personalizados); nenhuma referência de outra organização pode ser executada. Não transportar segredos de webhooks nem URLs assinadas/credenciais como configuração pronta. Mostrar campos pendentes e bloquear ativação enquanto faltarem vínculos. Exportar formato versionado, validar tamanho/schema e referências no servidor. Alterar modelo não altera robôs existentes. Modelos oficiais podem ser usados por clientes sem lhes dar acesso à organização de origem.
+
+## Retorno à conta principal
+Superadmin fora de Anúncio Jurídico vê um botão direto ao lado/abaixo do seletor. Um clique usa a rota existente com auditoria, fixa somente a aba atual e vai ao dashboard. Destino configurado por UUID estável em platform_config (main_organization_id), nunca por nome mutável. Sem botão para outros papéis ou se já estiver na AJ.
+
+## Grupos
+Título clicável abre painel de participantes com busca por nome/telefone, indicador de administrador e Abrir conversa. Abrir conversa usa o número conectado do grupo; não envia mensagem nem cria lead. Digitar @ abre sugestões filtradas e seleção por mouse/teclado; o envio leva identificadores reais para o provedor. Manter distinção entre JID do participante, LID e telefone, sem inventar telefone a partir de LID. Validar todos os membros no servidor contra o grupo e organização; se provedor não oferecer recurso, mostrar indisponibilidade clara. Nenhum envio real nos testes.
+
+## Etiquetas compartilhadas
+Um catálogo por organização para tags dos leads e etiquetas do chat, preservando nomes/cores. Sincronização bidirecional somente entre conversa e seu deal_id vinculado válido na mesma org; outros leads do mesmo contato não são alterados. Grupos/sem lead mantêm etiquetas próprias. Ao vincular lead unir marcações preexistentes; novos vínculos não apagam tags do lead anterior. Adicionar/remover de qualquer origem (UI, robô, integração) converge em ambos os lados, inclusive múltiplas conversas vinculadas ao mesmo lead. Alterações concorrentes e exclusão/renomeação de catálogo não devem ressuscitar etiquetas removidas. Migração idempotente une equivalentes por nome normalizado (trim/case), sem misturar organizações. Manter APIs existentes compatíveis e cache canônico do lead.
+
+## Verificação e limites
+Next.js16/React19/TypeScript5, padrões visuais existentes, nenhum pacote novo salvo necessidade comprovada. Todas as consultas/mutações respeitam organização e permissões. Cobrir isolamento de organizações, remapeamento/modelos independentes, menções reais e sincronização inclusiva/exclusiva; build, tipos, lint alterado, testes focados e integração em staging. Falhas gerais preexistentes: 11 já reproduzidas na main anterior. Não enviar mensagens reais ou habilitar robôs dos clientes nos testes.
