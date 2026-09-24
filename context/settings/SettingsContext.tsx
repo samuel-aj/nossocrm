@@ -440,7 +440,9 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
       void migratedTags;
     })();
 
-    return () => { cancelled = true; };
+    const reloadTags = () => { void loadTags(); };
+    window.addEventListener('crm:labels-changed', reloadTags);
+    return () => { cancelled = true; window.removeEventListener('crm:labels-changed', reloadTags); };
   }, [profile]);
 
   // Lazy-load AI feature flags only when needed (settings/ai or global AI UI).

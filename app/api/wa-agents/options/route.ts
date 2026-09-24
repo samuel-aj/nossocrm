@@ -55,7 +55,7 @@ export async function GET() {
       .select('id, board_id, label, name, order')
       .eq('organization_id', orgId)
       .order('order', { ascending: true }),
-    admin.from('tags').select('name').eq('organization_id', orgId).order('name', { ascending: true }),
+    admin.from('wa_labels').select('name').eq('organization_id', orgId).order('name', { ascending: true }),
     admin.from('profiles').select(PROFILE_COLUMNS).eq('organization_id', orgId).limit(300),
     admin.from('user_organizations').select('user_id').eq('organization_id', orgId).limit(300),
     admin.from('products').select('id, name, active').eq('organization_id', orgId).order('name', { ascending: true }).limit(300),

@@ -9,7 +9,7 @@
  */
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
-import { isLabelColor, isTabelaAusente, normalizeLabelName } from '@/lib/whatsapp/labels';
+import { isLabelColor, isTabelaAusente, normalizeLabelName, MAX_LABEL_NAME } from '@/lib/whatsapp/labels';
 
 export const runtime = 'nodejs';
 
@@ -38,6 +38,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if ('name' in body) {
     const name = normalizeLabelName(body.name);
+    if (name.length > MAX_LABEL_NAME) return json({ error: `Máximo de ${MAX_LABEL_NAME} caracteres` }, 400);
     if (!name) return json({ error: 'Dê um nome para a etiqueta' }, 400);
     patch.name = name;
   }

@@ -14,6 +14,7 @@ import { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supab
 import { supabase } from '@/lib/supabase';
 import { dealsService } from '@/lib/supabase/deals';
 import { contactsService } from '@/lib/supabase/contacts';
+import { refreshLinkedLabels } from './labelCache';
 import { dealPatch } from './dealPayload';
 import { queryKeys, DEALS_VIEW_KEY } from '@/lib/query/queryKeys';
 import { readTabOrg } from '@/lib/tabOrg';
@@ -80,7 +81,9 @@ type RealtimeTable =
   | 'activities'
   | 'boards'
   | 'board_stages'
-  | 'crm_companies';
+  | 'crm_companies'
+  | 'wa_labels'
+  | 'wa_conversations';
 
 // Lazy getter for query keys mapping - avoids initialization issues in tests
 const getTableQueryKeys = (table: RealtimeTable): readonly (readonly unknown[])[] => {
@@ -98,6 +101,8 @@ const getTableQueryKeys = (table: RealtimeTable): readonly (readonly unknown[])[
     boards: [queryKeys.boards.all],
     board_stages: [queryKeys.boards.all], // stages invalidate boards
     crm_companies: [queryKeys.companies.all],
+    wa_labels: [['waLabels'], ['waConversations'], queryKeys.deals.all],
+    wa_conversations: [['waConversations']],
   };
   return mapping[table];
 };
@@ -186,6 +191,19 @@ export function useRealtimeSync(
           const evOrg = typeof evRow?.organization_id === 'string' ? (evRow.organization_id as string) : null;
           const tabOrgId = readTabOrg()?.id ?? null;
           if (evOrg && tabOrgId && evOrg !== tabOrgId) return;
+
+          if (table === 'wa_labels') {
+            void refreshLinkedLabels(queryClient, true);
+            return;
+          }
+          if (table === 'wa_conversations') {
+            // Message previews also update this table; linked label changes emit their own deals event.
+            void queryClient.invalidateQueries({ queryKey: ['waConversations'] });
+            return;
+          }
+          if (table === 'deals') {
+            void queryClient.invalidateQueries({ queryKey: ['waConversations'] });
+          }
 
           // Call custom callback (if provided)
           onchangeRef.current?.(payload);
@@ -586,6 +604,14 @@ export function useRealtimeSync(
                 }
               );
 
+              const mergeRawDeal = (old: Deal): Deal => {
+                const patch = dealPatch(newData);
+                if (old.updatedAt && patch.updatedAt && Date.parse(patch.updatedAt) < Date.parse(old.updatedAt) - 2000) return old;
+                return { ...old, ...patch };
+              };
+              queryClient.setQueryData<Deal[]>(queryKeys.deals.lists(), old => old?.map(d => d.id === dealId ? mergeRawDeal(d) : d));
+              queryClient.setQueryData<Deal>(queryKeys.deals.detail(dealId), old => old ? mergeRawDeal(old) : old);
+
               // Dashboard stats are derived from deals — invalidate so the
               // next mount recalculates. Only refetches if it's mounted.
               queryClient.invalidateQueries({
@@ -681,7 +707,7 @@ export function useRealtimeSync(
  * Ideal for the main app layout
  */
 export function useRealtimeSyncAll(options: UseRealtimeSyncOptions = {}) {
-  return useRealtimeSync(['deals', 'deal_items', 'deal_notes', 'contacts', 'activities', 'boards', 'board_stages', 'crm_companies'], options);
+  return useRealtimeSync(['deals', 'deal_items', 'deal_notes', 'contacts', 'activities', 'boards', 'board_stages', 'crm_companies', 'wa_labels', 'wa_conversations'], options);
 }
 
 /**

@@ -29,20 +29,18 @@ export interface WaLabel {
   color: LabelColor;
 }
 
-export const MAX_LABEL_NAME = 40;
-/** Teto por organização: lista maior que isso vira rolagem infinita na tela. */
-export const MAX_LABELS_PER_ORG = 50;
-/** Teto por conversa, como no WhatsApp Business. */
-export const MAX_LABELS_PER_CHAT = 20;
+export const MAX_LABEL_NAME = 500;
+/** Safety limit for interactive mutations; imported database arrays are never truncated. */
+export const MAX_LABELS_PER_CHAT = 500;
 
 export function isLabelColor(value: unknown): value is LabelColor {
   return typeof value === 'string' && (LABEL_COLORS as readonly string[]).includes(value);
 }
 
-/** Nome utilizável: sem espaço nas pontas e dentro do limite. '' = inválido. */
+/** Normalize without truncating legacy names; API callers validate new input size. */
 export function normalizeLabelName(raw: unknown): string {
   if (typeof raw !== 'string') return '';
-  return raw.trim().slice(0, MAX_LABEL_NAME);
+  return raw.trim();
 }
 
 /** Chave de comparação: dois nomes que só diferem em caixa são o mesmo. */

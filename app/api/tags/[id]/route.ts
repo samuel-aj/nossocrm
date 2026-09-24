@@ -3,12 +3,13 @@ import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { isValidUUID } from '@/lib/supabase/utils';
+import { catalogColor, legacyTagColor } from '@/lib/whatsapp/labelCompatibility';
 import { withTabOrg } from '@/lib/supabase/tabOrgScope';
 
 export const runtime = 'nodejs';
 
 const UpdateSchema = z.object({
-  name: z.string().min(1).max(80).optional(),
+  name: z.string().trim().min(1).max(500).optional(),
   color: z.string().min(1).max(40).optional(),
 }).strict();
 
@@ -47,8 +48,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 
   const sb = createStaticAdminClient();
   const { data, error } = await sb
-    .from('tags')
-    .update(parsed.data)
+    .from('wa_labels')
+    .update({ ...parsed.data, ...(parsed.data.color ? { color: catalogColor(parsed.data.color) } : {}) })
     .eq('id', id)
     .eq('organization_id', auth.profile.organization_id)
     .select('id,name,color,created_at')
@@ -56,7 +57,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  return NextResponse.json({ data });
+  return NextResponse.json({ data: { ...data, color: legacyTagColor(data.color) } });
 }
 
 export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -70,7 +71,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
 
   const sb = createStaticAdminClient();
   const { error, count } = await sb
-    .from('tags')
+    .from('wa_labels')
     .delete({ count: 'exact' })
     .eq('id', id)
     .eq('organization_id', auth.profile.organization_id);

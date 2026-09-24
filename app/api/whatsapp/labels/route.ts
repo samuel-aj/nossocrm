@@ -15,7 +15,7 @@ import {
   isLabelColor,
   isTabelaAusente,
   likePattern,
-  MAX_LABELS_PER_ORG,
+  MAX_LABEL_NAME,
   normalizeLabelName,
 } from '@/lib/whatsapp/labels';
 
@@ -60,21 +60,11 @@ export async function POST(req: Request) {
     return json({ error: 'JSON inválido' }, 400);
   }
 
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return json({ error: 'JSON inválido' }, 400);
   const name = normalizeLabelName(body.name);
+  if (name.length > MAX_LABEL_NAME) return json({ error: `Máximo de ${MAX_LABEL_NAME} caracteres` }, 400);
   if (!name) return json({ error: 'Dê um nome para a etiqueta' }, 400);
   const color = isLabelColor(body.color) ? body.color : DEFAULT_LABEL_COLOR;
-
-  const { count, error: erroCount } = await auth.admin
-    .from('wa_labels')
-    .select('id', { count: 'exact', head: true })
-    .eq('organization_id', orgId);
-  if (erroCount) {
-    if (isTabelaAusente(erroCount)) return json({ error: ERRO_MIGRACAO }, 503);
-    return json({ error: erroCount.message }, 500);
-  }
-  if ((count ?? 0) >= MAX_LABELS_PER_ORG) {
-    return json({ error: `Limite de ${MAX_LABELS_PER_ORG} etiquetas por organização` }, 400);
-  }
 
   const { data, error } = await auth.admin
     .from('wa_labels')

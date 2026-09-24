@@ -1,5 +1,7 @@
 'use client';
 
+import { labelDelta, linkedDeal } from '@/lib/whatsapp/labelCompatibility';
+import { refreshLinkedLabels } from '@/lib/realtime/labelCache';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -16,6 +18,7 @@ import {
   LABEL_DOT_CLASS,
   DEFAULT_LABEL_COLOR,
   MAX_LABELS_PER_CHAT,
+  MAX_LABEL_NAME,
   type LabelColor,
   type WaLabel,
 } from '@/lib/whatsapp/labels';
@@ -681,7 +684,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
   // Salva as etiquetas da conversa aberta e atualiza a lista. O responsável
   // NÃO passa por aqui: ele vem do lead e não se marca no chat.
   const [savingConv, setSavingConv] = useState(false);
-  const patchConversation = async (conversationId: string, patch: { labelIds?: string[] }) => {
+  const patchConversation = async (conversationId: string, patch: { addLabelIds?: string[]; removeLabelIds?: string[]; dealId?: string | null }) => {
     setSavingConv(true);
     try {
       const res = await fetch(`/api/whatsapp/conversations/${conversationId}`, {
@@ -692,9 +695,11 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
       });
       const j = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(j.error || `Falha (HTTP ${res.status})`);
-      await queryClient.invalidateQueries({ queryKey: ['waConversations'] });
+      await refreshLinkedLabels(queryClient);
+      return true;
     } catch (e) {
       addToast(`Não deu pra salvar: ${(e as Error).message}`, 'error');
+      return false;
     } finally {
       setSavingConv(false);
     }
@@ -712,7 +717,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
   const selectedConv = useMemo(() => {
     if (!selected) return null;
     const rows = convsQ.data?.data ?? [];
-    if (selected.isGroup) return rows.find(r => r.id === selected.conversationId) ?? null;
+    if (selected.conversationId) return rows.find(r => r.id === selected.conversationId) ?? null;
     const chave = phoneKey(selected.phone);
     return (
       rows.find(
@@ -731,17 +736,18 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
     [selectedLabelIds, labelById]
   );
   /** O que a barra mostra: o dono do lead daquele contato, só leitura. */
-  const selectedOwnerEfetivo = selected ? responsavelEfetivo({ contactId: selected.contactId }) : null;
   // Diálogo "Etiquetar conversa": o rascunho fica aqui e só vai pro banco no
   // Salvar — no WhatsApp Business você marca várias e confirma de uma vez.
   const [labelDialogOpen, setLabelDialogOpen] = useState(false);
   const [labelDraft, setLabelDraft] = useState<string[]>([]);
+  const [labelSnapshot, setLabelSnapshot] = useState<string[]>([]);
   const [novaLabelNome, setNovaLabelNome] = useState('');
   const [novaLabelCor, setNovaLabelCor] = useState<LabelColor>(DEFAULT_LABEL_COLOR);
   const [criandoLabel, setCriandoLabel] = useState(false);
 
   const abrirDialogoEtiquetas = useCallback(() => {
     setLabelDraft(selectedLabelIds);
+    setLabelSnapshot(selectedLabelIds);
     setNovaLabelNome('');
     setNovaLabelCor(DEFAULT_LABEL_COLOR);
     setLabelDialogOpen(true);
@@ -761,7 +767,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
       });
       const j = (await res.json().catch(() => ({}))) as { label?: WaLabel; error?: string };
       if (!res.ok || !j.label) throw new Error(j.error || `Falha (HTTP ${res.status})`);
-      await queryClient.invalidateQueries({ queryKey: ['waLabels'] });
+      await refreshLinkedLabels(queryClient, true);
       setLabelDraft(atual => (atual.includes(j.label!.id) ? atual : [...atual, j.label!.id]));
       setNovaLabelNome('');
       setNovaLabelCor(DEFAULT_LABEL_COLOR);
@@ -812,7 +818,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
       });
       const j = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(j.error || `Falha (HTTP ${res.status})`);
-      await queryClient.invalidateQueries({ queryKey: ['waLabels'] });
+      await refreshLinkedLabels(queryClient, true);
       setEditandoLabelId(null);
     } catch (e) {
       addToast(`Não deu pra salvar a etiqueta: ${(e as Error).message}`, 'error');
@@ -824,7 +830,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
   const apagarEtiqueta = useCallback(
     async (l: WaLabel) => {
       if (salvandoLabel) return;
-      if (!window.confirm(`Apagar a etiqueta "${l.name}"? Ela sai de todas as conversas.`)) return;
+      if (!window.confirm(`Apagar a etiqueta "${l.name}"? Ela sai de todos os leads e conversas.`)) return;
       setSalvandoLabel(true);
       try {
         const res = await fetch(`/api/whatsapp/labels/${l.id}`, {
@@ -834,11 +840,9 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
         const j = (await res.json().catch(() => ({}))) as { error?: string };
         if (!res.ok) throw new Error(j.error || `Falha (HTTP ${res.status})`);
         // O gatilho do banco tira o id das conversas; a lista precisa reler.
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ['waLabels'] }),
-          queryClient.invalidateQueries({ queryKey: ['waConversations'] }),
-        ]);
+        await refreshLinkedLabels(queryClient, true);
         setLabelDraft(atual => atual.filter(x => x !== l.id));
+        setLabelSnapshot(atual => atual.filter(x => x !== l.id));
         setTagFilter(atual => (atual === l.id ? 'all' : atual));
         setEditandoLabelId(atual => (atual === l.id ? null : atual));
       } catch (e) {
@@ -850,26 +854,11 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
     [salvandoLabel, queryClient, addToast]
   );
 
-  // Lead do contato selecionado: prefere um deal ABERTO (nem ganho nem
-  // perdido); entre vários, o mais recente. null = "Criar lead" disponível.
-  // Vários negócios do mesmo contato: a barra mostra QUAL está em foco e deixa
-  // trocar (nada muda no negócio errado por escolha automática).
-  const contactDeals = useMemo(() => {
-    if (!selected?.contactId) return [];
-    const list = deals.filter(d => d.contactId === selected.contactId);
-    const open = list.filter(d => !d.isWon && !d.isLost);
-    const pool = open.length ? open : list;
-    return pool.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-  }, [deals, selected?.contactId]);
-  const [pickedDealId, setPickedDealId] = useState<string | null>(null);
-  useEffect(() => {
-    setPickedDealId(null);
-  }, [selected?.contactId]);
-  const selectedDeal = useMemo(
-    () => contactDeals.find(d => d.id === pickedDealId) ?? contactDeals[0] ?? null,
-    [contactDeals, pickedDealId]
-  );
-
+  // The persisted link is authoritative. Other contact leads are explicit options only.
+  const contactDeals = useMemo(() => !selected?.contactId ? [] : deals.filter(d => d.contactId === selected.contactId)
+    .slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), [deals, selected?.contactId]);
+  const selectedDeal = linkedDeal(deals, selectedConv?.deal_id, !!selected?.isGroup);
+  const selectedOwnerEfetivo = selectedDeal?.ownerId ?? null;
 
   const selectedDealBoard = useMemo(
     () => (selectedDeal ? boards.find(b => b.id === selectedDeal.boardId) ?? null : null),
@@ -1055,6 +1044,11 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
         isLost: false,
       } as Omit<Deal, 'id' | 'createdAt'>);
       if (created) {
+        if (selectedConvId && !(await patchConversation(selectedConvId, { dealId: created.id }))) {
+          addToast('Lead criado, mas o vínculo não foi salvo. Selecione-o na conversa para tentar novamente.', 'error');
+          setLeadModalOpen(false);
+          return;
+        }
         const b = boards.find(x => x.id === leadBoardId);
         addToast(`Lead criado em "${b?.name ?? 'board'}"!`, 'success');
         setLeadModalOpen(false);
@@ -1731,30 +1725,25 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                     . Grupos não viram contato nem lead.
                   </span>
                 </span>
-              ) : selectedDeal ? (
+              ) : selectedConvId && (contactDeals.length > 0 || selectedDeal) ? (
                 <span className="flex items-center gap-2 min-w-0 text-xs text-slate-600 dark:text-slate-300">
                   <KanbanSquare size={14} className="text-primary-500 shrink-0" aria-hidden="true" />
-                  {contactDeals.length > 1 && (
-                    <select
-                      value={selectedDeal.id}
-                      onChange={e => setPickedDealId(e.target.value)}
-                      aria-label="Negócio deste contato que será alterado"
-                      title={`Este contato tem ${contactDeals.length} negócios${contactDeals.some(d => !d.isWon && !d.isLost) ? ' abertos' : ''}. Escolha qual alterar.`}
-                      className="max-w-[160px] truncate rounded-lg border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-1 text-xs font-semibold text-amber-800 dark:text-amber-200 outline-none focus:ring-2 focus:ring-primary-500"
-                    >
-                      {contactDeals.map(d => (
-                        <option key={d.id} value={d.id}>
-                          {d.title}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  <span className="min-w-0 w-[260px] max-w-full">
-                    <DealStageControl deal={selectedDeal} size="sm" />
-                  </span>
+                  <select
+                    value={selectedDeal?.id ?? ''}
+                    disabled={savingConv}
+                    onChange={e => void patchConversation(selectedConvId, { dealId: e.target.value || null })}
+                    aria-label="Lead vinculado a esta conversa"
+                    title="Ao vincular, as etiquetas da conversa e do lead serão unidas."
+                    className="max-w-[180px] truncate rounded-lg border border-slate-300 dark:border-white/20 bg-white dark:bg-dark-card px-1.5 py-1 text-xs outline-none focus:ring-2 focus:ring-primary-500"
+                  >
+                    <option value="">Sem lead vinculado</option>
+                    {selectedDeal && !contactDeals.some(d => d.id === selectedDeal.id) && <option value={selectedDeal.id}>{selectedDeal.title}</option>}
+                    {contactDeals.map(d => <option key={d.id} value={d.id}>{d.title}</option>)}
+                  </select>
+                  {selectedDeal && <span className="min-w-0 w-[260px] max-w-full"><DealStageControl deal={selectedDeal} size="sm" /></span>}
                 </span>
               ) : selected.contactId ? (
-                <span className="min-w-0 text-xs text-slate-400 italic truncate">Este contato ainda não tem lead.</span>
+                <span className="min-w-0 text-xs text-slate-400 italic truncate">Conversa sem lead vinculado.</span>
               ) : (
                 <span className="min-w-0 text-xs text-amber-600 dark:text-amber-400 truncate">
                   Número sem contato no CRM. Adicione pra criar o lead.
@@ -1798,7 +1787,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                           disabled={savingConv}
                           onClick={() =>
                             void patchConversation(selectedConvId, {
-                              labelIds: selectedLabelIds.filter(id => id !== l.id),
+                              removeLabelIds: [l.id],
                             })
                           }
                           aria-label={`Tirar a etiqueta ${l.name} desta conversa`}
@@ -2170,7 +2159,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                                 setEditandoLabelId(null);
                               }
                             }}
-                            maxLength={40}
+                            maxLength={MAX_LABEL_NAME}
                             aria-label="Nome da etiqueta"
                             className="flex-1 px-2.5 py-1.5 rounded-lg text-sm bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
                           />
@@ -2269,7 +2258,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                       }
                     }}
                     placeholder="Nova etiqueta"
-                    maxLength={40}
+                    maxLength={MAX_LABEL_NAME}
                     className="flex-1 px-2.5 py-1.5 rounded-lg text-sm bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
                   />
                   <button
@@ -2315,7 +2304,8 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                     type="button"
                     onClick={() => {
                       setLabelDialogOpen(false);
-                      void patchConversation(selectedConvId, { labelIds: labelDraft });
+                      const delta = labelDelta(labelSnapshot, labelDraft);
+                      if (delta.addLabelIds.length || delta.removeLabelIds.length) void patchConversation(selectedConvId, delta);
                     }}
                     disabled={savingConv}
                     className="px-3 py-1.5 rounded-lg text-xs font-bold text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20 disabled:opacity-50"

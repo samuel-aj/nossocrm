@@ -2,12 +2,13 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
+import { catalogColor, legacyTagColor } from '@/lib/whatsapp/labelCompatibility';
 import { withTabOrg } from '@/lib/supabase/tabOrgScope';
 
 export const runtime = 'nodejs';
 
 const CreateSchema = z.object({
-  name: z.string().min(1).max(80),
+  name: z.string().trim().min(1).max(500),
   color: z.string().min(1).max(40).optional(),
 }).strict();
 
@@ -39,13 +40,13 @@ export async function GET() {
 
   const sb = createStaticAdminClient();
   const { data, error } = await sb
-    .from('tags')
+    .from('wa_labels')
     .select('id,name,color,created_at')
     .eq('organization_id', auth.profile.organization_id)
     .order('name', { ascending: true });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ data: data || [] });
+  return NextResponse.json({ data: (data || []).map(row => ({ ...row, color: legacyTagColor(row.color) })) });
 }
 
 export async function POST(req: Request) {
@@ -65,17 +66,17 @@ export async function POST(req: Request) {
     if (parsed.data.items.length === 0) return NextResponse.json({ data: [] });
 
     const sb = createStaticAdminClient();
-    const rows = parsed.data.items.map(it => ({
+    const rows = [...new Map(parsed.data.items.map(it => [it.name.toLowerCase(), it])).values()].map(it => ({
       organization_id: auth.profile.organization_id,
       name: it.name,
-      color: it.color ?? 'bg-gray-500',
+      color: catalogColor(it.color),
     }));
     const { data, error } = await sb
-      .from('tags')
-      .upsert(rows, { onConflict: 'name,organization_id', ignoreDuplicates: true })
+      .from('wa_labels')
+      .upsert(rows, { onConflict: 'organization_id,name_key', ignoreDuplicates: true })
       .select('id,name,color,created_at');
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ data: data || [] });
+    return NextResponse.json({ data: (data || []).map(row => ({ ...row, color: legacyTagColor(row.color) })) });
   }
 
   // Single-item create
@@ -86,11 +87,11 @@ export async function POST(req: Request) {
 
   const sb = createStaticAdminClient();
   const { data, error } = await sb
-    .from('tags')
+    .from('wa_labels')
     .insert({
       organization_id: auth.profile.organization_id,
       name: parsed.data.name,
-      color: parsed.data.color ?? 'bg-gray-500',
+      color: catalogColor(parsed.data.color),
     })
     .select('id,name,color,created_at')
     .single();
@@ -100,5 +101,5 @@ export async function POST(req: Request) {
     const isDup = /duplicate key|unique/i.test(msg);
     return NextResponse.json({ error: isDup ? 'Tag já existe' : msg }, { status: isDup ? 409 : 500 });
   }
-  return NextResponse.json({ data }, { status: 201 });
+  return NextResponse.json({ data: { ...data, color: legacyTagColor(data.color) } }, { status: 201 });
 }
