@@ -14,12 +14,13 @@ DO $$ DECLARE sid uuid; did uuid; owner uuid;
 BEGIN
  SELECT id INTO sid FROM public.board_stages WHERE board_id='bb7b7e2b-2818-4579-ae20-bf052e51cf41' ORDER BY "order" LIMIT 1;
  INSERT INTO public.deals(organization_id,board_id,stage_id,status,title,value,is_won,is_lost)
- VALUES('428e1830-2ff5-425a-b9b1-f9379897c2c6','bb7b7e2b-2818-4579-ae20-bf052e51cf41',sid,sid::text,'TESTE: manual sem responsável elegível',0,false,false)
+ VALUES('428e1830-2ff5-425a-b9b1-f9379897c2c6','bb7b7e2b-2818-4579-ae20-bf052e51cf41',sid,sid::text,'TESTE: manual com super admin membro',0,false,false)
  RETURNING id,owner_id INTO did,owner;
- IF owner IS NOT NULL THEN RAISE EXCEPTION 'Super admin received lead'; END IF;
- INSERT INTO crm_test_results VALUES('manual creation survives ineligible distribution entry',true);
+ IF owner IS DISTINCT FROM 'd08ed7fb-95ac-4820-a209-0e844cab0d74'::uuid THEN RAISE EXCEPTION 'Linked super admin did not receive lead'; END IF;
+ INSERT INTO crm_test_results VALUES('manual creation assigns explicitly linked super admin',true);
 END $$;
 RESET ROLE;
+UPDATE public.lead_distribution SET active=false WHERE organization_id='428e1830-2ff5-425a-b9b1-f9379897c2c6';
 INSERT INTO public.lead_distribution(organization_id,user_id,weight,active)
  VALUES('428e1830-2ff5-425a-b9b1-f9379897c2c6','d57196ab-ff56-4802-a181-3de195a3ed0f',100,true)
  ON CONFLICT(organization_id,user_id) DO UPDATE SET active=true,weight=100;
