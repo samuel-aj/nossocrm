@@ -919,6 +919,8 @@ function BlockFields({ block, update }: { block: Block; update: (block: Block) =
       return <ConditionEditor block={block} update={update} />;
     case 'move_stage':
       return <MoveStageEditor block={block} update={update} />;
+    case 'activate_alert':
+      return <label className="grid gap-2 text-sm">Texto do alerta<input className="rounded-lg border p-2 dark:bg-slate-900" value={block.data.message} maxLength={300} onChange={e => update({ ...block, data: { message: e.target.value } })} /></label>;
     case 'add_tag':
     case 'remove_tag':
       return <TagEditor block={block} update={update} />;

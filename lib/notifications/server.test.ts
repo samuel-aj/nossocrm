@@ -44,3 +44,23 @@ describe('personal notification security and audiences',()=>{
   it('rejects subscriptions to inaccessible boards',async()=>{await expect(saveSettings(auth,{...DEFAULT_PREFERENCES,boardIds:['hidden']})).rejects.toThrow('boards disponíveis');});
   it('only emits lead events for selected, still-current boards',async()=>{const b='11111111-1111-4111-8111-111111111111';tables.boards=[{id:b,name:'Vendas'}];tables.deals[0].board_id=b;tables.crm_notification_events=[{id:2,kind:'lead',source_id:'d',board_id:b,created_at:now()}];expect((await notices())[0].href).toContain('deal=d');tables.deals[0].board_id='elsewhere';expect(await notices()).toEqual([]);});
 });
+
+it('delivers alerts independently to the current responsible seller only', async () => {
+  tables.crm_notification_preferences=[{preferences:{...DEFAULT_PREFERENCES,messages:false,leads:false,alerts:true}}];
+  tables.crm_notification_events=[{id:5,kind:'alert',source_id:'a',created_at:now()}];
+  tables.deal_alert_events=[{id:'a',deal_id:'d',message:'Recuperado'}];
+  tables.deals[0].active_alert={id:'a'};
+  expect(await notices()).toMatchObject([{kind:'alert',message:'Lead · Recuperado',href:'/boards?board=b&deal=d'}]);
+  tables.deals[0].owner_id='other';
+  expect(await notices()).toEqual([]);
+  tables.deals[0].owner_id=user;
+  tables.deals[0].active_alert={id:'new'};
+  expect(await notices()).toEqual([]);
+});
+it('suppresses recovery alerts outside board/lead visibility and when preference is off', async () => {
+  tables.crm_notification_events=[{id:5,kind:'alert',source_id:'a',created_at:now()}];
+  tables.deal_alert_events=[{id:'a',deal_id:'d',message:'Recuperado'}];
+  tables.deals[0].active_alert={id:'a'};
+  vi.mocked(getTeamAccess).mockResolvedValue({fullAccess:false,canManage:false,legacy:false,masterUserId:null,boards:[]});
+  expect(await notices()).toEqual([]);
+});

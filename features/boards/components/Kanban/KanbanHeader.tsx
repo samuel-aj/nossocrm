@@ -127,7 +127,7 @@ function FiltersButton({
         (c) => c.field && (c.operator === 'empty' || c.operator === 'not_empty' || c.value.trim() !== '')
     );
     const activeCount =
-        activeConditions.length + (controls.general.product ? 1 : 0) + (tagFilter ? 1 : 0) + (ownerFilter !== 'all' ? 1 : 0) + (statusFilter !== 'open' ? 1 : 0);
+        (controls.general.alertsOnly ? 1 : 0) + activeConditions.length + (controls.general.product ? 1 : 0) + (tagFilter ? 1 : 0) + (ownerFilter !== 'all' ? 1 : 0) + (statusFilter !== 'open' ? 1 : 0);
 
     const updateCondition = (id: string, patch: Partial<CfCondition>) =>
         onConditionsChange(conditions.map((c) => (c.id === id ? { ...c, ...patch } : c)));
@@ -171,6 +171,7 @@ function FiltersButton({
                     </div>
                     <label className="block space-y-2">
                         <span className={SECTION_TITLE}>Produto</span>
+                        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!controls.general.alertsOnly} onChange={e => controls.setGeneral({ alertsOnly: e.target.checked })} />Com alertas</label>
                         <FilterSelect label="Filtrar por produto" value={controls.general.product} onChange={product => controls.setGeneral({ product })} options={[
  { value: '', label: 'Todos os produtos' },
  ...(controls.general.product && !products.some(p => p.id === controls.general.product) ? [{value: controls.general.product, label: 'Produto indisponível'}] : []),

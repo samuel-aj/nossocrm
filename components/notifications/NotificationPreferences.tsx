@@ -24,6 +24,7 @@ export function NotificationPreferences({settings,onClose,onSave,onTest}:{settin
       <div className="grid gap-6 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
       <div className="min-w-0 space-y-6">
       <section className="space-y-3">
+        <FormCheckbox label="Alertas dos meus leads" checked={draft.alerts} onChange={alerts=>set({alerts})}>Alertas dos meus leads</FormCheckbox>
         <FormCheckbox label="Novas mensagens de leads" checked={draft.messages} onChange={messages=>set({messages})}>Novas mensagens de leads</FormCheckbox>
         {draft.messages && <FormSelect label="Receber mensagens de" value={draft.scope} onChange={scope=>set({scope:scope as Preferences['scope']})} options={[{value:'own',label:'Meus leads'},{value:'all',label:'Todos que posso visualizar'}]}/>}
       </section>

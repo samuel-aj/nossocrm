@@ -6,7 +6,7 @@ export function dealPatch(row: Record<string, unknown>): Partial<Deal> & { id: s
   const fields: Record<string, string> = {
     organization_id: 'organizationId', board_id: 'boardId', stage_id: 'status',
     contact_id: 'contactId', client_company_id: 'clientCompanyId', owner_id: 'ownerId',
-    custom_fields: 'customFields', ai_summary: 'aiSummary', created_at: 'createdAt',
+    active_alert: 'activeAlert', custom_fields: 'customFields', ai_summary: 'aiSummary', created_at: 'createdAt',
     updated_at: 'updatedAt', is_won: 'isWon', is_lost: 'isLost', closed_at: 'closedAt',
     qualified_at: 'qualifiedAt', qualification_date_source: 'qualificationDateSource',
     last_stage_change_date: 'lastStageChangeDate', loss_reason: 'lossReason',

@@ -1,0 +1,34 @@
+import React from 'react';
+import { renderHook, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { afterEach, expect, it, vi } from 'vitest';
+import { queryKeys } from '@/lib/query';
+import type { DealView } from '@/types';
+import { clearExpectedAlert, useAcknowledgeAlert } from './useAcknowledgeAlert';
+const make = (id: string) => ({ id: 'lead', activeAlert: { id, message: 'Recuperado' } }) as DealView;
+afterEach(() => vi.unstubAllGlobals());
+it('never clears a newer cache alert with an old acknowledgement', () => {
+  expect(clearExpectedAlert(make('new'), 'lead', 'old').activeAlert?.id).toBe('new');
+  expect(clearExpectedAlert(make('old'), 'lead', 'old').activeAlert).toBeNull();
+});
+it('acknowledges only the first resolved alert per successful opening, never prefetch', async () => {
+  const client = new QueryClient();
+  const key = [...queryKeys.deals.lists(), 'view'];
+  let finish!: (v: unknown) => void;
+  const fetcher = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+  vi.stubGlobal('fetch', fetcher);
+  client.setQueryData(key, [make('old')]);
+  const wrapper = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  const { rerender } = renderHook(({ open, deal }) => useAcknowledgeAlert(open, deal), { wrapper, initialProps: { open: false, deal: make('old') } });
+  expect(fetcher).not.toHaveBeenCalled();
+  rerender({ open: true, deal: make('old') });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  client.setQueryData(key, [make('new')]);
+  rerender({ open: true, deal: make('new') });
+  finish({ ok: true, json: async () => ({ acknowledged: true }) });
+  await waitFor(() => expect(client.getQueryData<DealView[]>(key)?.[0].activeAlert?.id).toBe('new'));
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  rerender({ open: false, deal: make('new') });
+  rerender({ open: true, deal: make('new') });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});

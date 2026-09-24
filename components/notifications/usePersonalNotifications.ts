@@ -24,7 +24,7 @@ export function usePersonalNotifications() {
   const preferences=settings.data?.preferences;
   const fingerprint=JSON.stringify(preferences);
   useEffect(()=>{
-    if(!scope || !preferences || (!preferences.messages && !preferences.leads)) return;
+    if(!scope || !preferences || (!preferences.messages && !preferences.leads && !preferences.alerts)) return;
     const controller=new AbortController(); let stopped=false; let timer:ReturnType<typeof setTimeout>;
     let baseline:string|null=null;
     seen.current=new Set();

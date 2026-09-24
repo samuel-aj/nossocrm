@@ -18,6 +18,7 @@ const h = vi.hoisted(() => ({
   created: [] as Array<Record<string, unknown>>,
   updated: [] as Array<Record<string, unknown>>,
   lossHistory: 0,
+  alertCalls: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('@/lib/whatsapp', () => ({
@@ -124,7 +125,7 @@ function fakeDb(tables: Record<string, Row[]>) {
     };
     return b;
   };
-  return { from, rpc: async () => ({ data: true, error: null }) } as never;
+  return { from, rpc: async (name: string, args: Record<string, unknown>) => { if (name === 'activate_deal_alert') h.alertCalls.push(args); return { data: true, error: null }; } } as never;
 }
 
 const ORG = 'org-1';
@@ -185,6 +186,7 @@ beforeEach(() => {
   h.created = [];
   h.updated = [];
   h.lossHistory = 0;
+  h.alertCalls = [];
   h.deal = { id: 'deal-1', contact_id: 'contact-1', title: 'Lead', stage_id: 's1', board_id: 'b1', tags: [], stage_label: 'Novo' };
 });
 
@@ -398,4 +400,13 @@ describe('motor dos robôs', () => {
     expect(wait).toBeGreaterThanOrEqual(44000);
     expect(wait).toBeLessThan(47000);
   });
+});
+
+ it('activates the resolved run lead using stable run/block identity and continues the graph', async () => {
+  const steps = chain([{ id: 'alert', type: 'activate_alert', message: 'Resposta de {{primeiro_nome}}' }, { id: 'tag', type: 'add_tag', tag: 'recuperado' }]);
+  const tables = db(bot(steps), [run()]);
+  await processBotRun(fakeDb(tables), run());
+  expect(h.alertCalls).toEqual([{ p_org: ORG, p_deal: 'deal-1', p_bot: 'bot-1', p_run: 'run-1', p_block: 'alert', p_message: 'Resposta de Maria' }]);
+  expect(h.tags).toEqual([{ dealId: 'deal-1', tag: 'recuperado' }]);
+  expect(tables.wa_bot_runs[0].status).toBe('done');
 });

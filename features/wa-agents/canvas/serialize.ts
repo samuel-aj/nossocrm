@@ -173,6 +173,8 @@ export function createBlock(type: StepType, id: string = newId()): Block {
       return { id, type, data: { rules: [newConditionRule(newId())] } };
     case 'move_stage':
       return { id, type, data: { stage_id: '', board_id: '', loss_reason: '', loss_category: '' } };
+    case 'activate_alert':
+      return { id, type, data: { message: 'Respondeu à recuperação' } };
     case 'add_tag':
       return { id, type, data: { tag: '' } };
     case 'remove_tag':
@@ -306,6 +308,8 @@ function stepToBlock(step: BotStep): Block {
           loss_category: step.loss_category ?? '',
         },
       };
+    case 'activate_alert':
+      return { id, type: 'activate_alert', data: { message: step.message } };
     case 'add_tag':
       return { id, type: 'add_tag', data: { tag: step.tag } };
     case 'remove_tag':
@@ -421,6 +425,7 @@ export function botToFlow(bot: BotRow | null, fallbackSteps: BotStep[]): FlowGra
       case 'wait':
       case 'typing':
       case 'move_stage':
+      case 'activate_alert':
       case 'add_tag':
       case 'remove_tag':
       case 'create_lead':
@@ -574,6 +579,8 @@ function blockToStep(block: Block, to: (handle: string) => string | null, ui: { 
         next_step_id: to(HANDLE_NEXT),
         ui,
       };
+    case 'activate_alert':
+      return { id, type: 'activate_alert', message: block.data.message.trim(), next_step_id: to(HANDLE_NEXT), ui };
     case 'add_tag':
       return { id, type: 'add_tag', tag: block.data.tag.trim(), next_step_id: to(HANDLE_NEXT), ui };
     case 'remove_tag':
@@ -908,6 +915,9 @@ export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowH
           break;
         case 'move_stage':
           if (!block.data.stage_id) fail('escolha a etapa de destino');
+          break;
+        case 'activate_alert':
+          if (!block.data.message.trim() || block.data.message.trim().length > 300) fail('informe um alerta de até 300 caracteres');
           break;
         case 'add_tag':
         case 'remove_tag':

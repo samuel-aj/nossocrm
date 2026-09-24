@@ -30,6 +30,7 @@ export const STEP_LABELS: Record<StepType, string> = {
   wait_reply: 'Esperar resposta',
   condition: 'Condição',
   move_stage: 'Mover etapa',
+  activate_alert: 'Ativar alerta',
   add_tag: 'Adicionar tag',
   remove_tag: 'Remover tag',
   create_lead: 'Criar lead',
@@ -50,6 +51,7 @@ export const STEP_TYPES: StepType[] = [
   'create_lead',
   'update_lead',
   'move_stage',
+  'activate_alert',
   'add_tag',
   'remove_tag',
   'webhook',
@@ -78,6 +80,7 @@ export const BLOCK_KIND: Record<StepType, BlockKind> = {
   wait_reply: 'branch',
   condition: 'branch',
   move_stage: 'linear',
+  activate_alert: 'linear',
   add_tag: 'linear',
   remove_tag: 'linear',
   create_lead: 'linear',
@@ -314,6 +317,7 @@ export type Block =
   | { id: string; type: 'wait_reply'; data: WaitReplyData }
   | { id: string; type: 'condition'; data: ConditionData }
   | { id: string; type: 'move_stage'; data: MoveStageData }
+  | { id: string; type: 'activate_alert'; data: { message: string } }
   | { id: string; type: 'add_tag'; data: TagData }
   | { id: string; type: 'remove_tag'; data: TagData }
   | { id: string; type: 'create_lead'; data: CreateLeadData }
@@ -398,6 +402,7 @@ export function blockOutputs(block: Block): BubbleOutput[] {
     case 'wait':
     case 'typing':
     case 'move_stage':
+    case 'activate_alert':
     case 'add_tag':
     case 'remove_tag':
     case 'create_lead':

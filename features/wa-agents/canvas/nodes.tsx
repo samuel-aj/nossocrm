@@ -149,6 +149,8 @@ Motivo: ${block.data.loss_reason.trim()}` : '';
       }
       return block.data.stage_id ? 'Etapa não encontrada' : 'Escolha a etapa';
     }
+    case 'activate_alert':
+      return block.data.message;
     case 'add_tag':
       return block.data.tag.trim() ? `+ ${block.data.tag.trim()}` : 'Informe a tag';
     case 'remove_tag':

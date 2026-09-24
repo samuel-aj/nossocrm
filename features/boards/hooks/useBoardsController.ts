@@ -481,6 +481,7 @@ export const useBoardsController = () => {
     const tagTerm = tagFilter.trim().toLowerCase();
 
     return deals.filter(l => {
+      if (general.alertsOnly && !l.activeAlert) return false;
       const matchesSearch = buscaCasaDeal(l, searchTerm);
 
       const matchesOwner =
@@ -557,7 +558,7 @@ export const useBoardsController = () => {
       }
       return deal;
     });
-  }, [deals, searchTerm, ownerFilter, customFieldConditions, customFieldLogic, tagFilter, period, dateClock, general.product, statusFilter, profile, inactiveLeadsEnabled, inactiveContactIds, buscaCasaDeal]);
+  }, [deals, searchTerm, ownerFilter, customFieldConditions, customFieldLogic, tagFilter, period, dateClock, general.alertsOnly, general.product, statusFilter, profile, inactiveLeadsEnabled, inactiveContactIds, buscaCasaDeal]);
 
   const filteredDeals = useMemo(() => matchingDeals.filter(d => !inactiveLeadsEnabled || !(d.inactiveAt || (d.contactId && inactiveContactIds.has(d.contactId)))), [matchingDeals, inactiveLeadsEnabled, inactiveContactIds]);
 

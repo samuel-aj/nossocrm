@@ -696,6 +696,7 @@ export const BotStepSchema = z.discriminatedUnion('type', [
     loss_reason: z.string().max(200).optional(),
     loss_category: z.enum(LOSS_CATEGORIES).optional(),
   }),
+  z.object({ ...botStepBase, type: z.literal('activate_alert'), message: z.string().trim().min(1).max(300).default('Respondeu à recuperação') }),
   z.object({ ...botStepBase, type: z.literal('add_tag'), tag: z.string().min(1).max(60) }),
   /** Tira a tag do lead; tag que ele não tem não é erro */
   z.object({ ...botStepBase, type: z.literal('remove_tag'), tag: z.string().min(1).max(60) }),

@@ -39,7 +39,7 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
   if (!since) return {events:[],serverTime,nextAfter:null};
   const ctx = await context(auth);
   const {preferences:p,access,rules} = ctx;
-  if (!p.messages && !p.leads) return {events:[],serverTime,nextAfter:null};
+  if (!p.messages && !p.leads && !p.alerts) return {events:[],serverTime,nextAfter:null};
   const lower = new Date(Math.max(Date.parse(since),Date.now()-120_000)).toISOString();
   const upper = until && until < serverTime ? until : serverTime;
   let query = auth.admin.from('crm_notification_events').select('id,kind,source_id,board_id,created_at')
@@ -48,6 +48,11 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
   const {data: rows,error} = await query;
   if (error) throw error;
   const events=rows ?? [];
+  const alertIds=events.filter(e=>e.kind==='alert' && p.alerts).map(e=>e.source_id);
+  const alerts=alertIds.length ? await auth.admin.from('deal_alert_events').select('id,deal_id,message').eq('organization_id',auth.user.organizationId).in('id',alertIds).is('acknowledged_at',null) : {data:[],error:null};
+  if(alerts.error) throw alerts.error;
+  const alertDeals=alerts.data?.length ? await auth.admin.from('deals').select('id,title,board_id,owner_id,active_alert').eq('organization_id',auth.user.organizationId).in('id',alerts.data.map(a=>a.deal_id)).eq('owner_id',auth.user.id).is('deleted_at',null) : {data:[],error:null};
+  if(alertDeals.error) throw alertDeals.error;
   const messageIds=events.filter(e=>e.kind==='message' && p.messages).map(e=>e.source_id);
   const leadIds=events.filter(e=>e.kind==='lead' && p.leads && p.boardIds.includes(e.board_id)).map(e=>e.source_id);
   const messages=messageIds.length ? await auth.admin.from('wa_messages').select('id,conversation_id,wa_timestamp').eq('organization_id',auth.user.organizationId).in('id',messageIds).eq('direction','in').is('deleted_at',null) : {data:[],error:null};
@@ -72,7 +77,12 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
       (rules.deals.scope==='team' && rules.deals.team_user_ids.includes(d.owner_id)));
   const notices:Notice[]=[];
   for(const event of events) {
-    if(event.kind==='lead') {
+    if(event.kind==='alert') {
+      const a=(alerts.data as Array<{id:string;deal_id:string;message:string}> | null)?.find(a=>a.id===event.source_id);
+      const d=(alertDeals.data as Array<{id:string;title:string;board_id:string;owner_id:string|null;active_alert:{id:string}|null}> | null)?.find(d=>d.id===a?.deal_id && d.active_alert?.id===a?.id);
+      if(!p.alerts || !a || !d || d.owner_id!==auth.user.id || !allowed(d)) continue;
+      notices.push({id:String(event.id),kind:'alert',title:'Alerta do lead',message:`${d.title} · ${a.message}`,href:`/boards?board=${d.board_id}&deal=${d.id}`,createdAt:event.created_at});
+    } else if(event.kind==='lead') {
       const d=leadRows.find(d=>d.id===event.source_id);
       if(!d || !p.leads || !p.boardIds.includes(event.board_id) || d.board_id!==event.board_id || !allowed(d)) continue;
       notices.push({id:String(event.id),kind:'lead',title:'Novo lead no board',message:`${d.title} · ${ctx.boards.find(b=>b.id===d.board_id)?.name}`,href:`/boards?board=${d.board_id}&deal=${d.id}`,createdAt:event.created_at});

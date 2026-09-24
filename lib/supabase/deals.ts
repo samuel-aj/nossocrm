@@ -72,6 +72,7 @@ export interface DbDeal {
   /** Campos customizados. */
   custom_fields: Record<string, any>;
   /** Data de criação. */
+  active_alert?: import('@/types/types').DealAlert | null;
   created_at: string;
   /** Data de atualização. */
   updated_at: string;
@@ -149,6 +150,7 @@ const transformDeal = (db: DbDeal, items: DbDealItem[]): Deal => {
     tags: db.tags || [],
     lastStageChangeDate: db.last_stage_change_date || undefined,
     customFields: db.custom_fields || {},
+    activeAlert: db.active_alert ?? null,
     createdAt: db.created_at,
     updatedAt: db.updated_at,
     items: items

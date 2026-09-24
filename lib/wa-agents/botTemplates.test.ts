@@ -50,3 +50,11 @@ describe('portable bot templates', () => {
     expect(() => parseBotTemplate(template)).toThrow();
   });
 });
+
+it('exports and imports recovery alert blocks without adding resource dependencies', () => {
+  const source = bot();
+  source.steps.push({ id: 'alert', type: 'activate_alert', message: 'Respondeu à recuperação', next_step_id: 'end' });
+  const template = parseBotTemplate(JSON.parse(JSON.stringify(createBotTemplate(source))));
+  const copy = applyBotTemplate(template, Object.fromEntries(template.dependencies.map(d => [d.ref, targetId])));
+  expect(copy.steps.find(s => s.id === 'alert')).toMatchObject({ type: 'activate_alert', message: 'Respondeu à recuperação', next_step_id: 'end' });
+});

@@ -291,3 +291,11 @@ describe('validateFlow', () => {
     expect(issue?.nodeId).toBe('g1');
   });
 });
+
+it('roundtrips recovery alert text and its normal next edge', () => {
+  const steps: BotStep[] = [{ id: 'alert', type: 'activate_alert', message: 'Respondeu à recuperação', next_step_id: 'end' }, { id: 'end', type: 'end' }];
+  const graph = botToFlow(bot(steps, 'alert'), []);
+  const result = flowToBot(graph.nodes, graph.edges, HEADER);
+  expect(result.steps.find(s => s.id === 'alert')).toMatchObject(steps[0]);
+  expect(createBlock('activate_alert', 'new')).toMatchObject({ data: { message: 'Respondeu à recuperação' } });
+});

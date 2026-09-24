@@ -1,3 +1,4 @@
+import { DealAlertBadge } from '../DealAlertBadge';
 import React, { useState } from 'react';
 import { DealView, CustomFieldDefinition } from '@/types';
 import { Phone, Copy, Check, Hourglass, Trophy, XCircle, Package, UserX } from 'lucide-react';
@@ -140,6 +141,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
       shadow-sm cursor-grab active:cursor-grabbing group hover:shadow-md transition-all relative select-none
     `;
 
+    if (deal.activeAlert) return `${baseClasses} bg-emerald-50 dark:bg-emerald-950/50 border-emerald-400 dark:border-emerald-600 ring-1 ring-emerald-300/60 dark:ring-emerald-700/60`;
     if (deal.isWon) {
       return `${baseClasses} 
         bg-green-50 dark:bg-green-900/20 
@@ -164,6 +166,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
 
   // Get border-left color class based on status
   const getBorderLeftClass = () => {
+    if (deal.activeAlert) return '!border-l-emerald-500';
     if (deal.isWon) return '!border-l-green-500';
     if (deal.isLost) return '!border-l-red-500';
     // Priority-based colors for open deals
@@ -346,6 +349,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
       </div>
       )}
 
+      <DealAlertBadge alert={deal.activeAlert} />
       <h4
         title={deal.title}
         className={`truncate text-sm font-bold font-display leading-snug mb-0.5 ${isRotting ? 'text-slate-600 dark:text-slate-400' : 'text-slate-900 dark:text-white'}`}

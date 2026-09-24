@@ -16,3 +16,9 @@ describe('external lead payloads', () => {
       .toEqual({ id: 'lead', ownerId: null, lossReason: null, customFields: {} });
   });
 });
+
+it('maps recovery alerts and explicit acknowledgements into the shared deal cache', () => {
+  const alert = { id: 'alert', message: 'Respondeu à recuperação' };
+  expect(dealPatch({ id: 'lead', active_alert: alert })).toMatchObject({ activeAlert: alert });
+  expect(dealPatch({ id: 'lead', active_alert: null })).toMatchObject({ activeAlert: null });
+});

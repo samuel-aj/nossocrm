@@ -221,6 +221,7 @@ const STEP_LABEL: Partial<Record<BotStep['type'], string>> = {
   wait_reply: 'Aguardar resposta',
   condition: 'Condição',
   move_stage: 'Mover etapa',
+  activate_alert: 'Ativar alerta',
   add_tag: 'Adicionar tag',
   remove_tag: 'Remover tag',
   create_lead: 'Criar lead',
@@ -1132,6 +1133,14 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
             });
             await reloadDeal();
           }
+          idx = next(step);
+          break;
+        }
+        case 'activate_alert': {
+          if (!deal) throw new Error('Alerta exige um lead nesta execução');
+          const { error } = await admin.rpc('activate_deal_alert', { p_org: orgId, p_deal: deal.id, p_bot: bot.id, p_run: st.run.id, p_block: step.id, p_message: renderTemplate(step.message, tplVars) });
+          if (error) throw error;
+          note(st, step, 'Alerta ativado', 'ok');
           idx = next(step);
           break;
         }

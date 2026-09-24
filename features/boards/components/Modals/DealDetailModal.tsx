@@ -1,3 +1,4 @@
+import { useAcknowledgeAlert } from '../../hooks/useAcknowledgeAlert';
 import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
 import React, { useState, useRef, useEffect, useId, useMemo, useCallback } from 'react';
 import { useCRM } from '@/context/CRMContext';
@@ -182,6 +183,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const shouldFetch = !!dealId && !!isOpen && !dealFromCache;
   const { data: fetchedDeal, isLoading: fetchingDeal, isError: fetchDealError, isSuccess: fetchDealSuccess, refetch: refetchDeal } = useDeal(shouldFetch ? dealId : undefined);
   const deal = dealFromCache ?? (fetchedDeal as unknown as typeof dealFromCache | undefined);
+  useAcknowledgeAlert(isOpen, deal);
   const permissions = useMyActionPermissions(deal?.boardId);
   const queryClient = useQueryClient();
   const historyQuery = useDealHistory(deal?.id, isOpen);
