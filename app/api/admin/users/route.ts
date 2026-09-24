@@ -89,7 +89,7 @@ export async function GET() {
       // estar navegando nesta org (org ativa aqui) não o coloca na lista.
       const isSuperAdmin = p.role === UserRole.SUPER_ADMIN;
       const linked = membershipRoleByUser.has(uid);
-      if (isSuperAdmin) return null;
+      if (isSuperAdmin && !linked) return null;
       // Papel exibido = papel NESTA org (vínculo); fallback pro papel do perfil.
       // Vínculo antigo gravado como super_admin conta como admin da org.
       const rawRole = membershipRoleByUser.get(uid) ?? p.role ?? UserRole.VENDEDOR;

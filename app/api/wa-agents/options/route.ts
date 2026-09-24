@@ -73,13 +73,14 @@ export async function GET() {
 
   // Responsáveis: perfis da org + membros vinculados por user_organizations
   const ownersById = new Map<string, string>();
-  for (const p of profilesRes.data ?? []) if (p.role !== 'super_admin') ownersById.set(String(p.id), displayName(p));
+  const linkedIds = new Set((membersRes.data ?? []).map(m => String(m.user_id)));
+  for (const p of profilesRes.data ?? []) if (p.role !== 'super_admin' || linkedIds.has(String(p.id))) ownersById.set(String(p.id), displayName(p));
   const missing = (membersRes.data ?? [])
     .map(m => String(m.user_id ?? ''))
     .filter(uid => uid && !ownersById.has(uid));
   if (missing.length) {
     const { data: extra } = await admin.from('profiles').select(PROFILE_COLUMNS).in('id', missing);
-    for (const p of extra ?? []) if (p.role !== 'super_admin') ownersById.set(String(p.id), displayName(p));
+    for (const p of extra ?? []) ownersById.set(String(p.id), displayName(p));
   }
   const owners = [...ownersById.entries()]
     .map(([id, name]) => ({ id, name }))
