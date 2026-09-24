@@ -127,7 +127,7 @@ function FiltersButton({
         (c) => c.field && (c.operator === 'empty' || c.operator === 'not_empty' || c.value.trim() !== '')
     );
     const activeCount =
-        (controls.general.automation && controls.general.automation !== 'all' ? 1 : 0) + (controls.general.alertsOnly ? 1 : 0) + activeConditions.length + (controls.general.product ? 1 : 0) + (tagFilter ? 1 : 0) + (ownerFilter !== 'all' ? 1 : 0) + (statusFilter !== 'open' ? 1 : 0);
+        (controls.general.automation && controls.general.automation !== 'all' ? 1 : 0) + activeConditions.length + (controls.general.product ? 1 : 0) + (tagFilter ? 1 : 0) + (ownerFilter !== 'all' ? 1 : 0) + (statusFilter !== 'open' ? 1 : 0);
 
     const updateCondition = (id: string, patch: Partial<CfCondition>) =>
         onConditionsChange(conditions.map((c) => (c.id === id ? { ...c, ...patch } : c)));
@@ -138,7 +138,7 @@ function FiltersButton({
             { id: crypto.randomUUID(), field: options[0]?.key || '', operator: 'contains', value: '' },
         ]);
     const clearAll = () => {
-        controls.setGeneral({ product: '', logic: 'AND', alertsOnly: false, automation: 'all' });
+        controls.setGeneral({ product: '', logic: 'AND', automation: 'all' });
         onConditionsChange([]);
         onTagFilterChange('');
         onOwnerChange('all');
@@ -168,24 +168,6 @@ function FiltersButton({
                             </button>
                         )}
                         <FilterPin controls={controls} group="general" />
-                    </div>
-                    <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!controls.general.alertsOnly} onChange={e => controls.setGeneral({ alertsOnly: e.target.checked })} />Com alertas</label>
-                    <div className="block space-y-2">
-                        <span className={SECTION_TITLE}>Automação</span>
-                        <FilterSelect label="Filtrar por automação" value={controls.general.automation || 'all'} onChange={automation => controls.setGeneral({ automation: automation as 'all' | 'bot' | 'ai' | 'none' })} options={[
-                            { value: 'all', label: 'Todas' },
-                            { value: 'bot', label: 'Robô em andamento' },
-                            { value: 'ai', label: 'IA ativa' },
-                            { value: 'none', label: 'Sem automação ativa' },
-                        ]} />
-                    </div>
-                    <div className="block space-y-2">
-                        <span className={SECTION_TITLE}>Produto</span>
-                        <FilterSelect label="Filtrar por produto" value={controls.general.product} onChange={product => controls.setGeneral({ product })} options={[
- { value: '', label: 'Todos os produtos' },
- ...(controls.general.product && !products.some(p => p.id === controls.general.product) ? [{value: controls.general.product, label: 'Produto indisponível'}] : []),
- ...products.map(p => ({value:p.id,label:p.name}))
-]} />
                     </div>
                     {/* Status */}
                     <div className="space-y-2">
@@ -217,6 +199,15 @@ function FiltersButton({
                         </div>
                     </div>
 
+                    <div className="block space-y-2">
+                        <span className={SECTION_TITLE}>Produto</span>
+                        <FilterSelect label="Filtrar por produto" value={controls.general.product} onChange={product => controls.setGeneral({ product })} options={[
+ { value: '', label: 'Todos os produtos' },
+ ...(controls.general.product && !products.some(p => p.id === controls.general.product) ? [{value: controls.general.product, label: 'Produto indisponível'}] : []),
+ ...products.map(p => ({value:p.id,label:p.name}))
+]} />
+                    </div>
+
                     {/* Responsável */}
                     <div className="space-y-2">
                         <p className={SECTION_TITLE}>Responsável</p>
@@ -233,6 +224,16 @@ function FiltersButton({
                             <FilterSelect label="Filtrar por tag" value={tagFilter} onChange={onTagFilterChange} options={[{value:'',label:'Todas'}, ...tagOptions.map(t => ({value:t,label:t}))]} />
                         </div>
                     )}
+
+                    <div className="block space-y-2">
+                        <span className={SECTION_TITLE}>Automações</span>
+                        <FilterSelect label="Filtrar por automação" value={controls.general.automation || 'all'} onChange={automation => controls.setGeneral({ automation: automation as 'all' | 'bot' | 'ai' | 'none' })} options={[
+                            { value: 'all', label: 'Todas' },
+                            { value: 'bot', label: 'Robô em andamento' },
+                            { value: 'ai', label: 'IA ativa' },
+                            { value: 'none', label: 'Sem automação ativa' },
+                        ]} />
+                    </div>
 
                     {/* Campos personalizados / UTMs */}
                     {options.length > 0 && (

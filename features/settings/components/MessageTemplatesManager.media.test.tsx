@@ -19,9 +19,9 @@ const cloud = { id: 'cloud', provider: 'meta_cloud', status: 'connected', phoneN
 const evolution = { id: 'evolution', provider: 'evolution_business', status: 'connected', phoneNumber: '+5522222222222' };
 const cloudTwo = { ...cloud, id: 'cloud-two', phoneNumber: '+5533333333333' };
 
-beforeEach(() => { vi.unstubAllGlobals(); });
+beforeEach(() => { vi.unstubAllGlobals(); Element.prototype.scrollIntoView = vi.fn(); });
 
-function setup() {
+async function setup() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   client.setQueryData(['messageTemplates'], { data: [] });
   client.setQueryData(['waConnection'], { connected: true, connection: cloud, connections: [cloud, evolution, cloudTwo] });
@@ -31,16 +31,17 @@ function setup() {
   fireEvent.click(screen.getByRole('button', { name: 'WhatsApp API' }));
   fireEvent.change(screen.getByPlaceholderText('Ex: Boas-vindas, Lembrete de audiência'), { target: { value: 'Boas-vindas' } });
   fireEvent.change(screen.getByPlaceholderText(/Ex: Olá/), { target: { value: 'Olá, tudo bem?' } });
-  fireEvent.change(screen.getByRole('combobox', { name: 'Mídia do cabeçalho' }), { target: { value: 'image' } });
+  fireEvent.keyDown(screen.getByRole('combobox', { name: 'Mídia do cabeçalho' }), { key: 'Enter' });
+  fireEvent.click(await screen.findByRole('option', { name: 'Imagem' }));
   return fetcher;
 }
 
 it('clears uploaded media when switching Meta Cloud to Evolution and permits text-only creation', async () => {
-  const fetcher = setup();
+  const fetcher = await setup();
   fireEvent.click(screen.getByRole('button', { name: 'Concluir upload' }));
   expect(screen.getByRole('button', { name: 'Criar modelo' })).toBeEnabled();
   fireEvent.click(screen.getByRole('button', { name: evolution.phoneNumber }));
-  expect(screen.getByRole('combobox', { name: 'Mídia do cabeçalho' })).toHaveValue('');
+  expect(screen.getByRole('combobox', { name: 'Mídia do cabeçalho' })).toHaveTextContent('Sem mídia');
   expect(screen.getByRole('combobox', { name: 'Mídia do cabeçalho' })).toBeDisabled();
   expect(screen.queryByRole('button', { name: 'Concluir upload' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Criar modelo' })).toBeEnabled();
@@ -51,14 +52,15 @@ it('clears uploaded media when switching Meta Cloud to Evolution and permits tex
   expect(payload).not.toHaveProperty('mediaId');
 });
 
-it('clears pending upload state and requires a new file for a different Cloud connection', () => {
-  setup();
+it('clears pending upload state and requires a new file for a different Cloud connection', async () => {
+  await setup();
   fireEvent.click(screen.getByRole('button', { name: 'Iniciar upload' }));
   expect(screen.getByRole('button', { name: 'Criar modelo' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: cloudTwo.phoneNumber }));
-  expect(screen.getByRole('combobox', { name: 'Mídia do cabeçalho' })).toHaveValue('');
+  expect(screen.getByRole('combobox', { name: 'Mídia do cabeçalho' })).toHaveTextContent('Sem mídia');
   expect(screen.getByRole('combobox', { name: 'Mídia do cabeçalho' })).toBeEnabled();
   expect(screen.getByRole('button', { name: 'Criar modelo' })).toBeEnabled();
-  fireEvent.change(screen.getByRole('combobox', { name: 'Mídia do cabeçalho' }), { target: { value: 'image' } });
+  fireEvent.keyDown(screen.getByRole('combobox', { name: 'Mídia do cabeçalho' }), { key: 'Enter' });
+  fireEvent.click(await screen.findByRole('option', { name: 'Imagem' }));
   expect(screen.getByRole('button', { name: 'Criar modelo' })).toBeDisabled();
 });

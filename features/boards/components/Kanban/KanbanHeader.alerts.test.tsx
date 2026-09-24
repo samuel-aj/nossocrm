@@ -11,7 +11,7 @@ vi.mock('@/lib/permissions/useMyActionPermissions', () => ({ useMyActionPermissi
 vi.mock('../BoardSelector', () => ({ BoardSelector: () => null }));
 afterEach(cleanup);
 function Header() {
-  const [general, setGeneralState] = useState<GeneralSettings>(EMPTY_GENERAL);
+  const [general, setGeneralState] = useState<GeneralSettings>({ ...EMPTY_GENERAL, alertsOnly: true });
   const setGeneral = (patch: Partial<GeneralSettings>) => setGeneralState(current => ({ ...current, ...patch }));
   const board = { id: 'board', name: 'Vendas', stages: [] } as unknown as Board;
   return <KanbanHeader boards={[board]} activeBoard={board} onSelectBoard={vi.fn()} onCreateBoard={vi.fn()}
@@ -24,21 +24,14 @@ function Header() {
     filterControls={{ general, setGeneral, period: EMPTY_PERIOD, setPeriod: vi.fn(), saved: { general: null, period: null }, pin: vi.fn(), saving: false, ready: true, loading: false, loadError: false }}
     onNewDeal={vi.fn()} selectionMode={false} onEnterSelectionMode={vi.fn()} onExitSelectionMode={vi.fn()} />;
 }
-it('selects and clears Com alertas without retaining the merged filter or active count', () => {
+it('ignores the retired alert preference in the controls and active count', () => {
   render(<Header />);
   fireEvent.click(screen.getByRole('button', { name: 'Filtros' }));
-  const checkbox = screen.getByRole('checkbox', { name: 'Com alertas' });
-  expect(checkbox).not.toBeChecked();
-  expect(checkbox.closest('label')?.parentElement?.closest('label')).toBeNull();
-  fireEvent.click(checkbox);
-  expect(checkbox).toBeChecked();
-  fireEvent.click(screen.getByRole('button', { name: 'Limpar (1)' }));
-  expect(checkbox).not.toBeChecked();
+  expect(screen.queryByRole('checkbox', { name: 'Com alertas' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /Limpar/ })).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Filtros' })).not.toHaveTextContent('1');
 });
 
-it('combines automation and alerts, then clears both and the count', async () => {
+it('selects and clears automation without retaining the active count', async () => {
   Element.prototype.scrollIntoView = vi.fn();
   render(<Header />);
   fireEvent.click(screen.getByRole('button', { name: 'Filtros' }));
@@ -46,9 +39,7 @@ it('combines automation and alerts, then clears both and the count', async () =>
   fireEvent.keyDown(combo, { key: 'Enter' });
   fireEvent.click(await screen.findByRole('option', { name: 'Robô em andamento' }));
   expect(combo).toHaveTextContent('Robô em andamento');
-  fireEvent.click(screen.getByRole('checkbox', { name: 'Com alertas' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Limpar (2)' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Limpar (1)' }));
   expect(combo).toHaveTextContent('Todas');
-  expect(screen.getByRole('checkbox', { name: 'Com alertas' })).not.toBeChecked();
   expect(screen.queryByRole('button', { name: /Limpar/ })).not.toBeInTheDocument();
 });

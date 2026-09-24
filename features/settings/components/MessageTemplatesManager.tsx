@@ -2,6 +2,7 @@
 
 import React, { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { FormSelect } from '@/components/ui/FormControls';
 import { TemplateMediaUpload } from './TemplateMediaUpload';
 import type { TemplateHeaderType } from '@/lib/templateMedia';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -553,26 +554,24 @@ export function MessageTemplatesManager() {
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Idioma</label>
-              <select
-                value={language}
-                onChange={e => setLanguage(e.target.value)}
-                className="w-full bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
-              >
-                {LANGUAGES.map(l => (
-                  <option key={l.value} value={l.value}>{l.label}</option>
-                ))}
-              </select>
+              <FormSelect label="Idioma" value={language} onChange={setLanguage} options={LANGUAGES} />
             </div>
           </div>
         )}
 
         {tab === 'whatsapp_api' && <div className="mb-4 space-y-2">
-          <label className="block text-sm">Mídia do cabeçalho
-            <select aria-label="Mídia do cabeçalho" value={headerType} disabled={mediaBusy || connSelecionada?.provider !== 'meta_cloud'} className="block w-full border rounded p-2 dark:bg-slate-900"
-              onChange={e => { setHeaderType(e.target.value as TemplateHeaderType | ''); setMediaId(null); }}>
-              <option value="">Sem mídia</option><option value="image">Imagem</option><option value="video">Vídeo</option><option value="document">Documento</option>
-            </select>
-          </label>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Mídia do cabeçalho</label>
+            <FormSelect label="Mídia do cabeçalho" value={headerType || 'none'}
+              disabled={mediaBusy || connSelecionada?.provider !== 'meta_cloud'}
+              onChange={value => { setHeaderType(value === 'none' ? '' : value as TemplateHeaderType); setMediaId(null); }}
+              options={[
+                { value: 'none', label: 'Sem mídia' },
+                { value: 'image', label: 'Imagem' },
+                { value: 'video', label: 'Vídeo' },
+                { value: 'document', label: 'Documento' },
+              ]} />
+          </div>
           {headerType && <TemplateMediaUpload key={`${headerType}-${selConnEfetiva}`} type={headerType} connectionId={selConnEfetiva || ''}
             onBusy={setMediaBusy} onUploaded={id => { setMediaId(id); setMediaConnection(selConnEfetiva || ''); }} />}
           {connSelecionada?.provider !== 'meta_cloud' && <p className="text-xs text-slate-500">Mídia em modelos está disponível para números conectados pela Meta Cloud.</p>}

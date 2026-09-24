@@ -13,6 +13,7 @@ export const periodSchema = z.object({
 }).strict().refine(v => v.created || v.closed, 'Selecione pelo menos uma data.')
   .refine(v => v.preset !== 'custom' || (!!v.start && !!v.end && v.start <= v.end), 'Informe um intervalo válido.');
 export const generalSchema = z.object({
+  // Accept old saved preferences, but this retired filter must never hide leads.
   alertsOnly: z.boolean().optional(),
   automation: z.enum(['all', 'bot', 'ai', 'none']).optional(),
   status: z.enum(['open', 'won', 'lost', 'all']),
