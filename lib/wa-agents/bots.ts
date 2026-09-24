@@ -35,6 +35,7 @@ import {
 } from './types';
 import { dispatchAgentEvent, postWebhook } from './webhooks';
 import { withActor } from '@/lib/supabase/actorClient';
+import { linkRunConversation } from './linkRunConversation';
 
 export { normalizeKeyword };
 
@@ -744,6 +745,12 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
         return;
       }
       const conv = await ensureConversation(admin, orgId, numeroInicial, phone, contact?.name ?? null);
+      try {
+        await linkRunConversation(admin, orgId, conv.id, run.deal_id ?? null);
+      } catch (error) {
+        // Associação auxiliar: não interrompe o envio nem reinicia o robô.
+        note(st, null, `não foi possível vincular o lead à conversa: ${errorMessage(error)}`);
+      }
       st.run = { ...st.run, conversation_id: conv.id, phone, contact_id: contact?.id ?? contactId ?? null };
       await saveRun(admin, st, { conversation_id: conv.id, phone, contact_id: st.run.contact_id });
     } else {

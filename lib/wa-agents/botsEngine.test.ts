@@ -20,6 +20,7 @@ const h = vi.hoisted(() => ({
   updated: [] as Array<Record<string, unknown>>,
   lossHistory: 0,
   alertCalls: [] as Array<Record<string, unknown>>,
+  linkFails: false,
 }));
 
 vi.mock('@/lib/whatsapp', () => ({
@@ -102,6 +103,9 @@ function fakeDb(tables: Record<string, Row[]>) {
     let limit: number | null = null;
     const rows = () => (tables[table] ??= []);
     const run = () => {
+      if (table === 'wa_conversations' && op === 'update' && h.linkFails) {
+        return { data: null, error: { message: 'link indisponível' } };
+      }
       let hit = rows().filter(r => filters.every(f => f(r)));
       if (op === 'update') hit.forEach(r => Object.assign(r, patch));
       if (limit !== null) hit = hit.slice(0, limit);
@@ -189,6 +193,7 @@ beforeEach(() => {
   h.updated = [];
   h.lossHistory = 0;
   h.alertCalls = [];
+  h.linkFails = false;
   h.deal = { id: 'deal-1', contact_id: 'contact-1', title: 'Lead', stage_id: 's1', board_id: 'b1', tags: [], stage_label: 'Novo' };
 });
 
@@ -196,6 +201,76 @@ const chain = (steps: Row[]) =>
   steps.map((s, i) => ({ next_step_id: steps[i + 1]?.id ?? null, ...s }));
 
 describe('motor dos robôs', () => {
+  const initialRun = () => run({ conversation_id: null, deal_id: 'deal-1', contact_id: 'contact-1', phone: '+5511988887777' });
+  const initialTables = (r: BotRunRow) => db(
+    bot([{ id: 'tx', type: 'send_text', text: 'Olá' }]), [r],
+    { id: 'conv-new', is_group: false },
+  );
+
+  it('vincula o lead que iniciou o robô ao adquirir a conversa, sem duplicar envio', async () => {
+    const r = initialRun();
+    const tables = initialTables(r);
+    await processBotRun(fakeDb(tables), r);
+    expect(tables.wa_conversations[0].deal_id).toBe('deal-1');
+    expect(tables.wa_bot_runs[0].conversation_id).toBe('conv-new');
+    expect(h.sent).toEqual(['Olá']);
+    expect(tables.wa_bot_runs[0].status).toBe('done');
+  });
+
+  it.each([
+    ['já vinculado', { deal_id: 'outro-lead' }],
+    ['outro contato', { contact_id: 'outro-contato' }],
+    ['outra organização', { organization_id: 'outra-org' }],
+    ['grupo', { is_group: true }],
+  ])('preserva a conversa: %s', async (_name, patch) => {
+    const r = initialRun();
+    const tables = initialTables(r);
+    Object.assign(tables.wa_conversations[0], patch);
+    const before = { ...tables.wa_conversations[0] };
+    await processBotRun(fakeDb(tables), r);
+    expect(tables.wa_conversations[0]).toEqual(before);
+    expect(h.sent).toEqual(['Olá']);
+  });
+
+  it.each([
+    ['lead excluído', { deleted_at: '2026-09-24T00:00:00Z' }],
+    ['lead de outra organização', { organization_id: 'outra-org' }],
+    ['lead sem contato', { contact_id: null }],
+  ])('não vincula %s', async (_name, patch) => {
+    const r = initialRun();
+    const tables = initialTables(r);
+    Object.assign(tables.deals[0], patch);
+    await processBotRun(fakeDb(tables), r);
+    expect(tables.wa_conversations[0].deal_id).toBeNull();
+  });
+
+  it('não adivinha vínculo pelo contato quando a execução não tem lead explícito', async () => {
+    const r = { ...initialRun(), deal_id: null };
+    const tables = initialTables(r);
+    await processBotRun(fakeDb(tables), r);
+    expect(tables.wa_conversations[0].deal_id).toBeNull();
+    expect(h.sent).toEqual(['Olá']);
+  });
+
+  it('retomar execução não desfaz uma desvinculação manual', async () => {
+    const r = { ...initialRun(), conversation_id: 'conv-1' };
+    const tables = db(bot([{ id: 'tx', type: 'send_text', text: 'Olá' }]), [r], { is_group: false });
+    await processBotRun(fakeDb(tables), r);
+    expect(tables.wa_conversations[0].deal_id).toBeNull();
+    expect(h.sent).toEqual(['Olá']);
+  });
+
+  it('falha no vínculo fica no histórico e não interrompe nem repete o envio', async () => {
+    h.linkFails = true;
+    const r = initialRun();
+    const tables = initialTables(r);
+    await processBotRun(fakeDb(tables), r);
+    expect(tables.wa_conversations[0].deal_id).toBeNull();
+    expect(tables.wa_bot_runs[0].status).toBe('done');
+    expect(JSON.stringify(tables.wa_bot_runs[0].log)).toContain('não foi possível vincular');
+    expect(h.sent).toEqual(['Olá']);
+  });
+
   it('executa TODAS as ações do balão, com o lead achado pela conversa', async () => {
     const steps = chain([
       { id: 'a', type: 'send_text', text: 'Olá {{primeiro_nome}}' },
