@@ -1,3 +1,4 @@
+import { resolveTemplateComponents } from '@/lib/whatsapp/templateMedia';
 /**
  * Robôs de mensagens predefinidas (sem IA): execução passo a passo com
  * esperas, espera de resposta, condições por palavra-chave e entrega a um
@@ -314,6 +315,8 @@ async function sendBotText(
 }
 
 type BotTemplateRow = {
+  header_type?: string | null;
+  media_id?: string | null;
   connection_id: string | null;
   id: string;
   name: string;
@@ -349,7 +352,7 @@ async function sendBotTemplate(
 ): Promise<string> {
   const { data, error } = await admin
     .from('message_templates')
-    .select('id, name, type, language, body, meta_name, meta_status, connection_id')
+    .select('id, name, type, language, body, meta_name, meta_status, connection_id, header_type, media_id')
     .eq('organization_id', st.run.organization_id)
     .eq('id', templateId)
     .maybeSingle();
@@ -375,9 +378,7 @@ async function sendBotTemplate(
         to: phone,
         name: tpl.meta_name,
         language: (tpl.language || 'pt_BR').trim(),
-        components: params.length
-          ? [{ type: 'body', parameters: params.map(p => ({ type: 'text', text: p })) }]
-          : undefined,
+        components: await resolveTemplateComponents(admin, st.run.organization_id, connection.id, tpl, params),
       });
     } else {
       result = await provider.sendText({ to: phone, text });

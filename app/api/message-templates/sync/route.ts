@@ -52,7 +52,7 @@ export async function POST(req: Request) {
 
   const { data: rows } = await sb
     .from('message_templates')
-    .select('id, meta_name, language, connection_id')
+    .select('id, meta_name, language, connection_id, header_type')
     .eq('organization_id', scoped.organization_id)
     .eq('type', 'whatsapp_api');
   // Só os modelos DESTA conexão + os legados sem conexão (que serão adotados
@@ -75,6 +75,8 @@ export async function POST(req: Request) {
       const { error } = await sb
         .from('message_templates')
         .update({
+          header_type: t.headerType,
+          ...(match.header_type !== t.headerType ? { media_id: null } : {}),
           meta_status: t.status,
           ...(safeCategory ? { category: safeCategory } : {}),
           connection_id: conn.id,
@@ -97,6 +99,7 @@ export async function POST(req: Request) {
       category: safeCategory,
       language: t.language || 'pt_BR',
       body: t.bodyText ?? '',
+      header_type: t.headerType,
       meta_name: t.name,
       meta_status: t.status,
       buttons: t.buttons,

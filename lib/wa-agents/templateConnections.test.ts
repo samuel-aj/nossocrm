@@ -25,6 +25,8 @@ describe('modelos exclusivos por número', () => {
     expect(await botTemplateConnectionError(admin, 'org', steps, ['number-a'])).toBeNull();
     query.in.mockResolvedValue({ data: [], error: null });
     expect(await botTemplateConnectionError(admin, 'org', steps, ['number-a'])).toContain('não existe');
+    query.in.mockResolvedValue({ data: [{ ...api, header_type: 'image', media_id: null }], error: null });
+    expect(await botTemplateConnectionError(admin, 'org', steps, ['number-a'])).toContain('precisa de mídia');
     query.in.mockResolvedValue({ data: [{ ...api, meta_status: 'REJECTED' }], error: null });
     expect(await botTemplateConnectionError(admin, 'org', steps, ['number-a'])).toContain('aprovado');
   });

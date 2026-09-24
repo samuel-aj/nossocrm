@@ -761,6 +761,8 @@ export type FlowValidation = { errors: FlowIssue[]; warnings: FlowIssue[] };
 export type TemplateCheck = {
   id: string;
   type: string;
+  header_type?: string | null;
+  media_id?: string | null;
   meta_status?: string | null;
   connection_id?: string | null;
   buttons?: Array<{ type: string; text: string }> | null;
@@ -868,6 +870,7 @@ export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowH
             const live = templates.find((t) => t.id === block.data.template_id);
             if (!live) fail('o modelo escolhido não existe mais: escolha outro');
             else {
+              if (live.header_type && !live.media_id) fail('o modelo precisa de mídia em Configurações → Modelos');
               if (live.type === 'whatsapp_api' && live.meta_status !== 'APPROVED') fail('o modelo ainda não foi aprovado pela Meta');
               if (!templateFitsConnections(live, header.connection_ids ?? [])) {
                 fail('o modelo da API exige que o robô use somente o número ao qual ele pertence');

@@ -1233,6 +1233,8 @@ export function DealWhatsAppChat({
       body: string;
       language?: string;
       meta_name?: string | null;
+      header_type?: string | null;
+      media_id?: string | null;
       meta_status?: string | null;
       connectionId?: string | null;
       buttons?: TemplateButton[] | null;
@@ -1492,7 +1494,7 @@ export function DealWhatsAppChat({
   const windowLocked = senderIsMeta && !win.open;
   const apiTemplates = senderIsApi
     ? (templatesQ.data?.data ?? []).filter(
-        t => t.type === 'whatsapp_api' && t.meta_status === 'APPROVED' && t.connectionId === activeSender?.id
+        t => t.type === 'whatsapp_api' && (!t.header_type || !!t.media_id) && t.meta_status === 'APPROVED' && t.connectionId === activeSender?.id
       )
     : [];
   const pickApiTemplate = (t: (typeof apiTemplates)[number]) => {

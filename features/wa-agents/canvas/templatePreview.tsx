@@ -15,6 +15,8 @@ export type TemplateOption = {
   id: string;
   name: string;
   type: 'general' | 'whatsapp_api';
+  header_type?: string | null;
+  media_id?: string | null;
   meta_status?: string | null;
   body: string;
   connection_id?: string | null;

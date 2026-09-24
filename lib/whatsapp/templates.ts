@@ -11,6 +11,7 @@
  */
 import type { WaConnectionRow } from './service';
 import { envEvolution } from './index';
+import { parseTemplateHeader, type TemplateHeaderType } from '@/lib/templateMedia';
 import type { TemplateButton } from '@/lib/messageTemplates';
 
 /** Componente BUTTONS da Meta -> nossos botões (ignora tipos que não usamos). */
@@ -57,6 +58,7 @@ async function evoInstanceCall<T = unknown>(
 }
 
 export interface MetaTemplateInfo {
+  headerType: TemplateHeaderType | null;
   metaId: string | null;
   name: string;
   status: string | null;
@@ -81,6 +83,7 @@ export async function createMetaTemplate(
     language: string;
     bodyText: string;
     examples: string[];
+    header?: { type: TemplateHeaderType; handle: string };
     buttons?: TemplateButton[] | null;
   }
 ): Promise<{ ok: boolean; error?: string }> {
@@ -92,6 +95,7 @@ export async function createMetaTemplate(
       ...(input.examples.length > 0 ? { example: { body_text: [input.examples] } } : {}),
     },
   ];
+  if (input.header) components.unshift({ type: 'HEADER', format: input.header.type.toUpperCase(), example: { header_handle: [input.header.handle] } });
   if (input.buttons && input.buttons.length > 0) {
     components.push({
       type: 'BUTTONS',
@@ -172,6 +176,7 @@ export async function listMetaTemplates(
       const comps = Array.isArray(t.components) ? (t.components as Record<string, unknown>[]) : [];
       const bodyComp = comps.find(c => String(c?.type ?? '').toUpperCase() === 'BODY');
       templates.push({
+        headerType: parseTemplateHeader(comps),
         metaId: t.id != null ? String(t.id) : null,
         name: String(t.name ?? ''),
         status: t.status != null ? String(t.status).toUpperCase() : null,
@@ -204,7 +209,8 @@ export async function listMetaTemplates(
     const comps = Array.isArray(t.components) ? (t.components as Record<string, unknown>[]) : [];
     const bodyComp = comps.find(c => String(c?.type ?? '').toUpperCase() === 'BODY');
     templates.push({
-      metaId: t.id != null ? String(t.id) : null,
+      headerType: parseTemplateHeader(comps),
+        metaId: t.id != null ? String(t.id) : null,
       name: String(t.name ?? ''),
       status: t.status != null ? String(t.status).toUpperCase() : null,
       category: t.category != null ? String(t.category).toUpperCase() : null,

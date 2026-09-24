@@ -2,6 +2,8 @@
 
 import React, { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { TemplateMediaUpload } from './TemplateMediaUpload';
+import type { TemplateHeaderType } from '@/lib/templateMedia';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ArrowRight, Check, FileText, KeyRound, MessageCircle, MousePointerClick, Pencil, Plus, RefreshCw, Trash2, Variable, X } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
@@ -27,6 +29,8 @@ type TemplateType = 'general' | 'whatsapp_api';
 type TemplateCategory = 'UTILITY' | 'MARKETING';
 
 interface MessageTemplate {
+  header_type?: TemplateHeaderType | null;
+  media_id?: string | null;
   /** Número (conexão) dono do modelo na Meta; null = legado pré multi-número */
   connectionId?: string | null;
   id: string;
@@ -79,6 +83,10 @@ export function MessageTemplatesManager() {
   const [language, setLanguage] = useState('pt_BR');
   const [body, setBody] = useState('');
   // Botões do modelo da API (Resposta rápida | Link | Ligar), limites da Meta
+  const [headerType, setHeaderType] = useState<TemplateHeaderType | ''>('');
+  const [mediaId, setMediaId] = useState<string | null>(null);
+  const [mediaBusy, setMediaBusy] = useState(false);
+  const [mediaConnection, setMediaConnection] = useState('');
   const [buttons, setButtons] = useState<TemplateButton[]>([]);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const addButton = (type: TemplateButton['type']) =>
@@ -142,7 +150,7 @@ export function MessageTemplatesManager() {
     setCategory('UTILITY');
     setLanguage('pt_BR');
     setBody('');
-    setButtons([]);
+    setButtons([]); setHeaderType(''); setMediaId(null); setMediaBusy(false);
   };
 
   const switchTab = (next: TemplateType) => {
@@ -155,6 +163,7 @@ export function MessageTemplatesManager() {
   const saveMut = useMutation({
     mutationFn: () => {
       const payload = {
+        ...(tab === 'whatsapp_api' && headerType && mediaId && mediaConnection === selConnEfetiva ? { mediaId } : {}),
         name: name.trim(),
         type: tab,
         category: tab === 'whatsapp_api' ? category : null,
@@ -266,6 +275,10 @@ export function MessageTemplatesManager() {
       }`}
     >
       <div className="min-w-0 flex-1">
+        {t.header_type && <div className="mb-3">
+          <p className="text-xs font-semibold">{({ image: 'Imagem', video: 'Vídeo', document: 'Documento' })[t.header_type]} · {t.media_id ? 'Arquivo vinculado' : 'Mídia faltante — selecione antes de enviar'}</p>
+          {t.connectionId && <TemplateMediaUpload key={`${t.id}-${t.header_type}`} type={t.header_type} connectionId={t.connectionId} templateId={t.id} onUploaded={() => { qc.invalidateQueries({ queryKey: ['messageTemplates'] }); }} />}
+        </div>}
         <div className="flex items-center gap-2 flex-wrap">
           <p className="text-sm font-bold text-slate-900 dark:text-white truncate">{t.name}</p>
           {t.type === 'whatsapp_api' && (
@@ -539,6 +552,17 @@ export function MessageTemplatesManager() {
           </div>
         )}
 
+        {tab === 'whatsapp_api' && <div className="mb-4 space-y-2">
+          <label className="block text-sm">Mídia do cabeçalho
+            <select aria-label="Mídia do cabeçalho" value={headerType} disabled={mediaBusy || connSelecionada?.provider !== 'meta_cloud'} className="block w-full border rounded p-2 dark:bg-slate-900"
+              onChange={e => { setHeaderType(e.target.value as TemplateHeaderType | ''); setMediaId(null); }}>
+              <option value="">Sem mídia</option><option value="image">Imagem</option><option value="video">Vídeo</option><option value="document">Documento</option>
+            </select>
+          </label>
+          {headerType && <TemplateMediaUpload key={`${headerType}-${selConnEfetiva}`} type={headerType} connectionId={selConnEfetiva || ''}
+            onBusy={setMediaBusy} onUploaded={id => { setMediaId(id); setMediaConnection(selConnEfetiva || ''); }} />}
+          {connSelecionada?.provider !== 'meta_cloud' && <p className="text-xs text-slate-500">Mídia em modelos está disponível para números conectados pela Meta Cloud.</p>}
+        </div>}
         <div className="mb-3">
           <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Mensagem</label>
           <textarea
@@ -712,7 +736,7 @@ export function MessageTemplatesManager() {
           <button
             type="button"
             onClick={() => saveMut.mutate()}
-            disabled={!canSave || saveMut.isPending || apiLocked}
+            disabled={!canSave || saveMut.isPending || apiLocked || mediaBusy || (tab === 'whatsapp_api' && !!headerType && (!mediaId || mediaConnection !== selConnEfetiva))}
             className={`${
               editingId ? 'bg-amber-600 hover:bg-amber-500' : 'bg-primary-600 hover:bg-primary-500'
             } text-white px-4 py-2 rounded-lg text-sm font-bold inline-flex items-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}

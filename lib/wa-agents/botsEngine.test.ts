@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const h = vi.hoisted(() => ({
   sent: [] as string[],
+  sentTemplates: [] as unknown[],
   typingCalls: [] as number[],
   moves: [] as Array<{ dealId: string; stageId: string }>,
   tags: [] as Array<{ dealId: string; tag: string }>,
@@ -27,6 +28,7 @@ vi.mock('@/lib/whatsapp', () => ({
       h.sent.push(text);
       return { ok: true, providerMessageId: `m${h.sent.length}` };
     },
+    sendTemplate: async (input: unknown) => { h.sentTemplates.push(input); return { ok: true, providerMessageId: 'template-message' }; },
     sendTyping: async ({ ms }: { ms: number }) => {
       h.typingCalls.push(ms);
     },
@@ -84,7 +86,7 @@ vi.mock('./webhooks', () => ({
   postWebhook: async () => ({ ok: false, error: 'HTTP 500' }),
 }));
 
-import { processBotRun } from './bots';
+import { processBotRun, sendTemplateToConversation } from './bots';
 import type { BotRunRow } from './types';
 
 type Row = Record<string, unknown>;
@@ -409,4 +411,17 @@ describe('motor dos robôs', () => {
   expect(h.alertCalls).toEqual([{ p_org: ORG, p_deal: 'deal-1', p_bot: 'bot-1', p_run: 'run-1', p_block: 'alert', p_message: 'Resposta de Maria' }]);
   expect(h.tags).toEqual([{ dealId: 'deal-1', tag: 'recuperado' }]);
   expect(tables.wa_bot_runs[0].status).toBe('done');
+});
+
+
+describe('bot template media delivery', () => {
+  it('sends the private media header alongside body parameters', async () => {
+    const db = fakeDb({ message_templates: [{ id: 'tpl', organization_id: 'org', connection_id: 'conn', name: 'Media', type: 'whatsapp_api', language: 'pt_BR', body: 'Olá {{contato.nome}}', meta_name: 'media', meta_status: 'APPROVED', header_type: 'image', media_id: 'asset' }], message_template_media: [{ id: 'asset', organization_id: 'org', connection_id: 'conn', storage_path: 'org/conn/asset/photo.png', header_type: 'image', mime_type: 'image/png', byte_size: 8, verified_at: 'now' }] });
+    const signed = vi.fn().mockResolvedValue({data:{signedUrl:'https://storage.test/fresh'}});
+    Object.assign(db, {storage:{from:()=>({createSignedUrl:signed})}});
+    h.sentTemplates = [];
+    await sendTemplateToConversation(db as never,{organizationId:'org',conversationId:'conv',connection:{id:'conn',status:'connected'} as never,phone:'+5511999999999',templateId:'tpl',values:{'contato.nome':'Maria'}});
+    expect(h.sentTemplates).toEqual([expect.objectContaining({name:'media',components:[{type:'header',parameters:[{type:'image',image:{link:'https://storage.test/fresh'}}]},{type:'body',parameters:[{type:'text',text:'Maria'}]}]})]);
+    expect(signed).toHaveBeenCalledWith('org/conn/asset/photo.png',600);
+  });
 });

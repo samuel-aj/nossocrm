@@ -1,3 +1,4 @@
+import { resolveTemplateComponents } from '@/lib/whatsapp/templateMedia';
 /**
  * POST /api/whatsapp/send -> envia texto e/ou mídia e persiste (out).
  *
@@ -173,6 +174,12 @@ export async function POST(req: Request) {
         }
       : undefined;
 
+  if (templateName && !provider.sendTemplate) {
+    const { data: template, error } = await auth.admin.from('message_templates').select('header_type')
+      .eq('organization_id', auth.user.organizationId).eq('connection_id', conn.id)
+      .eq('meta_name', templateName).eq('language', (body.template?.language || 'pt_BR').trim()).maybeSingle();
+    if (error || template?.header_type) return json({ error: 'Este modelo com mídia exige conexão Meta Cloud.' }, 422);
+  }
   let result;
   const mediaPath = media?.path ?? '';
   if (media && mediaKind) {
@@ -199,14 +206,17 @@ export async function POST(req: Request) {
     });
   } else if (templateName && provider.sendTemplate) {
     const params = (body.template?.params ?? []).map(p => String(p ?? '').trim() || '-');
+    const { data: tpl, error: tplError } = await auth.admin.from('message_templates').select('header_type,media_id,meta_status').eq('organization_id', auth.user.organizationId).eq('connection_id', conn.id).eq('meta_name', templateName).eq('language', (body.template?.language || 'pt_BR').trim()).maybeSingle();
+    if (tplError || !tpl || tpl.meta_status !== 'APPROVED') return json({ error: 'Modelo não encontrado ou não aprovado para este número.' }, 422);
+    let components;
+    try { components = await resolveTemplateComponents(auth.admin, auth.user.organizationId, conn.id, tpl, params); }
+    catch (error) { return json({ error: error instanceof Error ? error.message : 'Mídia inválida' }, 422); }
     result = await provider.sendTemplate({
       to,
       isGroup: !!group,
       name: templateName,
       language: (body.template?.language || 'pt_BR').trim(),
-      components: params.length
-        ? [{ type: 'body', parameters: params.map(p => ({ type: 'text', text: p })) }]
-        : undefined,
+      components,
     });
   } else {
     // provedor sem envio de modelo (QR/Evolution): vai o texto já preenchido

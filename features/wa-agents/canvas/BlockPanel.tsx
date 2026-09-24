@@ -747,8 +747,8 @@ function TemplateEditor({ block, update }: EditorProps<'send_template'>) {
         {apiGroups.map(group => (
           <optgroup key={group.id} label={`WhatsApp API — ${group.label}`}>
             {group.templates.map(t => (
-              <option key={t.id} value={t.id} disabled={t.meta_status !== 'APPROVED'}>
-                {t.name} — {group.label}{statusLabel(t.meta_status)}
+              <option key={t.id} value={t.id} disabled={t.meta_status !== 'APPROVED' || (!!t.header_type && !t.media_id)}>
+                {t.name} — {group.label}{statusLabel(t.meta_status)}{t.header_type && !t.media_id ? ' (mídia faltante)' : ''}
               </option>
             ))}
           </optgroup>

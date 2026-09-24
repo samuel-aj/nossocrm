@@ -1,3 +1,5 @@
+import { getTemplateMedia, readTemplateMedia, uploadMetaTemplateSample } from '@/lib/whatsapp/templateMedia';
+import type { TemplateHeaderType } from '@/lib/templateMedia';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
@@ -44,6 +46,7 @@ const CreateSchema = z
     connectionId: z.string().uuid().optional(),
     /** Só whatsapp_api: botões do template (criados na Meta junto) */
     buttons: ButtonsSchema.optional(),
+    mediaId: z.string().uuid().optional(),
   })
   .strict()
   .refine(v => v.type !== 'whatsapp_api' || !!v.category, {
@@ -84,6 +87,8 @@ function mapRow(row: any) {
     meta_status: (row.meta_status ?? null) as string | null,
     connectionId: (row.connection_id ?? null) as string | null,
     buttons: (Array.isArray(row.buttons) ? row.buttons : null) as import('@/lib/messageTemplates').TemplateButton[] | null,
+    header_type: row.header_type ?? null,
+    media_id: row.media_id ?? null,
     created_at: row.created_at as string | null,
   };
 }
@@ -95,7 +100,7 @@ export async function GET() {
   const sb = createStaticAdminClient();
   const { data, error } = await sb
     .from('message_templates')
-    .select('id,name,type,category,language,body,meta_name,meta_status,connection_id,buttons,created_at')
+    .select('id,name,type,category,language,body,meta_name,meta_status,connection_id,buttons,header_type,media_id,created_at')
     .eq('organization_id', auth.profile.organization_id)
     .order('created_at', { ascending: true });
 
@@ -121,6 +126,8 @@ export async function POST(req: Request) {
   // Modelo do WhatsApp API: cria o template NA META (via Evolution) antes de
   // salvar no CRM — o modelo nasce sincronizado, com status PENDING até a
   // aprovação da Meta chegar (botão Sincronizar atualiza).
+  if (parsed.data.type === 'general' && parsed.data.mediaId) return NextResponse.json({ error: 'Mídia disponível apenas em modelos oficiais' }, { status: 422 });
+  let header: { type: TemplateHeaderType; handle: string } | undefined;
   let metaName: string | null = null;
   let metaStatus: string | null = null;
   let connIdUsada: string | null = null;
@@ -137,7 +144,19 @@ export async function POST(req: Request) {
     connIdUsada = conn.id;
     metaName = toMetaName(parsed.data.name);
     const meta = toMetaBody(parsed.data.body);
+    if (parsed.data.mediaId) {
+      try {
+        const media = await getTemplateMedia(sb, auth.profile.organization_id, conn.id, parsed.data.mediaId);
+        if (!media.verified_at) throw new Error('Conclua o upload da mídia antes de criar o modelo.');
+        const bytes = await readTemplateMedia(sb, media);
+        const handle = await uploadMetaTemplateSample(conn, media, bytes);
+        const saved = await sb.from('message_template_media').update({ meta_handle: handle }).eq('id', media.id).eq('organization_id', auth.profile.organization_id);
+        if (saved.error) throw new Error('Falha ao registrar a amostra.');
+        header = { type: media.header_type, handle };
+      } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : 'Falha na amostra de mídia' }, { status: 422 }); }
+    }
     const created = await createMetaTemplate(conn, {
+      header,
       name: metaName,
       category: parsed.data.category as 'UTILITY' | 'MARKETING',
       language: parsed.data.language?.trim() || 'pt_BR',
@@ -160,13 +179,15 @@ export async function POST(req: Request) {
       category: parsed.data.type === 'whatsapp_api' ? parsed.data.category : null,
       language: parsed.data.language?.trim() || 'pt_BR',
       body: parsed.data.body,
+      header_type: header?.type ?? null,
+      media_id: parsed.data.mediaId ?? null,
       meta_name: metaName,
       meta_status: metaStatus,
       ...(metaName ? { synced_at: new Date().toISOString() } : {}),
       ...(parsed.data.type === 'whatsapp_api' && connIdUsada ? { connection_id: connIdUsada } : {}),
       buttons: parsed.data.type === 'whatsapp_api' && parsed.data.buttons?.length ? parsed.data.buttons : null,
     })
-    .select('id,name,type,category,language,body,meta_name,meta_status,connection_id,buttons,created_at')
+    .select('id,name,type,category,language,body,meta_name,meta_status,connection_id,buttons,header_type,media_id,created_at')
     .single();
 
   if (error) {
