@@ -35,4 +35,6 @@ Aplicar as migrações versionadas de modelos e etiquetas antes do novo código.
 
 ## Revisão final
 
-Pendente registrar commit final, resultado da revisão geral e URL do deployment verificado.
+Revisão geral `e5b1303..4a69187` aprovada para staging, sem achados críticos/importantes. Build final do código `fa5bfa1` e ambos os testes HTTP em modo de produção passaram. Migrações/histórico de staging alinhados às versões `20260924002950` e `20260924010603`.
+
+Observações menores mantidas: contato sem conversa persistida pode criar lead, mas o painel só exibe vínculo quando a conversa existir (lead acessível no board); menções validam membro/identificador real, sem impor igualdade literal do nome exibido. Nenhuma dessas observações altera o isolamento ou a sincronização por vínculo explícito.
