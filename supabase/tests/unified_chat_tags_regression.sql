@@ -34,6 +34,11 @@ BEGIN
  PERFORM public.mutate_conversation_labels(org,c1,ARRAY[b],ARRAY[a]);
  IF (SELECT tags FROM public.deals WHERE id=d1)<>ARRAY[prefix||'B'] THEN RAISE EXCEPTION 'Atomic delta failed'; END IF;
  INSERT INTO label_test_results VALUES('add/remove from either origin and atomic delta',true);
+ BEGIN PERFORM public.mutate_conversation_labels(org,c1,ARRAY[a],'{}',d2,true); RAISE EXCEPTION 'Changed link accepted after authorization'; EXCEPTION WHEN serialization_failure THEN NULL; END;
+ BEGIN PERFORM public.mutate_conversation_labels(org,c1,ARRAY[a],'{}',NULL,true); RAISE EXCEPTION 'Concurrent link from unlinked state accepted'; EXCEPTION WHEN serialization_failure THEN NULL; END;
+ IF (SELECT tags FROM public.deals WHERE id=d1)<>ARRAY[prefix||'B'] THEN RAISE EXCEPTION 'Rejected mutation modified linked lead'; END IF;
+ PERFORM public.mutate_conversation_labels(org,c1,ARRAY[b],'{}',d1,true);
+ INSERT INTO label_test_results VALUES('atomic labels require the exact authorized link including null',true);
  INSERT INTO public.wa_conversations(organization_id,wa_phone,label_ids) VALUES(org,'test-'||gen_random_uuid(),ARRAY[a]) RETURNING id INTO local_chat;
  INSERT INTO public.wa_conversations(organization_id,wa_phone,is_group,label_ids) VALUES(org,'test-'||gen_random_uuid(),true,ARRAY[a]) RETURNING id INTO grp;
  UPDATE public.wa_conversations SET deal_id=d1 WHERE id=local_chat;
@@ -62,7 +67,7 @@ BEGIN
  UPDATE public.deals SET tags=tags||ARRAY[prefix||'Renamed'] WHERE id=d1;
  IF NOT (SELECT x=ANY(label_ids) FROM public.wa_conversations WHERE id=c1) THEN RAISE EXCEPTION 'Explicit recreate not usable'; END IF;
  INSERT INTO label_test_results VALUES('rename/delete tombstones and explicit recreation',true);
- IF has_function_privilege('authenticated','public.mutate_conversation_labels(uuid,uuid,uuid[],uuid[])','execute') OR has_function_privilege('anon','public.mutate_conversation_labels(uuid,uuid,uuid[],uuid[])','execute') THEN RAISE EXCEPTION 'RPC exposed'; END IF;
+ IF has_function_privilege('authenticated','public.mutate_conversation_labels(uuid,uuid,uuid[],uuid[],uuid,boolean)','execute') OR has_function_privilege('anon','public.mutate_conversation_labels(uuid,uuid,uuid[],uuid[],uuid,boolean)','execute') THEN RAISE EXCEPTION 'RPC exposed'; END IF;
  INSERT INTO label_test_results VALUES('backend atomic RPC is not public',true);
  BEGIN UPDATE public.deals SET organization_id=other_org WHERE id=d1; RAISE EXCEPTION 'Linked lead moved organization'; EXCEPTION WHEN check_violation THEN NULL; END;
  UPDATE public.deals SET deleted_at=now() WHERE id=d1;

@@ -210,7 +210,8 @@ REVOKE ALL ON public.tags,public.wa_labels FROM anon;
 GRANT SELECT,INSERT,UPDATE,DELETE ON public.tags,public.wa_labels TO authenticated,service_role;
 
 -- Backend-only atomic mutation: acquire the lead first, then the conversation.
-CREATE OR REPLACE FUNCTION public.mutate_conversation_labels(p_org uuid,p_conversation uuid,p_add uuid[] DEFAULT '{}',p_remove uuid[] DEFAULT '{}')
+DROP FUNCTION IF EXISTS public.mutate_conversation_labels(uuid,uuid,uuid[],uuid[]);
+CREATE OR REPLACE FUNCTION public.mutate_conversation_labels(p_org uuid,p_conversation uuid,p_add uuid[] DEFAULT '{}',p_remove uuid[] DEFAULT '{}',p_expected_deal uuid DEFAULT NULL,p_check_link boolean DEFAULT false)
 RETURNS public.wa_conversations LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE c public.wa_conversations; linked uuid;
 BEGIN
@@ -218,13 +219,14 @@ BEGIN
  IF linked IS NOT NULL THEN PERFORM 1 FROM public.deals WHERE id=linked AND organization_id=p_org FOR UPDATE; END IF;
  SELECT * INTO c FROM public.wa_conversations WHERE id=p_conversation AND organization_id=p_org FOR UPDATE;
  IF NOT FOUND THEN RAISE EXCEPTION 'Conversation not found' USING ERRCODE='P0002'; END IF;
+ IF p_check_link AND c.deal_id IS DISTINCT FROM p_expected_deal THEN RAISE EXCEPTION 'Conversation link changed; refresh authorization' USING ERRCODE='40001'; END IF;
  IF c.deal_id IS DISTINCT FROM linked THEN RAISE EXCEPTION 'Conversation link changed; retry' USING ERRCODE='40001'; END IF;
  UPDATE public.wa_conversations SET label_ids=ARRAY(SELECT DISTINCT id FROM unnest(c.label_ids || p_add) id WHERE NOT id=ANY(p_remove) ORDER BY id)
  WHERE id=c.id RETURNING * INTO c;
  RETURN c;
 END $$;
-REVOKE ALL ON FUNCTION public.mutate_conversation_labels(uuid,uuid,uuid[],uuid[]) FROM PUBLIC,anon,authenticated;
-GRANT EXECUTE ON FUNCTION public.mutate_conversation_labels(uuid,uuid,uuid[],uuid[]) TO service_role;
+REVOKE ALL ON FUNCTION public.mutate_conversation_labels(uuid,uuid,uuid[],uuid[],uuid,boolean) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.mutate_conversation_labels(uuid,uuid,uuid[],uuid[],uuid,boolean) TO service_role;
 REVOKE ALL ON FUNCTION crm_internal.label_color(text),crm_internal.normalize_deal_labels(),crm_internal.fanout_deal_labels(),crm_internal.validate_conversation_labels(),crm_internal.apply_conversation_labels(),crm_internal.catalog_label_before(),crm_internal.catalog_label_after(),crm_internal.write_legacy_tag() FROM PUBLIC,anon,authenticated;
 
 DO $$ BEGIN

@@ -40,3 +40,19 @@ Controller performed actual STAGING SQL validation (worker did not apply remote 
 - Backfill preserves full source data in the private legacy archive; equivalent normalized names necessarily converge to one canonical ID/color, preferring existing chat label. Existing persisted external legacy-ID references to merged duplicates require a fresh catalog lookup.
 - Catalog creation/rename input is limited to 500 characters; migration retains longer legacy strings without truncating. Interactive delta/replacement payloads capped at 500 IDs.
 - Build, independent review, deployment and any further staging checks belong to controller. No pushes or production writes performed by worker.
+
+## Review follow-up — persisted-lead authorization (P1)
+
+Independent review `.tmp/tags-review.md` found that conversation access can come from visible lead A while the persisted linked lead B is hidden. Both delta and legacy replacement routes now load `deal_id`, validate the exact linked lead in the same organization and call `getTeamAccess`/`visibleLead` before any mutation. Unlinked/group-local labeling continues; explicit unlink/relink authorizes only the destination because the old lead's labels remain untouched.
+
+The controller also approved closing the authorization/read race. Atomic requests pass captured `p_expected_deal` (including null) with `p_check_link=true`; the RPC checks this under its row lock. Legacy full replacement adds a `deal_id` equality/null condition. A changed link returns 409 and cannot redirect a previously authorized write to a different lead. The RPC keeps one unambiguous signature with optional default arguments, so old backend four-argument calls remain compatible. Public/authenticated execution remains revoked.
+
+Validation:
+
+- Red regression: `npx vitest run 'app/api/whatsapp/conversations/[id]/route.test.ts' --maxWorkers=2` — 4 new assertions failed against the original route (hidden lead returned 200, visible linked lead was never checked).
+- Green: `npx vitest run 'app/api/whatsapp/conversations/[id]/route.test.ts' lib/whatsapp/conversationLabels.test.ts lib/whatsapp/labelCompatibility.test.ts --maxWorkers=2` — **3 files, 20 tests passed** (13 route + 7 helpers). Includes both payload forms, denied indirect writes with no update/RPC, visible-link success, unlink/relink preservation, atomic and replacement race rejection.
+- `npm run typecheck` — passed.
+- `npx eslint 'app/api/whatsapp/conversations/[id]/route.ts' 'app/api/whatsapp/conversations/[id]/route.test.ts' --max-warnings 0` — passed.
+- `git diff --check` — passed.
+- Controller reapplied SQL authorization fix on staging and all **9 rollback cases passed**, including expected-link mismatch/null rejection and unchanged lead labels on rejection.
+- Controller reported broad suite on the preceding commit: 613 passing / 11 known baseline failures; controller repeats build and focused review after this fix.

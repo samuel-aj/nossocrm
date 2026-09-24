@@ -21,17 +21,26 @@ export async function PATCH(req: Request, ctx: Ctx) {
   if (!parsed.success) return json({ error: 'Alteração de etiquetas ou vínculo inválida' }, 400);
   const body = parsed.data;
 
-  if ('dealId' in body && body.dealId) {
+  const isLabelEdit = !('dealId' in body);
+  let expectedDealId: string | null = null;
+  if (isLabelEdit || ('dealId' in body && body.dealId)) {
     const { data: conversation, error: convError } = await auth.admin.from('wa_conversations')
-      .select('contact_id,is_group').eq('organization_id', orgId).eq('id', id).maybeSingle();
+      .select('contact_id,is_group,deal_id').eq('organization_id', orgId).eq('id', id).maybeSingle();
     if (convError) return json({ error: convError.message }, 500);
-    if (!conversation || conversation.is_group) return json({ error: 'Grupos não podem ter lead vinculado' }, 400);
-    const { data: deal, error: dealError } = await auth.admin.from('deals')
-      .select('id,contact_id,board_id,owner_id').eq('organization_id', orgId).eq('id', body.dealId).is('deleted_at', null).maybeSingle();
-    if (dealError) return json({ error: dealError.message }, 500);
-    if (!deal || !conversation.contact_id || deal.contact_id !== conversation.contact_id) return json({ error: 'Lead indisponível para esta conversa' }, 404);
-    const access = await getTeamAccess(auth.admin, orgId, auth.user.id);
-    if (!visibleLead(access, auth.user.id, deal.board_id, deal.owner_id)) return json({ error: 'Lead indisponível para esta conversa' }, 404);
+    if (!conversation) return json({ error: 'Conversa indisponível' }, 404);
+    expectedDealId = conversation.deal_id ?? null;
+    if (!isLabelEdit && conversation.is_group) return json({ error: 'Grupos não podem ter lead vinculado' }, 400);
+    // Conversation visibility may come from another lead belonging to this contact.
+    // Label triggers mutate the persisted link, so authorize that exact lead too.
+    const targetDealId = 'dealId' in body ? body.dealId : expectedDealId;
+    if (targetDealId) {
+      const { data: deal, error: dealError } = await auth.admin.from('deals')
+        .select('id,contact_id,board_id,owner_id').eq('organization_id', orgId).eq('id', targetDealId).is('deleted_at', null).maybeSingle();
+      if (dealError) return json({ error: dealError.message }, 500);
+      if (!deal || (!isLabelEdit && (!conversation.contact_id || deal.contact_id !== conversation.contact_id))) return json({ error: 'Lead indisponível para esta conversa' }, 404);
+      const access = await getTeamAccess(auth.admin, orgId, auth.user.id);
+      if (!visibleLead(access, auth.user.id, deal.board_id, deal.owner_id)) return json({ error: 'Lead indisponível para esta conversa' }, 404);
+    }
   }
 
   const requested = 'labelIds' in body ? body.labelIds : 'addLabelIds' in body ? [...body.addLabelIds, ...body.removeLabelIds] : [];
@@ -42,11 +51,19 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (data?.length !== unique.length) return json({ error: 'Etiqueta indisponível nesta organização; atualize a lista' }, 400);
   }
 
-  const { data, error } = await retryLabelWrite(() => 'addLabelIds' in body
-    ? auth.admin.rpc('mutate_conversation_labels', { p_org: orgId, p_conversation: id, p_add: body.addLabelIds, p_remove: body.removeLabelIds })
-    : auth.admin.from('wa_conversations').update('dealId' in body ? { deal_id: body.dealId } : { label_ids: [...new Set(body.labelIds)] })
-      .eq('organization_id', orgId).eq('id', id).select('id,label_ids,deal_id').maybeSingle());
-  if (error) return json({ error: error.message }, ['23514', '23503'].includes(error.code ?? '') ? 400 : 500);
-  if (!data) return json({ error: 'Conversa não encontrada' }, 404);
+  const { data, error } = await retryLabelWrite(() => {
+    if ('addLabelIds' in body) return auth.admin.rpc('mutate_conversation_labels', {
+      p_org: orgId, p_conversation: id, p_add: body.addLabelIds, p_remove: body.removeLabelIds,
+      p_expected_deal: expectedDealId, p_check_link: true,
+    });
+    let update = auth.admin.from('wa_conversations')
+      .update('dealId' in body ? { deal_id: body.dealId } : { label_ids: [...new Set(body.labelIds)] })
+      .eq('organization_id', orgId).eq('id', id);
+    // Conditional replacement closes the same authorization/link race as the RPC.
+    if (isLabelEdit) update = expectedDealId ? update.eq('deal_id', expectedDealId) : update.is('deal_id', null);
+    return update.select('id,label_ids,deal_id').maybeSingle();
+  });
+  if (error) return json({ error: error.message }, ['23514', '23503'].includes(error.code ?? '') ? 400 : error.code === '40001' ? 409 : 500);
+  if (!data) return json({ error: isLabelEdit ? 'Vínculo da conversa mudou; atualize e tente novamente' : 'Conversa não encontrada' }, isLabelEdit ? 409 : 404);
   return json({ ok: true, conversation: Array.isArray(data) ? data[0] : data });
 }
