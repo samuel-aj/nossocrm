@@ -138,7 +138,7 @@ function FiltersButton({
             { id: crypto.randomUUID(), field: options[0]?.key || '', operator: 'contains', value: '' },
         ]);
     const clearAll = () => {
-        controls.setGeneral({ product: '', logic: 'AND' });
+        controls.setGeneral({ product: '', logic: 'AND', alertsOnly: false });
         onConditionsChange([]);
         onTagFilterChange('');
         onOwnerChange('all');
@@ -169,15 +169,15 @@ function FiltersButton({
                         )}
                         <FilterPin controls={controls} group="general" />
                     </div>
-                    <label className="block space-y-2">
+                    <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!controls.general.alertsOnly} onChange={e => controls.setGeneral({ alertsOnly: e.target.checked })} />Com alertas</label>
+                    <div className="block space-y-2">
                         <span className={SECTION_TITLE}>Produto</span>
-                        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!controls.general.alertsOnly} onChange={e => controls.setGeneral({ alertsOnly: e.target.checked })} />Com alertas</label>
                         <FilterSelect label="Filtrar por produto" value={controls.general.product} onChange={product => controls.setGeneral({ product })} options={[
  { value: '', label: 'Todos os produtos' },
  ...(controls.general.product && !products.some(p => p.id === controls.general.product) ? [{value: controls.general.product, label: 'Produto indisponível'}] : []),
  ...products.map(p => ({value:p.id,label:p.name}))
 ]} />
-                    </label>
+                    </div>
                     {/* Status */}
                     <div className="space-y-2">
                         <p className={SECTION_TITLE}>Status</p>

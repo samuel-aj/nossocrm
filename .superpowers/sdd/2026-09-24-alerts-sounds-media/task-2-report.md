@@ -35,3 +35,15 @@ All new RPCs are SECURITY INVOKER and service-only. Audit table RLS enabled, cli
 - Visual browser verification of board/list/editor and end-to-end realtime across team tabs remains for controller after migration. Background classes were implemented following approved option 2; no production publication performed.
 - Old untouched notification feed still limits its replay window to 120 seconds; persistent board alert does not expire with that window.
 - `.tmp/` untracked content predates this scoped commit and was excluded.
+
+## Review follow-up — clear alert filter and valid labels
+
+Addressed both findings in `task-2-review.md`: `Limpar` now explicitly resets `alertsOnly: false` in the merged general filter state; `Com alertas` is a sibling of a non-label product container. Added a focused header interaction regression using the actual merge-state behavior: select alerts, observe `Limpar (1)`, clear, verify checkbox/count are reset and no nested labels exist.
+
+Validation commands (all passed):
+- `npx vitest run features/boards/components/Kanban/KanbanHeader.alerts.test.tsx features/boards/filters` — 5 files, 21 tests.
+- `npx eslint --max-warnings 0 features/boards/components/Kanban/KanbanHeader.tsx features/boards/components/Kanban/KanbanHeader.alerts.test.tsx` — zero warnings/errors.
+- `npm run typecheck` — exit 0.
+- `git diff --check` — passed.
+
+No migration or database changes in this follow-up.
