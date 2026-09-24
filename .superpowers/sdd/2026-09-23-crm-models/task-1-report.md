@@ -70,3 +70,41 @@ Supabase skill read; changelog fetched through curl (no relevant breaking change
 - New official/private libraries start empty. Models are immutable snapshots in this UI: saving creates another snapshot; publication toggles do not affect existing copies.
 - Source resource labels currently identify resource type and field location rather than querying original resource names. Users choose destination resources from canonical organization options.
 - Source webhook payloads are deliberately cleared entirely to avoid transporting embedded credentials; configure URL, optional secret and body in destination editor. Arbitrary prose cannot be guaranteed free of manually embedded secrets, but all structured webhook secrets/payloads and credential-bearing URLs are removed.
+
+## Independent review corrections — 2026-09-23
+
+Read `.tmp/models-review.md` verbatim and fixed both Important findings in commit `0f55acbc6be0aaaf029c1d23dd393ceb60142bab` (`fix(robots): validate imported routing and required bindings before activation`). Only model-related files were committed; the controller's uncommitted labels draft was preserved.
+
+1. Message-template activation now reads the destination organization's current `buttons` and compares ordered QUICK_REPLY labels/count with every saved send-template step. URL/phone buttons are ignored and labels are trimmed consistently with the editor. POST enabled and PATCH enabled reject mismatch, including a template changed after import. The import route returns mismatch in `pending` without changing saved labels, branch targets or other-response edges. The library displays returned pending feedback, and the editor recomputes routing warnings from current message templates, so warnings survive closing/reopening the editor.
+2. Pending validation now checks required semantic slots independently of abstract references: absent/blank/whitespace owner values are invalid unless mode is explicitly `clear`; custom-field changes (including clear) and custom-field conditions always require a nonblank key. Empty/whitespace strings are no longer represented as real resources during export. Disabled drafts may remain incomplete, with explicit pending messages; server activation rejects both saved incomplete steps and incomplete replacements submitted together with `enabled: true`. Optional trigger board/stage bindings and CRM-only number-free flows remain valid.
+
+Red evidence, before production changes:
+
+`PATH=/Users/samuelmacario/.local/node/bin:$PATH npx vitest run app/api/wa-agents/bot-templates/route.test.ts`
+
+Output: `Test Files 1 failed (1)`, `Tests 6 failed | 7 passed (13)`. Failures demonstrated missing import warnings for changed quick replies, blank owner, missing custom-field change key and missing custom-field condition key.
+
+Final focused verification:
+
+`PATH=/Users/samuelmacario/.local/node/bin:$PATH npx vitest run app/api/wa-agents/bot-templates/route.test.ts lib/wa-agents/templateConnections.test.ts app/api/wa-agents/bots/'[id]'/route.test.ts lib/wa-agents/botTemplates.test.ts lib/wa-agents/botTemplateResources.test.ts lib/wa-agents/botConnections.test.ts lib/wa-agents/bulkBots.test.ts`
+
+```text
+✓ lib/wa-agents/templateConnections.test.ts (5 tests)
+✓ lib/wa-agents/botTemplateResources.test.ts (5 tests)
+✓ lib/wa-agents/bulkBots.test.ts (2 tests)
+✓ lib/wa-agents/botTemplates.test.ts (4 tests)
+✓ app/api/wa-agents/bots/[id]/route.test.ts (3 tests)
+✓ app/api/wa-agents/bot-templates/route.test.ts (16 tests)
+✓ lib/wa-agents/botConnections.test.ts (4 tests)
+Test Files 7 passed (7)
+Tests 39 passed (39)
+Duration 1.81s
+```
+
+`PATH=/Users/samuelmacario/.local/node/bin:$PATH npm run typecheck` → `tsc --noEmit`, exit 0.
+
+`PATH=/Users/samuelmacario/.local/node/bin:$PATH npx eslint --max-warnings 0 app/api/wa-agents/bot-templates/route.test.ts app/api/wa-agents/bot-templates/route.ts features/wa-agents/BotEditor.tsx features/wa-agents/templates/BotTemplateLibrary.tsx lib/wa-agents/botTemplateDependencies.ts lib/wa-agents/botTemplates.ts lib/wa-agents/templateConnections.ts` → no diagnostics, exit 0.
+
+`git diff --check` → no diagnostics, exit 0.
+
+Self-review: checks run on the real route/domain implementations with controlled DB mocks; only authentication/database I/O is mocked. All current-template reads are org filtered. No model binding, template body, or graph edge is rewritten during import validation. No deployment, migration, live robot activation or WhatsApp message was performed for these corrections. Build and renewed staging checks remain with controller integration.
