@@ -16,7 +16,7 @@ export function generateReportPDF(data: PerformanceMetrics & { webhookUnavailabl
   doc.text(headerLines, 14, 29);
   autoTable(doc, { startY: 29 + headerLines.length * 4.5 + 6, head: [['Indicador', 'Resultado', 'Base']], body: [
     ['Entradas', String(data.entries.length), 'Criados no período'],
-    ['Qualificados', data.hasQualifiedStage ? String(data.qualifiedCount) : '-', 'Qualificação comprovada no período'],
+    ['Qualificados', data.hasQualifiedStage ? String(data.qualifiedCount) : '-', 'Primeira qualificação no período, incluindo datas estimadas'],
     ['Taxa de qualificação', rate(data.qualificationRate), `${data.qualifiedCount} qualificados / ${data.entries.length} entradas`],
     ['Taxa de fechamento', rate(data.closingRate), `${data.wonDeals.length} ganhos / ${data.qualifiedCount} qualificados`],
     ['Ganhos', String(data.wonDeals.length), 'Data de encerramento'],

@@ -85,18 +85,18 @@ describe('Performance por acontecimentos', () => {
     const data = calculatePerformance(leads, [event('a', 'proposal', '2026-08-20')], board, august);
     expect(data.stageData.find(s => s.name === 'Novo Lead')?.count).toBe(2);
     expect(data.stageData.find(s => s.name === 'Qualificado')).toMatchObject({ count: 1 });
-    expect(data.qualifiedCount).toBe(0);
+    expect(data.qualifiedCount).toBe(1);
     expect(data.unknownQualification).toHaveLength(0);
-    expect(data.qualificationDates.has('a')).toBe(false);
+    expect(data.qualificationDates.get('a')).toBe('2026-08-20');
     expect(data.estimatedQualificationIds.has('a')).toBe(true);
     expect(data.leadQualificationDates.get('a')).toBe('2026-08-20');
   });
-  it('não inventa o mês de uma passagem cujo intervalo atravessa meses', () => {
+  it('inclui a primeira chegada estimada no mês registrado, mesmo para lead antigo', () => {
     const data = calculatePerformance([deal('a', { createdAt: '2026-07-10', status: 'proposal' })], [event('a', 'proposal', '2026-08-20')], board, august);
-    expect(data.qualifiedCount).toBe(0);
+    expect(data.qualifiedCount).toBe(1);
     expect(data.stageData.find(s => s.name === 'Qualificado')).toMatchObject({ count: 0, conversionRate: null });
     const year = calculatePerformance([deal('a', { createdAt: '2026-07-10', status: 'proposal' })], [event('a', 'proposal', '2026-08-20')], board, {start:new Date('2026-01-01'),end:august.end});
-    expect(year.qualifiedCount).toBe(0);
+    expect(year.qualifiedCount).toBe(1);
   });
   it('não transfere qualificação de julho para agosto nem usa estado atual no passado', () => {
     const data = calculatePerformance([deal('a', {status:'proposal'}),deal('b',{createdAt:'2026-08-01',status:'proposal'})], [event('a','q','2026-07-10'),event('a','proposal','2026-08-20')], board, august, '', undefined, new Date('2026-09-10'));
@@ -131,9 +131,9 @@ describe('Performance por acontecimentos', () => {
     expect(data.qualifiedCount).toBe(1);
     expect(data.stageData.find(s => s.name === 'Qualificado')?.count).toBe(0);
   });
-  it('conta salto sobre qualificação somente com origem abaixo dela conhecida', () => {
+  it('conta saltos sobre qualificação com origem conhecida ou estimada', () => {
     const data = calculatePerformance([deal('a'), deal('b', { status: 'proposal' })], [event('a', 'proposal', '2026-08-10', 'new'), event('b', 'proposal')], board, august);
-    expect([...data.qualifiedIds]).toEqual(['a']);
+    expect([...data.qualifiedIds]).toEqual(['a', 'b']);
     expect(data.stageData.find(s => s.name === 'Qualificado')?.count).toBe(0);
     expect(data.unknownQualification).toHaveLength(0);
     expect([...data.estimatedQualificationIds]).toEqual(['b']);
@@ -187,12 +187,34 @@ describe('Regressões e primeira qualificação', () => {
     expect(data.qualifiedCount).toBe(0);
     expect(data.leadQualificationDates.get('a')).toBe('2026-07-03');
   });
-  it('prioriza SQL configurado e mostra a data corrigida estimada sem fabricar conversão mensal', () => {
+  it('prioriza SQL configurado e inclui a data corrigida estimada na conversão mensal', () => {
     const funnel={...board,stages:board.stages.map(s=>s.id==='proposal'?{...s,linkedLifecycleStage:'SALES_QUALIFIED' as const}:s)};
     const data=calculatePerformance([deal('a',{status:'proposal',qualifiedAt:'2026-08-20',qualificationDateSource:'estimated'})],
       [event('a','q','2026-08-04')],funnel,august);
     expect(data.leadQualificationDates.get('a')).toBe('2026-08-20');
     expect(data.estimatedQualificationIds.has('a')).toBe(true);
-    expect(data.qualifiedCount).toBe(0);
+    expect(data.qualifiedCount).toBe(1);
+  });
+});
+
+
+describe('Qualificação por salto de etapa', () => {
+  it.each(['q', 'proposal', 'won'])('registra a qualificação ao sair de Novo Lead diretamente para %s', (destination) => {
+    const leads = [deal('jump', { createdAt: '2026-08-01', status: destination, isWon: destination === 'won', closedAt: destination === 'won' ? '2026-08-15T12:00:00Z' : undefined })];
+    const data = calculatePerformance(leads, [event('jump', destination, '2026-08-15T12:00:00Z', 'new')], board, august);
+    expect([...data.qualifiedIds]).toEqual(['jump']);
+    expect(data.qualificationDates.get('jump')).toBe('2026-08-15T12:00:00Z');
+    expect(data.stageData.find(s => s.stageId === 'q')?.deals.map(d => d.id)).toEqual(['jump']);
+  });
+  it('conta estimativas apenas no mês registrado e mantém o gráfico pela criação/etapa atual', () => {
+    const leads = [
+      deal('current', { createdAt: '2026-08-01', status: 'proposal', qualifiedAt: '2026-08-05', qualificationDateSource: 'estimated' }),
+      deal('old', { status: 'proposal', qualifiedAt: '2026-08-06', qualificationDateSource: 'estimated' }),
+      deal('previous', { status: 'proposal', qualifiedAt: '2026-07-06', qualificationDateSource: 'estimated' }),
+    ];
+    const data = calculatePerformance(leads, [], board, august);
+    expect([...data.qualifiedIds]).toEqual(['current', 'old']);
+    expect(data.qualificationRate).toBe(200);
+    expect(data.stageData.find(s => s.stageId === 'q')?.deals.map(d => d.id)).toEqual(['current']);
   });
 });

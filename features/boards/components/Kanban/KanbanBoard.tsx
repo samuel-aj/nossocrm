@@ -63,6 +63,8 @@ function dropHighlightClasses(stageBgClass?: string): string {
 }
 
 export interface KanbanBoardProps {
+  /** Expand columns to fill available desktop space, except outcome-only filters. */
+  expandColumns?: boolean;
   /** Modo Automatizar: as colunas mostram as automações da etapa no lugar dos leads */
   automation?: KanbanAutomation;
   stages: BoardStage[];
@@ -131,6 +133,7 @@ export interface KanbanBoardProps {
  */
 export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   stages,
+  expandColumns = true,
   filteredDeals,
   customFieldDefinitions,
   draggingId,
@@ -359,7 +362,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
             }}
             onDragEnter={() => setDragOverStage(stage.id)}
             onDragLeave={() => setDragOverStage(null)}
-            className={`w-[280px] shrink-0 max-md:w-[calc(100vw-5.5rem)] max-md:snap-center flex flex-col rounded-xl border-2 overflow-visible transition-all duration-200
+            className={`w-[280px] shrink-0 ${expandColumns ? 'md:flex-1 md:min-w-[280px]' : ''} max-md:w-[calc(100vw-5.5rem)] max-md:snap-center flex flex-col rounded-xl border-2 overflow-visible transition-all duration-200
                             ${isOver
                 ? `${dropHighlightClasses(stage.color)} scale-[1.02]`
                 : 'border-slate-200/50 dark:border-white/10 glass'
@@ -523,7 +526,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
             const dealId = e.dataTransfer.getData('dealId');
             if (dealId) onMarkInactive(dealId);
           }}
-          className="w-[280px] shrink-0 max-md:w-[calc(100vw-5.5rem)] max-md:snap-center flex flex-col rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 overflow-visible glass"
+          className={`w-[280px] shrink-0 ${expandColumns ? 'md:flex-1 md:min-w-[280px]' : ''} max-md:w-[calc(100vw-5.5rem)] max-md:snap-center flex flex-col rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 overflow-visible glass`}
         >
           <div className="sticky top-0 z-20 h-1.5 shrink-0 w-full bg-slate-400"></div>
           <div className="sticky top-1.5 z-10 p-3 border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-dark-card shrink-0">

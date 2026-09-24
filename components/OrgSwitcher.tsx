@@ -1,12 +1,14 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Check, ChevronsUpDown, Search, Loader2 } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 import { pinTabOrg } from '@/lib/tabOrg';
 import { supabase } from '@/lib/supabase/client';
 import { MainOrganizationShortcut } from './MainOrganizationShortcut';
+import { FocusTrap } from '@/lib/a11y';
 
 interface OrgSummary {
   id: string;
@@ -44,14 +46,38 @@ export function OrgSwitcher({
   const [search, setSearch] = useState('');
   const [switchingId, setSwitchingId] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const reposition = () => {
+      const anchor = rootRef.current?.getBoundingClientRect();
+      if (!anchor) return;
+      const left = Math.max(8, Math.min(anchor.left, window.innerWidth - 264));
+      const top = anchor.bottom + 8;
+      setPosition(previous => previous.left === left && previous.top === top ? previous : { left, top });
+    };
+    reposition();
+    const observer = new ResizeObserver(reposition);
+    if (rootRef.current) observer.observe(rootRef.current);
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    const dismiss = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!rootRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false);
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener('mousedown', dismiss);
+    return () => document.removeEventListener('mousedown', dismiss);
   }, [open]);
 
   const orgsQ = useQuery<{ organizations: OrgSummary[] }>({
@@ -160,7 +186,7 @@ export function OrgSwitcher({
     <div ref={rootRef} className="relative min-w-0 flex-1">
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setOpen(previous => !previous)}
         aria-expanded={open}
         aria-label="Trocar organização"
         title="Trocar organização"
@@ -171,13 +197,22 @@ export function OrgSwitcher({
 
       <MainOrganizationShortcut enabled={isSuperAdmin} currentOrgId={currentOrgId} collapsed={collapsed} busy={!!switchingId} onSelect={handleSwitch} />
 
-      {open && (
-        <div className="absolute left-0 top-full mt-2 z-[80] w-64 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-xl overflow-hidden">
+      {open && createPortal(
+        <div
+          ref={menuRef}
+          role="dialog"
+          aria-label="Organizações"
+          style={{ ...position, maxHeight: `calc(100dvh - ${position.top + 8}px)` }}
+          className="fixed z-[10050] w-64 max-w-[calc(100vw-1rem)] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-xl overflow-y-auto"
+        >
+        {/* Share the focus-trap stack with the lead modal while this portal is open. */}
+        <FocusTrap active={open} onEscape={() => setOpen(false)} initialFocus="[data-org-switcher-search]">
+
           <div className="p-2 border-b border-slate-100 dark:border-white/10">
             <div className="relative">
               <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
               <input
-                autoFocus
+                data-org-switcher-search
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -231,7 +266,8 @@ export function OrgSwitcher({
               );
             })}
           </div>
-        </div>
+        </FocusTrap>
+        </div>, document.body
       )}
     </div>
   );

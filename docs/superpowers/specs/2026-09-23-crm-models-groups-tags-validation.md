@@ -38,3 +38,15 @@ Aplicar as migrações versionadas de modelos e etiquetas antes do novo código.
 Revisão geral `e5b1303..4a69187` aprovada para staging, sem achados críticos/importantes. Build final do código `fa5bfa1` e ambos os testes HTTP em modo de produção passaram. Migrações/histórico de staging alinhados às versões `20260924002950` e `20260924010603`.
 
 Observações menores mantidas: contato sem conversa persistida pode criar lead, mas o painel só exibe vínculo quando a conversa existir (lead acessível no board); menções validam membro/identificador real, sem impor igualdade literal do nome exibido. Nenhuma dessas observações altera o isolamento ou a sincronização por vínculo explícito.
+
+## Ajustes aprovados em 24/09 — qualificação, menu e largura
+
+Samuel confirmou que o indicador deve incluir datas estimadas de primeira qualificação no período, inclusive de leads antigos. O gráfico continua usando criação no período e etapa atual. Avançar diretamente para uma etapa após Qualificado conta como qualificação; não exige visita intermediária no CRM. Não adotamos a proposta anterior de igualar a população do indicador à do gráfico.
+
+- Removida a exclusão das datas estimadas no cálculo. Drilldown e PDF explicam a mesma regra; datas sem qualquer registro continuam sem mês atribuído.
+- O trigger existente já registra a primeira qualificação ao saltar etapas. Validado no banco de staging com `supabase/tests/qualification_stage_jumps.sql`, dentro de transação revertida: Novo Lead/Em qualificação → Qualificado/Reunião agendada/Contratado; regressões preservam a data; perda não qualifica por estar no fim do funil.
+- Consulta somente leitura ao BPC Autista/MPL em produção, setembro/2026, reproduziu 24 qualificações sem estimativas e 31 no gráfico. Incluindo estimativas, o indicador conta 44; 9 dos 31 do gráfico têm data estimada. Não foi necessário alterar dados de produção.
+- Menu de organizações em portal acima do lead, com posição acompanhando a sidebar e foco próprio que pausa/restaura o foco do modal.
+- Colunas desktop crescem igualmente a partir de 280 px em Em aberto/Todos. Ganhos/Perdidos mantêm largura fixa; regra mobile preservada.
+
+Validação: 53 testes de relatório/menu/atalho + 5 de modal/deep-link; lint dos arquivos alterados; typecheck e build de produção passaram. Navegador autenticado no build local com staging: menu por cima do card e busca focada; três colunas preenchendo a área disponível; Ganhos com colunas de 280 px. Nenhuma mensagem enviada e teste SQL integralmente revertido.

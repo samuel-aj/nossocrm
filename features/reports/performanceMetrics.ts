@@ -100,8 +100,8 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   }
   for (const [id, date] of leadQualificationDates) {
     qualificationKnown.add(id);
-    // Estimates are visible but must not manufacture a monthly conversion.
-    if (inPeriod(date) && !estimatedQualificationIds.has(id)) {
+    // Historical estimates count in their recorded month, like observed crossings.
+    if (inPeriod(date)) {
       qualified.add(id);
       qualificationDates.set(id, date);
     }

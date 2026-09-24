@@ -32,6 +32,14 @@ describe('leads que compõem os indicadores', () => {
     expect(closing.groups[0].deals).toEqual(metrics.wonDeals);
     expect(closing.groups[1].deals).toEqual(qualification.groups[0].deals);
   });
+  it('inclui estimativas na lista e no denominador do fechamento', () => {
+    const estimated = deal('estimated', { qualifiedAt: '2026-09-05', qualificationDateSource: 'estimated', status: 'q' });
+    const metrics = fixture([...reportDeals, estimated]);
+    const qualification = reportDrilldown(metrics, { kind: 'qualification' });
+    expect(qualification.groups[0].deals.map(d => d.id)).toEqual(['old-qualified', 'estimated']);
+    expect(qualification.groups[0].deals).toHaveLength(metrics.qualifiedCount);
+    expect(reportDrilldown(metrics, { kind: 'closing' }).groups[1].deals).toEqual(qualification.groups[0].deals);
+  });
   it('separa o mesmo motivo por categoria e inclui perdas sem classificação', () => {
     expect(reportDrilldown(fixture(), { kind: 'loss', category: 'qualified', reason: 'Preço' }).groups[0].deals.map(d => d.id)).toEqual(['lost-q']);
     expect(reportDrilldown(fixture(), { kind: 'loss', category: 'disqualified', reason: 'Preço' }).groups[0].deals.map(d => d.id)).toEqual(['lost-dq']);

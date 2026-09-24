@@ -604,6 +604,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
               <AutomationLayer board={activeBoard} enabled={automationActive}>
                 {(automation) => (
               <KanbanBoard
+                expandColumns={statusFilter !== 'won' && statusFilter !== 'lost'}
                 automation={automation}
                 stages={kanbanStages}
                 // Coluna Inativos fica OCULTA na visão padrão; aparece só no

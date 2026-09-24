@@ -20,7 +20,7 @@ export type ReportSelection =
 export interface ReportLeadGroup { id: string; label: string; description: string; deals: Deal[] }
 export function reportDrilldown(metrics: PerformanceMetrics & { deals: Deal[] }, selection: ReportSelection) {
   const won: ReportLeadGroup = { id: 'won', label: 'Ganhos', description: 'Ganhos pela data de encerramento no período, incluindo leads criados em outros meses.', deals: metrics.wonDeals };
-  const qualified: ReportLeadGroup = { id: 'qualified', label: 'Qualificados', description: 'Primeira qualificação comprovada no período, incluindo leads criados em outros meses. Datas estimadas não entram no cálculo.', deals: metrics.deals.filter(deal => metrics.qualifiedIds.has(deal.id)) };
+  const qualified: ReportLeadGroup = { id: 'qualified', label: 'Qualificados', description: 'Primeira qualificação no período, incluindo datas estimadas e leads criados em outros meses. Avanços diretos para etapas posteriores também contam.', deals: metrics.deals.filter(deal => metrics.qualifiedIds.has(deal.id)) };
   const entries: ReportLeadGroup = { id: 'entries', label: 'Total de leads', description: 'Leads criados no período selecionado.', deals: metrics.entries };
   const qualifiedLost: ReportLeadGroup = { id: 'qualified-lost', label: 'Perdas qualificadas', description: 'Perdas encerradas no período e classificadas como qualificadas.', deals: metrics.lostDeals.filter(deal => deal.lossCategory === 'qualified') };
   switch (selection.kind) {
