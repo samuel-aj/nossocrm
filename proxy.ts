@@ -40,8 +40,9 @@ export const config = {
          * - _next/static, _next/image
          * - _next/data (mesmo excluindo, o Next pode ainda invocar o Proxy para /_next/data por segurança)
          * - arquivos de metadata (manifest, sitemap, robots)
+         * - service worker e página offline neutra (sem sessão/dados do CRM)
          * - assets (imagens)
          */
-        '/((?!api|_next/static|_next/image|_next/data|favicon.ico|sitemap.xml|robots.txt|manifest.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+        '/((?!api|_next/static|_next/image|_next/data|sw[.]js$|offline[.]html$|favicon.ico|sitemap.xml|robots.txt|manifest.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
     ],
 }
