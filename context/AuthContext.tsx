@@ -27,12 +27,13 @@
  * ```
  */
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useCallback, useEffect, useRef, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabase';
+import { supabase } from '../lib/supabase/client';
 import { queryClient } from '@/lib/query';
 import { clearTabOrg, pinTabOrg, readTabOrg } from '@/lib/tabOrg';
 import { installTabOrgFetch } from '@/lib/tabOrgFetch';
+import { loadAuthProfile } from '@/lib/supabase/authProfile';
 import type { OrganizationId } from '../types';
 
 // Instala (uma vez por aba) o injetor do header x-org-id nos fetches de /api —
@@ -54,7 +55,7 @@ installTabOrgFetch();
  * @property {string | null} [avatar_url] - URL do avatar
  * @property {string} [created_at] - Data de criação
  */
-interface Profile {
+export interface Profile {
     id: string;
     email: string;
     organization_id: OrganizationId;
@@ -87,6 +88,8 @@ interface AuthContextType {
     organizationId: OrganizationId | null;
     /** Se está carregando dados iniciais */
     loading: boolean;
+    /** Falha recuperável ao carregar o perfil; não é uma troca de usuário. */
+    profileError: string | null;
     /** Se a instância foi inicializada (setup feito) */
     isInitialized: boolean | null;
     /** Verifica se instância foi inicializada */
@@ -126,6 +129,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [user, setUser] = useState<User | null>(null);
     const [profile, setProfile] = useState<Profile | null>(null);
     const [loading, setLoading] = useState(true);
+    const [profileError, setProfileError] = useState<string | null>(null);
+    const mountedRef = useRef(false);
+    const userIdRef = useRef<string | null>(null);
+    const profileRef = useRef<Profile | null>(null);
+    const requestRef = useRef<{
+        key: string;
+        cancelled: boolean;
+        controller: AbortController;
+        promise: Promise<void>;
+    } | null>(null);
     const [isInitialized, setIsInitialized] = useState<boolean | null>(null);
 
     // Supabase client pode ser null quando envs não estão configuradas.
@@ -148,153 +161,153 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
     };
 
-    const fetchProfile = async (userId: string) => {
-        try {
-            if (!sb) {
-                setProfile(null);
-                return;
-            }
+    const cancelProfileRequest = useCallback(() => {
+        const request = requestRef.current;
+        if (request) {
+            request.cancelled = true;
+            request.controller.abort();
+            requestRef.current = null;
+        }
+    }, []);
 
-            const { data, error } = await sb
-                .from('profiles')
-                .select('*, organizations!profiles_organization_id_fkey(name)')
-                .eq('id', userId)
-                .single();
+    const fetchProfile = useCallback((userId: string): Promise<void> => {
+        if (!sb || !mountedRef.current || userIdRef.current !== userId) return Promise.resolve();
+        const pinned = readTabOrg();
+        const key = `${userId}:${pinned?.id ?? ''}`;
+        if (requestRef.current?.key === key) return requestRef.current.promise;
+        cancelProfileRequest();
+        setProfileError(null);
+        if (!profileRef.current) setLoading(true);
+        const request = { key, cancelled: false, controller: new AbortController(), promise: Promise.resolve() };
+        requestRef.current = request;
+        const isCurrent = () => mountedRef.current && !request.cancelled
+            && requestRef.current === request && userIdRef.current === userId;
 
-            if (error) {
-                console.error('Error fetching profile:', error);
-            } else {
-                const org = (data as any)?.organizations as { name: string } | null;
-                const base = {
-                    ...data,
-                    organization_name: org?.name ?? null,
-                    organizations: undefined,
-                } as Profile;
-
-                // ORG POR ABA: se esta aba está fixada em OUTRA org (sessionStorage),
-                // o perfil exposto pro app reflete a org DA ABA (id, nome e papel do
-                // vínculo), não a org "ativa" da sessão — assim duas abas convivem
-                // em orgs diferentes. Pin inválido (perdeu o vínculo) é descartado.
-                const pinned = readTabOrg();
-                if (!pinned && base.organization_id) {
-                    pinTabOrg(base.organization_id, base.organization_name);
-                    setProfile(base);
-                } else if (!pinned || pinned.id === base.organization_id) {
-                    setProfile(base);
-                } else if (base.role === 'super_admin') {
-                    const { data: pinnedOrg } = await sb
-                        .from('organizations')
-                        .select('name')
-                        .eq('id', pinned.id)
-                        .maybeSingle();
-                    setProfile({
-                        ...base,
-                        organization_id: pinned.id as OrganizationId,
-                        organization_name: (pinnedOrg as { name?: string } | null)?.name ?? pinned.name,
-                    });
-                } else {
-                    const { data: link, error: linkError } = await sb
-                        .from('user_organizations')
-                        .select('role, organizations!user_organizations_organization_id_fkey(name)')
-                        .eq('user_id', base.id)
-                        .eq('organization_id', pinned.id)
-                        .maybeSingle();
-                    if (linkError) {
-                        // Falha TRANSITÓRIA (rede/refresh de token): NUNCA abandonar
-                        // o pin — abandonar fazia a aba "seguir" a troca de org feita
-                        // em outra aba. Mantém a org da aba com o que se sabe; a
-                        // próxima fetchProfile (próximo evento) corrige os detalhes.
-                        setProfile({
-                            ...base,
-                            organization_id: pinned.id as OrganizationId,
-                            organization_name: pinned.name,
-                        });
-                    } else if (!link) {
-                        // Consulta OK e SEM vínculo: removido da org de verdade —
-                        // só então volta pra org do perfil.
-                        pinTabOrg(base.organization_id, base.organization_name);
-                        setProfile(base);
-                    } else {
-                        const linkOrg = (link as any)?.organizations as { name?: string } | null;
-                        setProfile({
-                            ...base,
-                            organization_id: pinned.id as OrganizationId,
-                            organization_name: linkOrg?.name || pinned.name,
-                            role: ((link as { role?: string }).role as Profile['role']) || base.role,
-                        });
+        request.promise = (async () => {
+            // O callback de auth deve terminar antes de iniciar consultas autenticadas.
+            await new Promise(resolve => setTimeout(resolve, 0));
+            for (const delay of [0, 600, 1500]) {
+                if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+                if (!isCurrent()) return;
+                request.controller = new AbortController();
+                let timeout: ReturnType<typeof setTimeout> | undefined;
+                try {
+                    const resolved = await Promise.race([
+                        loadAuthProfile(userId, pinned, request.controller.signal),
+                        new Promise<never>((_, reject) => {
+                            timeout = setTimeout(() => {
+                                request.controller.abort();
+                                reject(new Error('Tempo esgotado ao carregar o perfil.'));
+                            }, 8000);
+                        }),
+                    ]);
+                    if (!isCurrent()) return;
+                    if ((readTabOrg()?.id ?? null) !== (pinned?.id ?? null)) {
+                        // A organização desta aba mudou durante a consulta.
+                        void fetchProfile(userId);
+                        return;
                     }
+                    if (resolved.organization_id) pinTabOrg(resolved.organization_id, resolved.organization_name);
+                    profileRef.current = resolved;
+                    setProfile(resolved);
+                    setProfileError(null);
+                    return;
+                } catch (error) {
+                    if (!isCurrent()) return;
+                    if (delay === 1500) {
+                        console.error('Error fetching profile after retries:', error);
+                        setProfileError('Não foi possível carregar seu perfil. Verifique sua conexão e tente novamente.');
+                    }
+                } finally {
+                    clearTimeout(timeout);
                 }
             }
-        } finally {
-            setLoading(false);
-        }
-    };
+        })().finally(() => {
+            if (isCurrent()) {
+                requestRef.current = null;
+                setLoading(false);
+            }
+        });
+        return request.promise;
+    }, [sb, cancelProfileRequest]);
 
-    const refreshProfile = async () => {
-        if (user?.id) {
-            await fetchProfile(user.id);
-        }
-    };
+    const refreshProfile = useCallback(async () => {
+        if (userIdRef.current) await fetchProfile(userIdRef.current);
+    }, [fetchProfile]);
 
     useEffect(() => {
+        mountedRef.current = true;
         if (!sb) {
-            // Sem Supabase configurado: mantém app em estado "deslogado".
-            setSession(null);
-            setUser(null);
-            setProfile(null);
             setIsInitialized(true);
             setLoading(false);
-            return;
+            return () => { mountedRef.current = false; };
         }
 
-        checkInitialization();
-
-        sb.auth.getSession().then(({ data: { session } }) => {
-            setSession(session);
-            setUser(session?.user ?? null);
-            if (session?.user) {
-                fetchProfile(session.user.id);
-            } else {
-                setLoading(false);
-            }
-        });
-
-        const { data: { subscription } } = sb.auth.onAuthStateChange((event, session) => {
-            setSession(session);
-            setUser(session?.user ?? null);
-            if (session?.user) {
-                fetchProfile(session.user.id);
-            } else {
-                // IMPORTANTE: só limpar o queryClient em SIGNED_OUT explícito.
-                // O Supabase dispara INITIAL_SESSION com session=null toda vez
-                // que o AuthProvider remonta (ex.: navegação entre route groups
-                // `(protected)` ↔ `(admin)`) — limpar o cache nesses momentos
-                // transientes deixava telas (ex.: Kanban) vazias até F5.
-                if (event === 'SIGNED_OUT') {
+        void checkInitialization();
+        let active = true;
+        let authEventReceived = false;
+        const acceptSession = (next: Session | null, signedOut = false) => {
+            if (!active) return;
+            const nextId = next?.user.id ?? null;
+            if (nextId !== userIdRef.current || signedOut) {
+                cancelProfileRequest();
+                // Invalida também uma consulta antiga quando há troca de conta sem reload.
+                if (signedOut || (userIdRef.current && nextId && nextId !== userIdRef.current)) {
                     queryClient.clear();
-                    // A marcação de org é da SESSÃO do usuário; sem limpar, o
-                    // pin do usuário anterior vira falso conflito no próximo
-                    // login nesta mesma aba.
                     clearTabOrg();
                 }
+                profileRef.current = null;
                 setProfile(null);
+                setProfileError(null);
+            }
+            userIdRef.current = nextId;
+            setSession(next);
+            setUser(next?.user ?? null);
+            if (nextId) void fetchProfile(nextId);
+            else setLoading(false);
+        };
+
+        const { data: { subscription } } = sb.auth.onAuthStateChange((event, next) => {
+            authEventReceived = true;
+            acceptSession(next, event === 'SIGNED_OUT');
+        });
+        // Fallback de inicialização: nunca sobrepor um evento de auth mais recente.
+        void sb.auth.getSession().then(({ data: { session: initial } }) => {
+            if (!authEventReceived) acceptSession(initial);
+        }).catch(error => {
+            if (active && !authEventReceived) {
+                console.error('Error loading session:', error);
                 setLoading(false);
             }
         });
 
-        return () => subscription.unsubscribe();
-    }, []);
+        const retryMissingProfile = () => {
+            if (userIdRef.current && !profileRef.current) void fetchProfile(userIdRef.current);
+        };
+        window.addEventListener('online', retryMissingProfile);
+        window.addEventListener('focus', retryMissingProfile);
+        return () => {
+            active = false;
+            mountedRef.current = false;
+            cancelProfileRequest();
+            subscription.unsubscribe();
+            window.removeEventListener('online', retryMissingProfile);
+            window.removeEventListener('focus', retryMissingProfile);
+        };
+    }, [sb, fetchProfile, cancelProfileRequest]);
 
     const signOut = async () => {
         if (sb) await sb.auth.signOut();
-        // CRÍTICO: limpa o QueryClient para evitar que dados do usuário anterior
-        // vazem para a sessão seguinte (próximo login sem hard reload mostraria
-        // listas/contadores da sessão anterior até o staleTime expirar).
+        cancelProfileRequest();
+        userIdRef.current = null;
+        profileRef.current = null;
         queryClient.clear();
         clearTabOrg();
         setProfile(null);
+        setProfileError(null);
         setUser(null);
         setSession(null);
+        setLoading(false);
     };
 
     const value = {
@@ -303,6 +316,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         profile,
         organizationId: profile?.organization_id ?? null,
         loading,
+        profileError,
         isInitialized,
         checkInitialization,
         signOut,

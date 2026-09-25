@@ -6,6 +6,7 @@ import { CRMProvider } from '@/context/CRMContext'
 import { AIProvider } from '@/context/AIContext'
 import Layout from '@/components/Layout'
 import EntryRedirect from '@/components/EntryRedirect'
+import SessionGate from '@/components/SessionGate'
 
 /**
  * Layout do grupo `(protected)`. Providers globais (Query, Toast, Theme,
@@ -23,7 +24,7 @@ export default function ProtectedLayout({
     const isLabsRoute = pathname === '/labs' || pathname.startsWith('/labs/')
     const shouldUseAppShell = !isSetupRoute && !isLabsRoute
 
-    return (
+    const content = (
         <CRMProvider>
             <AIProvider>
                 <EntryRedirect />
@@ -31,5 +32,7 @@ export default function ProtectedLayout({
             </AIProvider>
         </CRMProvider>
     )
-}
 
+    // Setup continua acessível antes da criação da primeira conta.
+    return isSetupRoute ? content : <SessionGate>{content}</SessionGate>
+}
