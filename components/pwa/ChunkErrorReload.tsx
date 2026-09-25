@@ -28,7 +28,8 @@ export function tryAutoReload(): boolean {
     if (Date.now() - last < GUARD_WINDOW_MS) return false;
     sessionStorage.setItem(GUARD_KEY, String(Date.now()));
   } catch {
-    // sessionStorage indisponível: recarrega mesmo assim (pior caso, uma vez)
+    // Without a persistent guard a broken chunk could cause an endless reload.
+    return false;
   }
   window.location.reload();
   return true;

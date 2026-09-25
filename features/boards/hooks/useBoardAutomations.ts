@@ -29,11 +29,11 @@ export function useBoardAutomations(organizationId: string | null | undefined, u
       }
       return result;
     },
-    staleTime: 5_000,
+    staleTime: 10_000,
     // wa_* is server-only. Refresh safely through the authenticated API, also on focus/reconnect.
-    refetchInterval: 10_000,
+    refetchInterval: 15_000,
     refetchIntervalInBackground: false,
-    refetchOnWindowFocus: 'always',
+    refetchOnWindowFocus: true,
     retry: 1,
   });
   const data = query.isError ? EMPTY : query.data || EMPTY;

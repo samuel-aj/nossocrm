@@ -1,9 +1,18 @@
 import { describe, it, expect } from 'vitest';
-import { META_WINDOW_MS, formatRemaining, getServiceWindow } from './serviceWindow';
+import { META_WINDOW_MS, formatRemaining, getServiceWindow, senderLastInbound } from './serviceWindow';
 
 const MIN = 60_000;
 const NOW = Date.parse('2026-08-25T12:00:00.000Z');
 const FECHADA = { open: false, expiresAt: null, remainingMs: 0 };
+
+it('keeps the Meta service window separate for each sending number', () => {
+  const timestamp = new Date(NOW - 60_000).toISOString();
+  const messages = [{ direction: 'in', connection_id: 'one', wa_timestamp: null, created_at: timestamp }];
+  expect(senderLastInbound('two', { one: timestamp, two: null }, messages)).toBeNull();
+  expect(senderLastInbound('one', { one: timestamp }, messages)).toBe(timestamp);
+  expect(senderLastInbound('two', undefined, messages)).toBeNull();
+  expect(senderLastInbound('one', undefined, messages)).toBe(timestamp);
+});
 
 describe('getServiceWindow', () => {
   it('sem mensagem recebida (ou data inválida): janela fechada e sem prazo', () => {

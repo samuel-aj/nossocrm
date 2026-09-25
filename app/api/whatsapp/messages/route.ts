@@ -127,6 +127,7 @@ export async function GET(req: Request) {
   const phone = normalizePhoneE164(url.searchParams.get('phone') || '');
   if (!phone && !conversationId) return json({ error: 'phone é obrigatório' }, 400);
   const connectionId = url.searchParams.get('connectionId');
+  const contextConnectionId = url.searchParams.get('contextConnectionId');
   const beforeRaw = url.searchParams.get('before');
   const before = beforeRaw && !Number.isNaN(Date.parse(beforeRaw)) ? new Date(beforeRaw).toISOString() : null;
 
@@ -257,8 +258,9 @@ export async function GET(req: Request) {
   // Chats): conversa de responsável não permitido não abre nem carrega
   convs = await filterConversationsByOwner(auth.admin, auth.user.organizationId, vis, auth.user.id, convs);
   // Agente de IA: a conversa (deste contato) em que um agente já atuou
-  const aiConv = convs.find(c => c.ai_status) ?? null;
-  const conv = convs.find(c => c.contact_id) ?? convs[0] ?? null;
+  const contextConvs = contextConnectionId ? convs.filter(c => c.connection_id === contextConnectionId) : convs;
+  const aiConv = contextConvs.find(c => c.ai_status) ?? null;
+  const conv = contextConvs.find(c => c.contact_id) ?? contextConvs[0] ?? null;
 
   const { rows: messages, hasMore } = await loadMessages(auth.admin, convs, auth.user.id, all, { before });
   if (before) return json({ messages, hasMore });
@@ -267,19 +269,17 @@ export async function GET(req: Request) {
   // contato, olhando todas as conversas consideradas (visão unificada por
   // telefone). Consulta leve; o chat mostra quanto falta e trava o envio comum
   // quando ela fecha.
-  let lastInboundAt: string | null = null;
-  if (convs.length > 0) {
-    const { data: lastIn } = await auth.admin
-      .from('wa_messages')
+  const lastInboundByConnection: Record<string, string | null> = {};
+  const windowConnections = [...new Set(convs.map(c => c.connection_id).filter((id): id is string => !!id))];
+  await Promise.all(windowConnections.map(async id => {
+    const { data: lastIn, error } = await auth.admin.from('wa_messages')
       .select('created_at, wa_timestamp')
-      .in('conversation_id', convs.map(c => c.id))
-      .eq('direction', 'in')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    const row = (lastIn ?? null) as { created_at?: string | null; wa_timestamp?: string | null } | null;
-    lastInboundAt = row?.wa_timestamp || row?.created_at || null;
-  }
+      .in('conversation_id', convs.filter(c => c.connection_id === id).map(c => c.id))
+      .eq('direction', 'in').order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (error) throw error;
+    lastInboundByConnection[id] = lastIn?.wa_timestamp || lastIn?.created_at || null;
+  }));
+  const lastInboundAt = Object.values(lastInboundByConnection).filter((t): t is string => !!t).sort().at(-1) ?? null;
 
   // Agente de IA (externo via API pública ou nativo/beta): estado completo da faixa do chat
   const ai = aiConv
@@ -306,6 +306,7 @@ export async function GET(req: Request) {
     senders,
     numbers,
     conversation: conv ? { ...conv, last_inbound_at: lastInboundAt } : null,
+    lastInboundByConnection,
     ai,
     bot,
     messages,

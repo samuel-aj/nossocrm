@@ -1,5 +1,6 @@
 'use client';
 
+import { unifyConversations } from './unifiedConversation';
 import { labelDelta, linkedDeal } from '@/lib/whatsapp/labelCompatibility';
 import { refreshLinkedLabels } from '@/lib/realtime/labelCache';
 import { usePersistedState } from '@/hooks/usePersistedState';
@@ -65,6 +66,9 @@ type ConvRow = {
 };
 
 type ConvInfo = {
+  initialSenderId?: string | null;
+  conversationIds?: string[];
+  connectionIds?: string[];
   connectionId: string | null;
   phone: string;
   contactId: string | null;
@@ -84,6 +88,9 @@ type ChatTarget = {
   contactId: string | null;
   /** Conversa presa a um número conectado (null = visão unificada) */
   connectionId?: string | null;
+  initialSenderId?: string | null;
+  conversationIds?: string[];
+  connectionIds?: string[];
   /** GRUPO: abre pelo id da conversa (sem contato nem telefone) */
   conversationId?: string | null;
   isGroup?: boolean;
@@ -184,11 +191,13 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
   const router = useRouter();
   const queryClient = useQueryClient();
   const [selected, setSelectedState] = useState<ChatTarget | null>(null);
+  const [contextConnectionId, setContextConnectionId] = useState<string | null>(null);
   const [demoOpen, setDemoOpen] = useState(stagingDemo);
   const [demoStartedAt, setDemoStartedAt] = useState(() => new Date().toISOString());
   const setSelected = useCallback((target: ChatTarget | null) => {
     setDemoOpen(false);
     setSelectedState(target);
+    setContextConnectionId(target?.connectionId ?? target?.initialSenderId ?? null);
   }, []);
   const showingDemo = stagingDemo && demoOpen;
   const [searchQuery, setSearchQuery] = useState('');
@@ -488,9 +497,9 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
   // igual ao WhatsApp: conta conversas, não mensagens)
   const unreadChats = useMemo(
     () =>
-      Array.from(convByKey.values()).filter(c => c.unread > 0).length +
+      Array.from(convsByPhone.values()).reduce((count, rows) => count + (effectiveConn === 'all' ? Number(rows.some(c => c.unread > 0)) : rows.filter(c => c.unread > 0).length), 0) +
       groupItems.filter(g => g.unread > 0).length,
-    [convByKey, groupItems]
+    [convsByPhone, effectiveConn, groupItems]
   );
 
   // LISTA ÚNICA: contatos do CRM com telefone + conversas NOVAS de números
@@ -573,10 +582,11 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
         });
         continue;
       }
-      for (const conv of convs) {
+      for (const conv of effectiveConn === 'all' ? unifyConversations(convs) : convs) {
         items.push({
           key: `${conv.connectionId ?? 'none'}#${key}`,
           connectionId: conv.connectionId,
+          ...('connectionIds' in conv ? { connectionIds: conv.connectionIds, conversationIds: conv.conversationIds, initialSenderId: conv.initialSenderId } : {}),
           phone: conv.phone,
           name: c.name,
           contactId: c.id,
@@ -596,10 +606,11 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
     // WhatsApp ou o número) — dá pra responder e criar contato/lead dali.
     for (const [key, convs] of convsByPhone.entries()) {
       if (contactByKey.has(key)) continue;
-      for (const conv of convs) {
+      for (const conv of effectiveConn === 'all' ? unifyConversations(convs) : convs) {
         items.push({
           key: `${conv.connectionId ?? 'none'}#${key}`,
           connectionId: conv.connectionId,
+          ...('connectionIds' in conv ? { connectionIds: conv.connectionIds, conversationIds: conv.conversationIds, initialSenderId: conv.initialSenderId } : {}),
           phone: conv.phone,
           name: conv.waName || conv.phone,
           contactId: null,
@@ -651,7 +662,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
       if (a.hasConv !== b.hasConv) return a.hasConv ? -1 : 1;
       return a.name.localeCompare(b.name, 'pt-BR');
     });
-  }, [contacts, convsByPhone, groupItems, searchQuery, filter, ownerFilter, tagFilter, responsavelEfetivo]);
+  }, [contacts, convsByPhone, groupItems, searchQuery, filter, ownerFilter, tagFilter, responsavelEfetivo, effectiveConn]);
 
   // Etiquetas DA ORGANIZAÇÃO (nome + cor): a mesma lista pra equipe inteira,
   // como no WhatsApp Business. A conversa guarda só os ids.
@@ -672,11 +683,12 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
     const conversationId = searchParams?.get('conversation');
     const contactId = searchParams?.get('contact');
     if (!conversationId && !contactId) return;
-    const alvo = chatList.find(i => conversationId ? i.conversationId === conversationId : i.contactId === contactId);
+    const alvo = chatList.find(i => conversationId ? i.conversationId === conversationId || i.conversationIds?.includes(conversationId) : i.contactId === contactId);
     if (!alvo) return;
-    setSelected(alvo);
+    const origin = conversationId ? convsQ.data?.data.find(c => c.id === conversationId) : null;
+    setSelected(origin && !alvo.isGroup ? { ...alvo, initialSenderId: origin.connection_id } : alvo);
     window.history.replaceState({}, '', '/chats');
-  }, [searchParams, chatList, setSelected]);
+  }, [searchParams, chatList, setSelected, convsQ.data]);
 
   const labels = useMemo(() => labelsQ.data?.labels ?? [], [labelsQ.data]);
   const labelById = useMemo(() => new Map(labels.map(l => [l.id, l])), [labels]);
@@ -724,10 +736,10 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
         r =>
           !r.is_group &&
           phoneKey(r.wa_phone) === chave &&
-          (selected.connectionId ? r.connection_id === selected.connectionId : true)
+          (contextConnectionId ? r.connection_id === contextConnectionId : selected.connectionId ? r.connection_id === selected.connectionId : true)
       ) ?? null
     );
-  }, [selected, convsQ.data]);
+  }, [selected, convsQ.data, contextConnectionId]);
   const selectedConvId = selectedConv?.id ?? null;
   const selectedLabelIds = useMemo(() => selectedConv?.label_ids ?? [], [selectedConv]);
   /** Etiquetas da conversa já resolvidas: id que não existe mais some. */
@@ -895,12 +907,10 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
         body: JSON.stringify(conversationId ? { conversationId } : { phone, connectionId }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const isSelected = conversationId
-        ? selected?.conversationId === conversationId
-        : !!selected &&
+      const isSelected = (conversationId && selected?.conversationId === conversationId) || (!!selected &&
           !selected.isGroup &&
           phoneKey(selected.phone) === phoneKey(phone) &&
-          (selected.connectionId ?? null) === connectionId;
+          (selected.connectionId ?? null) === connectionId);
       if (isSelected) setSelected(null);
       await queryClient.invalidateQueries({ queryKey: ['waConversations'] });
       addToast('Conversa marcada como não lida.', 'success');
@@ -1504,6 +1514,9 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                           phone: c.phone,
                           name: c.name,
                           contactId: c.contactId,
+                          initialSenderId: c.initialSenderId,
+                          connectionIds: c.connectionIds,
+                          conversationIds: c.conversationIds,
                           connectionId: c.connectionId ?? (effectiveConn !== 'all' ? effectiveConn : null),
                         }
                   )
@@ -1540,12 +1553,13 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                           sem contato
                         </span>
                       )}
-                      {connsList.length > 1 && effectiveConn === 'all' && c.connectionId && (
+                      {(c.connectionIds?.length ?? 0) > 1 && <span className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400" title={c.connectionIds?.map(id => connsList.find(x => x.id === id)?.phoneNumber || 'Número').join(', ')}>{c.connectionIds?.length} números</span>}
+                      {connsList.length > 1 && effectiveConn === 'all' && (c.connectionId || c.connectionIds?.length === 1) && (
                         <span
                           className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400"
-                          title={`Conversa do número ${connsList.find(x => x.id === c.connectionId)?.phoneNumber || ''}`}
+                          title={`Conversa do número ${connsList.find(x => x.id === (c.connectionId ?? c.connectionIds?.[0]))?.phoneNumber || ''}`}
                         >
-                          {(connsList.find(x => x.id === c.connectionId)?.phoneNumber || 'número').replace('+55', '')}
+                          {(connsList.find(x => x.id === (c.connectionId ?? c.connectionIds?.[0]))?.phoneNumber || 'número').replace('+55', '')}
                         </span>
                       )}
                       {/* Etiquetas JUNTO do nome/número (modelo WhatsApp
@@ -1646,7 +1660,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                       onClick={e => {
                         e.stopPropagation();
                         setRowMenu(null);
-                        void handleMarkRead(c.phone, c.connectionId ?? (c.hasConv ? 'none' : null), c.conversationId);
+                        void handleMarkRead(c.phone, c.connectionId, c.isGroup ? c.conversationId : null);
                       }}
                       className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
                     >
@@ -1659,7 +1673,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                       onClick={e => {
                         e.stopPropagation();
                         setRowMenu(null);
-                        void handleMarkUnread(c.phone, c.connectionId ?? (c.hasConv ? 'none' : null), c.conversationId);
+                        void handleMarkUnread(c.phone, c.connectionId, c.conversationId);
                       }}
                       className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
                     >
@@ -1858,6 +1872,9 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
               <DealWhatsAppChat
                 key={selected.isGroup ? `group|${selected.conversationId}` : `${selected.phone}|${selected.connectionId ?? 'all'}`}
                 connectionId={selected.connectionId ?? null}
+                initialSenderId={selected.initialSenderId}
+                contextConnectionId={contextConnectionId}
+                onSenderChange={setContextConnectionId}
                 contact={
                   selected.isGroup ? null : { id: selected.contactId || selected.phone, name: selected.name, phone: selected.phone }
                 }

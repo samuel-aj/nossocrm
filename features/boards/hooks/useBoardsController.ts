@@ -147,7 +147,6 @@ export const useBoardsController = () => {
   // and we'll naturally refetch deals for the corrected board.
   const dealsBoardId = activeBoardId || '';
   const { data: deals = [], isLoading: dealsLoading } = useDealsByBoard(dealsBoardId);
-  const automations = useBoardAutomations(organizationId, profile?.id, deals.map(d => d.id));
   const moveDealMutation = useMoveDeal();
 
   // Filter State (declared before AI context useEffect that uses them)
@@ -476,7 +475,7 @@ export const useBoardsController = () => {
   }, [availableTags, deals]);
 
   // Filtering Logic
-  const matchingDeals = useMemo(() => {
+  const matchingBaseDeals = useMemo(() => {
     // Condições completas: vazio/preenchido não precisam de valor; contém/igual sim.
     const activeCfConditions = customFieldConditions.filter(
       (c) => c.field && (c.operator === 'empty' || c.operator === 'not_empty' || c.value.trim() !== '')
@@ -484,7 +483,6 @@ export const useBoardsController = () => {
     const tagTerm = tagFilter.trim().toLowerCase();
 
     return deals.filter(l => {
-      if (!matchesAutomation(automations.data[l.id], general.automation)) return false;
       const matchesSearch = buscaCasaDeal(l, searchTerm);
 
       const matchesOwner =
@@ -561,7 +559,12 @@ export const useBoardsController = () => {
       }
       return deal;
     });
-  }, [deals, automations.data, general.automation, searchTerm, ownerFilter, customFieldConditions, customFieldLogic, tagFilter, period, dateClock, general.product, statusFilter, profile, inactiveLeadsEnabled, inactiveContactIds, buscaCasaDeal]);
+  }, [deals, searchTerm, ownerFilter, customFieldConditions, customFieldLogic, tagFilter, period, dateClock, general.product, statusFilter, profile, inactiveLeadsEnabled, inactiveContactIds, buscaCasaDeal]);
+
+  // Load candidates before applying the automation filter, so unloaded states
+  // never exclude leads that should match it. Other filters bound the work.
+  const automations = useBoardAutomations(organizationId, profile?.id, matchingBaseDeals.map(d => d.id));
+  const matchingDeals = useMemo(() => matchingBaseDeals.filter(d => matchesAutomation(automations.data[d.id], general.automation)), [matchingBaseDeals, automations.data, general.automation]);
 
   const filteredDeals = useMemo(() => matchingDeals.filter(d => !inactiveLeadsEnabled || !(d.inactiveAt || (d.contactId && inactiveContactIds.has(d.contactId)))), [matchingDeals, inactiveLeadsEnabled, inactiveContactIds]);
 

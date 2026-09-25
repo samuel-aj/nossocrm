@@ -13,6 +13,7 @@ import { isStaleChunkError, tryAutoReload } from '@/components/pwa/ChunkErrorRel
  * global-error) e não herda o CSS do app — por isso os estilos inline.
  */
 export default function GlobalError({ error }: { error: Error & { digest?: string } }) {
+  const staleChunk = isStaleChunkError(error?.message);
   useEffect(() => {
     if (isStaleChunkError(error?.message)) {
       tryAutoReload();
@@ -34,10 +35,11 @@ export default function GlobalError({ error }: { error: Error & { digest?: strin
         }}
       >
         <div style={{ textAlign: 'center', padding: 24, maxWidth: 420 }}>
-          <h1 style={{ fontSize: 20, margin: '0 0 8px' }}>O CRM foi atualizado</h1>
+          <h1 style={{ fontSize: 20, margin: '0 0 8px' }}>{staleChunk ? 'Precisamos recarregar esta aba' : 'Não foi possível abrir esta tela'}</h1>
           <p style={{ fontSize: 14, color: '#475569', margin: '0 0 20px', lineHeight: 1.6 }}>
-            Esta aba estava com uma versão antiga do sistema. Recarregue para
-            continuar de onde parou.
+            {staleChunk
+              ? 'Não foi possível carregar um arquivo do sistema. Recarregue para tentar novamente com a versão atual.'
+              : 'Ocorreu um erro ao carregar o CRM. Tente recarregar a página. Se continuar, informe o problema pelo suporte.'}
           </p>
           <button
             type="button"

@@ -65,19 +65,19 @@ export async function POST(req: Request) {
   const phone = normalizePhoneE164(body?.phone || '');
   if (!phone) return json({ error: 'phone ou conversationId é obrigatório' }, 400);
 
-  if (!(await conversationAllowed(auth.admin, auth.user, { phone, connectionId: body?.connectionId || undefined }))) return json({ error: 'Conversa indisponível' }, 404);
-  const variants = brPhoneVariants(phone);
-  let q = auth.admin
-    .from('wa_conversations')
-    .update({ unread_count: 1 })
-    .eq('organization_id', auth.user.organizationId)
-    .in('wa_phone', variants.length ? variants : [phone]);
-  // Conversas separadas por número: marca só a do número da linha clicada.
-  // 'none' = linha órfã (conexão excluída): só a conversa sem número.
-  if (body?.connectionId === 'none') q = q.is('connection_id', null);
-  else if (body?.connectionId) q = q.eq('connection_id', body.connectionId);
-  const { error } = await q.or('unread_count.is.null,unread_count.eq.0');
-
+  // The unified action is limited to the same authorized rows as the inbox.
+  // Authorizing one matching conversation does not authorize all its numbers.
+  const { data: visible, error: visibilityError } = await listVisibleConversations(auth.admin, auth.user, {
+    colunas: 'id,contact_id,wa_phone,connection_id',
+    connectionId: body?.connectionId && body.connectionId !== 'none' ? body.connectionId : null,
+  });
+  if (visibilityError) return json({ error: visibilityError.message }, 500);
+  const variants = new Set(brPhoneVariants(phone).length ? brPhoneVariants(phone) : [phone]);
+  const ids = visible.filter(c => variants.has(String(c.wa_phone)) && (body?.connectionId !== 'none' || !c.connection_id)).map(c => String(c.id));
+  if (!ids.length) return json({ error: 'Conversa indisponível' }, 404);
+  const { error } = await auth.admin.from('wa_conversations').update({ unread_count: 1 })
+    .eq('organization_id', auth.user.organizationId).in('id', ids)
+    .or('unread_count.is.null,unread_count.eq.0');
   if (error) return json({ error: error.message }, 500);
   return json({ ok: true });
 }

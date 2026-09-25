@@ -60,7 +60,7 @@ import {
   TEMPLATE_VARIABLES,
   type TemplateButton,
 } from '@/lib/messageTemplates';
-import { formatRemaining, getServiceWindow } from '@/lib/whatsapp/serviceWindow';
+import { formatRemaining, getServiceWindow, senderLastInbound } from '@/lib/whatsapp/serviceWindow';
 import { useOlderWhatsAppMessages, useWhatsAppChat, type WaChatMessage, type WaMediaKind, type WaSender } from './useWhatsAppChat';
 import { transcodeToMp3 } from './audioTranscode';
 import { useWaAgentsAccess } from '@/hooks/useWaAgentsAccess';
@@ -1148,6 +1148,9 @@ export function DealWhatsAppChat({
   group = null,
   timeline = null,
   onOpenGroupMember,
+  initialSenderId,
+  contextConnectionId,
+  onSenderChange,
 }: {
   contact: { id: string; name?: string | null; phone?: string | null } | null;
   /** Valores extras pras variáveis dos modelos (lead.titulo, escritorio.nome...) */
@@ -1156,6 +1159,9 @@ export function DealWhatsAppChat({
    * número): só as mensagens dele, e o envio sai por ele — o seletor de
    * remetente some. null = visão unificada do contato (card do lead). */
   connectionId?: string | null;
+  initialSenderId?: string | null;
+  contextConnectionId?: string | null;
+  onSenderChange?: (connectionId: string | null) => void;
   /** GRUPO do WhatsApp: a conversa é o grupo (sem contato nem telefone); as
    * mensagens recebidas mostram quem escreveu; sem agente, robô nem janela de 24 h. */
   onOpenGroupMember?: (member: GroupParticipant, connectionId: string) => void;
@@ -1165,7 +1171,7 @@ export function DealWhatsAppChat({
 }) {
   const isGroup = !!group;
   const phone = useMemo(() => (isGroup ? '' : normalizePhoneE164(contact?.phone || '')), [contact?.phone, isGroup]);
-  const { data, isLoading, error, send, edit, remove } = useWhatsAppChat(phone || null, connectionId, group?.conversationId ?? null);
+  const { data, isLoading, error, send, edit, remove } = useWhatsAppChat(phone || null, connectionId, group?.conversationId ?? null, contextConnectionId);
   const { text, setText, mentions, selectMention, restoreDraft } = useMentionDraft();
   const [membersOpen, setMembersOpen] = useState(false);
   const [mentionCaret, setMentionCaret] = useState(0);
@@ -1306,7 +1312,7 @@ export function DealWhatsAppChat({
   // MULTI-NÚMERO: qual conexão ENVIA as mensagens deste usuário. Persistido
   // no navegador; validado contra os números conectados a cada render.
   const [senderId, setSenderId] = useState<string | null>(() =>
-    typeof window !== 'undefined' ? window.localStorage.getItem('wa-sender-connection') : null
+    initialSenderId ?? (typeof window !== 'undefined' ? window.localStorage.getItem('wa-sender-connection') : null)
   );
   const [senderMenuOpen, setSenderMenuOpen] = useState(false);
   // AGENTE DE IA nesta conversa: pausa sozinho quando um atendente responde
@@ -1464,23 +1470,18 @@ export function DealWhatsAppChat({
   useEffect(() => {
     senderRef.current = activeSender;
   }, [activeSender]);
+  useEffect(() => {
+    if (data) onSenderChange?.(activeSender?.id ?? null);
+  }, [data, activeSender?.id, onSenderChange]);
   // Modelos APROVADOS do número que vai enviar (cada número tem os seus na Meta)
   const senderIsApi = ['meta_cloud', 'evolution_business'].includes(String(activeSender?.provider ?? '').toLowerCase());
   // JANELA DE 24 H: só a API oficial da Meta trava (Evolution não tem a regra).
   // Conta da ÚLTIMA MENSAGEM RECEBIDA do contato: a rota manda a data olhando
   // todas as conversas do telefone; reserva = mensagens já carregadas.
   const senderIsMeta = String(activeSender?.provider ?? '').toLowerCase() === 'meta_cloud';
-  const lastInboundAt = useMemo(() => {
-    const fromApi = data?.conversation?.last_inbound_at ?? null;
-    if (fromApi) return fromApi;
-    let latest: string | null = null;
-    for (const m of messages) {
-      if (m.direction !== 'in') continue;
-      const ts = m.wa_timestamp || m.created_at;
-      if (!latest || Date.parse(ts) > Date.parse(latest)) latest = ts;
-    }
-    return latest;
-  }, [data?.conversation?.last_inbound_at, messages]);
+  const lastInboundAt = useMemo(() => senderLastInbound(activeSender?.id, data?.lastInboundByConnection, messages),
+    [activeSender?.id, data?.lastInboundByConnection, messages]);
+
   // Relógio da faixa "fecha em X" (e da trava): tique a cada 30 s, só com a API oficial
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {

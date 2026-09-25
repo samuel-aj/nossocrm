@@ -10,6 +10,23 @@
 /** Duração da janela de atendimento da Meta: 24 h em milissegundos */
 export const META_WINDOW_MS = 24 * 60 * 60 * 1000;
 
+/** A reply received on one company number never opens another number's window. */
+export function senderLastInbound(
+  connectionId: string | null | undefined,
+  byConnection: Record<string, string | null> | undefined,
+  messages: Array<{ direction: string; connection_id?: string | null; wa_timestamp: string | null; created_at: string }>
+): string | null {
+  if (!connectionId) return null;
+  if (byConnection && Object.prototype.hasOwnProperty.call(byConnection, connectionId)) return byConnection[connectionId];
+  let latest: string | null = null;
+  for (const message of messages) {
+    if (message.direction !== 'in' || message.connection_id !== connectionId) continue;
+    const timestamp = message.wa_timestamp || message.created_at;
+    if (!latest || Date.parse(timestamp) > Date.parse(latest)) latest = timestamp;
+  }
+  return latest;
+}
+
 export interface ServiceWindow {
   /** true = ainda dá pra mandar mensagem livre */
   open: boolean;

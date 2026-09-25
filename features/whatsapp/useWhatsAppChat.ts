@@ -63,6 +63,7 @@ export interface WaSender {
 }
 
 export interface WaChatData {
+  lastInboundByConnection?: Record<string, string | null>;
   connected: boolean;
   hasConnection: boolean;
   /** Provedor da conexão ('evolution' | 'evolution_business' | 'meta_cloud') — decide fallback de áudio */
@@ -156,9 +157,9 @@ export async function forwardWhatsAppMessages(messageIds: string[], targets: For
  * número na página Chats). null/omitido = visão unificada do contato.
  * conversationId = GRUPO do WhatsApp (a conversa é o grupo; sem telefone).
  */
-export function useWhatsAppChat(phoneE164: string | null, connectionId?: string | null, conversationId?: string | null) {
+export function useWhatsAppChat(phoneE164: string | null, connectionId?: string | null, conversationId?: string | null, contextConnectionId?: string | null) {
   const qc = useQueryClient();
-  const queryKey = ['waChat', conversationId ? `conv:${conversationId}` : phoneE164, connectionId ?? 'all'] as const;
+  const queryKey = ['waChat', conversationId ? `conv:${conversationId}` : phoneE164, connectionId ?? 'all', ...(contextConnectionId ? [contextConnectionId] : [])] as const;
   const hasTarget = !!phoneE164 || !!conversationId;
   // pausa o polling durante um envio: um refetch no meio apagaria a bolha otimista
   const sendingRef = useRef(false);
@@ -172,11 +173,17 @@ export function useWhatsAppChat(phoneE164: string | null, connectionId?: string 
 
   const query = useQuery<WaChatData>({
     queryKey,
+    // Switching the sender changes action context, not the visible history.
+    // Only retain messages for this exact phone/group and viewing scope.
+    placeholderData: (previous, previousQuery) => previous && previousQuery?.queryKey[1] === queryKey[1] && previousQuery.queryKey[2] === queryKey[2]
+      ? { ...previous, conversation: null, ai: null, bot: null }
+      : undefined,
     queryFn: async () => {
       const url = conversationId
         ? `/api/whatsapp/messages?conversationId=${encodeURIComponent(conversationId)}`
         : `/api/whatsapp/messages?phone=${encodeURIComponent(phoneE164!)}` +
-          (connectionId ? `&connectionId=${encodeURIComponent(connectionId)}` : '');
+          (connectionId ? `&connectionId=${encodeURIComponent(connectionId)}` : '') +
+          (contextConnectionId ? `&contextConnectionId=${encodeURIComponent(contextConnectionId)}` : '');
       const res = await fetch(url, {
         credentials: 'include',
         headers: { accept: 'application/json' },

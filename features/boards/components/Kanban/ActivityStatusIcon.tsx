@@ -199,9 +199,9 @@ export const ActivityStatusIcon: React.FC<ActivityStatusIconProps> = ({
     const label = automationLabel(automation);
     const Icon = automation.kind === 'bot' ? Bot : Sparkles;
     return (
-      <span role="img" aria-label={label} title={label} className={`relative inline-flex shrink-0 p-0.5 ${automation.kind === 'bot' ? 'text-sky-600 dark:text-sky-400' : 'text-violet-600 dark:text-violet-400'}`}>
-        <Icon size={22} strokeWidth={2.25} aria-hidden="true" />
-        <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-current motion-safe:animate-pulse" />
+      <span role="img" aria-label={label} title={label} className={`inline-flex h-[22px] items-center gap-1 shrink-0 rounded-md border border-slate-200 dark:border-white/10 px-1.5 text-[10px] font-semibold ${automation.kind === 'bot' ? 'text-sky-600 dark:text-sky-400' : 'text-violet-600 dark:text-violet-400'}`}>
+        <Icon size={13} strokeWidth={1.8} aria-hidden="true" />
+        <span aria-hidden="true">{automation.kind === 'bot' ? 'Robô' : 'IA'}</span>
       </span>
     );
   }
