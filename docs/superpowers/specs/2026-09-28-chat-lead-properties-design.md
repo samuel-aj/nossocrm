@@ -61,7 +61,7 @@ Edição mostra estado de salvamento e erro recuperável. Só indicar “salvo�
 
 ### Texto do modal
 
-**Mudar lead de funil?**
+**Deseja mudar lead de funil?**
 
 Você vai mover **{nome do lead}** para outro funil.
 
