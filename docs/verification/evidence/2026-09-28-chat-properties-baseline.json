@@ -1,0 +1,66 @@
+{
+  "base": "https://crm.anunciojuridico.com.br",
+  "release": "30225021a0164d307f330e18c451c1f3df4bc8ab",
+  "viewport": {
+    "width": 1600,
+    "height": 1000
+  },
+  "windowMs": 10000,
+  "measuredAt": "2026-09-28T22:01:40.887Z",
+  "cases": {
+    "cold": {
+      "runs": 10,
+      "usableMs": {
+        "p50": 3883,
+        "p90": 4364,
+        "min": 3382,
+        "max": 5381
+      },
+      "dataBytes": {
+        "p50": 115575,
+        "p90": 115776,
+        "min": 109904,
+        "max": 115829
+      },
+      "dataRequests": {
+        "p50": 44,
+        "p90": 45,
+        "min": 42,
+        "max": 46
+      },
+      "allRequests": {
+        "p50": 46,
+        "p90": 47,
+        "min": 44,
+        "max": 48
+      }
+    },
+    "warm": {
+      "runs": 10,
+      "usableMs": {
+        "p50": 41,
+        "p90": 54,
+        "min": 31,
+        "max": 65
+      },
+      "dataBytes": {
+        "p50": 5917,
+        "p90": 19871,
+        "min": 1945,
+        "max": 23074
+      },
+      "dataRequests": {
+        "p50": 7,
+        "p90": 11,
+        "min": 5,
+        "max": 12
+      },
+      "allRequests": {
+        "p50": 8,
+        "p90": 12,
+        "min": 5,
+        "max": 13
+      }
+    }
+  }
+}
