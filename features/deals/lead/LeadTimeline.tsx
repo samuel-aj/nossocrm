@@ -369,15 +369,19 @@ function NoteCard({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(text);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const save = async () => {
     if (!onSave || !draft.trim() || draft === text) {
       setEditing(false);
       return;
     }
     setSaving(true);
+    setError(null);
     try {
       await onSave(id, draft.trim());
       setEditing(false);
+    } catch (e) {
+      setError((e as Error).message || 'Não foi possível salvar a nota. O texto continua aqui.');
     } finally {
       setSaving(false);
     }
@@ -413,6 +417,7 @@ function NoteCard({
       </header>
       {editing ? (
         <div data-esc-local="">
+          {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
           <textarea
             autoFocus
             value={draft}

@@ -46,3 +46,14 @@ describe('live imported leads', () => {
   expect(mocks.getDeal).not.toHaveBeenCalled();unmount();
  });
 });
+
+it('invalidates only the affected organization and lead history from central realtime', () => {
+ const { client, unmount } = setup();
+ const page = { pages: [{ activities: [{ id: 'note' }], history: { apiNotes: [] } }] };
+ for (const key of [['leadHistory','org','lead'], ['leadHistory','org','other'], ['leadHistory','foreign','lead']]) client.setQueryData(key, page);
+ act(() => mocks.listeners.get('activities')!({ eventType: 'UPDATE', new: { id: 'note', deal_id: 'lead', organization_id: 'org' } }));
+ expect(client.getQueryState(['leadHistory','org','lead'])?.isInvalidated).toBe(true);
+ expect(client.getQueryState(['leadHistory','org','other'])?.isInvalidated).toBe(false);
+ expect(client.getQueryState(['leadHistory','foreign','lead'])?.isInvalidated).toBe(false);
+ unmount(); client.clear();
+});

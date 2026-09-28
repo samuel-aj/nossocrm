@@ -1113,6 +1113,9 @@ export type ComposerMode = 'message' | 'note' | 'activity';
  * ficam guardados ao alternar, porque nada é desmontado).
  */
 export type ChatTimelineProps = {
+  /** Pagination/status inside the existing scroller; no chat remount. */
+  historyPrefix?: React.ReactNode;
+  historyLoadingOlder?: boolean;
   entries: ChatTimelineEntry[];
   headerExtra?: React.ReactNode;
   /** Depois da lupa de pesquisa (ex.: fechar o lead) */
@@ -1616,6 +1619,20 @@ export function DealWhatsAppChat({
     setNewBelow(0);
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [ownKey]);
+  const crmOlderAnchor = useRef<{ height: number; top: number } | null>(null);
+  const crmPrependDone = useRef(false);
+  const crmOlderLoading = timeline?.historyLoadingOlder ?? false;
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    if (crmOlderLoading && !crmOlderAnchor.current) crmOlderAnchor.current = { height: el.scrollHeight, top: el.scrollTop };
+    if (!crmOlderLoading && crmOlderAnchor.current) {
+      const anchor = crmOlderAnchor.current;
+      el.scrollTop = anchor.top + el.scrollHeight - anchor.height;
+      crmOlderAnchor.current = null;
+      crmPrependDone.current = true;
+    }
+  }, [crmOlderLoading, timeline?.entries]);
   // Novidade = mensagem nova no fim OU item novo do CRM (nota/atividade/alteração).
   // Perto do fim: desce; lendo o histórico: só avisa.
   const lastMsgId = messages.length ? messages[messages.length - 1].id : '';
@@ -1626,6 +1643,8 @@ export function DealWhatsAppChat({
     lastItemKeyRef.current = key;
     const el = listRef.current;
     if (!el || !initialScrollDoneRef.current || !key || key === prev || prev === null) return;
+    if (crmPrependDone.current) { crmPrependDone.current = false; return; }
+    if (crmOlderLoading || crmOlderAnchor.current) return;
     const nearBottom = atBottomRef.current || el.scrollHeight - el.scrollTop - el.clientHeight < 300;
     if (nearBottom || forceScrollRef.current) {
       forceScrollRef.current = false;
@@ -1634,7 +1653,7 @@ export function DealWhatsAppChat({
     } else {
       setNewBelow(n => n + 1);
     }
-  }, [contentKey, listItems.length]);
+  }, [contentKey, listItems.length, crmOlderLoading]);
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
@@ -2309,6 +2328,7 @@ export function DealWhatsAppChat({
         aria-label={timeline ? 'Histórico do lead' : undefined}
         className="flex-1 min-h-0 overflow-y-auto scrollbar-custom px-4 py-3 space-y-2 bg-slate-50/40 dark:bg-black/10"
       >
+        {timeline?.historyPrefix}
         {isLoading && listItems.length === 0 && (
           <div className="h-full flex items-center justify-center text-slate-400">
             <Loader2 className="animate-spin" size={20} />

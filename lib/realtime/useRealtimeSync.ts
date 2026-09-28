@@ -8,6 +8,7 @@
  *   useRealtimeSync('deals');  // Subscribe to deals table changes
  *   useRealtimeSync(['deals', 'activities']);  // Multiple tables
  */
+import { invalidateLeadHistory } from '@/features/deals/lead/leadHistoryInvalidation';
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
@@ -192,6 +193,11 @@ export function useRealtimeSync(
           const evOrg = typeof evRow?.organization_id === 'string' ? (evRow.organization_id as string) : null;
           const tabOrgId = readTabOrg()?.id ?? null;
           if (evOrg && tabOrgId && evOrg !== tabOrgId) return;
+
+          if (table === 'activities' || table === 'deal_notes' || table === 'deals') {
+            const relatedDealId = table === 'deals' ? evRow?.id : evRow?.deal_id;
+            void invalidateLeadHistory(queryClient, tabOrgId ?? evOrg, typeof relatedDealId === 'string' ? relatedDealId : null, typeof evRow?.id === 'string' ? evRow.id : undefined);
+          }
 
           if (table === 'wa_labels') {
             void refreshLinkedLabels(queryClient, true);

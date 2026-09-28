@@ -11,6 +11,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Activity } from '@/types';
 import { activitiesService } from '@/lib/supabase';
 import { useAuth } from '../AuthContext';
+import { invalidateLeadHistory } from '@/features/deals/lead/leadHistoryInvalidation';
 import { queryKeys } from '@/lib/query';
 import { useActivities as useTanStackActivities } from '@/lib/query/hooks/useActivitiesQuery';
 
@@ -19,8 +20,8 @@ interface ActivitiesContextType {
   loading: boolean;
   error: string | null;
   addActivity: (activity: Omit<Activity, 'id' | 'createdAt'>) => Promise<Activity | null>;
-  updateActivity: (id: string, updates: Partial<Activity>) => Promise<void>;
-  deleteActivity: (id: string) => Promise<void>;
+  updateActivity: (id: string, updates: Partial<Activity>, options?: { throwOnError?: boolean }) => Promise<void>;
+  deleteActivity: (id: string, options?: { throwOnError?: boolean }) => Promise<void>;
   toggleActivityCompletion: (id: string) => Promise<void>;
   refresh: () => Promise<void>;
   /**
@@ -49,8 +50,10 @@ const ActivitiesContext = createContext<ActivitiesContextType | undefined>(undef
  * only way to make optimistic UI and Realtime echoes coexist without flicker.
  */
 export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { profile } = useAuth();
+  const { profile, organizationId } = useAuth();
   const queryClient = useQueryClient();
+  const activeOrgRef = useRef(organizationId);
+  activeOrgRef.current = organizationId;
 
   // ============================================
   // TanStack Query como fonte única de verdade
@@ -82,7 +85,7 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
   }, []);
   const isActivityPending = useCallback(
     (id: string) => pendingIdsRef.current.has(id),
-    [pendingVersion] // eslint-disable-line react-hooks/exhaustive-deps
+    [pendingVersion]
   );
 
   /**
@@ -117,6 +120,7 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
       // Cancel any in-flight refetch so it can't resolve after us and drop
       // the temp activity before the real one replaces it.
       await queryClient.cancelQueries({ queryKey: queryKeys.activities.all });
+      if (activeOrgRef.current !== organizationId) throw new Error("A organização mudou durante o salvamento");
 
       const previous = patchActivitiesCache(list => [tempActivity, ...list]);
 
@@ -124,31 +128,34 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
 
       if (addError || !data) {
         console.error('Erro ao criar atividade:', addError?.message);
-        if (previous) queryClient.setQueryData(queryKeys.activities.lists(), previous);
+        if (previous && activeOrgRef.current === organizationId) queryClient.setQueryData(queryKeys.activities.lists(), previous);
         return null;
       }
 
       // Swap the temp entry for the real server row. If the Realtime INSERT
       // echo already added the real row, just drop the temp and don't duplicate.
-      patchActivitiesCache(list => {
+      if (activeOrgRef.current === organizationId) patchActivitiesCache(list => {
         const withoutTemp = list.filter(a => a.id !== tempId);
         const alreadyPresent = withoutTemp.some(a => a.id === data.id);
         return alreadyPresent ? withoutTemp : [data, ...withoutTemp];
       });
 
-      // NO invalidateQueries on success — cache is already correct and
-      // Realtime will keep other tabs/windows in sync.
+      // The canonical activity cache is already correct. Only its read
+      // projection is invalidated; realtime keeps other clients in sync.
+      void invalidateLeadHistory(queryClient, organizationId, data.dealId);
       return data;
     },
-    [profile, queryClient, patchActivitiesCache]
+    [profile, organizationId, queryClient, patchActivitiesCache]
   );
 
   const updateActivity = useCallback(
-    async (id: string, updates: Partial<Activity>) => {
-      if (pendingIdsRef.current.has(id)) return;
+    async (id: string, updates: Partial<Activity>, options?: { throwOnError?: boolean }) => {
+      if (pendingIdsRef.current.has(id)) { if (options?.throwOnError) throw new Error("Atividade já está sendo salva"); return; }
+      const sourceDealId = queryClient.getQueryData<Activity[]>(queryKeys.activities.lists())?.find(a => a.id === id)?.dealId;
       markPending(id);
       try {
         await queryClient.cancelQueries({ queryKey: queryKeys.activities.all });
+        if (activeOrgRef.current !== organizationId) throw new Error("A organização mudou durante o salvamento");
 
         const previous = patchActivitiesCache(list =>
           list.map(a => (a.id === id ? { ...a, ...updates } : a))
@@ -158,24 +165,28 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
 
         if (updateError) {
           console.error('Erro ao atualizar atividade:', updateError.message);
-          if (previous) queryClient.setQueryData(queryKeys.activities.lists(), previous);
+          if (previous && activeOrgRef.current === organizationId) queryClient.setQueryData(queryKeys.activities.lists(), previous);
+          if (options?.throwOnError) throw new Error(updateError.message);
           return;
         }
 
-        // NO invalidateQueries — see provider-level comment.
+        // Preserve the canonical list; revalidate only the history projection.
+        void invalidateLeadHistory(queryClient, organizationId, sourceDealId, id);
       } finally {
         unmarkPending(id);
       }
     },
-    [markPending, unmarkPending, patchActivitiesCache, queryClient]
+    [organizationId, markPending, unmarkPending, patchActivitiesCache, queryClient]
   );
 
   const deleteActivity = useCallback(
-    async (id: string) => {
-      if (pendingIdsRef.current.has(id)) return;
+    async (id: string, options?: { throwOnError?: boolean }) => {
+      if (pendingIdsRef.current.has(id)) { if (options?.throwOnError) throw new Error("Atividade já está sendo salva"); return; }
+      const sourceDealId = queryClient.getQueryData<Activity[]>(queryKeys.activities.lists())?.find(a => a.id === id)?.dealId;
       markPending(id);
       try {
         await queryClient.cancelQueries({ queryKey: queryKeys.activities.all });
+        if (activeOrgRef.current !== organizationId) throw new Error("A organização mudou durante o salvamento");
 
         const previous = patchActivitiesCache(list => list.filter(a => a.id !== id));
 
@@ -183,14 +194,16 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
 
         if (deleteError) {
           console.error('Erro ao deletar atividade:', deleteError.message);
-          if (previous) queryClient.setQueryData(queryKeys.activities.lists(), previous);
+          if (previous && activeOrgRef.current === organizationId) queryClient.setQueryData(queryKeys.activities.lists(), previous);
+          if (options?.throwOnError) throw new Error(deleteError.message);
           return;
         }
+        void invalidateLeadHistory(queryClient, organizationId, sourceDealId, id);
       } finally {
         unmarkPending(id);
       }
     },
-    [markPending, unmarkPending, patchActivitiesCache, queryClient]
+    [organizationId, markPending, unmarkPending, patchActivitiesCache, queryClient]
   );
 
   const toggleActivityCompletion = useCallback(
@@ -202,9 +215,11 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
       if (!activity) return;
       const nextCompleted = !activity.completed;
 
+      const sourceDealId = queryClient.getQueryData<Activity[]>(queryKeys.activities.lists())?.find(a => a.id === id)?.dealId;
       markPending(id);
       try {
         await queryClient.cancelQueries({ queryKey: queryKeys.activities.all });
+        if (activeOrgRef.current !== organizationId) throw new Error("A organização mudou durante o salvamento");
 
         const previous = patchActivitiesCache(list =>
           list.map(a => (a.id === id ? { ...a, completed: nextCompleted } : a))
@@ -216,14 +231,15 @@ export const ActivitiesProvider: React.FC<{ children: ReactNode }> = ({ children
 
         if (toggleError) {
           console.error('Erro ao alternar atividade:', toggleError.message);
-          if (previous) queryClient.setQueryData(queryKeys.activities.lists(), previous);
+          if (previous && activeOrgRef.current === organizationId) queryClient.setQueryData(queryKeys.activities.lists(), previous);
           return;
         }
+        void invalidateLeadHistory(queryClient, organizationId, sourceDealId, id);
       } finally {
         unmarkPending(id);
       }
     },
-    [activities, markPending, unmarkPending, patchActivitiesCache, queryClient]
+    [organizationId, activities, markPending, unmarkPending, patchActivitiesCache, queryClient]
   );
 
   const value = useMemo(

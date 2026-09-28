@@ -50,6 +50,8 @@ export function NoteComposer({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const latest = useRef({ value, onChange });
+  latest.current = { value, onChange };
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -63,7 +65,7 @@ export function NoteComposer({
     setError(null);
     try {
       await onSave(text);
-      onChange('');
+      if (latest.current.value === value) onChange('');
     } catch (e) {
       setError((e as Error)?.message || 'Não foi possível salvar a nota. O texto continua aqui.');
     } finally {

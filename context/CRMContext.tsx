@@ -126,8 +126,8 @@ interface CRMContextType {
   /** Lista de atividades (tarefas, reuniões) */
   activities: Activity[];
   addActivity: (activity: Omit<Activity, 'id' | 'createdAt'>) => Promise<Activity | null>;
-  updateActivity: (id: string, updates: Partial<Activity>) => Promise<void>;
-  deleteActivity: (id: string) => Promise<void>;
+  updateActivity: (id: string, updates: Partial<Activity>, options?: { throwOnError?: boolean }) => Promise<void>;
+  deleteActivity: (id: string, options?: { throwOnError?: boolean }) => Promise<void>;
   toggleActivityCompletion: (id: string) => Promise<void>;
   /** True while an activity mutation is in-flight for the given id. */
   isActivityPending: (id: string) => boolean;
