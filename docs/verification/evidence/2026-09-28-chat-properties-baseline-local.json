@@ -1,0 +1,66 @@
+{
+  "base": "http://localhost:3218",
+  "release": "3022502",
+  "viewport": {
+    "width": 1600,
+    "height": 1000
+  },
+  "windowMs": 10000,
+  "measuredAt": "2026-09-28T22:07:27.446Z",
+  "cases": {
+    "cold": {
+      "runs": 10,
+      "usableMs": {
+        "p50": 2414,
+        "p90": 3009,
+        "min": 2369,
+        "max": 3045
+      },
+      "dataBytes": {
+        "p50": 199219,
+        "p90": 210441,
+        "min": 195413,
+        "max": 215108
+      },
+      "dataRequests": {
+        "p50": 44,
+        "p90": 47,
+        "min": 43,
+        "max": 50
+      },
+      "allRequests": {
+        "p50": 47,
+        "p90": 52,
+        "min": 45,
+        "max": 55
+      }
+    },
+    "warm": {
+      "runs": 10,
+      "usableMs": {
+        "p50": 36,
+        "p90": 52,
+        "min": 30,
+        "max": 53
+      },
+      "dataBytes": {
+        "p50": 12794,
+        "p90": 93516,
+        "min": 10395,
+        "max": 101690
+      },
+      "dataRequests": {
+        "p50": 7,
+        "p90": 12,
+        "min": 5,
+        "max": 13
+      },
+      "allRequests": {
+        "p50": 7,
+        "p90": 13,
+        "min": 5,
+        "max": 13
+      }
+    }
+  }
+}

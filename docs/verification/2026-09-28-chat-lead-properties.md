@@ -20,6 +20,12 @@ Estes limites são alertas para investigar, não uma licença para aumentar cust
 
 Um build local otimizado da release original foi preservado para comparação com a candidata no mesmo host. Comparar produção com servidor local isoladamente não demonstra ganho de desempenho.
 
+### Baseline no host local otimizado
+
+Mesma release e dados, porta 3218, 10+10 execuções: frio p50/p90 **2.414/3.009 ms**, quente **36/52 ms**. Dados: frio **199.219/210.441 bytes**, quente **12.794/93.516 bytes**; requisições de dados **44/47** e **7/12**. A hospedagem local transfere respostas maiores, sem a mesma compressão da produção. Picos quentes incluem a atualização periódica da lista de conversas (aproximadamente 80 KB local). Evidência em `evidence/2026-09-28-chat-properties-baseline-local.json`.
+
+Para comparar no mesmo host: alerta de p90 acima de **3.100 ms** frio e **100 ms** quente; investigar diferença de bytes por endpoint, separando a atualização periódica já existente. Limites de bytes da produção não se aplicam a respostas locais com outra compressão. A candidata também terá leitura do histórico, cuja resposta será identificada separadamente.
+
 ## Execução
 
 Implementação e validação em andamento. Resultados da candidata e publicação serão registrados após a execução; os números acima não descrevem a nova versão.
