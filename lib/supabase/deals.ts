@@ -1,3 +1,4 @@
+import { dealPatch } from '@/lib/realtime/dealPayload';
 /**
  * @fileoverview Serviço Supabase para gerenciamento de deals (negócios/oportunidades).
  * 
@@ -269,17 +270,19 @@ export const dealsService = {
    * @param id - ID do deal.
    * @returns Promise com o deal ou erro.
    */
-  async getById(id: string): Promise<{ data: Deal | null; error: Error | null }> {
+  async getById(id: string, signal?: AbortSignal): Promise<{ data: Deal | null; error: Error | null }> {
     try {
       if (!supabase) {
         return { data: null, error: new Error('Supabase não configurado') };
       }
-      const [dealResult, itemsResult] = await Promise.all([
-        supabase.from('deals').select('*').eq('id', id).single(),
-        supabase.from('deal_items').select('*').eq('deal_id', id),
-      ]);
-
-      if (dealResult.error) return { data: null, error: dealResult.error };
+      const orgId = await getCurrentOrganizationId();
+      if (!orgId) return { data: null, error: new Error('Organização não encontrada') };
+      let dealQuery = supabase.from('deals').select('*').eq('organization_id', orgId).eq('id', id).is('deleted_at', null);
+      let itemsQuery = supabase.from('deal_items').select('*').eq('organization_id', orgId).eq('deal_id', id);
+      if (signal) { dealQuery = dealQuery.abortSignal(signal); itemsQuery = itemsQuery.abortSignal(signal); }
+      const [dealResult, itemsResult] = await Promise.all([dealQuery.maybeSingle(), itemsQuery]);
+      if (dealResult.error || itemsResult.error) return { data: null, error: dealResult.error || itemsResult.error };
+      if (!dealResult.data) return { data: null, error: null };
 
       const deal = transformDeal(dealResult.data as DbDeal, (itemsResult.data || []) as DbDealItem[]);
       return { data: deal, error: null };
@@ -431,7 +434,7 @@ export const dealsService = {
     }
   },
 
-  async update(id: string, updates: Partial<Deal>): Promise<{ error: Error | null }> {
+  async update(id: string, updates: Partial<Deal>): Promise<{ data?: Partial<Deal>; error: Error | null }> {
     try {
       if (!supabase) {
         return { error: new Error('Supabase não configurado') };
@@ -439,10 +442,16 @@ export const dealsService = {
       const dbUpdates = transformDealToDb(updates);
       dbUpdates.updated_at = new Date().toISOString();
 
-      const { error } = await supabase
+      const orgId = await getCurrentOrganizationId();
+      if (!orgId) return { error: new Error('Organização não encontrada') };
+      const { data, error } = await supabase
         .from('deals')
         .update(dbUpdates)
-        .eq('id', id);
+        .eq('organization_id', orgId)
+        .eq('id', id)
+        .is('deleted_at', null)
+        .select('*')
+        .maybeSingle();
 
       if (error) {
         // Trata erro de duplicidade do backend
@@ -454,7 +463,8 @@ export const dealsService = {
         return { error };
       }
 
-      return { error: null };
+      if (!data) return { error: new Error('Lead indisponível para edição. Atualize a conversa e tente novamente.') };
+      return { data: dealPatch(data), error: null };
     } catch (e) {
       return { error: e as Error };
     }

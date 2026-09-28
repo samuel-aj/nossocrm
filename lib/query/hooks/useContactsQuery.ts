@@ -10,6 +10,8 @@ import { useQuery, useMutation, useQueryClient, keepPreviousData, type QueryKey 
 import { queryKeys } from '../index';
 import { contactsService, companiesService } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
+import { readTabOrg } from '@/lib/tabOrg';
+import { newerRecord } from '../dealCache';
 import type { Contact, ContactStage, Company, PaginationState, PaginatedResponse, ContactsServerFilters } from '@/types';
 
 function matchesContactsServerFilters(contact: Contact, filters?: ContactsServerFilters): boolean {
@@ -109,15 +111,28 @@ export const useContacts = (filters?: ContactsFilters) => {
  */
 export const useContact = (id: string | undefined) => {
   const { user, loading: authLoading } = useAuth();
+  const client = useQueryClient();
   return useQuery({
     queryKey: queryKeys.contacts.detail(id || ''),
-    queryFn: async () => {
-      const { data, error } = await contactsService.getAll();
+    queryFn: async ({ signal }) => {
+      if (!id) return null;
+      const org = readTabOrg()?.id;
+      const { data, error } = await contactsService.getById(id, signal);
+      if (signal.aborted || readTabOrg()?.id !== org) throw new Error('Consulta cancelada');
       if (error) throw error;
-      return (data || []).find(c => c.id === id) || null;
+      if (data) client.setQueryData<Contact[]>(queryKeys.contacts.lists(), old => {
+        if (!old) return old; // A detail response must not mark an unfetched list as complete.
+        const current = old.find(c => c.id === data.id);
+        const resolved = newerRecord(current, data)!;
+        return current ? old.map(c => c.id === data.id ? resolved : c) : [...old, data];
+      });
+      return data;
     },
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
+    staleTime: 10_000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    retry: 1,
     enabled: !authLoading && !!user && !!id,
   });
 };

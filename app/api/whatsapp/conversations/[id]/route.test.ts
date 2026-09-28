@@ -42,7 +42,7 @@ describe('conversation labels and explicit linking', () => {
   it('links only an explicitly selected visible lead of this contact', async () => {
     expect((await PATCH(req({ dealId: id }), ctx)).status).toBe(200);
     expect(m.visible).toHaveBeenCalledWith({ fullAccess: true }, 'user', 'board', 'owner');
-    expect(m.update).toHaveBeenCalledWith({ deal_id: id });
+    expect(m.update).toHaveBeenCalledWith({ deal_id: id, deal_link_mode: 'manual' });
   });
   it('rejects a different contact, hidden lead and group', async () => {
     m.responses.deals = { data: { id, contact_id: 'other' }, error: null };
@@ -82,7 +82,7 @@ describe('conversation labels and explicit linking', () => {
     m.responses.deals = { data: { id, contact_id: 'contact', board_id: 'visible-board', owner_id: 'user' }, error: null };
     m.visible.mockImplementation((_access, _user, board) => board === 'visible-board');
     expect((await PATCH(req({ dealId: id }), ctx)).status).toBe(200);
-    expect(m.update).toHaveBeenCalledWith({ deal_id: id });
+    expect(m.update).toHaveBeenCalledWith({ deal_id: id, deal_link_mode: 'manual' });
   });
   it('passes the authorized link to the atomic write and rejects link races', async () => {
     m.responses.wa_conversations = { data: { id, contact_id: 'contact', is_group: false, deal_id: 'visible-A' }, error: null };
@@ -103,6 +103,6 @@ describe('conversation labels and explicit linking', () => {
     expect((await PATCH(req({ labelIds: [] }), ctx)).status).toBe(200);
     expect(m.update).toHaveBeenCalledWith({ label_ids: [] });
     expect((await PATCH(req({ dealId: null }), ctx)).status).toBe(200);
-    expect(m.update).toHaveBeenCalledWith({ deal_id: null });
+    expect(m.update).toHaveBeenCalledWith({ deal_id: null, deal_link_mode: 'manual' });
   });
 });

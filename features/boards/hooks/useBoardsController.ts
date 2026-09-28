@@ -23,7 +23,6 @@ import {
 import { useMoveDeal } from '@/lib/query/hooks/useMoveDeal';
 import { useOrgPreferences } from '@/lib/query/hooks/useOrgPreferences';
 import { usePersistedState } from '@/hooks/usePersistedState';
-import { useRealtimeSyncKanban } from '@/lib/realtime/useRealtimeSync';
 import { useToast } from '@/context/ToastContext';
 import { useAuth } from '@/context/AuthContext';
 import { useCRM } from '@/context/CRMContext';
@@ -316,8 +315,7 @@ export const useBoardsController = () => {
     [contacts]
   );
 
-  // Enable realtime sync for Kanban
-  useRealtimeSyncKanban();
+  // CRMProvider owns the shared subscription, including board stages.
 
   // Custom field definitions (TODO: migrate to query)
   const customFieldDefinitions: CustomFieldDefinition[] = [];

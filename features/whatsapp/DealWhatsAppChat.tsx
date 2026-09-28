@@ -1143,6 +1143,8 @@ interface Attachment {
 
 export function DealWhatsAppChat({
   contact,
+  contactLoadState,
+  onRetryContact,
   templateContext,
   connectionId = null,
   group = null,
@@ -1153,6 +1155,8 @@ export function DealWhatsAppChat({
   onSenderChange,
 }: {
   contact: { id: string; name?: string | null; phone?: string | null } | null;
+  contactLoadState?: 'loading' | 'error' | 'unavailable';
+  onRetryContact?: () => void;
   /** Valores extras pras variáveis dos modelos (lead.titulo, escritorio.nome...) */
   templateContext?: Record<string, string>;
   /** Conversa PRESA a um número conectado (página Chats com conversas por
@@ -1825,7 +1829,14 @@ export function DealWhatsAppChat({
     onError: message => showToast(message, 'error'),
   });
 
-  if (!isGroup && !contact) return <CenterMsg>Este lead não tem contato vinculado.</CenterMsg>;
+  if (!isGroup && !contact) {
+    if (contactLoadState === 'loading') return <CenterMsg><span role="status">Carregando contato…</span></CenterMsg>;
+    if (contactLoadState === 'error' || contactLoadState === 'unavailable') return <CenterMsg>
+      <span role="alert">{contactLoadState === 'error' ? 'Não foi possível carregar o contato.' : 'O contato vinculado está indisponível para esta conta.'}</span>
+      {onRetryContact && <button type="button" className="block mx-auto mt-2 text-primary-600 underline" onClick={onRetryContact}>Tentar novamente</button>}
+    </CenterMsg>;
+    return <CenterMsg>Este lead não tem contato vinculado.</CenterMsg>;
+  }
   if (!isGroup && !phone)
     return <CenterMsg>O contato não tem telefone. Adicione um número pra conversar pelo WhatsApp.</CenterMsg>;
 

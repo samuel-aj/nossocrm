@@ -57,11 +57,11 @@ export async function PATCH(req: Request, ctx: Ctx) {
       p_expected_deal: expectedDealId, p_check_link: true,
     });
     let update = auth.admin.from('wa_conversations')
-      .update('dealId' in body ? { deal_id: body.dealId } : { label_ids: [...new Set(body.labelIds)] })
+      .update('dealId' in body ? { deal_id: body.dealId, deal_link_mode: 'manual' } : { label_ids: [...new Set(body.labelIds)] })
       .eq('organization_id', orgId).eq('id', id);
     // Conditional replacement closes the same authorization/link race as the RPC.
     if (isLabelEdit) update = expectedDealId ? update.eq('deal_id', expectedDealId) : update.is('deal_id', null);
-    return update.select('id,label_ids,deal_id').maybeSingle();
+    return update.select('id,label_ids,deal_id,deal_link_mode').maybeSingle();
   });
   if (error) return json({ error: error.message }, ['23514', '23503'].includes(error.code ?? '') ? 400 : error.code === '40001' ? 409 : 500);
   if (!data) return json({ error: isLabelEdit ? 'Vínculo da conversa mudou; atualize e tente novamente' : 'Conversa não encontrada' }, isLabelEdit ? 409 : 404);

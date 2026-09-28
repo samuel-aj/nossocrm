@@ -265,7 +265,7 @@ export const contactsService = {
   },
 
   /** Um contato pelo id (escopado na org). Usado pelo deep link /contacts?contactId=. */
-  async getById(id: string): Promise<{ data: Contact | null; error: Error | null }> {
+  async getById(id: string, signal?: AbortSignal): Promise<{ data: Contact | null; error: Error | null }> {
     try {
       if (!supabase) {
         return { data: null, error: new Error('Supabase não configurado') };
@@ -273,12 +273,14 @@ export const contactsService = {
       const orgId = await getCurrentOrganizationId();
       if (!orgId) return { data: null, error: new Error('Organização não encontrada') };
 
-      const { data, error } = await supabase
+      let query = supabase
         .from('contacts')
         .select('*')
         .eq('organization_id', orgId)
         .eq('id', id)
-        .maybeSingle();
+        .is('deleted_at', null);
+      if (signal) query = query.abortSignal(signal);
+      const { data, error } = await query.maybeSingle();
 
       if (error) return { data: null, error };
       return { data: data ? transformContact(data as DbContact) : null, error: null };

@@ -1,5 +1,7 @@
 'use client';
 
+import { useConversationLead } from './useConversationLead';
+import { newerRecord } from '@/lib/query/dealCache';
 import { unifyConversations } from './unifiedConversation';
 import { labelDelta, linkedDeal } from '@/lib/whatsapp/labelCompatibility';
 import { refreshLinkedLabels } from '@/lib/realtime/labelCache';
@@ -11,7 +13,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, KanbanSquare, Loader2, MessageCircle, MessageSquareDot, Pencil, Plus, Search, Tag, Trash2, User, UserPlus, Users, X } from 'lucide-react';
 import { useCRM } from '@/context/CRMContext';
-import { useOrgMembers } from '@/lib/query/hooks';
+import { useOrgMembers, useDeal } from '@/lib/query/hooks';
 import { useAnchoredMenu } from '@/hooks/useAnchoredMenu';
 import {
   LABEL_CHIP_CLASS,
@@ -52,6 +54,7 @@ type ConvRow = {
   wa_name: string | null;
   contact_id: string | null;
   deal_id: string | null;
+  deal_link_mode?: string;
   last_message_at: string | null;
   last_message_preview: string | null;
   unread_count: number | null;
@@ -705,8 +708,13 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(patch),
       });
-      const j = (await res.json().catch(() => ({}))) as { error?: string };
+      const j = (await res.json().catch(() => ({}))) as { error?: string; conversation?: Partial<ConvRow> };
       if (!res.ok) throw new Error(j.error || `Falha (HTTP ${res.status})`);
+      await queryClient.cancelQueries({ queryKey: ['waConversationLink'] });
+      await queryClient.cancelQueries({ queryKey: ['waConversations'] });
+      if (j.conversation) queryClient.setQueriesData<{ data: ConvRow[] }>({ queryKey: ['waConversations'] }, old => old ? {
+        ...old, data: old.data.map(c => c.id === conversationId ? { ...c, ...j.conversation } : c),
+      } : old);
       await refreshLinkedLabels(queryClient);
       return true;
     } catch (e) {
@@ -741,6 +749,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
     );
   }, [selected, convsQ.data, contextConnectionId]);
   const selectedConvId = selectedConv?.id ?? null;
+  const linkQuery = useConversationLead(selectedConv);
   const selectedLabelIds = useMemo(() => selectedConv?.label_ids ?? [], [selectedConv]);
   /** Etiquetas da conversa já resolvidas: id que não existe mais some. */
   const selectedLabels = useMemo(
@@ -869,7 +878,11 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
   // The persisted link is authoritative. Other contact leads are explicit options only.
   const contactDeals = useMemo(() => !selected?.contactId ? [] : deals.filter(d => d.contactId === selected.contactId)
     .slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')), [deals, selected?.contactId]);
-  const selectedDeal = linkedDeal(deals, selectedConv?.deal_id, !!selected?.isGroup);
+  const cachedLinkedDeal = linkedDeal(deals, selectedConv?.deal_id, !!selected?.isGroup);
+  const linkedDealQuery = useDeal(!selected?.isGroup ? selectedConv?.deal_id || undefined : undefined);
+  const selectedDeal = linkedDealQuery.isSuccess && linkedDealQuery.data === null ? null : newerRecord(cachedLinkedDeal, linkedDealQuery.data);
+  const resolvingLead = (!selectedConv?.deal_id && linkQuery.isFetching) || (!!selectedConv?.deal_id && !selectedDeal && linkedDealQuery.isLoading);
+  const linkUnavailable = !!selectedConv?.deal_id && !selectedDeal && (linkedDealQuery.isError || linkedDealQuery.isSuccess);
   const selectedOwnerEfetivo = selectedDeal?.ownerId ?? null;
 
   const selectedDealBoard = useMemo(
@@ -1739,6 +1752,12 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                     . Grupos não viram contato nem lead.
                   </span>
                 </span>
+              ) : resolvingLead ? (
+                <span role="status" className="text-xs text-slate-500">Carregando lead…</span>
+              ) : linkUnavailable || linkQuery.isError ? (
+                <button type="button" onClick={() => { void linkQuery.refetch(); void linkedDealQuery.refetch(); }} className="text-xs text-primary-600 underline">
+                  {linkUnavailable ? 'Lead vinculado indisponível. Tentar novamente' : 'Não foi possível consultar o vínculo. Tentar novamente'}
+                </button>
               ) : selectedConvId && (contactDeals.length > 0 || selectedDeal) ? (
                 <span className="flex items-center gap-2 min-w-0 text-xs text-slate-600 dark:text-slate-300">
                   <KanbanSquare size={14} className="text-primary-500 shrink-0" aria-hidden="true" />

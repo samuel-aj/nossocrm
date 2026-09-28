@@ -318,38 +318,7 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
   // Local UI State
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [optimisticDealOverrides, setOptimisticDealOverrides] = useState<Record<string, Partial<Deal>>>({});
   const [optimisticCreatedDeals, setOptimisticCreatedDeals] = useState<Record<string, Deal>>({});
-
-  useEffect(() => {
-    const rawDealsById = new Map(rawDeals.map((deal) => [deal.id, deal]));
-
-    setOptimisticDealOverrides((prev) => {
-      let changed = false;
-      const next: Record<string, Partial<Deal>> = {};
-
-      for (const [dealId, override] of Object.entries(prev)) {
-        const persisted = rawDealsById.get(dealId);
-        if (!persisted) {
-          changed = true;
-          continue;
-        }
-
-        const stillPending = Object.entries(override).some(([key, value]) => {
-          const persistedValue = (persisted as unknown as Record<string, unknown>)[key];
-          return JSON.stringify(persistedValue) !== JSON.stringify(value);
-        });
-
-        if (stillPending) {
-          next[dealId] = override;
-        } else {
-          changed = true;
-        }
-      }
-
-      return changed ? next : prev;
-    });
-  }, [rawDeals]);
 
   useEffect(() => {
     const rawDealIds = new Set(rawDeals.map((deal) => deal.id));
@@ -367,40 +336,13 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     });
   }, [rawDeals]);
 
-  const updateDeal = useCallback(async (id: string, updates: Partial<Deal>) => {
-    const optimisticTimestamp = new Date().toISOString();
-    setOptimisticDealOverrides((prev) => ({
-      ...prev,
-      [id]: {
-        ...(prev[id] || {}),
-        ...updates,
-        updatedAt: optimisticTimestamp,
-      },
-    }));
-
-    await updateDealState(id, updates);
-  }, [updateDealState]);
+  const updateDeal = updateDealState;
 
   const clearCustomFieldDataByKey = useCallback(async (fieldKey: string) => {
     const dealsWithField = rawDeals.filter((deal) =>
       Object.prototype.hasOwnProperty.call(deal.customFields || {}, fieldKey)
     );
     if (dealsWithField.length === 0) return;
-
-    const optimisticTimestamp = new Date().toISOString();
-    setOptimisticDealOverrides((prev) => {
-      const next = { ...prev };
-      for (const deal of dealsWithField) {
-        const nextCustomFields = { ...(deal.customFields || {}) };
-        delete nextCustomFields[fieldKey];
-        next[deal.id] = {
-          ...(next[deal.id] || {}),
-          customFields: nextCustomFields,
-          updatedAt: optimisticTimestamp,
-        };
-      }
-      return next;
-    });
 
     await Promise.allSettled(
       dealsWithField.map((deal) => {
@@ -433,9 +375,7 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // View Projection: deals with company/contact names
   const deals: DealView[] = useMemo(() => {
     const fromRaw = rawDeals.map(baseDeal => {
-      const deal = optimisticDealOverrides[baseDeal.id]
-        ? { ...baseDeal, ...optimisticDealOverrides[baseDeal.id] }
-        : baseDeal;
+      const deal = baseDeal;
 
       // Find the stage label from the board stages
       const board = boards.find(b => b.id === deal.boardId);
@@ -482,7 +422,7 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       });
 
     return [...optimisticOnly, ...fromRaw];
-  }, [rawDeals, optimisticDealOverrides, optimisticCreatedDeals, companyMap, contactMap, boards, profile, user]);
+  }, [rawDeals, optimisticCreatedDeals, companyMap, contactMap, boards, profile, user]);
 
   // Update contact stage helper
   const updateContactStage = useCallback(async (id: string, stage: string) => {
@@ -899,7 +839,7 @@ const CRMInnerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       return stagnantDeals.length;
     }
     return 0;
-  }, [rawDeals, optimisticDealOverrides, activities, addActivity, getBoardById]);
+  }, [rawDeals, activities, addActivity, getBoardById]);
 
   // Build the context value
   const value: CRMContextType = useMemo(

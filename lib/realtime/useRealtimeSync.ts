@@ -16,6 +16,7 @@ import { dealsService } from '@/lib/supabase/deals';
 import { contactsService } from '@/lib/supabase/contacts';
 import { refreshLinkedLabels } from './labelCache';
 import { dealPatch } from './dealPayload';
+import { isDealSaving } from '@/lib/query/dealCache';
 import { queryKeys, DEALS_VIEW_KEY } from '@/lib/query/queryKeys';
 import { readTabOrg } from '@/lib/tabOrg';
 import type { Activity, Contact, Deal, DealItem, DealView } from '@/types';
@@ -88,7 +89,7 @@ type RealtimeTable =
 // Lazy getter for query keys mapping - avoids initialization issues in tests
 const getTableQueryKeys = (table: RealtimeTable): readonly (readonly unknown[])[] => {
   const mapping: Record<RealtimeTable, readonly (readonly unknown[])[]> = {
-    deals: [queryKeys.deals.all, queryKeys.dashboard.stats],
+    deals: [queryKeys.deals.all, queryKeys.dashboard.stats, ['waConversationLink']],
     // deal_items events are handled with direct cache writes; this mapping
     // is only used as a safety net if the dedicated handler ever falls through.
     deal_items: [queryKeys.deals.all, queryKeys.dashboard.stats],
@@ -202,6 +203,7 @@ export function useRealtimeSync(
             return;
           }
           if (table === 'deals') {
+            void queryClient.invalidateQueries({ queryKey: ['waConversationLink'] });
             void queryClient.invalidateQueries({ queryKey: ['waConversations'] });
           }
 
@@ -565,6 +567,8 @@ export function useRealtimeSync(
             if (payload.eventType === 'UPDATE' && table === 'deals') {
               const newData = payload.new as Record<string, unknown>;
               const dealId = newData.id as string;
+              // The pending mutation will publish the confirmed server response.
+              if (isDealSaving(queryClient, dealId)) return;
 
               queryClient.setQueryData<DealView[]>(
                 DEALS_VIEW_KEY,

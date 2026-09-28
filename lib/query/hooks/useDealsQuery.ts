@@ -12,6 +12,8 @@ import { queryKeys, DEALS_VIEW_KEY } from '../index';
 import { dealsService, contactsService, companiesService, boardStagesService } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
 import type { Deal, DealView, DealItem } from '@/types';
+import { isDealSaving, reconcileDeal, newerRecord } from '../dealCache';
+import { readTabOrg } from '@/lib/tabOrg';
 
 // ============ QUERY HOOKS ============
 
@@ -71,6 +73,7 @@ export const useDeals = (filters?: DealsFilters) => {
  * Waits for auth to be ready before fetching to ensure RLS works correctly
  */
 export const useDealsView = (filters?: DealsFilters) => {
+  const queryClient = useQueryClient();
   const { user, loading: authLoading } = useAuth();
 
   return useQuery<DealView[]>({
@@ -81,12 +84,18 @@ export const useDealsView = (filters?: DealsFilters) => {
       // Fetch all data in parallel (including stages for stageLabel)
       const [dealsResult, contactsResult, companiesResult, stagesResult] = await Promise.all([
         dealsService.getAll(),
-        contactsService.getAll(),
+        queryClient.fetchQuery({ queryKey: queryKeys.contacts.lists(), queryFn: async () => {
+          const result = await contactsService.getAll();
+          if (result.error) throw result.error;
+          return result.data || [];
+        }, staleTime: 2 * 60 * 1000 }).then(data => ({ data, error: null })),
         companiesService.getAll(),
         boardStagesService.getAll(),
       ]);
 
       if (dealsResult.error) throw dealsResult.error;
+      if (companiesResult.error) throw companiesResult.error;
+      if (stagesResult.error) throw stagesResult.error;
 
       const deals = dealsResult.data || [];
       const contacts = contactsResult.data || [];
@@ -131,7 +140,8 @@ export const useDealsView = (filters?: DealsFilters) => {
         });
       }
 
-      return enrichedDeals;
+      const current = new Map((queryClient.getQueryData<DealView[]>(DEALS_VIEW_KEY) || []).map(d => [d.id, d]));
+      return enrichedDeals.map(d => isDealSaving(queryClient, d.id) ? current.get(d.id) ?? d : newerRecord(current.get(d.id), d)!);
     },
     staleTime: 2 * 60 * 1000, // 2 minutes
     refetchOnWindowFocus: false,
@@ -148,14 +158,22 @@ export const useDealsView = (filters?: DealsFilters) => {
  */
 export const useDeal = (id: string | undefined) => {
   const { user, loading: authLoading } = useAuth();
+  const client = useQueryClient();
   return useQuery({
     queryKey: queryKeys.deals.detail(id || ''),
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (!id) return null;
-      const { data, error } = await dealsService.getById(id);
+      const org = readTabOrg()?.id;
+      const { data, error } = await dealsService.getById(id, signal);
+      if (signal.aborted || readTabOrg()?.id !== org) throw new Error('Consulta cancelada');
       if (error) throw error;
-      return data;
+      return data ? reconcileDeal(client, data) : null;
     },
+    staleTime: 10_000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    retry: 1,
     enabled: !authLoading && !!user && !!id,
   });
 };
@@ -168,6 +186,7 @@ export const useDeal = (id: string | undefined) => {
  * A filtragem por boardId é feita via `select` no cliente.
  */
 export const useDealsByBoard = (boardId: string) => {
+  const queryClient = useQueryClient();
   const { user, loading: authLoading } = useAuth();
   return useQuery<DealView[], Error, DealView[]>({
     // CRÍTICO: Usar a mesma query key que useDealsView para compartilhar cache
@@ -176,12 +195,18 @@ export const useDealsByBoard = (boardId: string) => {
       // Fetch all data in parallel (including all stages)
       const [dealsResult, contactsResult, companiesResult, stagesResult] = await Promise.all([
         dealsService.getAll(),
-        contactsService.getAll(),
+        queryClient.fetchQuery({ queryKey: queryKeys.contacts.lists(), queryFn: async () => {
+          const result = await contactsService.getAll();
+          if (result.error) throw result.error;
+          return result.data || [];
+        }, staleTime: 2 * 60 * 1000 }).then(data => ({ data, error: null })),
         companiesService.getAll(),
         boardStagesService.getAll(),
       ]);
 
       if (dealsResult.error) throw dealsResult.error;
+      if (companiesResult.error) throw companiesResult.error;
+      if (stagesResult.error) throw stagesResult.error;
 
       const deals = dealsResult.data || [];
       const contacts = contactsResult.data || [];
@@ -206,7 +231,8 @@ export const useDealsByBoard = (boardId: string) => {
           stageLabel: stageMap.get(deal.status) || 'Estágio não identificado',
         };
       });
-      return enrichedDeals;
+      const current = new Map((queryClient.getQueryData<DealView[]>(DEALS_VIEW_KEY) || []).map(d => [d.id, d]));
+      return enrichedDeals.map(d => isDealSaving(queryClient, d.id) ? current.get(d.id) ?? d : newerRecord(current.get(d.id), d)!);
     },
     // Filtrar por boardId no cliente (compartilha cache mas retorna só os deals do board)
     select: (data) => {

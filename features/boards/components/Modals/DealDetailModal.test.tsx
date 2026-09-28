@@ -5,8 +5,11 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 import { DealDetailModal } from './DealDetailModal';
 import type { Deal } from '@/types';
+const contactDetail = vi.hoisted(() => ({ data: null as any, isLoading: false, isError: false, isSuccess: false, refetch: vi.fn() }));
 const detail = vi.hoisted(() => ({ data: null as Deal | null, isLoading: false, isError: false, isSuccess: false, refetch: vi.fn() }));
-beforeEach(() => { detail.data = null; detail.isLoading = false; detail.isError = false; detail.isSuccess = false; detail.refetch.mockClear(); });
+beforeEach(() => { detail.data = null; detail.isLoading = false; detail.isError = false; detail.isSuccess = false; detail.refetch.mockClear(); contactDetail.data = null; contactDetail.isLoading = false; contactDetail.isError = false; contactDetail.isSuccess = false; });
+
+vi.mock('@/features/whatsapp/DealWhatsAppChat', () => ({ DealWhatsAppChat: ({ contact, contactLoadState }: { contact: { name?: string } | null; contactLoadState?: string }) => <div data-testid="resolved-contact">{contact?.name || contactLoadState || 'none'}</div> }));
 
 // Keep this test focused: we only want to ensure opening/closing the modal
 // never crashes due to hook-order issues (React error #310).
@@ -30,6 +33,7 @@ vi.mock('@/context/ToastContext', () => ({
 vi.mock('@/lib/query/hooks', () => ({
   useMoveDealSimple: () => ({ moveDeal: vi.fn() }),
   useDeal: () => detail,
+  useContact: () => contactDetail,
   useOrgUsers: () => ({ users: [], isAdmin: false, isLoading: false }),
   useOrgMembers: () => ({ members: [], isLoading: false }),
 }));
@@ -163,4 +167,25 @@ it('mostra erro recuperÃ¡vel em vez de carregar indefinidamente um lead inacessÃ
   expect(screen.getByRole('dialog')).toHaveAttribute('aria-busy','false');
   fireEvent.click(screen.getByRole('button',{name:'Tentar novamente'}));expect(detail.refetch).toHaveBeenCalledOnce();
   fireEvent.click(screen.getByRole('button',{name:'Fechar'}));expect(onClose).toHaveBeenCalledOnce();
+});
+
+
+it('resolves a linked contact absent from the global list', () => {
+  detail.data = { id: 'lead-new', title: 'New lead', value: 0, probability: 10, createdAt: '2026-09-28', contactId: 'missing-contact', boardId: 'board-1', status: 'stage-1', tags: [], items: [], customFields: {} } as unknown as Deal;
+  detail.isSuccess = true;
+  contactDetail.isLoading = true;
+  const { rerender } = render(<DealDetailModal dealId="lead-new" isOpen onClose={() => {}} />, { wrapper: ({children}) => <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider> });
+  expect(screen.getByTestId('resolved-contact')).toHaveTextContent('loading');
+  contactDetail.isLoading = false;
+  contactDetail.isSuccess = true;
+  contactDetail.data = { id: 'missing-contact', name: 'Fetched contact', phone: '+5569999999999' };
+  rerender(<DealDetailModal dealId="lead-new" isOpen onClose={() => {}} />);
+  expect(screen.getByTestId('resolved-contact')).toHaveTextContent('Fetched contact');
+});
+it('distinguishes a lookup error from a missing relationship', () => {
+  detail.data = { id: 'lead-new', title: 'New lead', value: 0, probability: 10, createdAt: '2026-09-28', contactId: 'missing-contact', boardId: 'board-1', status: 'stage-1', tags: [], items: [], customFields: {} } as unknown as Deal;
+  detail.isSuccess = true;
+  contactDetail.isError = true;
+  render(<DealDetailModal dealId="lead-new" isOpen onClose={() => {}} />, { wrapper: ({children}) => <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider> });
+  expect(screen.getByTestId('resolved-contact')).toHaveTextContent('error');
 });

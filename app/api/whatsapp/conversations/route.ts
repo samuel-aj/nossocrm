@@ -35,7 +35,7 @@ export async function GET(req: Request) {
   const connectionId = new URL(req.url).searchParams.get('connectionId');
 
   const COLUNAS_BASE =
-    'id, connection_id, wa_phone, wa_name, contact_id, deal_id, last_message_at, last_message_preview, unread_count, is_group, group_jid, participants_count, avatar_path, avatar_synced_at';
+    'id, connection_id, wa_phone, wa_name, contact_id, deal_id, deal_link_mode, last_message_at, last_message_preview, unread_count, is_group, group_jid, participants_count, avatar_path, avatar_synced_at';
 
   // `label_ids` (etiquetas da conversa) é coluna nova: enquanto a migração
   // não rodar no ambiente, busca sem ela em vez de derrubar a lista inteira —

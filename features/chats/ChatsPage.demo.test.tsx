@@ -5,7 +5,8 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { ChatsPage } from './ChatsPage';
 
 vi.mock('@/context/CRMContext', () => ({ useCRM: () => ({ contacts: [{ id: 'contact-one', name: 'Contato existente', phone: '+5569911111111' }], deals: [], boards: [] }) }));
-vi.mock('@/lib/query/hooks', () => ({ useOrgMembers: () => ({ data: [] }) }));
+vi.mock('./useConversationLead', () => ({ useConversationLead: () => ({ isFetching: false, isError: false, refetch: vi.fn() }) }));
+vi.mock('@/lib/query/hooks', () => ({ useOrgMembers: () => ({ data: [] }), useDeal: () => ({ data: undefined, isLoading: false, refetch: vi.fn() }) }));
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'user', organization_id: 'org' } }) }));
 vi.mock('@/context/ToastContext', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), useSearchParams: () => new URLSearchParams() }));

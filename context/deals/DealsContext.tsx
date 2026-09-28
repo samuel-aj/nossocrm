@@ -1,4 +1,4 @@
-﻿import React, {
+import React, {
   createContext,
   useContext,
   useMemo,
@@ -9,6 +9,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Deal, DealView, DealItem, Company, Contact, Board } from '@/types';
 import { dealsService } from '@/lib/supabase';
 import { useAuth } from '../AuthContext';
+import { saveDeal } from '@/lib/query/dealCache';
+import { useToast } from '@/context/ToastContext';
 import { queryKeys, DEALS_VIEW_KEY } from '@/lib/query';
 import { useDealsView as useTanStackDealsQuery } from '@/lib/query/hooks/useDealsQuery';
 
@@ -45,6 +47,7 @@ const DealsContext = createContext<DealsContextType | undefined>(undefined);
 export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { profile } = useAuth();
   const queryClient = useQueryClient();
+  const { addToast } = useToast();
 
   // ============================================
   // TanStack Query como fonte Ãºnica de verdade
@@ -90,30 +93,12 @@ export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   );
 
   const updateDeal = useCallback(async (id: string, updates: Partial<Deal>) => {
-    const optimisticTimestamp = new Date().toISOString();
-
-    // Optimistic update - usa DEALS_VIEW_KEY como fonte unica para listas de deals.
-    queryClient.setQueryData<DealView[]>(DEALS_VIEW_KEY, (old = []) =>
-      old.map((deal) =>
-        deal.id === id ? { ...deal, ...updates, updatedAt: optimisticTimestamp } : deal
-      )
-    );
-
-    queryClient.setQueryData<Deal>(queryKeys.deals.detail(id), (old) =>
-      old ? { ...old, ...updates, updatedAt: optimisticTimestamp } : old
-    );
-
-    const { error: updateError } = await dealsService.update(id, updates);
-
-    if (updateError) {
-      console.error('Erro ao atualizar deal:', updateError.message);
-      // Rollback: invalida para refetch em caso de erro
-      await queryClient.invalidateQueries({ queryKey: queryKeys.deals.all });
-      return;
+    try {
+      await saveDeal(queryClient, id, updates, (dealId, patch) => dealsService.update(dealId, patch));
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Não foi possível salvar o lead.', 'error');
     }
-
-    // Sucesso: Realtime vai sincronizar. NÃ£o precisa de invalidateQueries.
-  }, [queryClient]);
+  }, [queryClient, addToast]);
 
   const updateDealStatus = useCallback(
     async (id: string, newStatus: string, lossReason?: string) => {

@@ -1,3 +1,4 @@
+import { newerRecord } from '@/lib/query/dealCache';
 import { useAcknowledgeAlert } from '../../hooks/useAcknowledgeAlert';
 import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
 import React, { useState, useRef, useEffect, useId, useMemo, useCallback } from 'react';
@@ -6,7 +7,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import ConfirmModal from '@/components/ConfirmModal';
 import { LossDetailsBanner } from '@/features/deals/LossDetailsBanner';
-import { useDeal, useOrgUsers, useOrgMembers } from '@/lib/query/hooks';
+import { useDeal, useContact, useOrgUsers, useOrgMembers } from '@/lib/query/hooks';
 import { FocusTrap, useFocusReturn } from '@/lib/a11y';
 import { Activity, CustomFieldDefinition } from '@/types';
 
@@ -175,14 +176,9 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const productsById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
 
   const dealFromCache = dealId ? dealsById.get(dealId) : undefined;
-  // Fallback fetch: when a deal id lands in the modal (deep link, brand-new
-  // card from Realtime, or optimistic temp→real swap race) but the DealView
-  // cache hasn't caught up yet, fetch it directly so the modal still opens
-  // instead of silently returning null. The query is disabled when the cache
-  // already has the deal to avoid redundant requests.
-  const shouldFetch = !!dealId && !!isOpen && !dealFromCache;
-  const { data: fetchedDeal, isLoading: fetchingDeal, isError: fetchDealError, isSuccess: fetchDealSuccess, refetch: refetchDeal } = useDeal(shouldFetch ? dealId : undefined);
-  const deal = dealFromCache ?? (fetchedDeal as unknown as typeof dealFromCache | undefined);
+  // Revalidate the open lead even when the board already has a cached version.
+  const { data: fetchedDeal, isLoading: fetchingDeal, isError: fetchDealError, isSuccess: fetchDealSuccess, refetch: refetchDeal } = useDeal(isOpen && dealId ? dealId : undefined);
+  const deal = fetchDealSuccess && fetchedDeal === null ? undefined : newerRecord(dealFromCache, fetchedDeal as typeof dealFromCache) ?? undefined;
   useAcknowledgeAlert(isOpen, deal);
   const permissions = useMyActionPermissions(deal?.boardId);
   const queryClient = useQueryClient();
@@ -202,7 +198,11 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     if (!permissions.deals.edit) { addToast('Sem permissão para editar', 'error'); return; }
     return updateContactRaw(id, updates);
   };
-  const contact = deal ? (contactsById.get(deal.contactId) ?? null) : null;
+  const contactQuery = useContact(isOpen ? deal?.contactId || undefined : undefined);
+  const cachedContact = deal ? contactsById.get(deal.contactId) : null;
+  const contact = contactQuery.isSuccess && contactQuery.data === null ? null : newerRecord(cachedContact, contactQuery.data);
+  const contactLoadState = !deal?.contactId ? (fetchingDeal ? 'loading' : undefined)
+    : contactQuery.isError ? 'error' : contactQuery.isSuccess && !contact ? 'unavailable' : !contact ? 'loading' : undefined;
 
   // Determine the correct board for this deal
   const dealBoard = deal ? (boardsById.get(deal.boardId) ?? activeBoard) : activeBoard;
@@ -1843,6 +1843,8 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
         >
           <DealWhatsAppChat
             contact={contact}
+            contactLoadState={contactLoadState}
+            onRetryContact={() => { void refetchDeal(); void contactQuery.refetch(); }}
             templateContext={{
               'contato.email': contact?.email || '',
               'lead.titulo': deal.title,
