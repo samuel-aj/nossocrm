@@ -44,8 +44,9 @@ import {
   Pencil,
 } from 'lucide-react';
 import { normalizePhoneE164 } from '@/lib/phone';
-import { quotedPreviewText, type QuotedSnapshot } from '@/lib/whatsapp/quote';
+import { quotedPreviewText } from '@/lib/whatsapp/quote';
 import { DeleteMessageModal } from './DeleteMessageModal';
+import { QuotedBlock } from './QuotedBlock';
 import { EditMessageModal } from './EditMessageModal';
 import { GroupMembersModal, MentionSuggestions, useGroupMembers } from './GroupMembers';
 import { mentionQuery, useMentionDraft } from './useMentionDraft';
@@ -650,74 +651,6 @@ function senderColor(name: string): string {
   return SENDER_COLORS[h % SENDER_COLORS.length];
 }
 
-/** Bloco da mensagem CITADA dentro da bolha (estilo WhatsApp): barra colorida
- *  à esquerda, quem escreveu, prévia e miniatura quando a original é imagem.
- *  Clicável quando a original está carregada ("pular para"). */
-function QuotedBlock({
-  q,
-  isOut,
-  contactName,
-  original,
-  onJump,
-}: {
-  q: QuotedSnapshot;
-  isOut: boolean;
-  contactName?: string;
-  original: WaChatMessage | null;
-  onJump?: () => void;
-}) {
-  const mine = q.direction === 'out';
-  // grupo: a citada de outro participante mostra o nome dele (sender_name da original)
-  const title =
-    q.direction === 'out' ? 'Você' : q.direction === 'in' ? original?.sender_name || contactName || 'Contato' : 'Mensagem';
-  const thumb =
-    original?.media_url && (original.media_type === 'image' || original.media_type === 'sticker')
-      ? original.media_url
-      : null;
-  return (
-    <div
-      role={onJump ? 'button' : undefined}
-      tabIndex={onJump ? 0 : undefined}
-      onClick={onJump}
-      onKeyDown={e => {
-        if (onJump && (e.key === 'Enter' || e.key === ' ')) {
-          e.preventDefault();
-          onJump();
-        }
-      }}
-      title={onJump ? 'Ir para a mensagem original' : undefined}
-      className={`mb-1.5 flex items-stretch gap-2 rounded-lg overflow-hidden border-l-4 ${
-        mine ? 'border-emerald-300' : 'border-sky-400'
-      } ${isOut ? 'bg-black/15' : 'bg-slate-100 dark:bg-white/10'} ${
-        onJump ? 'cursor-pointer hover:brightness-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-400' : ''
-      }`}
-    >
-      <div className="min-w-0 flex-1 px-2 py-1.5">
-        <p
-          className={`text-[11px] font-bold ${
-            mine
-              ? isOut
-                ? 'text-emerald-100'
-                : 'text-emerald-600 dark:text-emerald-400'
-              : isOut
-                ? 'text-sky-100'
-                : 'text-sky-600 dark:text-sky-400'
-          }`}
-        >
-          {title}
-        </p>
-        <p className={`text-xs line-clamp-2 break-words ${isOut ? 'text-emerald-50/90' : 'text-slate-600 dark:text-slate-300'}`}>
-          {quotedPreviewText(q)}
-        </p>
-      </div>
-      {thumb && (
-        // eslint-disable-next-line @next/next/no-img-element -- miniatura da URL assinada do Storage
-        <img src={thumb} alt="" className="h-12 w-12 object-cover shrink-0" />
-      )}
-    </div>
-  );
-}
-
 /**
  * Por onde a mensagem SAIU, para o selo discreto na bolha. Só mensagens
  * enviadas têm origem; recebidas não levam selo. Linha antiga sem `source`
@@ -759,6 +692,7 @@ export function MessageBubble({
   onJumpToQuoted,
   flash = false,
   senderName,
+  isGroup = false,
 }: {
   m: WaChatMessage;
   searchQuery?: string;
@@ -773,6 +707,7 @@ export function MessageBubble({
   flash?: boolean;
   /** GRUPO: quem escreveu (nome colorido em cima da bolha recebida) */
   senderName?: string;
+  isGroup?: boolean;
 }) {
   const isOut = m.direction === 'out';
   const failed = m.status === 'failed';
@@ -979,6 +914,7 @@ export function MessageBubble({
             q={m.quoted}
             isOut={isOut}
             contactName={contactName}
+            isGroup={isGroup}
             original={quotedOriginal}
             onJump={m.quoted_message_id && onJumpToQuoted ? () => onJumpToQuoted(m.quoted_message_id as string) : undefined}
           />
@@ -1152,6 +1088,8 @@ export function DealWhatsAppChat({
   connectionId = null,
   group = null,
   timeline = null,
+  headerActions,
+  headerContext,
   onOpenGroupMember,
   initialSenderId,
   contextConnectionId,
@@ -1175,6 +1113,10 @@ export function DealWhatsAppChat({
   group?: { conversationId: string; name: string; participantsCount?: number | null } | null;
   /** Tela do lead: histórico unificado e compositor com modos (ver ChatTimelineProps) */
   timeline?: ChatTimelineProps | null;
+  /** Ações da página Chats ao lado da pesquisa; independentes da timeline. */
+  headerActions?: React.ReactNode;
+  /** Contexto de CRM abaixo da identidade; disponível também sem lead e em grupos. */
+  headerContext?: React.ReactNode;
 }) {
   const isGroup = !!group;
   const phone = useMemo(() => (isGroup ? '' : normalizePhoneE164(contact?.phone || '')), [contact?.phone, isGroup]);
@@ -2218,48 +2160,52 @@ export function DealWhatsAppChat({
     <div className="relative flex flex-col h-full min-h-0 overflow-hidden" {...imageTransfer.dropHandlers}>
       {imageTransfer.draggingImage && <div className="pointer-events-none absolute inset-2 z-50 flex items-center justify-center rounded-xl border-2 border-dashed border-emerald-500 bg-white/95 text-emerald-700 dark:bg-dark-card/95 dark:text-emerald-300" role="status">Solte a imagem para anexar</div>}
       {/* Cabeçalho da conversa */}
-      <div className="shrink-0 flex items-center gap-2 px-4 py-2.5 border-b border-slate-200 dark:border-white/10 bg-white/60 dark:bg-white/5">
-        <span className="w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 flex items-center justify-center">
-          {isGroup ? <Users size={15} /> : <MessageCircle size={15} />}
-        </span>
-        <div className="min-w-0">
-          {isGroup ? <button type="button" onClick={() => setMembersOpen(true)} title="Ver participantes do grupo" className="block max-w-full text-left rounded-md hover:bg-black/5 dark:hover:bg-white/5 focus-visible-ring">
-            <span className="block truncate text-sm font-bold text-slate-900 dark:text-white">{data?.conversation?.wa_name || contactName}</span>
-            <span className="block text-[11px] text-slate-500">Grupo do WhatsApp{participantsCount ? ` · ${participantsCount} participantes` : ''} · Ver membros</span>
-          </button> : <><p className="text-sm font-bold text-slate-900 dark:text-white truncate">{contact?.name || data?.conversation?.wa_name || 'Contato'}</p><p className="text-[11px] text-slate-500">{phone}</p></>}
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          {timeline?.headerExtra}
-          {data && !data.connected && (
-            <span className="text-[11px] text-amber-600 dark:text-amber-400">WhatsApp desconectado</span>
-          )}
-          {isGroup && (
+      <div className="shrink-0 min-w-0 border-b border-slate-200 bg-white/60 dark:border-white/10 dark:bg-white/5">
+        <div role="group" aria-label="Identificação da conversa" className="flex min-w-0 flex-wrap items-center gap-2 px-3 py-2.5 sm:px-4">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+            {isGroup ? <Users size={15} /> : <MessageCircle size={15} />}
+          </span>
+          <div className="min-w-0 flex-[1_1_130px]">
+            {isGroup ? <button type="button" onClick={() => setMembersOpen(true)} title="Ver participantes do grupo" className="block max-w-full text-left rounded-md hover:bg-black/5 dark:hover:bg-white/5 focus-visible-ring">
+              <span className="block truncate text-sm font-bold text-slate-900 dark:text-white">{data?.conversation?.wa_name || contactName}</span>
+              <span className="block text-[11px] text-slate-500">Grupo do WhatsApp{participantsCount ? ` · ${participantsCount} participantes` : ''} · Ver membros</span>
+            </button> : <><p className="text-sm font-bold text-slate-900 dark:text-white truncate">{contact?.name || data?.conversation?.wa_name || 'Contato'}</p><p className="text-[11px] text-slate-500">{phone}</p></>}
+          </div>
+          <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+            {timeline?.headerExtra}
+            {data && !data.connected && (
+              <span className="text-[11px] text-amber-600 dark:text-amber-400">WhatsApp desconectado</span>
+            )}
+            {isGroup && (
+              <button
+                type="button"
+                onClick={() => void copyInviteLink()}
+                disabled={inviteBusy}
+                className="h-8 px-2 inline-flex items-center gap-1.5 rounded-lg text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors disabled:opacity-60"
+                title="Copiar o link de convite do grupo"
+              >
+                {inviteBusy ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
+                Convite
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => void copyInviteLink()}
-              disabled={inviteBusy}
-              className="h-8 px-2 inline-flex items-center gap-1.5 rounded-lg text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors disabled:opacity-60"
-              title="Copiar o link de convite do grupo"
+              onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
+              className={`h-8 w-8 inline-flex items-center justify-center rounded-lg transition-colors ${
+                searchOpen
+                  ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600'
+                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'
+              }`}
+              aria-label="Pesquisar mensagens"
+              title="Pesquisar mensagens"
             >
-              {inviteBusy ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
-              Convite
+              <Search size={16} />
             </button>
-          )}
-          <button
-            type="button"
-            onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
-            className={`h-8 w-8 inline-flex items-center justify-center rounded-lg transition-colors ${
-              searchOpen
-                ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600'
-                : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'
-            }`}
-            aria-label="Pesquisar mensagens"
-            title="Pesquisar mensagens"
-          >
-            <Search size={16} />
-          </button>
-          {timeline?.headerEnd}
+            {headerActions}
+            {timeline?.headerEnd}
+          </div>
         </div>
+      {headerContext}
       </div>
 
       {/* Barra de pesquisa de mensagens */}
@@ -2414,6 +2360,7 @@ export function DealWhatsAppChat({
               searchQuery={activeQuery}
               isCurrentMatch={m.id === currentMatchId}
               contactName={isGroup ? undefined : contact?.name || data?.conversation?.wa_name || undefined}
+              isGroup={isGroup}
               onAction={notConnected ? undefined : onBubbleAction}
               quotedOriginal={m.quoted_message_id ? messagesById.get(m.quoted_message_id) ?? null : null}
               onJumpToQuoted={jumpToMessage}

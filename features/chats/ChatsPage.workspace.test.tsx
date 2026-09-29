@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ChatsPage } from './ChatsPage';
 
@@ -27,10 +27,15 @@ vi.mock('@/features/deals/lead/useLeadConversation', () => ({ useLeadConversatio
   state.noteLeadId = deal?.id ?? null;
   return { timeline: { noteComposer: <input aria-label="Nota interna" />, entries: [] }, dialogs: null };
 } }));
-vi.mock('@/features/whatsapp/DealWhatsAppChat', () => ({ DealWhatsAppChat: ({ timeline }: { timeline: { noteComposer?: React.ReactNode } | null }) => {
+vi.mock('@/features/whatsapp/DealWhatsAppChat', () => ({ DealWhatsAppChat: ({ timeline, headerActions, headerContext, contact }: {
+  timeline: { noteComposer?: React.ReactNode } | null;
+  headerActions?: React.ReactNode;
+  headerContext?: React.ReactNode;
+  contact?: { name?: string | null } | null;
+}) => {
   const [text, setText] = useState('');
   React.useEffect(() => { state.mountCount++; }, []);
-  return <div><input aria-label="Mensagem" value={text} onChange={e => setText(e.target.value)} />{timeline?.noteComposer}</div>;
+  return <div><header><span>{contact?.name}</span>{headerActions}{headerContext}</header><input aria-label="Mensagem" value={text} onChange={e => setText(e.target.value)} />{timeline?.noteComposer}</div>;
 } }));
 
 let client: QueryClient;
@@ -120,13 +125,13 @@ it('wraps CRM context and actions within a 390px workspace without dropping the 
   fireEvent.click(await screen.findByRole('button', { name: /Contato da lista.*Olá/ }));
   const selector = screen.getByRole('combobox', { name: 'Lead vinculado a esta conversa' });
   const properties = screen.getByRole('button', { name: 'Mostrar propriedades do lead' });
-  const context = selector.parentElement!;
-  const actions = properties.parentElement!;
-  expect(context.parentElement).toHaveClass('flex-wrap', 'min-w-0');
-  expect(context).toHaveClass('flex-wrap', 'max-w-full');
-  expect(actions).toHaveClass('flex-wrap', 'min-w-0', 'max-w-full');
-  expect(actions).not.toHaveClass('shrink-0');
+  const context = screen.getByRole('group', { name: 'Contexto CRM da conversa' });
+  expect(context).toHaveClass('flex-wrap', 'min-w-0');
+  expect(selector.parentElement).toHaveClass('w-[180px]', 'max-w-[calc(100vw-120px)]');
+  expect(selector.parentElement?.parentElement).toHaveClass('flex-wrap', 'max-w-full');
   expect(selector).toHaveClass('min-w-0');
+  expect(properties.closest('header')).toBe(context.parentElement);
+  expect(within(properties.closest('header')!).getAllByText('Contato da lista')).toHaveLength(1);
   expect(screen.getByRole('button', { name: 'Abrir lead' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Etiquetar' })).toBeInTheDocument();
 });

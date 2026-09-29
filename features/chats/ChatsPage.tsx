@@ -12,7 +12,7 @@ import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, KanbanSquare, Loader2, MessageCircle, MessageSquareDot, Pencil, Plus, Search, Tag, Trash2, User, UserPlus, Users, X } from 'lucide-react';
+import { ArrowLeft, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, KanbanSquare, Loader2, MessageCircle, MessageSquareDot, Pencil, Plus, Search, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useCRM } from '@/context/CRMContext';
 import { useOrgMembers, useDeal, useContact } from '@/lib/query/hooks';
 import { useAnchoredMenu } from '@/hooks/useAnchoredMenu';
@@ -30,6 +30,8 @@ import { FocusTrap } from '@/lib/a11y';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { DealWhatsAppChat } from '@/features/whatsapp/DealWhatsAppChat';
+import { NativeSelect } from '@/components/ui/NativeSelect';
+import { ChatCrmHeader, ChatCrmHeaderActions } from './ChatCrmHeader';
 import { DealStageControl } from '@/features/deals/lead/DealStageControl';
 import { useLeadConversation } from '@/features/deals/lead/useLeadConversation';
 import { LeadDetailsAside } from './LeadDetailsAside';
@@ -1773,166 +1775,6 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
               </button>
             </div>
 
-            {/* Barra de CRM: contexto e ações quebram linha conforme a largura
-                disponível, mantendo o seletor e os botões acessíveis. Responsável e
-                etiquetas só entram quando a conversa já existe no banco
-                (contato que nunca trocou mensagem não tem onde guardar). */}
-            <div className="shrink-0 flex flex-wrap min-w-0 items-center justify-between gap-2 px-3 py-2 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card">
-              {selected.isGroup ? (
-                /* Grupo: não tem contato nem lead; só o rótulo */
-                <span className="flex items-center gap-2 min-w-0 text-xs text-slate-500 dark:text-slate-400">
-                  <Users size={14} className="shrink-0" />
-                  <span className="truncate">
-                    Grupo do WhatsApp
-                    {selected.participantsCount ? ` · ${selected.participantsCount} participantes` : ''}
-                    . Grupos não viram contato nem lead.
-                  </span>
-                </span>
-              ) : resolvingLead ? (
-                <span role="status" className="text-xs text-slate-500">Carregando lead…</span>
-              ) : linkUnavailable || linkQuery.isError ? (
-                <button type="button" onClick={() => { void linkQuery.refetch(); void linkedDealQuery.refetch(); }} className="text-xs text-primary-600 underline">
-                  {linkUnavailable ? 'Lead vinculado indisponível. Tentar novamente' : 'Não foi possível consultar o vínculo. Tentar novamente'}
-                </button>
-              ) : selectedConvId && (contactDeals.length > 0 || selectedDeal) ? (
-                <span className="flex flex-wrap items-center gap-2 min-w-0 max-w-full text-xs text-slate-600 dark:text-slate-300">
-                  <KanbanSquare size={14} className="text-primary-500 shrink-0" aria-hidden="true" />
-                  <select
-                    value={selectedDeal?.id ?? ''}
-                    disabled={savingConv}
-                    onChange={e => void patchConversation(selectedConvId, { dealId: e.target.value || null })}
-                    aria-label="Lead vinculado a esta conversa"
-                    title="Ao vincular, as etiquetas da conversa e do lead serão unidas."
-                    className="min-w-0 max-w-[180px] truncate rounded-lg border border-slate-300 dark:border-white/20 bg-white dark:bg-dark-card px-1.5 py-1 text-xs outline-none focus:ring-2 focus:ring-primary-500"
-                  >
-                    <option value="">Sem lead vinculado</option>
-                    {selectedDeal && !contactDeals.some(d => d.id === selectedDeal.id) && <option value={selectedDeal.id}>{selectedDeal.title}</option>}
-                    {contactDeals.map(d => <option key={d.id} value={d.id}>{d.title}</option>)}
-                  </select>
-                  {selectedDeal && !detailsOpen && <span className="min-w-0 w-[260px] max-w-full"><DealStageControl deal={selectedDeal} size="sm" /></span>}
-                </span>
-              ) : selected.contactId ? (
-                <span className="min-w-0 text-xs text-slate-400 italic truncate">Conversa sem lead vinculado.</span>
-              ) : (
-                <span className="min-w-0 text-xs text-amber-600 dark:text-amber-400 truncate">
-                  Número sem contato no CRM. Adicione pra criar o lead.
-                </span>
-              )}
-
-              <span className="flex flex-wrap min-w-0 max-w-full items-center gap-1.5">
-                {selectedConvId && (
-                  <>
-                    {/* SÓ LEITURA: quem responde pelo chat é o dono do LEAD
-                        desse contato. Pra trocar, troca no lead. */}
-                    {!detailsOpen && <span
-                      title="Responsável do lead deste contato. Para mudar, troque no lead."
-                      className={`inline-flex min-w-0 max-w-full items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border ${
-                        selectedOwnerEfetivo
-                          ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'
-                          : 'border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400'
-                      }`}
-                    >
-                      <User size={12} className="shrink-0" />
-                      <span className="truncate">{selectedOwnerEfetivo
-                        ? nomePorId.get(selectedOwnerEfetivo) || 'Responsável'
-                        : 'Sem responsável'}</span>
-                    </span>}
-
-                    {/* Etiquetas: só leitura aqui, e no máximo 3 pra não
-                        estourar a linha. O resto vira "+N" (a lista de
-                        conversas mostra todas). Marcar é no diálogo. */}
-                    {selectedLabels.slice(0, 3).map(l => (
-                      <span
-                        key={l.id}
-                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold ring-1 ring-inset max-w-[130px] ${LABEL_CHIP_CLASS[l.color]}`}
-                      >
-                        <span className={`w-2 h-2 shrink-0 rounded-full ${LABEL_DOT_CLASS[l.color]}`} />
-                        <span className="truncate">{l.name}</span>
-                        {/* X tira a etiqueta SÓ desta conversa (a etiqueta da
-                            organização continua existindo; apagar de vez é a
-                            lixeira do diálogo). */}
-                        <button
-                          type="button"
-                          disabled={savingConv}
-                          onClick={() =>
-                            void patchConversation(selectedConvId, {
-                              removeLabelIds: [l.id],
-                            })
-                          }
-                          aria-label={`Tirar a etiqueta ${l.name} desta conversa`}
-                          title="Tirar desta conversa"
-                          className="shrink-0 -mr-0.5 rounded-sm opacity-50 hover:opacity-100 disabled:opacity-30 transition-opacity"
-                        >
-                          <X size={11} />
-                        </button>
-                      </span>
-                    ))}
-                    {selectedLabels.length > 3 && (
-                      <span
-                        title={selectedLabels.slice(3).map(l => l.name).join(', ')}
-                        className="inline-flex items-center px-1.5 py-1 rounded-md text-[11px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-white/10"
-                      >
-                        +{selectedLabels.length - 3}
-                      </span>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={abrirDialogoEtiquetas}
-                      disabled={savingConv}
-                      className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-bold border border-dashed border-slate-300 dark:border-white/15 text-slate-500 dark:text-slate-400 hover:text-primary-600 hover:border-primary-300 transition-colors disabled:opacity-50"
-                    >
-                      <Tag size={11} /> Etiquetar
-                    </button>
-                  </>
-                )}
-
-                {/* A ação da barra fica por ÚLTIMO, colada nas etiquetas */}
-                {!selected.isGroup &&
-                  (selectedDeal ? (
-                    <button
-                      type="button"
-                      onClick={() => router.push(`/boards?deal=${selectedDeal.id}`)}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 border border-primary-200 dark:border-primary-500/30 transition-colors"
-                    >
-                      Abrir lead <ExternalLink size={12} />
-                    </button>
-                  ) : selected.contactId ? (
-                    <button
-                      type="button"
-                      onClick={openLeadModal}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition-colors"
-                    >
-                      <Plus size={13} /> Criar lead
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        openNewContactModal({
-                          name: selected.name !== selected.phone ? selected.name : '',
-                          phone: selected.phone,
-                        })
-                      }
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition-colors"
-                    >
-                      <UserPlus size={13} /> Adicionar contato
-                    </button>
-                  ))}
-                {selectedDeal && (
-                  <button
-                    type="button"
-                    aria-label={detailsOpen ? 'Ocultar propriedades do lead' : 'Mostrar propriedades do lead'}
-                    aria-expanded={detailsOpen}
-                    onClick={() => setDetailsOpen(open => !open)}
-                    className="inline-flex items-center rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-primary-600 hover:bg-primary-50 dark:border-white/10 dark:text-primary-400 dark:hover:bg-white/10"
-                  >
-                    {detailsOpen ? 'Ocultar propriedades' : 'Propriedades'}
-                  </button>
-                )}
-              </span>
-            </div>
-
             <div className="flex-1 min-h-0">
               {/* key={phone} garante reset total do composer/busca ao trocar de conversa */}
               <DealWhatsAppChat
@@ -1968,6 +1810,40 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                   'responsavel.nome': selectedDeal?.owner?.name || '',
                   'escritorio.nome': profile?.organization_name || '',
                 }}
+                headerActions={
+                  <ChatCrmHeaderActions
+                    hasDeal={!!selectedDeal && !selected.isGroup}
+                    detailsOpen={detailsOpen}
+                    onToggleDetails={() => setDetailsOpen(open => !open)}
+                  />
+                }
+                headerContext={
+                  <ChatCrmHeader
+                    isGroup={selected.isGroup}
+                    participantsCount={selected.participantsCount}
+                    loading={resolvingLead}
+                    unavailable={linkUnavailable}
+                    linkError={linkQuery.isError}
+                    conversationId={selectedConvId}
+                    contactId={selected.contactId}
+                    deal={selectedDeal}
+                    contactDeals={contactDeals}
+                    saving={savingConv}
+                    detailsOpen={detailsOpen}
+                    stage={selectedDeal ? <DealStageControl deal={selectedDeal} size="sm" /> : null}
+                    ownerName={selectedOwnerEfetivo ? nomePorId.get(selectedOwnerEfetivo) || 'Responsável' : null}
+                    labels={selectedLabels}
+                    onLinkDeal={dealId => { if (selectedConvId) void patchConversation(selectedConvId, { dealId }); }}
+                    onOpenDeal={() => { if (selectedDeal) router.push(`/boards?deal=${selectedDeal.id}`); }}
+                    onCreateLead={openLeadModal}
+                    onAddContact={() => openNewContactModal({
+                      name: selected.name !== selected.phone ? selected.name : '',
+                      phone: selected.phone,
+                    })}
+                    onOpenLabels={abrirDialogoEtiquetas}
+                    onRetryLink={() => { void linkQuery.refetch(); void linkedDealQuery.refetch(); }}
+                  />
+                }
                 timeline={selected.isGroup || !selectedDeal ? null : leadConversation.timeline}
               />
             </div>
@@ -2042,9 +1918,10 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
               {metaConns.length > 1 && (
                 <label className="block">
                   <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Número</span>
-                  <select
+                  <NativeSelect
                     value={ngConn}
                     onChange={e => setNgConn(e.target.value)}
+                    aria-label="Número do grupo"
                     className="w-full bg-slate-100 dark:bg-black/20 border border-transparent focus:border-emerald-400 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none"
                   >
                     {metaConns.map(c => (
@@ -2052,7 +1929,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                         {c.phoneNumber || c.profileName || 'Número'}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </label>
               )}
               <label className="block">
@@ -2442,8 +2319,9 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Pipeline (board)</label>
-                <select
+                <NativeSelect
                   value={leadBoardId}
+                  aria-label="Pipeline (board)"
                   onChange={e => {
                     const boardId = e.target.value;
                     setLeadBoardId(boardId);
@@ -2455,19 +2333,20 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                   {boards.map(b => (
                     <option key={b.id} value={b.id}>{b.name}</option>
                   ))}
-                </select>
+                </NativeSelect>
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Etapa</label>
-                <select
+                <NativeSelect
                   value={leadStageId}
+                  aria-label="Etapa"
                   onChange={e => setLeadStageId(e.target.value)}
                   className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500"
                 >
                   {(boards.find(b => b.id === leadBoardId)?.stages ?? []).map(s => (
                     <option key={s.id} value={s.id}>{s.label}</option>
                   ))}
-                </select>
+                </NativeSelect>
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-5">
