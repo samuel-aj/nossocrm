@@ -1,0 +1,55 @@
+{
+  "codeCommit": "53e2836",
+  "baselineCommit": "d4e2d8b",
+  "passed": 971,
+  "failed": 11,
+  "skipped": 5,
+  "total": 987,
+  "newFailures": 0,
+  "baselineFailures": [
+    {
+      "file": "test/supabaseMiddleware.test.ts",
+      "test": "redireciona usuário autenticado para /dashboard quando acessa /login"
+    },
+    {
+      "file": "test/stories/US-001-abrir-deal-no-boards.test.tsx",
+      "test": "simula a história e garante que não quebra"
+    },
+    {
+      "file": "lib/query/__tests__/cache-integrity.test.ts",
+      "test": "DealsContext.tsx: não deve usar setQueriesData com prefix matcher"
+    },
+    {
+      "file": "lib/query/__tests__/cache-integrity.test.ts",
+      "test": "useRealtimeSync.ts: não deve usar setQueriesData com prefix matcher"
+    },
+    {
+      "file": "lib/query/__tests__/cache-integrity.test.ts",
+      "test": "useRealtimeSync deve usar DEALS_VIEW_KEY para INSERT e UPDATE"
+    },
+    {
+      "file": "lib/query/__tests__/cache-integrity.test.ts",
+      "test": "deve gerar um snapshot das query keys usadas para escrita de deals"
+    },
+    {
+      "file": "features/boards/components/Modals/CreateBoardModal.stages.test.tsx",
+      "test": "clicar na etapa abre a configuração e ela permanece aberta"
+    },
+    {
+      "file": "features/boards/components/Modals/CreateBoardModal.stages.test.tsx",
+      "test": "\"Editar etapa\" no menu abre a configuração, que permanece aberta"
+    },
+    {
+      "file": "features/boards/components/Modals/CreateBoardModal.stages.test.tsx",
+      "test": "ESC fecha só a etapa; o board continua aberto"
+    },
+    {
+      "file": "features/boards/components/Modals/CreateBoardModal.stages.test.tsx",
+      "test": "clicar fora da configuração da etapa fecha só ela"
+    },
+    {
+      "file": "features/boards/components/Modals/CreateBoardModal.stages.test.tsx",
+      "test": "o ID da etapa nunca aparece escrito na tela"
+    }
+  ]
+}
