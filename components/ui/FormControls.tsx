@@ -21,7 +21,7 @@ export function FormSelect({ label, value, onChange, options, placeholder = 'Sel
   }
   flushGroup();
   return <NativeSelect aria-label={label} value={value} onChange={event => onChange(event.target.value)} disabled={disabled} searchable={searchable} placeholder={placeholder}
-    className={compact ? 'min-h-8 px-2 py-1 text-xs' : 'min-h-11 rounded-xl px-3.5 py-2.5 shadow-sm'}>{children}</NativeSelect>;
+    className={compact ? 'w-full min-h-8 px-2 py-1 text-xs' : 'w-full min-h-11 rounded-xl px-3.5 py-2.5 shadow-sm'}>{children}</NativeSelect>;
 }
 
 export function FormCheckbox({ label, checked, onChange, disabled = false, children }: {

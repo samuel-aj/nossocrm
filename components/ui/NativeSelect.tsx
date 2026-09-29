@@ -53,7 +53,10 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
   const selectRef = useRef<HTMLSelectElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const pendingTabRef = useRef<HTMLElement | null>(null);
+  const blurSentRef = useRef(false);
   const sentinel = useMemo(() => {
     let candidate = EMPTY;
     while (options.some(option => option.value === candidate)) candidate += '_';
@@ -87,6 +90,22 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
     if (typeof forwardedRef === 'function') forwardedRef(node);
     else if (forwardedRef) forwardedRef.current = node;
   }, [forwardedRef]);
+  const emitRegisteredBlur = () => {
+    if (!onBlur || blurSentRef.current) return;
+    blurSentRef.current = true;
+    const native = selectRef.current;
+    if (native) onBlur({ target: native, currentTarget: native, type: 'blur' } as React.FocusEvent<HTMLSelectElement>);
+  };
+  const handleWidgetBlur = (event: React.FocusEvent<HTMLElement>) => {
+    if (!onBlur) return;
+    const next = event.relatedTarget as Node | null;
+    if (next && (triggerRef.current?.contains(next) || contentRef.current?.contains(next))) return;
+    window.setTimeout(() => {
+      const focused = document.activeElement;
+      if (focused && (triggerRef.current?.contains(focused) || contentRef.current?.contains(focused))) return;
+      emitRegisteredBlur();
+    }, 0);
+  };
   const change = (next: string) => {
     if (value === undefined) setInternalValue(next);
     const native = selectRef.current;
@@ -117,7 +136,7 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
   return <span className={cn('relative inline-flex min-w-0', wrapperWidth)}>
     <select
       ref={setRefs} tabIndex={-1} aria-hidden="true" name={name} required={required} disabled={disabled}
-      form={form} value={selected} onChange={onChange ?? (() => {})} onBlur={onBlur}
+      form={form} value={selected} onChange={onChange ?? (() => {})}
       onInvalid={event => { event.preventDefault(); triggerRef.current?.focus(); props.onInvalid?.(event); }}
       className="pointer-events-none absolute left-0 top-0 h-px w-px opacity-0"
     >
@@ -127,13 +146,22 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
       <Select.Trigger
         {...(props as React.ComponentPropsWithoutRef<typeof Select.Trigger>)} id={id} ref={triggerRef} aria-required={required || props['aria-required']}
         className={cn('group flex min-h-9 w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm text-slate-800 outline-none transition hover:border-primary-300 focus-visible:border-primary-500 focus-visible:ring-2 focus-visible:ring-primary-500/20 data-[state=open]:border-primary-400 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/15 dark:bg-slate-900 dark:text-slate-100', className)}
-        onBlur={event => { if (selectRef.current) onBlur?.({ ...event, target: selectRef.current, currentTarget: selectRef.current } as unknown as React.FocusEvent<HTMLSelectElement>); }}
+        onFocus={event => { blurSentRef.current = false; props.onFocus?.(event as unknown as React.FocusEvent<HTMLSelectElement>); }}
+        onBlur={handleWidgetBlur}
       >
         <Select.Value placeholder={placeholder}>{current?.label ?? placeholder}</Select.Value>
         <Select.Icon asChild><ChevronDown size={15} className="shrink-0 text-slate-400 transition-transform group-data-[state=open]:rotate-180" /></Select.Icon>
       </Select.Trigger>
       <Select.Portal>
-        <Select.Content position="popper" sideOffset={5} collisionPadding={12} className="z-[10050] max-h-[min(360px,var(--radix-select-content-available-height))] w-[var(--radix-select-trigger-width)] min-w-[min(220px,calc(100vw-24px))] max-w-[calc(100vw-24px)] overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 text-slate-800 shadow-xl dark:border-white/15 dark:bg-slate-900 dark:text-slate-100">
+        <Select.Content ref={contentRef} onFocusCapture={() => { blurSentRef.current = false; }} onBlurCapture={handleWidgetBlur}
+          onCloseAutoFocus={event => {
+            const next = pendingTabRef.current;
+            if (!next) return;
+            event.preventDefault();
+            pendingTabRef.current = null;
+            window.setTimeout(() => { next.focus(); emitRegisteredBlur(); }, 0);
+          }}
+          position="popper" sideOffset={5} collisionPadding={12} className="z-[10050] max-h-[min(360px,var(--radix-select-content-available-height))] w-[var(--radix-select-trigger-width)] min-w-[min(220px,calc(100vw-24px))] max-w-[calc(100vw-24px)] overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 text-slate-800 shadow-xl dark:border-white/15 dark:bg-slate-900 dark:text-slate-100">
           {showSearch && <div className="relative mb-1.5 flex items-center gap-2 border-b border-slate-200 px-2 pb-1.5 dark:border-white/15" onPointerDown={event => event.stopPropagation()}>
             <Search size={15} className="shrink-0 text-slate-400" aria-hidden="true" />
             <input ref={searchRef} type="search" aria-label="Buscar opções" value={search} onChange={event => setSearch(event.target.value)} onKeyDown={event => {
@@ -155,8 +183,8 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
                 const focusables = Array.from(scope.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]):not([tabindex="-1"]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'));
                 const position = trigger ? focusables.indexOf(trigger) : -1;
                 const next = focusables[position + (event.shiftKey ? -1 : 1)] ?? trigger;
+                pendingTabRef.current = next;
                 setOpen(false);
-                window.setTimeout(() => next?.focus(), 0);
               } else if (event.key !== 'Escape') event.stopPropagation();
             }} className="min-w-0 flex-1 bg-transparent py-1 text-sm outline-none" placeholder="Buscar..." />
           </div>}

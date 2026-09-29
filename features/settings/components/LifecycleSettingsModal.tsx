@@ -102,12 +102,12 @@ export const LifecycleSettingsModal: React.FC<LifecycleSettingsModalProps> = ({ 
                         {lifecycleStages.map((stage, index) => (
                             <div key={stage.id} className="flex items-center gap-3 p-2 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
                                 {/* Color */}
-                                <div className="relative flex-shrink-0 group">
-                                    <div className={`w-6 h-6 rounded-full ${stage.color} cursor-pointer ring-2 ring-transparent hover:ring-slate-300 dark:hover:ring-slate-600 transition-all`} />
+                                <div className="relative h-6 w-6 flex-shrink-0">
                                     <NativeSelect
+                                        aria-label={`Cor do estágio ${stage.name}`}
                                         value={stage.color}
                                         onChange={(e) => updateLifecycleStage(stage.id, { color: e.target.value })}
-                                        className="absolute inset-0 opacity-0 cursor-pointer"
+                                        className={`${stage.color} h-6 w-6 min-h-6 cursor-pointer rounded-full border-0 p-0 text-transparent shadow-none ring-2 ring-transparent hover:ring-slate-300 focus-visible:ring-primary-500 dark:hover:ring-slate-600 [&>span]:sr-only [&>svg]:hidden`}
                                     >
                                         {STAGE_COLORS.map(c => (
                                             <option key={c} value={c}>{c.replace('bg-', '')}</option>

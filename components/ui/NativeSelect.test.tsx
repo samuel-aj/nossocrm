@@ -5,6 +5,7 @@ import { beforeAll, describe, it, expect, vi } from 'vitest';
 import { NativeSelect } from './NativeSelect';
 import { useForm } from 'react-hook-form';
 import { Modal } from './Modal';
+import { FormSelect } from './FormControls';
 
 beforeAll(() => {
   HTMLElement.prototype.hasPointerCapture = () => false;
@@ -33,6 +34,8 @@ describe('NativeSelect', () => {
     await userEvent.click(screen.getByRole('combobox', { name: 'Responsável' }));
     expect(screen.getByText('Equipe')).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Indisponível' })).toHaveAttribute('data-disabled');
+    await userEvent.click(screen.getByRole('option', { name: 'Indisponível' }));
+    expect(onChange).not.toHaveBeenCalled();
     expect(screen.getByRole('option', { name: /Pessoa com nome muito longo/ })).toBeInTheDocument();
   });
 
@@ -137,6 +140,28 @@ describe('NativeSelect', () => {
     expect(screen.getByRole('combobox', { name: 'Produto' })).toHaveTextContent('Nenhum');
     expect(screen.getByTestId('watched')).toBeEmptyDOMElement();
   });
+
+  it('keeps a FormSelect full width within its form column', () => {
+    render(<div className="w-80"><FormSelect label="Produto" value="a" onChange={vi.fn()} options={[{ value: 'a', label: 'Produto A' }]} /></div>);
+    expect(screen.getByRole('combobox', { name: 'Produto' }).parentElement).toHaveClass('w-full');
+  });
+
+  it('fires registered blur after leaving the search portal, not on opening it', async () => {
+    function Form() {
+      const { register, formState } = useForm({ mode: 'onBlur', defaultValues: { product: '' } });
+      return <form><NativeSelect aria-label="Produto" searchable {...register('product', { required: true })}>
+        <option value="">Nenhum</option><option value="a">Produto A</option>
+      </NativeSelect><button type="button">Próximo</button><span data-testid="touched">{String(Boolean(formState.touchedFields.product))}</span></form>;
+    }
+    render(<Form />);
+    await userEvent.click(screen.getByRole('combobox', { name: 'Produto' }));
+    expect(screen.getByRole('searchbox')).toHaveFocus();
+    expect(screen.getByTestId('touched')).toHaveTextContent('false');
+    await userEvent.tab();
+    expect(screen.getByRole('button', { name: 'Próximo' })).toHaveFocus();
+    expect(screen.getByTestId('touched')).toHaveTextContent('true');
+  });
+
 
   it('keeps portal focus and tab navigation usable in a modal', async () => {
     render(<Modal isOpen onClose={vi.fn()} title="Seleção"><NativeSelect aria-label="Produto" defaultValue="" searchable>
