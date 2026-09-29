@@ -25,8 +25,10 @@ export function useConversationSidebar(selectionKey: string | null) {
     if (changed) {
       previousKey.current = selectionKey;
       if (selectionKey) {
-        if (!prior) entryCollapsed.current = sidebarCollapsed;
-        manualOverride.current = false;
+        if (!prior) {
+          entryCollapsed.current = sidebarCollapsed;
+          manualOverride.current = false;
+        }
         if (!sidebarCollapsed) {
           expectedChange.current = true;
           setSidebarCollapsed(true);

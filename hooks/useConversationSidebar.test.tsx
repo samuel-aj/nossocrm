@@ -48,3 +48,21 @@ it('collapses a different chat after the navigation was manually reopened', () =
   expect(sidebar.set).toHaveBeenCalledTimes(2);
   expect(sidebar.set).toHaveBeenLastCalledWith(true);
 });
+
+it.each(['close selection', 'unmount'] as const)(
+  'keeps the last manual collapse after switching chats and %s',
+  exit => {
+    const view = render(<Harness selection="conversation-a" />);
+    expect(sidebar.set).toHaveBeenCalledTimes(1);
+    sidebar.collapsed = true;
+    view.rerender(<Harness selection="conversation-a" update={1} />);
+    sidebar.collapsed = false;
+    view.rerender(<Harness selection="conversation-a" update={2} />);
+    sidebar.collapsed = true;
+    view.rerender(<Harness selection="conversation-a" update={3} />);
+    view.rerender(<Harness selection="conversation-b" />);
+    if (exit === 'unmount') view.unmount();
+    else view.rerender(<Harness selection={null} />);
+    expect(sidebar.set).toHaveBeenCalledTimes(1);
+  },
+);
