@@ -13,7 +13,7 @@ const now = '2026-09-01T00:00:00Z';
 const data = { activities: [{ id: 'note', type: 'note', dealId: 'lead', date: now, description: 'paged note' }], nextCursor: null, history: { available: true, since: now, events: [], activityMeta: {}, apiNotes: [{ id: 'api', content: 'readonly API', createdAt: now, updatedAt: null, authorName: null }] } };
 function Harness({ id = 'lead' }: { id?: string }) {
  const result = useLeadConversation({ deal: { id, title: 'Lead', boardId: 'board', organizationId: mocks.org } as Deal });
- return <>{result.timeline.historyPrefix}{result.timeline.entries.map(e => <div key={e.id}>{e.node}</div>)}{result.timeline.noteComposer}{result.dialogs}</>;
+ return <><button onClick={() => result.startActivity({ editingId: "must-reset", type: "CALL", title: "Ligar para o lead", date: "2026-09-28", time: "09:00", description: "" })}>Nova atividade</button>{result.timeline.composerMode === "activity" && result.timeline.activityComposer}{result.timeline.historyPrefix}{result.timeline.entries.map(e => <div key={e.id}>{e.node}</div>)}{result.timeline.noteComposer}{result.dialogs}</>;
 }
 beforeEach(() => { mocks.org = 'org'; mocks.edit = true; mocks.add.mockResolvedValue({ id: 'new' }); mocks.update.mockResolvedValue(undefined); mocks.remove.mockResolvedValue(undefined); vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(Response.json(data)))); });
 afterEach(() => vi.unstubAllGlobals());
@@ -63,5 +63,15 @@ it('keeps an edited note open with its text and an error when canonical save fai
  fireEvent.click(screen.getAllByRole('button', { name: 'Salvar nota' })[0]);
  expect(await screen.findByRole('alert')).toHaveTextContent('Save failed');
  expect(edit).toHaveValue('unsaved edit');
+ unmount(); client.clear();
+});
+
+it('starts a prefilled NEW activity for board schedule hints', async () => {
+ const { client, unmount } = setup();
+ fireEvent.click(screen.getByRole('button', { name: 'Nova atividade' }));
+ expect(screen.getByRole('textbox', { name: 'Título da atividade' })).toHaveValue('Ligar para o lead');
+ expect(screen.getByRole('combobox', { name: 'Tipo da atividade' })).toHaveValue('CALL');
+ expect(screen.getByRole('button', { name: 'Criar atividade' })).toBeInTheDocument();
+ expect(screen.queryByText('Editando atividade.')).toBeNull();
  unmount(); client.clear();
 });

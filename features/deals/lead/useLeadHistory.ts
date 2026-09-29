@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useInfiniteQuery, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query';
 import type { DealHistory } from './useDealHistory';
-import { leadHistoryKey, mergeLatestPage, type LeadHistoryPage } from './timelinePage';
+import { leadHistoryKey, refreshTimelinePages, type LeadHistoryPage } from './timelinePage';
 export { leadHistoryKey } from './timelinePage';
 export type { LeadHistoryPage } from './timelinePage';
 export async function fetchLeadHistoryPage(dealId: string, cursor: string | null, signal: AbortSignal): Promise<LeadHistoryPage> {
@@ -44,7 +44,7 @@ export function useLeadHistory(orgId: string | null | undefined, dealId: string 
         if (!controller.signal.aborted) setRefreshFailure(null);
         if (!controller.signal.aborted) client.setQueryData<InfiniteData<LeadHistoryPage, string | null>>(leadHistoryKey(orgId!, dealId!), old => {
           if (!old) return old;
-          return old.pages.length === 1 ? { pages: [page], pageParams: [null] } : { ...old, pages: [mergeLatestPage(page, old.pages[0]), ...old.pages.slice(1)] };
+          return old.pages.length === 1 ? { pages: [page], pageParams: [null] } : { ...old, pages: refreshTimelinePages(page, old.pages) };
         });
       } catch (error) { if (!controller.signal.aborted) setRefreshFailure({ org: orgId!, deal: dealId!, error: error as Error, updatedAt: startedAt }); }
       finally { pending = false; }

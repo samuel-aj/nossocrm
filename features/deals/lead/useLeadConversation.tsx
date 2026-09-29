@@ -13,7 +13,7 @@ import { useLeadHistory } from './useLeadHistory';
 import { useLeadTimelineEntries } from './LeadTimeline';
 import { ActivityComposer, NoteComposer, EMPTY_ACTIVITY_DRAFT, draftFromActivity, type ActivityDraft } from './LeadComposers';
 import { PendingActivitiesStrip } from './PendingActivitiesStrip';
-export type LeadConversationResult = { timeline: ChatTimelineProps; dialogs: React.ReactNode; openActivity: (activity: Activity) => void; refresh: () => Promise<unknown> };
+export type LeadConversationResult = { timeline: ChatTimelineProps; dialogs: React.ReactNode; openActivity: (activity: Activity) => void; startActivity: (draft: ActivityDraft) => void; refresh: () => Promise<unknown> };
 type Draft = { note: string; activity: ActivityDraft; mode: ComposerMode };
 const emptyDraft = (): Draft => ({ note: '', activity: { ...EMPTY_ACTIVITY_DRAFT }, mode: 'message' });
 export function useLeadConversation({ deal, enabled = true }: { deal: Deal | DealView | null | undefined; enabled?: boolean }): LeadConversationResult {
@@ -41,6 +41,7 @@ export function useLeadConversation({ deal, enabled = true }: { deal: Deal | Dea
   const refresh = async () => client.invalidateQueries({ queryKey: leadHistoryKey(organizationId ?? '', deal?.id ?? '') });
   const afterSave = async () => { await client.invalidateQueries({ queryKey: leadHistoryKey(organizationId ?? '', deal?.id ?? '') }); if (currentIdentity.current === identity) setScrollKey(n => n + 1); };
   const openActivity = (activity: Activity) => { setDraft({ activity: draftFromActivity(activity), mode: 'activity' }); };
+  const startActivity = (activity: ActivityDraft) => { setDraft({ activity: { ...activity, editingId: null }, mode: 'activity' }); };
   const toggle = (a: Activity) => {
     if (!canEdit) return;
     void crm.updateActivity(a.id, { completed: !a.completed }, { throwOnError: true }).then(refresh).catch(e => currentIdentity.current === identity && setError(e.message));
@@ -65,13 +66,13 @@ export function useLeadConversation({ deal, enabled = true }: { deal: Deal | Dea
     onSaveNote: async (id, text) => { if (!canEdit) throw new Error('Sem permissão para editar'); await crm.updateActivity(id, { description: text }, { throwOnError: true }); await refresh(); },
     onDeleteNote: id => setDeleting({ key: identity, id }), onOpenActivity: openActivity, onToggleActivity: toggle });
   return {
-    refresh, openActivity,
+    refresh, openActivity, startActivity,
     timeline: {
       entries, historyLoadingOlder: query.isFetchingNextPage, composerMode: draft.mode, onComposerModeChange: mode => setDraft({ mode }), canWriteCrm: canEdit, scrollToEndKey: scrollKey,
       historyPrefix: <div className="text-center text-xs p-2" aria-live="polite">{query.isLoading && 'Carregando histórico…'}{query.isError && <p role="alert">Não foi possível carregar o histórico. <button onClick={() => void refresh()}>Tentar novamente</button></p>}{query.hasNextPage && <button disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>{query.isFetchingNextPage ? 'Carregando…' : 'Carregar histórico anterior'}</button>}</div>,
       aboveComposer: <>{error && <p role="alert">{error}</p>}<PendingActivitiesStrip activities={crm.activities.filter(a => a.dealId === deal?.id)} canEdit={canEdit} onOpen={openActivity} onComplete={toggle} isPending={crm.isActivityPending} /></>,
-      noteComposer: <NoteComposer key={identity} value={draft.note} onChange={note => setDraft({ note })} onSave={saveNote} disabled={!canEdit} />,
-      activityComposer: <ActivityComposer key={identity} draft={draft.activity} onChange={activity => setDraft({ activity })} onSubmit={saveActivity} onCancelEdit={() => setDraft({ activity: { ...EMPTY_ACTIVITY_DRAFT } })} disabled={!canEdit} onComplete={async id => { try { await crm.updateActivity(id, { completed: true }, { throwOnError: true }); await refresh(); } catch (e) { if (currentIdentity.current === identity) setError((e as Error).message); } }} />,
+      noteComposer: <NoteComposer key={`${identity}:note`} value={draft.note} onChange={note => setDraft({ note })} onSave={saveNote} disabled={!canEdit} />,
+      activityComposer: <ActivityComposer key={`${identity}:activity`} draft={draft.activity} onChange={activity => setDraft({ activity })} onSubmit={saveActivity} onCancelEdit={() => setDraft({ activity: { ...EMPTY_ACTIVITY_DRAFT } })} disabled={!canEdit} onComplete={async id => { try { await crm.updateActivity(id, { completed: true }, { throwOnError: true }); await refresh(); } catch (e) { if (currentIdentity.current === identity) setError((e as Error).message); } }} />,
     },
     dialogs: <ConfirmModal isOpen={canEdit && deleting?.key === identity} onClose={() => setDeleting(null)} title="Excluir nota" message="Excluir esta nota interna? A exclusão fica registrada no histórico do lead." confirmText="Excluir" variant="danger" onConfirm={() => {
       if (!canEdit || deleting?.key !== identity) return;

@@ -50,3 +50,22 @@ export function mergeLatestPage(fresh: LeadHistoryPage, old: LeadHistoryPage): L
   const apiNotes = old.history.apiNotes.filter(n => compareTimelineItems({ id: n.id, source: 'note', at: n.createdAt }, edge) > 0);
   return { ...fresh, activities: [...fresh.activities, ...activities], nextCursor: old.nextCursor, history: { ...fresh.history, activityMeta: { ...old.history.activityMeta, ...fresh.history.activityMeta }, events: [...fresh.history.events, ...events], apiNotes: [...fresh.history.apiNotes, ...apiNotes] } };
 }
+/** Keep loaded rows while making an unseen burst reachable by explicit paging. */
+export function refreshTimelinePages(fresh: LeadHistoryPage, pages: LeadHistoryPage[]): LeadHistoryPage[] {
+  if (pages.length <= 1) return [fresh];
+  const keys = (page: LeadHistoryPage) => [
+    ...page.activities.map(a => `activity:${a.id}`),
+    ...page.history.events.map(e => `event:${e.id}`),
+    ...page.history.apiNotes.map(n => `note:${n.id}`),
+  ];
+  const oldKeys = new Set(keys(pages[0]));
+  const overlaps = keys(fresh).some(key => oldKeys.has(key));
+  const next = [mergeLatestPage(fresh, pages[0]), ...pages.slice(1)];
+  if (fresh.nextCursor && !overlaps) {
+    // A burst can exceed 50 entries between bounded refreshes. Resume at its
+    // new boundary, then traverse toward older rows; the projection dedupes
+    // any already-loaded rows encountered during this catch-up.
+    next[next.length - 1] = { ...next[next.length - 1], nextCursor: fresh.nextCursor };
+  }
+  return next;
+}
