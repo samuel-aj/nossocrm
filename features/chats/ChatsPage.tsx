@@ -6,6 +6,7 @@ import { unifyConversations } from './unifiedConversation';
 import { labelDelta, linkedDeal } from '@/lib/whatsapp/labelCompatibility';
 import { refreshLinkedLabels } from '@/lib/realtime/labelCache';
 import { usePersistedState } from '@/hooks/usePersistedState';
+import { useConversationSidebar } from '@/hooks/useConversationSidebar';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
@@ -13,7 +14,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, KanbanSquare, Loader2, MessageCircle, MessageSquareDot, Pencil, Plus, Search, Tag, Trash2, User, UserPlus, Users, X } from 'lucide-react';
 import { useCRM } from '@/context/CRMContext';
-import { useOrgMembers, useDeal } from '@/lib/query/hooks';
+import { useOrgMembers, useDeal, useContact } from '@/lib/query/hooks';
 import { useAnchoredMenu } from '@/hooks/useAnchoredMenu';
 import {
   LABEL_CHIP_CLASS,
@@ -30,6 +31,8 @@ import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { DealWhatsAppChat } from '@/features/whatsapp/DealWhatsAppChat';
 import { DealStageControl } from '@/features/deals/lead/DealStageControl';
+import { useLeadConversation } from '@/features/deals/lead/useLeadConversation';
+import { LeadDetailsAside } from './LeadDetailsAside';
 import { WhatsAppChatDemo } from '@/features/whatsapp/WhatsAppChatDemo';
 import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
 import { Contact, Deal } from '@/types';
@@ -194,6 +197,9 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
   const router = useRouter();
   const queryClient = useQueryClient();
   const [selected, setSelectedState] = useState<ChatTarget | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
+  const [workspaceWidth, setWorkspaceWidth] = useState(0);
   const [contextConnectionId, setContextConnectionId] = useState<string | null>(null);
   const [demoOpen, setDemoOpen] = useState(stagingDemo);
   const [demoStartedAt, setDemoStartedAt] = useState(() => new Date().toISOString());
@@ -731,6 +737,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
       ? `group#${selected.conversationId}`
       : `${selected.connectionId ?? 'none'}#${phoneKey(selected.phone)}`
     : null;
+  useConversationSidebar(selectedKey);
 
   // Linha da conversa aberta: é dela que saem responsável e etiquetas. Vem da
   // consulta (e não do item da lista) pra refletir na hora o que foi salvo.
@@ -884,6 +891,12 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
   const resolvingLead = (!selectedConv?.deal_id && linkQuery.isFetching) || (!!selectedConv?.deal_id && !selectedDeal && linkedDealQuery.isLoading);
   const linkUnavailable = !!selectedConv?.deal_id && !selectedDeal && (linkedDealQuery.isError || linkedDealQuery.isSuccess);
   const selectedOwnerEfetivo = selectedDeal?.ownerId ?? null;
+  const linkedContactQuery = useContact(selectedDeal?.contactId || undefined);
+  const cachedLinkedContact = selectedDeal ? contacts.find(c => c.id === selectedDeal.contactId) : null;
+  const linkedContact = linkedContactQuery.isSuccess && linkedContactQuery.data === null
+    ? null
+    : newerRecord(cachedLinkedContact, linkedContactQuery.data) ?? null;
+  const leadConversation = useLeadConversation({ deal: selectedDeal, enabled: !!selected && !selected.isGroup && !!selectedDeal });
 
   const selectedDealBoard = useMemo(
     () => (selectedDeal ? boards.find(b => b.id === selectedDeal.boardId) ?? null : null),
@@ -1088,6 +1101,28 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
   // Largura do painel de conversas (desktop), escolhida pela pessoa e guardada
   // neste navegador. Duplo clique na divisória volta ao padrão.
   const [listWidth, setListWidth] = usePersistedState<number>('crm_chat_list_width', CHAT_LIST_DEFAULT_WIDTH);
+  useEffect(() => {
+    const element = workspaceRef.current;
+    if (!element) return;
+    const update = () => setWorkspaceWidth(element.getBoundingClientRect().width);
+    update();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', update);
+      return () => window.removeEventListener('resize', update);
+    }
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const detailsDrawer = workspaceWidth < listWidth + 6 + 480 + 360;
+  const previousDrawer = useRef(detailsDrawer);
+  useEffect(() => {
+    if (detailsDrawer && !previousDrawer.current) setDetailsOpen(false);
+    previousDrawer.current = detailsDrawer;
+  }, [detailsDrawer]);
+  useEffect(() => {
+    setDetailsOpen(!!selectedKey && !detailsDrawer);
+  }, [selectedKey]); // Selection changes only; metadata resolution must not reopen details.
   const [resizing, setResizing] = useState(false);
   const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
@@ -1120,6 +1155,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
     // Tela CHEIA: ancora no <main> (que é relative) e ignora o p-6 dele —
     // nada de cartão flutuante; o chat cola nas bordas da área de conteúdo.
     <div
+      ref={workspaceRef}
       className="absolute inset-0 flex bg-white dark:bg-dark-card overflow-hidden"
       style={{ paddingBottom: 'calc(var(--app-bottom-nav-height, 0px) + var(--app-safe-area-bottom, 0px))' }}
     >
@@ -1773,7 +1809,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                     {selectedDeal && !contactDeals.some(d => d.id === selectedDeal.id) && <option value={selectedDeal.id}>{selectedDeal.title}</option>}
                     {contactDeals.map(d => <option key={d.id} value={d.id}>{d.title}</option>)}
                   </select>
-                  {selectedDeal && <span className="min-w-0 w-[260px] max-w-full"><DealStageControl deal={selectedDeal} size="sm" /></span>}
+                  {selectedDeal && !detailsOpen && <span className="min-w-0 w-[260px] max-w-full"><DealStageControl deal={selectedDeal} size="sm" /></span>}
                 </span>
               ) : selected.contactId ? (
                 <span className="min-w-0 text-xs text-slate-400 italic truncate">Conversa sem lead vinculado.</span>
@@ -1788,7 +1824,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                   <>
                     {/* SÓ LEITURA: quem responde pelo chat é o dono do LEAD
                         desse contato. Pra trocar, troca no lead. */}
-                    <span
+                    {!detailsOpen && <span
                       title="Responsável do lead deste contato. Para mudar, troque no lead."
                       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border ${
                         selectedOwnerEfetivo
@@ -1800,7 +1836,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                       {selectedOwnerEfetivo
                         ? nomePorId.get(selectedOwnerEfetivo) || 'Responsável'
                         : 'Sem responsável'}
-                    </span>
+                    </span>}
 
                     {/* Etiquetas: só leitura aqui, e no máximo 3 pra não
                         estourar a linha. O resto vira "+N" (a lista de
@@ -1883,6 +1919,17 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                       <UserPlus size={13} /> Adicionar contato
                     </button>
                   ))}
+                {selectedDeal && (
+                  <button
+                    type="button"
+                    aria-label={detailsOpen ? 'Ocultar propriedades do lead' : 'Mostrar propriedades do lead'}
+                    aria-expanded={detailsOpen}
+                    onClick={() => setDetailsOpen(open => !open)}
+                    className="inline-flex items-center rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-primary-600 hover:bg-primary-50 dark:border-white/10 dark:text-primary-400 dark:hover:bg-white/10"
+                  >
+                    {detailsOpen ? 'Ocultar propriedades' : 'Propriedades'}
+                  </button>
+                )}
               </span>
             </div>
 
@@ -1921,6 +1968,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                   'responsavel.nome': selectedDeal?.owner?.name || '',
                   'escritorio.nome': profile?.organization_name || '',
                 }}
+                timeline={selected.isGroup || !selectedDeal ? null : leadConversation.timeline}
               />
             </div>
           </>
@@ -1946,6 +1994,17 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
           </div>
         )}
       </section>
+
+      {selected && !selected.isGroup && selectedDeal && (
+        <LeadDetailsAside
+          deal={selectedDeal}
+          contact={linkedContact}
+          open={detailsOpen}
+          drawer={detailsDrawer}
+          onClose={() => setDetailsOpen(false)}
+        />
+      )}
+      {leadConversation.dialogs}
 
       {/* ============ MODAL: Novo grupo (API oficial) ============ */}
       {newGroupOpen && (

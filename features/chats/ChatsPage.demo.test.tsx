@@ -4,9 +4,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { ChatsPage } from './ChatsPage';
 
-vi.mock('@/context/CRMContext', () => ({ useCRM: () => ({ contacts: [{ id: 'contact-one', name: 'Contato existente', phone: '+5569911111111' }], deals: [], boards: [] }) }));
+vi.mock('@/context/CRMContext', () => ({ useCRM: () => ({ contacts: [{ id: 'contact-one', name: 'Contato existente', phone: '+5569911111111' }], deals: [], boards: [], sidebarCollapsed: false, setSidebarCollapsed: vi.fn() }) }));
+vi.mock('@/features/deals/lead/useLeadConversation', () => ({ useLeadConversation: () => ({ timeline: {}, dialogs: null }) }));
 vi.mock('./useConversationLead', () => ({ useConversationLead: () => ({ isFetching: false, isError: false, refetch: vi.fn() }) }));
-vi.mock('@/lib/query/hooks', () => ({ useOrgMembers: () => ({ data: [] }), useDeal: () => ({ data: undefined, isLoading: false, refetch: vi.fn() }) }));
+vi.mock('@/lib/query/hooks', () => ({ useOrgMembers: () => ({ data: [] }), useDeal: () => ({ data: undefined, isLoading: false, refetch: vi.fn() }), useContact: () => ({ data: undefined, isSuccess: false }) }));
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'user', organization_id: 'org' } }) }));
 vi.mock('@/context/ToastContext', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), useSearchParams: () => new URLSearchParams() }));
