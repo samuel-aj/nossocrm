@@ -57,6 +57,8 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
   const viewportRef = useRef<HTMLDivElement>(null);
   const pendingTabRef = useRef<HTMLElement | null>(null);
   const blurSentRef = useRef(false);
+  const typeaheadRef = useRef('');
+  const typeaheadTimerRef = useRef<number | null>(null);
   const sentinel = useMemo(() => {
     let candidate = EMPTY;
     while (options.some(option => option.value === candidate)) candidate += '_';
@@ -75,6 +77,9 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
   useEffect(() => {
     if (autoFocus) triggerRef.current?.focus();
   }, [autoFocus]);
+  useEffect(() => () => {
+    if (typeaheadTimerRef.current !== null) window.clearTimeout(typeaheadTimerRef.current);
+  }, []);
   useEffect(() => {
     const native = selectRef.current;
     const owner = native?.form;
@@ -116,6 +121,24 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
       onChange?.({ target, currentTarget: target, type: 'change' } as React.ChangeEvent<HTMLSelectElement>);
     }
   };
+  const resetTypeahead = () => {
+    typeaheadRef.current = '';
+    if (typeaheadTimerRef.current !== null) window.clearTimeout(typeaheadTimerRef.current);
+    typeaheadTimerRef.current = null;
+  };
+  const handleClosedTypeahead = (key: string) => {
+    const search = typeaheadRef.current + key;
+    typeaheadRef.current = search;
+    if (typeaheadTimerRef.current !== null) window.clearTimeout(typeaheadTimerRef.current);
+    typeaheadTimerRef.current = window.setTimeout(resetTypeahead, 1000);
+    const normalized = search.length > 1 && Array.from(search).every(char => char === search[0]) ? search[0] : search;
+    const enabled = options.filter(option => !option.disabled);
+    const currentIndex = Math.max(0, enabled.findIndex(option => option.value === selected));
+    const ordered = [...enabled.slice(currentIndex), ...enabled.slice(0, currentIndex)];
+    const candidates = normalized.length === 1 ? ordered.filter(option => option.value !== selected) : ordered;
+    const match = candidates.find(option => option.label.toLocaleLowerCase().startsWith(normalized.toLocaleLowerCase()));
+    if (match) change(match.value);
+  };
   const visible = showSearch && search.trim()
     ? options.filter(option => option.label.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
     : options;
@@ -143,17 +166,25 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
     >
       {nativeOptions.length ? nativeOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>) : <option value={selected}>{selected}</option>}
     </select>
-    <Select.Root value={radixValue} open={open} onOpenChange={setOpen} onValueChange={next => change(next === sentinel ? '' : next)} disabled={disabled}>
+    <Select.Root value={radixValue} open={open} onOpenChange={next => { setOpen(next); if (next) resetTypeahead(); }} onValueChange={next => change(next === sentinel ? '' : next)} disabled={disabled}>
       <Select.Trigger
         {...(props as React.ComponentPropsWithoutRef<typeof Select.Trigger>)} id={id} ref={triggerRef} aria-required={required || props['aria-required']}
         className={cn('group flex min-h-9 w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm text-slate-800 outline-none transition hover:border-primary-300 focus-visible:border-primary-500 focus-visible:ring-2 focus-visible:ring-primary-500/20 data-[state=open]:border-primary-400 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/15 dark:bg-slate-900 dark:text-slate-100', className)}
         onFocus={event => { blurSentRef.current = false; props.onFocus?.(event as unknown as React.FocusEvent<HTMLSelectElement>); }}
         onBlur={handleWidgetBlur}
+        onKeyDown={event => {
+          props.onKeyDown?.(event as unknown as React.KeyboardEvent<HTMLSelectElement>);
+          if (event.defaultPrevented || open || disabled || event.ctrlKey || event.altKey || event.metaKey) return;
+          if (event.key.length === 1 && (event.key !== ' ' || typeaheadRef.current)) {
+            event.preventDefault();
+            handleClosedTypeahead(event.key);
+          }
+        }}
       >
         <Select.Value placeholder={placeholder}>{current?.label ?? placeholder}</Select.Value>
         <Select.Icon asChild><ChevronDown size={15} className="shrink-0 text-slate-400 transition-transform group-data-[state=open]:rotate-180" /></Select.Icon>
       </Select.Trigger>
-      <Select.Portal>
+      {open && <Select.Portal>
         <Select.Content ref={contentRef} onFocusCapture={() => { blurSentRef.current = false; }} onBlurCapture={handleWidgetBlur}
           onCloseAutoFocus={event => {
             const next = pendingTabRef.current;
@@ -209,7 +240,7 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
             {visible.length === 0 && <div className="px-3 py-2 text-sm text-slate-500">Nenhuma opção encontrada</div>}
           </Select.Viewport>
         </Select.Content>
-      </Select.Portal>
+      </Select.Portal>}
     </Select.Root>
   </span>;
 });

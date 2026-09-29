@@ -15,6 +15,31 @@ beforeAll(() => {
 });
 
 describe('NativeSelect', () => {
+  it('does not mount Radix option nodes while a large menu is closed', async () => {
+    const setAttribute = vi.spyOn(Element.prototype, 'setAttribute');
+    try {
+      render(<NativeSelect aria-label="Produto" defaultValue="" searchable>
+        <option value="">Nenhum</option>
+        {Array.from({ length: 100 }, (_, index) => <option key={index} value={String(index)}>Produto {index}</option>)}
+      </NativeSelect>);
+      const mountedOptions = () => setAttribute.mock.calls.filter(([name, value]) => name === 'role' && value === 'option').length;
+      expect(mountedOptions()).toBe(0);
+      await userEvent.click(screen.getByRole('combobox', { name: 'Produto' }));
+      expect(mountedOptions()).toBeGreaterThanOrEqual(100);
+    } finally {
+      setAttribute.mockRestore();
+    }
+  });
+
+  it('keeps closed-trigger typeahead without opening the list', async () => {
+    render(<NativeSelect aria-label="Produto" defaultValue=""><option value="">Nenhum</option><option value="u">Uva</option><option value="l">Laranja</option></NativeSelect>);
+    const trigger = screen.getByRole('combobox', { name: 'Produto' });
+    trigger.focus();
+    await userEvent.keyboard('u');
+    expect(trigger).toHaveTextContent('Uva');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  });
+
   it('selects an empty value and preserves the native change contract', async () => {
     const onChange = vi.fn();
     render(<NativeSelect aria-label="Produto" value="a" onChange={onChange}>
