@@ -1,0 +1,513 @@
+import React from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Contact, Deal } from "@/types";
+import { LeadPropertiesPanel } from "./LeadPropertiesPanel";
+
+const mocks = vi.hoisted(() => ({
+  updateDeal: vi.fn(),
+  updateContact: vi.fn(),
+  addItemToDeal: vi.fn(),
+  updateItemInDeal: vi.fn(),
+  removeItemFromDeal: vi.fn(),
+  deleteDeal: vi.fn(),
+  addTag: vi.fn(),
+  addToast: vi.fn(),
+  edit: true,
+  move: true,
+  remove: true,
+  org: "org-1",
+}));
+vi.mock("@/context/CRMContext", () => ({
+  useCRM: () => ({
+    updateDeal: mocks.updateDeal,
+    updateContact: mocks.updateContact,
+    addItemToDeal: mocks.addItemToDeal,
+    updateItemInDeal: mocks.updateItemInDeal,
+    removeItemFromDeal: mocks.removeItemFromDeal,
+    deleteDeal: mocks.deleteDeal,
+    addTag: mocks.addTag,
+    availableTags: ["Existente"],
+    products: [{ id: "product", name: "Serviço", price: 100 }],
+    boards: [{ id: "board", name: "Funil", hiddenFieldGroups: ["Oculto"] }],
+    customFieldDefinitions: [
+      { id: "field-1", key: "source", label: "Origem", type: "text" },
+      {
+        id: "field-2",
+        key: "score",
+        label: "Pontuação",
+        type: "number",
+        groupName: "Análise",
+      },
+      {
+        id: "field-3",
+        key: "secret",
+        label: "Segredo",
+        type: "text",
+        groupName: "Oculto",
+      },
+    ],
+  }),
+}));
+vi.mock("@/context/AuthContext", () => ({
+  useAuth: () => ({ organizationId: mocks.org }),
+}));
+vi.mock("@/context/ToastContext", () => ({
+  useToast: () => ({ addToast: mocks.addToast }),
+}));
+vi.mock("@/lib/permissions/useMyActionPermissions", () => ({
+  useMyActionPermissions: () => ({
+    deals: { edit: mocks.edit, move: mocks.move, delete: mocks.remove },
+  }),
+}));
+vi.mock("@/lib/query/hooks", () => ({
+  useOrgUsers: () => ({ isAdmin: mocks.edit }),
+  useOrgMembers: () => ({
+    data: [{ id: "owner-1", name: "Samuel", member: true }],
+  }),
+}));
+vi.mock("@/features/boards/hooks/useAcknowledgeAlert", () => ({
+  useAcknowledgeAlert: vi.fn(),
+}));
+vi.mock("@/features/deals/LossDetailsBanner", () => ({
+  LossDetailsBanner: () => null,
+}));
+vi.mock("./DealStageControl", () => ({
+  DealStageControl: () => <button>Etapa</button>,
+}));
+vi.mock("./FollowupStatus", () => ({ FollowupStatus: () => null }));
+vi.mock("@/components/ConfirmModal", () => ({
+  default: ({
+    isOpen,
+    onConfirm,
+    onClose,
+  }: {
+    isOpen: boolean;
+    onConfirm: () => void;
+    onClose: () => void;
+  }) =>
+    isOpen ? (
+      <div role="alertdialog">
+        <button onClick={onConfirm}>Confirmar exclusão</button>
+        <button onClick={onClose}>Cancelar</button>
+      </div>
+    ) : null,
+}));
+const deal = {
+  id: "lead-1",
+  title: "Lead A",
+  boardId: "board",
+  contactId: "contact",
+  status: "stage",
+  value: 250,
+  priority: "medium",
+  probability: 10,
+  createdAt: "2026-09-01T00:00:00Z",
+  tags: [],
+  items: [],
+  customFields: {},
+  ownerId: "owner-1",
+} as unknown as Deal;
+const contact = {
+  id: "contact",
+  name: "Maria",
+  phone: "1234",
+  status: "ACTIVE",
+} as Contact;
+function setup(current = deal) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const wrapper = ({ children }: { children: React.ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  return {
+    client,
+    wrapper,
+    ...render(
+      <LeadPropertiesPanel key={current.id} deal={current} contact={contact} />,
+      { wrapper },
+    ),
+  };
+}
+beforeEach(() => {
+  mocks.edit = true;
+  mocks.move = true;
+  mocks.remove = true;
+  mocks.org = "org-1";
+  for (const mock of [
+    mocks.updateDeal,
+    mocks.updateContact,
+    mocks.addItemToDeal,
+    mocks.updateItemInDeal,
+    mocks.removeItemFromDeal,
+    mocks.deleteDeal,
+    mocks.addTag,
+    mocks.addToast,
+  ]) {
+    mock.mockReset();
+    mock.mockResolvedValue(undefined);
+  }
+  mocks.addItemToDeal.mockResolvedValue({ id: "item" });
+});
+
+describe("LeadPropertiesPanel", () => {
+  it("opens Negócio and Contato, collapses the other independent sections, and never saves on expansion", () => {
+    setup();
+    expect(screen.getByRole("button", { name: /Negócio/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: /Contato/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    for (const label of [
+      /Campos personalizados/,
+      /Produtos/,
+      /UTMs/,
+      /Detalhes/,
+    ])
+      expect(screen.getByRole("button", { name: label })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+    fireEvent.click(
+      screen.getByRole("button", { name: /Campos personalizados/ }),
+    );
+    expect(
+      screen.getByRole("button", { name: /Campos personalizados/ }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: /Negócio/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(mocks.updateDeal).not.toHaveBeenCalled();
+    expect(screen.getByText("Origem")).toBeInTheDocument();
+    expect(screen.queryByText("Segredo")).toBeNull();
+  });
+  it("validates title and keeps its draft when canonical save rejects", async () => {
+    mocks.updateDeal.mockRejectedValueOnce(new Error("Falha no banco"));
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "Lead A" }));
+    const input = screen.getByRole("textbox", { name: "Nome do negócio" });
+    fireEvent.change(input, { target: { value: "  " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(mocks.updateDeal).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "Lead Novo" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("Falha no banco"),
+    );
+    expect(input).toHaveValue("Lead Novo");
+    expect(mocks.updateDeal).toHaveBeenCalledWith(
+      "lead-1",
+      { title: "Lead Novo" },
+      { throwOnError: true },
+    );
+  });
+  it("validates the value and retains the description on failed save", async () => {
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: /R\$\s*250/ }));
+    const value = screen.getByRole("textbox", { name: "Valor do negócio" });
+    fireEvent.change(value, { target: { value: "-1" } });
+    fireEvent.keyDown(value, { key: "Enter" });
+    expect(mocks.updateDeal).not.toHaveBeenCalled();
+    fireEvent.change(value, { target: { value: "300" } });
+    fireEvent.keyDown(value, { key: "Enter" });
+    await waitFor(() =>
+      expect(mocks.updateDeal).toHaveBeenCalledWith(
+        "lead-1",
+        { value: 300 },
+        { throwOnError: true },
+      ),
+    );
+    mocks.updateDeal.mockRejectedValueOnce(new Error("Descrição falhou"));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Adicionar descrição..." }),
+    );
+    const description = screen.getByRole("textbox", {
+      name: "Descrição do lead",
+    });
+    fireEvent.change(description, { target: { value: "Rascunho importante" } });
+    fireEvent.blur(description);
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("Descrição falhou"),
+    );
+    expect(description).toHaveValue("Rascunho importante");
+  });
+  it("calls canonical product and owner mutations and renders each property once", async () => {
+    setup();
+    expect(screen.getAllByText("Prioridade")).toHaveLength(1);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Responsável pelo lead" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Sem responsável" }));
+    await waitFor(() =>
+      expect(mocks.updateDeal).toHaveBeenCalledWith(
+        "lead-1",
+        { ownerId: "" },
+        { throwOnError: true },
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Produtos/ }));
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Produto ou serviço" }),
+      { target: { value: "product" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Adicionar" }));
+    await waitFor(() =>
+      expect(mocks.addItemToDeal).toHaveBeenCalledWith(
+        "lead-1",
+        expect.objectContaining({
+          productId: "product",
+          price: 100,
+          quantity: 1,
+        }),
+      ),
+    );
+  });
+  it("is read-only without edit/delete permissions and confirms deletion when allowed", async () => {
+    mocks.edit = false;
+    mocks.remove = false;
+    const view = setup();
+    expect(screen.getByRole("button", { name: "Lead A" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /R\$\s*250/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Opções do negócio" }));
+    expect(
+      screen.getByRole("button", { name: "Excluir negócio" }),
+    ).toBeDisabled();
+    view.unmount();
+    mocks.edit = true;
+    mocks.remove = true;
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "Opções do negócio" }));
+    fireEvent.click(screen.getByRole("button", { name: "Excluir negócio" }));
+    expect(mocks.deleteDeal).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar exclusão" }));
+    await waitFor(() =>
+      expect(mocks.deleteDeal).toHaveBeenCalledWith("lead-1", {
+        throwOnError: true,
+      }),
+    );
+  });
+  it("does not clear a new lead editor when an old save settles", async () => {
+    let finish!: () => void;
+    mocks.updateDeal.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { rerender } = setup();
+    fireEvent.click(screen.getByRole("button", { name: "Lead A" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Nome do negócio" }), {
+      target: { value: "A editado" },
+    });
+    fireEvent.keyDown(
+      screen.getByRole("textbox", { name: "Nome do negócio" }),
+      { key: "Enter" },
+    );
+    rerender(
+      <LeadPropertiesPanel
+        key="lead-2"
+        deal={{ ...deal, id: "lead-2", title: "Lead B" }}
+        contact={contact}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Lead B" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Nome do negócio" }), {
+      target: { value: "B editado" },
+    });
+    await act(async () => finish());
+    expect(
+      screen.getByRole("textbox", { name: "Nome do negócio" }),
+    ).toHaveValue("B editado");
+    expect(mocks.updateDeal).toHaveBeenCalledTimes(1);
+  });
+  it("does not show an old lead failure on a newly selected lead", async () => {
+    let reject!: (error: Error) => void;
+    mocks.updateDeal.mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, fail) => {
+          reject = fail;
+        }),
+    );
+    const { rerender } = setup();
+    fireEvent.click(screen.getByRole("button", { name: "Lead A" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Nome do negócio" }), {
+      target: { value: "A editado" },
+    });
+    fireEvent.keyDown(
+      screen.getByRole("textbox", { name: "Nome do negócio" }),
+      { key: "Enter" },
+    );
+    rerender(
+      <LeadPropertiesPanel
+        key="lead-2"
+        deal={{ ...deal, id: "lead-2", title: "Lead B" }}
+        contact={contact}
+      />,
+    );
+    await act(async () => reject(new Error("A falhou")));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("button", { name: "Lead B" })).toBeInTheDocument();
+  });
+  it("cancels an editor with Escape without saving or closing the panel", () => {
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "Lead A" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Nome do negócio" }), {
+      target: { value: "Cancelar" },
+    });
+    fireEvent.keyDown(
+      screen.getByRole("textbox", { name: "Nome do negócio" }),
+      { key: "Escape" },
+    );
+    expect(screen.getByRole("button", { name: "Lead A" })).toBeInTheDocument();
+    expect(mocks.updateDeal).not.toHaveBeenCalled();
+  });
+  it("keeps custom-field editor open on validation and server failure", async () => {
+    setup();
+    fireEvent.click(
+      screen.getByRole("button", { name: /Campos personalizados/ }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Análise/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Editar Pontuação" }));
+    const score = screen.getByRole("textbox", { name: "Pontuação" });
+    fireEvent.change(score, { target: { value: "abc" } });
+    fireEvent.keyDown(score, { key: "Enter" });
+    expect(mocks.updateDeal).not.toHaveBeenCalled();
+    mocks.updateDeal.mockRejectedValueOnce(new Error("Campo não salvo"));
+    fireEvent.change(score, { target: { value: "15" } });
+    fireEvent.keyDown(score, { key: "Enter" });
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("Campo não salvo"),
+    );
+    expect(score).toHaveValue("15");
+    expect(mocks.updateDeal).toHaveBeenCalledWith(
+      "lead-1",
+      { customFields: { score: 15 } },
+      { throwOnError: true },
+    );
+  });
+  it("invalidates the shared paginated history after a successful property save", async () => {
+    const { client } = setup();
+    const key = ["leadHistory", "org-1", "lead-1"];
+    client.setQueryData(key, { pages: [], pageParams: [] });
+    fireEvent.click(screen.getByRole("button", { name: "Lead A" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Nome do negócio" }), {
+      target: { value: "Novo nome" },
+    });
+    fireEvent.keyDown(
+      screen.getByRole("textbox", { name: "Nome do negócio" }),
+      { key: "Enter" },
+    );
+    await waitFor(() =>
+      expect(client.getQueryState(key)?.isInvalidated).toBe(true),
+    );
+  });
+  it("retains catalog selection and edited item on canonical failure", async () => {
+    mocks.addItemToDeal.mockResolvedValueOnce(null);
+    const current = {
+      ...deal,
+      items: [
+        {
+          id: "item-1",
+          productId: "product",
+          name: "Serviço",
+          price: 100,
+          quantity: 2,
+        },
+      ],
+    } as Deal;
+    setup(current);
+    fireEvent.click(screen.getByRole("button", { name: /Produtos/ }));
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Produto ou serviço" }),
+      { target: { value: "product" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Adicionar" }));
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Não foi possível salvar",
+      ),
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Produto ou serviço" }),
+    ).toHaveValue("product");
+    mocks.updateItemInDeal.mockRejectedValueOnce(new Error("Preço não salvo"));
+    fireEvent.click(screen.getByRole("button", { name: /2 ×/ }));
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Preço de Serviço neste lead" }),
+      { target: { value: "125,50" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Salvar Serviço" }));
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("Preço não salvo"),
+    );
+    expect(
+      screen.getByRole("textbox", { name: "Preço de Serviço neste lead" }),
+    ).toHaveValue("125,50");
+    expect(mocks.updateItemInDeal).toHaveBeenCalledWith(
+      "lead-1",
+      "item-1",
+      { price: 125.5, quantity: 2 },
+      { throwOnError: true },
+    );
+  });
+  it("keeps a revised product price while its earlier add is pending", async () => {
+    let finish!: (value: unknown) => void;
+    mocks.addItemToDeal.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: /Produtos/ }));
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Produto ou serviço" }),
+      { target: { value: "product" } },
+    );
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Preço neste lead" }),
+      { target: { value: "100" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Adicionar" }));
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Preço neste lead" }),
+      { target: { value: "130" } },
+    );
+    await act(async () => finish({ id: "saved" }));
+    expect(
+      screen.getByRole("textbox", { name: "Preço neste lead" }),
+    ).toHaveValue("130");
+  });
+  it("keeps deletion confirmation visible on failure", async () => {
+    mocks.deleteDeal.mockRejectedValueOnce(
+      new Error("Não foi possível excluir"),
+    );
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "Opções do negócio" }));
+    fireEvent.click(screen.getByRole("button", { name: "Excluir negócio" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar exclusão" }));
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Não foi possível excluir",
+      ),
+    );
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    expect(mocks.addToast).not.toHaveBeenCalledWith(
+      "Negócio excluído com sucesso",
+      "success",
+    );
+  });
+});

@@ -10,6 +10,7 @@ import { Contact, Company, PaginatedResponse } from '@/types';
 import { contactsService, companiesService } from '@/lib/supabase';
 import { useAuth } from '../AuthContext';
 import { queryKeys } from '@/lib/query';
+import { readTabOrg } from '@/lib/tabOrg';
 import {
   useContacts as useTanStackContacts,
   useCompanies as useTanStackCompanies,
@@ -21,7 +22,7 @@ interface ContactsContextType {
   contactsLoading: boolean;
   contactsError: string | null;
   addContact: (contact: Omit<Contact, 'id' | 'createdAt'>) => Promise<Contact | null>;
-  updateContact: (id: string, updates: Partial<Contact>) => Promise<void>;
+  updateContact: (id: string, updates: Partial<Contact>, options?: { throwOnError?: boolean }) => Promise<void>;
   deleteContact: (id: string) => Promise<void>;
 
   // Companies
@@ -109,7 +110,8 @@ export const ContactsProvider: React.FC<{ children: ReactNode }> = ({ children }
     [profile, queryClient]
   );
 
-  const updateContact = useCallback(async (id: string, updates: Partial<Contact>) => {
+  const updateContact = useCallback(async (id: string, updates: Partial<Contact>, options?: { throwOnError?: boolean }) => {
+    const orgAtStart = readTabOrg()?.id;
     // Otimista: `contacts` deste provider vem do cache do TanStack Query, e o
     // Kanban deriva estado dele (ex.: devolver lead dos Inativos reativa o
     // contato) — a UI precisa refletir na hora, sem esperar o refetch.
@@ -136,19 +138,20 @@ export const ContactsProvider: React.FC<{ children: ReactNode }> = ({ children }
     // Cancela refetches em voo pra eles não sobrescreverem o patch otimista.
     await queryClient.cancelQueries({ queryKey: queryKeys.contacts.all });
 
-    const { error } = await contactsService.update(id, updates);
-
-    if (error) {
-      console.error('Erro ao atualizar contato:', error.message);
-      // Desfaz o update otimista — restaura os caches como estavam.
-      for (const [key, data] of previous) {
-        queryClient.setQueryData(key, data);
+    try {
+      const { error } = await contactsService.update(id, updates);
+      if (error) throw error;
+    } catch (error) {
+      console.error('Erro ao atualizar contato:', error);
+      if (readTabOrg()?.id === orgAtStart) {
+        for (const [key, data] of previous) queryClient.setQueryData(key, data);
       }
+      if (options?.throwOnError) throw error;
       return;
     }
 
     // Invalida cache para TanStack Query atualizar
-    await queryClient.invalidateQueries({ queryKey: queryKeys.contacts.all });
+    if (readTabOrg()?.id === orgAtStart) await queryClient.invalidateQueries({ queryKey: queryKeys.contacts.all });
   }, [queryClient]);
 
   const deleteContact = useCallback(async (id: string) => {

@@ -12,6 +12,7 @@ import { useAuth } from '../AuthContext';
 import { saveDeal } from '@/lib/query/dealCache';
 import { useToast } from '@/context/ToastContext';
 import { queryKeys, DEALS_VIEW_KEY } from '@/lib/query';
+import { readTabOrg } from '@/lib/tabOrg';
 import { useDealsView as useTanStackDealsQuery } from '@/lib/query/hooks/useDealsQuery';
 
 interface DealsContextType {
@@ -22,15 +23,15 @@ interface DealsContextType {
 
   // CRUD Operations
   addDeal: (deal: Omit<Deal, 'id' | 'createdAt'>) => Promise<Deal | null>;
-  updateDeal: (id: string, updates: Partial<Deal>) => Promise<void>;
+  updateDeal: (id: string, updates: Partial<Deal>, options?: { throwOnError?: boolean }) => Promise<void>;
   updateDealStatus: (id: string, newStatus: string, lossReason?: string) => Promise<void>;
-  deleteDeal: (id: string) => Promise<void>;
+  deleteDeal: (id: string, options?: { throwOnError?: boolean }) => Promise<void>;
 
   // Items
   addItemToDeal: (dealId: string, item: Omit<DealItem, 'id'>) => Promise<DealItem | null>;
   /** Preço/quantidade de um item já adicionado: mexe só no snapshot daquele lead */
-  updateItemInDeal: (dealId: string, itemId: string, updates: { price?: number; quantity?: number }) => Promise<void>;
-  removeItemFromDeal: (dealId: string, itemId: string) => Promise<void>;
+  updateItemInDeal: (dealId: string, itemId: string, updates: { price?: number; quantity?: number }, options?: { throwOnError?: boolean }) => Promise<void>;
+  removeItemFromDeal: (dealId: string, itemId: string, options?: { throwOnError?: boolean }) => Promise<void>;
 
   // Refresh
   refresh: () => Promise<void>;
@@ -92,11 +93,12 @@ export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     [profile, queryClient]
   );
 
-  const updateDeal = useCallback(async (id: string, updates: Partial<Deal>) => {
+  const updateDeal = useCallback(async (id: string, updates: Partial<Deal>, options?: { throwOnError?: boolean }) => {
     try {
       await saveDeal(queryClient, id, updates, (dealId, patch) => dealsService.update(dealId, patch));
     } catch (error) {
       addToast(error instanceof Error ? error.message : 'Não foi possível salvar o lead.', 'error');
+      if (options?.throwOnError) throw error;
     }
   }, [queryClient, addToast]);
 
@@ -115,23 +117,29 @@ export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     [updateDeal]
   );
 
-  const deleteDeal = useCallback(async (id: string) => {
+  const deleteDeal = useCallback(async (id: string, options?: { throwOnError?: boolean }) => {
+    const orgAtStart = readTabOrg()?.id;
+    const previousView = queryClient.getQueryData<DealView[]>(DEALS_VIEW_KEY);
     // Optimistic update - remove da UI imediatamente
     queryClient.setQueryData<DealView[]>(DEALS_VIEW_KEY, (old = []) =>
       old.filter(deal => deal.id !== id)
     );
 
-    const { error: deleteError } = await dealsService.delete(id);
-
-    if (deleteError) {
-      console.error('Erro ao deletar deal:', deleteError.message);
-      // Rollback: invalida para refetch em caso de erro
-      await queryClient.invalidateQueries({ queryKey: queryKeys.deals.all });
+    try {
+      const { error } = await dealsService.delete(id);
+      if (error) throw error;
+    } catch (error) {
+      console.error('Erro ao deletar deal:', error);
+      if (readTabOrg()?.id === orgAtStart) {
+        queryClient.setQueryData(DEALS_VIEW_KEY, previousView);
+        await queryClient.invalidateQueries({ queryKey: queryKeys.deals.all });
+      }
+      if (options?.throwOnError) throw error;
       return;
     }
 
     // Sucesso: atualiza stats do dashboard
-    await queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.stats });
+    if (readTabOrg()?.id === orgAtStart) await queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.stats });
   }, [queryClient]);
 
   // ============================================
@@ -139,6 +147,7 @@ export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // ============================================
   const addItemToDeal = useCallback(
     async (dealId: string, item: Omit<DealItem, 'id'>): Promise<DealItem | null> => {
+      const orgAtStart = readTabOrg()?.id;
       // Optimistic insert: UI atualiza instantaneamente.
       // Cache é a verdade; Realtime sincroniza entre abas (sem invalidateQueries).
       const tempId = `temp-item-${Date.now()}`;
@@ -164,16 +173,20 @@ export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         old ? withItem(old) : old
       );
 
-      const { data, error: addError } = await dealsService.addItem(dealId, item);
+      const { data, error: addError } = await dealsService.addItem(dealId, item).catch(error => ({ data: null, error: error instanceof Error ? error : new Error('Não foi possível adicionar item.') }));
 
       if (addError || !data) {
         console.error('Erro ao adicionar item:', addError?.message);
         // Rollback
-        queryClient.setQueryData(queryKeys.deals.lists(), previousLists);
-        queryClient.setQueryData(DEALS_VIEW_KEY, previousView);
-        queryClient.setQueryData(queryKeys.deals.detail(dealId), previousDetail);
+        if (readTabOrg()?.id === orgAtStart) {
+          queryClient.setQueryData(queryKeys.deals.lists(), previousLists);
+          queryClient.setQueryData(DEALS_VIEW_KEY, previousView);
+          queryClient.setQueryData(queryKeys.deals.detail(dealId), previousDetail);
+        }
         return null;
       }
+
+      if (readTabOrg()?.id !== orgAtStart) return data;
 
       // Troca o item temp pelo real (id do servidor).
       const swapTemp = <T extends Deal>(d: T): T => {
@@ -198,7 +211,8 @@ export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   );
 
   const updateItemInDeal = useCallback(
-    async (dealId: string, itemId: string, updates: { price?: number; quantity?: number }) => {
+    async (dealId: string, itemId: string, updates: { price?: number; quantity?: number }, options?: { throwOnError?: boolean }) => {
+      const orgAtStart = readTabOrg()?.id;
       // Optimistic update: UI atualiza instantaneamente; cache é a verdade.
       const previousLists = queryClient.getQueryData<Deal[]>(queryKeys.deals.lists());
       const previousView = queryClient.getQueryData<DealView[]>(DEALS_VIEW_KEY);
@@ -217,21 +231,25 @@ export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         old ? withUpdate(old) : old
       );
 
-      const { error: updateError } = await dealsService.updateItem(dealId, itemId, updates);
-
-      if (updateError) {
-        console.error('Erro ao alterar item:', updateError.message);
-        // Rollback
-        queryClient.setQueryData(queryKeys.deals.lists(), previousLists);
-        queryClient.setQueryData(DEALS_VIEW_KEY, previousView);
-        queryClient.setQueryData(queryKeys.deals.detail(dealId), previousDetail);
+      try {
+        const { error } = await dealsService.updateItem(dealId, itemId, updates);
+        if (error) throw error;
+      } catch (error) {
+        console.error('Erro ao alterar item:', error);
+        if (readTabOrg()?.id === orgAtStart) {
+          queryClient.setQueryData(queryKeys.deals.lists(), previousLists);
+          queryClient.setQueryData(DEALS_VIEW_KEY, previousView);
+          queryClient.setQueryData(queryKeys.deals.detail(dealId), previousDetail);
+        }
+        if (options?.throwOnError) throw error;
       }
       // Sucesso: Realtime UPDATE echo confirma o que o cache já mostra.
     },
     [queryClient]
   );
 
-  const removeItemFromDeal = useCallback(async (dealId: string, itemId: string) => {
+  const removeItemFromDeal = useCallback(async (dealId: string, itemId: string, options?: { throwOnError?: boolean }) => {
+    const orgAtStart = readTabOrg()?.id;
     // Optimistic remove: UI atualiza instantaneamente.
     const previousLists = queryClient.getQueryData<Deal[]>(queryKeys.deals.lists());
     const previousView = queryClient.getQueryData<DealView[]>(DEALS_VIEW_KEY);
@@ -250,14 +268,17 @@ export const DealsProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       old ? withoutItem(old) : old
     );
 
-    const { error: removeError } = await dealsService.removeItem(dealId, itemId);
-
-    if (removeError) {
-      console.error('Erro ao remover item:', removeError.message);
-      // Rollback
-      queryClient.setQueryData(queryKeys.deals.lists(), previousLists);
-      queryClient.setQueryData(DEALS_VIEW_KEY, previousView);
-      queryClient.setQueryData(queryKeys.deals.detail(dealId), previousDetail);
+    try {
+      const { error } = await dealsService.removeItem(dealId, itemId);
+      if (error) throw error;
+    } catch (error) {
+      console.error('Erro ao remover item:', error);
+      if (readTabOrg()?.id === orgAtStart) {
+        queryClient.setQueryData(queryKeys.deals.lists(), previousLists);
+        queryClient.setQueryData(DEALS_VIEW_KEY, previousView);
+        queryClient.setQueryData(queryKeys.deals.detail(dealId), previousDetail);
+      }
+      if (options?.throwOnError) throw error;
     }
     // Sucesso: Realtime DELETE echo é no-op (item já removido do cache).
   }, [queryClient]);

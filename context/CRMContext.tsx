@@ -114,13 +114,13 @@ interface CRMContextType {
 
   // Deals
   addDeal: (deal: Omit<Deal, 'id' | 'createdAt'>, relatedData?: { contact?: Partial<Contact>; companyName?: string }) => Promise<Deal | null>;
-  updateDeal: (id: string, updates: Partial<Deal>) => Promise<void>;
+  updateDeal: (id: string, updates: Partial<Deal>, options?: { throwOnError?: boolean }) => Promise<void>;
   // moveDeal removido - use useMoveDeal de @/lib/query/hooks
-  deleteDeal: (id: string) => Promise<void>;
+  deleteDeal: (id: string, options?: { throwOnError?: boolean }) => Promise<void>;
   addItemToDeal: (dealId: string, item: Omit<DealItem, 'id'>) => Promise<DealItem | null>;
   /** Preço/quantidade de um item já adicionado: mexe só no snapshot daquele lead */
-  updateItemInDeal: (dealId: string, itemId: string, updates: { price?: number; quantity?: number }) => Promise<void>;
-  removeItemFromDeal: (dealId: string, itemId: string) => Promise<void>;
+  updateItemInDeal: (dealId: string, itemId: string, updates: { price?: number; quantity?: number }, options?: { throwOnError?: boolean }) => Promise<void>;
+  removeItemFromDeal: (dealId: string, itemId: string, options?: { throwOnError?: boolean }) => Promise<void>;
 
   // Activities
   /** Lista de atividades (tarefas, reuniões) */
@@ -148,7 +148,7 @@ interface CRMContextType {
 
   // Contacts
   addContact: (contact: Omit<Contact, 'id' | 'createdAt'>) => Promise<Contact | null>;
-  updateContact: (id: string, updates: Partial<Contact>) => Promise<void>;
+  updateContact: (id: string, updates: Partial<Contact>, options?: { throwOnError?: boolean }) => Promise<void>;
   deleteContact: (id: string) => Promise<void>;
   updateContactStage: (id: string, stage: string) => Promise<void>;
   convertContactToDeal: (contactId: string) => Promise<void>;
