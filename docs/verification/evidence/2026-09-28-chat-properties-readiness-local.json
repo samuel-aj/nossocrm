@@ -1,0 +1,52 @@
+{
+  "base": "http://localhost:3219",
+  "caseName": "maks",
+  "viewport": {
+    "width": 1600,
+    "height": 1000
+  },
+  "windowMs": 10000,
+  "measuredAt": "2026-09-29T02:27:14.247Z",
+  "release": "f12edfd",
+  "cases": {
+    "cold": {
+      "runs": 10,
+      "propertiesReadyMs": {
+        "observations": 10,
+        "p50": 118,
+        "p90": 803,
+        "min": 101,
+        "max": 836
+      },
+      "historyResponseMs": {
+        "observations": 10,
+        "p50": 656,
+        "p90": 1172,
+        "min": 633,
+        "max": 1196
+      }
+    },
+    "warm": {
+      "runs": 10,
+      "propertiesReadyMs": {
+        "observations": 10,
+        "p50": 47,
+        "p90": 55,
+        "min": 42,
+        "max": 58
+      },
+      "historyResponseMs": {
+        "observations": 3,
+        "p50": 597,
+        "p90": 638,
+        "min": 467,
+        "max": 638
+      }
+    }
+  },
+  "purpose": "Separate property/API readiness instrumentation; primary timing comparison uses the original unchanged measurement helper.",
+  "limitations": [
+    "History time measures completed HTTP response, not painted note pixels. Warm history observations exist only when periodic refresh falls in the window.",
+    "Readiness observer matches selected lead title; this added observer is excluded from primary baseline/candidate comparison."
+  ]
+}

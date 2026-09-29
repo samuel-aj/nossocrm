@@ -1,0 +1,47 @@
+{
+  "method": "Native click capture to target message and composer present with layout dimensions in requestAnimationFrame; excludes Playwright locator/IPC time; not a pixel/GPU paint measurement.",
+  "runs": [
+    {
+      "base": "http://localhost:3218",
+      "release": "3022502",
+      "caseName": "cintia",
+      "values": [
+        22.799999952316284,
+        20.799999952316284,
+        20,
+        21.700000047683716,
+        21.300000071525574,
+        20.100000023841858,
+        19.300000071525574,
+        20.199999928474426,
+        21.100000023841858,
+        20.59999990463257
+      ],
+      "p50Ms": 20.59999990463257,
+      "p90Ms": 21.700000047683716,
+      "minMs": 19.300000071525574,
+      "maxMs": 22.799999952316284
+    },
+    {
+      "base": "http://localhost:3219",
+      "release": "8323f26",
+      "caseName": "cintia",
+      "values": [
+        27,
+        24.200000047683716,
+        24.5,
+        22.700000047683716,
+        26.100000023841858,
+        24.199999928474426,
+        30.100000023841858,
+        27.299999952316284,
+        26,
+        24
+      ],
+      "p50Ms": 24.5,
+      "p90Ms": 27.299999952316284,
+      "minMs": 22.700000047683716,
+      "maxMs": 30.100000023841858
+    }
+  ]
+}

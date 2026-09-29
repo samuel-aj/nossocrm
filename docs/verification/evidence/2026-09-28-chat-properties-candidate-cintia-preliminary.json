@@ -1,0 +1,168 @@
+{
+  "base": "http://localhost:3219",
+  "caseName": "cintia",
+  "viewport": {
+    "width": 1600,
+    "height": 1000
+  },
+  "windowMs": 10000,
+  "measuredAt": "2026-09-29T02:17:20.296Z",
+  "release": "6b77048",
+  "cases": {
+    "cold": {
+      "runs": 10,
+      "usableMs": {
+        "p50": 1406,
+        "p90": 1427,
+        "min": 1384,
+        "max": 1520
+      },
+      "dataBytes": {
+        "p50": 135008,
+        "p90": 135554,
+        "min": 133538,
+        "max": 138436
+      },
+      "dataRequests": {
+        "p50": 47,
+        "p90": 47,
+        "min": 46,
+        "max": 53
+      },
+      "resourceBytes": {
+        "p50": 25995,
+        "p90": 28060,
+        "min": 25992,
+        "max": 32105
+      },
+      "allHttpRequests": {
+        "p50": 62,
+        "p90": 64,
+        "min": 61,
+        "max": 72
+      },
+      "historyRequests": {
+        "p50": 1,
+        "p90": 1,
+        "min": 1,
+        "max": 1
+      },
+      "historyBytes": {
+        "p50": 1865,
+        "p90": 1865,
+        "min": 1865,
+        "max": 1865
+      },
+      "propertiesReadyMs": {
+        "observations": 10,
+        "p50": 109,
+        "p90": 124,
+        "min": 93,
+        "max": 220
+      },
+      "historyResponseMs": {
+        "observations": 10,
+        "p50": 657,
+        "p90": 688,
+        "min": 537,
+        "max": 856
+      },
+      "apiRequests": {
+        "p50": 17,
+        "p90": 17,
+        "min": 17,
+        "max": 17
+      },
+      "apiBytes": {
+        "p50": 110135,
+        "p90": 110137,
+        "min": 110132,
+        "max": 110139
+      },
+      "navigationFetchRequests": {
+        "p50": 33,
+        "p90": 33,
+        "min": 32,
+        "max": 39
+      },
+      "navigationFetchBytes": {
+        "p50": 24873,
+        "p90": 25418,
+        "min": 23399,
+        "max": 28301
+      }
+    },
+    "warm": {
+      "runs": 10,
+      "usableMs": {
+        "p50": 67,
+        "p90": 73,
+        "min": 56,
+        "max": 75
+      },
+      "dataBytes": {
+        "p50": 101250,
+        "p90": 175726,
+        "min": 93108,
+        "max": 182006
+      },
+      "dataRequests": {
+        "p50": 10,
+        "p90": 13,
+        "min": 8,
+        "max": 14
+      },
+      "resourceBytes": {
+        "p50": 10002,
+        "p90": 10004,
+        "min": 10000,
+        "max": 10005
+      },
+      "allHttpRequests": {
+        "p50": 15,
+        "p90": 18,
+        "min": 12,
+        "max": 18
+      },
+      "historyRequests": {
+        "p50": 0,
+        "p90": 1,
+        "min": 0,
+        "max": 1
+      },
+      "historyBytes": {
+        "p50": 0,
+        "p90": 1865,
+        "min": 0,
+        "max": 1865
+      },
+      "apiRequests": {
+        "p50": 10,
+        "p90": 13,
+        "min": 8,
+        "max": 14
+      },
+      "apiBytes": {
+        "p50": 101250,
+        "p90": 175726,
+        "min": 93108,
+        "max": 182006
+      },
+      "navigationFetchRequests": {
+        "p50": 0,
+        "p90": 0,
+        "min": 0,
+        "max": 0
+      },
+      "navigationFetchBytes": {
+        "p50": 0,
+        "p90": 0,
+        "min": 0,
+        "max": 0
+      }
+    }
+  },
+  "limitations": [
+    "Preliminary warm properties/readiness submetrics discarded: initial observer matched an already mounted panel before target identity; main usable-time/network measurements unchanged. Final helper matches selected lead title and exact history path."
+  ]
+}

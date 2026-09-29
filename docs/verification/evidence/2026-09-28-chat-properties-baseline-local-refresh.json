@@ -1,0 +1,103 @@
+{
+  "base": "http://localhost:3218",
+  "caseName": "maks",
+  "viewport": {
+    "width": 1600,
+    "height": 1000
+  },
+  "windowMs": 10000,
+  "measuredAt": "2026-09-29T01:45:44.579Z",
+  "release": "3022502",
+  "cases": {
+    "cold": {
+      "runs": 10,
+      "usableMs": {
+        "p50": 2380,
+        "p90": 2507,
+        "min": 1854,
+        "max": 5941
+      },
+      "dataBytes": {
+        "p50": 198186,
+        "p90": 210461,
+        "min": 193573,
+        "max": 210814
+      },
+      "dataRequests": {
+        "p50": 43,
+        "p90": 45,
+        "min": 42,
+        "max": 45
+      },
+      "resourceBytes": {
+        "p50": 0,
+        "p90": 0,
+        "min": 0,
+        "max": 0
+      },
+      "allHttpRequests": {
+        "p50": 45,
+        "p90": 47,
+        "min": 44,
+        "max": 47
+      },
+      "historyRequests": {
+        "p50": 0,
+        "p90": 0,
+        "min": 0,
+        "max": 0
+      },
+      "historyBytes": {
+        "p50": 0,
+        "p90": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "warm": {
+      "runs": 10,
+      "usableMs": {
+        "p50": 47,
+        "p90": 49,
+        "min": 25,
+        "max": 53
+      },
+      "dataBytes": {
+        "p50": 19739,
+        "p90": 93553,
+        "min": 10395,
+        "max": 101697
+      },
+      "dataRequests": {
+        "p50": 8,
+        "p90": 13,
+        "min": 6,
+        "max": 13
+      },
+      "resourceBytes": {
+        "p50": 0,
+        "p90": 0,
+        "min": 0,
+        "max": 0
+      },
+      "allHttpRequests": {
+        "p50": 8,
+        "p90": 13,
+        "min": 6,
+        "max": 13
+      },
+      "historyRequests": {
+        "p50": 0,
+        "p90": 0,
+        "min": 0,
+        "max": 0
+      },
+      "historyBytes": {
+        "p50": 0,
+        "p90": 0,
+        "min": 0,
+        "max": 0
+      }
+    }
+  }
+}

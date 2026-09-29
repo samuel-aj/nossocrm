@@ -1,0 +1,120 @@
+{
+  "base": "http://localhost:3219",
+  "checkedAt": "2026-09-29T02:40:54.920Z",
+  "checks": [
+    "selection collapses main navigation",
+    "desktop properties initial sections",
+    "aside toggle preserves message draft and input node",
+    "loaded section toggles make no property/history reads",
+    "note/message mode and aside preserve separate drafts",
+    "notebook retains minimum conversation width",
+    "mobile drawer closes with Escape and returns focus without draft loss",
+    "simulated property write failure preserves editor text",
+    "simulated note write failure retains draft and never sends WhatsApp",
+    "simulated business writes intercepted; no WhatsApp attempt or browser errors",
+    "390px drawer fully within viewport and last section is above bottom navigation / receives pointer hit"
+  ],
+  "blockedWrites": [
+    {
+      "path": "/rest/v1/deals",
+      "method": "PATCH"
+    },
+    {
+      "path": "/rest/v1/activities",
+      "method": "POST"
+    }
+  ],
+  "errors": [],
+  "bottomHit": {
+    "y": 675,
+    "height": 44,
+    "hittable": true,
+    "hitText": "Detalhes",
+    "hitTag": "BUTTON"
+  },
+  "geometry": {
+    "window": {
+      "width": 390,
+      "scrollX": 0
+    },
+    "main": {
+      "x": 0,
+      "y": 64,
+      "width": 390,
+      "height": 780,
+      "cls": "flex-1 overflow-auto [scrollbar-gutter:stable] p-6 pb-[calc(1.5rem+var(--app-bottom-nav-height,0px)+var(--app-safe-area-bottom,0px))] relative scroll-smooth",
+      "scrollLeft": 0,
+      "scrollWidth": 390,
+      "clientWidth": 390,
+      "right": "0px",
+      "position": "relative",
+      "transform": "none"
+    },
+    "drawer": {
+      "x": 30,
+      "y": 64,
+      "width": 360,
+      "height": 724,
+      "cls": "block min-h-0 [&>[data-focus-trap-fallback]]:h-full absolute top-0 bottom-[calc(var(--app-bottom-nav-height,0px)+var(--app-safe-area-bottom,0px))] right-0 z-30 w-[min(360px,100%)] shadow-2xl",
+      "scrollLeft": 0,
+      "scrollWidth": 360,
+      "clientWidth": 360,
+      "right": "0px",
+      "position": "absolute",
+      "transform": "none"
+    },
+    "parent": {
+      "x": 0,
+      "y": 64,
+      "width": 390,
+      "height": 780,
+      "cls": "absolute inset-0 flex bg-white dark:bg-dark-card overflow-clip",
+      "scrollLeft": 0,
+      "scrollWidth": 390,
+      "clientWidth": 390,
+      "right": "0px",
+      "position": "absolute",
+      "transform": "none"
+    },
+    "grandparent": {
+      "x": 0,
+      "y": 64,
+      "width": 390,
+      "height": 780,
+      "cls": "flex-1 overflow-auto [scrollbar-gutter:stable] p-6 pb-[calc(1.5rem+var(--app-bottom-nav-height,0px)+var(--app-safe-area-bottom,0px))] relative scroll-smooth",
+      "scrollLeft": 0,
+      "scrollWidth": 390,
+      "clientWidth": 390,
+      "right": "0px",
+      "position": "relative",
+      "transform": "none"
+    },
+    "trap": {
+      "x": 30,
+      "y": 64,
+      "width": 360,
+      "height": 724,
+      "cls": "",
+      "scrollLeft": 0,
+      "scrollWidth": 360,
+      "clientWidth": 360,
+      "right": "auto",
+      "position": "static",
+      "transform": "none"
+    },
+    "panel": {
+      "x": 31,
+      "y": 64,
+      "width": 359,
+      "height": 724,
+      "cls": "flex w-full max-w-full min-w-0 h-full min-h-0 flex-col bg-slate-50/70 dark:bg-slate-900/50 text-slate-900 dark:text-white",
+      "scrollLeft": 0,
+      "scrollWidth": 359,
+      "clientWidth": 359,
+      "right": "auto",
+      "position": "static",
+      "transform": "none"
+    }
+  },
+  "release": "8323f26"
+}

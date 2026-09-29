@@ -1,0 +1,34 @@
+{
+  "base": "http://localhost:3219",
+  "checkedAt": "2026-09-29T02:26:38.868Z",
+  "checks": [
+    "Board900/768 preserves480px conversation, left drawer geometry, Escape focus and same draft/input",
+    "Wide board retains same chat and accessible lead dialog name",
+    "Cross-funnel approved title and De/Para/lead; browse and cancel write nothing"
+  ],
+  "geometry": [
+    {
+      "width": 900,
+      "chatWidth": 818,
+      "panel": {
+        "x": 81,
+        "y": 1,
+        "width": 360,
+        "height": 898
+      }
+    },
+    {
+      "width": 768,
+      "chatWidth": 686,
+      "panel": {
+        "x": 81,
+        "y": 1,
+        "width": 360,
+        "height": 898
+      }
+    }
+  ],
+  "writes": [],
+  "errors": [],
+  "release": "f12edfd"
+}

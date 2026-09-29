@@ -1,0 +1,17 @@
+{
+  "base": "http://localhost:3219",
+  "checkedAt": "2026-09-29T02:16:50.809Z",
+  "checks": [
+    "Original Maicon internal note visible in Chats",
+    "Same note and attribution visible in board card",
+    "Opening board reuses valid selected lead history cache"
+  ],
+  "writes": [],
+  "errors": [],
+  "historyReads": {
+    "chats": 1,
+    "afterBoard": 1
+  },
+  "release": "6b77048",
+  "phase": "preliminary; final layout corrections pending"
+}

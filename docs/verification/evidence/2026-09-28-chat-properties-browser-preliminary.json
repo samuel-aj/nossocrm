@@ -1,0 +1,77 @@
+{
+  "base": "http://localhost:3219",
+  "checkedAt": "2026-09-29T02:15:55.692Z",
+  "checks": [
+    "selection collapses main navigation",
+    "desktop properties initial sections",
+    "aside toggle preserves message draft and input node",
+    "loaded section toggles make no property/history reads",
+    "note/message mode and aside preserve separate drafts",
+    "notebook retains minimum conversation width",
+    "mobile drawer closes with Escape and returns focus without draft loss",
+    "simulated property write failure preserves editor text",
+    "simulated note write failure retains draft and never sends WhatsApp",
+    "simulated business writes intercepted; no WhatsApp attempt or browser errors"
+  ],
+  "blockedWrites": [
+    {
+      "path": "/rest/v1/deals",
+      "method": "PATCH"
+    },
+    {
+      "path": "/rest/v1/activities",
+      "method": "POST"
+    }
+  ],
+  "errors": [],
+  "geometry": {
+    "window": {
+      "width": 390,
+      "scrollX": 0
+    },
+    "main": {
+      "x": 0,
+      "y": 64,
+      "width": 390,
+      "height": 780,
+      "cls": "flex-1 overflow-auto [scrollbar-gutter:stable] p-6 pb-[calc(1.5rem+var(--app-bottom-nav-height,0px)+var(--app-safe-area-bottom,0px))] relative scroll-smooth"
+    },
+    "drawer": {
+      "x": -16,
+      "y": 64,
+      "width": 360,
+      "height": 780,
+      "cls": "block min-h-0 [&>[data-focus-trap-fallback]]:h-full absolute inset-y-0 right-0 z-30 w-[min(360px,100%)] shadow-2xl"
+    },
+    "parent": {
+      "x": 0,
+      "y": 64,
+      "width": 390,
+      "height": 780,
+      "cls": "absolute inset-0 flex bg-white dark:bg-dark-card overflow-hidden"
+    },
+    "grandparent": {
+      "x": 0,
+      "y": 64,
+      "width": 390,
+      "height": 780,
+      "cls": "flex-1 overflow-auto [scrollbar-gutter:stable] p-6 pb-[calc(1.5rem+var(--app-bottom-nav-height,0px)+var(--app-safe-area-bottom,0px))] relative scroll-smooth"
+    },
+    "trap": {
+      "x": -16,
+      "y": 64,
+      "width": 360,
+      "height": 780,
+      "cls": ""
+    },
+    "panel": {
+      "x": -15,
+      "y": 64,
+      "width": 359,
+      "height": 780,
+      "cls": "flex h-full min-h-0 flex-col bg-slate-50/70 dark:bg-slate-900/50 text-slate-900 dark:text-white"
+    }
+  },
+  "release": "6b77048",
+  "phase": "preliminary; final layout corrections pending"
+}

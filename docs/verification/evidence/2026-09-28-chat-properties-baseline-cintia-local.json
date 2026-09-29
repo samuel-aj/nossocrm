@@ -1,0 +1,67 @@
+{
+  "base": "http://localhost:3218",
+  "caseName": "cintia",
+  "release": "3022502",
+  "viewport": {
+    "width": 1600,
+    "height": 1000
+  },
+  "windowMs": 10000,
+  "measuredAt": "2026-09-28T22:13:58.100Z",
+  "cases": {
+    "cold": {
+      "runs": 10,
+      "usableMs": {
+        "p50": 2884,
+        "p90": 3379,
+        "min": 2850,
+        "max": 3387
+      },
+      "dataBytes": {
+        "p50": 319998,
+        "p90": 323728,
+        "min": 315236,
+        "max": 330309
+      },
+      "dataRequests": {
+        "p50": 44,
+        "p90": 47,
+        "min": 43,
+        "max": 50
+      },
+      "allRequests": {
+        "p50": 52,
+        "p90": 56,
+        "min": 50,
+        "max": 59
+      }
+    },
+    "warm": {
+      "runs": 10,
+      "usableMs": {
+        "p50": 56,
+        "p90": 63,
+        "min": 48,
+        "max": 71
+      },
+      "dataBytes": {
+        "p50": 92694,
+        "p90": 173407,
+        "min": 90259,
+        "max": 181584
+      },
+      "dataRequests": {
+        "p50": 8,
+        "p90": 12,
+        "min": 5,
+        "max": 13
+      },
+      "allRequests": {
+        "p50": 13,
+        "p90": 16,
+        "min": 9,
+        "max": 17
+      }
+    }
+  }
+}

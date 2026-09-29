@@ -1,0 +1,151 @@
+{
+  "base": "http://localhost:3219",
+  "caseName": "maks",
+  "viewport": {
+    "width": 1600,
+    "height": 1000
+  },
+  "windowMs": 10000,
+  "measuredAt": "2026-09-29T02:35:01.368Z",
+  "release": "de393b4",
+  "cases": {
+    "cold": {
+      "runs": 10,
+      "usableMs": {
+        "p50": 909,
+        "p90": 1417,
+        "min": 861,
+        "max": 1496
+      },
+      "dataBytes": {
+        "p50": 56904,
+        "p90": 64902,
+        "min": 54569,
+        "max": 68151
+      },
+      "dataRequests": {
+        "p50": 48,
+        "p90": 55,
+        "min": 45,
+        "max": 58
+      },
+      "resourceBytes": {
+        "p50": 15993,
+        "p90": 22103,
+        "min": 13995,
+        "max": 22103
+      },
+      "allHttpRequests": {
+        "p50": 59,
+        "p90": 69,
+        "min": 55,
+        "max": 72
+      },
+      "historyRequests": {
+        "p50": 1,
+        "p90": 1,
+        "min": 1,
+        "max": 1
+      },
+      "historyBytes": {
+        "p50": 3145,
+        "p90": 3145,
+        "min": 3145,
+        "max": 3145
+      },
+      "apiRequests": {
+        "p50": 18,
+        "p90": 19,
+        "min": 18,
+        "max": 19
+      },
+      "apiBytes": {
+        "p50": 31493,
+        "p90": 36064,
+        "min": 31490,
+        "max": 36067
+      },
+      "navigationFetchRequests": {
+        "p50": 33,
+        "p90": 39,
+        "min": 30,
+        "max": 42
+      },
+      "navigationFetchBytes": {
+        "p50": 25411,
+        "p90": 30061,
+        "min": 23079,
+        "max": 32087
+      }
+    },
+    "warm": {
+      "runs": 10,
+      "usableMs": {
+        "p50": 59,
+        "p90": 61,
+        "min": 35,
+        "max": 1337
+      },
+      "dataBytes": {
+        "p50": 21322,
+        "p90": 97084,
+        "min": 9298,
+        "max": 102071
+      },
+      "dataRequests": {
+        "p50": 10,
+        "p90": 13,
+        "min": 8,
+        "max": 14
+      },
+      "resourceBytes": {
+        "p50": 0,
+        "p90": 0,
+        "min": 0,
+        "max": 0
+      },
+      "allHttpRequests": {
+        "p50": 10,
+        "p90": 13,
+        "min": 8,
+        "max": 14
+      },
+      "historyRequests": {
+        "p50": 0,
+        "p90": 1,
+        "min": 0,
+        "max": 1
+      },
+      "historyBytes": {
+        "p50": 0,
+        "p90": 3145,
+        "min": 0,
+        "max": 3145
+      },
+      "apiRequests": {
+        "p50": 10,
+        "p90": 13,
+        "min": 8,
+        "max": 14
+      },
+      "apiBytes": {
+        "p50": 21323,
+        "p90": 98179,
+        "min": 13179,
+        "max": 102071
+      },
+      "navigationFetchRequests": {
+        "p50": 0,
+        "p90": 0,
+        "min": 0,
+        "max": 0
+      },
+      "navigationFetchBytes": {
+        "p50": 0,
+        "p90": 0,
+        "min": 0,
+        "max": 0
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "base": "http://localhost:3219",
+  "checkedAt": "2026-09-29T02:22:57.584Z",
+  "fixture": "Browser-only intercepted history; no database fixtures",
+  "checks": [
+    "Explicit second page retains anchor and renders60unique notes with2reads",
+    "Property toggle preserves timeline scroll"
+  ],
+  "historyReads": [
+    "first",
+    "older"
+  ],
+  "errors": [],
+  "anchor": {
+    "beforeY": 386,
+    "afterY": 386
+  },
+  "toggle": {
+    "before": 2436,
+    "after": 2436
+  },
+  "release": "6b77048"
+}
