@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeAll, describe, it, expect, vi } from 'vitest';
 import { NativeSelect } from './NativeSelect';
@@ -159,7 +159,42 @@ describe('NativeSelect', () => {
     expect(screen.getByTestId('touched')).toHaveTextContent('false');
     await userEvent.tab();
     expect(screen.getByRole('button', { name: 'Próximo' })).toHaveFocus();
-    expect(screen.getByTestId('touched')).toHaveTextContent('true');
+    await waitFor(() => expect(screen.getByTestId('touched')).toHaveTextContent('true'));
+  });
+
+  it('keeps an only modal field untouched when Tab returns to its trigger', async () => {
+    function OnlyField() {
+      const { register, formState } = useForm({ mode: 'onBlur', defaultValues: { product: '' } });
+      return <Modal isOpen onClose={vi.fn()} title="Seleção"><NativeSelect aria-label="Produto" searchable {...register('product', { required: true })}>
+        <option value="">Nenhum</option><option value="a">Produto A</option>
+      </NativeSelect><span data-testid="touched">{String(Boolean(formState.touchedFields.product))}</span></Modal>;
+    }
+    render(<OnlyField />);
+    const trigger = screen.getByRole('combobox', { name: 'Produto' });
+    await userEvent.click(trigger);
+    expect(screen.getByRole('searchbox')).toHaveFocus();
+    await userEvent.tab();
+    await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 0)); });
+    expect(trigger).toHaveFocus();
+    expect(screen.getByTestId('touched')).toHaveTextContent('false');
+  });
+
+  it('keeps the first field untouched on Shift+Tab and skips portal focus guards', async () => {
+    function FirstField() {
+      const { register, formState } = useForm({ mode: 'onBlur', defaultValues: { product: '' } });
+      return <form><NativeSelect aria-label="Produto" searchable {...register('product', { required: true })}>
+        <option value="">Nenhum</option><option value="a">Produto A</option>
+      </NativeSelect><span data-testid="touched">{String(Boolean(formState.touchedFields.product))}</span></form>;
+    }
+    render(<FirstField />);
+    const trigger = screen.getByRole('combobox', { name: 'Produto' });
+    await userEvent.click(trigger);
+    expect(screen.getByRole('searchbox')).toHaveFocus();
+    await userEvent.tab({ shift: true });
+    await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 0)); });
+    expect(trigger).toHaveFocus();
+    expect(trigger.isConnected).toBe(true);
+    expect(screen.getByTestId('touched')).toHaveTextContent('false');
   });
 
 

@@ -101,6 +101,7 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
     const next = event.relatedTarget as Node | null;
     if (next && (triggerRef.current?.contains(next) || contentRef.current?.contains(next))) return;
     window.setTimeout(() => {
+      if (pendingTabRef.current) return;
       const focused = document.activeElement;
       if (focused && (triggerRef.current?.contains(focused) || contentRef.current?.contains(focused))) return;
       emitRegisteredBlur();
@@ -158,8 +159,13 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
             const next = pendingTabRef.current;
             if (!next) return;
             event.preventDefault();
-            pendingTabRef.current = null;
-            window.setTimeout(() => { next.focus(); emitRegisteredBlur(); }, 0);
+            window.setTimeout(() => {
+              const target = next.isConnected && !next.closest('[data-radix-popper-content-wrapper]') ? next : triggerRef.current;
+              target?.focus();
+              pendingTabRef.current = null;
+              const focused = document.activeElement;
+              if (focused && !triggerRef.current?.contains(focused) && !contentRef.current?.contains(focused)) emitRegisteredBlur();
+            }, 0);
           }}
           position="popper" sideOffset={5} collisionPadding={12} className="z-[10050] max-h-[min(360px,var(--radix-select-content-available-height))] w-[var(--radix-select-trigger-width)] min-w-[min(220px,calc(100vw-24px))] max-w-[calc(100vw-24px)] overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 text-slate-800 shadow-xl dark:border-white/15 dark:bg-slate-900 dark:text-slate-100">
           {showSearch && <div className="relative mb-1.5 flex items-center gap-2 border-b border-slate-200 px-2 pb-1.5 dark:border-white/15" onPointerDown={event => event.stopPropagation()}>
@@ -180,7 +186,12 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
                 event.stopPropagation();
                 const trigger = triggerRef.current;
                 const scope = trigger?.closest('[role="dialog"]') ?? document;
-                const focusables = Array.from(scope.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]):not([tabindex="-1"]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'));
+                const focusables = Array.from(scope.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]):not([tabindex="-1"]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter(element => {
+                  if (contentRef.current?.contains(element) || element.hasAttribute('data-radix-focus-guard')) return false;
+                  if (element.hidden || element.getAttribute('aria-hidden') === 'true' || element.tabIndex < 0 || element.matches(':disabled')) return false;
+                  const style = window.getComputedStyle(element);
+                  return style.display !== 'none' && style.visibility !== 'hidden';
+                });
                 const position = trigger ? focusables.indexOf(trigger) : -1;
                 const next = focusables[position + (event.shiftKey ? -1 : 1)] ?? trigger;
                 pendingTabRef.current = next;
