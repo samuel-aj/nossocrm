@@ -1,3 +1,4 @@
+import { NativeSelect } from '@/components/ui/NativeSelect';
 import { BoardFilterControls } from '../filters/useBoardFilters';
 import React from 'react';
 import { DealDetailModal } from './Modals/DealDetailModal';
@@ -785,12 +786,12 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white">
                   Alterar etapa de {selectedDealIds.length} negócio(s)
                 </h3>
-                <select value={bulkStageId} onChange={(e) => setBulkStageId(e.target.value)} className={bulkInputClass}>
+                <NativeSelect value={bulkStageId} onChange={(e) => setBulkStageId(e.target.value)} className={bulkInputClass}>
                   <option value="">Selecione a etapa...</option>
                   {activeBoard.stages.map((s) => (
                     <option key={s.id} value={s.id}>{s.label}</option>
                   ))}
-                </select>
+                </NativeSelect>
                 <button
                   type="button"
                   disabled={!bulkStageId}
@@ -806,16 +807,16 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white">
                   Editar tags de {selectedDealIds.length} negócio(s)
                 </h3>
-                <select value={bulkTagMode} onChange={(e) => setBulkTagMode(e.target.value as 'add' | 'remove')} className={bulkInputClass}>
+                <NativeSelect value={bulkTagMode} onChange={(e) => setBulkTagMode(e.target.value as 'add' | 'remove')} className={bulkInputClass}>
                   <option value="add">Adicionar tag</option>
                   <option value="remove">Remover tag</option>
-                </select>
-                <select value={bulkTagValue} onChange={(e) => setBulkTagValue(e.target.value)} className={bulkInputClass}>
+                </NativeSelect>
+                <NativeSelect value={bulkTagValue} onChange={(e) => setBulkTagValue(e.target.value)} className={bulkInputClass}>
                   <option value="">Selecione a tag...</option>
                   {tagOptions.map((t) => (
                     <option key={t} value={t}>{t}</option>
                   ))}
-                </select>
+                </NativeSelect>
                 <button
                   type="button"
                   disabled={!bulkTagValue}
@@ -831,7 +832,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white">
                   Alterar campo de {selectedDealIds.length} negócio(s)
                 </h3>
-                <select
+                <NativeSelect
                   value={bulkFieldKey}
                   onChange={(e) => { setBulkFieldKey(e.target.value); setBulkFieldValue(''); }}
                   className={bulkInputClass}
@@ -840,16 +841,16 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                   {customFieldOptions.map((o) => (
                     <option key={o.key} value={o.key}>{o.label}</option>
                   ))}
-                </select>
+                </NativeSelect>
                 {(() => {
                   const def = customFieldOptions.find((o) => o.key === bulkFieldKey);
                   return def?.kind === 'select' && def.options.length > 0 ? (
-                    <select value={bulkFieldValue} onChange={(e) => setBulkFieldValue(e.target.value)} className={bulkInputClass}>
+                    <NativeSelect value={bulkFieldValue} onChange={(e) => setBulkFieldValue(e.target.value)} className={bulkInputClass}>
                       <option value="">Selecione o valor...</option>
                       {def.options.map((v) => (
                         <option key={v} value={v}>{v}</option>
                       ))}
-                    </select>
+                    </NativeSelect>
                   ) : (
                     <input
                       type="text"

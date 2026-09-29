@@ -1,4 +1,5 @@
 'use client';
+import { NativeSelect } from '@/components/ui/NativeSelect';
 
 /**
  * Adicionar/editar uma automação da etapa sem sair do board:
@@ -221,7 +222,7 @@ export function StageActionModal({
       <label htmlFor="sa-conn" className={LABEL}>
         Número do WhatsApp
       </label>
-      <select id="sa-conn" className={INPUT} value={value} onChange={(e) => onChange(e.target.value)}>
+      <NativeSelect id="sa-conn" className={INPUT} value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">Selecione</option>
         {connections.map((c) => (
           <option key={c.id} value={c.id}>
@@ -229,7 +230,7 @@ export function StageActionModal({
             {c.status !== 'connected' ? ' (desconectado)' : ''}
           </option>
         ))}
-      </select>
+      </NativeSelect>
       <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{hint}</p>
     </div>
   );
@@ -267,25 +268,25 @@ export function StageActionModal({
           valueInput = <span className="text-xs text-slate-400 dark:text-slate-500 px-1 self-center">sem valor</span>;
         } else if (c.field === 'tags' && tags.length > 0) {
           valueInput = (
-            <select value={c.value ?? ''} onChange={(e) => updateClause(i, { value: e.target.value })} aria-label="Tag" className={`${valueClass} cursor-pointer`}>
+            <NativeSelect value={c.value ?? ''} onChange={(e) => updateClause(i, { value: e.target.value })} aria-label="Tag" className={`${valueClass} cursor-pointer`}>
               <option value="">Selecione a tag</option>
               {tags.map((t) => (
                 <option key={t} value={t}>
                   {t}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           );
         } else if ((def?.type === 'select' || def?.type === 'multiselect') && def.options?.length) {
           valueInput = (
-            <select value={c.value ?? ''} onChange={(e) => updateClause(i, { value: e.target.value })} aria-label="Valor" className={`${valueClass} cursor-pointer`}>
+            <NativeSelect value={c.value ?? ''} onChange={(e) => updateClause(i, { value: e.target.value })} aria-label="Valor" className={`${valueClass} cursor-pointer`}>
               <option value="">Selecione...</option>
               {def.options.map((v) => (
                 <option key={v} value={v}>
                   {v}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           );
         } else {
           const numeric = c.field === 'deal_value' || def?.type === 'number' || def?.type === 'currency';
@@ -306,7 +307,7 @@ export function StageActionModal({
           <div key={i} className="rounded-lg border border-slate-200 dark:border-white/10 p-2 min-w-0">
             {/* [Campo] [Operador compacto] [Valor: o resto do espaço] [×]; em telas estreitas o valor desce para a 2ª linha */}
             <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] sm:grid-cols-[minmax(8rem,10rem)_auto_minmax(0,1fr)_auto] gap-1.5 items-center">
-              <select
+              <NativeSelect
                 value={c.field === 'custom_field' && c.key ? `custom:${c.key}` : c.field}
                 onChange={(e) => {
                   const raw = e.target.value;
@@ -332,14 +333,14 @@ export function StageActionModal({
                     ))}
                   </optgroup>
                 )}
-              </select>
-              <select value={c.op} onChange={(e) => updateClause(i, { op: e.target.value as ConditionOp })} aria-label="Operador" className={`${INPUT_SM} w-auto shrink-0 cursor-pointer`}>
+              </NativeSelect>
+              <NativeSelect value={c.op} onChange={(e) => updateClause(i, { op: e.target.value as ConditionOp })} aria-label="Operador" className={`${INPUT_SM} w-auto shrink-0 cursor-pointer`}>
                 {ops.map((op) => (
                   <option key={op} value={op}>
                     {CONDITION_OP_LABELS[op]}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
               <div className="min-w-0 col-span-3 sm:col-span-1 flex">{valueInput}</div>
               <button
                 type="button"
@@ -390,11 +391,11 @@ export function StageActionModal({
                 aria-label="Tempo de espera"
                 className={`${INPUT_SM} w-20`}
               />
-              <select value={draft.delay.unit} onChange={(e) => patch({ delay: { amount: draft.delay!.amount, unit: e.target.value as DelayUnit } })} aria-label="Unidade" className={`${INPUT_SM} w-28 cursor-pointer`}>
+              <NativeSelect value={draft.delay.unit} onChange={(e) => patch({ delay: { amount: draft.delay!.amount, unit: e.target.value as DelayUnit } })} aria-label="Unidade" className={`${INPUT_SM} w-28 cursor-pointer`}>
                 <option value="minutes">minutos</option>
                 <option value="hours">horas</option>
                 <option value="days">dias</option>
-              </select>
+              </NativeSelect>
             </div>
           )}
         </div>
@@ -485,27 +486,27 @@ export function StageActionModal({
                   <label htmlFor="sa-board" className={LABEL}>
                     Pipeline de destino
                   </label>
-                  <select id="sa-board" className={INPUT} value={targetBoardId} onChange={(e) => patch({ boardId: e.target.value === board.id ? '' : e.target.value, stageId: '' })}>
+                  <NativeSelect id="sa-board" className={INPUT} value={targetBoardId} onChange={(e) => patch({ boardId: e.target.value === board.id ? '' : e.target.value, stageId: '' })}>
                     <option value={board.id}>{board.name} (este pipeline)</option>
                     {boards.filter((b) => b.id !== board.id).map((b) => (
                       <option key={b.id} value={b.id}>
                         {b.name}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </div>
                 <div>
                   <label htmlFor="sa-stage" className={LABEL}>
                     Etapa de destino
                   </label>
-                  <select id="sa-stage" className={INPUT} value={draft.stageId} onChange={(e) => patch({ stageId: e.target.value })}>
+                  <NativeSelect id="sa-stage" className={INPUT} value={draft.stageId} onChange={(e) => patch({ stageId: e.target.value })}>
                     <option value="">Selecione</option>
                     {targetStages.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.label}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </div>
               </div>
             )}
@@ -515,14 +516,14 @@ export function StageActionModal({
                   <label htmlFor="sa-agent" className={LABEL}>
                     Agente de IA
                   </label>
-                  <select id="sa-agent" className={INPUT} value={draft.agentId} onChange={(e) => patch({ agentId: e.target.value })}>
+                  <NativeSelect id="sa-agent" className={INPUT} value={draft.agentId} onChange={(e) => patch({ agentId: e.target.value })}>
                     <option value="">Selecione</option>
                     {agents.map((a) => (
                       <option key={a.id} value={a.id}>
                         {a.name}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </div>
                 {connectionSelect(draft.connectionId, (v) => patch({ connectionId: v }), 'Número da conversa que o agente passa a atender.')}
               </>
@@ -533,7 +534,7 @@ export function StageActionModal({
                   <label htmlFor="sa-bot" className={LABEL}>
                     Robô
                   </label>
-                  <select id="sa-bot" className={INPUT} value={draft.botId} onChange={(e) => patch({ botId: e.target.value, botName: bots.find((b) => b.id === e.target.value)?.name ?? '' })}>
+                  <NativeSelect id="sa-bot" className={INPUT} value={draft.botId} onChange={(e) => patch({ botId: e.target.value, botName: bots.find((b) => b.id === e.target.value)?.name ?? '' })}>
                     <option value="">{botsQ.isLoading ? 'Carregando robôs...' : bots.length === 0 ? 'Nenhum robô nesta organização' : 'Selecione'}</option>
                     {bots.map((b) => (
                       <option key={b.id} value={b.id}>
@@ -541,7 +542,7 @@ export function StageActionModal({
                         {b.enabled ? '' : ' (desligado)'}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                     Usa o robô como ele está configurado em IA e Automações → Robôs. Um robô desligado não roda: ligue-o antes.
                   </p>
@@ -568,14 +569,14 @@ export function StageActionModal({
                   <label htmlFor="sa-agent-start" className={LABEL}>
                     Agente de IA
                   </label>
-                  <select id="sa-agent-start" className={INPUT} value={agentId} onChange={(e) => setAgentId(e.target.value)}>
+                  <NativeSelect id="sa-agent-start" className={INPUT} value={agentId} onChange={(e) => setAgentId(e.target.value)}>
                     <option value="">Selecione</option>
                     {agents.map((a) => (
                       <option key={a.id} value={a.id}>
                         {a.name}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                   {(() => {
                     const a = (agentsQ.data ?? []).find((x) => x.id === agentId);
                     const deal = a?.triggers?.deal;

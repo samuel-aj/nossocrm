@@ -1,3 +1,4 @@
+import { NativeSelect } from '@/components/ui/NativeSelect';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Key, Copy, ExternalLink, CheckCircle2, Plus, Trash2, ShieldCheck, RefreshCw, TerminalSquare, Play } from 'lucide-react';
 
@@ -511,7 +512,7 @@ export const ApiKeysSection: React.FC = () => {
           <div className="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-2">
             Passo 1 — O que você quer automatizar?
           </div>
-          <select
+          <NativeSelect
             value={action}
             onChange={(e) => setAction(e.target.value as any)}
             className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
@@ -520,7 +521,7 @@ export const ApiKeysSection: React.FC = () => {
             <option value="create_deal">Criar Negócio (Deal)</option>
             <option value="move_stage">Mover etapa do Deal</option>
             <option value="create_activity">Criar Atividade (nota/tarefa)</option>
-          </select>
+          </NativeSelect>
 
           <div className="mt-3 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
             <CheckCircle2 className="h-4 w-4 text-emerald-500" />
@@ -622,7 +623,7 @@ export const ApiKeysSection: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <div className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">Pipeline (board)</div>
-                <select
+                <NativeSelect
                   value={selectedBoardId}
                   onChange={(e) => setSelectedBoardId(e.target.value)}
                   className="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white"
@@ -633,7 +634,7 @@ export const ApiKeysSection: React.FC = () => {
                       {b.name}{b.key ? ` — ${b.key}` : ' — (sem key)'}
                     </option>
                   ))}
-                </select>
+                </NativeSelect>
                 {selectedBoardId && !selectedBoardKey && (
                   <div className="mt-1 text-xs text-rose-600 dark:text-rose-300">
                     Este board ainda não tem <span className="font-mono">key</span>. Para integrações, gere uma key para o board.
@@ -693,7 +694,7 @@ export const ApiKeysSection: React.FC = () => {
               {action === 'move_stage' && (
                 <div className="md:col-span-2">
                   <div className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">Mover para etapa</div>
-                  <select
+                  <NativeSelect
                     value={selectedToStageId}
                     onChange={(e) => setSelectedToStageId(e.target.value)}
                     className="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white"
@@ -704,7 +705,7 @@ export const ApiKeysSection: React.FC = () => {
                         {s.label}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </div>
               )}
             </div>
@@ -714,7 +715,7 @@ export const ApiKeysSection: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <div className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">Tipo</div>
-                <select
+                <NativeSelect
                   value={activityType}
                   onChange={(e) => setActivityType(e.target.value)}
                   className="w-full px-3 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white"
@@ -724,7 +725,7 @@ export const ApiKeysSection: React.FC = () => {
                   <option value="CALL">Ligação</option>
                   <option value="MEETING">Reunião</option>
                   <option value="EMAIL">Email</option>
-                </select>
+                </NativeSelect>
               </div>
               <div>
                 <div className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">Título</div>

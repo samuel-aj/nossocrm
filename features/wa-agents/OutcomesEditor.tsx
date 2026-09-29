@@ -1,4 +1,5 @@
 'use client';
+import { NativeSelect } from '@/components/ui/NativeSelect';
 
 /**
  * Resultados do atendimento (outcomes) como cartões "Resultado X -> ações",
@@ -320,7 +321,7 @@ export function StageSelect({
 }) {
   const boards = options?.boards ?? [];
   return (
-    <select id={id} className={INPUT_CLASS} value={value} onChange={(e) => onChange(e.target.value)} aria-label={ariaLabel}>
+    <NativeSelect id={id} className={INPUT_CLASS} value={value} onChange={(e) => onChange(e.target.value)} aria-label={ariaLabel}>
       <option value="">Selecione a etapa</option>
       {boards.map((b) => (
         <optgroup key={b.id} label={b.name}>
@@ -331,7 +332,7 @@ export function StageSelect({
           ))}
         </optgroup>
       ))}
-    </select>
+    </NativeSelect>
   );
 }
 
@@ -353,7 +354,7 @@ export function AgentSelect({
 }) {
   const list = agents.filter((a) => a.id !== excludeId);
   return (
-    <select id={id} className={INPUT_CLASS} value={value} onChange={(e) => onChange(e.target.value)} aria-label={ariaLabel}>
+    <NativeSelect id={id} className={INPUT_CLASS} value={value} onChange={(e) => onChange(e.target.value)} aria-label={ariaLabel}>
       <option value="">Selecione o agente</option>
       {list.map((a) => (
         <option key={a.id} value={a.id}>
@@ -361,7 +362,7 @@ export function AgentSelect({
           {a.enabled ? '' : ' (desligado)'}
         </option>
       ))}
-    </select>
+    </NativeSelect>
   );
 }
 
@@ -440,7 +441,7 @@ function ActionFields({
     case 'start_bot':
       return (
         <div className="space-y-1">
-          <select
+          <NativeSelect
             id={`${idPrefix}-bot`}
             className={INPUT_CLASS}
             value={action.bot_id}
@@ -454,7 +455,7 @@ function ActionFields({
                 {b.enabled ? '' : ' (desligado)'}
               </option>
             ))}
-          </select>
+          </NativeSelect>
           <p className={HELP_CLASS}>O agente encerra e este robô assume a conversa na sequência.</p>
         </div>
       );
@@ -572,7 +573,7 @@ function ActionFields({
       );
     case 'assign_owner':
       return (
-        <select
+        <NativeSelect
           id={`${idPrefix}-owner`}
           className={INPUT_CLASS}
           value={action.owner_id}
@@ -585,7 +586,7 @@ function ActionFields({
               {o.name}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       );
     case 'append_description':
       return (
@@ -602,7 +603,7 @@ function ActionFields({
       );
     case 'set_product':
       return (
-        <select
+        <NativeSelect
           id={`${idPrefix}-product`}
           className={INPUT_CLASS}
           value={action.product_id}
@@ -615,7 +616,7 @@ function ActionFields({
               {p.name}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       );
     case 'create_task':
       return (
@@ -772,7 +773,7 @@ export const ActionsEditor: React.FC<{
             >
               <Icon size={14} aria-hidden="true" />
             </span>
-            <select
+            <NativeSelect
               className={`${INPUT_CLASS} md:max-w-xs`}
               value={action.type}
               aria-label={`Tipo da ação ${aIndex + 1}`}
@@ -783,7 +784,7 @@ export const ActionsEditor: React.FC<{
                   {actionLabel(t)}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
             <button
               type="button"
               className={`${BTN_ICON} hover:text-red-600 dark:hover:text-red-400 ml-auto`}

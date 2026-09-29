@@ -1,4 +1,5 @@
 'use client';
+import { NativeSelect } from '@/components/ui/NativeSelect';
 
 /**
  * Webhooks por evento do agente, um cartão por webhook: evento + URL + ativo
@@ -76,7 +77,7 @@ export const WebhooksEditor: React.FC<{
                     <Webhook size={14} aria-hidden="true" />
                   </span>
                   <div className="flex-1 min-w-0 grid grid-cols-1 md:grid-cols-[minmax(0,220px)_1fr] gap-2">
-                    <select
+                    <NativeSelect
                       id={`${idPrefix}-event`}
                       className={INPUT_CLASS}
                       value={hook.event}
@@ -88,7 +89,7 @@ export const WebhooksEditor: React.FC<{
                           {AGENT_EVENT_LABELS[ev]}
                         </option>
                       ))}
-                    </select>
+                    </NativeSelect>
                     <input
                       id={`${idPrefix}-url`}
                       type="url"

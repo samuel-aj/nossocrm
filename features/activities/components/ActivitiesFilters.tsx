@@ -1,3 +1,4 @@
+import { NativeSelect } from '@/components/ui/NativeSelect';
 import React from 'react';
 import { Search, Filter } from 'lucide-react';
 import { Activity } from '@/types';
@@ -45,7 +46,7 @@ export const ActivitiesFilters: React.FC<ActivitiesFiltersProps> = ({
       </div>
       <div className="flex items-center gap-2 max-md:w-full">
         <Filter size={20} className="text-slate-400 max-md:hidden" />
-        <select
+        <NativeSelect
           className="bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-xl px-4 py-2.5 max-md:w-full max-md:py-2 outline-none focus:ring-2 focus:ring-primary-500 text-slate-900 dark:text-white"
           value={filterType}
           onChange={e => setFilterType(e.target.value as Activity['type'] | 'ALL')}
@@ -55,7 +56,7 @@ export const ActivitiesFilters: React.FC<ActivitiesFiltersProps> = ({
           <option value="MEETING">Reuniões</option>
           <option value="EMAIL">Emails</option>
           <option value="TASK">Tarefas</option>
-        </select>
+        </NativeSelect>
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 'use client';
+import { NativeSelect } from '@/components/ui/NativeSelect';
 
 /**
  * Configurações do CRM. As categorias ficam no TOPO (sem sidebar interna):
@@ -67,7 +68,7 @@ const GeneralSettings: React.FC = () => {
           title="Página inicial"
           description="A tela que abre quando você entra no CRM."
           control={
-            <select
+            <NativeSelect
               aria-label="Selecionar página inicial"
               value={controller.defaultRoute}
               onChange={(e) => void controller.setDefaultRoute(e.target.value)}
@@ -80,7 +81,7 @@ const GeneralSettings: React.FC = () => {
               <option value="/contacts">Contatos</option>
               <option value="/activities">Minhas Atividades</option>
               <option value="/reports">Performance (Relatórios)</option>
-            </select>
+            </NativeSelect>
           }
         />
       </SettingsCard>

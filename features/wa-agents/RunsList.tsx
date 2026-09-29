@@ -1,4 +1,5 @@
 'use client';
+import { NativeSelect } from '@/components/ui/NativeSelect';
 
 /**
  * Execuções: tabela das execuções dos agentes (com filtro por agente e
@@ -293,7 +294,7 @@ export const RunsList: React.FC = () => {
             <label htmlFor="runs-agent-filter" className="sr-only">
               Filtrar por agente
             </label>
-            <select
+            <NativeSelect
               id="runs-agent-filter"
               className={`${INPUT_CLASS} w-auto min-w-[180px]`}
               value={agentId}
@@ -308,7 +309,7 @@ export const RunsList: React.FC = () => {
                   {a.name}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
             <button
               type="button"
               className={BTN_SMALL}
@@ -370,7 +371,7 @@ export const RunsList: React.FC = () => {
             <label htmlFor="runs-bot-filter" className="sr-only">
               Filtrar por robô
             </label>
-            <select
+            <NativeSelect
               id="runs-bot-filter"
               className={`${INPUT_CLASS} w-auto min-w-[180px]`}
               value={botId}
@@ -382,7 +383,7 @@ export const RunsList: React.FC = () => {
                   {b.name}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
             <button
               type="button"
               className={BTN_SMALL}

@@ -1,4 +1,5 @@
 'use client';
+import { NativeSelect } from '@/components/ui/NativeSelect';
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Modal } from '@/components/ui/Modal';
@@ -70,11 +71,11 @@ export function BulkBotModal({ dealIds: initialIds, onClose }: { dealIds: string
         <p className="text-sm">{dealIds.length} leads selecionados. O robô usará o número e as etapas já configurados.</p>
         {dealIds.length > 500 && <p role="alert" className="text-sm text-red-600">Selecione até 500 leads por lote.</p>}
         <label className="block text-sm font-medium">Robô
-          <select aria-label="Robô" className={`${inputClass} mt-1`} value={botId} disabled={busy || results !== null}
+          <NativeSelect aria-label="Robô" className={`${inputClass} mt-1`} value={botId} disabled={busy || results !== null}
             onChange={e => { setBotId(e.target.value); setPrepared(null); setError(''); }}>
             <option value="">{bots.isLoading ? 'Carregando…' : 'Selecione um robô ativo'}</option>
             {bots.data?.map(bot => <option key={bot.id} value={bot.id}>{bot.name}</option>)}
-          </select>
+          </NativeSelect>
         </label>
         {bots.isError && <p role="alert" className="text-sm text-red-600">Não foi possível carregar os robôs. <button type="button" onClick={() => void bots.refetch()}>Tentar novamente</button></p>}
         {bots.isSuccess && !bots.data.length && <p className="text-sm">Ative um robô em Configurações → Robôs para continuar.</p>}

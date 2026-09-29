@@ -1,3 +1,4 @@
+import { NativeSelect } from '@/components/ui/NativeSelect';
 /**
  * Script Editor Modal
  * CRUD interface for user custom scripts
@@ -154,7 +155,7 @@ export function ScriptEditorModal({
                             <label className="block text-xs font-medium text-slate-400 mb-2">
                                 Categoria
                             </label>
-                            <select
+                            <NativeSelect
                                 value={formData.category}
                                 onChange={(e) => setFormData({ ...formData, category: e.target.value as ScriptCategory })}
                                 className="w-full px-4 py-2.5 bg-slate-800/50 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-transparent appearance-none cursor-pointer"
@@ -164,7 +165,7 @@ export function ScriptEditorModal({
                                         {cat.label}
                                     </option>
                                 ))}
-                            </select>
+                            </NativeSelect>
                         </div>
 
                         {/* Icon */}

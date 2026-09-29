@@ -1,3 +1,4 @@
+import { NativeSelect } from '@/components/ui/NativeSelect';
 import React from 'react';
 import { X } from 'lucide-react';
 import { Activity, Deal } from '@/types';
@@ -119,7 +120,7 @@ export const ActivityFormModal: React.FC<ActivityFormModalProps> = ({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tipo</label>
-              <select
+              <NativeSelect
                 className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
                 value={formData.type}
                 onChange={e =>
@@ -130,13 +131,13 @@ export const ActivityFormModal: React.FC<ActivityFormModalProps> = ({
                 <option value="MEETING">Reunião</option>
                 <option value="EMAIL">Email</option>
                 <option value="TASK">Tarefa</option>
-              </select>
+              </NativeSelect>
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
                 Negócio Relacionado
               </label>
-              <select
+              <NativeSelect
                 required={!editingActivity}
                 className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
                 value={formData.dealId}
@@ -148,7 +149,7 @@ export const ActivityFormModal: React.FC<ActivityFormModalProps> = ({
                     {deal.title}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </div>
           </div>
 
@@ -192,7 +193,7 @@ export const ActivityFormModal: React.FC<ActivityFormModalProps> = ({
               <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
                 Atribuir a
               </label>
-              <select
+              <NativeSelect
                 className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
                 value={formData.assignedTo || ''}
                 onChange={e => setFormData({ ...formData, assignedTo: e.target.value || undefined })}
@@ -203,7 +204,7 @@ export const ActivityFormModal: React.FC<ActivityFormModalProps> = ({
                     {m.display_name || m.id.slice(0, 8)} ({m.role === UserRole.ADMIN || m.role === UserRole.SUPER_ADMIN ? 'Admin' : 'Vendedor'})
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </div>
           )}
 

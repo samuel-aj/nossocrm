@@ -11,6 +11,7 @@ import React, { useId } from 'react';
 import { UseFormRegisterReturn, FieldError } from 'react-hook-form';
 import { cn } from '@/lib/utils/cn';
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
+import { NativeSelect } from '@/components/ui/NativeSelect';
 
 // ============ BASE STYLES ============
 
@@ -376,7 +377,7 @@ export const SelectField: React.FC<SelectFieldProps> = ({
     className={containerClassName}
     required={required}
   >
-    <select
+    <NativeSelect
       className={cn(baseInputStyles, error && errorInputStyles, selectClassName)}
       {...registration}
       {...props}
@@ -391,7 +392,7 @@ export const SelectField: React.FC<SelectFieldProps> = ({
           {opt.label}
         </option>
       ))}
-    </select>
+    </NativeSelect>
   </FormField>
 );
 

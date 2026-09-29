@@ -1,4 +1,5 @@
 'use client';
+import { NativeSelect } from '@/components/ui/NativeSelect';
 
 /**
  * Campos compartilhados entre robôs e agentes de IA:
@@ -79,27 +80,27 @@ export function LeadChangesEditor<T extends LeadChangeRow>({
     if (row.mode === 'clear') return <p className={`${HELP_CLASS} py-2`}>O campo fica vazio.</p>;
     if (row.field === 'owner_id') {
       return (
-        <select id={id} className={INPUT_CLASS} value={row.value} aria-label={ariaLabel} onChange={(e) => setValue(e.target.value)}>
+        <NativeSelect id={id} className={INPUT_CLASS} value={row.value} aria-label={ariaLabel} onChange={(e) => setValue(e.target.value)}>
           <option value="">Escolha o responsável</option>
           {owners.map((o) => (
             <option key={o.id} value={o.id}>
               {o.name}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       );
     }
     const def = row.field === 'custom_field' ? fields.find((f) => f.key === row.key) : undefined;
     if (def?.type === 'select' && (def.options ?? []).length > 0 && !row.value.includes('{{')) {
       return (
-        <select id={id} className={INPUT_CLASS} value={row.value} aria-label={ariaLabel} onChange={(e) => setValue(e.target.value)}>
+        <NativeSelect id={id} className={INPUT_CLASS} value={row.value} aria-label={ariaLabel} onChange={(e) => setValue(e.target.value)}>
           <option value="">Escolha a opção</option>
           {(def.options ?? []).map((o) => (
             <option key={o} value={o}>
               {o}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       );
     }
     const placeholder =
@@ -122,7 +123,7 @@ export function LeadChangesEditor<T extends LeadChangeRow>({
         return (
           <div key={i} className="rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-2 space-y-1.5">
             <div className="flex items-center gap-1">
-              <select
+              <NativeSelect
                 className={`${INPUT_CLASS} flex-1 min-w-0`}
                 value={row.field}
                 aria-label={`Campo da alteração ${i + 1}`}
@@ -136,13 +137,13 @@ export function LeadChangesEditor<T extends LeadChangeRow>({
                     {FIELD_LABELS[f]}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
               <button type="button" className={SMALL_BTN} aria-label={`Remover alteração ${i + 1}`} onClick={() => onChange(rows.filter((_, j) => j !== i))}>
                 <Trash2 size={14} aria-hidden="true" />
               </button>
             </div>
             {row.field === 'custom_field' ? (
-              <select
+              <NativeSelect
                 className={INPUT_CLASS}
                 value={row.key}
                 aria-label={`Campo personalizado da alteração ${i + 1}`}
@@ -155,7 +156,7 @@ export function LeadChangesEditor<T extends LeadChangeRow>({
                   </option>
                 ))}
                 {row.key && !fields.some((f) => f.key === row.key) ? <option value={row.key}>{row.key} (não existe mais)</option> : null}
-              </select>
+              </NativeSelect>
             ) : null}
             {modes.length > 1 ? (
               <div className="flex flex-wrap gap-1" role="radiogroup" aria-label={`O que fazer na alteração ${i + 1}`}>
@@ -250,7 +251,7 @@ export function LossFields({
           </button>
         ))}
       </div>
-      <select
+      <NativeSelect
         id={`${idPrefix}-reason`}
         className={INPUT_CLASS}
         aria-label="Motivo da perda"
@@ -272,7 +273,7 @@ export function LossFields({
           </option>
         ))}
         <option value="__outro__">Outro (escrever)</option>
-      </select>
+      </NativeSelect>
       {custom
         ? renderText
           ? renderText({

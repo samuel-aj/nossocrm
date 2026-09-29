@@ -1,4 +1,5 @@
 'use client';
+import { NativeSelect } from '@/components/ui/NativeSelect';
 
 import React, { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -642,7 +643,7 @@ export function MessageTemplatesManager() {
               <div className="space-y-2 mb-2">
                 {buttons.map((b, i) => (
                   <div key={i} className="flex flex-wrap sm:flex-nowrap items-center gap-2">
-                    <select
+                    <NativeSelect
                       value={b.type}
                       onChange={e => updateButton(i, { type: e.target.value as TemplateButton['type'], url: undefined, phone_number: undefined })}
                       className="bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-2 py-2 text-xs outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
@@ -650,7 +651,7 @@ export function MessageTemplatesManager() {
                       <option value="QUICK_REPLY">Resposta rápida</option>
                       <option value="URL" disabled={b.type !== 'URL' && urlCount >= TEMPLATE_BUTTON_LIMITS.url}>Link</option>
                       <option value="PHONE_NUMBER" disabled={b.type !== 'PHONE_NUMBER' && phoneCount >= TEMPLATE_BUTTON_LIMITS.phone}>Ligar</option>
-                    </select>
+                    </NativeSelect>
                     <input
                       type="text"
                       value={b.text}

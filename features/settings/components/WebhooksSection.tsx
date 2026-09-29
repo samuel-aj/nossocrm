@@ -1,3 +1,4 @@
+import { NativeSelect } from '@/components/ui/NativeSelect';
 import React, { useMemo, useState } from 'react';
 import { Webhook, ArrowRight, Copy, Check, Link as LinkIcon, Pencil, Power, Trash2, KeyRound, HelpCircle } from 'lucide-react';
 import { SettingsSection } from './SettingsSection';
@@ -823,7 +824,7 @@ export const WebhooksSection: React.FC = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="space-y-2">
                       <label className="text-xs font-bold text-slate-600 dark:text-slate-300">Funil</label>
-            <select
+            <NativeSelect
               value={selectedBoard?.id || ''}
               onChange={(e) => {
                 setSelectedBoardId(e.target.value);
@@ -838,12 +839,12 @@ export const WebhooksSection: React.FC = () => {
                             {b.isDefault ? ' (padrão)' : ''}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </div>
 
           <div className="space-y-2">
                       <label className="text-xs font-bold text-slate-600 dark:text-slate-300">Etapa</label>
-            <select
+            <NativeSelect
               value={selectedStageId}
               onChange={(e) => setSelectedStageId(e.target.value)}
                         className="w-full px-4 py-2.5 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-slate-900 dark:text-white"
@@ -854,7 +855,7 @@ export const WebhooksSection: React.FC = () => {
                             {s.label}
                           </option>
               ))}
-            </select>
+            </NativeSelect>
                     </div>
           </div>
 

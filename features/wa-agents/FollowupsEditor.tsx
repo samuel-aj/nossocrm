@@ -1,4 +1,5 @@
 'use client';
+import { NativeSelect } from '@/components/ui/NativeSelect';
 
 /**
  * Régua de follow-ups do agente, uma regra por cartão compacto:
@@ -202,7 +203,7 @@ export function FollowupsEditor({
                             })
                           }
                         />
-                        <select
+                        <NativeSelect
                           className="bg-transparent border-l border-slate-200 dark:border-white/10 px-2 py-1.5 text-sm text-slate-900 dark:text-white outline-none"
                           aria-label="Unidade de tempo"
                           value={unit}
@@ -213,7 +214,7 @@ export function FollowupsEditor({
                               {amount === 1 ? u.one : u.many}
                             </option>
                           ))}
-                        </select>
+                        </NativeSelect>
                       </span>
                       <span>sem resposta do lead</span>
                       <span className="text-slate-400">→</span>
@@ -248,7 +249,7 @@ export function FollowupsEditor({
                         <label htmlFor={`followup-${f.id}-bot`} className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                           Robô
                         </label>
-                        <select
+                        <NativeSelect
                           id={`followup-${f.id}-bot`}
                           className={INPUT_CLASS}
                           value={f.bot_id ?? ''}
@@ -261,7 +262,7 @@ export function FollowupsEditor({
                               {b.enabled ? '' : ' (desligado)'}
                             </option>
                           ))}
-                        </select>
+                        </NativeSelect>
                         <p className={HELP_CLASS}>
                           Robôs com gatilho &quot;Follow-up do agente de IA&quot; ou &quot;Manual&quot;. O robô roda sem parar o agente; a
                           resposta do lead volta para o agente.

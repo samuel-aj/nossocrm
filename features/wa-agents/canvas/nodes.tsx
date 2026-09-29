@@ -1,4 +1,5 @@
 'use client';
+import { NativeSelect } from '@/components/ui/NativeSelect';
 
 /**
  * Nós do quadro do robô: Gatilho (fixo) e Balão (blocos empilhados, estilo Typebot).
@@ -345,7 +346,7 @@ function TriggerNodeView({ id, data, selected }: NodeProps<TriggerNode>) {
         <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide text-slate-400">Fixo</span>
       </div>
       <div className="nodrag p-3 space-y-2">
-        <select
+        <NativeSelect
           className={INPUT_CLASS}
           value={data.trigger_type}
           aria-label="Quando o robô dispara"
@@ -359,14 +360,14 @@ function TriggerNodeView({ id, data, selected }: NodeProps<TriggerNode>) {
               {TRIGGER_LABELS[t]}
             </option>
           ))}
-        </select>
+        </NativeSelect>
         {data.trigger_type === 'agent_followup' ? (
           <p className="text-xs text-slate-500 dark:text-slate-400">
             Entra em ação quando uma regra de follow-up de um agente de IA aponta para este robô (lead sem responder).
           </p>
         ) : null}
         {data.trigger_type !== 'manual' && data.trigger_type !== 'agent_followup' ? (
-          <select
+          <NativeSelect
             className={INPUT_CLASS}
             value={data.board_id}
             aria-label="Quadro"
@@ -378,10 +379,10 @@ function TriggerNodeView({ id, data, selected }: NodeProps<TriggerNode>) {
                 {b.name}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         ) : null}
         {data.trigger_type === 'deal_stage_entered' ? (
-          <select
+          <NativeSelect
             className={INPUT_CLASS}
             value={data.stage_id}
             aria-label="Etapa"
@@ -394,11 +395,11 @@ function TriggerNodeView({ id, data, selected }: NodeProps<TriggerNode>) {
                 {s.label}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         ) : null}
         {/* Por qual número a conversa começa quando o gatilho dispara (o lead ainda não tem conversa) */}
         {data.trigger_type !== 'agent_followup' ? (
-          <select
+          <NativeSelect
             className={INPUT_CLASS}
             value={data.connection_id}
             aria-label="Número que inicia a conversa"
@@ -413,7 +414,7 @@ function TriggerNodeView({ id, data, selected }: NodeProps<TriggerNode>) {
                 {c.status === 'connected' ? '' : ' (desconectado)'}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         ) : null}
         <p className={HELP_CLASS}>{help}</p>
       </div>

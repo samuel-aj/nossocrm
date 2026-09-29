@@ -1,4 +1,5 @@
 'use client'
+import { NativeSelect } from '@/components/ui/NativeSelect';
 
 import React, { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
@@ -897,7 +898,7 @@ export default function AdminPage() {
                           )}
                         </span>
                       </label>
-                      <select
+                      <NativeSelect
                         value={checked ? role : UserRole.VENDEDOR}
                         disabled={!checked}
                         onChange={e => setMembershipDraft(d => ({ ...d, [org.id]: e.target.value }))}
@@ -905,7 +906,7 @@ export default function AdminPage() {
                       >
                         <option value={UserRole.VENDEDOR}>Vendedor</option>
                         <option value={UserRole.ADMIN}>Admin</option>
-                      </select>
+                      </NativeSelect>
                     </div>
                   )
                 })}

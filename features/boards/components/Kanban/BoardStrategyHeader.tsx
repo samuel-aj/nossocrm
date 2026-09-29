@@ -1,3 +1,4 @@
+import { NativeSelect } from '@/components/ui/NativeSelect';
 import React, { useState } from 'react';
 import {
   Target,
@@ -287,7 +288,7 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
                             })
                           }
                         />
-                        <select
+                        <NativeSelect
                           className="bg-transparent text-[10px] font-bold uppercase text-slate-400 focus:text-primary-500 focus:outline-none cursor-pointer"
                           value={editedBoard.goal?.type || 'number'}
                           onChange={e =>
@@ -303,7 +304,7 @@ export const BoardStrategyHeader: React.FC<BoardStrategyHeaderProps> = ({ board 
                           <option value="currency">R$ (Valor)</option>
                           <option value="number"># (Qtd)</option>
                           <option value="percentage">% (Taxa)</option>
-                        </select>
+                        </NativeSelect>
                       </div>
                       <input
                         className="w-full bg-transparent text-xs font-medium text-slate-500 focus:text-primary-600 focus:outline-none transition-colors border-b border-transparent focus:border-primary-300 pb-0.5"

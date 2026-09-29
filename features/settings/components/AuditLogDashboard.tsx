@@ -1,3 +1,4 @@
+import { NativeSelect } from '@/components/ui/NativeSelect';
 /**
  * Audit Log Dashboard Component
  * T046: Create AuditLogDashboard Component
@@ -325,7 +326,7 @@ export const AuditLogDashboard: React.FC = () => {
             <span className="text-sm font-medium text-slate-600 dark:text-slate-300">Filtros:</span>
           </div>
 
-          <select
+          <NativeSelect
             value={severityFilter}
             onChange={(e) => setSeverityFilter(e.target.value)}
             className="px-3 py-1.5 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg text-sm text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-primary-500"
@@ -334,9 +335,9 @@ export const AuditLogDashboard: React.FC = () => {
             <option value="critical">Crítico</option>
             <option value="warning">Alerta</option>
             <option value="info">Info</option>
-          </select>
+          </NativeSelect>
 
-          <select
+          <NativeSelect
             value={actionFilter}
             onChange={(e) => setActionFilter(e.target.value)}
             className="px-3 py-1.5 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg text-sm text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-primary-500"
@@ -346,9 +347,9 @@ export const AuditLogDashboard: React.FC = () => {
             <option value="DATA_EXPORT">Exportação</option>
             <option value="DATA_DELETION">Exclusão</option>
             <option value="REVOKE_AI_CONSENT">Revogação IA</option>
-          </select>
+          </NativeSelect>
 
-          <select
+          <NativeSelect
             value={timeFilter}
             onChange={(e) => setTimeFilter(e.target.value)}
             className="px-3 py-1.5 bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-lg text-sm text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-primary-500"
@@ -357,7 +358,7 @@ export const AuditLogDashboard: React.FC = () => {
             <option value="7d">Últimos 7 dias</option>
             <option value="30d">Últimos 30 dias</option>
             <option value="90d">Últimos 90 dias</option>
-          </select>
+          </NativeSelect>
         </div>
       </div>
 

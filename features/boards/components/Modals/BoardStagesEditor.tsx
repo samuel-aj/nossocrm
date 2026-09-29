@@ -1,4 +1,5 @@
 'use client';
+import { NativeSelect } from '@/components/ui/NativeSelect';
 
 /**
  * Etapas do board como um pipeline HORIZONTAL (a mesma lógica visual do
@@ -203,7 +204,7 @@ export function BoardStagesEditor({
             <label htmlFor="stage-lifecycle" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
               Ao entrar nesta etapa, promover o contato para
             </label>
-            <select
+            <NativeSelect
               id="stage-lifecycle"
               value={current.linkedLifecycleStage || ''}
               onChange={(e) => update(current.id, { linkedLifecycleStage: e.target.value || undefined })}
@@ -215,7 +216,7 @@ export function BoardStagesEditor({
                   {ls.name}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
             {onManageLifecycle ? (
               <button
                 type="button"

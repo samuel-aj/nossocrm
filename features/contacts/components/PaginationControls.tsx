@@ -1,3 +1,4 @@
+import { NativeSelect } from '@/components/ui/NativeSelect';
 /**
  * @fileoverview Controles de paginação para a tabela de contatos.
  * 
@@ -131,7 +132,7 @@ export const PaginationControls: React.FC<PaginationControlsProps> = ({
           <label htmlFor="page-size" className="sr-only">
             Itens por página
           </label>
-          <select
+          <NativeSelect
             id="page-size"
             value={pageSize}
             onChange={handlePageSizeChange}
@@ -149,7 +150,7 @@ export const PaginationControls: React.FC<PaginationControlsProps> = ({
                 {size} por página
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </div>
       </div>
 

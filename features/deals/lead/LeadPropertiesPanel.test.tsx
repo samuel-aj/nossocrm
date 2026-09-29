@@ -8,9 +8,22 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Contact, Deal } from "@/types";
 import { LeadPropertiesPanel } from "./LeadPropertiesPanel";
+
+beforeAll(() => {
+  HTMLElement.prototype.hasPointerCapture = () => false;
+  HTMLElement.prototype.setPointerCapture = () => {};
+  HTMLElement.prototype.releasePointerCapture = () => {};
+  HTMLElement.prototype.scrollIntoView = () => {};
+});
+
+async function chooseProduct() {
+  await userEvent.click(screen.getByRole("combobox", { name: "Produto ou serviço" }));
+  await userEvent.click(screen.getByRole("option", { name: /Serviço/ }));
+}
 
 const mocks = vi.hoisted(() => ({
   updateDeal: vi.fn(),
@@ -265,10 +278,7 @@ describe("LeadPropertiesPanel", () => {
       ),
     );
     fireEvent.click(screen.getByRole("button", { name: /Produtos/ }));
-    fireEvent.change(
-      screen.getByRole("combobox", { name: "Produto ou serviço" }),
-      { target: { value: "product" } },
-    );
+    await chooseProduct();
     fireEvent.click(screen.getByRole("button", { name: "Adicionar" }));
     await waitFor(() =>
       expect(mocks.addItemToDeal).toHaveBeenCalledWith(
@@ -280,6 +290,11 @@ describe("LeadPropertiesPanel", () => {
         }),
       ),
     );
+  });
+  it("distinguishes custom fields and UTM sections with their own icons", () => {
+    setup();
+    expect(screen.getByRole("button", { name: "Campos personalizados" }).querySelector("svg")).toHaveClass("lucide-list");
+    expect(screen.getByRole("button", { name: "UTMs" }).querySelector("svg")).toHaveClass("lucide-radar");
   });
   it("is read-only without edit/delete permissions and confirms deletion when allowed", async () => {
     mocks.edit = false;
@@ -440,10 +455,7 @@ describe("LeadPropertiesPanel", () => {
     } as Deal;
     setup(current);
     fireEvent.click(screen.getByRole("button", { name: /Produtos/ }));
-    fireEvent.change(
-      screen.getByRole("combobox", { name: "Produto ou serviço" }),
-      { target: { value: "product" } },
-    );
+    await chooseProduct();
     fireEvent.click(screen.getByRole("button", { name: "Adicionar" }));
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(
@@ -452,7 +464,7 @@ describe("LeadPropertiesPanel", () => {
     );
     expect(
       screen.getByRole("combobox", { name: "Produto ou serviço" }),
-    ).toHaveValue("product");
+    ).toHaveTextContent("Serviço");
     mocks.updateItemInDeal.mockRejectedValueOnce(new Error("Preço não salvo"));
     fireEvent.click(screen.getByRole("button", { name: /2 ×/ }));
     fireEvent.change(
@@ -483,10 +495,7 @@ describe("LeadPropertiesPanel", () => {
     );
     setup();
     fireEvent.click(screen.getByRole("button", { name: /Produtos/ }));
-    fireEvent.change(
-      screen.getByRole("combobox", { name: "Produto ou serviço" }),
-      { target: { value: "product" } },
-    );
+    await chooseProduct();
     fireEvent.change(
       screen.getByRole("textbox", { name: "Preço neste lead" }),
       { target: { value: "100" } },

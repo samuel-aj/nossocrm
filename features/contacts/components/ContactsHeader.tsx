@@ -1,3 +1,4 @@
+import { NativeSelect } from '@/components/ui/NativeSelect';
 import React from 'react';
 import { Search, Filter, Plus, Download } from 'lucide-react';
 import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
@@ -64,7 +65,7 @@ export const ContactsHeader: React.FC<ContactsHeaderProps> = ({
       </div>
       <div className="flex gap-3 w-full sm:w-auto max-md:flex-wrap max-md:gap-2">
         {viewMode === 'people' && (
-          <select
+          <NativeSelect
             value={statusFilter}
             onChange={e =>
               setStatusFilter(e.target.value as 'ALL' | 'ACTIVE' | 'INACTIVE' | 'CHURNED' | 'RISK')
@@ -77,7 +78,7 @@ export const ContactsHeader: React.FC<ContactsHeaderProps> = ({
             <option value="INACTIVE">Inativos</option>
             <option value="CHURNED">Perdidos (Churn)</option>
             <option value="RISK">Em Risco (Alerta)</option>
-          </select>
+          </NativeSelect>
         )}
         <div className="relative flex-1 sm:w-72 max-md:basis-full max-md:min-w-0 max-md:order-first">
           {/* z-10: o input tem backdrop-blur (cria stacking context) e pintava POR CIMA da lupa */}

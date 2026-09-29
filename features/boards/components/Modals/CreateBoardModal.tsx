@@ -1,3 +1,4 @@
+import { NativeSelect } from '@/components/ui/NativeSelect';
 import React, { useMemo, useState, useId } from 'react';
 import { Plus, GripVertical, Trash2, ChevronDown, Settings, Copy, Check, Eye, EyeOff, FolderOpen, Target } from 'lucide-react';
 import { Board, BoardGoal, BoardStage, ContactStage } from '@/types';
@@ -432,7 +433,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                     Editando board
                   </label>
                   <div className="relative">
-                    <select
+                    <NativeSelect
                       value={editingBoard.id}
                       onChange={(e) => {
                         const next = availableBoards.find(b => b.id === e.target.value);
@@ -446,7 +447,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                           {b.name}
                         </option>
                       ))}
-                    </select>
+                    </NativeSelect>
                     <ChevronDown
                       size={18}
                       className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500"
@@ -499,7 +500,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                     📋 Usar Template
                   </label>
-                  <select
+                  <NativeSelect
                     value={selectedTemplate}
                     onChange={(e) => handleTemplateSelect(e.target.value as BoardTemplateType | '')}
                     className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
@@ -509,7 +510,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                     <option value="SALES">💰 Pipeline de Vendas</option>
                     <option value="ONBOARDING">🚀 Onboarding de Clientes</option>
                     <option value="CS">❤️ CS & Upsell</option>
-                  </select>
+                  </NativeSelect>
                   {selectedTemplate && (
                     <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                       ✨ Template aplicado! Você pode editar os campos abaixo.
@@ -587,7 +588,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                           placeholder="Ex.: 50"
                           className="flex-1 min-w-0 px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 outline-none"
                         />
-                        <select
+                        <NativeSelect
                           aria-label="Tipo da meta"
                           value={goal.type || 'number'}
                           onChange={(e) => setGoal({ ...goal, type: e.target.value as BoardGoal['type'] })}
@@ -596,7 +597,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                           <option value="number">Qtd.</option>
                           <option value="currency">R$</option>
                           <option value="percentage">%</option>
-                        </select>
+                        </NativeSelect>
                       </div>
                     </div>
                     <div>
@@ -668,7 +669,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                   🎯 Gerencia Contatos no Estágio
                 </label>
-                <select
+                <NativeSelect
                   value={linkedLifecycleStage}
                   onChange={(e) => setLinkedLifecycleStage(e.target.value)}
                   className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
@@ -677,7 +678,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                   {lifecycleStages.map(stage => (
                     <option key={stage.id} value={stage.id}>{stage.name}</option>
                   ))}
-                </select>
+                </NativeSelect>
                 <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                   Novos negócios de contatos neste estágio aparecerão automaticamente aqui.
                 </p>
@@ -688,7 +689,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                   🧾 Produto padrão (opcional)
                 </label>
-                <select
+                <NativeSelect
                   value={defaultProductId}
                   onChange={(e) => setDefaultProductId(e.target.value)}
                   className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
@@ -701,7 +702,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                         {p.name} — R$ {Number(p.price ?? 0).toLocaleString('pt-BR')}
                       </option>
                     ))}
-                </select>
+                </NativeSelect>
                 <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                   Sugere (ou pré-seleciona) um produto ao adicionar itens em deals desse board.
                 </p>
@@ -756,7 +757,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                   Ao Ganhar, enviar para...
                 </label>
-                <select
+                <NativeSelect
                   value={nextBoardId}
                   onChange={(e) => setNextBoardId(e.target.value)}
                   className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
@@ -767,7 +768,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                       {board.name}
                     </option>
                   ))}
-                </select>
+                </NativeSelect>
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                   Cria automaticamente um card no próximo board quando o negócio é ganho.
                 </p>
@@ -779,7 +780,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                     🏆 Estágio Ganho (Won)
                   </label>
-                  <select
+                  <NativeSelect
                     value={wonStayInStage ? 'archive' : wonStageId}
                     onChange={(e) => {
                       if (e.target.value === 'archive') {
@@ -797,7 +798,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                     {stages.map(stage => (
                       <option key={stage.id} value={stage.id}>{stage.label}</option>
                     ))}
-                  </select>
+                  </NativeSelect>
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                     O botão "Ganho" moverá o card para cá.
                   </p>
@@ -806,7 +807,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                     ❌ Estágio Perdido (Lost)
                   </label>
-                  <select
+                  <NativeSelect
                     value={lostStayInStage ? 'archive' : lostStageId}
                     onChange={(e) => {
                       if (e.target.value === 'archive') {
@@ -824,7 +825,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                     {stages.map(stage => (
                       <option key={stage.id} value={stage.id}>{stage.label}</option>
                     ))}
-                  </select>
+                  </NativeSelect>
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                     O botão "Perdido" moverá o card para cá.
                   </p>

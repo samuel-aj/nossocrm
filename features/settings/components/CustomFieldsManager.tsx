@@ -1,4 +1,5 @@
 'use client';
+import { NativeSelect } from '@/components/ui/NativeSelect';
 
 /**
  * Campos personalizados (Configurações → CRM): lista agrupada e enxuta
@@ -267,7 +268,7 @@ export const CustomFieldsManager: React.FC = () => {
     next.splice(Math.max(0, Math.min(to, next.length)), 0, draggingGroup);
     setDraggingGroup(null);
     setGroupDropIndex(null);
-    if (next.join(' ') === groups.join(' ')) return;
+    if (next.join('\0') === groups.join('\0')) return;
     const ok = await reorderCustomFieldGroups(next);
     if (!ok) addToast('A ordem dos grupos não pôde ser salva (migração pendente no banco).', 'warning');
   };
@@ -540,7 +541,7 @@ export const CustomFieldsManager: React.FC = () => {
                 <label htmlFor="cf-type" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Tipo
                 </label>
-                <select
+                <NativeSelect
                   id="cf-type"
                   className={SETTINGS_INPUT_CLASS}
                   value={draft.type}
@@ -551,13 +552,13 @@ export const CustomFieldsManager: React.FC = () => {
                       {TYPE_META[t].label}
                     </option>
                   ))}
-                </select>
+                </NativeSelect>
               </div>
               <div>
                 <label htmlFor="cf-group" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   Grupo
                 </label>
-                <select
+                <NativeSelect
                   id="cf-group"
                   className={SETTINGS_INPUT_CLASS}
                   value={draft.groupName}
@@ -569,7 +570,7 @@ export const CustomFieldsManager: React.FC = () => {
                       {g}
                     </option>
                   ))}
-                </select>
+                </NativeSelect>
               </div>
             </div>
             {isSelect ? (

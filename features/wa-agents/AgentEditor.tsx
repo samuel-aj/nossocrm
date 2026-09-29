@@ -1,4 +1,5 @@
 'use client';
+import { NativeSelect } from '@/components/ui/NativeSelect';
 
 /**
  * Editor de agente de IA em abas: Identidade e comportamento | Conhecimento |
@@ -716,7 +717,7 @@ function TriggersFields({
         {deal.enabled ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Field label="Evento" htmlFor="agent-deal-event">
-              <select
+              <NativeSelect
                 id="agent-deal-event"
                 className={INPUT_CLASS}
                 value={deal.event}
@@ -727,7 +728,7 @@ function TriggersFields({
                     {ev.label}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </Field>
             <Field
               label={deal.event === 'deal_stage_entered' ? 'Quadro' : 'Quadro (opcional)'}
@@ -738,7 +739,7 @@ function TriggersFields({
                   : 'Vazio dispara para negócios criados em qualquer quadro.'
               }
             >
-              <select
+              <NativeSelect
                 id="agent-deal-board"
                 className={INPUT_CLASS}
                 value={boardId}
@@ -750,11 +751,11 @@ function TriggersFields({
                     {b.name}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </Field>
             {deal.event === 'deal_stage_entered' ? (
               <Field label="Etapa" htmlFor="agent-deal-stage">
-                <select
+                <NativeSelect
                   id="agent-deal-stage"
                   className={INPUT_CLASS}
                   value={deal.stage_id ?? ''}
@@ -767,7 +768,7 @@ function TriggersFields({
                       {s.label}
                     </option>
                   ))}
-                </select>
+                </NativeSelect>
               </Field>
             ) : null}
             <Field
@@ -775,7 +776,7 @@ function TriggersFields({
               htmlFor="agent-deal-connection"
               tip="Número conectado que envia a primeira mensagem ao telefone do contato do negócio."
             >
-              <select
+              <NativeSelect
                 id="agent-deal-connection"
                 className={INPUT_CLASS}
                 value={deal.connection_id ?? ''}
@@ -788,7 +789,7 @@ function TriggersFields({
                     {c.status === 'connected' ? '' : ' (desconectado)'}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </Field>
             {selectedConnection && selectedConnection.status !== 'connected' ? (
               <div className="md:col-span-2">
@@ -1451,7 +1452,7 @@ export const AgentEditor: React.FC<{
             {form.auto_lead.enabled ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Field label="Quadro" htmlFor="agent-auto-lead-board">
-                  <select
+                  <NativeSelect
                     id="agent-auto-lead-board"
                     className={INPUT_CLASS}
                     value={form.auto_lead.board_id ?? ''}
@@ -1465,10 +1466,10 @@ export const AgentEditor: React.FC<{
                         {b.name}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </Field>
                 <Field label="Etapa" htmlFor="agent-auto-lead-stage">
-                  <select
+                  <NativeSelect
                     id="agent-auto-lead-stage"
                     className={INPUT_CLASS}
                     value={form.auto_lead.stage_id ?? ''}
@@ -1484,7 +1485,7 @@ export const AgentEditor: React.FC<{
                         {st.label}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </Field>
               </div>
             ) : null}
@@ -1505,7 +1506,7 @@ export const AgentEditor: React.FC<{
         <Panel title="Modelo" icon={<Cpu size={16} />}>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Field label="Provedor" htmlFor="agent-provider">
-              <select
+              <NativeSelect
                 id="agent-provider"
                 className={INPUT_CLASS}
                 value={form.provider}
@@ -1520,10 +1521,10 @@ export const AgentEditor: React.FC<{
                     {PROVIDER_LABELS[p] ?? p}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </Field>
             <Field label="Modelo" htmlFor="agent-model">
-              <select
+              <NativeSelect
                 id="agent-model"
                 className={INPUT_CLASS}
                 value={modelSelectValue}
@@ -1545,7 +1546,7 @@ export const AgentEditor: React.FC<{
                   </option>
                 ))}
                 <option value={CUSTOM_MODEL}>Outro (digitar ID)</option>
-              </select>
+              </NativeSelect>
               {modelSelectValue === CUSTOM_MODEL ? (
                 <input
                   className={`${INPUT_CLASS} mt-2 font-mono`}

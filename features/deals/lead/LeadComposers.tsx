@@ -1,4 +1,5 @@
 'use client';
+import { NativeSelect } from '@/components/ui/NativeSelect';
 
 /**
  * Compositores da tela do lead que NÃO vão para o WhatsApp: nota interna e
@@ -173,7 +174,7 @@ export function ActivityComposer({
       )}
       {error && <p role="alert" className="text-xs text-red-500">{error}</p>}
       <div className="flex gap-2 max-sm:flex-wrap">
-        <select
+        <NativeSelect
           value={draft.type}
           onChange={e => set({ type: e.target.value as ActivityDraft['type'] })}
           disabled={disabled}
@@ -184,7 +185,7 @@ export function ActivityComposer({
           <option value="CALL">Ligação</option>
           <option value="MEETING">Reunião</option>
           <option value="EMAIL">E-mail</option>
-        </select>
+        </NativeSelect>
         <input
           value={draft.title}
           onChange={e => set({ title: e.target.value })}

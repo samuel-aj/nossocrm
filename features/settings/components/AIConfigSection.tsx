@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { NativeSelect } from '@/components/ui/NativeSelect';
 import { useCRM } from '@/context/CRMContext';
 import { Bot, Key, Cpu, CheckCircle, AlertCircle, Loader2, Save, Trash2, ChevronDown, ChevronUp, Shield } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
@@ -327,7 +328,7 @@ export const AIConfigSection: React.FC = () => {
                             <Cpu size={14} /> Provedor de IA
                         </label>
                         <div className="relative">
-                            <select
+                            <NativeSelect
                                 id="ai-provider-select"
                                 value={aiProvider}
                                 onChange={handleProviderChange}
@@ -336,10 +337,7 @@ export const AIConfigSection: React.FC = () => {
                                 {AI_PROVIDERS.map(p => (
                                     <option key={p.id} value={p.id}>{p.name}</option>
                                 ))}
-                            </select>
-                            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                            </div>
+                            </NativeSelect>
                         </div>
                     </div>
 
@@ -349,7 +347,7 @@ export const AIConfigSection: React.FC = () => {
                             <Bot size={14} /> Modelo
                         </label>
                         <div className="relative">
-                            <select
+                            <NativeSelect
                                 id="ai-model-select"
                                 value={modelSelectValue}
                                 onChange={async (e) => {
@@ -378,10 +376,7 @@ export const AIConfigSection: React.FC = () => {
                                     </option>
                                 ))}
                                 <option value="custom">Outro (Digitar ID)</option>
-                            </select>
-                            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                            </div>
+                            </NativeSelect>
                         </div>
 
                         {modelSelectValue === 'custom' && (

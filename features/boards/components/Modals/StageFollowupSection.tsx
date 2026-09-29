@@ -1,4 +1,5 @@
 'use client';
+import { NativeSelect } from '@/components/ui/NativeSelect';
 
 /**
  * Seção "Follow-up por inatividade" da janela da etapa: se o lead ficar um
@@ -186,13 +187,13 @@ export function StageFollowupSection({ stageId, stageSaved }: { stageId: string;
                     value={draft.amount}
                     onChange={(e) => set({ amount: Math.max(0, Math.round(Number(e.target.value) || 0)) })}
                   />
-                  <select className={FIELD} value={draft.unit} aria-label="Unidade" onChange={(e) => set({ unit: e.target.value as Unit })}>
+                  <NativeSelect className={FIELD} value={draft.unit} aria-label="Unidade" onChange={(e) => set({ unit: e.target.value as Unit })}>
                     {(Object.keys(UNIT_LABEL) as Unit[]).map((u) => (
                       <option key={u} value={u}>
                         {UNIT_LABEL[u]}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </div>
               </div>
 
@@ -228,7 +229,7 @@ export function StageFollowupSection({ stageId, stageSaved }: { stageId: string;
                   <label htmlFor={`fu-bot-${stageId}`} className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
                     Robô
                   </label>
-                  <select id={`fu-bot-${stageId}`} className={FIELD} value={draft.botId} onChange={(e) => set({ botId: e.target.value })}>
+                  <NativeSelect id={`fu-bot-${stageId}`} className={FIELD} value={draft.botId} onChange={(e) => set({ botId: e.target.value })}>
                     <option value="">{botsQ.isLoading ? 'Carregando...' : 'Escolha o robô'}</option>
                     {bots.map((b) => (
                       <option key={b.id} value={b.id}>
@@ -236,7 +237,7 @@ export function StageFollowupSection({ stageId, stageSaved }: { stageId: string;
                         {b.enabled ? '' : ' (desligado)'}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                   <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
                     Se o robô já estiver rodando neste lead, ele não é iniciado de novo.
                   </p>
@@ -283,7 +284,7 @@ export function StageFollowupSection({ stageId, stageSaved }: { stageId: string;
                       </p>
                     </>
                   ) : (
-                    <select className={FIELD} value={draft.templateId} aria-label="Modelo de mensagem" onChange={(e) => set({ templateId: e.target.value })}>
+                    <NativeSelect className={FIELD} value={draft.templateId} aria-label="Modelo de mensagem" onChange={(e) => set({ templateId: e.target.value })}>
                       <option value="">{templatesQ.isLoading ? 'Carregando...' : 'Escolha o modelo'}</option>
                       {templates.map((t) => (
                         <option key={t.id} value={t.id} disabled={t.type === 'whatsapp_api' && t.meta_status !== 'APPROVED'}>
@@ -291,7 +292,7 @@ export function StageFollowupSection({ stageId, stageSaved }: { stageId: string;
                           {t.type === 'whatsapp_api' ? (t.meta_status === 'APPROVED' ? ' (API oficial)' : ' (aguardando aprovação)') : ''}
                         </option>
                       ))}
-                    </select>
+                    </NativeSelect>
                   )}
                 </div>
               )}

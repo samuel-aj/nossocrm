@@ -1,3 +1,4 @@
+import { NativeSelect } from '@/components/ui/NativeSelect';
 import React, { useMemo, useState } from 'react';
 import {
   Workflow,
@@ -532,7 +533,7 @@ export const PipelineWebhooksSection: React.FC = () => {
 
           <div className="space-y-2">
             <label className={labelClass}>Quando</label>
-            <select
+            <NativeSelect
               value={formEvent}
               onChange={(e) => handleEventChange(e.target.value as PipelineEvent)}
               className={inputClass}
@@ -542,7 +543,7 @@ export const PipelineWebhooksSection: React.FC = () => {
                   {ev.label}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
             {formEventMeta ? (
               <div className="text-xs text-slate-500 dark:text-slate-400">{formEventMeta.hint}</div>
             ) : null}
@@ -550,7 +551,7 @@ export const PipelineWebhooksSection: React.FC = () => {
 
           <div className="space-y-2">
             <label className={labelClass}>Quadro</label>
-            <select
+            <NativeSelect
               value={formBoardId}
               onChange={(e) => handleBoardChange(e.target.value)}
               disabled={boardsLoading}
@@ -563,13 +564,13 @@ export const PipelineWebhooksSection: React.FC = () => {
                   {b.isDefault ? ' (padrão)' : ''}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </div>
 
           {formEvent === 'deal.created' ? (
             <div className="space-y-2">
               <label className={labelClass}>Etapa em que o lead foi criado</label>
-              <select
+              <NativeSelect
                 value={formToStageId}
                 onChange={(e) => setFormToStageId(e.target.value)}
                 disabled={!formBoard || formStages.length === 0}
@@ -581,7 +582,7 @@ export const PipelineWebhooksSection: React.FC = () => {
                     {s.label}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
               {!formBoard ? (
                 <div className="text-xs text-slate-500 dark:text-slate-400">
                   Escolha um quadro para filtrar por etapa.
@@ -593,7 +594,7 @@ export const PipelineWebhooksSection: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <label className={labelClass}>De (etapa de origem)</label>
-                  <select
+                  <NativeSelect
                     value={formFromStageId}
                     onChange={(e) => setFormFromStageId(e.target.value)}
                     disabled={!formBoard || formStages.length === 0}
@@ -605,11 +606,11 @@ export const PipelineWebhooksSection: React.FC = () => {
                         {s.label}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </div>
                 <div className="space-y-2">
                   <label className={labelClass}>Para (etapa de destino)</label>
-                  <select
+                  <NativeSelect
                     value={formToStageId}
                     onChange={(e) => setFormToStageId(e.target.value)}
                     disabled={!formBoard || formStages.length === 0}
@@ -621,7 +622,7 @@ export const PipelineWebhooksSection: React.FC = () => {
                         {s.label}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </div>
               </div>
               {!formBoard ? (

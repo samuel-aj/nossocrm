@@ -1,3 +1,4 @@
+import { NativeSelect } from '@/components/ui/NativeSelect';
 import React, { useState } from 'react';
 import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
@@ -424,7 +425,7 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
                                 <label className="block text-xs font-medium text-slate-500 mb-1">Produto</label>
                                 <div className="relative">
                                     <Package size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                                    <select
+                                    <NativeSelect
                                         className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg pl-10 pr-3 py-2.5 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500 appearance-none"
                                         value={selectedProductId}
                                         onChange={e => setSelectedProductId(e.target.value)}
@@ -435,7 +436,7 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
                                                 {product.name} — R$ {product.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </option>
                                         ))}
-                                    </select>
+                                    </NativeSelect>
                                 </div>
                                 {selectedProductId && (
                                     <p className="text-xs text-slate-400 mt-1">
@@ -449,7 +450,7 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
                                 <label htmlFor="new-deal-stage" className="block text-xs font-medium text-slate-500 mb-1">Etapa</label>
                                 <div className="relative">
                                     <Columns3 size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                                    <select
+                                    <NativeSelect
                                         id="new-deal-stage"
                                         className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-lg pl-10 pr-3 py-2.5 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500 appearance-none"
                                         value={selectedStageId || activeBoard.stages[0]?.id || ''}
@@ -460,7 +461,7 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
                                                 {stage.label}
                                             </option>
                                         ))}
-                                    </select>
+                                    </NativeSelect>
                                 </div>
                             </div>
                         </div>

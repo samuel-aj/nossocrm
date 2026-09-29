@@ -1,4 +1,5 @@
 'use client';
+import { NativeSelect } from '@/components/ui/NativeSelect';
 import React, { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Modal } from '@/components/ui/Modal';
@@ -63,10 +64,10 @@ export function BotTemplateLibrary({ onClose, onCreated, onBlank }: { onClose: (
         <Field label="Nome do robô" htmlFor="copy-name"><input id="copy-name" className={INPUT_CLASS} value={name} onChange={e => setName(e.target.value)} maxLength={120} /></Field>
         {selected.snapshot.dependencies.map(d => <Field key={d.ref} label={d.label} htmlFor={`binding-${d.ref}`}>
           {d.kind === 'webhook' ? <input id={`binding-${d.ref}`} className={INPUT_CLASS} type="url" placeholder="Configurar URL pública aqui ou no editor" value={bindings[d.ref] ?? ''} onChange={e => setBindings({ ...bindings, [d.ref]: e.target.value })} /> :
-            <select id={`binding-${d.ref}`} className={INPUT_CLASS} value={bindings[d.ref] ?? ''} onChange={e => setBindings({ ...bindings, [d.ref]: e.target.value })}>
+            <NativeSelect id={`binding-${d.ref}`} className={INPUT_CLASS} value={bindings[d.ref] ?? ''} onChange={e => setBindings({ ...bindings, [d.ref]: e.target.value })}>
               <option value="">{d.kind === 'connection' ? 'Selecione um número' : 'Pendente — configurar no editor'}</option>
               {choices(d.kind).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>}
+            </NativeSelect>}
         </Field>)}
         <Notice>Webhooks precisam de nova configuração de segredo e corpo. Cada cópia é independente do modelo.</Notice>
         <div className="flex gap-2"><button type="button" className={BTN_SECONDARY} disabled={busy} onClick={() => setSelected(null)}>Voltar</button><button type="button" className={BTN_PRIMARY} disabled={busy || !name.trim() || missingNumbers} onClick={() => void createCopy()}>{busy ? 'Criando…' : 'Criar cópia desligada'}</button></div>

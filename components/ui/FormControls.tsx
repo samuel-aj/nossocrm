@@ -1,28 +1,27 @@
 'use client';
-import React, { useState } from 'react';
-import * as Select from '@radix-ui/react-select';
-import { Check, ChevronDown } from 'lucide-react';
-import { useModalOverlay } from '@/components/ui/Modal';
+import React from 'react';
+import { Check } from 'lucide-react';
+import { NativeSelect } from '@/components/ui/NativeSelect';
 
-export function FormSelect({ label, value, onChange, options, placeholder = 'Selecione', disabled = false }: {
+export function FormSelect({ label, value, onChange, options, placeholder = 'Selecione', disabled = false, compact = false, searchable = false }: {
   label: string; value: string; onChange: (value: string) => void;
-  options: { value: string; label: string }[]; placeholder?: string; disabled?: boolean;
+  options: { value: string; label: string; disabled?: boolean; group?: string }[]; placeholder?: string; disabled?: boolean; compact?: boolean; searchable?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
-  useModalOverlay(open);
-  return <Select.Root value={value} onValueChange={onChange} open={open} onOpenChange={setOpen} disabled={disabled}>
-    <Select.Trigger aria-label={label} className="group flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-left text-sm text-slate-700 shadow-sm outline-none transition hover:border-primary-300 focus-visible:border-primary-500 focus-visible:ring-4 focus-visible:ring-primary-500/10 data-[state=open]:border-primary-400 data-[state=open]:ring-4 data-[state=open]:ring-primary-500/10 disabled:opacity-50 dark:border-white/15 dark:bg-slate-900 dark:text-slate-200 [&>span:first-child]:min-w-0 [&>span:first-child]:flex-1 [&>span:first-child]:truncate">
-      <Select.Value placeholder={placeholder} /><Select.Icon asChild><ChevronDown size={16} className="shrink-0 text-slate-400 transition-transform group-data-[state=open]:rotate-180" /></Select.Icon>
-    </Select.Trigger>
-    <Select.Portal>
-      <Select.Content position="popper" sideOffset={6} collisionPadding={12} className="z-[10050] max-h-[min(320px,var(--radix-select-content-available-height))] w-max min-w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-24px)] overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 text-slate-700 shadow-xl dark:border-white/15 dark:bg-slate-900 dark:text-slate-200">
-        <Select.Viewport className="divide-y divide-slate-200/70 dark:divide-white/10">{options.map(option => <Select.Item key={option.value} value={option.value} className="relative flex min-h-11 cursor-pointer select-none items-center rounded-lg py-2.5 pl-3 pr-9 text-sm outline-none data-[highlighted]:bg-primary-50 data-[highlighted]:text-primary-700 data-[state=checked]:font-semibold dark:data-[highlighted]:bg-primary-500/15 dark:data-[highlighted]:text-primary-300">
-          <Select.ItemText><span className="block truncate" title={option.label}>{option.label}</span></Select.ItemText>
-          <Select.ItemIndicator className="absolute right-3 text-primary-600 dark:text-primary-400"><Check size={16} /></Select.ItemIndicator>
-        </Select.Item>)}</Select.Viewport>
-      </Select.Content>
-    </Select.Portal>
-  </Select.Root>;
+  const children: React.ReactNode[] = [];
+  let currentGroup: string | undefined;
+  let grouped: React.ReactNode[] = [];
+  const flushGroup = () => {
+    if (currentGroup) children.push(<optgroup key={`${currentGroup}:${children.length}`} label={currentGroup}>{grouped}</optgroup>);
+    else children.push(...grouped);
+    grouped = [];
+  };
+  for (const option of options) {
+    if (option.group !== currentGroup) { flushGroup(); currentGroup = option.group; }
+    grouped.push(<option key={option.value} value={option.value} disabled={option.disabled}>{option.label}</option>);
+  }
+  flushGroup();
+  return <NativeSelect aria-label={label} value={value} onChange={event => onChange(event.target.value)} disabled={disabled} searchable={searchable} placeholder={placeholder}
+    className={compact ? 'min-h-8 px-2 py-1 text-xs' : 'min-h-11 rounded-xl px-3.5 py-2.5 shadow-sm'}>{children}</NativeSelect>;
 }
 
 export function FormCheckbox({ label, checked, onChange, disabled = false, children }: {

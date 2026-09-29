@@ -1,3 +1,4 @@
+import { NativeSelect } from '@/components/ui/NativeSelect';
 import React, { useState, useId } from 'react';
 import { X, Plus, Trash2, ArrowUp, ArrowDown, Check } from 'lucide-react';
 import { useCRM } from '@/context/CRMContext';
@@ -103,7 +104,7 @@ export const LifecycleSettingsModal: React.FC<LifecycleSettingsModalProps> = ({ 
                                 {/* Color */}
                                 <div className="relative flex-shrink-0 group">
                                     <div className={`w-6 h-6 rounded-full ${stage.color} cursor-pointer ring-2 ring-transparent hover:ring-slate-300 dark:hover:ring-slate-600 transition-all`} />
-                                    <select
+                                    <NativeSelect
                                         value={stage.color}
                                         onChange={(e) => updateLifecycleStage(stage.id, { color: e.target.value })}
                                         className="absolute inset-0 opacity-0 cursor-pointer"
@@ -111,7 +112,7 @@ export const LifecycleSettingsModal: React.FC<LifecycleSettingsModalProps> = ({ 
                                         {STAGE_COLORS.map(c => (
                                             <option key={c} value={c}>{c.replace('bg-', '')}</option>
                                         ))}
-                                    </select>
+                                    </NativeSelect>
                                 </div>
 
                                 {/* Name */}

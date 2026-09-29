@@ -1,4 +1,5 @@
 "use client";
+import { NativeSelect } from '@/components/ui/NativeSelect';
 
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -10,10 +11,12 @@ import {
   Copy,
   ExternalLink,
   FolderOpen,
+  List,
   Maximize2,
   Package,
   Pencil,
   Phone,
+  Radar,
   Tag,
   Trash2,
   Undo2,
@@ -581,7 +584,7 @@ export function LeadPropertiesPanel({
               ))}
             </div>
           ) : field.type === "select" ? (
-            <select
+            <NativeSelect
               autoFocus
               aria-label={field.label}
               value={fieldEditor.value}
@@ -595,7 +598,7 @@ export function LeadPropertiesPanel({
               {field.options?.map((option) => (
                 <option key={option}>{option}</option>
               ))}
-            </select>
+            </NativeSelect>
           ) : (
             <input
               autoFocus
@@ -780,7 +783,7 @@ export function LeadPropertiesPanel({
               </button>
               {tagsOpen && (
                 <div className="absolute z-20 top-6 left-0 w-56 rounded-lg border bg-white dark:bg-slate-800 shadow-lg p-2 space-y-1">
-                  <select
+                  <NativeSelect
                     aria-label="Selecionar etiqueta"
                     className="w-full bg-white dark:bg-slate-800 p-1 text-xs"
                     value=""
@@ -797,7 +800,7 @@ export function LeadPropertiesPanel({
                       .map((value) => (
                         <option key={value}>{value}</option>
                       ))}
-                  </select>
+                  </NativeSelect>
                   <input
                     aria-label="Nome da nova tag"
                     placeholder="Nova etiqueta"
@@ -1082,7 +1085,7 @@ export function LeadPropertiesPanel({
         </SectionCard>
         <SectionCard
           title="Campos personalizados"
-          icon={<Tag size={16} />}
+          icon={<List size={16} />}
           open={open.fields}
           toggle={() => toggle("fields")}
           summary={`${fieldDefinitions.filter((field) => fieldIsFilled(field, deal.customFields?.[field.key])).length} preenchidos`}
@@ -1220,8 +1223,9 @@ export function LeadPropertiesPanel({
           ))}
           {canEdit && (
             <div className="mt-3 space-y-2">
-              <select
+              <NativeSelect
                 aria-label="Produto ou serviço"
+                searchable
                 value={productId}
                 onChange={(event) => {
                   setProductId(event.target.value);
@@ -1237,7 +1241,7 @@ export function LeadPropertiesPanel({
                     {product.name} - {money(product.price)}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
               {productId && (
                 <div className="flex gap-2">
                   <input
@@ -1315,7 +1319,7 @@ export function LeadPropertiesPanel({
         </SectionCard>
         <SectionCard
           title="UTMs"
-          icon={<Tag size={16} />}
+          icon={<Radar size={16} />}
           open={open.utms}
           toggle={() => toggle("utms")}
         >

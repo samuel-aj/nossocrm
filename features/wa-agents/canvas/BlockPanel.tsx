@@ -1,4 +1,5 @@
 'use client';
+import { NativeSelect } from '@/components/ui/NativeSelect';
 
 /**
  * Painel de propriedades do bloco apontado no quadro: gaveta lateral no
@@ -137,7 +138,7 @@ function DurationField({
         onCommit={(value) => onChange({ amount: value, unit })}
         ariaLabel={ariaLabel}
       />
-      <select
+      <NativeSelect
         className={INPUT_CLASS}
         value={unit}
         aria-label={`${ariaLabel} (unidade)`}
@@ -151,7 +152,7 @@ function DurationField({
             {WAIT_UNIT_LABELS[u]}
           </option>
         ))}
-      </select>
+      </NativeSelect>
     </div>
   );
 }
@@ -268,7 +269,7 @@ function WaitEditor({ block, update }: EditorProps<'wait'>) {
           onCommit={(value) => update({ ...block, data: { amount: value, unit } })}
           ariaLabel="Quanto tempo esperar"
         />
-        <select
+        <NativeSelect
           className={INPUT_CLASS}
           value={unit}
           aria-label="Unidade de tempo"
@@ -282,7 +283,7 @@ function WaitEditor({ block, update }: EditorProps<'wait'>) {
               {WAIT_UNIT_LABELS[u]}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </div>
       <p className={HELP_CLASS}>No máximo 30 dias. Depois da espera, o robô segue para o próximo bloco.</p>
     </>
@@ -347,14 +348,14 @@ function ConditionEditor({ block, update }: EditorProps<'condition'>) {
     }
     if (clause.field === 'board') {
       return (
-        <select id={id} className={INPUT_CLASS} value={clause.value} aria-label={label} onChange={(e) => setClause(rule.id, clause.id, { value: e.target.value })}>
+        <NativeSelect id={id} className={INPUT_CLASS} value={clause.value} aria-label={label} onChange={(e) => setClause(rule.id, clause.id, { value: e.target.value })}>
           <option value="">Escolha o quadro</option>
           {boards.map((b) => (
             <option key={b.id} value={b.id}>
               {b.name}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       );
     }
     if (clause.field === 'tags') {
@@ -423,7 +424,7 @@ function ConditionEditor({ block, update }: EditorProps<'condition'>) {
               ) : null}
               <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-1">
                 <div className="flex flex-wrap items-center gap-1">
-                  <select
+                  <NativeSelect
                     className={`${INPUT_CLASS} w-44`}
                     value={clause.field}
                     aria-label={`Campo da condição ${ci + 1}`}
@@ -434,7 +435,7 @@ function ConditionEditor({ block, update }: EditorProps<'condition'>) {
                         {CONDITION_FIELD_LABELS[f]}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                   {clause.field === 'custom_field' ? (
                     <input
                       className={`${INPUT_CLASS} w-40`}
@@ -444,7 +445,7 @@ function ConditionEditor({ block, update }: EditorProps<'condition'>) {
                       onChange={(e) => setClause(rule.id, clause.id, { key: e.target.value })}
                     />
                   ) : null}
-                  <select
+                  <NativeSelect
                     className={`${INPUT_CLASS} w-36`}
                     value={clause.op}
                     aria-label={`Operador da condição ${ci + 1}`}
@@ -455,7 +456,7 @@ function ConditionEditor({ block, update }: EditorProps<'condition'>) {
                         {CONDITION_OP_LABELS[op]}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                   {opNeedsValue(clause.op) ? <div className="flex-1 min-w-[10rem]">{valueInput(rule, clause, ci)}</div> : null}
                 </div>
                 <button
@@ -604,7 +605,7 @@ function CreateLeadEditor({ block, update }: EditorProps<'create_lead'>) {
       <label htmlFor={`block-${block.id}-board`} className={LABEL_CLASS}>
         Pipeline
       </label>
-      <select
+      <NativeSelect
         id={`block-${block.id}-board`}
         className={INPUT_CLASS}
         value={block.data.board_id}
@@ -619,11 +620,11 @@ function CreateLeadEditor({ block, update }: EditorProps<'create_lead'>) {
             {b.name}
           </option>
         ))}
-      </select>
+      </NativeSelect>
       <label htmlFor={`block-${block.id}-stage`} className={LABEL_CLASS}>
         Etapa inicial
       </label>
-      <select
+      <NativeSelect
         id={`block-${block.id}-stage`}
         className={INPUT_CLASS}
         value={block.data.stage_id}
@@ -636,7 +637,7 @@ function CreateLeadEditor({ block, update }: EditorProps<'create_lead'>) {
             {s.label}
           </option>
         ))}
-      </select>
+      </NativeSelect>
       <p className={HELP_CLASS}>
         O contato é identificado pelo telefone (com e sem o nono dígito). Se ele já tiver um lead aberto, nada é criado e
         o robô segue usando esse lead.
@@ -736,7 +737,7 @@ function TemplateEditor({ block, update }: EditorProps<'send_template'>) {
       <label htmlFor={`block-${block.id}-template`} className={LABEL_CLASS}>
         Modelo de mensagem
       </label>
-      <select
+      <NativeSelect
         id={`block-${block.id}-template`}
         className={INPUT_CLASS}
         value={block.data.template_id}
@@ -762,7 +763,7 @@ function TemplateEditor({ block, update }: EditorProps<'send_template'>) {
             ))}
           </optgroup>
         ) : null}
-      </select>
+      </NativeSelect>
       {templatesQ.isError ? <p className={HELP_CLASS}>Não foi possível carregar os modelos.</p> : null}
       {!templatesQ.isLoading && all.length === 0 ? (
         <p className={HELP_CLASS}>Nenhum modelo cadastrado. Crie em Configurações → Modelos.</p>
@@ -858,7 +859,7 @@ function StartBotEditor({ block, update }: EditorProps<'start_bot'>) {
       <label htmlFor={`block-${block.id}-bot`} className={LABEL_CLASS}>
         Robô que começa
       </label>
-      <select
+      <NativeSelect
         id={`block-${block.id}-bot`}
         className={INPUT_CLASS}
         value={block.data.bot_id}
@@ -875,7 +876,7 @@ function StartBotEditor({ block, update }: EditorProps<'start_bot'>) {
             {b.enabled ? '' : ' (desligado)'}
           </option>
         ))}
-      </select>
+      </NativeSelect>
       <p className={HELP_CLASS}>
         Este robô termina aqui e o outro começa na mesma conversa (mesmo contato e negócio; o contexto adicional vai
         junto). Até 5 robôs em cadeia.

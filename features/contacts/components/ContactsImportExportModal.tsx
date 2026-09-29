@@ -1,3 +1,4 @@
+import { NativeSelect } from '@/components/ui/NativeSelect';
 import React, { useMemo, useState } from 'react';
 import { Download, Upload, FileDown } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
@@ -202,7 +203,7 @@ export function ContactsImportExportModal(props: {
           <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
             Delimitador
           </label>
-          <select
+          <NativeSelect
             value={delimiter}
             onChange={e => setDelimiter(e.target.value as any)}
             className="text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 px-2 py-1"
@@ -211,7 +212,7 @@ export function ContactsImportExportModal(props: {
             <option value=",">, (vírgula)</option>
             <option value=";">; (ponto e vírgula)</option>
             <option value="\t">TAB</option>
-          </select>
+          </NativeSelect>
         </div>
       </div>
 
