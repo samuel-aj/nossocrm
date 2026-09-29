@@ -39,6 +39,9 @@ vi.mock("@/context/CRMContext", () => ({
     products: [{ id: "product", name: "Serviço", price: 100 }],
     boards: [{ id: "board", name: "Funil", hiddenFieldGroups: ["Oculto"] }],
     customFieldDefinitions: [
+      { id: "utm1", key: "utm_source", label: "Fonte UTM", type: "text" },
+      { id: "utm2", key: "utm_extra", label: "Extra UTM", type: "number" },
+      { id: "z", key: "z", label: "Z field", type: "text", groupName: "Zebra" },
       { id: "field-1", key: "source", label: "Origem", type: "text" },
       {
         id: "field-2",
@@ -746,4 +749,43 @@ describe("LeadPropertiesPanel", () => {
         .closest("section"),
     ).toHaveTextContent("2 preenchidos");
   });
+});
+
+it("preserves typed standard and nonstandard UTM editing and read-only permissions", async () => {
+  const view = setup();
+  fireEvent.click(screen.getByRole("button", { name: /UTMs/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Editar Fonte UTM" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Fonte UTM" }), { target: { value: "google" } });
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "Fonte UTM" }), { key: "Enter" });
+  await waitFor(() => expect(mocks.updateDeal).toHaveBeenCalledWith("lead-1", { customFields: { utm_source: "google" } }, { throwOnError: true }));
+  fireEvent.click(screen.getByRole("button", { name: "Editar Extra UTM" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Extra UTM" }), { target: { value: "12" } });
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "Extra UTM" }), { key: "Enter" });
+  await waitFor(() => expect(mocks.updateDeal).toHaveBeenCalledWith("lead-1", { customFields: { utm_extra: 12 } }, { throwOnError: true }));
+  view.unmount(); mocks.edit = false; setup();
+  fireEvent.click(screen.getByRole("button", { name: /UTMs/ }));
+  expect(screen.getByRole("button", { name: "Editar Fonte UTM" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Editar Extra UTM" })).toBeDisabled();
+});
+it("orders ungrouped fields before alphabetically sorted named groups", () => {
+  setup(); fireEvent.click(screen.getByRole("button", { name: /Campos personalizados/ }));
+  const section = screen.getByRole("button", { name: /Campos personalizados/ }).closest("section")!;
+  expect(section.textContent!.indexOf("Origem")).toBeLessThan(section.textContent!.indexOf("Análise"));
+  expect(section.textContent!.indexOf("Análise")).toBeLessThan(section.textContent!.indexOf("Zebra"));
+});
+it("preserves deterministic tag palette", () => {
+  setup({ ...deal, tags: ["A", "B"] });
+  expect(screen.getByText("A")).toHaveClass("bg-amber-50");
+  expect(screen.getByText("B")).toHaveClass("bg-emerald-50");
+});
+it("grows the description with the current draft", () => {
+  setup(); fireEvent.click(screen.getByRole("button", { name: "Adicionar descrição..." }));
+  const textarea = screen.getByRole("textbox", { name: "Descrição do lead" });
+  Object.defineProperty(textarea, "scrollHeight", { configurable: true, value: 240 });
+  fireEvent.change(textarea, { target: { value: "Long description" } });
+  expect(textarea).toHaveStyle({ height: "240px" });
+});
+it("constrains the shared panel to its available parent width", () => {
+  setup();
+  expect(screen.getByRole("complementary", { name: "Propriedades do lead" })).toHaveClass("w-full", "max-w-full", "min-w-0");
 });

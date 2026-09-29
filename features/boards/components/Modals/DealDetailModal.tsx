@@ -1,5 +1,5 @@
 import { newerRecord } from "@/lib/query/dealCache";
-import React, { useState, useRef, useEffect, useId, useMemo } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useCRM } from "@/context/CRMContext";
 import { useMyActionPermissions } from "@/lib/permissions/useMyActionPermissions";
 import { useAuth } from "@/context/AuthContext";
@@ -39,7 +39,6 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   scheduleHint = null,
   onScheduleHintConsumed,
 }) => {
-  const headingId = useId();
   useFocusReturn({ enabled: isOpen });
   const { mode } = useResponsiveMode();
   const isMobile = mode === "mobile";
@@ -120,6 +119,29 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     "fullscreen",
   );
   const [mobilePane, setMobilePane] = useState<"data" | "chat">("chat");
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const propertiesTriggerRef = useRef<HTMLButtonElement>(null);
+  const [workspaceWidth, setWorkspaceWidth] = useState(0);
+  const [propertiesOpen, setPropertiesOpen] = useState(false);
+  const propertiesDrawer = !isMobile && workspaceWidth < 840;
+  const closeProperties = () => {
+    setPropertiesOpen(false);
+    propertiesTriggerRef.current?.focus({ preventScroll: true });
+  };
+  useEffect(() => {
+    const element = workspaceRef.current;
+    if (!element) return;
+    const update = () => setWorkspaceWidth(element.getBoundingClientRect().width);
+    update();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", update);
+      return () => window.removeEventListener("resize", update);
+    }
+    const observer = new ResizeObserver(entries => setWorkspaceWidth(entries[0].contentRect.width));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [isOpen, !!deal, isMobile]);
+  useEffect(() => { setPropertiesOpen(false); }, [propertiesDrawer, dealId, isOpen]);
   const [aiOpen, setAiOpen] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isDrafting, setIsDrafting] = useState(false);
@@ -282,15 +304,22 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
           </button>
         </div>
       )}
-      <div className="flex-1 min-h-0 flex overflow-hidden">
+      <div ref={workspaceRef} className="relative flex-1 min-h-0 min-w-0 flex overflow-clip">
         <div
-          className={`${isMobile ? (mobilePane === "data" ? "block w-full" : "hidden") : "block w-[380px] xl:w-[420px] shrink-0 border-r border-slate-200 dark:border-white/10"} h-full`}
+          role={propertiesDrawer && propertiesOpen ? "dialog" : undefined}
+          aria-label={propertiesDrawer && propertiesOpen ? "Propriedades do lead" : undefined}
+          aria-modal={propertiesDrawer && propertiesOpen ? true : undefined}
+          inert={propertiesDrawer && !propertiesOpen}
+          onKeyDown={event => { if (propertiesDrawer && event.key === "Escape") { event.stopPropagation(); closeProperties(); } }}
+          className={`${isMobile ? (mobilePane === "data" ? "block w-full" : "hidden") : propertiesDrawer ? `${propertiesOpen ? "block" : "hidden"} absolute inset-y-0 left-0 z-30 w-[min(360px,100%)] shadow-2xl` : "block w-[360px] shrink-0 border-r border-slate-200 dark:border-white/10"} h-full min-w-0 [&>[data-focus-trap-fallback]]:h-full`}
         >
+          <FocusTrap active={propertiesDrawer && propertiesOpen} onEscape={closeProperties}>
           <LeadPropertiesPanel
             key={deal.id}
             deal={deal}
             contact={contact}
             side="left"
+            onClose={propertiesDrawer ? closeProperties : undefined}
             onExpand={
               !isMobile
                 ? () =>
@@ -301,11 +330,13 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
             }
             onDeleted={onClose}
           />
+          </FocusTrap>
         </div>
         <section
           aria-label="Conversa e histórico do lead"
           className={`${isMobile ? (mobilePane === "chat" ? "flex" : "hidden") : "flex"} relative flex-1 min-w-0 min-h-0 flex-col bg-white dark:bg-dark-card`}
         >
+          {propertiesDrawer && <button ref={propertiesTriggerRef} type="button" aria-expanded={propertiesOpen} onClick={() => setPropertiesOpen(true)} className="shrink-0 self-start m-2 text-sm">Abrir propriedades</button>}
           <DealWhatsAppChat
             contact={contact}
             contactLoadState={contactLoadState}
@@ -546,7 +577,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   return (
     <FocusTrap
       active={isOpen}
-      onEscape={onClose}
+      onEscape={propertiesDrawer && propertiesOpen ? closeProperties : onClose}
       allowOutsideClick
       initialFocus="[data-focus-trap-fallback]"
     >
@@ -554,7 +585,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
         className={`fixed inset-0 md:left-[var(--app-sidebar-width,0px)] z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm ${viewMode === "fullscreen" ? "p-0" : "p-4"}`}
         role="dialog"
         aria-modal="true"
-        aria-labelledby={headingId}
+        aria-label={`Negócio: ${deal.title}`}
         onClick={(event) => {
           if (event.target === event.currentTarget) onClose();
         }}

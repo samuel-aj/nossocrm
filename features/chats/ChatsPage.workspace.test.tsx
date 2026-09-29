@@ -103,3 +103,13 @@ it('keeps both drafts through a wide to narrow layout change', async () => {
   expect(screen.getByRole('textbox', { name: 'Editor da propriedade' })).toHaveValue('campo em edição');
   expect(state.mountCount).toBe(1);
 });
+
+it('prevents focus from horizontally scrolling the narrow workspace containing the right drawer', async () => {
+  state.width = 390;
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: /Contato da lista.*Olá/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Mostrar propriedades do lead' }));
+  const drawer = screen.getByRole('dialog', { name: 'Propriedades do lead' });
+  expect(drawer.parentElement).toHaveClass('overflow-clip');
+  expect(drawer).toHaveClass('right-0', 'w-[min(360px,100%)]');
+});

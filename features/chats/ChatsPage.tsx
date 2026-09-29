@@ -1156,7 +1156,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
     // nada de cartão flutuante; o chat cola nas bordas da área de conteúdo.
     <div
       ref={workspaceRef}
-      className="absolute inset-0 flex bg-white dark:bg-dark-card overflow-hidden"
+      className="absolute inset-0 flex bg-white dark:bg-dark-card overflow-clip"
       style={{ paddingBottom: 'calc(var(--app-bottom-nav-height, 0px) + var(--app-safe-area-bottom, 0px))' }}
     >
       {/* ============ COLUNA ESQUERDA: conversas + contatos ============ */}

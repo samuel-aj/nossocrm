@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { DealDetailModal } from "./DealDetailModal";
 import type { Deal } from "@/types";
@@ -399,4 +399,27 @@ it("saves AI analysis through the canonical strict mutation when edit is allowed
       .mocked(fetch)
       .mock.calls.every(([url]) => !String(url).startsWith("http://localhost")),
   ).toBe(true);
+});
+
+it("names the desktop dialog", () => {
+ render(<DealDetailModal dealId="deal-1" isOpen onClose={() => {}} />, { wrapper: ({ children }) => <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider> });
+ expect(screen.getByRole("dialog", { name: "Negócio: Pequeno Chapéu" })).toBeInTheDocument();
+});
+it.each([704, 836, 660])("uses a left overlay for %s available pixels and keeps chat/panel mounted", width => {
+ let resize!: ResizeObserverCallback;
+ vi.stubGlobal("ResizeObserver", class { constructor(callback: ResizeObserverCallback) { resize = callback; } observe() {} disconnect() {} });
+ const onClose = vi.fn();
+ render(<DealDetailModal dealId="deal-1" isOpen onClose={onClose} />, { wrapper: ({ children }) => <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider> });
+ act(() => resize([{ contentRect: { width } } as ResizeObserverEntry], {} as ResizeObserver));
+ const chat = screen.getByTestId("resolved-contact");
+ const panel = screen.getByLabelText("Propriedades do lead", { selector: "aside" });
+ const trigger = screen.getByRole("button", { name: "Abrir propriedades" });
+ fireEvent.click(trigger);
+ const drawer = screen.getByRole("dialog", { name: "Propriedades do lead" });
+ expect(drawer).toHaveClass("left-0");
+ fireEvent.keyDown(drawer, { key: "Escape" });
+ expect(onClose).not.toHaveBeenCalled();
+ expect(trigger).toHaveFocus();
+ expect(screen.getByTestId("resolved-contact")).toBe(chat);
+ expect(screen.getByLabelText("Propriedades do lead", { selector: "aside" })).toBe(panel);
 });

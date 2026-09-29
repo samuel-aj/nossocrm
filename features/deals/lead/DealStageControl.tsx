@@ -54,6 +54,12 @@ export function DealStageControl({ deal, size = 'md', align = 'left' }: Props) {
   };
 
   const selectedMove = pendingMove ? resolveMove(pendingMove) : null;
+  const targetIsWon = !!selectedMove && !isLostStage(selectedMove.target, selectedMove.targetStage.id) && (
+    selectedMove.target.wonStageId
+      ? selectedMove.target.wonStageId === selectedMove.targetStage.id
+      : selectedMove.target.linkedLifecycleStage !== 'CUSTOMER' && selectedMove.targetStage.linkedLifecycleStage === 'CUSTOMER'
+  );
+  const targetIsSuccess = targetIsWon || ['MQL', 'SALES_QUALIFIED'].includes(selectedMove?.targetStage.linkedLifecycleStage ?? '');
   const effect = selectedMove && (
     isLostStage(selectedMove.target, selectedMove.targetStage.id)
       ? 'O lead será marcado como perdido após informar o motivo.'
@@ -153,10 +159,14 @@ export function DealStageControl({ deal, size = 'md', align = 'left' }: Props) {
         title="Deseja mudar lead de funil?"
         message={
           <div className="space-y-2">
-            <p>{selectedMove ? `${selectedMove.source.name} / ${selectedMove.sourceStage.label} → ${selectedMove.target.name} / ${selectedMove.targetStage.label}` : 'A origem ou o destino mudou. Selecione a etapa novamente.'}</p>
+            {selectedMove ? <>
+              <p>Você vai mover <strong>{deal.title}</strong> para outro funil.</p>
+              <p><strong>De:</strong> {selectedMove.source.name} → {selectedMove.sourceStage.label}</p>
+              <p><strong>Para:</strong> {selectedMove.target.name} → {selectedMove.targetStage.label}</p>
+            </> : <p>A origem ou o destino mudou. Selecione a etapa novamente.</p>}
             {effect && <p>{effect}</p>}
-            {selectedMove?.targetStage.linkedLifecycleStage && <p>A etapa do contato poderá ser atualizada automaticamente.</p>}
-            {selectedMove?.target.nextBoardId && <p>As automações do funil de destino poderão criar um lead no próximo funil.</p>}
+            {deal.contactId && selectedMove?.targetStage.linkedLifecycleStage && <p>A etapa do contato poderá ser atualizada automaticamente.</p>}
+            {targetIsSuccess && selectedMove?.target.nextBoardId && <p>As automações do funil de destino poderão criar um lead no próximo funil.</p>}
           </div>
         }
         confirmText="Confirmar mudança de funil"

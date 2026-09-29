@@ -134,3 +134,27 @@ describe('DealStageControl', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /Origem/ })).toHaveFocus());
   });
 });
+
+it("names the lead and separates source/destination in confirmation", () => {
+ setup(); pick('Destino', /Etapa destino/);
+ const dialog = screen.getByRole('alertdialog');
+ expect(dialog).toHaveTextContent('Você vai mover Lead para outro funil.');
+ expect(dialog).toHaveTextContent('De: Origem → Atual');
+ expect(dialog).toHaveTextContent('Para: Destino → Etapa destino');
+});
+it.each([undefined, 'LEAD', 'MQL', 'SALES_QUALIFIED', 'CUSTOMER'])('announces only applicable effects for %s', lifecycle => {
+ mocks.boards = [source, { ...target, nextBoardId: 'next', stages: [{ ...target.stages[0], linkedLifecycleStage: lifecycle }] } as Board];
+ setup(); pick('Destino', /Etapa destino/);
+ expect(screen.queryByText(/etapa do contato poderá/)).toBeNull();
+ expect(!!screen.queryByText(/próximo funil/)).toBe(['MQL', 'SALES_QUALIFIED', 'CUSTOMER'].includes(lifecycle || ''));
+});
+it.each([
+  { lifecycle: 'CUSTOMER', wonStageId: 'another', expected: false },
+  { lifecycle: 'LEAD', wonStageId: 'destination', expected: true },
+  { lifecycle: 'CUSTOMER', linkedLifecycleStage: 'CUSTOMER', expected: false },
+])('matches configured won-stage overrides for $lifecycle', ({ lifecycle, wonStageId, linkedLifecycleStage, expected }) => {
+  mocks.boards = [source, { ...target, nextBoardId: 'next', wonStageId, linkedLifecycleStage, stages: [{ ...target.stages[0], linkedLifecycleStage: lifecycle }] } as Board];
+  setup({ ...deal, contactId: 'contact' }); pick('Destino', /Etapa destino/);
+  expect(screen.getByText(/etapa do contato poderá/)).toBeInTheDocument();
+  expect(!!screen.queryByText(/próximo funil/)).toBe(expected);
+});

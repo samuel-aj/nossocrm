@@ -31,6 +31,7 @@ import { formatPriorityPtBr } from "@/lib/utils/priority";
 import type { Contact, CustomFieldDefinition, Deal, DealView } from "@/types";
 import { useAcknowledgeAlert } from "@/features/boards/hooks/useAcknowledgeAlert";
 import { LossDetailsBanner } from "@/features/deals/LossDetailsBanner";
+import { tagMarkerStyle } from "./tagMarkerStyle";
 import { DealStageControl } from "./DealStageControl";
 import { FollowupStatus } from "./FollowupStatus";
 import { invalidateLeadHistory } from "./leadHistoryInvalidation";
@@ -180,6 +181,13 @@ export function LeadPropertiesPanel({
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const [valueDraft, setValueDraft] = useState<string | null>(null);
   const [descriptionDraft, setDescriptionDraft] = useState<string | null>(null);
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const textarea = descriptionRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }, [descriptionDraft, open.business]);
   const [fieldEditor, setFieldEditor] = useState<{
     key: string;
     value: string;
@@ -216,11 +224,12 @@ export function LeadPropertiesPanel({
   const hiddenGroups = new Set(
     crm.boards.find((b) => b.id === deal.boardId)?.hiddenFieldGroups ?? [],
   );
-  const fieldDefinitions = crm.customFieldDefinitions.filter(
+  const visibleDefinitions = crm.customFieldDefinitions.filter(
     (f) =>
-      !hiddenGroups.has((f.groupName ?? "").trim()) &&
-      !f.key.startsWith("utm_"),
+      !hiddenGroups.has((f.groupName ?? "").trim()),
   );
+  const fieldDefinitions = visibleDefinitions.filter(f => !f.key.startsWith("utm_"));
+  const utmDefinitions = visibleDefinitions.filter(f => f.key.startsWith("utm_"));
   const groups = new Map<string, CustomFieldDefinition[]>();
   for (const field of fieldDefinitions) {
     const group = (field.groupName ?? "").trim();
@@ -653,7 +662,7 @@ export function LeadPropertiesPanel({
   return (
     <aside
       aria-label="Propriedades do lead"
-      className="flex h-full min-h-0 flex-col bg-slate-50/70 dark:bg-slate-900/50 text-slate-900 dark:text-white"
+      className="flex w-full max-w-full min-w-0 h-full min-h-0 flex-col bg-slate-50/70 dark:bg-slate-900/50 text-slate-900 dark:text-white"
     >
       <div className="shrink-0 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card p-4 space-y-2">
         <div className="flex items-start gap-2">
@@ -745,7 +754,7 @@ export function LeadPropertiesPanel({
           {(deal.tags ?? []).map((tag) => (
             <span
               key={tag}
-              className="rounded border border-primary-200 bg-primary-50 dark:bg-primary-500/10 px-1.5 py-0.5 text-xs text-primary-700 dark:text-primary-300"
+              className={`rounded border px-1.5 py-0.5 text-xs ${tagMarkerStyle(tag).chip}`}
             >
               {tag}
               {canEdit && (
@@ -985,6 +994,7 @@ export function LeadPropertiesPanel({
             <span className="block text-xs text-slate-500">Descrição</span>
             {descriptionDraft !== null ? (
               <textarea
+                ref={descriptionRef}
                 autoFocus
                 aria-label="Descrição do lead"
                 value={descriptionDraft}
@@ -1080,7 +1090,7 @@ export function LeadPropertiesPanel({
           {fieldDefinitions.length === 0 ? (
             <p className="text-slate-500">Nenhum campo personalizado</p>
           ) : (
-            [...groups.entries()].map(([name, fields]) =>
+            [...groups.entries()].sort(([a], [b]) => !a ? -1 : !b ? 1 : a.localeCompare(b, "pt-BR")).map(([name, fields]) =>
               name ? (
                 <div
                   key={name}
@@ -1309,7 +1319,8 @@ export function LeadPropertiesPanel({
           open={open.utms}
           toggle={() => toggle("utms")}
         >
-          {(["source", "medium", "campaign", "content", "term"] as const).map(
+          {utmDefinitions.map(row)}
+          {(["source", "medium", "campaign", "content", "term"] as const).filter(name => !crm.customFieldDefinitions.some(field => field.key === `utm_${name}`)).map(
             (name) => (
               <div key={name} className="flex justify-between gap-2 py-1">
                 <span className="text-slate-500">
