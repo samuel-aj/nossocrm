@@ -396,7 +396,7 @@ export class EvolutionProvider implements WhatsAppProvider {
     const msg = (data.message as Record<string, unknown>) ?? {};
     const { text, mediaType, mediaMime, skip } = extractContent(msg);
     if (skip) return { kind: 'ignored', reason: 'evento sem bolha (reação/protocolo)' };
-    const ctx = extractContextInfo(msg);
+    const ctx = extractContextInfo(data);
 
     const tsRaw = data.messageTimestamp as number | string | undefined;
     const tsNum = typeof tsRaw === 'string' ? parseInt(tsRaw, 10) : tsRaw;
@@ -460,26 +460,35 @@ function unwrapMessage(message: Record<string, unknown>): Record<string, unknown
 }
 
 /**
- * Responder/encaminhar: o Baileys põe em `<tipo>Message.contextInfo` o
- * `stanzaId` (id da mensagem citada), a `quotedMessage` (conteúdo dela) e
- * `isForwarded`/`forwardingScore` (mensagem encaminhada).
+ * Responder/encaminhar: Evolution pode pôr contextInfo no registro inteiro
+ * ou dentro do tipo de mensagem (inclusive wrappers do Baileys).
  */
 function extractContextInfo(rawMsg: Record<string, unknown>): {
   quoted?: { providerMessageId: string; text?: string; mediaType?: string };
   forwarded?: boolean;
 } {
-  const msg = unwrapMessage(rawMsg);
-  for (const v of Object.values(msg)) {
-    const ci = (v as { contextInfo?: Record<string, unknown> } | null | undefined)?.contextInfo;
-    if (!ci || typeof ci !== 'object') continue;
-    const forwarded = Boolean(ci.isForwarded) || Number(ci.forwardingScore ?? 0) > 0;
-    const stanzaId = typeof ci.stanzaId === 'string' ? ci.stanzaId : '';
-    if (!stanzaId) return forwarded ? { forwarded } : {};
-    const quotedMsg = (ci.quotedMessage as Record<string, unknown> | undefined) ?? {};
-    const c = extractContent(quotedMsg);
-    return { quoted: { providerMessageId: stanzaId, text: c.text, mediaType: c.mediaType }, forwarded };
+  const queue: Record<string, unknown>[] = [rawMsg];
+  let forwarded = false;
+  for (let i = 0; i < queue.length && i < 32; i++) {
+    const node = queue[i];
+    const ci = node.contextInfo as Record<string, unknown> | undefined;
+    if (ci && typeof ci === 'object') {
+      forwarded ||= Boolean(ci.isForwarded) || Number(ci.forwardingScore ?? 0) > 0;
+      const stanzaId = typeof ci.stanzaId === 'string' ? ci.stanzaId.trim() : '';
+      if (stanzaId) {
+        const quotedMsg = (ci.quotedMessage as Record<string, unknown> | undefined) ?? {};
+        const c = extractContent(quotedMsg);
+        return { quoted: { providerMessageId: stanzaId, text: c.text?.slice(0, 300), mediaType: c.mediaType }, forwarded };
+      }
+    }
+    for (const key of ['message', 'ephemeralMessage', 'viewOnceMessage', 'viewOnceMessageV2',
+      'viewOnceMessageV2Extension', 'documentWithCaptionMessage', 'deviceSentMessage',
+      'extendedTextMessage', 'imageMessage', 'videoMessage', 'audioMessage', 'documentMessage', 'stickerMessage']) {
+      const child = node[key];
+      if (child && typeof child === 'object' && !Array.isArray(child)) queue.push(child as Record<string, unknown>);
+    }
   }
-  return {};
+  return forwarded ? { forwarded } : {};
 }
 
 /** Extrai o telefone de um vCard (waid= ou linha TEL). */

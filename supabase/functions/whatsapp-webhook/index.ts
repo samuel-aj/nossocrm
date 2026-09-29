@@ -19,6 +19,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { parseMessageDeletion, applyMessageDeletion } from "./deletions.ts";
 import { encryptedEdit, resolveEncryptedEdit } from "./encrypted-edits.ts";
 import { parseMessageEdit, applyMessageEdit } from "./edits.ts";
+import { enrichMissingQuote, extractEvolutionQuoteContext, resolveIncomingQuote } from "../_shared/quotes.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -183,35 +184,6 @@ function extractContent(rawMessage: any): {
 }
 
 /**
- * RESPONDER/ENCAMINHAR: o Baileys põe em `<tipo>Message.contextInfo` o
- * `stanzaId` (id da mensagem citada), a `quotedMessage` (conteúdo dela), o
- * `participant` (JID de quem escreveu a citada) e `isForwarded`/
- * `forwardingScore` (mensagem encaminhada).
- */
-// deno-lint-ignore no-explicit-any
-function extractContextInfo(rawMessage: any): {
-  quoted?: { providerId: string; text?: string; mediaType?: string; participant?: string };
-  forwarded: boolean;
-} {
-  const message = unwrapMessage(rawMessage);
-  if (!message || typeof message !== "object") return { forwarded: false };
-  for (const v of Object.values(message)) {
-    // deno-lint-ignore no-explicit-any
-    const ci = (v as any)?.contextInfo;
-    if (!ci || typeof ci !== "object") continue;
-    const forwarded = !!ci.isForwarded || Number(ci.forwardingScore ?? 0) > 0;
-    const stanzaId = typeof ci.stanzaId === "string" ? ci.stanzaId : "";
-    if (!stanzaId) return { forwarded };
-    const c = ci.quotedMessage ? extractContent(ci.quotedMessage) : {};
-    return {
-      quoted: { providerId: stanzaId, text: c.text, mediaType: c.mediaType, participant: ci.participant },
-      forwarded,
-    };
-  }
-  return { forwarded: false };
-}
-
-/**
  * GRUPOS: nome (subject) e tamanho do grupo na Evolution
  * (GET /group/findGroupInfos/{instance}?groupJid=...). Best-effort: sem
  * resposta, o grupo entra sem nome e o CRM tenta de novo na próxima mensagem.
@@ -334,7 +306,7 @@ function agendarAssinatura(supabaseUrl: string, conn: any, instanceName: string)
     })
     .catch((e) => console.error("[wa-webhook] assinatura falhou:", e));
   try {
-    // @ts-ignore: EdgeRuntime existe no runtime das Edge Functions da Supabase
+    // @ts-expect-error: EdgeRuntime existe no runtime das Edge Functions da Supabase
     EdgeRuntime.waitUntil(p);
   } catch {
     void p;
@@ -512,7 +484,7 @@ Deno.serve(async (req) => {
       }
     })();
     try {
-      // @ts-ignore: EdgeRuntime existe no runtime das Edge Functions da Supabase
+      // @ts-expect-error: EdgeRuntime existe no runtime das Edge Functions da Supabase
       EdgeRuntime.waitUntil(espelho);
     } catch {
       void espelho;
@@ -706,7 +678,7 @@ Deno.serve(async (req) => {
       // sobrescreve a prévia da conversa com texto vazio — era isso que
       // deixava chats ativos exibindo "Sem mensagens" na lista.
       if (!text && !mediaType) continue;
-      const ctx = extractContextInfo(m.message);
+      const ctx = extractEvolutionQuoteContext(m, extractContent);
       const tsRaw = m.messageTimestamp;
       const tsNum = typeof tsRaw === "string" ? parseInt(tsRaw, 10) : tsRaw;
       const waTs = tsNum ? new Date(tsNum * 1000).toISOString() : new Date().toISOString();
@@ -824,11 +796,21 @@ Deno.serve(async (req) => {
       // — evita upload duplicado de mídia e o insert com erro de unicidade.
       const { data: existingMsg } = await supabase
         .from("wa_messages")
-        .select("id")
+        .select("id, quoted, quoted_message_id, wa_conversations!inner(connection_id)")
         .eq("organization_id", orgId)
+        .eq("conversation_id", convId)
+        .eq("wa_conversations.connection_id", conn.id)
         .eq("evolution_message_id", providerId)
         .maybeSingle();
-      if (existingMsg) continue;
+      if (existingMsg) {
+        if (ctx.quoted && !existingMsg.quoted) {
+          const own = jidToE164(conn.phone_number ?? "");
+          const part = jidToE164(ctx.quoted.participant ?? "");
+          const direction = own && part ? (brPhoneVariants(own).includes(part) ? "out" : "in") : null;
+          await enrichMissingQuote(supabase, { organizationId: orgId, conversationId: convId, connectionId: conn.id }, existingMsg, ctx.quoted, direction);
+        }
+        continue;
+      }
 
       // Mídia: base64 no payload (webhookBase64=true) ou busca na Evolution;
       // sobe pro Storage privado e guarda o CAMINHO (a API assina URL na leitura).
@@ -922,31 +904,12 @@ Deno.serve(async (req) => {
       let quotedMessageId: string | null = null;
       let quotedSnapshot: Record<string, unknown> | null = null;
       if (ctx.quoted) {
-        const { data: orig } = await supabase
-          .from("wa_messages")
-          .select("id, body, media_type, direction")
-          .eq("organization_id", orgId)
-          .eq("evolution_message_id", ctx.quoted.providerId)
-          .maybeSingle();
-        if (orig) {
-          quotedMessageId = orig.id;
-          quotedSnapshot = {
-            provider_id: ctx.quoted.providerId,
-            body: orig.body ?? null,
-            media_type: orig.media_type ?? null,
-            direction: orig.direction ?? null,
-          };
-        } else {
-          const own = jidToE164(conn.phone_number ?? "");
-          const part = jidToE164(ctx.quoted.participant ?? "");
-          const direction = own && part ? (brPhoneVariants(own).includes(part) ? "out" : "in") : null;
-          quotedSnapshot = {
-            provider_id: ctx.quoted.providerId,
-            body: ctx.quoted.text ?? null,
-            media_type: ctx.quoted.mediaType ?? null,
-            direction,
-          };
-        }
+        const own = jidToE164(conn.phone_number ?? "");
+        const part = jidToE164(ctx.quoted.participant ?? "");
+        const direction = own && part ? (brPhoneVariants(own).includes(part) ? "out" : "in") : null;
+        const resolved = await resolveIncomingQuote(supabase, { organizationId: orgId, conversationId: convId, connectionId: conn.id }, ctx.quoted, direction);
+        quotedMessageId = resolved.quotedMessageId;
+        quotedSnapshot = resolved.quotedSnapshot;
       }
 
       // idempotente: o índice único (org, evolution_message_id) descarta o eco

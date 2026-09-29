@@ -21,6 +21,7 @@
  * evolution_message_id evita duplicar o que o próprio CRM já gravou ao enviar.
  */
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { enrichMissingQuote, resolveIncomingQuote } from "../_shared/quotes.ts";
 
 const GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") ?? "v21.0";
 
@@ -197,7 +198,7 @@ async function agendarCura(supabase: any, supabaseUrl: string, conn: ConnRow): P
   ultimaCura.set(conn.id, agora);
   const p = curarConexao(supabase, supabaseUrl, conn).catch((e) => console.error("[wa-meta-cura] falhou:", e));
   try {
-    // @ts-ignore: EdgeRuntime existe no runtime das Edge Functions da Supabase
+    // @ts-expect-error: EdgeRuntime existe no runtime das Edge Functions da Supabase
     EdgeRuntime.waitUntil(p);
   } catch {
     void p;
@@ -680,11 +681,19 @@ async function processarEventos(supabase: any, conn: ConnRow, payload: any): Pro
         // CRM ficava com o texto antigo para sempre).
         const { data: existingMsg } = await supabase
           .from("wa_messages")
-          .select("id, body, conversation_id, sender_name")
+          .select("id, body, conversation_id, sender_name, quoted, quoted_message_id, wa_conversations!inner(connection_id)")
           .eq("organization_id", orgId)
+          .eq("conversation_id", convId)
+          .eq("wa_conversations.connection_id", conn.id)
           .eq("evolution_message_id", providerId)
           .maybeSingle();
         if (existingMsg) {
+          if (ctxQuotedId && !existingMsg.quoted) {
+            const own = digitosConexao ? `+${digitosConexao}` : "";
+            const direction = own && ctxFrom ? (brPhoneVariants(own).includes(ctxFrom) ? "out" : "in") : null;
+            await enrichMissingQuote(supabase, { organizationId: orgId, conversationId: convId, connectionId: conn.id },
+              existingMsg, { providerId: ctxQuotedId }, direction);
+          }
           const novoTexto = (text ?? "").trim();
           const antigo = (existingMsg.body ?? "").trim();
           if (novoTexto && novoTexto !== antigo) {
@@ -746,25 +755,13 @@ async function processarEventos(supabase: any, conn: ConnRow, payload: any): Pro
         let quotedMessageId: string | null = null;
         let quotedSnapshot: Record<string, unknown> | null = null;
         if (ctxQuotedId) {
-          const { data: orig } = await supabase
-            .from("wa_messages")
-            .select("id, body, media_type, direction")
-            .eq("organization_id", orgId)
-            .eq("evolution_message_id", ctxQuotedId)
-            .maybeSingle();
-          if (orig) {
-            quotedMessageId = orig.id;
-            quotedSnapshot = {
-              provider_id: ctxQuotedId,
-              body: orig.body ?? null,
-              media_type: orig.media_type ?? null,
-              direction: orig.direction ?? null,
-            };
-          } else {
-            const own = digitosConexao ? `+${digitosConexao}` : "";
-            const direction = own && ctxFrom ? (brPhoneVariants(own).includes(ctxFrom) ? "out" : "in") : null;
-            quotedSnapshot = { provider_id: ctxQuotedId, body: null, media_type: null, direction };
-          }
+          const own = digitosConexao ? `+${digitosConexao}` : "";
+          const direction = own && ctxFrom ? (brPhoneVariants(own).includes(ctxFrom) ? "out" : "in") : null;
+          const resolved = await resolveIncomingQuote(supabase,
+            { organizationId: orgId, conversationId: convId, connectionId: conn.id },
+            { providerId: ctxQuotedId }, direction);
+          quotedMessageId = resolved.quotedMessageId;
+          quotedSnapshot = resolved.quotedSnapshot;
         }
 
         const baseRow = {
@@ -920,7 +917,7 @@ Deno.serve(async (req) => {
       }
     })();
     try {
-      // @ts-ignore: EdgeRuntime existe no runtime das Edge Functions da Supabase
+      // @ts-expect-error: EdgeRuntime existe no runtime das Edge Functions da Supabase
       EdgeRuntime.waitUntil(espelho);
     } catch {
       void espelho;

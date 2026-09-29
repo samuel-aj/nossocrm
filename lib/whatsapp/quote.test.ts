@@ -30,6 +30,15 @@ describe('quote helpers', () => {
     expect(clampQuote(long).endsWith('…')).toBe(true);
   });
 
+  it('limita retratos enviados e mantém apenas autoria conhecida', () => {
+    const q = snapshotFromMessage({ body: 'a'.repeat(500), media_type: null,
+      direction: 'in', sender_name: 'Maria' });
+    expect(q.body?.length).toBe(300);
+    expect(q.sender_name).toBe('Maria');
+    expect(snapshotFromMessage({ body: 'texto antigo', media_type: null,
+      direction: 'in', deleted_at: '2026-09-28' })).toMatchObject({ body: null, deleted: true });
+  });
+
   it('só mídia com arquivo vira envio de mídia', () => {
     expect(outboundKindFromMediaType('image')).toBe('image');
     expect(outboundKindFromMediaType('sticker')).toBe('sticker');

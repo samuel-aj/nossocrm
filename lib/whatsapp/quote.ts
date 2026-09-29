@@ -14,6 +14,10 @@ export interface QuotedSnapshot {
   media_type: string | null;
   /** 'out' = a citada foi enviada pelo número do CRM; 'in' = pelo contato */
   direction: 'in' | 'out' | null;
+  /** Autor conhecido, especialmente em grupos; ausente quando não identificado. */
+  sender_name?: string | null;
+  /** Original já estava apagada ao registrar a citação. */
+  deleted?: boolean;
 }
 
 /** Forma mínima de uma mensagem do chat pra virar citação. */
@@ -22,6 +26,8 @@ export interface QuotableMessage {
   media_type?: string | null;
   direction: 'in' | 'out';
   evolution_message_id?: string | null;
+  sender_name?: string | null;
+  deleted_at?: string | null;
 }
 
 const MEDIA_QUOTE_LABEL: Record<string, string> = {
@@ -37,9 +43,11 @@ const MEDIA_QUOTE_LABEL: Record<string, string> = {
 export function snapshotFromMessage(m: QuotableMessage): QuotedSnapshot {
   return {
     provider_id: m.evolution_message_id ?? null,
-    body: m.body ?? null,
+    body: m.deleted_at ? null : m.body ? clampQuote(m.body) : null,
     media_type: m.media_type ?? null,
     direction: m.direction,
+    ...(m.sender_name ? { sender_name: m.sender_name } : {}),
+    ...(m.deleted_at ? { deleted: true } : {}),
   };
 }
 
