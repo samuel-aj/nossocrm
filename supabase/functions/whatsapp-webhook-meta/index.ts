@@ -21,7 +21,7 @@
  * evolution_message_id evita duplicar o que o próprio CRM já gravou ao enviar.
  */
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { enrichMissingQuote, resolveQuoteWhenPresent } from "../_shared/quotes.ts";
+import { enrichMissingQuote, resolveQuoteWhenPresent, type QuoteSnapshot } from "../_shared/quotes.ts";
 
 const GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") ?? "v21.0";
 
@@ -584,7 +584,7 @@ async function processarEventos(supabase: any, conn: ConnRow, payload: any): Pro
           .eq("organization_id", orgId)
           .eq("connection_id", conn.id)
           .in("wa_phone", variants);
-        const conv = (convList ?? []).find((c) => c.contact_id) ?? (convList ?? [])[0];
+        const conv = (convList ?? []).find((c: { contact_id?: string | null }) => c.contact_id) ?? (convList ?? [])[0];
         if (conv) {
           convId = conv.id;
           // Grupo ainda sem nome no CRM: tenta buscar de novo
@@ -606,7 +606,7 @@ async function processarEventos(supabase: any, conn: ConnRow, payload: any): Pro
             .is("connection_id", null)
             .in("wa_phone", variants);
           // preferir a órfã LIGADA a contato (carrega o histórico certo)
-          const orfa = (orfas ?? []).find((o) => o.contact_id) ?? (orfas ?? [])[0];
+          const orfa = (orfas ?? []).find((o: { contact_id?: string | null }) => o.contact_id) ?? (orfas ?? [])[0];
           if (orfa?.id) {
             const { data: claimed } = await supabase
               .from("wa_conversations")
@@ -753,7 +753,7 @@ async function processarEventos(supabase: any, conn: ConnRow, payload: any): Pro
         // RESPONDER: liga à mensagem citada quando ela está no CRM; senão
         // guarda só o id e de quem era (a Meta não manda o conteúdo).
         let quotedMessageId: string | null = null;
-        let quotedSnapshot: Record<string, unknown> | null = null;
+        let quotedSnapshot: QuoteSnapshot | null = null;
         const ownQuotePhone = digitosConexao ? `+${digitosConexao}` : "";
         const quotedDirection = ownQuotePhone && ctxFrom
           ? (brPhoneVariants(ownQuotePhone).includes(ctxFrom) ? "out" : "in") : null;

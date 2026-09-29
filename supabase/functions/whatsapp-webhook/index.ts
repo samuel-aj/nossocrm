@@ -19,7 +19,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { parseMessageDeletion, applyMessageDeletion } from "./deletions.ts";
 import { encryptedEdit, resolveEncryptedEdit } from "./encrypted-edits.ts";
 import { parseMessageEdit, applyMessageEdit } from "./edits.ts";
-import { enrichMissingQuote, extractEvolutionQuoteContext, resolveQuoteWhenPresent } from "../_shared/quotes.ts";
+import { enrichMissingQuote, extractEvolutionQuoteContext, resolveQuoteWhenPresent, type QuoteSnapshot } from "../_shared/quotes.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -902,7 +902,7 @@ Deno.serve(async (req) => {
       // ligar as duas e guardar o retrato; sem ela no banco, o retrato vem do
       // conteúdo que o WhatsApp manda junto (quotedMessage).
       let quotedMessageId: string | null = null;
-      let quotedSnapshot: Record<string, unknown> | null = null;
+      let quotedSnapshot: QuoteSnapshot | null = null;
       const quotedParticipant = jidToE164(ctx.quoted?.participant ?? "");
       const ownPhone = jidToE164(conn.phone_number ?? "");
       const quotedDirection = ownPhone && quotedParticipant
