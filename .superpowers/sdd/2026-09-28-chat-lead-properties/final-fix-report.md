@@ -40,3 +40,11 @@ Controller measured a 390 px viewport/workspace with a 360 px drawer at x=-16, s
 ## Scope and remaining acceptance
 
 No schema, production writes, staging, build, server lifecycle or deployment actions. Root verification document/evidence left untouched. Approved canonical writes, selection/revision guards and exact confirmation title preserved. Controller owns final real-browser drawer geometry/focus acceptance, performance comparisons and full build/suite. No known remaining unit/type/lint failure in this scoped wave.
+
+## Finding 9 continuation: responsive header containment
+
+Controller's real-browser run of `f12edfd` exposed the remaining cause: at 390 px, the unwrapped CRM header placed the properties button beyond the viewport. `overflow-clip` correctly prevented horizontal container scrolling but could not contain that header by itself. Board 768/900 geometry passed. Finding 9 therefore remained open after the first commit; the initial CSS-only regression did not establish browser acceptance.
+
+Continued the same scoped geometry correction: CRM header and its context/actions groups now wrap within their available width; lead selector has `min-w-0`; owner chip constrains and truncates long names. All lead, labeling, selector and properties actions remain available. No other layout or behavior is changed.
+
+Added the regression before this correction: `/tmp/workspace-header-red.log` has **1 failed, 5 passed**; after correction `/tmp/workspace-header-green.log` has **6 passed**. This checks the containment CSS and continued presence of existing actions; the controller still owns actual 390 px click/rect acceptance. Typecheck and changed-file ESLint passed (`/tmp/workspace-header-types.log`, `/tmp/workspace-header-lint.log`); diff check passed. Changed files for this continuation: `ChatsPage.tsx`, `ChatsPage.workspace.test.tsx`, and this report. Commit subject: `fix(chats): contain CRM header actions on narrow screens`.

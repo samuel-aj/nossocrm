@@ -113,3 +113,20 @@ it('prevents focus from horizontally scrolling the narrow workspace containing t
   expect(drawer.parentElement).toHaveClass('overflow-clip');
   expect(drawer).toHaveClass('right-0', 'w-[min(360px,100%)]');
 });
+
+it('wraps CRM context and actions within a 390px workspace without dropping the lead selector or properties trigger', async () => {
+  state.width = 390;
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: /Contato da lista.*Olá/ }));
+  const selector = screen.getByRole('combobox', { name: 'Lead vinculado a esta conversa' });
+  const properties = screen.getByRole('button', { name: 'Mostrar propriedades do lead' });
+  const context = selector.parentElement!;
+  const actions = properties.parentElement!;
+  expect(context.parentElement).toHaveClass('flex-wrap', 'min-w-0');
+  expect(context).toHaveClass('flex-wrap', 'max-w-full');
+  expect(actions).toHaveClass('flex-wrap', 'min-w-0', 'max-w-full');
+  expect(actions).not.toHaveClass('shrink-0');
+  expect(selector).toHaveClass('min-w-0');
+  expect(screen.getByRole('button', { name: 'Abrir lead' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Etiquetar' })).toBeInTheDocument();
+});

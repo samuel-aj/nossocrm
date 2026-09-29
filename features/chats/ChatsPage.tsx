@@ -1773,11 +1773,11 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
               </button>
             </div>
 
-            {/* Barra de CRM em UMA linha só: à esquerda o contexto do lead,
-                à direita responsável, etiquetas e a ação. Responsável e
+            {/* Barra de CRM: contexto e ações quebram linha conforme a largura
+                disponível, mantendo o seletor e os botões acessíveis. Responsável e
                 etiquetas só entram quando a conversa já existe no banco
                 (contato que nunca trocou mensagem não tem onde guardar). */}
-            <div className="shrink-0 flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card">
+            <div className="shrink-0 flex flex-wrap min-w-0 items-center justify-between gap-2 px-3 py-2 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card">
               {selected.isGroup ? (
                 /* Grupo: não tem contato nem lead; só o rótulo */
                 <span className="flex items-center gap-2 min-w-0 text-xs text-slate-500 dark:text-slate-400">
@@ -1795,7 +1795,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                   {linkUnavailable ? 'Lead vinculado indisponível. Tentar novamente' : 'Não foi possível consultar o vínculo. Tentar novamente'}
                 </button>
               ) : selectedConvId && (contactDeals.length > 0 || selectedDeal) ? (
-                <span className="flex items-center gap-2 min-w-0 text-xs text-slate-600 dark:text-slate-300">
+                <span className="flex flex-wrap items-center gap-2 min-w-0 max-w-full text-xs text-slate-600 dark:text-slate-300">
                   <KanbanSquare size={14} className="text-primary-500 shrink-0" aria-hidden="true" />
                   <select
                     value={selectedDeal?.id ?? ''}
@@ -1803,7 +1803,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                     onChange={e => void patchConversation(selectedConvId, { dealId: e.target.value || null })}
                     aria-label="Lead vinculado a esta conversa"
                     title="Ao vincular, as etiquetas da conversa e do lead serão unidas."
-                    className="max-w-[180px] truncate rounded-lg border border-slate-300 dark:border-white/20 bg-white dark:bg-dark-card px-1.5 py-1 text-xs outline-none focus:ring-2 focus:ring-primary-500"
+                    className="min-w-0 max-w-[180px] truncate rounded-lg border border-slate-300 dark:border-white/20 bg-white dark:bg-dark-card px-1.5 py-1 text-xs outline-none focus:ring-2 focus:ring-primary-500"
                   >
                     <option value="">Sem lead vinculado</option>
                     {selectedDeal && !contactDeals.some(d => d.id === selectedDeal.id) && <option value={selectedDeal.id}>{selectedDeal.title}</option>}
@@ -1819,23 +1819,23 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                 </span>
               )}
 
-              <span className="shrink-0 flex items-center gap-1.5">
+              <span className="flex flex-wrap min-w-0 max-w-full items-center gap-1.5">
                 {selectedConvId && (
                   <>
                     {/* SÓ LEITURA: quem responde pelo chat é o dono do LEAD
                         desse contato. Pra trocar, troca no lead. */}
                     {!detailsOpen && <span
                       title="Responsável do lead deste contato. Para mudar, troque no lead."
-                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border ${
+                      className={`inline-flex min-w-0 max-w-full items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border ${
                         selectedOwnerEfetivo
                           ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'
                           : 'border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400'
                       }`}
                     >
-                      <User size={12} />
-                      {selectedOwnerEfetivo
+                      <User size={12} className="shrink-0" />
+                      <span className="truncate">{selectedOwnerEfetivo
                         ? nomePorId.get(selectedOwnerEfetivo) || 'Responsável'
-                        : 'Sem responsável'}
+                        : 'Sem responsável'}</span>
                     </span>}
 
                     {/* Etiquetas: só leitura aqui, e no máximo 3 pra não
