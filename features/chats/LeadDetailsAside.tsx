@@ -21,7 +21,7 @@ export function LeadDetailsAside({ deal, contact, open, drawer, onClose }: Props
       aria-modal={drawer && open ? true : undefined}
       aria-hidden={!open}
       inert={!open}
-      className={`${open ? 'block' : 'hidden'} min-h-0 [&>[data-focus-trap-fallback]]:h-full ${drawer ? 'absolute inset-y-0 right-0 z-30 w-[min(360px,100%)] shadow-2xl' : 'w-[360px] shrink-0'}`}
+      className={`${open ? 'block' : 'hidden'} min-h-0 [&>[data-focus-trap-fallback]]:h-full ${drawer ? 'absolute top-0 bottom-[calc(var(--app-bottom-nav-height,0px)+var(--app-safe-area-bottom,0px))] right-0 z-30 w-[min(360px,100%)] shadow-2xl' : 'w-[360px] shrink-0'}`}
     >
       <FocusTrap active={drawer && open} onEscape={onClose}>
         <div className="h-full min-h-0 border-l border-slate-200 bg-white dark:border-white/10 dark:bg-dark-card">

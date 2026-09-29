@@ -130,3 +130,13 @@ it('wraps CRM context and actions within a 390px workspace without dropping the 
   expect(screen.getByRole('button', { name: 'Abrir lead' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Etiquetar' })).toBeInTheDocument();
 });
+
+it('reserves the existing bottom navigation and safe-area height below an absolute properties drawer', async () => {
+  state.width = 390;
+  mount();
+  fireEvent.click(await screen.findByRole('button', { name: /Contato da lista.*Olá/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Mostrar propriedades do lead' }));
+  const drawer = screen.getByRole('dialog', { name: 'Propriedades do lead' });
+  expect(drawer).toHaveClass('top-0', 'bottom-[calc(var(--app-bottom-nav-height,0px)+var(--app-safe-area-bottom,0px))]');
+  expect(drawer).not.toHaveClass('inset-y-0');
+});
