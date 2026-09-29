@@ -1,6 +1,7 @@
 import { newerRecord } from "@/lib/query/dealCache";
 import React, { useState, useRef, useEffect, useId, useMemo } from "react";
 import { useCRM } from "@/context/CRMContext";
+import { useMyActionPermissions } from "@/lib/permissions/useMyActionPermissions";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 import { useDeal, useContact, useOrgMembers } from "@/lib/query/hooks";
@@ -113,6 +114,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
   const dealBoard = deal
     ? (boardsById.get(deal.boardId) ?? activeBoard)
     : activeBoard;
+  const permissions = useMyActionPermissions(deal?.boardId);
   const conversation = useLeadConversation({ deal, enabled: isOpen });
   const [viewMode, setViewMode] = useState<"modal" | "fullscreen">(
     "fullscreen",
@@ -186,6 +188,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
     (stage) => stage.id === deal.status,
   )?.label;
   const handleAnalyzeDeal = async () => {
+    if (!permissions.deals.edit) return;
     setIsAnalyzing(true);
     try {
       const result = await analyzeLead(deal, stageLabel);
@@ -412,7 +415,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                   <div className="flex gap-3 mb-5">
                     <button
                       onClick={handleAnalyzeDeal}
-                      disabled={isAnalyzing}
+                      disabled={isAnalyzing || !permissions.deals.edit}
                       className="flex-1 py-2.5 bg-white dark:bg-white/5 text-slate-700 dark:text-white text-sm font-medium rounded-lg shadow-sm border border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/10 transition-all flex items-center justify-center gap-2"
                     >
                       {isAnalyzing ? (

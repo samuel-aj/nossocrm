@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
@@ -91,6 +91,16 @@ function fieldDisplay(field: CustomFieldDefinition, value: unknown) {
   }
   return Array.isArray(value) ? value.join(", ") : String(value);
 }
+function fieldIsFilled(field: CustomFieldDefinition, value: unknown) {
+  if (value === null || value === undefined) return false;
+  if (field.type === "multiselect")
+    return Array.isArray(value) && value.length > 0;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (typeof value === "number") return Number.isFinite(value);
+  return (
+    typeof value === "boolean" || (Array.isArray(value) && value.length > 0)
+  );
+}
 
 function SectionCard({
   title,
@@ -156,12 +166,15 @@ export function LeadPropertiesPanel({
   const { data: members = [] } = useOrgMembers();
   useAcknowledgeAlert(true, deal);
   const identity = `${organizationId}:${deal.id}`;
-  const identityRef = useRef(identity);
+  const identityRef = useRef<string | null>(identity);
   const pendingRef = useRef(new Set<string>());
   const cancelledBlurRef = useRef<string | null>(null);
   const defaultProductSuggestedRef = useRef(false);
-  useEffect(() => {
+  useLayoutEffect(() => {
     identityRef.current = identity;
+    return () => {
+      identityRef.current = null;
+    };
   }, [identity]);
   const [open, setOpen] = useState(INITIAL_OPEN);
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
@@ -190,29 +203,15 @@ export function LeadPropertiesPanel({
   const [ownerOpen, setOwnerOpen] = useState(false);
   const [tagsOpen, setTagsOpen] = useState(false);
   const [newTag, setNewTag] = useState("");
+  const tagDraftRef = useRef({ value: "", revision: 0 });
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [fieldGroups, setFieldGroups] = useState<Record<string, boolean>>({});
-  const [saving, setSaving] = useState<string | null>(null);
+  const [pendingCount, setPendingCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
-  const draftRevisionRef = useRef(0);
-  useEffect(() => {
-    draftRevisionRef.current += 1;
-  }, [
-    titleDraft,
-    valueDraft,
-    descriptionDraft,
-    fieldEditor,
-    productId,
-    quantity,
-    price,
-    itemName,
-    itemPrice,
-    itemQuantity,
-    itemEditor,
-    newTag,
-  ]);
+  const batchFailedRef = useRef(false);
+  const batchUnsavedRef = useRef(false);
   const canEdit = permissions.deals.edit;
   const hiddenGroups = new Set(
     crm.boards.find((b) => b.id === deal.boardId)?.hiddenFieldGroups ?? [],
@@ -242,14 +241,20 @@ export function LeadPropertiesPanel({
     setTagsOpen(false);
     setOptionsOpen(false);
     setOwnerOpen(false);
-    setSaving(null);
+    setPendingCount(0);
     setError(null);
     setLastSaved(null);
     const initiallyOpen: Record<string, boolean> = {};
     for (const field of fieldDefinitions) {
       const group = (field.groupName ?? "").trim();
       const value = deal.customFields?.[field.key];
-      if (group && value != null && value !== "" && (!Array.isArray(value) || value.length > 0)) initiallyOpen[group] = true;
+      if (
+        group &&
+        value != null &&
+        value !== "" &&
+        (!Array.isArray(value) || value.length > 0)
+      )
+        initiallyOpen[group] = true;
     }
     setFieldGroups(initiallyOpen);
     defaultProductSuggestedRef.current = false;
@@ -274,28 +279,30 @@ export function LeadPropertiesPanel({
   const save = async (
     key: string,
     action: () => Promise<unknown>,
-    clear?: () => void,
+    clear?: () => void | boolean,
   ) => {
     const start = identity;
-    const draftRevision = draftRevisionRef.current;
     const pendingKey = `${start}:${key}`;
     if (pendingRef.current.has(pendingKey)) return false;
+    if (pendingRef.current.size === 0) {
+      batchFailedRef.current = false;
+      batchUnsavedRef.current = false;
+    }
     pendingRef.current.add(pendingKey);
     setError(null);
     setLastSaved(null);
-    setSaving(key);
+    setPendingCount(pendingRef.current.size);
     try {
       const result = await action();
       if (result === null)
         throw new Error("Não foi possível salvar. Seus dados continuam aqui.");
       await refresh(organizationId, deal.id);
       if (identityRef.current === start) {
-        clear?.();
-        if (draftRevisionRef.current === draftRevision)
-          setLastSaved(new Date());
+        if (clear?.() === false) batchUnsavedRef.current = true;
       }
       return true;
     } catch (cause) {
+      batchFailedRef.current = true;
       if (identityRef.current === start)
         setError(
           cause instanceof Error
@@ -305,7 +312,15 @@ export function LeadPropertiesPanel({
       return false;
     } finally {
       pendingRef.current.delete(pendingKey);
-      if (identityRef.current === start) setSaving(null);
+      if (identityRef.current === start) {
+        setPendingCount(pendingRef.current.size);
+        if (
+          pendingRef.current.size === 0 &&
+          !batchFailedRef.current &&
+          !batchUnsavedRef.current
+        )
+          setLastSaved(new Date());
+      }
     }
   };
   const updateDeal = (patch: Partial<Deal>) =>
@@ -477,9 +492,10 @@ export function LeadPropertiesPanel({
       },
     );
   };
-  const changeTag = async (tag: string, remove = false) => {
+  const changeTag = async (tag: string, remove = false, fromDraft = false) => {
     const normalized = tag.trim().replace(/\s+/g, " ");
     if (!normalized) return;
+    const submittedRevision = tagDraftRef.current.revision;
     const tags = remove
       ? deal.tags.filter((value) => value !== normalized)
       : [...(deal.tags ?? []), normalized];
@@ -495,8 +511,18 @@ export function LeadPropertiesPanel({
         "tags",
         () => updateDeal({ tags }),
         () => {
+          if (
+            fromDraft &&
+            (tagDraftRef.current.revision !== submittedRevision ||
+              tagDraftRef.current.value !== tag)
+          )
+            return false;
           setTagsOpen(false);
           setNewTag("");
+          tagDraftRef.current = {
+            value: "",
+            revision: tagDraftRef.current.revision + 1,
+          };
         },
       )) &&
       !remove &&
@@ -616,6 +642,14 @@ export function LeadPropertiesPanel({
       </div>
     );
   };
+  const hasUnsavedEditor =
+    titleDraft !== null ||
+    valueDraft !== null ||
+    descriptionDraft !== null ||
+    fieldEditor !== null ||
+    itemEditor !== null ||
+    (tagsOpen && !!newTag.trim()) ||
+    (open.products && (!!productId || (customItem && !!itemName.trim())));
   return (
     <aside
       aria-label="Propriedades do lead"
@@ -759,15 +793,22 @@ export function LeadPropertiesPanel({
                     aria-label="Nome da nova tag"
                     placeholder="Nova etiqueta"
                     value={newTag}
-                    onChange={(event) => setNewTag(event.target.value)}
+                    onChange={(event) => {
+                      tagDraftRef.current = {
+                        value: event.target.value,
+                        revision: tagDraftRef.current.revision + 1,
+                      };
+                      setNewTag(event.target.value);
+                    }}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter") void changeTag(newTag);
+                      if (event.key === "Enter")
+                        void changeTag(newTag, false, true);
                     }}
                     className="w-full rounded border p-1 text-xs bg-white dark:bg-slate-900"
                   />
                   <button
                     type="button"
-                    onClick={() => void changeTag(newTag)}
+                    onClick={() => void changeTag(newTag, false, true)}
                     className="text-xs text-primary-600"
                   >
                     Criar
@@ -783,7 +824,7 @@ export function LeadPropertiesPanel({
             {error}
           </p>
         )}
-        {saving && (
+        {pendingCount > 0 && (
           <p role="status" className="text-xs text-slate-500">
             Salvando…
           </p>
@@ -1034,11 +1075,7 @@ export function LeadPropertiesPanel({
           icon={<Tag size={16} />}
           open={open.fields}
           toggle={() => toggle("fields")}
-          summary={
-            fieldDefinitions.length
-              ? `${fieldDefinitions.length} campo${fieldDefinitions.length === 1 ? "" : "s"}`
-              : undefined
-          }
+          summary={`${fieldDefinitions.filter((field) => fieldIsFilled(field, deal.customFields?.[field.key])).length} preenchidos`}
         >
           {fieldDefinitions.length === 0 ? (
             <p className="text-slate-500">Nenhum campo personalizado</p>
@@ -1304,6 +1341,8 @@ export function LeadPropertiesPanel({
       </div>
       <ConfirmModal
         isOpen={deleteOpen}
+        closeOnConfirm={false}
+        pending={pendingRef.current.has(`${identity}:delete`)}
         onClose={() => setDeleteOpen(false)}
         onConfirm={() => {
           if (!permissions.deals.delete) return;
@@ -1324,7 +1363,7 @@ export function LeadPropertiesPanel({
         variant="danger"
       />
       <div className="shrink-0 border-t border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card px-3 py-2 min-h-8 text-xs text-slate-500 dark:text-slate-400">
-        {lastSaved && !error && (
+        {lastSaved && !error && pendingCount === 0 && !hasUnsavedEditor && (
           <span
             role="status"
             className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400"

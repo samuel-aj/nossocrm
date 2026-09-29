@@ -111,6 +111,25 @@ describe('ConfirmModal', () => {
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 
+    it('keeps an async caller in control of closing and blocks dismissal while pending', async () => {
+      const onClose = vi.fn();
+      const onConfirm = vi.fn();
+      const { rerender, container } = render(
+        <ConfirmModal {...defaultProps} onClose={onClose} onConfirm={onConfirm} closeOnConfirm={false} />
+      );
+      await userEvent.click(screen.getByRole('button', { name: /confirmar/i }));
+      expect(onConfirm).toHaveBeenCalledOnce();
+      expect(onClose).not.toHaveBeenCalled();
+      rerender(
+        <ConfirmModal {...defaultProps} onClose={onClose} onConfirm={onConfirm} closeOnConfirm={false} pending />
+      );
+      expect(screen.getByRole('alertdialog')).toHaveAttribute('aria-busy', 'true');
+      expect(screen.getByRole('button', { name: /confirmar/i })).toBeDisabled();
+      expect(screen.getByRole('button', { name: /cancelar/i })).toBeDisabled();
+      await userEvent.click(container.querySelector('.fixed.inset-0')!);
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
     it('should call onClose when backdrop is clicked', async () => {
       const onClose = vi.fn();
       const { container } = render(<ConfirmModal {...defaultProps} onClose={onClose} />);

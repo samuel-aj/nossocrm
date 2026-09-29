@@ -52,6 +52,8 @@ import { FocusTrap, useFocusReturn } from '@/lib/a11y';
  * @property {string} [confirmText='Confirmar'] - Texto do botão de confirmar
  * @property {string} [cancelText='Cancelar'] - Texto do botão de cancelar
  * @property {'danger' | 'primary'} [variant='danger'] - Estilo visual
+ * @property {boolean} [closeOnConfirm=true] - Fecha imediatamente após confirmar
+ * @property {boolean} [pending=false] - Bloqueia confirmação e cancelamento durante operação assíncrona
  */
 interface ConfirmModalProps {
     isOpen: boolean;
@@ -62,6 +64,10 @@ interface ConfirmModalProps {
     confirmText?: string;
     cancelText?: string;
     variant?: 'danger' | 'primary';
+    /** Keep the dialog open until its caller explicitly closes it. */
+    closeOnConfirm?: boolean;
+    /** Prevent duplicate confirmation and dismissal during an async action. */
+    pending?: boolean;
 }
 
 /**
@@ -81,7 +87,9 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
     message,
     confirmText = 'Confirmar',
     cancelText = 'Cancelar',
-    variant = 'danger'
+    variant = 'danger',
+    closeOnConfirm = true,
+    pending = false,
 }) => {
     const generatedId = useId();
     const titleId = `confirm-title-${generatedId}`;
@@ -96,16 +104,17 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
     return (
         <FocusTrap 
             active={isOpen} 
-            onEscape={onClose}
+            onEscape={() => { if (!pending) onClose(); }}
             initialFocus={false}
             returnFocus={true}
         >
             <div 
                 className="fixed inset-0 md:left-[var(--app-sidebar-width,0px)] z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200"
-                onClick={(e) => e.target === e.currentTarget && onClose()}
+                onClick={(e) => e.target === e.currentTarget && !pending && onClose()}
             >
                 <div 
                     role="alertdialog"
+                    aria-busy={pending}
                     aria-modal="true"
                     aria-labelledby={titleId}
                     aria-describedby={descId}
@@ -142,6 +151,7 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
                                 ref={cancelButtonRef}
                                 type="button"
                                 onClick={onClose}
+                                disabled={pending}
                                 className="px-4 py-2 rounded-lg text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors focus-visible-ring"
                                 autoFocus
                             >
@@ -149,9 +159,10 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
                             </button>
                             <button
                                 type="button"
+                                disabled={pending}
                                 onClick={() => {
                                     onConfirm();
-                                    onClose();
+                                    if (closeOnConfirm) onClose();
                                 }}
                                 className={`px-4 py-2 rounded-lg text-sm font-bold text-white shadow-lg transition-all focus-visible-ring ${variant === 'danger'
                                         ? 'bg-red-600 hover:bg-red-500 shadow-red-600/20'

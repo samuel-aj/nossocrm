@@ -54,6 +54,14 @@ vi.mock("@/context/CRMContext", () => ({
         type: "text",
         groupName: "Oculto",
       },
+      {
+        id: "field-4",
+        key: "preferences",
+        label: "Preferências",
+        type: "multiselect",
+        options: ["A"],
+      },
+      { id: "field-5", key: "active", label: "Ativo", type: "text" },
     ],
   }),
 }));
@@ -80,27 +88,14 @@ vi.mock("@/features/boards/hooks/useAcknowledgeAlert", () => ({
 vi.mock("@/features/deals/LossDetailsBanner", () => ({
   LossDetailsBanner: () => null,
 }));
+vi.mock("@/lib/a11y", () => ({
+  FocusTrap: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useFocusReturn: () => undefined,
+}));
 vi.mock("./DealStageControl", () => ({
   DealStageControl: () => <button>Etapa</button>,
 }));
 vi.mock("./FollowupStatus", () => ({ FollowupStatus: () => null }));
-vi.mock("@/components/ConfirmModal", () => ({
-  default: ({
-    isOpen,
-    onConfirm,
-    onClose,
-  }: {
-    isOpen: boolean;
-    onConfirm: () => void;
-    onClose: () => void;
-  }) =>
-    isOpen ? (
-      <div role="alertdialog">
-        <button onClick={onConfirm}>Confirmar exclusão</button>
-        <button onClick={onClose}>Cancelar</button>
-      </div>
-    ) : null,
-}));
 const deal = {
   id: "lead-1",
   title: "Lead A",
@@ -122,7 +117,10 @@ const contact = {
   phone: "1234",
   status: "ACTIVE",
 } as Contact;
-function setup(current = deal) {
+function setup(
+  current = deal,
+  callbacks: { onDeleted?: () => void; onClose?: () => void } = {},
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -133,7 +131,12 @@ function setup(current = deal) {
     client,
     wrapper,
     ...render(
-      <LeadPropertiesPanel key={current.id} deal={current} contact={contact} />,
+      <LeadPropertiesPanel
+        key={current.id}
+        deal={current}
+        contact={contact}
+        {...callbacks}
+      />,
       { wrapper },
     ),
   };
@@ -292,7 +295,11 @@ describe("LeadPropertiesPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Opções do negócio" }));
     fireEvent.click(screen.getByRole("button", { name: "Excluir negócio" }));
     expect(mocks.deleteDeal).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Confirmar exclusão" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Excluir",
+      }),
+    );
     await waitFor(() =>
       expect(mocks.deleteDeal).toHaveBeenCalledWith("lead-1", {
         throwOnError: true,
@@ -328,10 +335,10 @@ describe("LeadPropertiesPanel", () => {
       target: { value: "B editado" },
     });
     await act(async () => finish());
+    expect(mocks.updateDeal).toHaveBeenCalledTimes(1);
     expect(
       screen.getByRole("textbox", { name: "Nome do negócio" }),
     ).toHaveValue("B editado");
-    expect(mocks.updateDeal).toHaveBeenCalledTimes(1);
   });
   it("does not show an old lead failure on a newly selected lead", async () => {
     let reject!: (error: Error) => void;
@@ -490,6 +497,7 @@ describe("LeadPropertiesPanel", () => {
     expect(
       screen.getByRole("textbox", { name: "Preço neste lead" }),
     ).toHaveValue("130");
+    expect(screen.queryByText(/Salvo ·/)).toBeNull();
   });
   it("keeps deletion confirmation visible on failure", async () => {
     mocks.deleteDeal.mockRejectedValueOnce(
@@ -498,7 +506,11 @@ describe("LeadPropertiesPanel", () => {
     setup();
     fireEvent.click(screen.getByRole("button", { name: "Opções do negócio" }));
     fireEvent.click(screen.getByRole("button", { name: "Excluir negócio" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirmar exclusão" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Excluir",
+      }),
+    );
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(
         "Não foi possível excluir",
@@ -509,5 +521,229 @@ describe("LeadPropertiesPanel", () => {
       "Negócio excluído com sucesso",
       "success",
     );
+  });
+  it("keeps the real confirmation open and disables duplicate deletion while pending", async () => {
+    let reject!: (error: Error) => void;
+    mocks.deleteDeal.mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, fail) => {
+          reject = fail;
+        }),
+    );
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "Opções do negócio" }));
+    fireEvent.click(screen.getByRole("button", { name: "Excluir negócio" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Excluir",
+      }),
+    );
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Excluir",
+      }),
+    ).toBeDisabled();
+    await act(async () => reject(new Error("Falha na exclusão")));
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Excluir",
+      }),
+    ).toBeEnabled();
+  });
+  it("does not close lead B after a pending deletion of keyed lead A succeeds", async () => {
+    let finish!: () => void;
+    mocks.deleteDeal.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const onDeleted = vi.fn();
+    const onClose = vi.fn();
+    const { rerender } = setup(deal, { onDeleted, onClose });
+    fireEvent.click(screen.getByRole("button", { name: "Opções do negócio" }));
+    fireEvent.click(screen.getByRole("button", { name: "Excluir negócio" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Excluir",
+      }),
+    );
+    rerender(
+      <LeadPropertiesPanel
+        key="lead-2"
+        deal={{ ...deal, id: "lead-2", title: "Lead B" }}
+        contact={contact}
+        onDeleted={onDeleted}
+        onClose={onClose}
+      />,
+    );
+    await act(async () => finish());
+    expect(screen.getByRole("button", { name: "Lead B" })).toBeInTheDocument();
+    expect(onDeleted).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+  it.each(["title", "value"] as const)(
+    "holds saving status until both concurrent saves finish when %s resolves first",
+    async (first) => {
+      let finishTitle!: () => void;
+      let finishValue!: () => void;
+      mocks.updateDeal.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishTitle = resolve;
+          }),
+      );
+      mocks.updateDeal.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishValue = resolve;
+          }),
+      );
+      setup();
+      fireEvent.click(screen.getByRole("button", { name: "Lead A" }));
+      fireEvent.change(
+        screen.getByRole("textbox", { name: "Nome do negócio" }),
+        { target: { value: "Novo título" } },
+      );
+      fireEvent.keyDown(
+        screen.getByRole("textbox", { name: "Nome do negócio" }),
+        { key: "Enter" },
+      );
+      fireEvent.click(screen.getByRole("button", { name: /R\$\s*250/ }));
+      fireEvent.change(
+        screen.getByRole("textbox", { name: "Valor do negócio" }),
+        { target: { value: "300" } },
+      );
+      fireEvent.keyDown(
+        screen.getByRole("textbox", { name: "Valor do negócio" }),
+        { key: "Enter" },
+      );
+      await act(async () => {
+        (first === "title" ? finishTitle : finishValue)();
+      });
+      expect(screen.getByText("Salvando…")).toBeInTheDocument();
+      expect(screen.queryByText(/Salvo ·/)).toBeNull();
+      await act(async () => {
+        (first === "title" ? finishValue : finishTitle)();
+      });
+      expect(screen.queryByText("Salvando…")).toBeNull();
+      expect(screen.getByText(/Salvo ·/)).toBeInTheDocument();
+    },
+  );
+  it("does not claim saved when one concurrent write succeeds and the other fails", async () => {
+    let rejectTitle!: (error: Error) => void;
+    let finishValue!: () => void;
+    mocks.updateDeal.mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectTitle = reject;
+        }),
+    );
+    mocks.updateDeal.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishValue = resolve;
+        }),
+    );
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "Lead A" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Nome do negócio" }), {
+      target: { value: "Novo título" },
+    });
+    fireEvent.keyDown(
+      screen.getByRole("textbox", { name: "Nome do negócio" }),
+      { key: "Enter" },
+    );
+    fireEvent.click(screen.getByRole("button", { name: /R\$\s*250/ }));
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Valor do negócio" }),
+      { target: { value: "300" } },
+    );
+    fireEvent.keyDown(
+      screen.getByRole("textbox", { name: "Valor do negócio" }),
+      { key: "Enter" },
+    );
+    await act(async () => finishValue());
+    expect(screen.queryByText(/Salvo ·/)).toBeNull();
+    await act(async () => rejectTitle(new Error("Título falhou")));
+    expect(screen.getByRole("alert")).toHaveTextContent("Título falhou");
+    expect(screen.queryByText(/Salvo ·/)).toBeNull();
+  });
+  it("keeps the failure visible when it arrives before another pending save succeeds", async () => {
+    let rejectTitle!: (error: Error) => void;
+    let finishValue!: () => void;
+    mocks.updateDeal.mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectTitle = reject;
+        }),
+    );
+    mocks.updateDeal.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishValue = resolve;
+        }),
+    );
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "Lead A" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Nome do negócio" }), {
+      target: { value: "Novo título" },
+    });
+    fireEvent.keyDown(
+      screen.getByRole("textbox", { name: "Nome do negócio" }),
+      { key: "Enter" },
+    );
+    fireEvent.click(screen.getByRole("button", { name: /R\$\s*250/ }));
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Valor do negócio" }),
+      { target: { value: "300" } },
+    );
+    fireEvent.keyDown(
+      screen.getByRole("textbox", { name: "Valor do negócio" }),
+      { key: "Enter" },
+    );
+    await act(async () => rejectTitle(new Error("Título falhou")));
+    expect(screen.getByText("Salvando…")).toBeInTheDocument();
+    await act(async () => finishValue());
+    expect(screen.getByRole("alert")).toHaveTextContent("Título falhou");
+    expect(screen.queryByText(/Salvo ·/)).toBeNull();
+  });
+  it("keeps a revised new-tag draft visible after its prior save completes", async () => {
+    let finish!: () => void;
+    mocks.updateDeal.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "+ Tag" }));
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Nome da nova tag" }),
+      { target: { value: "Primeira" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Criar" }));
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Nome da nova tag" }),
+      { target: { value: "Segunda" } },
+    );
+    await act(async () => finish());
+    expect(
+      screen.getByRole("textbox", { name: "Nome da nova tag" }),
+    ).toHaveValue("Segunda");
+    expect(screen.queryByText(/Salvo ·/)).toBeNull();
+  });
+  it("summarizes filled custom fields including zero and false but excluding empty multiselect", () => {
+    setup({
+      ...deal,
+      customFields: { source: "", score: 0, preferences: [], active: false },
+    });
+    expect(
+      screen
+        .getByRole("button", { name: /Campos personalizados/ })
+        .closest("section"),
+    ).toHaveTextContent("2 preenchidos");
   });
 });
