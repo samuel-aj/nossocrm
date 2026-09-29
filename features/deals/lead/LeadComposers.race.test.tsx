@@ -12,3 +12,16 @@ it('does not clear newer text when an older save completes', async () => {
  await act(async () => finish());
  expect(change).not.toHaveBeenCalled();
 });
+
+it('does not invoke a stale clear after its composer unmounts', async () => {
+ let finish: () => void;
+ const change = vi.fn();
+ const save = () => new Promise<void>(resolve => { finish = resolve; });
+ const view = render(<NoteComposer value="old" onChange={change} onSave={save} />);
+ fireEvent.click(screen.getByRole('button', { name: 'Salvar nota' }));
+ view.unmount();
+ const next = render(<NoteComposer value="new" onChange={change} onSave={save} />);
+ await act(async () => finish());
+ expect(change).not.toHaveBeenCalled();
+ next.unmount();
+});

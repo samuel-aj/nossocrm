@@ -41,15 +41,24 @@ export function NoteComposer({
   onChange,
   onSave,
   disabled,
+  clearOnSave = true,
+  saveState,
 }: {
   value: string;
   onChange: (v: string) => void;
   onSave: (text: string) => Promise<void>;
+  /** Controlled lifecycle for persistent, lead-scoped drafts. */
+  saveState?: { saving: boolean; error: string | null };
+  clearOnSave?: boolean;
   disabled?: boolean;
 }) {
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [localError, setError] = useState<string | null>(null);
+  const error = saveState ? saveState.error : localError;
+  const isSaving = saveState ? saveState.saving : saving;
   const ref = useRef<HTMLTextAreaElement>(null);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const latest = useRef({ value, onChange });
   latest.current = { value, onChange };
   useEffect(() => {
@@ -60,12 +69,12 @@ export function NoteComposer({
   }, [value]);
   const save = async () => {
     const text = value.trim();
-    if (!text || saving) return;
+    if (!text || isSaving) return;
     setSaving(true);
     setError(null);
     try {
       await onSave(text);
-      if (latest.current.value === value) onChange('');
+      if (clearOnSave && mounted.current && latest.current.value === value) onChange('');
     } catch (e) {
       setError((e as Error)?.message || 'Não foi possível salvar a nota. O texto continua aqui.');
     } finally {
@@ -95,10 +104,10 @@ export function NoteComposer({
         <button
           type="button"
           onClick={() => void save()}
-          disabled={disabled || saving || !value.trim()}
+          disabled={disabled || isSaving || !value.trim()}
           className="self-end shrink-0 h-10 px-3 inline-flex items-center gap-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold transition-colors"
         >
-          {saving && <Loader2 size={14} className="animate-spin" />}
+          {isSaving && <Loader2 size={14} className="animate-spin" />}
           Salvar nota
         </button>
       </div>
@@ -116,21 +125,25 @@ export function ActivityComposer({
   onCancelEdit,
   onComplete,
   disabled,
+  saveState,
 }: {
   draft: ActivityDraft;
   onChange: (d: ActivityDraft) => void;
   onSubmit: (d: ActivityDraft) => Promise<void>;
+  saveState?: { saving: boolean; error: string | null };
   onCancelEdit: () => void;
   /** Concluir a atividade que está sendo editada */
   onComplete?: (id: string) => Promise<void> | void;
   disabled?: boolean;
 }) {
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [localError, setError] = useState<string | null>(null);
+  const error = saveState ? saveState.error : localError;
+  const isSaving = saveState ? saveState.saving : saving;
   const set = (patch: Partial<ActivityDraft>) => onChange({ ...draft, ...patch });
   const valid = !!draft.title.trim() && !!draft.date && !!draft.time;
   const submit = async () => {
-    if (!valid || saving) return;
+    if (!valid || isSaving) return;
     setSaving(true);
     setError(null);
     try {
@@ -211,7 +224,7 @@ export function ActivityComposer({
           <button
             type="button"
             onClick={() => void onComplete(draft.editingId!)}
-            disabled={disabled || saving}
+            disabled={disabled || isSaving}
             className="h-9 px-3 rounded-xl border border-emerald-300 dark:border-emerald-500/40 text-emerald-700 dark:text-emerald-300 text-sm font-bold hover:bg-emerald-50 dark:hover:bg-emerald-900/20 disabled:opacity-50"
           >
             Concluir
@@ -220,11 +233,11 @@ export function ActivityComposer({
         <button
           type="button"
           onClick={() => void submit()}
-          disabled={disabled || saving || !valid}
+          disabled={disabled || isSaving || !valid}
           title={!valid ? 'Preencha título, data e hora' : undefined}
           className="h-9 px-3 inline-flex items-center gap-1.5 rounded-xl bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold transition-colors"
         >
-          {saving && <Loader2 size={14} className="animate-spin" />}
+          {isSaving && <Loader2 size={14} className="animate-spin" />}
           {draft.editingId ? 'Salvar alterações' : 'Criar atividade'}
         </button>
       </div>

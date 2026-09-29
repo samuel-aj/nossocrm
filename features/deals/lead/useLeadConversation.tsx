@@ -14,8 +14,8 @@ import { useLeadTimelineEntries } from './LeadTimeline';
 import { ActivityComposer, NoteComposer, EMPTY_ACTIVITY_DRAFT, draftFromActivity, type ActivityDraft } from './LeadComposers';
 import { PendingActivitiesStrip } from './PendingActivitiesStrip';
 export type LeadConversationResult = { timeline: ChatTimelineProps; dialogs: React.ReactNode; openActivity: (activity: Activity) => void; startActivity: (draft: ActivityDraft) => void; refresh: () => Promise<unknown> };
-type Draft = { note: string; activity: ActivityDraft; mode: ComposerMode };
-const emptyDraft = (): Draft => ({ note: '', activity: { ...EMPTY_ACTIVITY_DRAFT }, mode: 'message' });
+type Draft = { note: string; activity: ActivityDraft; mode: ComposerMode; noteRevision: number; activityRevision: number; noteSaving: boolean; activitySaving: boolean; noteError: string | null; activityError: string | null };
+const emptyDraft = (): Draft => ({ note: '', activity: { ...EMPTY_ACTIVITY_DRAFT }, mode: 'message', noteRevision: 0, activityRevision: 0, noteSaving: false, activitySaving: false, noteError: null, activityError: null });
 export function useLeadConversation({ deal, enabled = true }: { deal: Deal | DealView | null | undefined; enabled?: boolean }): LeadConversationResult {
   const { organizationId, profile } = useAuth();
   const client = useQueryClient();
@@ -28,7 +28,16 @@ export function useLeadConversation({ deal, enabled = true }: { deal: Deal | Dea
   const draftKey = ['leadConversationDraft', organizationId ?? '', deal?.id ?? ''];
   const { data: draft } = useQuery<Draft>({ queryKey: draftKey, queryFn: emptyDraft, enabled: false, initialData: emptyDraft, gcTime: Infinity });
   const [, renderDraft] = useState(0);
-  const setDraft = (patch: Partial<Draft>) => { client.setQueryData<Draft>(draftKey, old => ({ ...(old ?? emptyDraft()), ...patch })); renderDraft(n => n + 1); };
+  const setDraft = (patch: Partial<Draft>) => {
+    client.setQueryData<Draft>(draftKey, old => {
+      const current = old ?? emptyDraft();
+      return { ...current, ...patch,
+        noteRevision: (current.noteRevision ?? 0) + ('note' in patch ? 1 : 0),
+        activityRevision: (current.activityRevision ?? 0) + ('activity' in patch ? 1 : 0),
+      };
+    });
+    renderDraft(n => n + 1);
+  };
   const [deleting, setDeleting] = useState<{ key: string; id: string } | null>(null);
   const [failure, setFailure] = useState<{ key: string; message: string } | null>(null);
   const [scrollKey, setScrollKey] = useState(0);
@@ -47,19 +56,45 @@ export function useLeadConversation({ deal, enabled = true }: { deal: Deal | Dea
     void crm.updateActivity(a.id, { completed: !a.completed }, { throwOnError: true }).then(refresh).catch(e => currentIdentity.current === identity && setError(e.message));
   };
   const saveNote = async (text: string) => {
-    if (!canEdit || !deal) throw new Error('Sem permissão para editar');
-    const saved = await crm.addActivity({ dealId: deal.id, dealTitle: deal.title, type: 'NOTE', title: 'Nota interna', description: text, date: new Date().toISOString(), completed: true, user: { name: profile?.name ?? 'Usuário', avatar: profile?.avatar_url ?? '' } });
-    if (!saved) throw new Error('Não foi possível salvar a nota. O texto continua aqui.');
-    await afterSave();
+    const initiating = client.getQueryData<Draft>(draftKey) ?? emptyDraft();
+    if (initiating.noteSaving) return;
+    setDraft({ noteSaving: true, noteError: null });
+    try {
+      if (!canEdit || !deal) throw new Error('Sem permissão para editar');
+      const saved = await crm.addActivity({ dealId: deal.id, dealTitle: deal.title, type: 'NOTE', title: 'Nota interna', description: text, date: new Date().toISOString(), completed: true, user: { name: profile?.name ?? 'Usuário', avatar: profile?.avatar_url ?? '' } });
+      if (!saved) throw new Error('Não foi possível salvar a nota. O texto continua aqui.');
+      client.setQueryData<Draft>(draftKey, current => current ? {
+        ...current, noteError: null,
+        note: current.noteRevision === initiating.noteRevision && current.note === initiating.note ? '' : current.note,
+      } : current);
+      await afterSave();
+    } catch (e) {
+      setDraft({ noteError: (e as Error).message || 'Não foi possível salvar a nota. O texto continua aqui.' });
+      throw e;
+    } finally {
+      setDraft({ noteSaving: false });
+    }
   };
   const saveActivity = async (value: ActivityDraft) => {
-    if (!canEdit || !deal) throw new Error('Sem permissão para editar');
-    const changes = { title: value.title.trim(), description: value.description, type: value.type, date: new Date(`${value.date}T${value.time}`).toISOString() };
-    if (value.editingId) await crm.updateActivity(value.editingId, changes, { throwOnError: true });
-    else if (!await crm.addActivity({ ...changes, dealId: deal.id, dealTitle: deal.title, completed: false, user: { name: profile?.name ?? 'Usuário', avatar: profile?.avatar_url ?? '' } })) throw new Error('Não foi possível criar a atividade');
-    const current = client.getQueryData<Draft>(draftKey);
-    if (current?.activity === value) client.setQueryData(draftKey, { ...current, activity: { ...EMPTY_ACTIVITY_DRAFT } });
-    await afterSave();
+    const initiating = client.getQueryData<Draft>(draftKey) ?? emptyDraft();
+    if (initiating.activitySaving) return;
+    setDraft({ activitySaving: true, activityError: null });
+    try {
+      if (!canEdit || !deal) throw new Error('Sem permissão para editar');
+      const changes = { title: value.title.trim(), description: value.description, type: value.type, date: new Date(`${value.date}T${value.time}`).toISOString() };
+      if (value.editingId) await crm.updateActivity(value.editingId, changes, { throwOnError: true });
+      else if (!await crm.addActivity({ ...changes, dealId: deal.id, dealTitle: deal.title, completed: false, user: { name: profile?.name ?? 'Usuário', avatar: profile?.avatar_url ?? '' } })) throw new Error('Não foi possível criar a atividade');
+      client.setQueryData<Draft>(draftKey, current => current ? {
+        ...current, activityError: null,
+        activity: current.activityRevision === initiating.activityRevision ? { ...EMPTY_ACTIVITY_DRAFT } : current.activity,
+      } : current);
+      await afterSave();
+    } catch (e) {
+      setDraft({ activityError: (e as Error).message || 'Não foi possível salvar a atividade. Os dados continuam aqui.' });
+      throw e;
+    } finally {
+      setDraft({ activitySaving: false });
+    }
   };
   const memberName = useCallback((id: string) => members.find(m => m.id === id)?.name ?? null, [members]);
   const entries = useLeadTimelineEntries({ deal: deal ?? ({ createdAt: '' } as Deal), activities: query.activities, history: query.history, boards: crm.boards, memberName, customFields: crm.customFieldDefinitions, canEdit,
@@ -71,8 +106,8 @@ export function useLeadConversation({ deal, enabled = true }: { deal: Deal | Dea
       entries, historyLoadingOlder: query.isFetchingNextPage, composerMode: draft.mode, onComposerModeChange: mode => setDraft({ mode }), canWriteCrm: canEdit, scrollToEndKey: scrollKey,
       historyPrefix: <div className="text-center text-xs p-2" aria-live="polite">{query.isLoading && 'Carregando histórico…'}{query.isError && <p role="alert">Não foi possível carregar o histórico. <button onClick={() => void refresh()}>Tentar novamente</button></p>}{query.hasNextPage && <button disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>{query.isFetchingNextPage ? 'Carregando…' : 'Carregar histórico anterior'}</button>}</div>,
       aboveComposer: <>{error && <p role="alert">{error}</p>}<PendingActivitiesStrip activities={crm.activities.filter(a => a.dealId === deal?.id)} canEdit={canEdit} onOpen={openActivity} onComplete={toggle} isPending={crm.isActivityPending} /></>,
-      noteComposer: <NoteComposer key={`${identity}:note`} value={draft.note} onChange={note => setDraft({ note })} onSave={saveNote} disabled={!canEdit} />,
-      activityComposer: <ActivityComposer key={`${identity}:activity`} draft={draft.activity} onChange={activity => setDraft({ activity })} onSubmit={saveActivity} onCancelEdit={() => setDraft({ activity: { ...EMPTY_ACTIVITY_DRAFT } })} disabled={!canEdit} onComplete={async id => { try { await crm.updateActivity(id, { completed: true }, { throwOnError: true }); await refresh(); } catch (e) { if (currentIdentity.current === identity) setError((e as Error).message); } }} />,
+      noteComposer: <NoteComposer key={`${identity}:note`} value={draft.note} clearOnSave={false} saveState={{ saving: draft.noteSaving, error: draft.noteError }} onChange={note => setDraft({ note })} onSave={saveNote} disabled={!canEdit} />,
+      activityComposer: <ActivityComposer key={`${identity}:activity`} draft={draft.activity} saveState={{ saving: draft.activitySaving, error: draft.activityError }} onChange={activity => setDraft({ activity })} onSubmit={saveActivity} onCancelEdit={() => setDraft({ activity: { ...EMPTY_ACTIVITY_DRAFT } })} disabled={!canEdit} onComplete={async id => { try { await crm.updateActivity(id, { completed: true }, { throwOnError: true }); await refresh(); } catch (e) { if (currentIdentity.current === identity) setError((e as Error).message); } }} />,
     },
     dialogs: <ConfirmModal isOpen={canEdit && deleting?.key === identity} onClose={() => setDeleting(null)} title="Excluir nota" message="Excluir esta nota interna? A exclusão fica registrada no histórico do lead." confirmText="Excluir" variant="danger" onConfirm={() => {
       if (!canEdit || deleting?.key !== identity) return;

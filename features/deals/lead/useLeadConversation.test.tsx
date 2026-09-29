@@ -1,6 +1,6 @@
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { Deal } from '@/types';
 const mocks = vi.hoisted(() => ({ add: vi.fn(), update: vi.fn(), remove: vi.fn(), org: 'org', edit: true }));
@@ -73,5 +73,41 @@ it('starts a prefilled NEW activity for board schedule hints', async () => {
  expect(screen.getByRole('combobox', { name: 'Tipo da atividade' })).toHaveValue('CALL');
  expect(screen.getByRole('button', { name: 'Criar atividade' })).toBeInTheDocument();
  expect(screen.queryByText('Editando atividade.')).toBeNull();
+ unmount(); client.clear();
+});
+
+it.each(['newer A', 'original A'])('preserves revised cached A draft (%s) after the original composer unmounts', async expected => {
+ let finish: (value: unknown) => void;
+ mocks.add.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+ const { rerender, unmount, client } = setup();
+ fireEvent.change(screen.getByRole('textbox', { name: 'Nota interna' }), { target: { value: 'original A' } });
+ fireEvent.click(screen.getByRole('button', { name: 'Salvar nota' }));
+ rerender(<Harness id="B" />);
+ rerender(<Harness />);
+ expect(screen.getByRole('button', { name: 'Salvar nota' })).toBeDisabled();
+ fireEvent.change(screen.getByRole('textbox', { name: 'Nota interna' }), { target: { value: 'intermediate edit' } });
+ fireEvent.change(screen.getByRole('textbox', { name: 'Nota interna' }), { target: { value: expected } });
+ await act(async () => finish({ id: 'saved-original' }));
+ expect(screen.getByRole('textbox', { name: 'Nota interna' })).toHaveValue(expected);
+ expect(client.getQueryData(['leadConversationDraft', 'org', 'lead'])).toEqual(expect.objectContaining({ note: expected }));
+ unmount(); client.clear();
+});
+it.each(['note', 'activity'] as const)('persists %s failure while A is unmounted and clears it on retry', async mode => {
+ let fail: (error: Error) => void;
+ mocks.add.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+ const { rerender, unmount, client } = setup();
+ if (mode === 'note') fireEvent.change(screen.getByRole('textbox', { name: 'Nota interna' }), { target: { value: 'keep A' } });
+ else fireEvent.click(screen.getByRole('button', { name: 'Nova atividade' }));
+ const button = mode === 'note' ? 'Salvar nota' : 'Criar atividade';
+ fireEvent.click(screen.getByRole('button', { name: button }));
+ rerender(<Harness id="B" />);
+ await act(async () => fail(new Error('Failed in A')));
+ expect(screen.queryByRole('alert')).toBeNull();
+ rerender(<Harness />);
+ expect(await screen.findByRole('alert')).toHaveTextContent('Failed in A');
+ rerender(<Harness id="B" />); rerender(<Harness />);
+ expect(screen.getByRole('alert')).toHaveTextContent('Failed in A');
+ fireEvent.click(screen.getByRole('button', { name: button }));
+ await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
  unmount(); client.clear();
 });
