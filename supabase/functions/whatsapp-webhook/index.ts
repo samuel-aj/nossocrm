@@ -19,7 +19,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { parseMessageDeletion, applyMessageDeletion } from "./deletions.ts";
 import { encryptedEdit, resolveEncryptedEdit } from "./encrypted-edits.ts";
 import { parseMessageEdit, applyMessageEdit } from "./edits.ts";
-import { enrichMissingQuote, extractEvolutionQuoteContext, resolveIncomingQuote } from "../_shared/quotes.ts";
+import { enrichMissingQuote, extractEvolutionQuoteContext, resolveQuoteWhenPresent } from "../_shared/quotes.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -903,11 +903,13 @@ Deno.serve(async (req) => {
       // conteúdo que o WhatsApp manda junto (quotedMessage).
       let quotedMessageId: string | null = null;
       let quotedSnapshot: Record<string, unknown> | null = null;
-      if (ctx.quoted) {
-        const own = jidToE164(conn.phone_number ?? "");
-        const part = jidToE164(ctx.quoted.participant ?? "");
-        const direction = own && part ? (brPhoneVariants(own).includes(part) ? "out" : "in") : null;
-        const resolved = await resolveIncomingQuote(supabase, { organizationId: orgId, conversationId: convId, connectionId: conn.id }, ctx.quoted, direction);
+      const quotedParticipant = jidToE164(ctx.quoted?.participant ?? "");
+      const ownPhone = jidToE164(conn.phone_number ?? "");
+      const quotedDirection = ownPhone && quotedParticipant
+        ? (brPhoneVariants(ownPhone).includes(quotedParticipant) ? "out" : "in") : null;
+      const resolved = await resolveQuoteWhenPresent(supabase,
+        { organizationId: orgId, conversationId: convId, connectionId: conn.id }, ctx.quoted, quotedDirection);
+      if (resolved) {
         quotedMessageId = resolved.quotedMessageId;
         quotedSnapshot = resolved.quotedSnapshot;
       }

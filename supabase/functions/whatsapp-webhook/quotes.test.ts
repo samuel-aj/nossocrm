@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { boundedQuoteText, enrichMissingQuote, extractEvolutionQuoteContext, resolveIncomingQuote } from '../_shared/quotes';
+import { boundedQuoteText, enrichMissingQuote, extractEvolutionQuoteContext, resolveIncomingQuote, resolveQuoteWhenPresent } from '../_shared/quotes';
 
 const content = (m: Record<string, unknown>) => {
   const extended = m.extendedTextMessage as { text?: string } | undefined;
@@ -10,7 +10,7 @@ const content = (m: Record<string, unknown>) => {
 const scope = { organizationId: 'org-A', conversationId: 'conv-A', connectionId: 'conn-A' };
 const quote = { providerId: 'original-provider-id', text: 'quoted text', participant: '123@s.whatsapp.net' };
 
-function fakeDb(original: Record<string, unknown> | null = null) {
+function fakeDb(original: Record<string, unknown> | null = null, failure: 'lookup-error' | 'lookup-throw' | 'update-error' | 'update-throw' | null = null) {
   const filters: Array<[string, string, unknown]> = [];
   const writes: Array<Record<string, unknown>> = [];
   let reads = 0;
@@ -20,8 +20,17 @@ function fakeDb(original: Record<string, unknown> | null = null) {
       eq: (key: string, value: unknown) => { filters.push([table, key, value]); return q; },
       is: (key: string, value: unknown) => { filters.push([table, key, value]); return q; },
       update: (patch: Record<string, unknown>) => { writes.push(patch); return q; },
-      maybeSingle: async () => { reads++; return { data: original, error: null }; },
-      then: (resolve: (result: unknown) => void) => resolve({ data: [{ id: 'message-A' }], error: null }),
+      maybeSingle: async () => {
+        reads++;
+        if (failure === 'lookup-throw') throw new Error('private lookup detail');
+        return { data: failure === 'lookup-error' ? null : original,
+          error: failure === 'lookup-error' ? new Error('private lookup detail') : null };
+      },
+      then: (resolve: (result: unknown) => void) => {
+        if (failure === 'update-throw') throw new Error('private update detail');
+        return resolve({ data: failure === 'update-error' ? null : [{ id: 'message-A' }],
+          error: failure === 'update-error' ? new Error('private update detail') : null });
+      },
     };
     return q;
   } };
@@ -57,6 +66,27 @@ describe('Evolution incoming quotes', () => {
     expect(extractEvolutionQuoteContext({ message: { extendedTextMessage: {
       contextInfo: { forwardingScore: 2 },
     } } }, content)).toEqual({ forwarded: true });
+  });
+
+  it('bounds provider text in the extracted metadata before persistence', () => {
+    const text = 'a'.repeat(500);
+    const extracted = extractEvolutionQuoteContext({ contextInfo: {
+      stanzaId: 'original-provider-id', quotedMessage: { conversation: text },
+    } }, content);
+    expect(extracted.quoted?.text?.length).toBe(300);
+    expect(extracted.quoted?.text?.endsWith('…')).toBe(true);
+  });
+
+  it('does zero quote reads for an ordinary message and one for a quoted message', async () => {
+    const f = fakeDb();
+    const ordinary = extractEvolutionQuoteContext({ message: { conversation: 'hello' } }, content);
+    expect(ordinary.quoted).toBeUndefined();
+    expect(await resolveQuoteWhenPresent(f.db, scope, ordinary.quoted, null)).toBeNull();
+    expect(f.reads).toBe(0);
+    expect(await resolveQuoteWhenPresent(f.db, scope, quote, null)).toMatchObject({
+      quotedSnapshot: { provider_id: quote.providerId },
+    });
+    expect(f.reads).toBe(1);
   });
 
   it('bounds text and preserves safe text without guessing author', async () => {
@@ -109,5 +139,34 @@ describe('Evolution incoming quotes', () => {
         { id: 'message-A', quoted: { provider_id: 'original-provider-id' } }, quote, null)).toBe(false);
       expect(f.reads).toBe(1);
     } finally { fetchSpy.mockRestore(); }
+  });
+
+  it.each(['lookup-error', 'lookup-throw'] as const)('falls back to provider snapshot on %s without leaking details', async failure => {
+    const f = fakeDb(null, failure);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const resolved = await resolveIncomingQuote(f.db, scope, quote, null);
+      expect(resolved).toEqual({ quotedMessageId: null, quotedSnapshot: {
+        provider_id: quote.providerId, body: quote.text, media_type: null, direction: null,
+      } });
+      expect(log).toHaveBeenCalledOnce();
+      expect(JSON.stringify(log.mock.calls)).not.toContain('private lookup detail');
+    } finally { log.mockRestore(); }
+  });
+
+  it.each(['update-error', 'update-throw'] as const)('keeps duplicate and later edit processing alive on %s', async failure => {
+    const f = fakeDb({ id: 'original-A', body: 'original body', direction: 'in' }, failure);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const changed = await enrichMissingQuote(f.db, scope,
+        { id: 'message-A', quoted: null }, quote, null);
+      const laterEditStillRuns = vi.fn();
+      laterEditStillRuns();
+      expect(changed).toBe(false);
+      expect(laterEditStillRuns).toHaveBeenCalledOnce();
+      expect(f.reads).toBe(1);
+      expect(log).toHaveBeenCalledOnce();
+      expect(JSON.stringify(log.mock.calls)).not.toContain('private update detail');
+    } finally { log.mockRestore(); }
   });
 });

@@ -21,7 +21,7 @@
  * evolution_message_id evita duplicar o que o próprio CRM já gravou ao enviar.
  */
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { enrichMissingQuote, resolveIncomingQuote } from "../_shared/quotes.ts";
+import { enrichMissingQuote, resolveQuoteWhenPresent } from "../_shared/quotes.ts";
 
 const GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") ?? "v21.0";
 
@@ -754,12 +754,13 @@ async function processarEventos(supabase: any, conn: ConnRow, payload: any): Pro
         // guarda só o id e de quem era (a Meta não manda o conteúdo).
         let quotedMessageId: string | null = null;
         let quotedSnapshot: Record<string, unknown> | null = null;
-        if (ctxQuotedId) {
-          const own = digitosConexao ? `+${digitosConexao}` : "";
-          const direction = own && ctxFrom ? (brPhoneVariants(own).includes(ctxFrom) ? "out" : "in") : null;
-          const resolved = await resolveIncomingQuote(supabase,
-            { organizationId: orgId, conversationId: convId, connectionId: conn.id },
-            { providerId: ctxQuotedId }, direction);
+        const ownQuotePhone = digitosConexao ? `+${digitosConexao}` : "";
+        const quotedDirection = ownQuotePhone && ctxFrom
+          ? (brPhoneVariants(ownQuotePhone).includes(ctxFrom) ? "out" : "in") : null;
+        const resolved = await resolveQuoteWhenPresent(supabase,
+          { organizationId: orgId, conversationId: convId, connectionId: conn.id },
+          ctxQuotedId ? { providerId: ctxQuotedId } : null, quotedDirection);
+        if (resolved) {
           quotedMessageId = resolved.quotedMessageId;
           quotedSnapshot = resolved.quotedSnapshot;
         }

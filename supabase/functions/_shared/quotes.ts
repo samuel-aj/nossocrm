@@ -34,7 +34,7 @@ export function extractEvolutionQuoteContext(record: unknown, content: Content):
         return {
           quoted: {
             providerId,
-            text: quotedContent.text,
+            text: boundedQuoteText(quotedContent.text) ?? undefined,
             mediaType: quotedContent.mediaType,
             participant: typeof ci.participant === 'string' ? ci.participant : undefined,
           },
@@ -70,6 +70,26 @@ export interface QuoteSnapshot {
   deleted?: boolean;
 }
 
+function providerSnapshot(quote: IncomingQuote, direction: 'in' | 'out' | null): QuoteSnapshot {
+  return {
+    provider_id: quote.providerId,
+    body: boundedQuoteText(quote.text),
+    media_type: quote.mediaType ?? null,
+    direction,
+  };
+}
+
+/** No original lookup for an ordinary message. */
+export async function resolveQuoteWhenPresent(
+  // deno-lint-ignore no-explicit-any
+  db: any,
+  scope: { organizationId: string; conversationId: string; connectionId: string },
+  quote: IncomingQuote | null | undefined,
+  fallbackDirection: 'in' | 'out' | null,
+): Promise<{ quotedMessageId: string | null; quotedSnapshot: QuoteSnapshot } | null> {
+  return quote ? resolveIncomingQuote(db, scope, quote, fallbackDirection) : null;
+}
+
 export async function resolveIncomingQuote(
   // deno-lint-ignore no-explicit-any
   db: any,
@@ -77,14 +97,25 @@ export async function resolveIncomingQuote(
   quote: IncomingQuote,
   fallbackDirection: 'in' | 'out' | null,
 ): Promise<{ quotedMessageId: string | null; quotedSnapshot: QuoteSnapshot }> {
-  const { data: original, error } = await db.from('wa_messages')
-    .select('id, body, media_type, direction, sender_name, deleted_at, wa_conversations!inner(connection_id)')
-    .eq('organization_id', scope.organizationId)
-    .eq('conversation_id', scope.conversationId)
-    .eq('wa_conversations.connection_id', scope.connectionId)
-    .eq('evolution_message_id', quote.providerId)
-    .maybeSingle();
-  if (error) throw new Error('Quoted message lookup failed');
+  let original: {
+    id: string; body?: string | null; media_type?: string | null;
+    direction?: string | null; sender_name?: string | null; deleted_at?: string | null;
+  } | null = null;
+  try {
+    const result = await db.from('wa_messages')
+      .select('id, body, media_type, direction, sender_name, deleted_at, wa_conversations!inner(connection_id)')
+      .eq('organization_id', scope.organizationId)
+      .eq('conversation_id', scope.conversationId)
+      .eq('wa_conversations.connection_id', scope.connectionId)
+      .eq('evolution_message_id', quote.providerId)
+      .maybeSingle();
+    if (result.error) throw result.error;
+    original = result.data;
+  } catch {
+    // A quote is auxiliary metadata. Never block the message insert or leak
+    // message content/provider credentials into diagnostics.
+    console.error('[wa-quote] scoped original lookup failed; using provider snapshot');
+  }
   if (original) {
     const deleted = !!original.deleted_at;
     return {
@@ -100,15 +131,7 @@ export async function resolveIncomingQuote(
       },
     };
   }
-  return {
-    quotedMessageId: null,
-    quotedSnapshot: {
-      provider_id: quote.providerId,
-      body: boundedQuoteText(quote.text),
-      media_type: quote.mediaType ?? null,
-      direction: fallbackDirection,
-    },
-  };
+  return { quotedMessageId: null, quotedSnapshot: providerSnapshot(quote, fallbackDirection) };
 }
 
 /** A duplicate webhook may supply missing context. Touch only quote columns. */
@@ -124,12 +147,17 @@ export async function enrichMissingQuote(
   const resolved = await resolveIncomingQuote(db, scope, quote, fallbackDirection);
   const patch: Record<string, unknown> = { quoted: resolved.quotedSnapshot };
   if (!existing.quoted_message_id && resolved.quotedMessageId) patch.quoted_message_id = resolved.quotedMessageId;
-  const { data, error } = await db.from('wa_messages').update(patch)
-    .eq('id', existing.id)
-    .eq('organization_id', scope.organizationId)
-    .eq('conversation_id', scope.conversationId)
-    .is('quoted', null)
-    .select('id');
-  if (error) throw new Error('Quoted message enrichment failed');
-  return !!data?.length;
+  try {
+    const { data, error } = await db.from('wa_messages').update(patch)
+      .eq('id', existing.id)
+      .eq('organization_id', scope.organizationId)
+      .eq('conversation_id', scope.conversationId)
+      .is('quoted', null)
+      .select('id');
+    if (error) throw error;
+    return !!data?.length;
+  } catch {
+    console.error('[wa-quote] duplicate enrichment failed; retaining existing message');
+    return false;
+  }
 }
