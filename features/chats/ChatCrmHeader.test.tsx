@@ -29,6 +29,13 @@ const base = {
 };
 
 describe('ChatCrmHeader', () => {
+  it('uses compact trigger sizing so the linked lead matches the adjacent stage control', () => {
+    render(<ChatCrmHeader {...base} />);
+    const selector = screen.getByRole('combobox', { name: 'Lead vinculado a esta conversa' });
+    expect(selector).toHaveClass('min-h-0', 'py-1', 'text-xs');
+    expect(selector).not.toHaveClass('min-h-9');
+  });
+
   it('places linked lead, open-card action, stage, readonly owner and tags in the CRM row', () => {
     render(<ChatCrmHeader {...base} />);
     const row = screen.getByRole('group', { name: 'Contexto CRM da conversa' });

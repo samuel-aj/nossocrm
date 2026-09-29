@@ -11,6 +11,7 @@ import {
   Copy,
   ExternalLink,
   FolderOpen,
+  Info,
   List,
   Maximize2,
   Package,
@@ -1339,7 +1340,7 @@ export function LeadPropertiesPanel({
         </SectionCard>
         <SectionCard
           title="Detalhes"
-          icon={<FolderOpen size={16} />}
+          icon={<Info size={16} />}
           open={open.details}
           toggle={() => toggle("details")}
           summary={`Criado em ${new Date(deal.createdAt).toLocaleDateString("pt-BR")} · Probabilidade ${deal.probability}%`}

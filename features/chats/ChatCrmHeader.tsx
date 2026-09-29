@@ -76,7 +76,7 @@ export function ChatCrmHeader({
                   onChange={e => onLinkDeal(e.target.value || null)}
                   aria-label="Lead vinculado a esta conversa"
                   title="Ao vincular, as etiquetas da conversa e do lead serão unidas."
-                  className="min-w-0 w-[180px] max-w-[calc(100vw-120px)] truncate rounded-lg border border-slate-300 dark:border-white/20 bg-white dark:bg-dark-card px-1.5 py-1 text-xs outline-none focus:ring-2 focus:ring-primary-500"
+                  className="min-h-0 min-w-0 w-[180px] max-w-[calc(100vw-120px)] truncate rounded-lg border border-slate-300 dark:border-white/20 bg-white dark:bg-dark-card px-1.5 py-1 text-xs outline-none focus:ring-2 focus:ring-primary-500"
                 >
                   <option value="">Sem lead vinculado</option>
                   {deal && !contactDeals.some(d => d.id === deal.id) && <option value={deal.id}>{deal.title}</option>}

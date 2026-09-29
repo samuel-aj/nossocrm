@@ -179,6 +179,13 @@ beforeEach(() => {
 });
 
 describe("LeadPropertiesPanel", () => {
+  it("uses the information icon for Detalhes", () => {
+    setup();
+    const details = screen.getByRole("button", { name: /Detalhes/ });
+    expect(details.querySelector("svg.lucide-info")).toBeInTheDocument();
+    expect(details.querySelector("svg.lucide-folder-open")).not.toBeInTheDocument();
+  });
+
   it("opens Negócio and Contato, collapses the other independent sections, and never saves on expansion", () => {
     setup();
     expect(screen.getByRole("button", { name: /Negócio/ })).toHaveAttribute(
