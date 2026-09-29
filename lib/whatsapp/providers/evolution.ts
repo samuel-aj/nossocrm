@@ -483,7 +483,9 @@ function extractContextInfo(rawMsg: Record<string, unknown>): {
     }
     for (const key of ['message', 'ephemeralMessage', 'viewOnceMessage', 'viewOnceMessageV2',
       'viewOnceMessageV2Extension', 'documentWithCaptionMessage', 'deviceSentMessage',
-      'extendedTextMessage', 'imageMessage', 'videoMessage', 'audioMessage', 'documentMessage', 'stickerMessage']) {
+      'extendedTextMessage', 'imageMessage', 'videoMessage', 'audioMessage', 'documentMessage', 'stickerMessage',
+      'contactMessage', 'contactsArrayMessage', 'locationMessage', 'liveLocationMessage',
+      'pollCreationMessage', 'pollCreationMessageV2', 'pollCreationMessageV3']) {
       const child = node[key];
       if (child && typeof child === 'object' && !Array.isArray(child)) queue.push(child as Record<string, unknown>);
     }

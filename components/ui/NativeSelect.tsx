@@ -1,9 +1,8 @@
 'use client';
 
-import React, { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as Select from '@radix-ui/react-select';
 import { Check, ChevronDown, Search } from 'lucide-react';
-import { useModalOverlay } from '@/components/ui/Modal';
 import { cn } from '@/lib/utils/cn';
 
 const EMPTY = '__crm_empty_selection__';
@@ -49,6 +48,7 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
   const [internalValue, setInternalValue] = useState(initial);
   const selected = value === undefined ? internalValue : String(value);
   const [open, setOpen] = useState(false);
+  const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
   const [search, setSearch] = useState('');
   const selectRef = useRef<HTMLSelectElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -64,7 +64,6 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
     while (options.some(option => option.value === candidate)) candidate += '_';
     return candidate;
   }, [options]);
-  useModalOverlay(open);
 
   useEffect(() => {
     if (open && showSearch) {
@@ -80,6 +79,12 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
   useEffect(() => () => {
     if (typeaheadTimerRef.current !== null) window.clearTimeout(typeaheadTimerRef.current);
   }, []);
+  useLayoutEffect(() => {
+    // React may see unchanged option props after an imperative write. Restore
+    // the committed value as well when a controlled owner rejects a change.
+    const option = selectRef.current?.options[0];
+    if (option) { option.value = selected; option.selected = true; }
+  });
   useEffect(() => {
     const native = selectRef.current;
     const owner = native?.form;
@@ -91,10 +96,26 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
 
   const setRefs = useCallback((node: HTMLSelectElement | null) => {
     selectRef.current = node;
-    if (node) Object.defineProperty(node, 'focus', { configurable: true, value: () => triggerRef.current?.focus() });
+    if (node) {
+      Object.defineProperty(node, 'focus', { configurable: true, value: () => triggerRef.current?.focus() });
+      // Registration libraries write directly to ref.value for defaults, reset
+      // and setValue. Keep the sole native option valid *before* they read it
+      // back, then update the visible uncontrolled value on the next render.
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!;
+      Object.defineProperty(node, 'value', {
+        configurable: true,
+        get: () => descriptor.get!.call(node),
+        set: (next: string) => {
+          const normalized = String(next ?? '');
+          node.options[0].value = normalized;
+          descriptor.set!.call(node, normalized);
+          if (value === undefined) setInternalValue(normalized);
+        },
+      });
+    }
     if (typeof forwardedRef === 'function') forwardedRef(node);
     else if (forwardedRef) forwardedRef.current = node;
-  }, [forwardedRef]);
+  }, [forwardedRef, value]);
   const emitRegisteredBlur = () => {
     if (!onBlur || blurSentRef.current) return;
     blurSentRef.current = true;
@@ -119,6 +140,12 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
       native.value = next;
       const target = { value: next, name: native.name, type: native.type };
       onChange?.({ target, currentTarget: target, type: 'change' } as React.ChangeEvent<HTMLSelectElement>);
+      // A controlled owner can reject the change without rendering again.
+      // Its next accepted prop remains authoritative for native form reads.
+      if (value !== undefined) {
+        native.options[0].value = selected;
+        native.options[0].selected = true;
+      }
     }
   };
   const resetTypeahead = () => {
@@ -142,17 +169,20 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
   const visible = showSearch && search.trim()
     ? options.filter(option => option.label.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
     : options;
+  const visibleValues = new Set(visible.map(option => option.value));
   const current = options.find(option => option.value === selected);
   const radixValue = selected === '' ? sentinel : selected;
-  const nativeOptions = open ? options : options.filter(option => option.value === selected);
   const wrapperWidth = className?.split(/\s+/).filter(token => /^(?:[a-z]+:)?(?:w-|min-w-|max-w-|flex-|shrink-)/.test(token)).join(' ');
-  const optionGroups = visible.reduce<{ group?: string; options: Option[] }[]>((groups, option) => {
+  const optionGroups = options.reduce<{ group?: string; options: Option[] }[]>((groups, option) => {
     const last = groups[groups.length - 1];
     if (last && last.group === option.group) last.options.push(option);
     else groups.push({ group: option.group, options: [option] });
     return groups;
   }, []);
-  const renderItem = (option: Option, index: number) => <Select.Item key={`${option.value}:${index}`} value={option.value === '' ? sentinel : option.value} disabled={option.disabled} textValue={option.label} className="relative flex min-h-9 cursor-pointer select-none items-center rounded-lg py-2 pl-2 pr-8 text-sm outline-none data-[disabled]:cursor-not-allowed data-[disabled]:opacity-40 data-[highlighted]:bg-primary-50 data-[highlighted]:text-primary-700 data-[state=checked]:font-semibold dark:data-[highlighted]:bg-primary-500/15 dark:data-[highlighted]:text-primary-300">
+  // Keep open items stable while filtering: unmounting the selected item makes
+  // Radix refocus the list and interrupts typing. Hidden items cannot be reached
+  // by either Radix navigation or the search input's Arrow/Enter handlers.
+  const renderItem = (option: Option, index: number) => <Select.Item key={`${option.value}:${index}`} value={option.value === '' ? sentinel : option.value} hidden={!visibleValues.has(option.value)} style={!visibleValues.has(option.value) ? { display: 'none' } : undefined} disabled={option.disabled || !visibleValues.has(option.value)} textValue={option.label} className="relative flex min-h-9 cursor-pointer select-none items-center rounded-lg py-2 pl-2 pr-8 text-sm outline-none data-[disabled]:cursor-not-allowed data-[disabled]:opacity-40 data-[highlighted]:bg-primary-50 data-[highlighted]:text-primary-700 data-[state=checked]:font-semibold dark:data-[highlighted]:bg-primary-500/15 dark:data-[highlighted]:text-primary-300">
     <Select.ItemText><span className="block whitespace-normal break-words" title={option.label}>{option.label}</span></Select.ItemText>
     <Select.ItemIndicator className="absolute right-2 text-primary-600 dark:text-primary-400"><Check size={15} /></Select.ItemIndicator>
   </Select.Item>;
@@ -164,9 +194,21 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
       onInvalid={event => { event.preventDefault(); triggerRef.current?.focus(); props.onInvalid?.(event); }}
       className="pointer-events-none absolute left-0 top-0 h-px w-px opacity-0"
     >
-      {nativeOptions.length ? nativeOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>) : <option value={selected}>{selected}</option>}
+      <option value={selected}>{current?.label ?? selected}</option>
     </select>
-    <Select.Root value={radixValue} open={open} onOpenChange={next => { setOpen(next); if (next) resetTypeahead(); }} onValueChange={next => change(next === sentinel ? '' : next)} disabled={disabled}>
+    <Select.Root value={radixValue} open={open} onOpenChange={next => {
+      if (next) {
+        // Portals belong to the innermost trap, including raw/nested drawer
+        // traps. The fixed Popper still escapes scrolling panel contents.
+        setPortalContainer(triggerRef.current?.closest<HTMLElement>('[data-focus-trap-fallback]') ?? null);
+        resetTypeahead();
+      }
+      setOpen(next);
+    }} onValueChange={next => {
+      // Radix's unnamed native form mirror has no options while closed and
+      // reports ''. Actual empty choices use our nonempty sentinel instead.
+      if (next !== '') change(next === sentinel ? '' : next);
+    }} disabled={disabled}>
       <Select.Trigger
         {...(props as React.ComponentPropsWithoutRef<typeof Select.Trigger>)} id={id} ref={triggerRef} aria-required={required || props['aria-required']}
         className={cn('group flex min-h-9 w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm text-slate-800 outline-none transition hover:border-primary-300 focus-visible:border-primary-500 focus-visible:ring-2 focus-visible:ring-primary-500/20 data-[state=open]:border-primary-400 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/15 dark:bg-slate-900 dark:text-slate-100', className)}
@@ -184,8 +226,11 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
         <Select.Value placeholder={placeholder}>{current?.label ?? placeholder}</Select.Value>
         <Select.Icon asChild><ChevronDown size={15} className="shrink-0 text-slate-400 transition-transform group-data-[state=open]:rotate-180" /></Select.Icon>
       </Select.Trigger>
-      {open && <Select.Portal>
+      {open && <Select.Portal container={portalContainer}>
         <Select.Content ref={contentRef} onFocusCapture={() => { blurSentRef.current = false; }} onBlurCapture={handleWidgetBlur}
+          // Radix receives Escape in document capture. Keep its dismissal and
+          // focus return, but do not forward Escape to containing dialogs.
+          onEscapeKeyDown={event => event.stopPropagation()}
           onCloseAutoFocus={event => {
             const next = pendingTabRef.current;
             if (!next) return;
@@ -232,7 +277,7 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(fun
           </div>}
           <Select.Viewport ref={viewportRef} className="max-h-72 overflow-y-auto">
             {optionGroups.map((block, index) => block.group
-              ? <Select.Group key={`${block.group}:${index}`}>
+              ? <Select.Group key={`${block.group}:${index}`} hidden={!block.options.some(option => visibleValues.has(option.value))}>
                   <Select.Label className="px-2 py-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">{block.group}</Select.Label>
                   {block.options.map(renderItem)}
                 </Select.Group>

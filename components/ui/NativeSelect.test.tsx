@@ -6,6 +6,7 @@ import { NativeSelect } from './NativeSelect';
 import { useForm } from 'react-hook-form';
 import { Modal } from './Modal';
 import { FormSelect } from './FormControls';
+import { FocusTrap } from '@/lib/a11y';
 
 beforeAll(() => {
   HTMLElement.prototype.hasPointerCapture = () => false;
@@ -15,6 +16,100 @@ beforeAll(() => {
 });
 
 describe('NativeSelect', () => {
+  it('keeps controlled form serialization when its owner rejects closed typeahead', async () => {
+    const onChange = vi.fn();
+    const { container } = render(<form><NativeSelect name="product" aria-label="Produto" value="a" onChange={onChange}>
+      <option value="a">Abacaxi</option><option value="b">Banana</option>
+    </NativeSelect></form>);
+    const trigger = screen.getByRole('combobox', { name: 'Produto' });
+    await act(async () => trigger.focus());
+    await userEvent.keyboard('b');
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ target: expect.objectContaining({ value: 'b' }) }));
+    expect(trigger).toHaveTextContent('Abacaxi');
+    expect(container.querySelector('select[name="product"]')).toHaveValue('a');
+    expect(new FormData(container.querySelector('form')!).get('product')).toBe('a');
+  });
+
+  it.each(['default', 'reset', 'setValue', 'typeahead'] as const)('synchronizes RHF %s with the label, native value, blur and submission', async mode => {
+    const submit = vi.fn();
+    function Form() {
+      const { register, handleSubmit, reset, setValue, watch, formState } = useForm({ mode: 'onBlur', defaultValues: { product: mode === 'default' ? 'b' : 'a' } });
+      return <form onSubmit={handleSubmit(submit)}>
+        <NativeSelect aria-label="Produto" {...register('product')}>
+          <option value="a">Abacaxi</option><option value="b">Banana</option>
+        </NativeSelect>
+        <span data-testid="watched">{watch('product')}</span>
+        <span data-testid="touched">{String(Boolean(formState.touchedFields.product))}</span>
+        <button type="button" onClick={() => reset({ product: 'b' })}>Resetar</button>
+        <button type="button" onClick={() => setValue('product', 'b')}>Definir</button>
+        <button type="submit">Enviar</button>
+      </form>;
+    }
+    const { container } = render(<Form />);
+    const trigger = screen.getByRole('combobox', { name: 'Produto' });
+    if (mode === 'reset') await userEvent.click(screen.getByText('Resetar'));
+    if (mode === 'setValue') await userEvent.click(screen.getByText('Definir'));
+    await act(async () => trigger.focus());
+    if (mode === 'typeahead') await userEvent.keyboard('b');
+    expect(trigger).toHaveTextContent('Banana');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('option')).not.toBeInTheDocument();
+    expect(container.querySelector('select')).toHaveValue('b');
+    expect(new FormData(container.querySelector('form')!).get('product')).toBe('b');
+    expect(screen.getByTestId('watched')).toHaveTextContent('b');
+    await userEvent.tab();
+    await waitFor(() => expect(screen.getByTestId('touched')).toHaveTextContent('true'));
+    expect(screen.getByTestId('watched')).toHaveTextContent('b');
+    expect(trigger).toHaveTextContent('Banana');
+    await userEvent.click(screen.getByText('Enviar'));
+    expect(submit).toHaveBeenLastCalledWith({ product: 'b' }, expect.anything());
+  });
+
+  it.each(['raw', 'nested', 'modal-raw'] as const)('keeps search, keyboard selection and local Escape inside a %s trap', async mode => {
+    const outerClose = vi.fn();
+    const innerClose = vi.fn();
+    const bubblingEscape = vi.fn();
+    function Surface() {
+      const [drawer, setDrawer] = React.useState(mode === 'raw');
+      const contents = <div role="dialog" onKeyDown={event => { if (event.key === 'Escape') bubblingEscape(); }}>
+        <button type="button" onClick={() => setDrawer(true)}>Abrir painel</button>
+        {drawer && <FocusTrap active initialFocus={false} onEscape={innerClose}>
+          <NativeSelect aria-label="Produto" searchable defaultValue="a">
+            <option value="a">Laranja</option><option value="b">Uva</option>
+          </NativeSelect><button type="button">Próximo</button>
+        </FocusTrap>}
+      </div>;
+      return mode === 'raw' ? contents : mode === 'modal-raw'
+        ? <Modal isOpen onClose={outerClose} title="Negócio">{contents}</Modal>
+        : <FocusTrap active initialFocus={false} onEscape={outerClose}>{contents}</FocusTrap>;
+    }
+    render(<Surface />);
+    if (mode !== 'raw') await userEvent.click(screen.getByText('Abrir painel'));
+    const trigger = screen.getByRole('combobox', { name: 'Produto' });
+    await userEvent.click(trigger);
+    const search = screen.getByRole('searchbox');
+    expect(trigger.closest('[data-focus-trap-fallback]')).toContainElement(search);
+    await userEvent.type(search, 'uva');
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue('uva');
+    await userEvent.keyboard('{ArrowDown}');
+    expect(screen.getByRole('option', { name: 'Uva' })).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    expect(trigger).toHaveTextContent('Uva');
+    expect(trigger).toHaveFocus();
+    for (const fromOption of [false, true]) {
+      await userEvent.click(trigger);
+      expect(screen.getByRole('searchbox')).toHaveFocus();
+      if (fromOption) await userEvent.keyboard('{ArrowDown}');
+      await userEvent.keyboard('{Escape}');
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+      expect(outerClose).not.toHaveBeenCalled();
+      expect(innerClose).not.toHaveBeenCalled();
+      expect(bubblingEscape).not.toHaveBeenCalled();
+    }
+  });
+
   it('does not mount Radix option nodes while a large menu is closed', async () => {
     const setAttribute = vi.spyOn(Element.prototype, 'setAttribute');
     try {

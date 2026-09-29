@@ -38,6 +38,20 @@ function fakeDb(original: Record<string, unknown> | null = null, failure: 'looku
 }
 
 describe('Evolution incoming quotes', () => {
+  it.each(['contactMessage', 'contactsArrayMessage', 'locationMessage', 'liveLocationMessage', 'pollCreationMessage', 'pollCreationMessageV2', 'pollCreationMessageV3'])('preserves quoted and forwarded context inside nested %s', envelope => {
+    for (const includeQuote of [false, true]) {
+      const record = { message: { viewOnceMessageV2: { message: { [envelope]: {
+        contextInfo: { forwardingScore: 1, ...(includeQuote ? {
+          stanzaId: 'exact-original-id', quotedMessage: { conversation: 'original text' },
+        } : {}) },
+      } } } } };
+      const context = extractEvolutionQuoteContext(record, content);
+      expect(context.forwarded).toBe(true);
+      if (includeQuote) expect(context.quoted).toEqual({ providerId: 'exact-original-id', text: 'original text', mediaType: undefined, participant: undefined });
+      else expect(context.quoted).toBeUndefined();
+    }
+  });
+
   it('extracts the sanitized HOPE provider-record shape (top-level contextInfo)', () => {
     // chat/findMessages exposes contextInfo at record level. Values are synthetic.
     const record = {

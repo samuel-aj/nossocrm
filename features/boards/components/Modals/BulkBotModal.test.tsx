@@ -1,10 +1,17 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({organizationId:'org'}) }));
-vi.mock('@/components/ui/Modal', () => ({ Modal: ({ children, footer }: {children:React.ReactNode;footer:React.ReactNode}) => <div>{children}{footer}</div> }));
+vi.mock('@/components/ui/Modal', async importOriginal => ({ ...await importOriginal<typeof import('@/components/ui/Modal')>(), Modal: ({ children, footer }: {children:React.ReactNode;footer:React.ReactNode}) => <div>{children}{footer}</div> }));
 import { BulkBotModal } from './BulkBotModal';
+beforeAll(() => {
+ HTMLElement.prototype.hasPointerCapture = () => false;
+ HTMLElement.prototype.setPointerCapture = () => {};
+ HTMLElement.prototype.releasePointerCapture = () => {};
+ HTMLElement.prototype.scrollIntoView = () => {};
+});
 afterEach(()=>vi.unstubAllGlobals());
 describe('bulk robot confirmation', () => {
  it('reviews recipients before starting and shows the queue result', async () => {
@@ -16,8 +23,10 @@ describe('bulk robot confirmation', () => {
   }));
   const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
   render(<QueryClientProvider client={client}><BulkBotModal dealIds={['lead']} onClose={()=>{}} /></QueryClientProvider>);
-  await screen.findByText('Follow-up');
-  fireEvent.change(screen.getByLabelText('Robô'),{target:{value:'bot'}});
+  const robot = await screen.findByRole('combobox', { name: 'Robô' });
+  await waitFor(() => expect(robot).not.toBeDisabled());
+  await userEvent.click(robot);
+  await userEvent.click(await screen.findByRole('option', { name: 'Follow-up' }));
   fireEvent.click(screen.getByRole('button',{name:'Revisar destinatários'}));
   await screen.findByRole('button',{name:'Confirmar execução (1)'});
   expect(calls).toHaveLength(1);expect(calls[0].preview).toBe(true);

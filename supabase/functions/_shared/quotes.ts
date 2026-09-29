@@ -46,7 +46,9 @@ export function extractEvolutionQuoteContext(record: unknown, content: Content):
       'message', 'ephemeralMessage', 'viewOnceMessage', 'viewOnceMessageV2',
       'viewOnceMessageV2Extension', 'documentWithCaptionMessage', 'deviceSentMessage',
       'extendedTextMessage', 'imageMessage', 'videoMessage', 'audioMessage',
-      'documentMessage', 'stickerMessage', 'contactMessage',
+      'documentMessage', 'stickerMessage', 'contactMessage', 'contactsArrayMessage',
+      'locationMessage', 'liveLocationMessage',
+      'pollCreationMessage', 'pollCreationMessageV2', 'pollCreationMessageV3',
     ]) {
       if (node[key] && typeof node[key] === 'object') queue.push(object(node[key]));
     }

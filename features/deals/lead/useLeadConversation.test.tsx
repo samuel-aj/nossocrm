@@ -70,9 +70,11 @@ it('starts a prefilled NEW activity for board schedule hints', async () => {
  const { client, unmount } = setup();
  fireEvent.click(screen.getByRole('button', { name: 'Nova atividade' }));
  expect(screen.getByRole('textbox', { name: 'Título da atividade' })).toHaveValue('Ligar para o lead');
- expect(screen.getByRole('combobox', { name: 'Tipo da atividade' })).toHaveValue('CALL');
+ expect(screen.getByRole('combobox', { name: 'Tipo da atividade' })).toHaveTextContent('Ligação');
  expect(screen.getByRole('button', { name: 'Criar atividade' })).toBeInTheDocument();
  expect(screen.queryByText('Editando atividade.')).toBeNull();
+ fireEvent.click(screen.getByRole('button', { name: 'Criar atividade' }));
+ await waitFor(() => expect(mocks.add).toHaveBeenCalledWith(expect.objectContaining({ type: 'CALL', title: 'Ligar para o lead', dealId: 'lead' })));
  unmount(); client.clear();
 });
 
