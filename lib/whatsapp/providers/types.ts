@@ -135,6 +135,10 @@ export interface WhatsAppProvider {
   getConnectionState(): Promise<WaConnectionState>;
   /** Inicia/obtém o QR para conectar o número. */
   getQrCode(): Promise<QrResult>;
+  /** Starts a fresh linking attempt; an already connected session is preserved. */
+  startPairing?(phoneNumber?: string): Promise<QrResult>;
+  /** Reads a pending attempt without starting another after it expires. */
+  getPairingStatus?(): Promise<QrResult>;
   /** Envia uma mensagem de texto. */
   sendText(input: SendTextInput): Promise<SendResult>;
   /** Envia mídia: imagem, vídeo, documento, áudio (voz) ou figurinha. */

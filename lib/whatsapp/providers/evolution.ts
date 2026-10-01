@@ -11,6 +11,7 @@
  * Eventos de webhook tratados: messages.upsert, connection.update, qrcode.updated, messages.update.
  */
 import { normalizePhoneE164, toWhatsAppPhone } from '@/lib/phone';
+import { pairingCode, pairingPhone, PairingInstanceMissingError } from '@/lib/whatsapp/pairing';
 import type {
   WhatsAppProvider,
   ProviderConfig,
@@ -112,6 +113,13 @@ export class EvolutionProvider implements WhatsAppProvider {
   readonly instanceName: string;
   private readonly baseUrl: string;
   private readonly token: string;
+  private pairingDeadline = Infinity;
+
+  private pairingTimeout(): number {
+    const remaining = this.pairingDeadline - Date.now();
+    if (remaining <= 0) throw new Error('A Evolution demorou a responder. Tente novamente.');
+    return Math.min(6000, remaining);
+  }
 
   constructor(config: ProviderConfig) {
     // remove barra final e um eventual /manager coladinho na base
@@ -123,7 +131,8 @@ export class EvolutionProvider implements WhatsAppProvider {
   private async call<T = unknown>(
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     path: string,
-    body?: unknown
+    body?: unknown,
+    timeoutMs?: number
   ): Promise<{ ok: boolean; status: number; data: T | null }> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
@@ -132,6 +141,7 @@ export class EvolutionProvider implements WhatsAppProvider {
         apikey: this.token,
       },
       body: body ? JSON.stringify(body) : undefined,
+      ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
       // sem cache; chamadas server-side
       cache: 'no-store',
     });
@@ -206,8 +216,77 @@ export class EvolutionProvider implements WhatsAppProvider {
     return {
       state: data.base64 ? 'connecting' : state,
       qrBase64: data.base64,
-      pairingCode: data.pairingCode ?? data.code,
+      pairingCode: pairingCode(data.pairingCode),
     };
+  }
+
+  private async pairingState(): Promise<WaConnectionState> {
+    const result = await this.call<{ instance?: { state?: string } }>(
+      'GET', `/instance/connectionState/${encodeURIComponent(this.instanceName)}`, undefined, this.pairingTimeout()
+    );
+    if (result.status === 404) throw new PairingInstanceMissingError();
+    // Fail closed: a network/auth error must never authorize resetting a session.
+    if (!result.ok || !['open', 'close', 'connecting'].includes(result.data?.instance?.state ?? '')) {
+      throw new Error('Não foi possível consultar a conexão. Tente novamente.');
+    }
+    return mapState(result.data?.instance?.state);
+  }
+
+  private async pairingResult(phoneNumber?: string): Promise<QrResult> {
+    const suffix = phoneNumber ? `?number=${encodeURIComponent(phoneNumber)}` : '';
+    const result = await this.call<{
+      base64?: string; pairingCode?: string; instance?: { state?: string }; error?: unknown;
+    }>('GET', `/instance/connect/${encodeURIComponent(this.instanceName)}${suffix}`, undefined, this.pairingTimeout());
+    if (!result.ok || !result.data || result.data.error) {
+      throw new Error('A Evolution não conseguiu gerar o pareamento. Tente novamente.');
+    }
+    const code = pairingCode(result.data.pairingCode);
+    return {
+      state: result.data.instance?.state === 'open' ? 'connected' : 'connecting',
+      qrBase64: result.data.base64,
+      pairingCode: code,
+    };
+  }
+
+  async getPairingStatus(): Promise<QrResult> {
+    this.pairingDeadline = Date.now() + 12000;
+    const state = await this.pairingState();
+    return state === 'connecting' ? this.pairingResult() : { state };
+  }
+
+  async startPairing(phoneNumber?: string): Promise<QrResult> {
+    this.pairingDeadline = Date.now() + 45000;
+    const number = phoneNumber === undefined ? undefined : pairingPhone(phoneNumber);
+    if (number === null) throw new Error('Informe um telefone válido com código do país e DDD.');
+    let state = await this.pairingState();
+    if (state === 'connected') return { state };
+    if (state === 'connecting') {
+      // Evolution ignores a new number while connecting. Only discard a pending
+      // attempt, rechecking immediately before resetting it (never a raw `open`).
+      state = await this.pairingState();
+      if (state === 'connected') return { state };
+      if (state === 'connecting') {
+        const reset = await this.call<{ error?: unknown }>(
+          'DELETE', `/instance/logout/${encodeURIComponent(this.instanceName)}`, undefined, this.pairingTimeout()
+        );
+        if (!reset.ok || reset.data?.error) throw new Error('Não foi possível renovar o pareamento. Tente novamente.');
+        for (let attempt = 0; attempt < 5; attempt++) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          state = await this.pairingState();
+          if (state === 'connected') return { state };
+          if (state === 'disconnected') break;
+        }
+        if (state !== 'disconnected') throw new Error('A tentativa anterior ainda está encerrando. Tente novamente em instantes.');
+      }
+    }
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const result = await this.pairingResult(number);
+      if (result.state === 'connected' || (number ? result.pairingCode : result.qrBase64)) return result;
+      if (attempt < 4) await new Promise(resolve => setTimeout(resolve, 1500));
+    }
+    throw new Error(number
+      ? 'A Evolution não retornou um código. Confira o telefone e tente novamente ou use o QR Code.'
+      : 'A Evolution não retornou o QR Code. Tente novamente.');
   }
 
   async sendText(input: SendTextInput): Promise<SendResult> {

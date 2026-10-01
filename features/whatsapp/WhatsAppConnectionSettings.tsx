@@ -5,10 +5,11 @@
  *
  * Conecta o WhatsApp DESTA organização. MULTI-NÚMERO: a org pode ter VÁRIAS
  * conexões da API oficial (cada número da Meta vira uma conexão; o chat deixa
- * escolher por qual número enviar). QR (Baileys) segue 1 por org. Super admin
+ * escolher por qual número enviar). O pareamento pelo celular também aceita vários números. Super admin
  * vê sempre as conexões da organização ATIVA — cada cliente tem as suas.
  */
 import { CopyId } from '@/components/ui/CopyId';
+import { WhatsAppPairingPanel } from './WhatsAppPairingPanel';
 import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -68,13 +69,6 @@ interface ConnResponse {
   removed?: Array<{ id: string; phoneNumber: string | null; duplicate: boolean; keptId: string }>;
 }
 
-interface QrResponse {
-  state: string;
-  qrBase64?: string;
-  pairingCode?: string;
-  error?: string;
-}
-
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     credentials: 'include',
@@ -109,7 +103,7 @@ export function WhatsAppConnectionSettings() {
       addToast(
         j.status === 'connected'
           ? 'Conexão reiniciada e conectada. Mande uma mensagem de teste para conferir.'
-          : `Conexão reiniciada (${j.status || 'aguardando'}). Se não conectar em instantes, desconecte e leia o QR de novo.`,
+          : `Conexão reiniciada (${j.status || 'aguardando'}). Se não conectar em instantes, reconecte por QR ou código.`,
         j.status === 'connected' ? 'success' : 'error'
       );
       await qc.invalidateQueries({ queryKey: ['waConnection'] });
@@ -207,7 +201,7 @@ export function WhatsAppConnectionSettings() {
   React.useEffect(() => {
     if (qrTargetId && qrTarget?.status === 'connected') {
       setQrTargetId(null);
-      addToast(`Número ${qrTarget.phoneNumber || ''} conectado via QR!`.replace('  ', ' '), 'success');
+      addToast(`Número ${qrTarget.phoneNumber || ''} conectado!`.replace('  ', ' '), 'success');
     }
   }, [qrTargetId, qrTarget?.status, qrTarget?.phoneNumber]);
   // HUB: o seletor de modo (2 cartões grandes) só existe pra org SEM nenhuma
@@ -477,17 +471,6 @@ export function WhatsAppConnectionSettings() {
     setEditingConnId(null);
   };
 
-  const qrQ = useQuery<QrResponse>({
-    queryKey: ['waConnectionQr', qrTargetId],
-    queryFn: () =>
-      fetchJson<QrResponse>(
-        `/api/whatsapp/connection/qr${qrTargetId ? `?id=${encodeURIComponent(qrTargetId)}` : ''}`
-      ),
-    enabled: waitingScan,
-    // o QR da Evolution expira (~40s): renova sozinho antes disso
-    refetchInterval: waitingScan ? 25000 : false,
-  });
-
   const createMut = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
       fetchJson<{
@@ -546,7 +529,7 @@ export function WhatsAppConnectionSettings() {
           );
         }
         setQrTargetId(created?.id ?? null);
-        addToast('Instância criada. Escaneie o QR pra conectar o número.', 'success');
+        addToast('Escolha QR Code ou código para conectar o número.', 'success');
       }
     },
     onError: e => addToast((e as Error).message, 'error'),
@@ -754,66 +737,15 @@ export function WhatsAppConnectionSettings() {
     </div>
   );
 
-  // Painel do QR ao vivo — renderiza DENTRO do cartão da conexão que está
-  // pareando (ou num cartão avulso enquanto a linha recém-criada não chega
-  // no refetch da lista).
-  const qrPanel = (
-    <div className="flex flex-col md:flex-row items-center gap-6">
-      <div className="shrink-0 rounded-2xl border border-slate-200 dark:border-white/10 p-3 bg-white">
-        {qrQ.data?.qrBase64 ? (
-          // eslint-disable-next-line @next/next/no-img-element -- QR é data URI dinâmico; next/image não otimiza data URIs
-          <img
-            src={qrQ.data.qrBase64}
-            alt="QR Code para conectar o WhatsApp"
-            width={232}
-            height={232}
-            // a Evolution gera o QR colorido (azul) — força módulos PRETOS
-            // mantendo o fundo branco, independente da cor que vier
-            className="grayscale contrast-[500%]"
-          />
-        ) : (
-          <div className="w-[232px] h-[232px] flex flex-col items-center justify-center gap-2 text-slate-400">
-            <Loader2 className="animate-spin" size={22} />
-            <span className="text-xs">
-              {qrQ.isError ? 'Falha ao gerar o QR. Tentando de novo…' : 'Gerando QR…'}
-            </span>
-          </div>
-        )}
-      </div>
-      <div className="text-sm text-slate-600 dark:text-slate-300 space-y-2">
-        <p className="font-bold text-slate-900 dark:text-white">Conecte o número neste cartão:</p>
-        <ol className="list-decimal list-inside space-y-1">
-          <li>Abra o WhatsApp no celular do número que vai atender</li>
-          <li>
-            Toque em <span className="font-semibold">⋮ (Menu) → Aparelhos conectados</span>
-          </li>
-          <li>
-            Toque em <span className="font-semibold">Conectar um aparelho</span> e escaneie o QR
-          </li>
-        </ol>
-        <p className="text-xs text-slate-400">
-          O QR se renova sozinho a cada 25s. Assim que o número parear, o cartão vira
-          &quot;Conectado&quot; automaticamente.
-        </p>
-        <div className="flex items-center gap-4">
-          <button
-            type="button"
-            onClick={() => qrQ.refetch()}
-            className="text-xs font-bold text-primary-600 dark:text-primary-400 hover:underline"
-          >
-            Gerar novo QR agora
-          </button>
-          <button
-            type="button"
-            onClick={() => setQrTargetId(null)}
-            className="text-xs font-bold text-slate-500 dark:text-slate-400 hover:underline"
-          >
-            ← Fechar o QR
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+  const qrPanel = qrTargetId ? (
+    <WhatsAppPairingPanel key={qrTargetId} connectionId={qrTargetId}
+      onClose={() => setQrTargetId(null)}
+      onConnected={() => {
+        setQrTargetId(null);
+        void qc.invalidateQueries({ queryKey: ['waConnection'] });
+        addToast('WhatsApp conectado!', 'success');
+      }} />
+  ) : null;
 
   // Bloco de ativação do Cadastro Embutido (super_admin): renderiza tanto no
   // seletor de modos (org sem conexão) quanto no HUB (org com conexões).
@@ -915,10 +847,9 @@ export function WhatsAppConnectionSettings() {
               <span className="w-9 h-9 mb-3 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
                 <QrCode size={18} />
               </span>
-              <p className="text-sm font-bold text-slate-900 dark:text-white mb-1.5">QR Code (celular)</p>
+              <p className="text-sm font-bold text-slate-900 dark:text-white mb-1.5">WhatsApp do celular</p>
               <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed flex-1 mb-4">
-                Conecta um número comum escaneando o QR com o celular. Sem custo por mensagem,
-                pronto em 1 minuto.
+                Conecte seu WhatsApp escaneando o QR Code ou digitando um código no celular.
               </p>
               <button
                 type="button"
@@ -927,7 +858,7 @@ export function WhatsAppConnectionSettings() {
                 className="mt-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold transition-colors disabled:opacity-60"
               >
                 {createMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <MessageCircle size={16} />}
-                Conectar via QR
+                Conectar WhatsApp
               </button>
             </div>
 
@@ -1012,7 +943,7 @@ export function WhatsAppConnectionSettings() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                          {c.profileName || (rowBiz ? 'WhatsApp API oficial' : 'WhatsApp via QR Code')}
+                          {c.profileName || (rowBiz ? 'WhatsApp API oficial' : 'WhatsApp do celular')}
                         </p>
                         {rowOn && c.sendHealth?.failing ? (
                           <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-500/15 text-red-700 dark:text-red-300">
@@ -1024,7 +955,7 @@ export function WhatsAppConnectionSettings() {
                           </span>
                         ) : rowPairing ? (
                           <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300">
-                            <Loader2 size={11} className="animate-spin" /> Aguardando QR
+                            <Loader2 size={11} className="animate-spin" /> Aguardando conexão
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400">
@@ -1038,7 +969,7 @@ export function WhatsAppConnectionSettings() {
                           <span className="flex-1 min-w-[12rem]">
                             Os últimos {c.sendHealth.failedCount} envios falharam
                             {c.sendHealth.lastError ? ` (${c.sendHealth.lastError})` : ''}. O provedor diz "conectado", mas a
-                            sessão do WhatsApp pode ter caído: reinicie a conexão; se continuar, desconecte e leia o QR de novo.
+                            sessão do WhatsApp pode ter caído: reinicie a conexão; se continuar, reconecte por QR ou código.
                           </span>
                           {!rowBiz ? (
                             <button
@@ -1057,7 +988,7 @@ export function WhatsAppConnectionSettings() {
                         {c.phoneNumber ||
                           (rowBiz ? 'Número da Meta (Cloud API)' : 'Número pareado pelo celular')}
                         {' · '}
-                        {rowBiz ? 'API oficial da Meta' : 'QR Code'}
+                        {rowBiz ? 'API oficial da Meta' : 'QR ou código'}
                       </p>
                     </div>
                     </div>
@@ -1098,7 +1029,7 @@ export function WhatsAppConnectionSettings() {
                             }}
                             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors"
                           >
-                            <QrCode size={14} /> Reconectar (QR)
+                            <QrCode size={14} /> Reconectar
                           </button>
                         )}
                         {/* Sessão caiu (ex.: reinício do servidor): reiniciar costuma voltar sem ler o QR */}
@@ -1305,7 +1236,7 @@ export function WhatsAppConnectionSettings() {
               ) : (
                 <QrCode size={15} />
               )}
-              Conectar número via QR Code
+              Conectar número por QR ou código
             </button>
             {esQ.data?.configured && (
               <button
@@ -1370,7 +1301,7 @@ export function WhatsAppConnectionSettings() {
               </p>
               <ul className="mt-1.5 space-y-1 text-xs text-slate-500 dark:text-slate-400 leading-relaxed list-disc pl-4">
                 <li>
-                  <span className="font-semibold text-slate-700 dark:text-slate-200">Número via QR Code:</span>{' '}
+                  <span className="font-semibold text-slate-700 dark:text-slate-200">WhatsApp do celular:</span>{' '}
                   grupos comuns do WhatsApp, inclusive os que o cliente te coloca.
                 </li>
                 <li>
