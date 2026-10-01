@@ -5,7 +5,7 @@
  * limpando o painel /manager), recria com o MESMO nome, atualiza o token,
  * re-registra o webhook e tenta o QR de novo — o usuário nem percebe.
  */
-import { requireOrgUser, json } from '@/lib/whatsapp/api';
+import { requireOrgUser, isOrgAdmin, json } from '@/lib/whatsapp/api';
 import { getConnectionsByOrg, upsertConnection } from '@/lib/whatsapp/service';
 import { getProvider, isBusinessConnection } from '@/lib/whatsapp';
 import { ensureEvolutionInstance, registerWebhook } from '@/lib/whatsapp/admin';
@@ -13,6 +13,7 @@ import { ensureEvolutionInstance, registerWebhook } from '@/lib/whatsapp/admin';
 export async function GET(req: Request) {
   const auth = await requireOrgUser();
   if (!auth.ok) return auth.response;
+  if (!isOrgAdmin(auth.user.role)) return json({ error: 'Apenas administradores podem conectar um número.' }, 403);
 
   // HUB multi-número: ?id=<connectionId> pareia UMA linha QR específica (a
   // org pode ter várias). Sem id, cai na primeira linha QR (compat). Nunca
