@@ -7,14 +7,17 @@ const GROUP_VARIABLE = /\{\{\s*deal\.whatsapp_group_id\s*\}\}/;
 const GROUP_VARIABLE_ALL = /\{\{\s*deal\.whatsapp_group_id\s*\}\}/g;
 const OMIT = Symbol('omit');
 
-/** Snapshots may contain older copies of this field outside the default deal. */
-function removeLegacyFields(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(removeLegacyFields);
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'whatsapp_group_id' && key !== 'deal.whatsapp_group_id')
-      .map(([key, child]) => [key, removeLegacyFields(child)]));
+/** Clear only the native slot and its literal-path alias used by template lookup. */
+function removeSnapshotGroupField(payload: Record<string, unknown>): Record<string, unknown> {
+  const clean = { ...payload };
+  delete clean['deal.whatsapp_group_id'];
+  const deal = clean.deal;
+  if (deal && typeof deal === 'object' && !Array.isArray(deal)) {
+    const cleanDeal = { ...deal } as Record<string, unknown>;
+    delete cleanDeal.whatsapp_group_id;
+    clean.deal = cleanDeal;
   }
-  return value;
+  return clean;
 }
 
 function removeDependencies(value: unknown): unknown {
@@ -73,7 +76,7 @@ export async function prepareGroupLinkWebhookPayload(
   payload: Record<string, unknown>,
   bodyTemplate?: string | null,
 ): Promise<unknown> {
-  const clean = removeLegacyFields(payload) as Record<string, unknown>;
+  const clean = removeSnapshotGroupField(payload);
   const deal = clean.deal;
   let field: { whatsapp_group_id?: string | null } = {};
   if (deal && typeof deal === 'object' && !Array.isArray(deal)) {

@@ -331,12 +331,18 @@ describe('motor dos robôs', () => {
     const failing = fakeDb(tables);
     const service = await import('@/lib/whatsapp/service');
     const spy = vi.spyOn(service, 'getConnectionByIdForOrg').mockResolvedValue({ id: 'conn-a', status: 'disconnected' } as never);
-    await processBotRun(failing, run());
-    spy.mockRestore();
-    const saved = tables.wa_bot_runs[0];
-    expect(saved.status).toBe('error');
-    expect(String(saved.error)).toContain('Mensagem (tx)');
-    expect(h.tags).toEqual([]);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await processBotRun(failing, run());
+      expect(errorSpy).toHaveBeenCalledExactlyOnceWith('[wa-agents] robô falhou:', 'número desconectado');
+      const saved = tables.wa_bot_runs[0];
+      expect(saved.status).toBe('error');
+      expect(String(saved.error)).toContain('Mensagem (tx)');
+      expect(h.tags).toEqual([]);
+    } finally {
+      errorSpy.mockRestore();
+      spy.mockRestore();
+    }
   });
 
   it('"Encerrar" cancela a outra execução ativa da mesma conversa', async () => {
