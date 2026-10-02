@@ -106,4 +106,61 @@ BEGIN
   DELETE FROM public.wa_group_entities WHERE id IN (group1, group2);
 END;
 $$;
+-- pg_net sends only after commit. This transaction always rolls back: request
+-- bodies below are inspected in the queue and never delivered externally.
+CREATE FUNCTION pg_temp.expect_group_webhook(p_org uuid, p_event text, p_field jsonb)
+RETURNS void LANGUAGE plpgsql AS $$
+DECLARE event_payload jsonb; queued_payload jsonb; request_id bigint;
+BEGIN
+  SELECT e.payload, d.request_id INTO STRICT event_payload, request_id
+  FROM public.webhook_events_out e JOIN public.webhook_deliveries d ON d.event_id=e.id
+  WHERE e.organization_id=p_org AND e.event_type=p_event;
+  IF (event_payload->'deal'->'whatsapp_group_id') IS DISTINCT FROM (p_field->'whatsapp_group_id') OR
+     (event_payload->'deal' ? 'whatsapp_group_id') IS DISTINCT FROM (p_field ? 'whatsapp_group_id') THEN
+    RAISE EXCEPTION 'Wrong group field on %: % expected %', p_event, event_payload, p_field;
+  END IF;
+  IF request_id IS NULL THEN RAISE EXCEPTION 'Missing pg_net request for %', p_event; END IF;
+  SELECT convert_from(q.body, 'UTF8')::jsonb INTO STRICT queued_payload FROM net.http_request_queue q WHERE q.id=request_id;
+  IF queued_payload IS DISTINCT FROM event_payload THEN RAISE EXCEPTION 'Stored and queued payloads differ for %', p_event; END IF;
+  DELETE FROM public.webhook_events_out WHERE organization_id=p_org;
+END;
+$$;
+DO $$
+DECLARE
+  org uuid := gen_random_uuid(); lead uuid := gen_random_uuid(); conn uuid := gen_random_uuid();
+  conv uuid := gen_random_uuid(); board uuid := gen_random_uuid(); st1 uuid := gen_random_uuid(); st2 uuid := gen_random_uuid();
+  jid text := '120363012345678901@g.us';
+BEGIN
+  INSERT INTO public.organizations(id,name) VALUES (org,'Group webhook rollback verification');
+  INSERT INTO public.boards(id,organization_id,name) VALUES (board,org,'Group webhooks');
+  INSERT INTO public.board_stages(id,board_id,organization_id,name,label,"order") VALUES
+    (st1,board,org,'One','One',0),(st2,board,org,'Two','Two',1);
+  INSERT INTO public.deals(organization_id,title,board_id,stage_id) VALUES (org,'No endpoint',board,st1);
+  IF EXISTS(SELECT 1 FROM public.webhook_events_out WHERE organization_id=org) THEN RAISE EXCEPTION 'No-endpoint path should not store events'; END IF;
+  INSERT INTO public.integration_outbound_endpoints(organization_id,name,url,secret,events,kind) VALUES
+    (org,'Rollback-only capture','https://example.invalid/group-links','rollback-only-secret',ARRAY['deal.created','deal.stage_changed','whatsapp.message.received'],'pipeline');
+  INSERT INTO public.deals(id,organization_id,title,board_id,stage_id,custom_fields)
+    VALUES (lead,org,'Created while disabled',board,st1,'{"preserved":"custom_fields"}'::jsonb);
+  IF (SELECT payload->'deal'->'custom_fields' FROM public.webhook_events_out WHERE organization_id=org AND event_type='deal.created') <> '{"preserved":"custom_fields"}'::jsonb THEN RAISE EXCEPTION 'Created webhook lost deployed custom_fields'; END IF;
+  PERFORM pg_temp.expect_group_webhook(org,'deal.created','{}');
+  UPDATE public.organization_settings SET wa_group_links_enabled=true WHERE organization_id=org;
+  UPDATE public.deals SET stage_id=st2 WHERE id=lead;
+  PERFORM pg_temp.expect_group_webhook(org,'deal.stage_changed','{"whatsapp_group_id":null}');
+  INSERT INTO public.wa_connections(id,organization_id,provider,instance_name) VALUES (conn,org,'evolution','group-webhook-'||conn);
+  INSERT INTO public.wa_conversations(id,organization_id,connection_id,wa_phone,group_jid,is_group,deal_id) VALUES (conv,org,conn,jid,jid,true,lead);
+  PERFORM public.mutate_whatsapp_group_link(org,conv,'deal',lead,'link');
+  UPDATE public.deals SET stage_id=st1 WHERE id=lead;
+  PERFORM pg_temp.expect_group_webhook(org,'deal.stage_changed',jsonb_build_object('whatsapp_group_id',jid));
+  INSERT INTO public.wa_messages(organization_id,conversation_id,direction,body) VALUES (org,conv,'in','Rollback-only fixture');
+  PERFORM pg_temp.expect_group_webhook(org,'whatsapp.message.received',jsonb_build_object('whatsapp_group_id',jid));
+  UPDATE public.organization_settings SET wa_group_links_enabled=false WHERE organization_id=org;
+  UPDATE public.deals SET stage_id=st2 WHERE id=lead;
+  PERFORM pg_temp.expect_group_webhook(org,'deal.stage_changed','{}');
+  INSERT INTO public.wa_messages(organization_id,conversation_id,direction,body) VALUES (org,conv,'in','Disabled rollback fixture');
+  PERFORM pg_temp.expect_group_webhook(org,'whatsapp.message.received','{}');
+  UPDATE public.organization_settings SET wa_group_links_enabled=true WHERE organization_id=org;
+  UPDATE public.deals SET stage_id=st1 WHERE id=lead;
+  PERFORM pg_temp.expect_group_webhook(org,'deal.stage_changed',jsonb_build_object('whatsapp_group_id',jid));
+END;
+$$;
 ROLLBACK;

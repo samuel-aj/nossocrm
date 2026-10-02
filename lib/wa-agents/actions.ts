@@ -265,6 +265,8 @@ async function runAction(
       const event = source.kind === 'outcome' ? 'outcome_action' : 'custom_action';
       const payload = buildWebhookPayload({ agent, event, ctx, extra: sourcePayloadExtra(source) });
       const r = await postWebhook({
+        admin,
+        organizationId: orgId,
         url: action.url,
         event,
         payload,

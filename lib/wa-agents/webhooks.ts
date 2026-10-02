@@ -11,7 +11,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveActionTexts, resolveAiVarValues } from './actionVars';
 import type { ConversationContext } from './context';
 import { errorMessage } from './errors';
-import { extractAiVarNames, renderJsonTemplate } from './template';
+import { extractAiVarNames } from './template';
+import { prepareGroupLinkWebhookPayload } from '@/lib/webhooks/groupLinks';
 import type { AgentEvent, AgentRow, EndAction } from './types';
 import { isPublicHttpUrl, isPublicIpAddress } from './url';
 
@@ -107,6 +108,8 @@ async function postOnce(
 }
 
 export type PostWebhookInput = {
+  admin: SupabaseClient;
+  organizationId: string;
   url: string;
   event: WebhookEventName;
   /** Payload padrão (também são as variáveis do corpo personalizado) */
@@ -126,10 +129,6 @@ export async function postWebhook(input: PostWebhookInput): Promise<Omit<Webhook
     if (!isPublicHttpUrl(input.url)) return { url: input.url, ok: false, error: 'URL precisa ser pública (http/https)' };
     const dnsError = await resolvesToPrivateAddress(input.url);
     if (dnsError) return { url: input.url, ok: false, error: `URL recusada: ${dnsError}` };
-    const bodyValue = input.body_template?.trim()
-      ? renderJsonTemplate(input.body_template, input.payload)
-      : input.payload;
-    const body = typeof bodyValue === 'string' ? bodyValue : JSON.stringify(bodyValue);
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Webhook-Event': input.event,
@@ -139,10 +138,15 @@ export async function postWebhook(input: PostWebhookInput): Promise<Omit<Webhook
       headers['X-Webhook-Secret'] = secret;
       headers['Authorization'] = `Bearer ${secret}`;
     }
-    let r = await postOnce(input.url, body, headers);
+    const attempt = async () => {
+      const bodyValue = await prepareGroupLinkWebhookPayload(input.admin, input.organizationId, input.payload, input.body_template);
+      const body = typeof bodyValue === 'string' ? bodyValue : JSON.stringify(bodyValue);
+      return postOnce(input.url, body, headers);
+    };
+    let r = await attempt();
     if (!r.ok && r.retryable) {
       await wait(RETRY_DELAY_MS);
-      r = await postOnce(input.url, body, headers);
+      r = await attempt();
     }
     return { url: input.url, ok: r.ok, status: r.status, error: r.error };
   } catch (e) {
@@ -182,6 +186,8 @@ export async function dispatchAgentEvent(
       const resolved = resolveActionTexts(action, aiValues, {});
       const body = resolved.type === 'webhook' ? resolved.body_template : hook.body_template;
       const r = await postWebhook({
+        admin,
+        organizationId: input.ctx.conversation.organization_id,
         url: hook.url,
         event: input.event,
         payload,

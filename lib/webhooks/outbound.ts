@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { prepareGroupLinkWebhookPayload } from './groupLinks';
 
 // Exponential backoff schedule (in minutes): 1m, 5m, 30m, 2h, 12h
 const BACKOFF_MINUTES = [1, 5, 30, 120, 720];
@@ -107,6 +108,7 @@ export async function deliverWebhook(
   let success = false;
 
   try {
+    const payload = await prepareGroupLinkWebhookPayload(supabase, delivery.organization_id, event.payload);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
 
@@ -117,7 +119,7 @@ export async function deliverWebhook(
         'X-Webhook-Secret': endpoint.secret,
         'Authorization': `Bearer ${endpoint.secret}`,
       },
-      body: JSON.stringify(event.payload),
+      body: JSON.stringify(payload),
       signal: controller.signal,
     });
 

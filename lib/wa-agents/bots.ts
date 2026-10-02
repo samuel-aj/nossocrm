@@ -1225,6 +1225,8 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
         case 'webhook': {
           // Mesmo POST dos webhooks do agente; falha não derruba o robô (fica no log)
           const r = await postWebhook({
+            admin,
+            organizationId: orgId,
             url: step.url,
             event: 'bot_webhook',
             secret: step.secret,
