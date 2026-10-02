@@ -1,6 +1,6 @@
 # WhatsApp Group Links Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Vincular grupos a vários contatos/leads e fornecer o ID externo do grupo principal em webhooks somente com o recurso ativo.
 
@@ -46,17 +46,17 @@ export type GroupLinksResponse = { enabled: boolean; groups: RelatedGroup[]; con
 // SQL public.deal_whatsapp_group_field(p_organization_id uuid,p_deal_id uuid) returns jsonb: {} off, {whatsapp_group_id:null|string} on, service_role only.
 ```
 
-- [ ] Inspect current provider values in wa_connections, contacts/deals permission patterns and requireOrgUser; reuse organization tab scoping and conversationAllowed. Contact visibility follows existing team lead access (fullAccess sees org contacts; otherwise at least one accessible nondeleted lead). Deal visibility uses visibleLead. Link/unlink needs both sides visible; principal choice also requires lead visible.
-- [ ] Add focused tests before code, e.g.:
+- [x] Inspect current provider values in wa_connections, contacts/deals permission patterns and requireOrgUser; reuse organization tab scoping and conversationAllowed. Contact visibility follows existing team lead access (fullAccess sees org contacts; otherwise at least one accessible nondeleted lead). Deal visibility uses visibleLead. Link/unlink needs both sides visible; principal choice also requires lead visible.
+- [x] Add focused tests before code, e.g.:
 ```ts
 expect(await getDealWhatsappGroupField(adminOff, orgId, dealId)).toEqual({});
 expect(await getDealWhatsappGroupField(adminUnlinked, orgId, dealId)).toEqual({whatsapp_group_id: null});
 expect(await getDealWhatsappGroupField(adminLinked, orgId, dealId)).toEqual({whatsapp_group_id: '120363012345678901@g.us'});
 ```
 Cover org mismatch, inaccessible conversation/entity, malformed/non-group IDs, disabled writes, nonadmin setting writes, link idempotence and primary semantics with actual SQL rollback assertions for constraints/RPC.
-- [ ] Create tables `wa_group_entities` (organization_id, provider, external_id unique tuple), `wa_group_contact_links`, `wa_group_deal_links` with organization-scoped integrity, cascade, indexes, RLS enabled and revoked anon/authenticated grants. Group links carry is_primary for lead only. Use serialized per-lead RPC for link/unlink/set_primary with unique partial index. First link is primary only when no links existed. Unlink principal leaves remaining links nonprimary. Duplicate links don't promote. Registry comes from known group conversation + connection provider, full nonempty JID. Preserve provider-specific ID without normalization to phone digits.
-- [ ] Implement bounded queries and delta endpoints, no overwrite of hidden links. Disabled GET returns only empty results plus enabled:false, with no field; disabled mutations return conflict/forbidden. Return friendly errors and fail closed on database errors. Resolve displayed group conversation through a visible connection; don't leak hidden group IDs/names. Field helper only for trusted server webhooks; UI field visibility also respects conversation access.
-- [ ] Execute focused tests and typecheck, then commit. Controller applies additive migration and runs SQL rollback tests on staging after review. Do not mutate remote or deploy from worker.
+- [x] Create tables `wa_group_entities` (organization_id, provider, external_id unique tuple), `wa_group_contact_links`, `wa_group_deal_links` with organization-scoped integrity, cascade, indexes, RLS enabled and revoked anon/authenticated grants. Group links carry is_primary for lead only. Use serialized per-lead RPC for link/unlink/set_primary with unique partial index. First link is primary only when no links existed. Unlink principal leaves remaining links nonprimary. Duplicate links don't promote. Registry comes from known group conversation + connection provider, full nonempty JID. Preserve provider-specific ID without normalization to phone digits.
+- [x] Implement bounded queries and delta endpoints, no overwrite of hidden links. Disabled GET returns only empty results plus enabled:false, with no field; disabled mutations return conflict/forbidden. Return friendly errors and fail closed on database errors. Resolve displayed group conversation through a visible connection; don't leak hidden group IDs/names. Field helper only for trusted server webhooks; UI field visibility also respects conversation access.
+- [x] Execute focused tests and typecheck, then commit. Controller applies additive migration and runs SQL rollback tests on staging after review. Do not mutate remote or deploy from worker.
 
 ### Task 2: Webhook contract and disable handling
 
@@ -73,11 +73,11 @@ export async function prepareGroupLinkWebhookPayload(admin: SupabaseClient, orga
 // Fresh authoritative field for default deal object. Disabled: remove field and any template property depending on {{deal.whatsapp_group_id}}.
 ```
 
-- [ ] Inventory real dispatch paths: pipeline pg_net calls, outbound retry stored event snapshots, agent hooks, custom actions, bot webhook blocks and webhook test endpoints. Read current trigger definitions/migrations; do not overwrite newer behavior. No new webhook transport.
-- [ ] Write failing behavior tests with captured outgoing bodies covering enabled real ID, enabled no group null, disabled omission, stale payload, templates with renamed property/embedded variable/nested objects/arrays/whole deal injection, and reactivation. E.g. disabled template `{"target":"{{deal.whatsapp_group_id}}","name":"{{contact.name}}"}` results in `{name:'Maria'}`. Remove disabled variable value/property before generic rendering; do not rely on undefined becoming null. Remove legacy key recursively in snapshots. Existing unrelated templates must remain unchanged.
-- [ ] Implement helper and wire immediate dispatch using current organization setting. Avoid copying broad blocks or changing template semantics for unrelated variables. On flag lookup failure do not send stale field. For templates producing raw text scrub disabled interpolations; do not retain a stale ID in fallback. Under active feature resolve real current principal ID. Empty lead means no invented lead object.
-- [ ] SQL generators enrich payload deal JSON via helper before both insert and net.http_post. SQL helper has restricted privileges; no service secrets in migration. Keep webhook independent from whether deal update succeeds. Queued/in-flight network requests cannot be recalled; document exact boundary.
-- [ ] Run focused webhook tests and typecheck, record paths audited and commit. Controller runs SQL checks on staging; worker no remote writes/deploys.
+- [x] Inventory real dispatch paths: pipeline pg_net calls, outbound retry stored event snapshots, agent hooks, custom actions, bot webhook blocks and webhook test endpoints. Read current trigger definitions/migrations; do not overwrite newer behavior. No new webhook transport.
+- [x] Write failing behavior tests with captured outgoing bodies covering enabled real ID, enabled no group null, disabled omission, stale payload, templates with renamed property/embedded variable/nested objects/arrays/whole deal injection, and reactivation. E.g. disabled template `{"target":"{{deal.whatsapp_group_id}}","name":"{{contact.name}}"}` results in `{name:'Maria'}`. Remove disabled variable value/property before generic rendering; do not rely on undefined becoming null. Remove legacy key recursively in snapshots. Existing unrelated templates must remain unchanged.
+- [x] Implement helper and wire immediate dispatch using current organization setting. Avoid copying broad blocks or changing template semantics for unrelated variables. On flag lookup failure do not send stale field. For templates producing raw text scrub disabled interpolations; do not retain a stale ID in fallback. Under active feature resolve real current principal ID. Empty lead means no invented lead object.
+- [x] SQL generators enrich payload deal JSON via helper before both insert and net.http_post. SQL helper has restricted privileges; no service secrets in migration. Keep webhook independent from whether deal update succeeds. Queued/in-flight network requests cannot be recalled; document exact boundary.
+- [x] Run focused webhook tests and typecheck, record paths audited and commit. Controller runs SQL checks on staging; worker no remote writes/deploys.
 
 ### Task 3: Interface, selectors and integration validation
 
@@ -89,20 +89,20 @@ export async function prepareGroupLinkWebhookPayload(admin: SupabaseClient, orga
 
 **Interfaces:** Consumes Task 1 API DTOs and Task 2 optional variable. Query keys organization-scoped. No duplicate deal/contact caches. Link queries can have their own canonical key per relationship target; mutations update/refetch those keys for affected conversation/contact/deal. GET defaults fail closed. Feature settings stale state must invalidate on same-tab change and refresh on focus.
 
-- [ ] Read existing UI patterns and React best practice skill. Build opt-in setting under CRM Recursos opcionais, administrator only. Explain linking sales/customer groups and preservation when disabled in concise Portuguese. Keep existing WhatsApp groups switch separate; suggest enabling it if groups unavailable.
-- [ ] Implement group relation panel with searchable contact/lead choices, independent link/unlink per item, loading/error/empty states. Keep group as own chat row; multiple contacts/leads possible; no implicit linking all group members. Conserve mobile space using existing drawer/disclosure pattern.
-- [ ] Add RelatedGroups to active contact and lead screens. Each group opens `/chats?conversation=<id>` through existing route. Lead shows readonly ID plus copy action and explicit principal choice for any nonprincipal linked group (including one remaining after removing the former principal); no editable text ID. Example integration:
+- [x] Read existing UI patterns and React best practice skill. Build opt-in setting under CRM Recursos opcionais, administrator only. Explain linking sales/customer groups and preservation when disabled in concise Portuguese. Keep existing WhatsApp groups switch separate; suggest enabling it if groups unavailable.
+- [x] Implement group relation panel with searchable contact/lead choices, independent link/unlink per item, loading/error/empty states. Keep group as own chat row; multiple contacts/leads possible; no implicit linking all group members. Conserve mobile space using existing drawer/disclosure pattern.
+- [x] Add RelatedGroups to active contact and lead screens. Each group opens `/chats?conversation=<id>` through existing route. Lead shows readonly ID plus copy action and explicit principal choice for any nonprincipal linked group (including one remaining after removing the former principal); no editable text ID. Example integration:
 ```tsx
 <RelatedGroups entityType="deal" entityId={deal.id} />
 <GroupRelationsPanel conversationId={selected.conversationId} />
 ```
 When disabled return null for these sections, including errors if flag unavailable. Avoid showing empty sections while setting unresolved.
-- [ ] Add `{{deal.whatsapp_group_id}}` only to feature-enabled selectors in pipeline, agents, bots. Preserve static base catalog consumers by composing conditional additions rather than making catalog globally visible. Existing saved templates remain readable/editable with warning/copy if appropriate, but no stale field suggestion off. API gating remains authoritative.
-- [ ] Add component tests for feature off hidden, activation reveals field, first/explicit principal selection, multiple contacts, errors, disabling hides then reactivation restores, and conditional selectors. Test actual interaction instead of implementation assertions.
-- [ ] Document default payload fragment and custom mapping `{ "whatsappGroupId": "{{deal.whatsapp_group_id}}" }`, null/off semantics, separate optional toggle, access limits, no AJ Ops receiver deployed. Run focused UI tests, lint, typecheck and full Vitest once on final branch; build `next build --webpack` if shared node_modules symlink prevents Turbopack. Fix failures attributable to feature; report baseline failures with evidence. Commit.
+- [x] Add `{{deal.whatsapp_group_id}}` only to feature-enabled selectors in pipeline, agents, bots. Preserve static base catalog consumers by composing conditional additions rather than making catalog globally visible. Existing saved templates remain readable/editable with warning/copy if appropriate, but no stale field suggestion off. API gating remains authoritative.
+- [x] Add component tests for feature off hidden, activation reveals field, first/explicit principal selection, multiple contacts, errors, disabling hides then reactivation restores, and conditional selectors. Test actual interaction instead of implementation assertions.
+- [x] Document default payload fragment and custom mapping `{ "whatsappGroupId": "{{deal.whatsapp_group_id}}" }`, null/off semantics, separate optional toggle, access limits, no AJ Ops receiver deployed. Run focused UI tests, lint, typecheck and full Vitest once on final branch; build `next build --webpack` if shared node_modules symlink prevents Turbopack. Fix failures attributable to feature; report baseline failures with evidence. Commit.
 
 ## Controller delivery checklist
-- [ ] Review each task with independent agent and fix required findings.
-- [ ] Apply migrations only to staging project mggvzlmquzqcloprxmoe, execute rollback SQL constraints/contracts tests and advisors; compare baseline notices.
-- [ ] Browser verify group → multiple links → lead ID/principal → disable/enable and separate chat rows, desktop/mobile. Use staging fixtures and mock outbound transport, no real WhatsApp messages.
-- [ ] Whole-branch review and focused fixes, then publish independent preview with branch-specific staging environment, preserving main/production. Give Samuel link and actual validation limits.
+- [x] Review each task with independent agent and fix required findings.
+- [x] Apply migrations only to staging project mggvzlmquzqcloprxmoe, execute rollback SQL constraints/contracts tests and advisors; compare baseline notices.
+- [x] Browser verify group → multiple links → lead ID/principal → disable/enable and separate chat rows, desktop/mobile. Use staging fixtures and mock outbound transport, no real WhatsApp messages.
+- [x] Whole-branch review and focused fixes, then publish independent preview with branch-specific staging environment, preserving main/production. Give Samuel link and actual validation limits.

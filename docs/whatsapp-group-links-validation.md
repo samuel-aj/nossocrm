@@ -4,15 +4,18 @@ Branch: `feat/whatsapp-group-links`, baseada em `c5f1583`. Implementação e tes
 
 ## Evidência
 
-- Backend: 86 testes focados de configuração, autorização, vínculos e principal passaram. A integração dos webhooks elevou o conjunto focado para 104 testes, com typecheck aprovado.
+- Backend: 86 testes focados de configuração, autorização, vínculos e principal passaram. A integração dos webhooks elevou o conjunto focado para 104 testes, com typecheck aprovado. A revisão final acrescentou 12 casos de regressão: 116 testes de servidor passaram, com saída limpa.
 - Banco: `supabase/tests/whatsapp_group_links.sql` passou integralmente após as migrações. A transação verifica isolamento entre organizações, identidade entre conexões, unicidade e integridade, principal, valor real/nulo/ausente, campos existentes e igualdade entre payload salvo e fila HTTP. Todos os dados e pedidos HTTP desse teste são revertidos.
 - Concorrência pela API: inclusões simultâneas e escolhas simultâneas mantiveram apenas um principal. Nove verificações autenticadas da API passaram, incluindo desativação e rejeição de conversa privada como grupo.
 - Interface: 64 testes focados passaram antes da revisão. O ajuste do editor e da tentativa de salvar a configuração passou em 19 testes focados, incluindo preservação da criação/edição de variáveis de IA nos agentes que a suportam.
 - Navegador: grupo ligado a dois contatos e dois leads, persistência após recarregar, conversas privadas separadas, ID somente leitura e cópia exata, troca e remoção do principal, escolha do único grupo restante, atalho do contato, ocultação ao desativar e restauração ao reativar. Conferidos também o painel do lead no chat privado e as telas de grupo/lead em largura de 390 px, sem rolagem horizontal.
-- Build local de `907d6f4`: `next build --webpack` aprovado, 153 páginas geradas. Webpack foi usado porque as dependências locais estão em um diretório compartilhado por symlink. Typecheck e lint dos arquivos alterados passaram também em `c6d094d`.
+- A prévia publicada passou por nove cenários completos de navegador, incluindo desktop e celular, com zero erros de página ou respostas de erro nas APIs durante o ensaio.
+- Build local de `907d6f4`: `next build --webpack` aprovado, 153 páginas geradas. Webpack foi usado porque as dependências locais estão em um diretório compartilhado por symlink. Typecheck e lint dos arquivos alterados passaram também em `c6d094d` e `c86c7fa`.
 - Os consultores de segurança e desempenho do Supabase não apontaram novos avisos de nível WARN em relação à base de homologação.
 
 As verificações de navegador usaram uma organização demonstrativa, conexões fictícias e bloqueio do envio de mensagens. Nenhuma mensagem real de WhatsApp foi enviada. O recebimento no AJ Ops não faz parte desta entrega.
+
+A revisão final corrigiu a limpeza dos snapshots: somente o campo nativo e seu alias literal reservado são removidos antes de consultar o valor atual. Campos personalizados e outros objetos com chaves de mesmo nome são preservados, inclusive em templates e novas tentativas de envio. Os 12 casos novos falham contra a implementação anterior e passam contra a correção.
 
 ## Falhas anteriores à alteração
 
@@ -37,4 +40,4 @@ O lint completo encontra um aviso anterior em `components/navigation/NavigationR
 
 ## Publicação
 
-A prévia usa variáveis de ambiente específicas desta branch e o banco de homologação. A revisão final e a conferência da versão publicada são registradas na entrega. Nenhum receptor novo foi instalado no AJ Ops.
+A prévia usa variáveis de ambiente específicas desta branch e o banco de homologação. A revisão final e a revisão da correção foram aprovadas, sem pendências. A versão publicada é conferida pelo controlador e informada na entrega. Nenhum receptor novo foi instalado no AJ Ops.
