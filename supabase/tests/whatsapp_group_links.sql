@@ -25,7 +25,9 @@ DECLARE
   role_name text; table_name text;
 BEGIN
   INSERT INTO public.organizations(id, name) VALUES (org, 'Group links rollback verification'), (other_org, 'Cross-org rollback verification');
-  INSERT INTO public.organization_settings(organization_id) VALUES (org), (other_org);
+  -- handle_new_organization already creates settings and a default board.
+  INSERT INTO public.organization_settings(organization_id) VALUES (org), (other_org)
+    ON CONFLICT (organization_id) DO NOTHING;
   INSERT INTO public.contacts(id, organization_id, name) VALUES (contact, org, 'Group links contact'), (other_contact, other_org, 'Other contact');
   INSERT INTO public.deals(id, organization_id, title, contact_id) VALUES (deal, org, 'Group links lead', contact), (other_deal, other_org, 'Other lead', other_contact);
   INSERT INTO public.wa_connections(id, organization_id, provider, instance_name) VALUES
