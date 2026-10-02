@@ -128,7 +128,7 @@ $$;
 DO $$
 DECLARE
   org uuid := gen_random_uuid(); lead uuid := gen_random_uuid(); conn uuid := gen_random_uuid();
-  conv uuid := gen_random_uuid(); board uuid := gen_random_uuid(); st1 uuid := gen_random_uuid(); st2 uuid := gen_random_uuid();
+  conv uuid := gen_random_uuid(); private_conv uuid := gen_random_uuid(); board uuid := gen_random_uuid(); st1 uuid := gen_random_uuid(); st2 uuid := gen_random_uuid();
   jid text := '120363012345678901@g.us';
 BEGIN
   INSERT INTO public.organizations(id,name) VALUES (org,'Group webhook rollback verification');
@@ -141,22 +141,25 @@ BEGIN
     (org,'Rollback-only capture','https://example.invalid/group-links','rollback-only-secret',ARRAY['deal.created','deal.stage_changed','whatsapp.message.received'],'pipeline');
   INSERT INTO public.deals(id,organization_id,title,board_id,stage_id,custom_fields)
     VALUES (lead,org,'Created while disabled',board,st1,'{"preserved":"custom_fields"}'::jsonb);
+  IF NOT EXISTS(SELECT 1 FROM public.webhook_events_out WHERE organization_id=org AND event_type='deal.created') THEN RAISE EXCEPTION 'Created webhook event missing; inspect notify_deal_created trigger warnings'; END IF;
   IF (SELECT payload->'deal'->'custom_fields' FROM public.webhook_events_out WHERE organization_id=org AND event_type='deal.created') IS DISTINCT FROM '{"preserved":"custom_fields"}'::jsonb THEN RAISE EXCEPTION 'Created webhook lost deployed custom_fields'; END IF;
   PERFORM pg_temp.expect_group_webhook(org,'deal.created','{}');
   UPDATE public.organization_settings SET wa_group_links_enabled=true WHERE organization_id=org;
   UPDATE public.deals SET stage_id=st2 WHERE id=lead;
   PERFORM pg_temp.expect_group_webhook(org,'deal.stage_changed','{"whatsapp_group_id":null}');
   INSERT INTO public.wa_connections(id,organization_id,provider,instance_name) VALUES (conn,org,'evolution','group-webhook-'||conn);
-  INSERT INTO public.wa_conversations(id,organization_id,connection_id,wa_phone,group_jid,is_group,deal_id) VALUES (conv,org,conn,jid,jid,true,lead);
+  INSERT INTO public.wa_conversations(id,organization_id,connection_id,wa_phone,group_jid,is_group,deal_id) VALUES
+    (conv,org,conn,jid,jid,true,NULL),
+    (private_conv,org,conn,'5511999999900',NULL,false,lead);
   PERFORM public.mutate_whatsapp_group_link(org,conv,'deal',lead,'link');
   UPDATE public.deals SET stage_id=st1 WHERE id=lead;
   PERFORM pg_temp.expect_group_webhook(org,'deal.stage_changed',jsonb_build_object('whatsapp_group_id',jid));
-  INSERT INTO public.wa_messages(organization_id,conversation_id,direction,body) VALUES (org,conv,'in','Rollback-only fixture');
+  INSERT INTO public.wa_messages(organization_id,conversation_id,direction,body) VALUES (org,private_conv,'in','Rollback-only fixture');
   PERFORM pg_temp.expect_group_webhook(org,'whatsapp.message.received',jsonb_build_object('whatsapp_group_id',jid));
   UPDATE public.organization_settings SET wa_group_links_enabled=false WHERE organization_id=org;
   UPDATE public.deals SET stage_id=st2 WHERE id=lead;
   PERFORM pg_temp.expect_group_webhook(org,'deal.stage_changed','{}');
-  INSERT INTO public.wa_messages(organization_id,conversation_id,direction,body) VALUES (org,conv,'in','Disabled rollback fixture');
+  INSERT INTO public.wa_messages(organization_id,conversation_id,direction,body) VALUES (org,private_conv,'in','Disabled rollback fixture');
   PERFORM pg_temp.expect_group_webhook(org,'whatsapp.message.received','{}');
   UPDATE public.organization_settings SET wa_group_links_enabled=true WHERE organization_id=org;
   UPDATE public.deals SET stage_id=st1 WHERE id=lead;
@@ -248,11 +251,22 @@ BEGIN
   IF NOT EXISTS(SELECT 1 FROM public.wa_messages WHERE id=msg AND organization_id=org) THEN RAISE EXCEPTION 'Webhook prevented mismatched message insert'; END IF;
   PERFORM pg_temp.expect_no_group_webhook(org,url);
   FOREACH scenario IN ARRAY ARRAY['connection','contact','deal','owner','sender'] LOOP
-    UPDATE public.wa_conversations SET
-      connection_id=CASE WHEN scenario='connection' THEN foreign_conn ELSE conn END,
-      contact_id=CASE WHEN scenario='contact' THEN foreign_contact ELSE contact END,
-      deal_id=CASE WHEN scenario='deal' THEN foreign_lead ELSE lead END,
-      assigned_owner_id=CASE WHEN scenario='owner' THEN foreign_user ELSE NULL END WHERE id=conv;
+    BEGIN
+      UPDATE public.wa_conversations SET
+        connection_id=CASE WHEN scenario='connection' THEN foreign_conn ELSE conn END,
+        contact_id=CASE WHEN scenario='contact' THEN foreign_contact ELSE contact END,
+        deal_id=CASE WHEN scenario='deal' THEN foreign_lead ELSE lead END,
+        assigned_owner_id=CASE WHEN scenario='owner' THEN foreign_user ELSE NULL END WHERE id=conv;
+    EXCEPTION WHEN check_violation THEN
+      -- Existing label integrity rejects foreign lead assignment before a
+      -- webhook can run. Retain that guard and verify its rejection is atomic.
+      IF scenario <> 'deal' OR SQLERRM <> 'Invalid lead organization or deleted lead' THEN RAISE; END IF;
+      IF (SELECT deal_id FROM public.wa_conversations WHERE id=conv) IS DISTINCT FROM lead THEN
+        RAISE EXCEPTION 'Rejected foreign lead assignment changed the conversation';
+      END IF;
+      PERFORM pg_temp.expect_no_group_webhook(org,url);
+      CONTINUE;
+    END;
     msg := gen_random_uuid();
     INSERT INTO public.wa_messages(id,organization_id,conversation_id,direction,body,sent_by) VALUES
       (msg,org,conv,'in','Cross-org '||scenario,CASE WHEN scenario='sender' THEN foreign_user ELSE NULL END);
