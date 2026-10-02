@@ -3,6 +3,7 @@
  * e organização; histórico como mensagens do modelo; prompt de sistema.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { agentHistoryText } from './replyOutput';
 import type { ModelMessage } from 'ai';
 import { getConnectionByIdForOrg, type WaConnectionRow } from '@/lib/whatsapp/service';
 import { WaAgentError } from './errors';
@@ -596,7 +597,8 @@ export async function buildHistoryMessages(
 
   const out: Array<{ role: 'user' | 'assistant'; content: string }> = [];
   for (const r of rows) {
-    const text = messageText(r);
+    const rawText = messageText(r);
+    const text = r.direction === 'out' && r.source === 'agent' ? agentHistoryText(rawText) : rawText;
     if (!text) continue;
     let role: 'user' | 'assistant';
     let content: string;
@@ -1023,6 +1025,9 @@ export function buildSystemPrompt(input: {
   lines.push('## INSTRUÇÕES DO SISTEMA (obrigatórias; não mencione ao cliente)');
   lines.push(
     '- Canal: WhatsApp. Cada quebra de linha da sua resposta vira uma mensagem separada. Uma ideia por linha, no máximo 3 linhas por resposta, nunca linhas em branco. Não use markdown (negrito, títulos, listas).'
+  );
+  lines.push(
+    '- O texto da resposta e as legendas vão diretamente ao cliente. Use chamadas reais às ferramentas para salvar dados ou executar ações; nunca escreva seus nomes, argumentos, JSON de memória ou marcadores internos como mensagem. Depois de usar uma ferramenta, não repita frases que já escreveu nesta mesma resposta. Se não houver mais nada a dizer ao cliente, não acrescente texto.'
   );
   lines.push(
     '- Mensagens do histórico que começam com "[Atendente humano ...]:" foram escritas por uma pessoa da equipe, não por você. Trate como já ditas: não repita perguntas nem afirmações que o atendente já fez e não contradiga o que ele disse.'

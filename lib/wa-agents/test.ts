@@ -13,8 +13,10 @@ import {
   MAX_KNOWLEDGE_CALLS_PER_RUN,
   NO_REPLY_TOKEN,
   type ReplySegment,
+  type GeneratedReply,
 } from './engine';
 import { errorMessage } from './errors';
+import { agentHistoryText } from './replyOutput';
 import { consultHelperAgent } from './helpers';
 import { searchKnowledge } from './knowledge';
 import { resolveAgentModel } from './model';
@@ -112,7 +114,8 @@ export function buildTestContext(input: {
 export function toModelMessages(messages: TestMessage[]): ModelMessage[] {
   const out: Array<{ role: 'user' | 'assistant'; content: string }> = [];
   for (const m of messages) {
-    const text = (m.text ?? '').trim();
+    const rawText = (m.text ?? '').trim();
+    const text = m.role === 'assistant' ? agentHistoryText(rawText) : rawText;
     if (!text) continue;
     const role = m.role === 'assistant' ? 'assistant' : 'user';
     const last = out[out.length - 1];
@@ -188,8 +191,11 @@ export async function testAgentReply(
     },
   };
 
+  let generated: GeneratedReply | null = null;
   try {
     const gen = await generateAgentReply({ model: resolved.model, agent, system, messages, runtime });
+    generated = gen;
+    if (gen.outputSafety.status === 'blocked') throw new Error('Resposta da IA bloqueada por conter dados internos. Revise o roteiro e tente novamente.');
     const lines = gen.text && gen.text !== NO_REPLY_TOKEN ? splitLines(gen.text) : [];
     const media = gen.segments.filter(s => s.kind === 'media').map(s => (s.kind === 'media' ? s.name : ''));
     await logRun(admin, {
@@ -198,6 +204,7 @@ export async function testAgentReply(
       conversation_id: null,
       trigger: 'test',
       status: 'ok',
+      events: [{ type: 'output_checked', at: new Date().toISOString(), ...gen.outputSafety }],
       input_text: lastUser,
       output_text: gen.text || null,
       tool_calls: gen.toolCalls,
@@ -214,6 +221,10 @@ export async function testAgentReply(
       conversation_id: null,
       trigger: 'test',
       status: 'error',
+      reason: generated?.outputSafety.status === 'blocked' ? 'Resposta bloqueada por conter dados internos; revisão necessária.' : null,
+      events: generated ? [{ type: 'output_checked', at: new Date().toISOString(), ...generated.outputSafety }] : [],
+      tool_calls: generated?.toolCalls ?? [],
+      usage: generated?.usage ?? null,
       input_text: lastUser,
       model: resolved.modelId,
       duration_ms: Date.now() - startedAt,
