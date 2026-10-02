@@ -141,7 +141,7 @@ BEGIN
     (org,'Rollback-only capture','https://example.invalid/group-links','rollback-only-secret',ARRAY['deal.created','deal.stage_changed','whatsapp.message.received'],'pipeline');
   INSERT INTO public.deals(id,organization_id,title,board_id,stage_id,custom_fields)
     VALUES (lead,org,'Created while disabled',board,st1,'{"preserved":"custom_fields"}'::jsonb);
-  IF (SELECT payload->'deal'->'custom_fields' FROM public.webhook_events_out WHERE organization_id=org AND event_type='deal.created') <> '{"preserved":"custom_fields"}'::jsonb THEN RAISE EXCEPTION 'Created webhook lost deployed custom_fields'; END IF;
+  IF (SELECT payload->'deal'->'custom_fields' FROM public.webhook_events_out WHERE organization_id=org AND event_type='deal.created') IS DISTINCT FROM '{"preserved":"custom_fields"}'::jsonb THEN RAISE EXCEPTION 'Created webhook lost deployed custom_fields'; END IF;
   PERFORM pg_temp.expect_group_webhook(org,'deal.created','{}');
   UPDATE public.organization_settings SET wa_group_links_enabled=true WHERE organization_id=org;
   UPDATE public.deals SET stage_id=st2 WHERE id=lead;
@@ -161,6 +161,128 @@ BEGIN
   UPDATE public.organization_settings SET wa_group_links_enabled=true WHERE organization_id=org;
   UPDATE public.deals SET stage_id=st1 WHERE id=lead;
   PERFORM pg_temp.expect_group_webhook(org,'deal.stage_changed',jsonb_build_object('whatsapp_group_id',jid));
+END;
+$$;
+-- A mismatched reference must preserve the underlying row write while producing
+-- neither a persisted external event nor a pg_net request for the fixture URL.
+CREATE FUNCTION pg_temp.expect_no_group_webhook(p_org uuid, p_url text)
+RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  IF EXISTS(SELECT 1 FROM public.webhook_events_out WHERE organization_id=p_org) OR
+     EXISTS(SELECT 1 FROM public.webhook_deliveries WHERE organization_id=p_org) OR
+     EXISTS(SELECT 1 FROM net.http_request_queue WHERE url=p_url) THEN
+    RAISE EXCEPTION 'Cross-organization reference produced a stored/queued webhook';
+  END IF;
+END;
+$$;
+DO $$
+DECLARE
+  org uuid := gen_random_uuid(); foreign_org uuid := gen_random_uuid();
+  board uuid := gen_random_uuid(); foreign_board uuid := gen_random_uuid();
+  st1 uuid := gen_random_uuid(); st2 uuid := gen_random_uuid(); foreign_stage uuid := gen_random_uuid();
+  contact uuid := gen_random_uuid(); foreign_contact uuid := gen_random_uuid();
+  lead uuid := gen_random_uuid(); foreign_lead uuid := gen_random_uuid(); broken_old_stage_lead uuid := gen_random_uuid();
+  conn uuid := gen_random_uuid(); foreign_conn uuid := gen_random_uuid();
+  conv uuid := gen_random_uuid(); foreign_conv uuid := gen_random_uuid();
+  foreign_user uuid := gen_random_uuid(); member_user uuid := gen_random_uuid();
+  endpoint uuid := gen_random_uuid(); msg uuid; invalid_lead uuid; scenario text; event_payload jsonb;
+  url text := 'https://example.invalid/org-isolation/' || org;
+BEGIN
+  INSERT INTO public.organizations(id,name) VALUES (org,'Webhook isolation owner'),(foreign_org,'Webhook isolation foreign');
+  UPDATE public.organization_settings SET wa_group_links_enabled=true WHERE organization_id=org;
+  INSERT INTO public.boards(id,organization_id,name) VALUES (board,org,'Local board'),(foreign_board,foreign_org,'Private foreign board');
+  INSERT INTO public.board_stages(id,board_id,organization_id,name,label,"order") VALUES
+    (st1,board,org,'One','One',0),(st2,board,org,'Two','Two',1),
+    (foreign_stage,foreign_board,foreign_org,'Foreign','Private foreign stage',0);
+  INSERT INTO public.contacts(id,organization_id,name,email) VALUES
+    (contact,org,'Local contact','local@example.invalid'),(foreign_contact,foreign_org,'Private foreign contact','foreign@example.invalid');
+  INSERT INTO public.deals(id,organization_id,title,board_id,stage_id,contact_id) VALUES
+    (lead,org,'Local lead',board,st1,contact),(foreign_lead,foreign_org,'Private foreign lead',foreign_board,foreign_stage,foreign_contact);
+  INSERT INTO public.wa_connections(id,organization_id,provider,instance_name,profile_name) VALUES
+    (conn,org,'evolution','isolation-'||conn,'Local connection'),
+    (foreign_conn,foreign_org,'evolution','isolation-'||foreign_conn,'Private foreign connection');
+  INSERT INTO public.wa_conversations(id,organization_id,connection_id,wa_phone,wa_name,contact_id,deal_id) VALUES
+    (conv,org,conn,'5511999999911','Local conversation',contact,lead),
+    (foreign_conv,foreign_org,foreign_conn,'5511999999922','Private foreign conversation',foreign_contact,foreign_lead);
+  -- auth trigger creates profiles; explicit upsert keeps these fixtures independent
+  -- of its default organization/name behavior. All auth/profile rows roll back.
+  INSERT INTO auth.users(id,email,raw_user_meta_data) VALUES
+    (foreign_user,'foreign-'||foreign_user||'@example.invalid',jsonb_build_object('organization_id',foreign_org,'name','Private foreign sender')),
+    (member_user,'member-'||member_user||'@example.invalid',jsonb_build_object('organization_id',foreign_org,'name','Authorized multi-org member'));
+  INSERT INTO public.profiles(id,organization_id,name,role) VALUES
+    (foreign_user,foreign_org,'Private foreign sender','vendedor'),(member_user,foreign_org,'Authorized multi-org member','vendedor')
+    ON CONFLICT(id) DO UPDATE SET organization_id=EXCLUDED.organization_id,name=EXCLUDED.name,role=EXCLUDED.role;
+  INSERT INTO public.user_organizations(user_id,organization_id,role) VALUES (member_user,org,'vendedor');
+  INSERT INTO public.integration_outbound_endpoints(id,organization_id,name,url,secret,events,kind) VALUES
+    (endpoint,org,'Isolation rollback-only',url,'rollback-only-secret',ARRAY['deal.created','deal.stage_changed','whatsapp.message.received'],'pipeline');
+
+  FOREACH scenario IN ARRAY ARRAY['board','stage','contact'] LOOP
+    invalid_lead := gen_random_uuid();
+    INSERT INTO public.deals(id,organization_id,title,board_id,stage_id,contact_id) VALUES
+      (invalid_lead,org,'Invalid created '||scenario,
+       CASE WHEN scenario='board' THEN foreign_board ELSE board END,
+       CASE WHEN scenario='stage' THEN foreign_stage ELSE st1 END,
+       CASE WHEN scenario='contact' THEN foreign_contact ELSE contact END);
+    IF NOT EXISTS(SELECT 1 FROM public.deals WHERE id=invalid_lead AND organization_id=org) THEN RAISE EXCEPTION 'Webhook prevented mismatched lead creation'; END IF;
+    PERFORM pg_temp.expect_no_group_webhook(org,url);
+  END LOOP;
+
+  FOREACH scenario IN ARRAY ARRAY['board','stage','contact'] LOOP
+    UPDATE public.deals SET
+      board_id=CASE WHEN scenario='board' THEN foreign_board ELSE board END,
+      stage_id=CASE WHEN scenario='stage' THEN foreign_stage ELSE st2 END,
+      contact_id=CASE WHEN scenario='contact' THEN foreign_contact ELSE contact END WHERE id=lead;
+    IF (SELECT stage_id FROM public.deals WHERE id=lead) IS DISTINCT FROM
+       (CASE WHEN scenario='stage' THEN foreign_stage ELSE st2 END) THEN RAISE EXCEPTION 'Webhook prevented mismatched lead update'; END IF;
+    PERFORM pg_temp.expect_no_group_webhook(org,url);
+    UPDATE public.integration_outbound_endpoints SET active=false WHERE id=endpoint;
+    UPDATE public.deals SET board_id=board,stage_id=st1,contact_id=contact WHERE id=lead;
+    UPDATE public.integration_outbound_endpoints SET active=true WHERE id=endpoint;
+  END LOOP;
+  INSERT INTO public.deals(id,organization_id,title,board_id,stage_id) VALUES (broken_old_stage_lead,org,'Foreign previous stage',board,foreign_stage);
+  UPDATE public.deals SET stage_id=st1 WHERE id=broken_old_stage_lead;
+  PERFORM pg_temp.expect_no_group_webhook(org,url);
+
+  msg := gen_random_uuid();
+  INSERT INTO public.wa_messages(id,organization_id,conversation_id,direction,body) VALUES (msg,org,foreign_conv,'in','Cross-org conversation fixture');
+  IF NOT EXISTS(SELECT 1 FROM public.wa_messages WHERE id=msg AND organization_id=org) THEN RAISE EXCEPTION 'Webhook prevented mismatched message insert'; END IF;
+  PERFORM pg_temp.expect_no_group_webhook(org,url);
+  FOREACH scenario IN ARRAY ARRAY['connection','contact','deal','owner','sender'] LOOP
+    UPDATE public.wa_conversations SET
+      connection_id=CASE WHEN scenario='connection' THEN foreign_conn ELSE conn END,
+      contact_id=CASE WHEN scenario='contact' THEN foreign_contact ELSE contact END,
+      deal_id=CASE WHEN scenario='deal' THEN foreign_lead ELSE lead END,
+      assigned_owner_id=CASE WHEN scenario='owner' THEN foreign_user ELSE NULL END WHERE id=conv;
+    msg := gen_random_uuid();
+    INSERT INTO public.wa_messages(id,organization_id,conversation_id,direction,body,sent_by) VALUES
+      (msg,org,conv,'in','Cross-org '||scenario,CASE WHEN scenario='sender' THEN foreign_user ELSE NULL END);
+    IF NOT EXISTS(SELECT 1 FROM public.wa_messages WHERE id=msg) THEN RAISE EXCEPTION 'Webhook prevented invalid % message insert',scenario; END IF;
+    PERFORM pg_temp.expect_no_group_webhook(org,url);
+  END LOOP;
+  UPDATE public.wa_conversations SET connection_id=conn,contact_id=contact,deal_id=lead,assigned_owner_id=NULL WHERE id=conv;
+  FOREACH scenario IN ARRAY ARRAY['board','stage'] LOOP
+    UPDATE public.integration_outbound_endpoints SET active=false WHERE id=endpoint;
+    UPDATE public.deals SET board_id=CASE WHEN scenario='board' THEN foreign_board ELSE board END,
+      stage_id=CASE WHEN scenario='stage' THEN foreign_stage ELSE st1 END WHERE id=lead;
+    UPDATE public.integration_outbound_endpoints SET active=true WHERE id=endpoint;
+    INSERT INTO public.wa_messages(organization_id,conversation_id,direction,body) VALUES (org,conv,'in','Foreign deal '||scenario);
+    PERFORM pg_temp.expect_no_group_webhook(org,url);
+  END LOOP;
+  UPDATE public.integration_outbound_endpoints SET active=false WHERE id=endpoint;
+  UPDATE public.deals SET board_id=board,stage_id=st1 WHERE id=lead;
+  UPDATE public.integration_outbound_endpoints SET active=true WHERE id=endpoint;
+
+  -- A user whose primary profile belongs elsewhere can still send/own in an
+  -- organization where they have explicit membership (same user_org_ids rules).
+  UPDATE public.wa_conversations SET assigned_owner_id=member_user WHERE id=conv;
+  INSERT INTO public.wa_messages(organization_id,conversation_id,direction,body,sent_by) VALUES (org,conv,'in','Authorized membership fixture',member_user);
+  SELECT payload INTO STRICT event_payload FROM public.webhook_events_out WHERE organization_id=org AND event_type='whatsapp.message.received';
+  IF event_payload #>> '{message,sent_by_name}' IS DISTINCT FROM 'Authorized multi-org member' OR
+     event_payload #>> '{message,sent_by_user_id}' IS DISTINCT FROM member_user::text OR
+     event_payload #>> '{conversation,assigned_owner_id}' IS DISTINCT FROM member_user::text THEN
+    RAISE EXCEPTION 'Authorized member sender/owner metadata was lost: %',event_payload;
+  END IF;
+  PERFORM pg_temp.expect_group_webhook(org,'whatsapp.message.received','{"whatsapp_group_id":null}');
 END;
 $$;
 ROLLBACK;

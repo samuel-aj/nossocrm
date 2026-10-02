@@ -39,15 +39,24 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  -- Enriquecimento básico para payload humano
-  SELECT b.name INTO board_name FROM public.boards b WHERE b.id = NEW.board_id;
-  SELECT bs.label INTO stage_label FROM public.board_stages bs WHERE bs.id = NEW.stage_id;
+  -- Referências inválidas não impedem a escrita do lead, mas não geram webhook.
+  IF NEW.board_id IS NOT NULL THEN
+    SELECT b.name INTO board_name FROM public.boards b
+      WHERE b.id = NEW.board_id AND b.organization_id = NEW.organization_id;
+    IF NOT FOUND THEN RETURN NEW; END IF;
+  END IF;
+  IF NEW.stage_id IS NOT NULL THEN
+    SELECT bs.label INTO stage_label FROM public.board_stages bs
+      WHERE bs.id = NEW.stage_id AND bs.organization_id = NEW.organization_id;
+    IF NOT FOUND THEN RETURN NEW; END IF;
+  END IF;
 
   IF NEW.contact_id IS NOT NULL THEN
     SELECT c.name, c.phone, c.email
       INTO contact_name, contact_phone, contact_email
     FROM public.contacts c
-    WHERE c.id = NEW.contact_id;
+    WHERE c.id = NEW.contact_id AND c.organization_id = NEW.organization_id;
+    IF NOT FOUND THEN RETURN NEW; END IF;
   END IF;
 
   FOR endpoint IN
@@ -160,16 +169,29 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  -- Enriquecimento básico para payload humano
-  SELECT b.name INTO board_name FROM public.boards b WHERE b.id = NEW.board_id;
-  SELECT bs.label INTO to_label FROM public.board_stages bs WHERE bs.id = NEW.stage_id;
-  SELECT bs.label INTO from_label FROM public.board_stages bs WHERE bs.id = OLD.stage_id;
+  -- Referências inválidas não impedem a escrita do lead, mas não geram webhook.
+  IF NEW.board_id IS NOT NULL THEN
+    SELECT b.name INTO board_name FROM public.boards b
+      WHERE b.id = NEW.board_id AND b.organization_id = NEW.organization_id;
+    IF NOT FOUND THEN RETURN NEW; END IF;
+  END IF;
+  IF NEW.stage_id IS NOT NULL THEN
+    SELECT bs.label INTO to_label FROM public.board_stages bs
+      WHERE bs.id = NEW.stage_id AND bs.organization_id = NEW.organization_id;
+    IF NOT FOUND THEN RETURN NEW; END IF;
+  END IF;
+  IF OLD.stage_id IS NOT NULL THEN
+    SELECT bs.label INTO from_label FROM public.board_stages bs
+      WHERE bs.id = OLD.stage_id AND bs.organization_id = NEW.organization_id;
+    IF NOT FOUND THEN RETURN NEW; END IF;
+  END IF;
 
   IF NEW.contact_id IS NOT NULL THEN
     SELECT c.name, c.phone, c.email
       INTO contact_name, contact_phone, contact_email
     FROM public.contacts c
-    WHERE c.id = NEW.contact_id;
+    WHERE c.id = NEW.contact_id AND c.organization_id = NEW.organization_id;
+    IF NOT FOUND THEN RETURN NEW; END IF;
   END IF;
 
   FOR endpoint IN
@@ -275,18 +297,35 @@ BEGIN
   END IF;
   SELECT c.connection_id, c.contact_id, c.deal_id, c.wa_phone, c.wa_name, c.assigned_owner_id, c.ai_status
     INTO conv_connection_id, conv_contact_id, conv_deal_id, conv_phone, conv_name, conv_owner, conv_ai
-  FROM public.wa_conversations c WHERE c.id = NEW.conversation_id;
+  FROM public.wa_conversations c WHERE c.id = NEW.conversation_id AND c.organization_id = NEW.organization_id;
+  -- Nunca persista associações/eventos para uma conversa de outra organização.
+  IF NOT FOUND THEN RETURN NEW; END IF;
+  IF conv_owner IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM public.profiles p WHERE p.id = conv_owner
+      AND NEW.organization_id IN (SELECT public.user_org_ids(p.id))
+  ) THEN RETURN NEW; END IF;
   IF conv_connection_id IS NOT NULL THEN
-    SELECT w.phone_number, w.provider, w.profile_name INTO conn_phone, conn_provider, conn_name FROM public.wa_connections w WHERE w.id = conv_connection_id;
+    SELECT w.phone_number, w.provider, w.profile_name INTO conn_phone, conn_provider, conn_name FROM public.wa_connections w WHERE w.id = conv_connection_id AND w.organization_id = NEW.organization_id;
+    IF NOT FOUND THEN RETURN NEW; END IF;
   END IF;
   IF conv_contact_id IS NOT NULL THEN
-    SELECT c.name, c.phone, c.email INTO ct_name, ct_phone, ct_email FROM public.contacts c WHERE c.id = conv_contact_id;
+    SELECT c.name, c.phone, c.email INTO ct_name, ct_phone, ct_email FROM public.contacts c WHERE c.id = conv_contact_id AND c.organization_id = NEW.organization_id;
+    IF NOT FOUND THEN RETURN NEW; END IF;
   END IF;
   IF conv_deal_id IS NOT NULL THEN
-    SELECT d.title, d.board_id, d.stage_id INTO deal_title, deal_board, deal_stage FROM public.deals d WHERE d.id = conv_deal_id;
+    SELECT d.title, d.board_id, d.stage_id INTO deal_title, deal_board, deal_stage FROM public.deals d WHERE d.id = conv_deal_id AND d.organization_id = NEW.organization_id;
+    IF NOT FOUND THEN RETURN NEW; END IF;
+    IF deal_board IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM public.boards b WHERE b.id = deal_board AND b.organization_id = NEW.organization_id
+    ) THEN RETURN NEW; END IF;
+    IF deal_stage IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM public.board_stages bs WHERE bs.id = deal_stage AND bs.organization_id = NEW.organization_id
+    ) THEN RETURN NEW; END IF;
   END IF;
   IF NEW.sent_by IS NOT NULL THEN
-    SELECT COALESCE(NULLIF(p.display_name, ''), NULLIF(p.name, ''), p.email) INTO autor FROM public.profiles p WHERE p.id = NEW.sent_by;
+    SELECT COALESCE(NULLIF(p.display_name, ''), NULLIF(p.name, ''), p.email) INTO autor FROM public.profiles p WHERE p.id = NEW.sent_by
+      AND NEW.organization_id IN (SELECT public.user_org_ids(p.id));
+    IF NOT FOUND THEN RETURN NEW; END IF;
   END IF;
   payload := jsonb_build_object(
     'event_type', ev_type, 'occurred_at', now(), 'organization_id', NEW.organization_id,
