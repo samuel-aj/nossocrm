@@ -12,7 +12,7 @@ import { STAGE_WEBHOOK_VARIABLE_GROUPS } from '@/features/boards/automations/sta
 import { BlockPanel } from '@/features/wa-agents/canvas/BlockPanel';
 import { WebhooksEditor } from '@/features/wa-agents/WebhooksEditor';
 import type { BlockOfType } from '@/features/wa-agents/canvas/types';
-import type { AgentWebhook } from '@/lib/wa-agents/types';
+import type { AgentAiVar, AgentWebhook } from '@/lib/wa-agents/types';
 import { WEBHOOK_VARIABLE_GROUPS } from '@/lib/wa-agents/catalog';
 
 const auth = vi.hoisted(() => ({ organizationId: 'org-1', profile: { role: 'admin' } }));
@@ -41,6 +41,7 @@ beforeEach(() => {
     const method = init?.method ?? 'GET';
     if (fail === 'settings' && url.pathname.endsWith('settings/group-links')) return Response.json({ error: 'Configuração indisponível.' }, { status: 500 });
     if (fail === 'relations' && url.pathname.endsWith('whatsapp/group-links') && method === 'GET') return Response.json({ error: 'Vínculos indisponíveis.' }, { status: 500 });
+    if (fail === 'settings-write' && url.pathname === '/api/settings/group-links' && method === 'PATCH') return Response.json({ error: 'Não foi possível salvar a configuração.' }, { status: 500 });
     if (url.pathname === '/api/settings/group-links') {
       if (method === 'PATCH') enabled = JSON.parse(String(init?.body)).enabled;
       return Response.json({ enabled });
@@ -182,8 +183,9 @@ describe('conditional webhook selectors', () => {
 
 function ActualWebhookEditor({ kind }: { kind: 'agent' | 'bot' }) {
   const [hooks, setHooks] = useState<AgentWebhook[]>([{ id: 'hook', event: 'finished', url: 'https://example.com/hook', active: true, secret: null, body_template: '{"group":"{{deal.whatsapp_group_id}}"}' }]);
+  const [aiVars, setAiVars] = useState<AgentAiVar[]>([]);
   const [block, setBlock] = useState<BlockOfType<'webhook'>>({ id: 'block', type: 'webhook', data: { url: 'https://example.com/hook', secret: '', body_template: '{"group":"{{deal.whatsapp_group_id}}"}' } });
-  return kind === 'agent' ? <WebhooksEditor value={hooks} onChange={setHooks} /> : <BlockPanel block={block} bubble={{ id: 'bubble', type: 'bubble', position: { x: 0, y: 0 }, data: { name: 'Webhook', blocks: [block] } }} index={0} update={next => setBlock(next as BlockOfType<'webhook'>)} onClose={() => {}} onRemove={() => {}} />;
+  return kind === 'agent' ? <WebhooksEditor value={hooks} onChange={setHooks} aiVars={aiVars} onAiVarsChange={setAiVars} /> : <BlockPanel block={block} bubble={{ id: 'bubble', type: 'bubble', position: { x: 0, y: 0 }, data: { name: 'Webhook', blocks: [block] } }} index={0} update={next => setBlock(next as BlockOfType<'webhook'>)} onClose={() => {}} onRemove={() => {}} />;
 }
 it.each(['agent', 'bot'] as const)('keeps optional variables conditional in the actual %s editor', async kind => {
   setup(<><GroupLinksSettings /><ActualWebhookEditor kind={kind} /></>);
@@ -198,4 +200,56 @@ it.each(['agent', 'bot'] as const)('keeps optional variables conditional in the 
   await userEvent.click(screen.getByRole('button', { name: 'Inserir variável' }));
   expect(screen.queryByText('ID completo do grupo principal no WhatsApp')).not.toBeInTheDocument();
   expect(screen.getByText(/Este campo será omitido/)).toBeInTheDocument();
+});
+
+it('offers system variables without unsupported AI authoring in the actual bot block', async () => {
+  enabled = true;
+  setup(<ActualWebhookEditor kind="bot" />);
+  await userEvent.click(screen.getByRole('button', { name: 'Inserir variável' }));
+  expect(screen.queryByRole('button', { name: 'Criar variável preenchida pela IA' })).not.toBeInTheDocument();
+  expect(await screen.findByText('ID completo do grupo principal no WhatsApp')).toBeInTheDocument();
+  const body = screen.getByRole('textbox', { name: 'Corpo personalizado do webhook' }) as HTMLTextAreaElement;
+  fireEvent.change(body, { target: { value: '{{ia:resumo}}' } });
+  body.setSelectionRange(7, 7);
+  await userEvent.click(body);
+  expect(screen.queryByRole('dialog', { name: 'Editar variável preenchida pela IA' })).not.toBeInTheDocument();
+  expect(body).toHaveValue('{{ia:resumo}}');
+});
+
+it('preserves supported agent AI variable creation and stored instruction editing', async () => {
+  enabled = true;
+  setup(<ActualWebhookEditor kind="agent" />);
+  await userEvent.click(screen.getByRole('button', { name: 'Inserir variável' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Criar variável preenchida pela IA' }));
+  const dialog = screen.getByRole('dialog', { name: 'Criar variável preenchida pela IA' });
+  await userEvent.type(within(dialog).getByLabelText('Nome'), 'resumo');
+  await userEvent.type(within(dialog).getByLabelText('Instrução para a IA'), 'Resuma o atendimento.');
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Criar e inserir' }));
+  const body = screen.getByRole('textbox', { name: 'Corpo personalizado do webhook' }) as HTMLTextAreaElement;
+  expect(body.value).toContain('{{ia:resumo}}');
+  await userEvent.click(screen.getByRole('button', { name: 'Inserir variável' }));
+  expect(screen.getByRole('button', { name: /ia:resumo.*Resuma o atendimento/ })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: /ia:resumo.*Resuma o atendimento/ }));
+  body.setSelectionRange(body.value.indexOf('{{ia:resumo}}') + 6, body.value.indexOf('{{ia:resumo}}') + 6);
+  fireEvent.click(body);
+  const editor = screen.getByRole('dialog', { name: 'Editar variável preenchida pela IA' });
+  expect(within(editor).getByLabelText('Instrução para a IA')).toHaveValue('Resuma o atendimento.');
+  fireEvent.change(within(editor).getByLabelText('Instrução para a IA'), { target: { value: 'Resuma a reunião de vendas.' } });
+  await userEvent.click(within(editor).getByRole('button', { name: 'Salvar' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Inserir variável' }));
+  expect(screen.getByRole('button', { name: /ia:resumo.*Resuma a reunião de vendas/ })).toBeInTheDocument();
+});
+
+it('retries the intended settings write after a failed PATCH', async () => {
+  fail = 'settings-write';
+  setup(<GroupLinksSettings />);
+  const toggle = await screen.findByRole('switch');
+  await waitFor(() => expect(toggle).toBeEnabled());
+  await userEvent.click(toggle);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Não foi possível salvar a configuração.');
+  expect(toggle).toHaveAttribute('aria-checked', 'false');
+  fail = '';
+  await userEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }));
+  await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'));
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });

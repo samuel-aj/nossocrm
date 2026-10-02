@@ -16,7 +16,10 @@ export function GroupLinksSettings() {
       </button>
     } />
     {feature.isPending ? <p role="status" className="text-xs text-slate-500">Carregando configuração...</p> : null}
-    {feature.isError || mutation.isError ? <p role="alert" className="text-xs text-red-600">{(mutation.error ?? feature.error)?.message} <button type="button" onClick={() => void feature.refetch()} className="underline">Tentar novamente</button></p> : null}
+    {feature.isError || mutation.isError ? <p role="alert" className="text-xs text-red-600">{(mutation.error ?? feature.error)?.message} <button type="button" disabled={mutation.isPending} onClick={() => {
+      if (mutation.isError && mutation.variables !== undefined) mutation.mutate(mutation.variables);
+      else void feature.refetch();
+    }} className="underline">Tentar novamente</button></p> : null}
     <p className="mt-3 text-xs text-slate-500">Desativado por padrão. Se os grupos não aparecerem nos Chats, ative também “Grupos do WhatsApp no chat” na tela Conexão. As duas opções são independentes.</p>
   </SettingsCard>;
 }

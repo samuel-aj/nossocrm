@@ -615,6 +615,7 @@ export function StageActionModal({
                     rows={8}
                     ariaLabel="Body personalizado do webhook"
                     aiVars={[]}
+                    allowAiVariables={false}
                     onAiVarsChange={NOOP}
                     groupsForFeature={stageWebhookVariableGroups}
                     insertLabel="Inserir variável"

@@ -702,6 +702,7 @@ function WebhookEditor({ block, update }: EditorProps<'webhook'>) {
         maxLength={20000}
         ariaLabel="Corpo personalizado do webhook"
         aiVars={[]}
+        allowAiVariables={false}
         onAiVarsChange={() => {}}
         insertLabel="Inserir variável"
       />

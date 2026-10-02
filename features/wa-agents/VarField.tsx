@@ -48,6 +48,8 @@ export type VarFieldProps = {
   minRows?: number;
   /** Variáveis de IA do agente e como alterá-las (compartilhadas entre as ações) */
   aiVars: AgentAiVar[];
+  /** Only supported when this editor persists and resolves agent AI definitions. */
+  allowAiVariables?: boolean;
   onAiVarsChange: (vars: AgentAiVar[]) => void;
   /** Variáveis extras deste campo (ex.: as do payload do webhook) */
   extraVars?: Array<{ key: string; description: string }>;
@@ -87,6 +89,7 @@ export const VarField: React.FC<VarFieldProps> = ({
   rows = 1,
   minRows,
   aiVars,
+  allowAiVariables = true,
   onAiVarsChange,
   extraVars,
   groups,
@@ -114,12 +117,12 @@ export const VarField: React.FC<VarFieldProps> = ({
     () => ({
       vars: systemVars.map(v => promptVariableName(v.key)),
       varPrefixes: ['campos.', 'deal.custom_fields.'],
-      aiVars: aiVars.map(v => v.name),
+      aiVars: allowAiVariables ? aiVars.map(v => v.name) : [],
       actions: [],
       media: [],
       mediaLoaded: true,
     }),
-    [systemVars, aiVars]
+    [systemVars, aiVars, allowAiVariables]
   );
 
   // Filtro do autocomplete: a sequência de caracteres de nome logo depois do
@@ -136,7 +139,7 @@ export const VarField: React.FC<VarFieldProps> = ({
     !filtro || v.key.toLowerCase().includes(filtro) || v.description.toLowerCase().includes(filtro);
   const gruposFiltrados = varGroups.map(g => ({ ...g, vars: g.vars.filter(casa) })).filter(g => g.vars.length > 0);
   const filtroIa = filtro.replace(/^ia:?/, '');
-  const iaFiltradas = aiVars.filter(v => !filtro || v.name.includes(filtroIa) || `ia:${v.name}`.includes(filtro));
+  const iaFiltradas = allowAiVariables ? aiVars.filter(v => !filtro || v.name.includes(filtroIa) || `ia:${v.name}`.includes(filtro)) : [];
   const nadaEncontrado = gruposFiltrados.length === 0 && iaFiltradas.length === 0;
 
   const fecharMenu = () => {
@@ -191,6 +194,7 @@ export const VarField: React.FC<VarFieldProps> = ({
 
   /** Clique/tecla no texto: caret dentro de um {{ia:...}} abre a edição da variável. */
   const abrirEdicaoNoCaret = () => {
+    if (!allowAiVariables) return;
     const el = textareaRef.current;
     if (!el) return;
     const caret = el.selectionStart ?? 0;
@@ -210,6 +214,7 @@ export const VarField: React.FC<VarFieldProps> = ({
   };
 
   const abrirCriacao = (insertAt: number | null) => {
+    if (!allowAiVariables) return;
     setDraft({ name: '', instruction: '', example: '' });
     setDraftError(null);
     setPopover({ mode: 'create', insertAt });
@@ -217,6 +222,7 @@ export const VarField: React.FC<VarFieldProps> = ({
   };
 
   const salvarPopover = () => {
+    if (!allowAiVariables) return;
     const nome = slugAiName(draft.name);
     const instrucao = draft.instruction.trim();
     if (!nome || !AI_VAR_NAME_RE.test(nome)) {
@@ -264,7 +270,7 @@ export const VarField: React.FC<VarFieldProps> = ({
   };
 
   const excluirVariavel = () => {
-    if (popover.mode !== 'edit') return;
+    if (!allowAiVariables || popover.mode !== 'edit') return;
     onAiVarsChange(aiVars.filter(v => v.name !== popover.name));
     onChange(
       value
@@ -356,7 +362,7 @@ export const VarField: React.FC<VarFieldProps> = ({
             <span className="block text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1">{v.instruction}</span>
           </button>
         ))}
-        <div className="border-t border-slate-200 dark:border-white/10 mt-1 pt-1 sticky bottom-0 bg-white dark:bg-dark-card">
+        {allowAiVariables ? <div className="border-t border-slate-200 dark:border-white/10 mt-1 pt-1 sticky bottom-0 bg-white dark:bg-dark-card">
           <button
             type="button"
             className={`${MENU_ITEM_CLASS} font-semibold text-fuchsia-700 dark:text-fuchsia-300 flex items-center gap-1.5`}
@@ -365,11 +371,11 @@ export const VarField: React.FC<VarFieldProps> = ({
             <Sparkles size={13} aria-hidden="true" />
             Criar variável preenchida pela IA
           </button>
-        </div>
+        </div> : null}
       </FloatingLayer>
 
       <FloatingLayer
-        open={popover.mode !== 'closed'}
+        open={allowAiVariables && popover.mode !== 'closed'}
         anchorRef={anchorRef}
         onClose={() => setPopover({ mode: 'closed' })}
         width={400}
