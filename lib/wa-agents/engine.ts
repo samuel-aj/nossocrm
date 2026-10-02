@@ -4,14 +4,6 @@
  * esteira do encerramento. Nada aqui lança sem registrar a execução.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import {
-  generateText,
-  hasToolCall,
-  stepCountIs,
-  type LanguageModel,
-  type ModelMessage,
-  type StopCondition,
-} from 'ai';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { getProvider, type SendResult } from '@/lib/whatsapp';
 import { recordOutboundMessage, replicateOutboundToSiblings } from '@/lib/whatsapp/service';
@@ -30,7 +22,6 @@ import {
   messageText,
   MESSAGE_LITE_COLUMNS,
   normalizeAgentRow,
-  transitionActionKeys,
   type ConversationContext,
   type WaMessageLite,
 } from './context';
@@ -38,7 +29,9 @@ import { errorMessage, WaAgentError } from './errors';
 import { consultHelperAgent } from './helpers';
 import { searchKnowledge } from './knowledge';
 import { sendAgentMedia } from './media';
-import { resolveAgentModel, supportsTemperature } from './model';
+import { resolveAgentModel } from './model';
+import { generateAgentReply, type CollectedToolCall } from './replyGeneration';
+import { segmentText } from './replyOutput';
 import { loadAgentResources } from './resources';
 import { logRun } from './runs';
 import { mergeSavedDataInto, NO_REPLY_TOKEN, sanitizeSavedData } from './savedData';
@@ -85,18 +78,18 @@ export type RunAgentInput = {
   followup?: { instruction: string; silentFor: string };
 };
 
-export type CollectedToolCall = { tool: string; input: unknown; output?: unknown };
+export { generateAgentReply } from './replyGeneration';
+export type { CollectedToolCall, GeneratedReply } from './replyGeneration';
+export { segmentText } from './replyOutput';
+export type { ReplySegment } from './replyOutput';
+export { supportsTemperature } from './model';
+export { pickInboundAgent };
 
 export { NO_REPLY_TOKEN };
 const LOCK_BASE_SECONDS = 90;
 const LOCK_RETRY_MS = 2_000;
 const LOCK_WAIT_MAX_MS = 60_000;
 const MAX_HANDOFF_DEPTH = 3;
-/**
- * Passos do modelo por resposta: consulta (documentos/auxiliar/calculadora) +
- * texto + salvar_dados + executar_acao/enviar_midia + encerrar_atendimento.
- */
-const MAX_STEPS = 6;
 /** Trechos da base de conhecimento injetados automaticamente no prompt. */
 const AUTO_KNOWLEDGE_LIMIT = 3;
 /** Trechos devolvidos pela ferramenta consultar_documentos. */
@@ -208,115 +201,6 @@ export function findCustomAction(actions: CustomAction[], key: string): CustomAc
     actions.find(a => a.label.trim().toLowerCase() === k.toLowerCase()) ??
     null
   );
-}
-
-/**
- * Pedaço da resposta na ordem em que o modelo produziu: texto (dividido em
- * linhas na hora do envio) ou mídia pedida por enviar_midia. Assim a mídia é
- * entregue no ponto da conversa em que a ferramenta foi chamada.
- */
-export type ReplySegment = { kind: 'text'; text: string } | { kind: 'media'; name: string; caption?: string };
-
-export type GeneratedReply = {
-  text: string;
-  segments: ReplySegment[];
-  toolCalls: CollectedToolCall[];
-  usage: unknown;
-  finishReason: string;
-};
-
-export { supportsTemperature, pickInboundAgent };
-
-/** Chama o modelo com as ferramentas do agente e junta texto/ferramentas de todos os passos. */
-export async function generateAgentReply(input: {
-  model: LanguageModel;
-  agent: AgentRow;
-  system: string;
-  messages: ModelMessage[];
-  /** Recursos e efeitos das ferramentas condicionais (documentos, mídias, auxiliares) */
-  runtime?: AgentToolRuntime;
-}): Promise<GeneratedReply> {
-  // Ação durante a conversa com transição (parar, passar, aprovação) também encerra a geração:
-  // o texto de um passo seguinte iria para um lead que já não é deste agente
-  const finals = transitionActionKeys(input.agent);
-  const hasTransitionAction: StopCondition<any> = ({ steps }) => {
-    const last = steps[steps.length - 1];
-    if (!last) return false;
-    return last.toolCalls.some(tc => {
-      const call = tc as { toolName: string; input?: unknown };
-      const acao = (call.input as { acao?: unknown } | undefined)?.acao;
-      return call.toolName === 'executar_acao' && finals.has(String(acao ?? ''));
-    });
-  };
-  const result = await generateText({
-    model: input.model,
-    system: input.system,
-    messages: input.messages,
-    temperature: supportsTemperature(input.agent) ? input.agent.temperature : undefined,
-    tools: buildAgentTools(input.agent, input.runtime),
-    // Depois de encerrar_atendimento não há passo extra: o texto sobrando iria para o lead
-    stopWhen: [stepCountIs(MAX_STEPS), hasToolCall('encerrar_atendimento'), hasTransitionAction],
-  });
-
-  const toolCalls: CollectedToolCall[] = [];
-  const texts: string[] = [];
-  const segments: ReplySegment[] = [];
-  for (const step of result.steps) {
-    const t = (step.text ?? '').trim();
-    if (t) {
-      texts.push(t);
-      segments.push({ kind: 'text', text: t });
-    }
-    for (const tc of step.toolCalls) {
-      const tr = step.toolResults.find(r => r.toolCallId === tc.toolCallId);
-      toolCalls.push({ tool: tc.toolName, input: tc.input, output: tr?.output });
-      if (tc.toolName === 'enviar_midia') {
-        const out = (tr?.output ?? null) as { ok?: boolean; midia?: string } | null;
-        const args = (tc.input ?? {}) as { nome?: string; legenda?: string };
-        if (out?.ok) {
-          segments.push({ kind: 'media', name: out.midia || String(args.nome ?? ''), caption: args.legenda });
-        }
-      }
-    }
-  }
-  // Legenda repetida no texto: o modelo costuma escrever a mesma frase na legenda da mídia e
-  // na resposta; sem isto o lead recebe a frase duas vezes (na mídia e como mensagem solta)
-  const captions = segments
-    .map(s => (s.kind === 'media' ? normalizeKeyword(s.caption ?? '') : ''))
-    .filter(Boolean);
-  if (captions.length > 0) {
-    for (let i = segments.length - 1; i >= 0; i--) {
-      const seg = segments[i];
-      if (seg.kind !== 'text') continue;
-      const kept = seg.text
-        .split('\n')
-        .filter(line => !captions.includes(normalizeKeyword(line)))
-        .join('\n')
-        .trim();
-      if (kept) segments[i] = { kind: 'text', text: kept };
-      else segments.splice(i, 1);
-    }
-  }
-  // O texto final pode ter vindo no passo anterior ao da ferramenta: junta todos
-  const text = (texts.join('\n') || result.text || '').trim();
-  // Sem mídia, um único segmento com o texto todo (mesma divisão em linhas de antes)
-  if (!segments.some(s => s.kind === 'media')) {
-    segments.length = 0;
-    if (text) segments.push({ kind: 'text', text });
-  }
-  const u = result.totalUsage;
-  const usage = {
-    inputTokens: u?.inputTokens ?? null,
-    outputTokens: u?.outputTokens ?? null,
-    totalTokens: u?.totalTokens ?? null,
-  };
-  return { text, segments, toolCalls, usage, finishReason: String(result.finishReason ?? '') };
-}
-
-/** Texto de um segmento sem o marcador [SEM_RESPOSTA] ('' quando só havia o marcador). */
-export function segmentText(seg: ReplySegment): string {
-  if (seg.kind !== 'text') return '';
-  return seg.text.split(NO_REPLY_TOKEN).join('').trim();
 }
 
 /** Dados salvos via salvar_dados (mesclados na ordem das chamadas e saneados: chaves curtas, valores primitivos). */
@@ -846,6 +730,24 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     usage = gen.usage;
     const text = gen.text;
     outputText = text || null;
+    pushEvent('output_checked', { ...gen.outputSafety });
+    if (gen.outputSafety.status === 'blocked') {
+      // A pause/transfer performed by a person while the model was running wins.
+      const pause = {
+        ai_status: 'paused', ai_status_changed_at: new Date().toISOString(), ai_resume_at: null,
+      } as const;
+      const { data: paused, error } = await admin.from('wa_conversations').update(pause)
+        .eq('organization_id', organizationId).eq('id', conversationId)
+        .eq('ai_agent_id', agent.id).eq('ai_status', 'active').eq('ai_lock_until', lockValue)
+        .select('id').maybeSingle();
+      if (error) throw new WaAgentError('DB_ERROR', error.message);
+      if (paused) Object.assign(ctx.conversation, pause);
+      const reason = 'Resposta da IA bloqueada por conter dados internos. ' + (paused
+        ? 'Atendimento pausado para revisão da equipe.'
+        : 'A conversa mudou durante a geração; o estado atual foi preservado.');
+      await emit('error', { code: 'AI_OUTPUT_BLOCKED', message: reason, paused: !!paused });
+      return await finish('error', { reason, error: reason });
+    }
 
     // 7. Envio na ordem dos segmentos: linhas de texto e mídias no ponto em que foram pedidas
     const lines: string[] = [];
