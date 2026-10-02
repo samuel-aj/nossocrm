@@ -190,3 +190,12 @@ export function withCustomFieldVariables(
       : g
   );
 }
+
+/** Optional webhook variables are composed per editor; base catalogs stay static. */
+export const GROUP_LINK_VARIABLE: VariableOption = { key: '{{deal.whatsapp_group_id}}', description: 'ID completo do grupo principal no WhatsApp' };
+export function withGroupLinkVariables(groups: VariableGroup[], enabled: boolean): VariableGroup[] {
+  return groups.map(group => ({ ...group, vars: [
+    ...group.vars.filter(variable => variable.key !== GROUP_LINK_VARIABLE.key),
+    ...(enabled && group.label === 'Lead' ? [GROUP_LINK_VARIABLE] : []),
+  ] }));
+}

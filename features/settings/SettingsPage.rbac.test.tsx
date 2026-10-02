@@ -1,4 +1,5 @@
 import React from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 
@@ -115,7 +116,7 @@ describe('SettingsPage RBAC', () => {
       profile: { role: 'vendedor' },
     } as any)
 
-    render(<SettingsPage />)
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><SettingsPage /></QueryClientProvider>)
 
     // Sem as categorias de administração
     expect(screen.queryByRole('tab', { name: /^CRM$/i })).not.toBeInTheDocument()
@@ -136,7 +137,7 @@ describe('SettingsPage RBAC', () => {
       profile: { role: 'admin' },
     } as any)
 
-    render(<SettingsPage />)
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><SettingsPage /></QueryClientProvider>)
 
     // CRM: campos personalizados e tags
     fireEvent.click(screen.getByRole('tab', { name: /^CRM$/i }))

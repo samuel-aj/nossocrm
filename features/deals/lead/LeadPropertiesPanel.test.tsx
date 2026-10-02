@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => ({
   remove: true,
   org: "org-1",
 }));
+vi.mock("@/features/group-links/api", () => ({ groupLinksApi: { settings: async () => ({ enabled: false }) } }));
 vi.mock("@/context/CRMContext", () => ({
   useCRM: () => ({
     updateDeal: mocks.updateDeal,

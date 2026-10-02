@@ -1,4 +1,5 @@
 'use client';
+import { GroupLinksVariableField } from '@/features/group-links/GroupLinksVariableField';
 import { NativeSelect } from '@/components/ui/NativeSelect';
 
 /**
@@ -12,7 +13,6 @@ import { Plus, Trash2, Webhook } from 'lucide-react';
 import { WEBHOOK_VARIABLE_GROUPS, withCustomFieldVariables } from '@/lib/wa-agents/catalog';
 import { AGENT_EVENTS, AGENT_EVENT_LABELS, type AgentAiVar, type AgentEvent, type AgentWebhook } from '@/lib/wa-agents/types';
 import type { WaAgentOptions } from './useWaAgents';
-import { VarField } from './VarField';
 import { Disclosure, Field, INPUT_CLASS, InfoTip, KebabMenu, Toggle, BTN_SMALL, newId } from './ui';
 
 const BODY_PLACEHOLDER = `{
@@ -118,7 +118,7 @@ export const WebhooksEditor: React.FC<{
                       htmlFor={`${idPrefix}-body`}
                       tip="Vazio envia o JSON padrão do evento. Se o corpo for um JSON válido, vai como JSON; senão, como texto. Digite { para ver as variáveis; variáveis preenchidas pela IA ({{ia:nome}}) são geradas na hora do envio."
                     >
-                      <VarField
+                      <GroupLinksVariableField
                         id={`${idPrefix}-body`}
                         value={hook.body_template ?? ''}
                         onChange={(body) => update(index, { body_template: body || null })}

@@ -6,6 +6,7 @@
  * Inativos). Só reorganiza o que já existia em "Geral".
  */
 import React from 'react';
+import { GroupLinksSettings } from '@/features/group-links/GroupLinksSettings';
 import { SlidersHorizontal } from 'lucide-react';
 import { Disclosure } from '@/components/ui/Disclosure';
 import { CustomFieldsManager } from './components/CustomFieldsManager';
@@ -21,6 +22,7 @@ export const CrmSettings: React.FC = () => {
       <CustomFieldsManager />
       <TagsManager />
       <LossReasonsSettings />
+      <GroupLinksSettings />
       <Disclosure label="Configurações avançadas">
         <SettingsCard title="Avançado" description="Opções pouco usadas do funil." icon={SlidersHorizontal}>
           <InactiveLeadsSettings />

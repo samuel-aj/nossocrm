@@ -83,7 +83,7 @@ export async function prepareGroupLinkWebhookPayload(admin: SupabaseClient, orga
 
 **Files:**
 - Create: `features/group-links/{api,useGroupLinks,GroupLinksSettings,GroupRelationsPanel,RelatedGroups}.tsx` (use .ts for pure API/hooks as appropriate) and focused component tests.
-- Modify: `features/settings/CrmSettings.tsx`, `features/chats/ChatsPage.tsx`, `features/contacts/components/ContactFormModal.tsx`, `features/boards/components/Modals/DealDetailModal.tsx`, `features/chats/LeadDetailsAside.tsx`.
+- Modify: `features/settings/CrmSettings.tsx`, `features/chats/ChatsPage.tsx`, `features/contacts/components/ContactFormModal.tsx`, `features/deals/lead/LeadPropertiesPanel.tsx` (shared by DealDetailModal and LeadDetailsAside; verify both consumers without duplicating integration).
 - Modify: `features/boards/automations/stageAutomationModel.ts`, `StageActionModal.tsx`, `lib/wa-agents/catalog.ts`, and actual agent/bot variable selector consumers for conditional field.
 - Create: `docs/whatsapp-group-links.md` with user flow and payload mapping to AJ Ops.
 
@@ -91,7 +91,7 @@ export async function prepareGroupLinkWebhookPayload(admin: SupabaseClient, orga
 
 - [ ] Read existing UI patterns and React best practice skill. Build opt-in setting under CRM Recursos opcionais, administrator only. Explain linking sales/customer groups and preservation when disabled in concise Portuguese. Keep existing WhatsApp groups switch separate; suggest enabling it if groups unavailable.
 - [ ] Implement group relation panel with searchable contact/lead choices, independent link/unlink per item, loading/error/empty states. Keep group as own chat row; multiple contacts/leads possible; no implicit linking all group members. Conserve mobile space using existing drawer/disclosure pattern.
-- [ ] Add RelatedGroups to active contact and lead screens. Each group opens `/chats?conversation=<id>` through existing route. Lead shows readonly ID plus copy action and explicit principal choice when multiple groups; no editable text ID. Example integration:
+- [ ] Add RelatedGroups to active contact and lead screens. Each group opens `/chats?conversation=<id>` through existing route. Lead shows readonly ID plus copy action and explicit principal choice for any nonprincipal linked group (including one remaining after removing the former principal); no editable text ID. Example integration:
 ```tsx
 <RelatedGroups entityType="deal" entityId={deal.id} />
 <GroupRelationsPanel conversationId={selected.conversationId} />

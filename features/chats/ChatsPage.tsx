@@ -1,4 +1,5 @@
 'use client';
+import { GroupRelationsPanel } from '@/features/group-links/GroupRelationsPanel';
 
 import { useConversationLead } from './useConversationLead';
 import { newerRecord } from '@/lib/query/dealCache';
@@ -1774,6 +1775,8 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                 <ArrowLeft size={16} /> Contatos
               </button>
             </div>
+
+            {selected.isGroup && selected.conversationId ? <GroupRelationsPanel key={selected.conversationId} conversationId={selected.conversationId} /> : null}
 
             <div className="flex-1 min-h-0">
               {/* key={phone} garante reset total do composer/busca ao trocar de conversa */}

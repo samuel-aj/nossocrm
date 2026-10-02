@@ -10,7 +10,7 @@
  * Passos gerados, nesta ordem: [condição?] → [espera?] → ação.
  */
 import type { BotConditionClause, BotInput, BotRow, BotStep } from '@/lib/wa-agents/types';
-import type { VariableGroup } from '@/lib/wa-agents/catalog';
+import { withGroupLinkVariables, type VariableGroup } from '@/lib/wa-agents/catalog';
 import type { Board, BoardStage } from '@/types';
 
 export const STAGE_AUTOMATION_GROUP_ID = 'board-stage-automation';
@@ -363,3 +363,7 @@ export const STAGE_WEBHOOK_VARIABLE_GROUPS: VariableGroup[] = [
     ],
   },
 ];
+
+export function stageWebhookVariableGroups(groupLinksEnabled: boolean): VariableGroup[] {
+  return withGroupLinkVariables(STAGE_WEBHOOK_VARIABLE_GROUPS, groupLinksEnabled);
+}

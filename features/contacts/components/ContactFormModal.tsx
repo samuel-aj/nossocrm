@@ -1,5 +1,6 @@
 import React, { useId, useState } from 'react';
 import { X } from 'lucide-react';
+import { RelatedGroups } from '@/features/group-links/RelatedGroups';
 import { Contact } from '@/types';
 import { DebugFillButton } from '@/components/debug/DebugFillButton';
 import { fakeContact } from '@/lib/debug';
@@ -83,7 +84,7 @@ export const ContactFormModal: React.FC<ContactFormModalProps> = ({
           if (e.target === e.currentTarget) onClose();
         }}
       >
-        <div className="bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl w-full max-w-md animate-in zoom-in-95 duration-200">
+        <div className="bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl w-full max-w-md max-h-[90dvh] overflow-y-auto animate-in zoom-in-95 duration-200">
           <div className="p-5 border-b border-slate-200 dark:border-white/10 flex justify-between items-center">
             <div className="flex items-center gap-2">
               <h2 id={headingId} className="text-lg font-bold text-slate-900 dark:text-white font-display">
@@ -162,6 +163,7 @@ export const ContactFormModal: React.FC<ContactFormModalProps> = ({
             {isSubmitting ? 'Criando...' : (editingContact ? 'Salvar Alterações' : 'Criar Contato')}
           </button>
         </form>
+        {editingContact ? <div className="px-5 pb-5"><RelatedGroups key={editingContact.id} entityType="contact" entityId={editingContact.id} /></div> : null}
         </div>
       </div>
     </FocusTrap>

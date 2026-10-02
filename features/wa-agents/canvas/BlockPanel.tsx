@@ -1,4 +1,5 @@
 'use client';
+import { GroupLinksVariableField } from '@/features/group-links/GroupLinksVariableField';
 import { NativeSelect } from '@/components/ui/NativeSelect';
 
 /**
@@ -658,12 +659,7 @@ function UpdateLeadEditor({ block, update }: EditorProps<'update_lead'>) {
 }
 
 function WebhookEditor({ block, update }: EditorProps<'webhook'>) {
-  const bodyRef = useRef<HTMLTextAreaElement>(null);
   const { url, secret, body_template } = block.data;
-
-  useEffect(() => {
-    autoResize(bodyRef.current);
-  }, [body_template]);
 
   const set = (patch: Partial<typeof block.data>) => update({ ...block, data: { ...block.data, ...patch } });
 
@@ -697,15 +693,17 @@ function WebhookEditor({ block, update }: EditorProps<'webhook'>) {
       <label htmlFor={`block-${block.id}-body`} className={LABEL_CLASS}>
         Corpo personalizado (opcional)
       </label>
-      <textarea
+      <GroupLinksVariableField
         id={`block-${block.id}-body`}
-        ref={bodyRef}
-        className={`${INPUT_CLASS} resize-none font-mono text-xs`}
         rows={3}
         value={body_template}
-        onChange={(e) => set({ body_template: e.target.value })}
-        placeholder={'Ex.: {"telefone": "{{telefone}}"}'}
+        onChange={(body) => set({ body_template: body })}
+        placeholder={'Ex.: {"telefone": "{{contact.phone}}"}'}
         maxLength={20000}
+        ariaLabel="Corpo personalizado do webhook"
+        aiVars={[]}
+        onAiVarsChange={() => {}}
+        insertLabel="Inserir variável"
       />
       <p className={HELP_CLASS}>POST em JSON. Vazio: envia os dados padrão do lead e do negócio.</p>
     </>

@@ -1,4 +1,5 @@
 'use client';
+import { GroupLinksVariableField } from '@/features/group-links/GroupLinksVariableField';
 import { NativeSelect } from '@/components/ui/NativeSelect';
 
 /**
@@ -19,7 +20,6 @@ import { useToast } from '@/context/ToastContext';
 import { useCRM } from '@/context/CRMContext';
 import { DEFAULT_AGENT_TRIGGERS, type BotConditionClause } from '@/lib/wa-agents/types';
 import { useSaveWaAgent, useSaveWaBot, useWaAgentOptions, useWaAgentsList, useWaBotsList } from '@/features/wa-agents/useWaAgents';
-import { VarField } from '@/features/wa-agents/VarField';
 import { CONDITION_OP_LABELS, conditionOpsFor, opNeedsValue, type ConditionField, type ConditionOp } from '@/features/wa-agents/canvas/types';
 import type { Board, BoardStage } from '@/types';
 import type { StageAutomation } from './useStageAutomations';
@@ -29,7 +29,7 @@ import {
   MAX_DELAY_SECONDS,
   STAGE_ACTION_LABEL,
   STAGE_ENTRY_LABEL,
-  STAGE_WEBHOOK_VARIABLE_GROUPS,
+  stageWebhookVariableGroups,
   buildStageActionBot,
   delayToSeconds,
   draftFromBot,
@@ -606,7 +606,7 @@ export function StageActionModal({
                   <label htmlFor="sa-body" className={LABEL}>
                     Body personalizado (JSON)
                   </label>
-                  <VarField
+                  <GroupLinksVariableField
                     id="sa-body"
                     value={draft.bodyTemplate}
                     onChange={(v) => patch({ bodyTemplate: v })}
@@ -616,7 +616,7 @@ export function StageActionModal({
                     ariaLabel="Body personalizado do webhook"
                     aiVars={[]}
                     onAiVarsChange={NOOP}
-                    groups={STAGE_WEBHOOK_VARIABLE_GROUPS}
+                    groupsForFeature={stageWebhookVariableGroups}
                     insertLabel="Inserir variável"
                   />
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Vazio envia o payload completo padrão. Digite {'{'} para ver as variáveis do contato, do lead, do pipeline e dos campos personalizados.</p>

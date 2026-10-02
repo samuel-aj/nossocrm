@@ -1,6 +1,7 @@
 "use client";
 import { NativeSelect } from '@/components/ui/NativeSelect';
 
+import { RelatedGroups } from "@/features/group-links/RelatedGroups";
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -1031,6 +1032,7 @@ export function LeadPropertiesPanel({
             )}
           </div>
         </SectionCard>
+        <RelatedGroups key={`groups-${deal.id}`} entityType="deal" entityId={deal.id} />
         <SectionCard
           title="Contato"
           icon={<User size={16} />}

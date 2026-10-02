@@ -1,4 +1,5 @@
 'use client';
+import { GroupLinksVariableField } from '@/features/group-links/GroupLinksVariableField';
 import { NativeSelect } from '@/components/ui/NativeSelect';
 
 /**
@@ -676,7 +677,7 @@ function ActionFields({
               htmlFor={`${idPrefix}-body`}
               tip="Vazio envia o JSON padrão (evento, agente, conversa, contato, negócio e resultado ou ação). JSON válido vai como JSON; senão, como texto. Digite { para ver as variáveis; as preenchidas pela IA ({{ia:nome}}) são geradas na hora do envio."
             >
-              <VarField
+              <GroupLinksVariableField
                 id={`${idPrefix}-body`}
                 value={action.body_template ?? ''}
                 onChange={(body) => onChange({ ...action, body_template: body || null })}
