@@ -28,7 +28,8 @@ export function ReportLeadsModal({ detail, board, filtersLabel, qualificationDat
     <Modal isOpen onClose={onClose} title={detail.title} className="max-w-6xl" bodyClassName="p-0 overflow-auto">
       <div className="px-5 py-4 space-y-3 border-b border-slate-200 dark:border-white/10">
         <p className="text-xs text-slate-500 dark:text-slate-400">{filtersLabel}</p>
-        {detail.formula && <p className="text-sm text-slate-700 dark:text-slate-200">{detail.formula}. As duas bases podem conter leads diferentes.</p>}
+        {detail.formula && <p className="text-sm text-slate-700 dark:text-slate-200">{detail.formula}.</p>}
+        <p className="text-xs text-slate-500">{detail.contextDescription} {detail.dateBasisLabel}</p>
         {detail.groups.length > 1 && <div className="flex flex-wrap gap-2" role="group" aria-label="Base do indicador">
           {detail.groups.map(item => <button key={item.id} type="button" aria-pressed={item.id === group.id}
             onClick={() => { setGroupId(item.id); setSearch(''); }}
@@ -51,7 +52,7 @@ export function ReportLeadsModal({ detail, board, filtersLabel, qualificationDat
       <div className="overflow-x-auto">
         <table className="w-full text-sm text-left">
           <thead className="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400"><tr>
-            {['Lead / Responsável', 'Etapa atual', 'Produto', ...(detail.showRevenue ? ['Valor'] : []), ...(showLoss ? ['Classificação', 'Motivo'] : []), 'Criação', 'Qualificação', 'Encerramento', ...(detail.showCycle ? ['Duração'] : [])].map(label => <th key={label} scope="col" className="px-4 py-3 font-medium whitespace-nowrap">{label}</th>)}
+            {['Lead / Responsável', 'Etapa registrada', 'Produto', ...(detail.showRevenue ? ['Valor'] : []), ...(showLoss ? ['Classificação', 'Motivo'] : []), 'Criação', 'Qualificação', 'Encerramento', ...(detail.showCycle ? ['Duração'] : [])].map(label => <th key={label} scope="col" className="px-4 py-3 font-medium whitespace-nowrap">{label}</th>)}
           </tr></thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
             {leads.map(lead => <tr key={lead.id} className="text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5">

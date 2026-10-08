@@ -1,29 +1,35 @@
 import { expect, it } from 'vitest';
 import { calculatePerformance } from './performanceMetrics';
-import type { Board, Deal } from '@/types';
+import { august, board, lead, lifecycle, movement, snapshot } from './performanceTestFixtures';
 
-it('lista exatamente a coorte de cada barra e ganhos por encerramento, respeitando board e vendedor', () => {
-  const board = { id: 'b', wonStageId: 'won', stages: [
-    { id: 'new', label: 'Novo', color: '' }, { id: 'q', label: 'Qualificado', color: '' },
-    { id: 'proposal', label: 'Proposta', color: '' }, { id: 'won', label: 'Ganho', color: '' },
-  ] } as Board;
-  const lead = (id: string, extra: Partial<Deal> = {}) => ({ id, title: id, boardId: 'b', ownerId: 'seller', status: 'proposal', createdAt: '2026-08-02T12:00:00Z', ...extra }) as Deal;
-  const metrics = calculatePerformance([
-    lead('later'), lead('unknown'), lead('old-won', { createdAt: '2026-07-01', isWon: true, closedAt: '2026-08-15T12:00:00Z' }),
-    lead('other-owner', { ownerId: 'other' }), lead('other-board', { boardId: 'other' }),
-  ], [
-    { dealId: 'later', stageId: 'q', date: '2026-09-02T12:00:00Z' },
-    { dealId: 'later', stageId: 'q', date: '2026-09-03T12:00:00Z' },
-    { dealId: 'old-won', stageId: 'q', date: '2026-07-10T12:00:00Z' },
-  ], board, { start: new Date('2026-08-01'), end: new Date('2026-08-31T23:59:59Z') }, 'seller', undefined, new Date('2026-09-10'));
-  for (const stage of metrics.stageData) {
+it('cada barra contém exatamente os IDs observados da coorte, sem duplicatas, ganhos antigos nem eventos futuros', () => {
+  const a = lead('a');
+  const b = lead('b');
+  const old = lead('old', { createdAt: '2026-07-01' });
+  const other = lead('other', { ownerId: 'other' });
+  const foreign = lead('foreign', { boardId: 'other' });
+  const events = [lifecycle(a, 'entered_board', a.createdAt), lifecycle(b, 'entered_board', b.createdAt),
+    lifecycle(old, 'won', '2026-08-02', { stageId: 'won' }), lifecycle(other, 'entered_board', other.createdAt),
+    lifecycle(foreign, 'entered_board', foreign.createdAt, { boardId: 'other' })];
+  const history = [movement('a', 'q'), movement('a', 'q'), movement('a', 'signed', '2026-08-10', 'q'),
+    movement('a', 'new', '2026-08-11', 'signed'), movement('b', 'q', '2026-09-01'),
+    movement('old', 'won'), movement('other', 'q'), { ...movement('foreign', 'q'), boardId: 'other' }];
+  const data = calculatePerformance([a, b, old, other, foreign], history, board, august, 'ana', undefined, snapshot, { lifecycleEvents: events });
+  expect(data.stageData.map(stage => stage.deals.map(deal => deal.id))).toEqual([['a', 'b'], ['a'], [], ['a'], []]);
+  for (const stage of data.stageData) {
     expect(stage.deals).toHaveLength(stage.count);
     expect(new Set(stage.deals.map(deal => deal.id)).size).toBe(stage.count);
+    expect(stage.deals.every(deal => data.entries.some(entry => entry.id === deal.id))).toBe(true);
+    if (stage.conversionRate !== null) expect(stage.conversionRate).toBeLessThanOrEqual(100);
   }
-  expect(metrics.stageData.find(stage => stage.stageId === 'q')!.deals.map(deal => deal.id)).toEqual(['later', 'unknown']);
-  expect(metrics.stageData.find(stage => stage.stageId === 'won')!.deals.map(deal => deal.id)).toEqual(['old-won']);
-  expect(metrics.leadQualificationDates.get('later')).toBe('2026-09-02T12:00:00Z');
-  expect(metrics.leadQualificationDates.get('old-won')).toBe('2026-07-10T12:00:00Z');
-  expect(metrics.leadQualificationDates.has('unknown')).toBe(false);
-  expect(metrics.qualificationDates.size).toBe(0);
+});
+
+it('carteira atual particiona os abertos; fluxo mede chegadas reais sem taxa', () => {
+  const deals = [lead('a', { status: 'q' }), lead('b', { status: 'proposal' }), lead('closed', { isWon: true })];
+  const current = calculatePerformance(deals, [], board, august, '', undefined, snapshot, { mode: 'current' });
+  expect(current.stageData.reduce((sum, stage) => sum + stage.count, 0)).toBe(current.currentDeals.length);
+  expect(current.stageData.every(stage => stage.comparisonBase === '' && stage.conversionRate === null)).toBe(true);
+  const period = calculatePerformance(deals, [movement('a', 'q'), movement('b', 'proposal'), movement('b', 'proposal')], board, august, '', undefined, snapshot, { mode: 'period' });
+  expect(period.stageData.map(stage => stage.count)).toEqual([0, 1, 1, 0, 0]);
+  expect(period.stageData.every(stage => stage.comparisonBase === '' && stage.conversionRate === null)).toBe(true);
 });

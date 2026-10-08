@@ -89,7 +89,20 @@ export function createCRMTools(context: CRMCallOptions, userId: string, scopedCl
         stageId?: string;
         stageName?: string;
     }) => {
-        if (params.stageId) return { ok: true as const, stageId: params.stageId };
+        if (params.stageId) {
+            // The AI may use a service-role client, so a raw ID must never
+            // bypass board/tenant validation (the name path is already scoped).
+            const { data: stage, error } = await supabase
+                .from('board_stages')
+                .select('id')
+                .eq('organization_id', organizationId)
+                .eq('board_id', params.boardId)
+                .eq('id', params.stageId)
+                .maybeSingle();
+            if (error) return { ok: false as const, error: formatSupabaseFailure(error) };
+            if (!stage) return { ok: false as const, error: 'O estágio destino não pertence ao board e à organização deste negócio.' };
+            return { ok: true as const, stageId: stage.id };
+        }
 
         const stageName = (params.stageName || '').trim();
         if (!stageName) {
@@ -675,49 +688,37 @@ export function createCRMTools(context: CRMCallOptions, userId: string, scopedCl
                     return { error: 'Nenhum deal especificado.' };
                 }
 
-                const { data: deal } = await supabase
+                const { data: deal, error: dealError } = await supabase
                     .from('deals')
                     .select('board_id, title')
                     .eq('organization_id', organizationId)
                     .eq('id', targetDealId)
                     .single();
 
+                if (dealError) return { error: formatSupabaseFailure(dealError) };
                 if (!deal) {
                     return { error: 'Deal não encontrado.' };
                 }
 
-                let targetStageId = stageId;
-                if (!targetStageId && stageName) {
-                    const { data: stages } = await supabase
-                        .from('board_stages')
-                        .select('id, name, label')
-                        .eq('organization_id', organizationId)
-                        .eq('board_id', deal.board_id)
-                        .or(`name.ilike.%${stageName}%,label.ilike.%${stageName}%`);
+                const stageRes = await resolveStageIdForBoard({ boardId: deal.board_id, stageId, stageName });
+                if (!stageRes.ok) return { error: stageRes.error };
 
-                    if (stages && stages.length > 0) {
-                        targetStageId = stages[0].id;
-                    } else {
-                        return { error: `Estágio "${stageName}" não encontrado.` };
-                    }
-                }
-
-                if (!targetStageId) {
-                    return { error: 'Especifique o estágio destino.' };
-                }
-
-                const { error } = await supabase
+                const { data: moved, error } = await supabase
                     .from('deals')
                     .update({
-                        stage_id: targetStageId,
+                        stage_id: stageRes.stageId,
                         updated_at: new Date().toISOString()
                     })
                     .eq('organization_id', organizationId)
-                    .eq('id', targetDealId);
+                    .eq('board_id', deal.board_id)
+                    .eq('id', targetDealId)
+                    .select('id')
+                    .maybeSingle();
 
                 if (error) {
                     return { success: false, error: error.message };
                 }
+                if (!moved) return { success: false, error: 'O negócio mudou de board ou não está mais disponível. Consulte-o novamente antes de mover.' };
 
                 return { success: true, message: `Deal "${deal.title}" movido com sucesso!` };
             },

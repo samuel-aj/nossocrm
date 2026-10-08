@@ -13,6 +13,7 @@ interface ReportFilters {
 
 interface ReportFiltersPopoverProps {
   filters: ReportFilters;
+  hidePeriod?: boolean;
   owners: { id: string; name: string }[];
   products: { value: string; label: string }[];
   onApply: (filters: ReportFilters) => void;
@@ -20,17 +21,17 @@ interface ReportFiltersPopoverProps {
 }
 
 // Mounted only while open: each opening starts with the currently applied filters.
-export function ReportFiltersPopover({ filters, owners, products, onApply, onClose }: ReportFiltersPopoverProps) {
+export function ReportFiltersPopover({ filters, owners, products, onApply, onClose, hidePeriod }: ReportFiltersPopoverProps) {
   const [draft, setDraft] = useState(filters);
 
   return (
     <PopoverContent align="end" sideOffset={8} collisionPadding={12} aria-label="Filtros do relatório"
       className="z-[10001] w-[380px] max-w-[calc(100vw-24px)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto rounded-xl border-slate-200 p-3 shadow-xl dark:border-white/15 dark:bg-dark-card">
       <form onSubmit={event => { event.preventDefault(); onApply(draft); }}>
-        <div className="grid grid-cols-[76px_minmax(0,1fr)] items-center gap-3 border-b border-slate-200/70 py-2 dark:border-white/10">
+        {!hidePeriod && <div className="grid grid-cols-[76px_minmax(0,1fr)] items-center gap-3 border-b border-slate-200/70 py-2 dark:border-white/10">
           <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Período</p>
           <PeriodFilterSelect className="min-w-0" value={draft.period} onChange={period => setDraft(current => ({ ...current, period }))} />
-        </div>
+        </div>}
         <div className="grid grid-cols-[76px_minmax(0,1fr)] items-center gap-3 border-b border-slate-200/70 py-2 dark:border-white/10">
           <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Vendedor</p>
           <FilterSelect label="Filtrar por Vendedor" value={draft.ownerId}

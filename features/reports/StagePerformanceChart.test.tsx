@@ -1,22 +1,37 @@
 import React from 'react';
 import { expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { StageConversionChart } from './StagePerformanceChart';
 
-vi.mock('recharts', async importOriginal => {
-  const actual = await importOriginal<typeof import('recharts')>();
-  return { ...actual, ResponsiveContainer: ({ children }: { children: React.ReactElement }) =>
-    React.cloneElement(children as React.ReactElement<{ width: number; height: number }>, { width: 800, height: 300 }) };
+it('mantém nome completo e quantidade visível no mesmo controle acessível', () => {
+  const name = 'Reunião de apresentação e avaliação detalhada da proposta comercial';
+  render(<StageConversionChart data={[
+    { stageId: 'long', name, count: 137, fill: '#a855f7', conversionRate: 67.5, comparisonBase: '137 de 203 leads', conversionLabel: 'chegaram a esta etapa' },
+    { stageId: 'empty', name: 'Contrato em análise', count: 0, fill: '#22c55e' },
+  ]} onStageClick={vi.fn()} />);
+  const bar = screen.getByRole('button', { name: `Ver 137 leads em ${name}` });
+  expect(within(bar).getByText(name)).toBeVisible();
+  expect(within(bar).getByText('137', { exact: true })).toBeVisible();
+  expect(within(bar).getByText('67,5% · chegaram a esta etapa · 137 de 203 leads')).toBeVisible();
+  expect(within(screen.getByRole('button', { name: 'Ver 0 leads em Contrato em análise' })).getByText('0')).toBeVisible();
 });
 
-it('abre a etapa correta por clique e teclado nas barras reais', async () => {
+it('abre a etapa correta por clique e ativação nativa de teclado, uma vez por gesto', async () => {
+  const user = userEvent.setup();
   const onStageClick = vi.fn();
   render(<StageConversionChart data={[{ stageId: 'q', name: 'Qualificado', count: 13, fill: '#a855f7' }]} onStageClick={onStageClick} />);
-  const bar = await screen.findByRole('button', { name: 'Ver 13 leads em Qualificado' }, { timeout: 5000 });
-  fireEvent.click(bar);
-  expect(onStageClick).toHaveBeenLastCalledWith('q');
-  fireEvent.keyDown(bar, { key: 'Enter' });
-  expect(onStageClick).toHaveBeenCalledTimes(2);
-  fireEvent.keyDown(bar, { key: ' ' });
-  expect(onStageClick).toHaveBeenCalledTimes(3);
+  const bar = screen.getByRole('button', { name: 'Ver 13 leads em Qualificado' });
+  await user.click(bar);
+  await user.keyboard('{Enter}');
+  await user.keyboard(' ');
+  expect(onStageClick.mock.calls).toEqual([['q'], ['q'], ['q']]);
+});
+
+it('explica ausência de etapas e não oferece ação sem callback', () => {
+  const { rerender } = render(<StageConversionChart data={[]} />);
+  expect(screen.getByText('Nenhuma etapa disponível para esta visão.')).toBeVisible();
+  expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  rerender(<StageConversionChart data={[{ stageId: 'q', name: 'Qualificado', count: 13, fill: '#a855f7' }]} />);
+  expect(screen.getByRole('button', { name: 'Ver 13 leads em Qualificado' })).toBeDisabled();
 });

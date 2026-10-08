@@ -115,10 +115,11 @@ export const useMoveDeal = () => {
 
       // Build updates object
       const changingBoard = board.id !== deal.boardId;
+      const changingStage = changingBoard || targetStageId !== deal.status;
       const updates: Partial<Deal> = {
         ...(changingBoard && { boardId: board.id }),
         status: targetStageId,
-        lastStageChangeDate: new Date().toISOString(),
+        ...(changingStage && { lastStageChangeDate: new Date().toISOString() }),
         ...(lossReason && { lossReason }),
         ...(lossCategory && { lossCategory }),
         ...(isWon !== undefined && { isWon }),
@@ -250,6 +251,9 @@ export const useMoveDeal = () => {
         explicitLost
         || (board.lostStageId ? targetStageId === board.lostStageId : targetStage?.linkedLifecycleStage === 'OTHER');
       const boardUpdate = board.id !== deal.boardId ? { boardId: board.id } : {};
+      const stageDateUpdate = board.id !== deal.boardId || targetStageId !== deal.status
+        ? { lastStageChangeDate: new Date().toISOString() }
+        : {};
 
       const lossUpdates = isLost ? {
         ...(lossCategory && { lossCategory }), ...(lossReason && { lossReason }),
@@ -266,7 +270,7 @@ export const useMoveDeal = () => {
               ...d,
               ...boardUpdate,
               status: targetStageId,
-              lastStageChangeDate: new Date().toISOString(),
+              ...stageDateUpdate,
               isWon: isWon ?? d.isWon,
               isLost: isLost ?? d.isLost,
               ...lossUpdates,
@@ -285,7 +289,7 @@ export const useMoveDeal = () => {
           ...old,
           ...boardUpdate,
           status: targetStageId,
-          lastStageChangeDate: new Date().toISOString(),
+          ...stageDateUpdate,
           isWon: isWon ?? old.isWon,
           isLost: isLost ?? old.isLost,
           ...lossUpdates,

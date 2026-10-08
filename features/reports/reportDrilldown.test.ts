@@ -1,64 +1,78 @@
 import { describe, expect, it } from 'vitest';
 import { calculatePerformance } from './performanceMetrics';
-import { filterReportProducts, NO_PRODUCT, reportDrilldown } from './reportDrilldown';
-import type { Board, Deal } from '@/types';
+import { filterReportProducts, NO_PRODUCT, reportDrilldown, salesCycleDays } from './reportDrilldown';
+import { august, board, lead, lifecycle, snapshot } from './performanceTestFixtures';
 
-export const board = { id: 'board', name: 'Teste', stages: [
-  { id: 'new', label: 'Novo' }, { id: 'q', label: 'Qualificado', linkedLifecycleStage: 'SALES_QUALIFIED' },
-  { id: 'won', label: 'Ganho', linkedLifecycleStage: 'CUSTOMER' }, { id: 'lost', label: 'Perdido', linkedLifecycleStage: 'OTHER' },
-], wonStageId: 'won', lostStageId: 'lost' } as Board;
-const deal = (id: string, extra: Partial<Deal> = {}) => ({ id, title: `Lead ${id}`, boardId: 'board', status: 'new', createdAt: '2026-09-01T12:00:00Z',
-  isLost: false, isWon: false, value: 100, items: [{ id: id + '-item', productId: 'p1', name: 'Produto A', quantity: 1, price: 100 }], owner: { name: 'Ana', avatar: '' }, ownerId: 'ana', ...extra } as Deal);
-export const reportDeals = [
-  deal('entry'),
-  deal('old-qualified', { createdAt: '2026-08-01T12:00:00Z', qualifiedAt: '2026-09-02T12:00:00Z', status: 'q' }),
-  deal('won', { createdAt: '2026-08-01T12:00:00Z', qualifiedAt: '2026-08-02T12:00:00Z', status: 'won', isWon: true, closedAt: '2026-09-03T12:00:00Z', value: 240, items: [{ id: '1', productId: 'p1', name: 'Produto A', quantity: 1, price: 120 }, { id: '2', productId: 'p2', name: 'Produto B', quantity: 1, price: 120 }] }),
-  deal('lost-q', { isLost: true, status: 'lost', closedAt: '2026-09-04T12:00:00Z', lossCategory: 'qualified', lossReason: 'Preço' }),
-  deal('lost-dq', { isLost: true, status: 'lost', closedAt: '2026-09-04T12:00:00Z', lossCategory: 'disqualified', lossReason: 'Preço' }),
-  deal('unknown', { isLost: true, status: 'lost', closedAt: '2026-09-04T12:00:00Z', items: [] }),
-  deal('other-product', { items: [{ id: '3', productId: 'p2', name: 'Produto B', quantity: 1, price: 100 }] }),
+const q = lead('q');
+const won = lead('won');
+const undocumented = lead('undocumented');
+const old = lead('old', { createdAt: '2026-07-01' });
+const lostQ = lead('lost-q', { lossCategory: 'qualified', lossReason: 'Contato Repetido' });
+const lostDQ = lead('lost-dq', { lossCategory: 'disqualified', lossReason: 'REPETIDO.' });
+const lostQ2 = lead('lost-q2', { lossCategory: 'qualified', lossReason: 'lead repetido' });
+const unknown = lead('unknown', { items: [] });
+const deals = [q, won, undocumented, old, lostQ, lostDQ, lostQ2, unknown];
+const events = [
+  ...deals.map(deal => lifecycle(deal, 'entered_board', deal.createdAt)),
+  ...[q, won].map(deal => lifecycle(deal, 'qualified', '2026-08-02', { stageId: 'q' })),
+  ...[won, undocumented, old].map(deal => lifecycle(deal, 'won', '2026-08-03', { stageId: 'won', value: 240 })),
+  ...[lostQ, lostDQ, lostQ2, unknown].map(deal => lifecycle(deal, 'lost', '2026-08-04', { stageId: 'lost' })),
 ];
-export const fixture = (deals = reportDeals) => ({ ...calculatePerformance(deals, [], board, { start: new Date('2026-09-01T00:00:00Z'), end: new Date('2026-09-30T23:59:59Z') }, '', undefined, new Date('2026-10-01')), deals });
+const fixture = (mode: 'cohort' | 'period' = 'cohort') => ({ ...calculatePerformance(deals, [], board, august, '', undefined, snapshot, { mode, lifecycleEvents: events }), deals });
 
-describe('leads que compõem os indicadores', () => {
-  it('preserva bases de datas diferentes nas duas taxas', () => {
+describe('detalhamento reconciliado com indicadores', () => {
+  it('taxas usam os mesmos subconjuntos e ganhos sem data qualificada continuam na receita', () => {
     const metrics = fixture();
     const qualification = reportDrilldown(metrics, { kind: 'qualification' });
-    expect(qualification.groups[0].deals.map(d => d.id)).toEqual(['old-qualified']);
-    expect(qualification.groups[0].deals).toHaveLength(metrics.qualifiedCount);
-    expect(qualification.groups[1].deals).toEqual(metrics.entries);
-    expect(qualification.groups[1].deals.some(d => d.id === 'old-qualified')).toBe(false);
+    expect(qualification.groups[0].deals.map(deal => deal.id)).toEqual(['q', 'won']);
+    expect(qualification.groups[0].deals.every(deal => qualification.groups[1].deals.some(entry => entry.id === deal.id))).toBe(true);
     const closing = reportDrilldown(metrics, { kind: 'closing' });
-    expect(closing.groups[0].deals).toEqual(metrics.wonDeals);
+    expect(closing.groups[0].deals.map(deal => deal.id)).toEqual(['won']);
     expect(closing.groups[1].deals).toEqual(qualification.groups[0].deals);
-  });
-  it('inclui estimativas na lista e no denominador do fechamento', () => {
-    const estimated = deal('estimated', { qualifiedAt: '2026-09-05', qualificationDateSource: 'estimated', status: 'q' });
-    const metrics = fixture([...reportDeals, estimated]);
-    const qualification = reportDrilldown(metrics, { kind: 'qualification' });
-    expect(qualification.groups[0].deals.map(d => d.id)).toEqual(['old-qualified', 'estimated']);
-    expect(qualification.groups[0].deals).toHaveLength(metrics.qualifiedCount);
-    expect(reportDrilldown(metrics, { kind: 'closing' }).groups[1].deals).toEqual(qualification.groups[0].deals);
-  });
-  it('separa o mesmo motivo por categoria e inclui perdas sem classificação', () => {
-    expect(reportDrilldown(fixture(), { kind: 'loss', category: 'qualified', reason: 'Preço' }).groups[0].deals.map(d => d.id)).toEqual(['lost-q']);
-    expect(reportDrilldown(fixture(), { kind: 'loss', category: 'disqualified', reason: 'Preço' }).groups[0].deals.map(d => d.id)).toEqual(['lost-dq']);
-    expect(reportDrilldown(fixture(), { kind: 'loss', category: 'unknown' }).groups[0].deals.map(d => d.id)).toEqual(['unknown']);
-    expect(reportDrilldown(fixture(), { kind: 'loss' }).groups[0].deals).toHaveLength(3);
-  });
-  it('filtra antes do cálculo, sem duplicar faturamento de negócios com vários itens', () => {
-    const metrics = fixture(filterReportProducts(reportDeals, 'p1'));
-    expect(metrics.wonRevenue).toBe(240);
-    expect(metrics.entries).toHaveLength(3);
-    expect(metrics.qualificationRate).toBeCloseTo(100 / 3);
+    expect(closing.formula).toContain('1 ganhos entre os qualificados ÷ 2');
     const revenue = reportDrilldown(metrics, { kind: 'revenue' });
-    expect(revenue.groups[0].deals.reduce((sum, d) => sum + d.value, 0)).toBe(metrics.wonRevenue);
-    expect(filterReportProducts(reportDeals, NO_PRODUCT).map(d => d.id)).toEqual(['unknown']);
-    expect(filterReportProducts(reportDeals, 'missing')).toEqual([]);
+    expect(revenue.groups[0].deals.map(deal => deal.id)).toEqual(['undocumented', 'won']);
+    expect(revenue.groups[0].deals.reduce((sum, deal) => sum + deal.value, 0)).toBe(metrics.wonRevenue);
   });
-  it('inclui apenas durações válidas e ganhos do vendedor consultado', () => {
-    const metrics = fixture([...reportDeals, deal('bad-cycle', { isWon: true, createdAt: 'data inválida', closedAt: '2026-09-05', ownerId: 'bia' })]);
-    expect(reportDrilldown(metrics, { kind: 'cycle' }).groups[0].deals.map(d => d.id)).toEqual(['won']);
-    expect(reportDrilldown(metrics, { kind: 'owner', ownerId: 'ana', ownerName: 'Ana' }).groups[0].deals.map(d => d.id)).toEqual(['won']);
+  it('fluxo apresenta volumes, preserva ganhos antigos e não exibe fórmula de taxa', () => {
+    const metrics = fixture('period');
+    const closing = reportDrilldown(metrics, { kind: 'closing' });
+    expect(closing.formula).toBeUndefined();
+    expect(closing.groups).toHaveLength(1);
+    expect(closing.groups[0].deals.map(deal => deal.id)).toEqual(['old', 'undocumented', 'won']);
+    expect(closing.contextDescription).toContain('própria data');
+  });
+  it('entradas e reaberturas do fluxo abrem os mesmos IDs contados', () => {
+    const history = [...events, lifecycle(won, 'reopened', '2026-08-06'), lifecycle(won, 'reopened', '2026-08-08')];
+    const metrics = { ...calculatePerformance(deals, [], board, august, '', undefined, snapshot, { mode: 'period', lifecycleEvents: history }), deals };
+    expect(reportDrilldown(metrics, { kind: 'entries' }).groups[0].deals).toEqual(metrics.entries);
+    expect(reportDrilldown(metrics, { kind: 'reopened' }).groups[0].deals).toEqual(metrics.reopenedDeals);
+    expect(metrics.reopenedDeals.map(deal => deal.id)).toEqual(['won']);
+  });
+  it('motivo normalizado mantém texto original e respeita categoria', () => {
+    const grouped = reportDrilldown(fixture(), { kind: 'loss', category: 'qualified', reasonKey: 'duplicate_contact' });
+    expect(grouped.groups[0].deals.map(deal => deal.id)).toEqual(['lost-q', 'lost-q2']);
+    expect(grouped.groups[0].deals.map(deal => deal.lossReason)).toEqual(['Contato Repetido', 'lead repetido']);
+    expect(reportDrilldown(fixture(), { kind: 'loss', category: 'disqualified', reason: 'Contato repetido' }).groups[0].deals.map(deal => deal.id)).toEqual(['lost-dq']);
+    expect(reportDrilldown(fixture(), { kind: 'loss', category: 'unknown' }).groups[0].deals.map(deal => deal.id)).toEqual(['unknown']);
+  });
+  it('título de perdas só contém motivo quando há filtro de motivo', () => {
+    const metrics = fixture();
+    expect(reportDrilldown(metrics, { kind: 'loss' }).title).toBe('Perdas no Período');
+    expect(reportDrilldown(metrics, { kind: 'loss', category: 'qualified' }).title).toBe('Perdas qualificadas');
+    expect(reportDrilldown(metrics, { kind: 'loss', category: 'qualified', reasonKey: 'duplicate_contact' }).title).toBe('Perdas qualificadas · Contato repetido');
+  });
+  it('produto filtra negócio inteiro uma vez; sem produto é explícito', () => {
+    expect(filterReportProducts(deals, NO_PRODUCT).map(deal => deal.id)).toEqual(['unknown']);
+    expect(filterReportProducts(deals, 'missing')).toEqual([]);
+    const multi = lead('multi', { items: [...won.items, { ...won.items[0], id: 'item2', productId: 'p2' }] });
+    expect(filterReportProducts([multi], 'p1')).toEqual([multi]);
+  });
+  it('ciclo e vendedor usam os mesmos ganhos do detalhe', () => {
+    const metrics = fixture();
+    const detail = reportDrilldown(metrics, { kind: 'cycle' });
+    expect(detail.groups[0].deals.map(deal => salesCycleDays(deal))).toEqual([2, 2]);
+    expect(reportDrilldown(metrics, { kind: 'owner', ownerId: 'ana', ownerName: 'Ana' }).groups[0].deals).toEqual(metrics.wonDeals);
+    expect(salesCycleDays(lead('bad', { closedAt: 'bad' }))).toBeNull();
   });
 });

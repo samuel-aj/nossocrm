@@ -1,25 +1,14 @@
 import React from 'react';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Rectangle,
-  LabelList,
-} from 'recharts';
 
 interface StageConversionData {
   stageId: string;
   name: string;
   count: number;
   fill: string;
-  conversionRate?: number | null; // % that converted to next stage
+  conversionRate?: number | null;
   populationLabel?: string;
   comparisonBase?: string;
-  conversionLabel?: string; // "avançam" or "fecham"
+  conversionLabel?: string;
 }
 
 interface StageConversionChartProps {
@@ -27,105 +16,37 @@ interface StageConversionChartProps {
   onStageClick?: (stageId: string) => void;
 }
 
-const CustomTooltip = ({ active, payload }: any) => {
-  if (!active || !payload?.length) return null;
-  const d = payload[0].payload as StageConversionData;
+/** Bars and their exact quantities share the same accessible control. */
+export function StageConversionChart({ data, onStageClick }: StageConversionChartProps) {
+  const maximum = Math.max(1, ...data.map(stage => stage.count));
+  if (!data.length) return <p className="py-10 text-center text-sm text-slate-500">Nenhuma etapa disponível para esta visão.</p>;
   return (
-    <div
-      style={{
-        backgroundColor: 'var(--chart-tooltip-bg)',
-        border: '1px solid var(--chart-tooltip-border)',
-        borderRadius: '12px',
-        color: 'var(--chart-tooltip-text)',
-        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-        padding: '10px 14px',
-      }}
-    >
-      <p style={{ fontWeight: 700, marginBottom: 4 }}>{d.name}</p>
-      <p style={{ fontSize: 13 }}>{d.count} negócio{d.count !== 1 ? 's' : ''}</p>
-      {d.populationLabel && <p style={{ fontSize: 12, maxWidth: 300 }}>{d.populationLabel}</p>}
-      {d.comparisonBase && <p style={{ fontSize: 12 }}>{d.comparisonBase}</p>}
-      {d.conversionRate !== undefined && (
-        <p style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>
-          {d.conversionRate === null ? '—' : d.conversionRate.toFixed(1) + '%'} {d.conversionLabel || 'avançam'}
-        </p>
-      )}
-    </div>
+    <figure aria-label="Negócios por etapa" className="w-full space-y-2">
+      <figcaption className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+        Quantidade de leads distintos. Selecione uma etapa para ver os registros.
+      </figcaption>
+      {data.map(stage => {
+        const percentage = stage.conversionRate == null ? null : `${stage.conversionRate.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
+        return (
+          <button key={stage.stageId} type="button" disabled={!onStageClick}
+            onClick={() => onStageClick?.(stage.stageId)}
+            aria-label={`Ver ${stage.count} leads em ${stage.name}`}
+            className="w-full rounded-lg px-2 py-2.5 text-left hover:bg-slate-50 dark:hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:cursor-default">
+            <span className="grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(120px,1fr)_minmax(100px,2fr)_auto] items-center gap-x-4 gap-y-2">
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-200 break-words">{stage.name}</span>
+              <span aria-hidden="true" className="hidden sm:block h-5 rounded bg-slate-100 dark:bg-white/5 overflow-hidden">
+                <span className="block h-full rounded" style={{ width: `${stage.count / maximum * 100}%`, backgroundColor: stage.fill }} />
+              </span>
+              <span className="min-w-8 text-right text-lg font-semibold tabular-nums text-slate-900 dark:text-white">{stage.count}</span>
+            </span>
+            {percentage !== null && <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+              {percentage} · {stage.conversionLabel || 'conversão'}{stage.comparisonBase ? ` · ${stage.comparisonBase}` : ''}
+            </span>}
+          </button>
+        );
+      })}
+    </figure>
   );
-};
-
-const renderConversionLabel = (props: any) => {
-  const { x, y, width, value } = props;
-  if (value === undefined) return null;
-  return (
-    <text
-      x={x + width / 2}
-      y={y - 8}
-      fill="var(--chart-text)"
-      textAnchor="middle"
-      fontSize={11}
-      fontWeight={600}
-    >
-      {value === null ? '—' : value.toFixed(0) + '%'}
-    </text>
-  );
-};
-
-const abbreviateStage = (name: string) => {
-  const shortened = name.trim()
-    .replace(/contato/gi, 'Cont.')
-    .replace(/contrato/gi, 'Contr.')
-    .replace(/qualificação/gi, 'qualif.')
-    .replace(/qualificado/gi, 'Qualif.')
-    .replace(/proposta/gi, 'Prop.')
-    .replace(/pendente/gi, 'pend.')
-    .replace(/assinado/gi, 'ass.')
-    .replace(/protocolado/gi, 'Protoc.');
-  return shortened.length > 14 ? shortened.slice(0, 13).trimEnd() + '…' : shortened;
-};
-
-export const StageConversionChart: React.FC<StageConversionChartProps> = ({ data, onStageClick }) => (
-  <ResponsiveContainer width="100%" height="100%">
-    <BarChart data={data} margin={{ top: 24, right: 12, bottom: 8, left: 4 }}>
-      <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
-      <XAxis
-        dataKey="name"
-        tickFormatter={abbreviateStage}
-        axisLine={false}
-        tickLine={false}
-        tick={{ fill: 'var(--chart-text)', fontSize: 11 }}
-        interval="preserveStartEnd"
-        height={32}
-        angle={0}
-        textAnchor="middle"
-        dy={6}
-      />
-      <YAxis
-        axisLine={false}
-        tickLine={false}
-        tick={{ fill: 'var(--chart-text)', fontSize: 12 }}
-        allowDecimals={false}
-      />
-      <Tooltip content={<CustomTooltip />} cursor={{ fill: 'var(--chart-grid)', opacity: 0.5 }} />
-      <Bar isAnimationActive={false} dataKey="count" radius={[6, 6, 0, 0]} maxBarSize={56}
-        cursor={onStageClick ? 'pointer' : undefined}
-        shape={(props: any) => (
-          <Rectangle {...props}
-            tabIndex={onStageClick ? 0 : undefined}
-            role={onStageClick ? 'button' : undefined}
-            aria-label={'Ver ' + props.payload.count + ' leads em ' + props.payload.name}
-            onClick={() => onStageClick?.(props.payload.stageId)}
-            onKeyDown={event => {
-              if (onStageClick && (event.key === 'Enter' || event.key === ' ')) {
-                event.preventDefault();
-                onStageClick(props.payload.stageId);
-              }
-            }} />
-        )}>
-        {data.some(entry => entry.conversionRate !== undefined) ? <LabelList dataKey="conversionRate" content={renderConversionLabel} /> : <LabelList dataKey="count" position="top" fill="var(--chart-text)" fontSize={11} />}
-      </Bar>
-    </BarChart>
-  </ResponsiveContainer>
-);
+}
 
 export default StageConversionChart;

@@ -14,7 +14,7 @@ Aplicar a solução completa de regra, histórico e apresentação. Uma alteraç
 
 MQL tem prioridade sobre compatibilidade com SQL/nome legado. wonStageId/lostStageId explícitos continuam prevalecendo. Chegadas em etapas posteriores podem provar o marco de qualificação segundo a regra do board; isso não inventa visita às etapas intermediárias ou opcionais. Eventos ocorridos depois do corte não entram no histórico selecionado.
 
-O novo diário append-only deal_lifecycle_events guarda entered_board, left_board, qualified, won, lost, reopened, data observada, origem, identidade de board/etapa e snapshots dos campos usados no relatório. Escrita por trigger privado, leitura com RLS dos negócios visíveis. Reabertura/transferência não apagam o resultado passado. A carteira operacional continua usando o estado atual.
+O novo diário append-only deal_lifecycle_events guarda entered_board, left_board, stage_changed, qualified, won, lost, reopened, data observada, origem, identidade de board/etapa e snapshots dos campos usados no relatório. Escrita por trigger privado, leitura com RLS dos negócios visíveis. Reabertura/transferência não apagam o resultado passado. A carteira operacional continua usando o estado atual.
 
 Recuperar o passado somente de evidência datada de etapa/marco no board correspondente. Campos estimated e atividades sem identidade de board não sustentam conversões datadas. A migração nunca deve marcar qualificações antigas como ocorridas hoje; alterações comuns de título/tag também não devem fazer isso. A cobertura incompleta e snapshots recuperados devem ser visíveis.
 
@@ -27,3 +27,7 @@ Seleção acessível das três visões, período e data-limite explícitos, quan
 MQL renomeado continua válido; ganhos antigos não entram na conversão de novos leads; nenhum cenário mistura bases para produzir conversão acima de 100%; retornos não apagam chegadas reais; saltos não criam passagens fictícias; reabertura/transferência não mudam o relatório anterior; atualizações irrelevantes não criam datas; troca de configuração invalida o cache; organização/funil/etapa são consistentes inclusive em integrações privilegiadas; detalhes/PDF conciliam com os indicadores.
 
 Implementação e testes locais autorizados. Publicação em produção será tratada após o resultado concreto e validado, conforme instruções do workspace.
+
+## Precisão dos filtros de produto
+
+A criação atual grava negócio e produtos em requisições separadas. Para manter os leads acessíveis pelo produto escolhido no formulário, a visão de captação filtra produto pela associação atual, explicitamente; responsável continua ancorado na entrada. Editar produtos pode mudar esse grupo filtrado, mas numerador e denominador sempre usam os mesmos IDs. Nos volumes por período o produto é o registrado no instante do acontecimento; adicionar depois não reescreve o passado. Criação atômica com itens é uma melhoria separada de persistência, registrada na revisão; não será improvisada nesta migration de relatórios.

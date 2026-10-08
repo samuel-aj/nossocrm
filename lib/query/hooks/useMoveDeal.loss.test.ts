@@ -14,10 +14,10 @@ vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ profile: { first_nam
 const board = { id: 'board', lostStageId: 'lost', stages: [{ id: 'new', label: 'Novo' }, { id: 'lost', label: 'Perdido' }] } as Board;
 const deal = { id: 'lead', title: 'Teste', boardId: 'board', status: 'new', isWon: false, isLost: false } as Deal;
 beforeEach(() => { vi.clearAllMocks(); mock.update.mockResolvedValue({ error: null }); mock.activity.mockResolvedValue({ data: { id: 'activity' }, error: null }); });
-function setup() {
+function setup(currentDeal = deal, currentBoard = board) {
   const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
-  client.setQueryData(DEALS_VIEW_KEY, [deal]); client.setQueryData(queryKeys.deals.detail(deal.id), deal);
-  const hook = renderHook(() => useMoveDealSimple(board), { wrapper: ({ children }) => React.createElement(QueryClientProvider, { client }, children) });
+  client.setQueryData(DEALS_VIEW_KEY, [currentDeal]); client.setQueryData(queryKeys.deals.detail(currentDeal.id), currentDeal);
+  const hook = renderHook(() => useMoveDealSimple(currentBoard), { wrapper: ({ children }) => React.createElement(QueryClientProvider, { client }, children) });
   return { ...hook, client };
 }
 it('envia perda e classificação juntas e inclui os dois dados no histórico', async () => {
@@ -36,4 +36,21 @@ it('restaura classificação, motivo e status no cartão e na lista se a perda n
   expect(client.getQueryData(DEALS_VIEW_KEY)).toEqual([deal]);
   expect(client.getQueryData(queryKeys.deals.detail(deal.id))).toEqual(deal);
   expect(mock.activity).not.toHaveBeenCalled();
+});
+
+it('preserva a entrada na etapa ao marcar perda sem mover de etapa', async () => {
+  const currentDeal = { ...deal, lastStageChangeDate: '2026-09-01T12:00:00Z' };
+  const { result, client } = setup(currentDeal);
+  await act(async () => { await result.current.moveDeal(currentDeal, 'new', 'Sem perfil', false, true, 'disqualified'); });
+  expect(mock.update.mock.calls[0][1]).not.toHaveProperty('lastStageChangeDate');
+  expect(client.getQueryData<Deal[]>(DEALS_VIEW_KEY)?.[0].lastStageChangeDate).toBe(currentDeal.lastStageChangeDate);
+  expect(client.getQueryData<Deal>(queryKeys.deals.detail(currentDeal.id))?.lastStageChangeDate).toBe(currentDeal.lastStageChangeDate);
+});
+
+it('atualiza a entrada na etapa somente quando a etapa ou o board muda', async () => {
+  const currentDeal = { ...deal, lastStageChangeDate: '2026-09-01T12:00:00Z' };
+  const { result, client } = setup(currentDeal);
+  await act(async () => { await result.current.moveDeal(currentDeal, 'lost', 'Sem perfil', false, true, 'disqualified'); });
+  expect(mock.update.mock.calls[0][1].lastStageChangeDate).not.toBe(currentDeal.lastStageChangeDate);
+  expect(client.getQueryData<Deal[]>(DEALS_VIEW_KEY)?.[0].lastStageChangeDate).not.toBe(currentDeal.lastStageChangeDate);
 });
