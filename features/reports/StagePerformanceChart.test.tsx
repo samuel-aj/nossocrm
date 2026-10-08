@@ -4,7 +4,8 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { StageConversionChart } from './StagePerformanceChart';
 
-it('mantém nome completo e quantidade visível no mesmo controle acessível', () => {
+it('mantém nome completo, quantidade e explicação acessível no mesmo controle', async () => {
+  const user = userEvent.setup();
   const name = 'Reunião de apresentação e avaliação detalhada da proposta comercial';
   render(<StageConversionChart data={[
     { stageId: 'long', name, count: 137, fill: '#a855f7', conversionRate: 67.5, comparisonBase: '137 de 203 leads', conversionLabel: 'chegaram a esta etapa' },
@@ -13,7 +14,9 @@ it('mantém nome completo e quantidade visível no mesmo controle acessível', (
   const bar = screen.getByRole('button', { name: `Ver 137 leads em ${name}` });
   expect(within(bar).getByText(name)).toBeVisible();
   expect(within(bar).getByText('137', { exact: true })).toBeVisible();
-  expect(within(bar).getByText('67,5% · chegaram a esta etapa · 137 de 203 leads')).toBeVisible();
+  expect(bar).toHaveAccessibleDescription('67,5% · chegaram a esta etapa · 137 de 203 leads');
+  await user.tab();
+  expect(await screen.findByRole('tooltip')).toHaveTextContent('67,5% · chegaram a esta etapa · 137 de 203 leads');
   expect(within(screen.getByRole('button', { name: 'Ver 0 leads em Contrato em análise' })).getByText('0')).toBeVisible();
 });
 

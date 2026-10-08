@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
 const LazyStageConversionChart = dynamic(() => import('./StagePerformanceChart').then(module => module.StageConversionChart), { ssr: false });
-import { TrendingUp, Clock, Target, DollarSign, Trophy, Users, Download, ThumbsDown, UserX, CheckCircle2, SlidersHorizontal } from 'lucide-react';
+import { TrendingUp, Clock, Target, DollarSign, Trophy, Users, Download, UserX, CheckCircle2, SlidersHorizontal } from 'lucide-react';
 import { getDateRange, PeriodFilter, PERIOD_LABELS, COMPARISON_LABELS } from '../dashboard/hooks/useDashboardMetrics';
 import { ReportFiltersPopover } from './ReportFiltersPopover';
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
@@ -315,63 +315,12 @@ const ReportsPage: React.FC = () => {
         <button type="button" onClick={() => setSelection({ kind: 'entries' })} className="rounded-lg border border-slate-200 dark:border-white/10 px-4 py-3 hover:border-primary-400 focus-visible:ring-2 focus-visible:ring-primary-500">Entradas no funil: <strong>{metrics.entries.length}</strong></button>
         <button type="button" onClick={() => setSelection({ kind: 'reopened' })} className="rounded-lg border border-slate-200 dark:border-white/10 px-4 py-3 hover:border-primary-400 focus-visible:ring-2 focus-visible:ring-primary-500">Reaberturas: <strong>{metrics.reopenedDeals.length}</strong></button>
       </div>}
-      <LeadSourceChart groups={metrics.leadSourceGroups} total={metrics.leadSourceTotal} mode={mode}
-        legacySnapshotCount={metrics.coverage.legacyLeadSourceSnapshotCount}
-        onSelect={keys => setSelection({ kind: 'source', keys })} />
-      {/* Fileira: Leads Perdidos + Conversão por Etapa lado a lado */}
+      {/* Origens à esquerda; etapas em colunas verticais à direita. */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Loss by Category */}
-        {mode !== 'current' && lostDeals.length > 0 && (
-          <div className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2 mb-4">
-              <ThumbsDown className="text-red-500" size={20} />
-              {mode === 'cohort' ? 'Perdas dos leads do grupo' : 'Perdas no período'}
-            </h2>
-            {(() => {
-              // Sem categoria gravada (perdas antigas) = "Sem classificação";
-              // não dá pra afirmar que era qualificado só por ter motivo
-              const qualified = lostDeals.filter(d => d.lossCategory === 'qualified');
-              const disqualified = lostDeals.filter(d => d.lossCategory === 'disqualified');
-              const noCategory = lostDeals.filter(d => !d.lossCategory);
-              return (
-                <div className="space-y-3">
-                  <button type="button" onClick={() => setSelection({ kind: 'loss', category: 'qualified' })} className="w-full text-left focus-visible:ring-2 focus-visible:ring-primary-500 hover:brightness-110 flex items-center justify-between p-3 rounded-lg bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-500/20">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 size={16} className="text-orange-500" />
-                      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Qualificados</span>
-                    </div>
-                    <span className="text-lg font-bold text-orange-600 dark:text-orange-400">{qualified.length}</span>
-                  </button>
-                  <button type="button" onClick={() => setSelection({ kind: 'loss', category: 'disqualified' })} className="w-full text-left focus-visible:ring-2 focus-visible:ring-primary-500 hover:brightness-110 flex items-center justify-between p-3 rounded-lg bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-500/20">
-                    <div className="flex items-center gap-2">
-                      <UserX size={16} className="text-red-500" />
-                      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Desqualificados</span>
-                    </div>
-                    <span className="text-lg font-bold text-red-600 dark:text-red-400">{disqualified.length}</span>
-                  </button>
-                  {noCategory.length > 0 && (
-                    <button type="button" onClick={() => setSelection({ kind: 'loss', category: 'unknown' })} className="w-full text-left focus-visible:ring-2 focus-visible:ring-primary-500 flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10">
-                      <span className="text-sm font-medium text-slate-500">Sem classificação</span>
-                      <span className="text-lg font-bold text-slate-400">{noCategory.length}</span>
-                    </button>
-                  )}
-                  <button type="button" onClick={() => setSelection({ kind: 'loss' })} className="w-full text-left focus-visible:ring-2 focus-visible:ring-primary-500 pt-2 border-t border-slate-200 dark:border-white/10 flex items-center justify-between">
-                    <span className="text-sm font-medium text-slate-500">Total perdidos</span>
-                    <span className="text-lg font-bold text-slate-900 dark:text-white">{lostDeals.length}</span>
-                  </button>
-                </div>
-              );
-            })()}
-          </div>
-        )}
-
-        {/* Conversão por Etapa: ao lado de Leads Perdidos (ocupa a fileira
-            inteira quando não há perdas pra mostrar) */}
-        <div
-          className={`glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col min-h-[320px] ${
-            mode !== 'current' && lostDeals.length > 0 ? 'lg:col-span-2' : 'lg:col-span-3'
-          }`}
-        >
+        <LeadSourceChart groups={metrics.leadSourceGroups} total={metrics.leadSourceTotal} mode={mode}
+          legacySnapshotCount={metrics.coverage.legacyLeadSourceSnapshotCount}
+          onSelect={keys => setSelection({ kind: 'source', keys })} />
+        <div className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col min-w-0 lg:col-span-2">
           <div className="flex flex-wrap justify-between items-center gap-2 mb-4 shrink-0">
             <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display">
               {modeInfo.chartTitle}
@@ -387,34 +336,44 @@ const ReportsPage: React.FC = () => {
 
       {/* Fileira de baixo: Motivos de Perda + Desqualificação (+ Top Vendedores) */}
       {mode !== 'current' && <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-        {/* Motivos de Perda: perdas QUALIFICADAS (+ antigas sem categoria,
-            que nasceram antes da classificação existir) */}
-        {lostDeals.length > 0 && (
-          <div className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2 mb-4">
-              <CheckCircle2 className="text-orange-500" size={20} />
-              Motivos de Perda — Qualificados
-            </h2>
-            {renderLossReasons(
-              lostDeals.filter(d => d.lossCategory === 'qualified'),
-              'bg-orange-500', 'qualified'
-            )}
+        {lostDeals.length > 0 && <div className="lg:col-span-2 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+            <section aria-label="Perdas qualificadas" className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2 mb-4">
+                <CheckCircle2 className="text-orange-500" size={20} />
+                Motivos de Perda — Qualificados
+              </h2>
+              <button type="button" onClick={() => setSelection({ kind: 'loss', category: 'qualified' })}
+                className="mb-4 w-full text-left focus-visible:ring-2 focus-visible:ring-primary-500 hover:brightness-110 flex items-center justify-between gap-3 p-3 rounded-lg bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-500/20">
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Qualificados perdidos</span>
+                <span className="text-lg font-bold text-orange-600 dark:text-orange-400">{lostDeals.filter(d => d.lossCategory === 'qualified').length}</span>
+              </button>
+              {renderLossReasons(lostDeals.filter(d => d.lossCategory === 'qualified'), 'bg-orange-500', 'qualified')}
+            </section>
+            <section aria-label="Desqualificações" className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2 mb-4">
+                <UserX className="text-red-500" size={20} />
+                Desqualificação
+              </h2>
+              <button type="button" onClick={() => setSelection({ kind: 'loss', category: 'disqualified' })}
+                className="mb-4 w-full text-left focus-visible:ring-2 focus-visible:ring-primary-500 hover:brightness-110 flex items-center justify-between gap-3 p-3 rounded-lg bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-500/20">
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Total desqualificados</span>
+                <span className="text-lg font-bold text-red-600 dark:text-red-400">{lostDeals.filter(d => d.lossCategory === 'disqualified').length}</span>
+              </button>
+              {renderLossReasons(lostDeals.filter(d => d.lossCategory === 'disqualified'), 'bg-red-500', 'disqualified')}
+            </section>
           </div>
-        )}
-
-        {/* Desqualificação: perdas DESQUALIFICADAS (lead fora do perfil) */}
-        {lostDeals.length > 0 && (
-          <div className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2 mb-4">
-              <UserX className="text-red-500" size={20} />
-              Desqualificação
-            </h2>
-            {renderLossReasons(
-              lostDeals.filter(d => d.lossCategory === 'disqualified'),
-              'bg-red-500', 'disqualified'
-            )}
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm px-1">
+            <button type="button" onClick={() => setSelection({ kind: 'loss' })}
+              className="rounded-md py-1 text-slate-600 dark:text-slate-300 hover:text-primary-600 focus-visible:ring-2 focus-visible:ring-primary-500">
+              Total perdidos: <strong className="text-slate-900 dark:text-white">{lostDeals.length}</strong>
+            </button>
+            {lostDeals.some(d => !d.lossCategory) && <button type="button" onClick={() => setSelection({ kind: 'loss', category: 'unknown' })}
+              className="rounded-md py-1 text-slate-500 hover:text-primary-600 focus-visible:ring-2 focus-visible:ring-primary-500">
+              Sem classificação: <strong>{lostDeals.filter(d => !d.lossCategory).length}</strong>
+            </button>}
           </div>
-        )}
+        </div>}
 
         {/* Leaderboard - FEATURE #3 (Top Performers) */}
         <div

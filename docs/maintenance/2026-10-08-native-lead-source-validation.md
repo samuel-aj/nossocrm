@@ -38,3 +38,11 @@ Evidências locais ignoradas pelo Git em `tmp/performance-preview`: `native-sour
 Aplicar migrations da branch em ordem: `20261008161431_performance_lifecycle_history.sql`, depois `20261008193128_native_lead_source.sql`, antes do frontend/API dependentes das novas colunas. A migration de origem não atualiza a tabela operacional deals em massa, evitando disparos de automações por adoção. O legado é lido até a próxima escrita normal; a inicialização mantém null explícito distinto de ausência legada.
 
 Não apagar campos legados, UTMs, histórico ou colunas numa reversão emergencial. Preservar novos dados de origem e reverter o código da aplicação se necessário; avaliar a regra de ganho separadamente para não reintroduzir protocolo como assinatura. Antes de eventual publicação, conferir o estado remoto e migrations já aplicadas, sem reaplicar às cegas.
+
+## Ajuste somente visual — 08/10/2026
+
+A pedido do usuário após revisar a prévia, o gráfico de origens ocupa a coluna esquerda ao lado das etapas. Os totais de qualificados perdidos e desqualificados foram incorporados aos respectivos blocos de motivos; total geral e perdas sem classificação continuam acessíveis abaixo desses blocos.
+
+As etapas voltaram a colunas verticais, com escala iniciada em zero, quantidades acima das colunas, nomes completos e percentuais. A explicação da conversão está disponível por foco/tooltip. Em telas estreitas a rolagem horizontal fica dentro do gráfico. Nenhuma fórmula, base, filtro, regra de ganho/qualificação, migration ou exportação foi alterada nesta revisão.
+
+Validação desta revisão: 15/15 testes existentes em ReportsPage, LeadSourceChart, LossReasonsCard e StagePerformanceChart; lint dos cinco arquivos alterados; TypeScript (`npm run typecheck`); diff sem erros. Prévia real com dados fictícios conferida em desktop e viewport de 390px; largura do documento igual à largura visível no celular (375px úteis). Capturas locais: `tmp/performance-preview/report-layout-final.jpg` e `report-layout-mobile.jpg`. Continua somente local, sem publicação.

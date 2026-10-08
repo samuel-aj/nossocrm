@@ -12,7 +12,7 @@ export function LeadSourceChart({ groups, total, mode, legacySnapshotCount, onSe
   const titleId = useId();
   const slices = leadSourceSlices(groups);
   let offset = 0;
-  return <section aria-labelledby={titleId} className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-white/10 rounded-2xl p-5 sm:p-6">
+  return <section aria-labelledby={titleId} className="glass min-w-0 border border-slate-200 dark:border-white/5 rounded-xl p-5 shadow-sm">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
         <h2 id={titleId} className="flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-white"><PieChart size={18} className="text-primary-500" aria-hidden="true" />Origem dos leads</h2>
@@ -20,8 +20,8 @@ export function LeadSourceChart({ groups, total, mode, legacySnapshotCount, onSe
       </div>
       {total > 0 && <button type="button" onClick={() => onSelect()} className="inline-flex items-center gap-1 rounded-md text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline focus-visible:ring-2 focus-visible:ring-primary-500">Ver todas as origens<ArrowUpRight size={14} aria-hidden="true" /></button>}
     </div>
-    {!total ? <p className="py-12 text-center text-sm text-slate-500">Nenhum lead nesta base para distribuir por origem.</p> : <div className="grid items-center gap-6 mt-5 sm:grid-cols-[220px_1fr] lg:grid-cols-[260px_1fr]">
-      <div className="relative mx-auto w-52 h-52">
+    {!total ? <p className="py-12 text-center text-sm text-slate-500">Nenhum lead nesta base para distribuir por origem.</p> : <div className="grid items-center gap-4 mt-4 sm:grid-cols-[160px_1fr] lg:grid-cols-1 2xl:grid-cols-[140px_1fr]">
+      <div className="relative mx-auto w-40 h-40 2xl:w-36 2xl:h-36">
         <svg viewBox="0 0 200 200" className="w-full h-full overflow-visible" role="group" aria-label={`Distribuição de ${total} leads por origem`}>
           {slices.map(slice => {
             const start = offset;
@@ -33,15 +33,15 @@ export function LeadSourceChart({ groups, total, mode, legacySnapshotCount, onSe
               onClick={() => onSelect(slice.sourceKeys)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(slice.sourceKeys); } }}><title>{label}</title></circle>;
           })}
         </svg>
-        <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center"><span className="text-3xl font-semibold tracking-tight text-slate-900 dark:text-white">{total.toLocaleString('pt-BR')}</span><span className="text-xs text-slate-500 dark:text-slate-400">leads na base</span></div>
+        <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center"><span className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">{total.toLocaleString('pt-BR')}</span><span className="text-xs text-slate-500 dark:text-slate-400">leads na base</span></div>
       </div>
       <ul className="space-y-1" aria-label="Origens e participação na base">
         {slices.map(slice => <li key={slice.key}><button type="button" onClick={() => onSelect(slice.sourceKeys)} aria-label={`Detalhar ${slice.label}: ${slice.count} ${slice.count === 1 ? 'lead' : 'leads'}, ${formatReportRate(slice.percentage)}`}
-          className="group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-slate-50 dark:hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-primary-500">
+          className="group flex w-full items-center gap-2 rounded-lg px-1 py-2 text-left hover:bg-slate-50 dark:hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-primary-500">
           <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: slice.color }} />
-          <span className="min-w-0 flex-1 text-sm text-slate-700 dark:text-slate-200 break-words">{slice.label}</span>
-          <span className="text-sm font-semibold tabular-nums text-slate-900 dark:text-white">{slice.count.toLocaleString('pt-BR')}</span>
-          <span className="w-16 text-right text-xs tabular-nums text-slate-500 dark:text-slate-400">{formatReportRate(slice.percentage)}</span>
+          <span className="min-w-0 flex-1 text-xs text-slate-700 dark:text-slate-200 break-words">{slice.label}</span>
+          <span className="text-sm shrink-0 font-semibold tabular-nums text-slate-900 dark:text-white">{slice.count.toLocaleString('pt-BR')}</span>
+          <span className="w-12 shrink-0 text-right text-xs tabular-nums text-slate-500 dark:text-slate-400">{formatReportRate(slice.percentage)}</span>
           <ArrowUpRight size={13} aria-hidden="true" className="text-slate-400 group-hover:text-primary-500" />
         </button></li>)}
       </ul>

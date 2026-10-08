@@ -88,7 +88,7 @@ describe('tela Performance', () => {
       createdAt: '2026-08-01', isLost: true, isWon: false, closedAt: '2026-08-05', lossCategory: 'disqualified', lossReason: reason, value: 0 } as Deal));
     state.data = { ...calculatePerformance(deals, deals.map(deal => ({ dealId: deal.id, stageId: 'q', boardId: 'board', date: deal.createdAt })), board, { start: new Date('2026-08-01'), end: new Date('2026-08-31') }), deals };
     render(<ReportsPage />);
-    fireEvent.click(screen.getByRole('button', { name: 'Desqualificados 2' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Total desqualificados 2' }));
     const modal = screen.getByRole('dialog');
     expect(within(modal).getAllByRole('link')).toHaveLength(2);
     expect(within(modal).getByRole('link', { name: /Lead 0/ })).toHaveAttribute('href', '/boards?deal=lost-0');
