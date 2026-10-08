@@ -27,6 +27,7 @@ import {
 import { getProvider, type SendResult } from '@/lib/whatsapp';
 import { outboundKindFromMediaType } from '@/lib/whatsapp/quote';
 import { normalizePhoneE164 } from '@/lib/phone';
+import { checkSendWindow } from '@/lib/whatsapp/sendWindow';
 
 export const runtime = 'nodejs';
 
@@ -165,6 +166,8 @@ export async function POST(req: Request) {
     let failed = 0;
     let firstError: string | undefined;
     try {
+      const windowError = await checkSendWindow(auth.admin, orgId, conn, targetPhone, { isGroup: !!group });
+      if (windowError) throw new Error(windowError);
       const conv = group ?? (await ensureConversation(auth.admin, orgId, conn.id, target.phone));
       const provider = getProvider(conn);
 

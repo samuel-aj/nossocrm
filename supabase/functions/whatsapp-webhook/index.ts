@@ -19,6 +19,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { parseMessageDeletion, applyMessageDeletion } from "./deletions.ts";
 import { encryptedEdit, resolveEncryptedEdit } from "./encrypted-edits.ts";
 import { parseMessageEdit, applyMessageEdit } from "./edits.ts";
+import { applyDeliveryStatus } from "./statuses.ts";
 import { enrichMissingQuote, extractEvolutionQuoteContext, resolveQuoteWhenPresent, type QuoteSnapshot } from "../_shared/quotes.ts";
 
 const corsHeaders = {
@@ -601,31 +602,10 @@ Deno.serve(async (req) => {
   if (event === "messages.update") {
     // a Evolution pode mandar VÁRIOS updates num só evento — processa todos
     const items = Array.isArray(data) ? data : [data];
-    const map: Record<string, string> = {
-      SERVER_ACK: "sent",
-      DELIVERY_ACK: "delivered",
-      READ: "read",
-      PLAYED: "read",
-      ERROR: "failed",
-    };
-    // só avança o status (evento fora de ordem não rebaixa "lida" p/ "entregue")
-    const lowerThan: Record<string, string[]> = {
-      sent: ["queued"],
-      delivered: ["queued", "sent"],
-      read: ["queued", "sent", "delivered"],
-      failed: ["queued", "sent", "delivered"],
-    };
-    for (const item of items) {
-      const id = item?.key?.id ?? item?.keyId;
-      const raw = String(item?.status ?? item?.update?.status ?? "").toUpperCase();
-      const status = map[raw];
-      if (!id || !status) continue;
-      await supabase
-        .from("wa_messages")
-        .update({ status })
-        .eq("organization_id", orgId)
-        .eq("evolution_message_id", id)
-        .in("status", lowerThan[status] ?? []);
+    try {
+      for (const item of items) await applyDeliveryStatus(supabase, orgId, conn.id, item);
+    } catch {
+      return json(500, { error: "Não foi possível registrar o status de entrega" });
     }
     return json(200, { ok: true });
   }
