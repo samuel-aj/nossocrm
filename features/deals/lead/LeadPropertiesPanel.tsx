@@ -40,6 +40,9 @@ import { tagMarkerStyle } from "./tagMarkerStyle";
 import { DealStageControl } from "./DealStageControl";
 import { FollowupStatus } from "./FollowupStatus";
 import { invalidateLeadHistory } from "./leadHistoryInvalidation";
+import { LeadContactEditor } from "./LeadContactEditor";
+import { queryKeys } from "@/lib/query/queryKeys";
+import { newerRecord } from "@/lib/query/dealCache";
 
 export type LeadPropertiesPanelProps = {
   deal: Deal | DealView;
@@ -214,6 +217,7 @@ export function LeadPropertiesPanel({
     quantity: number;
   } | null>(null);
   const [ownerOpen, setOwnerOpen] = useState(false);
+  const [contactEditorOpen, setContactEditorOpen] = useState(false);
   const [tagsOpen, setTagsOpen] = useState(false);
   const [newTag, setNewTag] = useState("");
   const tagDraftRef = useRef({ value: "", revision: 0 });
@@ -255,6 +259,7 @@ export function LeadPropertiesPanel({
     setTagsOpen(false);
     setOptionsOpen(false);
     setOwnerOpen(false);
+    setContactEditorOpen(false);
     setPendingCount(0);
     setError(null);
     setLastSaved(null);
@@ -657,6 +662,7 @@ export function LeadPropertiesPanel({
     );
   };
   const hasUnsavedEditor =
+    contactEditorOpen ||
     titleDraft !== null ||
     valueDraft !== null ||
     descriptionDraft !== null ||
@@ -1085,6 +1091,35 @@ export function LeadPropertiesPanel({
             <span className="text-slate-500">Empresa</span>
             <span>{"companyName" in deal ? deal.companyName || "—" : "—"}</span>
           </div>
+          {canEdit && (contactEditorOpen ? (
+            <LeadContactEditor
+              key={identity}
+              currentContactId={deal.contactId}
+              saving={pendingRef.current.has(`${identity}:contact`)}
+              onCancel={() => setContactEditorOpen(false)}
+              onSave={nextContact => save("contact", async () => {
+                // The search can return a contact outside the initial list cache.
+                // Seed the same contact caches before the optimistic lead update.
+                client.setQueryData<Contact[]>(queryKeys.contacts.lists(), old => {
+                  if (!old) return old;
+                  const existing = old.find(row => row.id === nextContact.id);
+                  return existing
+                    ? old.map(row => row.id === nextContact.id ? newerRecord(row, nextContact)! : row)
+                    : [...old, nextContact];
+                });
+                client.setQueryData<Contact>(queryKeys.contacts.detail(nextContact.id), old => newerRecord(old, nextContact)!);
+                await updateDeal({ contactId: nextContact.id });
+              }, () => setContactEditorOpen(false))}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setContactEditorOpen(true)}
+              className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-primary-600 dark:text-primary-400 hover:underline"
+            >
+              <Pencil size={13} aria-hidden="true" /> {deal.contactId ? "Trocar contato" : "Vincular contato"}
+            </button>
+          ))}
         </SectionCard>
         <SectionCard
           title="Campos personalizados"

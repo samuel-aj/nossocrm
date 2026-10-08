@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import { readTabOrg } from '@/lib/tabOrg';
 import { queryKeys } from '@/lib/query/queryKeys';
+import { patchConversationCache } from '@/lib/whatsapp/conversationCache';
 
 type ConversationLink = {
   id: string; contact_id: string | null; deal_id: string | null;
@@ -33,9 +34,7 @@ export function useConversationLead(conversation: ConversationLink | null) {
       // Cancel older list requests before applying the authoritative link response.
       await client.cancelQueries({ queryKey: ['waConversations'] });
       if (signal.aborted || readTabOrg()?.id !== tabOrg) throw new Error('Consulta cancelada');
-      client.setQueriesData<{ data: ConversationLink[] }>({ queryKey: ['waConversations'] }, old => old ? {
-        ...old, data: old.data.map(c => c.id === resolved.id ? { ...c, ...resolved } : c),
-      } : old);
+      patchConversationCache(client, resolved.id, resolved);
       if (resolved.deal_id && resolved.deal_id !== conversation?.deal_id) {
         void client.invalidateQueries({ queryKey: queryKeys.deals.detail(resolved.deal_id) });
         void client.invalidateQueries({ queryKey: ['waLabels'] });

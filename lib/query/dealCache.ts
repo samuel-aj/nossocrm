@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query';
-import type { Deal, DealView } from '@/types';
+import type { Contact, Deal, DealView } from '@/types';
 import { DEALS_VIEW_KEY, queryKeys } from './queryKeys';
 import { readTabOrg } from '@/lib/tabOrg';
 
@@ -13,6 +13,12 @@ export function newerRecord<T extends { updatedAt?: string }>(cached: T | null |
 type PendingSave = { revision: number; tail: Promise<unknown>; confirmed: Deal | undefined };
 const saves = new WeakMap<QueryClient, Map<string, PendingSave>>();
 export const isDealSaving = (client: QueryClient, id: string) => saves.get(client)?.has(id) ?? false;
+
+function contactFields(client: QueryClient, contactId: string): Pick<DealView, 'contactName' | 'contactEmail' | 'contactPhone'> {
+  const contact = client.getQueryData<Contact>(queryKeys.contacts.detail(contactId))
+    ?? client.getQueryData<Contact[]>(queryKeys.contacts.lists())?.find(row => row.id === contactId);
+  return { contactName: contact?.name || 'Sem contato', contactEmail: contact?.email || '', contactPhone: contact?.phone || '' };
+}
 
 export function writeDeal(client: QueryClient, deal: Partial<Deal> & { id: string }) {
   client.setQueryData<DealView[]>(DEALS_VIEW_KEY, old => old?.map(row => row.id === deal.id ? { ...row, ...deal } : row));
@@ -48,7 +54,8 @@ export async function saveDeal(
   const revision = ++entry.revision;
   // Cancelling is synchronous; no stale list/detail response may undo this edit.
   const cancelled = client.cancelQueries({ queryKey: queryKeys.deals.all });
-  writeDeal(client, { ...updates, id });
+  const optimistic = updates.contactId === undefined ? updates : { ...updates, ...contactFields(client, updates.contactId) };
+  writeDeal(client, { ...optimistic, id });
   const previous = entry.tail;
   const operation = (async () => {
     await cancelled;
@@ -57,8 +64,27 @@ export async function saveDeal(
       if (!sameOrg()) throw new Error('A empresa mudou durante a gravação.');
       const { data, error } = await persist(id, updates);
       if (error) throw error;
-      entry.confirmed = { ...entry.confirmed, ...updates, ...data, id } as Deal;
+      entry.confirmed = { ...entry.confirmed, ...optimistic, ...data, id } as Deal;
       if (entry.revision === revision && sameOrg()) writeDeal(client, entry.confirmed);
+      if (updates.contactId !== undefined && sameOrg()) {
+        // The database atomically removes incompatible chat links. Old resolver
+        // responses must not reintroduce the previous lead after this save.
+        await Promise.all([
+          client.cancelQueries({ queryKey: ['waConversationLink'] }),
+          client.cancelQueries({ queryKey: ['waConversations'] }),
+        ]);
+        if (sameOrg()) {
+          type Conversation = { id: string; deal_id: string | null; contact_id: string | null; is_group?: boolean | null };
+          client.setQueriesData<{ data?: Conversation[] }>({ queryKey: ['waConversations'] }, old => old && Array.isArray(old.data) ? {
+            ...old, data: old.data.map(row => row.deal_id === id && !row.is_group
+              && (!entry.confirmed?.contactId || row.contact_id !== entry.confirmed.contactId)
+              ? { ...row, deal_id: null } : row),
+          } : old);
+          void client.resetQueries({ queryKey: ['waConversationLink'] });
+          void client.invalidateQueries({ queryKey: ['waConversations'] });
+          void client.invalidateQueries({ queryKey: ['waChat'] });
+        }
+      }
     } catch (error) {
       if (entry.revision === revision && entry.confirmed && sameOrg()) writeDeal(client, entry.confirmed);
       throw error;

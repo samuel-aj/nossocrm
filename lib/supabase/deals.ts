@@ -439,11 +439,23 @@ export const dealsService = {
       if (!supabase) {
         return { error: new Error('Supabase não configurado') };
       }
+      if (updates.contactId && !isValidUUID(updates.contactId)) {
+        return { error: new Error('Contato inválido. Selecione um contato da lista.') };
+      }
       const dbUpdates = transformDealToDb(updates);
       dbUpdates.updated_at = new Date().toISOString();
 
       const orgId = await getCurrentOrganizationId();
       if (!orgId) return { error: new Error('Organização não encontrada') };
+      if (updates.contactId) {
+        // Read through the user's RLS session, never service role. Database
+        // guards repeat validation atomically and enforce lead edit access.
+        const { data: contact, error: contactError } = await supabase.from('contacts')
+          .select('id').eq('organization_id', orgId).eq('id', updates.contactId)
+          .is('deleted_at', null).maybeSingle();
+        if (contactError) return { error: new Error('Não foi possível verificar o contato. Tente novamente.') };
+        if (!contact) return { error: new Error('Contato indisponível nesta organização. Atualize a lista.') };
+      }
       const { data, error } = await supabase
         .from('deals')
         .update(dbUpdates)

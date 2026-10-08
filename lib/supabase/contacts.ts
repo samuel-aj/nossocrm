@@ -351,6 +351,10 @@ export const contactsService = {
 
       // Apply filters
       if (filters) {
+        // Pickers must not offer a deleted contact that cannot be linked.
+        // Filter on the server so totalCount and page boundaries stay accurate.
+        if (filters.excludeDeleted) query = query.is('deleted_at', null);
+
         // Busca por NOME, E-MAIL ou TELEFONE. O telefone é guardado em E.164
         // (+5569...), então compara só dígitos: "9296", "(69) 99292-6666" e
         // "+5569992926666" acham o mesmo contato. Também tenta a outra grafia
