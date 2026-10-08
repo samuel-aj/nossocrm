@@ -1,3 +1,4 @@
+import { readDbLeadSource } from '@/lib/deals/leadSource';
 /**
  * Contexto de uma conversa para o agente: conversa, número, contato, negócio
  * e organização; histórico como mensagens do modelo; prompt de sistema.
@@ -114,7 +115,7 @@ export type ContextDeal = {
   /** Rótulos dos campos personalizados (chave -> rótulo), quando definidos na org */
   custom_field_labels: Record<string, string>;
   created_at: string | null;
-  /** Origem do lead: utm_source/origem dos campos personalizados ou a origem do contato */
+  /** Origem nativa do lead; UTMs permanecem nos campos personalizados */
   source: string | null;
 };
 
@@ -337,7 +338,7 @@ function profileDisplayName(p: ProfileNameRow | null | undefined): string | null
 }
 
 const DEAL_COLUMNS =
-  'id, title, board_id, stage_id, owner_id, tags, description, ai_context, value, custom_fields, created_at, contact_id';
+  'id, title, board_id, stage_id, owner_id, tags, description, ai_context, value, custom_fields, lead_source, lead_source_initialized, created_at, contact_id';
 
 type DealRaw = {
   id: string;
@@ -350,18 +351,11 @@ type DealRaw = {
   ai_context: string | null;
   value: number | string | null;
   custom_fields: Record<string, unknown> | null;
+  lead_source: string | null;
+  lead_source_initialized: boolean;
   created_at: string | null;
   contact_id: string | null;
 };
-
-/** Origem do lead a partir dos campos personalizados (utm_source/origem) ou do contato. */
-function dealSource(customFields: Record<string, unknown>, contactSource: string | null): string | null {
-  for (const key of ['utm_source', 'origem', 'source', 'fonte']) {
-    const v = customFields[key];
-    if (typeof v === 'string' && v.trim()) return v.trim();
-  }
-  return contactSource?.trim() || null;
-}
 
 export async function loadDealContext(
   admin: SupabaseClient,
@@ -402,7 +396,7 @@ export async function loadDealContext(
       : {};
   const cfKeys = Object.keys(customFields);
 
-  const [stageRes, boardRes, ownerRes, defsRes, contactRes, items, groupField] = await Promise.all([
+  const [stageRes, boardRes, ownerRes, defsRes, items, groupField] = await Promise.all([
     deal.stage_id
       ? admin.from('board_stages').select('label, name').eq('organization_id', organizationId).eq('id', deal.stage_id).maybeSingle()
       : Promise.resolve({ data: null }),
@@ -419,9 +413,6 @@ export async function loadDealContext(
       : Promise.resolve({ data: null }),
     cfKeys.length > 0
       ? admin.from('custom_field_definitions').select('key, label').eq('organization_id', organizationId).in('key', cfKeys)
-      : Promise.resolve({ data: null }),
-    deal.contact_id
-      ? admin.from('contacts').select('source').eq('organization_id', organizationId).eq('id', deal.contact_id).maybeSingle()
       : Promise.resolve({ data: null }),
     loadDealItems(admin, organizationId, deal.id),
     getDealWhatsappGroupField(admin, organizationId, deal.id).catch(() => ({})),
@@ -452,7 +443,7 @@ export async function loadDealContext(
     custom_fields: customFields,
     custom_field_labels: labels,
     created_at: deal.created_at ?? null,
-    source: dealSource(customFields, (contactRes.data as { source?: string | null } | null)?.source ?? null),
+    source: readDbLeadSource(deal),
   };
 }
 
@@ -753,7 +744,7 @@ export function buildLeadDataBlock(ctx: ConversationContext, opts?: AgentLeadCon
   push('Quadro / etapa', where);
   push('Responsável', deal.owner_name);
   push('Rótulos', deal.tags);
-  push('Origem', deal.source);
+  push('Origem', deal.source ?? 'Não informado');
   push('Cadastrado em', formatDatePtBr(deal.created_at));
   // A descrição guarda o histórico do lead (notas da equipe, resumos de atendimentos):
   // cabe muito mais que um campo comum, e pode ser desligada na configuração do agente.
@@ -765,7 +756,7 @@ export function buildLeadDataBlock(ctx: ConversationContext, opts?: AgentLeadCon
   }
   if (mostrar.custom_fields) {
     for (const [key, value] of Object.entries(deal.custom_fields ?? {})) {
-      if (!key) continue;
+      if (!key || key === 'origem') continue;
       push(deal.custom_field_labels[key] || key, value);
     }
   }

@@ -5,6 +5,7 @@ import { Phone, Copy, Check, Hourglass, Trophy, XCircle, Package, UserX } from '
 import { ActivityStatusIcon } from './ActivityStatusIcon';
 import { OwnerBadge } from './OwnerBadge';
 import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
+import { getDealLeadSource } from '@/lib/deals/leadSource';
 
 /** Chegada do lead no card: "Hoje - 14:32", "Ontem - 09:15" ou "12/08 - 18:40". */
 function rotuloChegada(iso: string): string {
@@ -378,7 +379,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
             <div key={`${deal.id}-${field.id}`} className="text-sm">
               <span className="text-slate-500">{field.label}: </span>
               {(() => {
-                const value = deal.customFields?.[field.key];
+                const value = field.key === 'origem' ? getDealLeadSource(deal) : deal.customFields?.[field.key];
                 if (value === undefined || value === null || String(value).trim() === '') {
                   return (
                     <span className="italic text-slate-500 dark:text-slate-400">

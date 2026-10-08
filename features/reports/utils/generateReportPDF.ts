@@ -3,6 +3,7 @@ import autoTable from 'jspdf-autotable';
 import type { PerformanceMetrics } from '../performanceMetrics';
 import { groupLossReasons } from '@/lib/utils/lossDetails';
 import { REPORT_MODES, formatReportRate, type ReportMode } from '../reportPresentation';
+import { LEAD_SOURCE_BASE, LEAD_SOURCE_HISTORY_NOTE } from '../leadSourceReport';
 
 export interface ReportContext { mode?: ReportMode; boardName: string; period: string; range: string; owner: string; product?: string; customerPipeline?: boolean; generatedBy: string }
 
@@ -40,6 +41,10 @@ export function generateReportPDF(data: PerformanceMetrics & { webhookUnavailabl
   autoTable(doc, { startY: 29 + headerLines.length * 4.5 + 6, head: [['Indicador', 'Resultado', 'Base']], body, styles: { fontSize: 9 }, headStyles: { fillColor: [30, 41, 59] } });
   autoTable(doc, { head: [[info.chartTitle, 'Leads distintos', 'Percentual / Base']], body: data.stageData.map(stage => [stage.name, stage.count,
     stage.conversionRate == null ? '—' : `${formatReportRate(stage.conversionRate)} · ${stage.comparisonBase}`]), styles: { fontSize: 9 } });
+  autoTable(doc, { head: [['Origem do lead', 'Leads', '% da base']], body: [
+    ...data.leadSourceGroups.map(group => [group.label, group.count, formatReportRate(group.percentage)]),
+    ['Total da base', data.leadSourceTotal, data.leadSourceTotal ? '100,0%' : '—'],
+  ], styles: { fontSize: 9 } });
   const reasonRows: (string | number)[][] = [];
   for (const category of ['qualified', 'disqualified', undefined]) {
     const deals = data.lostDeals.filter(deal => deal.lossCategory === category || (!category && !deal.lossCategory));
@@ -50,6 +55,9 @@ export function generateReportPDF(data: PerformanceMetrics & { webhookUnavailabl
   const coverage = data.coverage;
   autoTable(doc, { head: [['Como ler este relatório']], body: [
     [info.description],
+    [`Origem dos leads: ${LEAD_SOURCE_BASE[mode]} Cada lead conta uma vez; Não informado faz parte do total.`],
+    ...(mode !== 'current' ? [['A origem usa o registro histórico da entrada; na coorte, a primeira presença comprovada no funil.']] : []),
+    ...(coverage.legacyLeadSourceSnapshotCount ? [[`${coverage.legacyLeadSourceSnapshotCount} ${coverage.legacyLeadSourceSnapshotCount === 1 ? 'lead tem' : 'leads têm'} origem histórica reconstruída ou indisponível. ${LEAD_SOURCE_HISTORY_NOTE}`]] : []),
     ...(!context.customerPipeline ? [['Fechamento automático = promoção para Cliente. Etapas posteriores, como protocolo, não geram outro ganho nem alteram sua data. A primeira promoção comprovada de cada jornada define o fechamento; reaberturas iniciam uma nova jornada.']] : []),
     [cohort ? 'Qualificação: qualificados / leads do mesmo grupo. Fechamento: ganhos entre os qualificados / qualificados do mesmo grupo. Sem denominador: traço.' : mode === 'period' ? 'Os volumes usam as datas de cada acontecimento; não são taxas de conversão. Um lead pode ter perda, reabertura e ganho no mesmo intervalo.' : 'Cada negócio aberto aparece na sua etapa atual.'],
     ...(mode !== 'current' ? [

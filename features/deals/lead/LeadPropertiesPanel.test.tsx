@@ -54,6 +54,7 @@ vi.mock("@/context/CRMContext", () => ({
     products: [{ id: "product", name: "Serviço", price: 100 }],
     boards: [{ id: "board", name: "Funil", hiddenFieldGroups: ["Oculto"] }],
     customFieldDefinitions: [
+      { id: 'legacy-source', key: 'origem', label: 'Origem legada', type: 'select', options: ['Evento antigo'] },
       { id: "utm1", key: "utm_source", label: "Fonte UTM", type: "text" },
       { id: "utm2", key: "utm_extra", label: "Extra UTM", type: "number" },
       { id: "z", key: "z", label: "Z field", type: "text", groupName: "Zebra" },
@@ -187,6 +188,37 @@ beforeEach(() => {
 });
 
 describe("LeadPropertiesPanel", () => {
+  it('edits native source and explicitly clears legacy source without rewriting custom fields or UTMs', async () => {
+    const current = { ...deal, customFields: { origem: 'Evento antigo', utm_source: 'google', utm_campaign: 'Campanha original' } };
+    setup(current);
+    const select = screen.getByRole('combobox', { name: 'Origem do lead' });
+    expect(select).toHaveTextContent('Evento antigo');
+    fireEvent.click(screen.getByRole('button', { name: /Campos personalizados/ }));
+    expect(screen.queryByText('Origem legada')).not.toBeInTheDocument();
+    await userEvent.click(select);
+    await userEvent.click(screen.getByRole('option', { name: 'Não informado' }));
+    await waitFor(() => expect(mocks.updateDeal).toHaveBeenCalledWith('lead-1', { leadSource: null }, { throwOnError: true }));
+    expect(current.customFields).toEqual({ origem: 'Evento antigo', utm_source: 'google', utm_campaign: 'Campanha original' });
+  });
+
+  it('respects explicit unknown source over legacy data and read-only permission', () => {
+    mocks.edit = false;
+    setup({ ...deal, leadSource: null, customFields: { origem: 'Evento antigo' } });
+    const select = screen.getByRole('combobox', { name: 'Origem do lead' });
+    expect(select).toHaveTextContent('Não informado');
+    expect(select).toBeDisabled();
+    expect(mocks.updateDeal).not.toHaveBeenCalled();
+  });
+
+  it('keeps the prior source visible and reports a rejected save', async () => {
+    mocks.updateDeal.mockRejectedValue(new Error('Origem não salva'));
+    setup({ ...deal, leadSource: 'Google Ads' });
+    await userEvent.click(screen.getByRole('combobox', { name: 'Origem do lead' }));
+    await userEvent.click(screen.getByRole('option', { name: 'Meta Ads' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Origem não salva'));
+    expect(screen.getByRole('combobox', { name: 'Origem do lead' })).toHaveTextContent('Google Ads');
+  });
+
   it("changes only the lead contact and seeds the selected contact for the chat", async () => {
     const { client } = setup();
     client.setQueryData(queryKeys.contacts.lists(), [contact]);

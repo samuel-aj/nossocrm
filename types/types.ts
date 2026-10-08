@@ -250,6 +250,8 @@ export interface Deal {
   tags: string[];
   aiSummary?: string;
   customFields?: Record<string, any>; // Dynamic fields storage
+  /** Acquisition source; null is explicitly unknown, undefined allows legacy origem. */
+  leadSource?: string | null;
   lastStageChangeDate?: string; // For stagnation tracking
   lossReason?: string; // For win/loss analysis
   lossCategory?: 'qualified' | 'disqualified'; // Lead was qualified or disqualified when lost

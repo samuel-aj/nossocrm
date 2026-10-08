@@ -25,6 +25,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useCRM } from '@/context/CRMContext';
 import { useMoveDealSimple } from '@/lib/query/hooks';
 import { normalizePhoneE164 } from '@/lib/phone';
+import { buildDealLeadSourceContext } from '@/lib/deals/leadSourceContext';
 
 import { useAIDealAnalysis, deriveHealthFromProbability } from '@/features/inbox/hooks/useAIDealAnalysis';
 import { useDealNotes } from '@/features/inbox/hooks/useDealNotes';
@@ -837,7 +838,7 @@ export default function DealCockpitClient({ dealId }: { dealId?: string }) {
       nextActivity: selectedDeal.nextActivity,
       tags: selectedDeal.tags,
       items: selectedDeal.items,
-      customFields: selectedDeal.customFields,
+      ...buildDealLeadSourceContext(selectedDeal),
       lastStageChangeDate: selectedDeal.lastStageChangeDate,
       lossReason: selectedDeal.lossReason,
       createdAt: selectedDeal.createdAt,

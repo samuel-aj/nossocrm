@@ -1,7 +1,8 @@
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, expect, it, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import { ChatsPage } from './ChatsPage';
 
 const mocks = vi.hoisted(() => ({ addDeal: vi.fn(), addToast: vi.fn() }));
@@ -26,9 +27,15 @@ vi.mock('@/features/deals/lead/DealStageControl', () => ({ DealStageControl: () 
 vi.mock('@/features/whatsapp/DealWhatsAppChat', () => ({ DealWhatsAppChat: ({ headerContext }: { headerContext?: React.ReactNode }) => <div>{headerContext}</div> }));
 
 let client: QueryClient;
+beforeAll(() => {
+  HTMLElement.prototype.hasPointerCapture = () => false;
+  HTMLElement.prototype.setPointerCapture = () => {};
+  HTMLElement.prototype.releasePointerCapture = () => {};
+  HTMLElement.prototype.scrollIntoView = () => {};
+});
 afterEach(() => { cleanup(); client?.clear(); vi.unstubAllGlobals(); });
 
-it('creates and manually links a lead without treating the unread counter as a list', async () => {
+it.each(['Indicação', null])('creates and links a lead with source %s without treating the unread counter as a list', async source => {
   mocks.addDeal.mockReset().mockResolvedValue(lead);
   mocks.addToast.mockReset();
   let linked = false;
@@ -52,9 +59,13 @@ it('creates and manually links a lead without treating the unread counter as a l
   fireEvent.click(await screen.findByRole('button', { name: /João.*Olá/ }));
   fireEvent.click(screen.getByRole('button', { name: 'Criar lead' }));
   expect(screen.getByRole('heading', { name: 'Criar lead' })).toBeInTheDocument();
+  if (source) {
+    await userEvent.click(screen.getByRole('combobox', { name: 'Origem do lead' }));
+    await userEvent.click(screen.getByRole('option', { name: source }));
+  }
   fireEvent.click(screen.getAllByRole('button', { name: 'Criar lead' }).at(-1)!);
   await waitFor(() => expect(mocks.addToast).toHaveBeenCalledWith('Lead criado em "Vendas"!', 'success'));
-  expect(mocks.addDeal).toHaveBeenCalledWith(expect.objectContaining({ contactId: 'joao', title: 'João', boardId: 'board', status: 'new' }));
+  expect(mocks.addDeal).toHaveBeenCalledWith(expect.objectContaining({ contactId: 'joao', title: 'João', boardId: 'board', status: 'new', leadSource: source }));
   expect(fetcher).toHaveBeenCalledWith('/api/whatsapp/conversations/chat', expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ dealId: 'new-lead' }) }));
   expect(mocks.addToast.mock.calls.some(([, variant]) => variant === 'error')).toBe(false);
   expect(screen.queryByRole('heading', { name: 'Criar lead' })).not.toBeInTheDocument();

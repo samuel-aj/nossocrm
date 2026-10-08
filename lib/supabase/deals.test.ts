@@ -48,3 +48,48 @@ describe('reassigning a lead contact', () => {
     expect(mocks.from.mock.calls).toEqual([['deals']]);
   });
 });
+
+describe('native lead source writes', () => {
+  beforeEach(() => { vi.clearAllMocks(); mocks.organization.mockResolvedValue('current-org'); });
+  it.each([undefined, null, '  Feira   local  '])('creates a deal with deliberate source intent %s without rewriting original UTMs', async leadSource => {
+    const board = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: vi.fn().mockResolvedValue({ data: { id: contactId, organization_id: dealId }, error: null }) };
+    const normalized = leadSource === null ? null : leadSource ? 'Feira local' : 'Meta Ads';
+    const lead = { insert: vi.fn().mockReturnThis(), select: vi.fn().mockReturnThis(), single: vi.fn().mockResolvedValue({ data: { id: dealId, lead_source: normalized, lead_source_initialized: true }, error: null }) };
+    const items = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockResolvedValue({ data: [], error: null }) };
+    mocks.from.mockImplementation(table => table === 'boards' ? board : table === 'deals' ? lead : items);
+    const fields = { origem: 'Meta Ads', utm_campaign: 'Original campaign' };
+    const input = { boardId: contactId, title: 'New lead', status: contactId, items: [], customFields: fields, leadSource } as Parameters<typeof dealsService.create>[0];
+    const result = await dealsService.create(input);
+    expect(result.error).toBeNull();
+    expect(result.data?.leadSource).toBe(normalized);
+    const payload = lead.insert.mock.calls[0][0];
+    expect(payload.custom_fields).toEqual(fields);
+    if (leadSource === undefined) {
+      expect(payload).not.toHaveProperty('lead_source');
+      expect(payload).not.toHaveProperty('lead_source_initialized');
+    } else {
+      expect(payload).toMatchObject({ lead_source: normalized, lead_source_initialized: true });
+    }
+  });
+  it('sends explicit clear and initialization, then returns authoritative database source for the shared cache', async () => {
+    const lead = query({ data: { id: dealId, lead_source: null, lead_source_initialized: true, custom_fields: { origem: 'Meta Ads' } }, error: null });
+    mocks.from.mockReturnValue(lead);
+    const result = await dealsService.update(dealId, { leadSource: null, customFields: { origem: 'Meta Ads' } });
+    expect(lead.update).toHaveBeenCalledWith(expect.objectContaining({ lead_source: null, lead_source_initialized: true, custom_fields: { origem: 'Meta Ads' } }));
+    expect(result.data?.leadSource).toBeNull();
+  });
+  it('omits source fields entirely for unrelated edits, preserving lazy legacy initialization on the server', async () => {
+    const lead = query({ data: { id: dealId, lead_source: 'Meta Ads', lead_source_initialized: true }, error: null });
+    mocks.from.mockReturnValue(lead);
+    expect((await dealsService.update(dealId, { title: 'Edited', leadSource: undefined })).data?.leadSource).toBe('Meta Ads');
+    expect(lead.update.mock.calls[0][0]).not.toHaveProperty('lead_source');
+    expect(lead.update.mock.calls[0][0]).not.toHaveProperty('lead_source_initialized');
+  });
+  it('normalizes a custom category but never changes the preserved legacy/UTM object', async () => {
+    const lead = query({ data: { id: dealId, lead_source: 'Feira presencial', lead_source_initialized: true }, error: null });
+    mocks.from.mockReturnValue(lead);
+    const fields = { origem: 'Original', utm_campaign: 'Original campaign' };
+    await dealsService.update(dealId, { leadSource: ' Feira\n presencial ', customFields: fields });
+    expect(lead.update).toHaveBeenCalledWith(expect.objectContaining({ lead_source: 'Feira presencial', lead_source_initialized: true, custom_fields: fields }));
+  });
+});

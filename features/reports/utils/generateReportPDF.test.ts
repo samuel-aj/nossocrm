@@ -2,6 +2,8 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { Board, Deal } from '@/types';
 import { calculatePerformance } from '../performanceMetrics';
 import { generateReportPDF } from './generateReportPDF';
+import { august, board as fixtureBoard, lead, lifecycle, snapshot } from '../performanceTestFixtures';
+import { reportDrilldown } from '../reportDrilldown';
 
 const output = vi.hoisted(() => ({ table: vi.fn(), text: vi.fn(), save: vi.fn() }));
 vi.mock('jspdf', () => ({ jsPDF: class {
@@ -15,6 +17,18 @@ const context = { boardName: 'DBA', period: 'Agosto', range: '01/08 a 31/08', ow
 const tables = () => output.table.mock.calls.map(call => call[1]);
 beforeEach(() => vi.clearAllMocks());
 describe('PDF Performance', () => {
+  it('exporta todas as origens da mesma base da pizza e lista, incluindo null e histórico reconstruído', () => {
+    const deals = [lead('one', { leadSource: 'Meta Ads' }), lead('two', { leadSource: null }), lead('three', { leadSource: 'Google Ads' })];
+    const events = deals.map(deal => lifecycle(deal, 'entered_board', deal.createdAt, { leadSourceSnapshotSource: deal.id === 'three' ? 'current' : 'transition' }));
+    const data = calculatePerformance(deals, [], fixtureBoard, august, '', undefined, snapshot, { lifecycleEvents: events });
+    const detail = reportDrilldown({ ...data, deals }, { kind: 'source' });
+    generateReportPDF(data, context);
+    const sourceTable = tables().find(table => table.head[0][0] === 'Origem do lead');
+    expect(sourceTable.body).toEqual([['Google Ads', 1, '33,3%'], ['Meta Ads', 1, '33,3%'], ['Não informado', 1, '33,3%'], ['Total da base', 3, '100,0%']]);
+    expect(detail.groups[0].deals).toHaveLength(sourceTable.body.at(-1)[1]);
+    expect(JSON.stringify(tables())).toContain('1 lead tem origem histórica reconstruída ou indisponível');
+    expect(JSON.stringify(tables())).toContain('Não informado faz parte do total');
+  });
   it('explica denominadores da mesma coorte e limita a qualificação a datas comprovadas', () => {
     const metrics = calculatePerformance([], [], board, range);
     generateReportPDF(metrics, context);

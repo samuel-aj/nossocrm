@@ -33,6 +33,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { DealWhatsAppChat } from '@/features/whatsapp/DealWhatsAppChat';
 import { NativeSelect } from '@/components/ui/NativeSelect';
+import { LeadSourceSelect } from '@/features/deals/components/LeadSourceSelect';
 import { ChatCrmHeader, ChatCrmHeaderActions } from './ChatCrmHeader';
 import { DealStageControl } from '@/features/deals/lead/DealStageControl';
 import { useLeadConversation } from '@/features/deals/lead/useLeadConversation';
@@ -251,6 +252,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
   const [leadModalOpen, setLeadModalOpen] = useState(false);
   const [leadBoardId, setLeadBoardId] = useState('');
   const [leadStageId, setLeadStageId] = useState('');
+  const [leadSource, setLeadSource] = useState<string | null>(null);
   const [leadBusy, setLeadBusy] = useState(false);
 
   // Modal "Novo grupo" (Groups API da Meta: grupo criado pela empresa, entrada por convite)
@@ -1056,6 +1058,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
     const firstBoard = boards[0];
     setLeadBoardId(firstBoard?.id || '');
     setLeadStageId(firstBoard?.stages[0]?.id || '');
+    setLeadSource(null);
     setLeadModalOpen(true);
   };
 
@@ -1078,6 +1081,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
         tags: [],
         owner: { name: 'Eu', avatar: 'https://i.pravatar.cc/150?u=me' },
         customFields: {},
+        leadSource,
         isWon: false,
         isLost: false,
       } as Omit<Deal, 'id' | 'createdAt'>);
@@ -2350,6 +2354,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                   ))}
                 </NativeSelect>
               </div>
+              <LeadSourceSelect value={leadSource} onChange={setLeadSource} disabled={leadBusy} />
             </div>
             <div className="flex justify-end gap-2 mt-5">
               <button

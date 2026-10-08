@@ -1,4 +1,5 @@
 import type { Deal, DealItem } from '@/types';
+import { getDealLeadSource, normalizeLeadSource } from '@/lib/deals/leadSource';
 
 export type PerformanceMode = 'cohort' | 'period' | 'current';
 export type LifecycleEventType = 'entered_board' | 'left_board' | 'qualified' | 'won' | 'lost' | 'reopened' | 'stage_changed';
@@ -8,13 +9,16 @@ export interface LifecycleEvent {
   stageId?: string; ownerId?: string; owner?: Deal['owner']; value: number; title: string;
   dealCreatedAt: string; items: DealItem[]; lossCategory?: Deal['lossCategory']; lossReason?: string;
   isWon: boolean; isLost: boolean;
+  leadSource?: string | null; leadSourceSnapshotSource?: 'transition' | 'current';
 }
+export type HistoricalReportDeal = Deal & { leadSourceSnapshotSource?: 'transition' | 'current' };
 export interface DbLifecycleEvent {
   id: string; deal_id: string; board_id: string; event_type: LifecycleEventType;
   occurred_at: string; recorded_at?: string | null; source: LifecycleEvent['source']; snapshot_source: LifecycleEvent['snapshotSource'];
   stage_id: string | null; owner_id: string | null; value: number | string; title: string;
   deal_created_at: string; items: unknown; loss_category: Deal['lossCategory'] | null;
   loss_reason: string | null; is_won: boolean; is_lost: boolean;
+  lead_source?: string | null; lead_source_snapshot_source?: 'transition' | 'current';
 }
 export function lifecycleEventFromRow(row: DbLifecycleEvent): LifecycleEvent {
   const items: DealItem[] = Array.isArray(row.items) ? row.items.flatMap((item: unknown) => {
@@ -28,10 +32,12 @@ export function lifecycleEventFromRow(row: DbLifecycleEvent): LifecycleEvent {
     stageId: row.stage_id || undefined, ownerId: row.owner_id || undefined, value: Number(row.value) || 0,
     title: row.title, dealCreatedAt: row.deal_created_at, items,
     lossCategory: row.loss_category || undefined, lossReason: row.loss_reason || undefined,
-    isWon: !!row.is_won, isLost: !!row.is_lost };
+    isWon: !!row.is_won, isLost: !!row.is_lost,
+    leadSource: normalizeLeadSource(row.lead_source),
+    leadSourceSnapshotSource: row.lead_source !== undefined ? row.lead_source_snapshot_source || 'current' : 'current' };
 }
 /** Snapshot fields deliberately override today's owner, products and outcome. */
-export function dealAtEvent(deal: Deal, event: LifecycleEvent): Deal {
+export function dealAtEvent(deal: Deal, event: LifecycleEvent): HistoricalReportDeal {
   return { ...deal, boardId: event.boardId, title: event.title, createdAt: event.dealCreatedAt,
     updatedAt: event.date, status: event.stageId || '', ownerId: event.ownerId,
     owner: event.owner || (event.ownerId === deal.ownerId ? deal.owner : { name: event.ownerId ? 'Responsável não disponível' : 'Sem responsável', avatar: '' }),
@@ -40,7 +46,10 @@ export function dealAtEvent(deal: Deal, event: LifecycleEvent): Deal {
     closedAt: event.type === 'won' || event.type === 'lost' ? event.date : undefined,
     qualifiedAt: event.type === 'qualified' ? event.date : undefined,
     qualificationDateSource: event.type === 'qualified' ? event.source : undefined,
-    lossCategory: event.lossCategory, lossReason: event.lossReason };
+    lossCategory: event.lossCategory, lossReason: event.lossReason,
+    // Explicit null in a snapshot must never read through today's legacy origem.
+    leadSource: event.leadSource !== undefined ? normalizeLeadSource(event.leadSource) : getDealLeadSource(deal),
+    leadSourceSnapshotSource: event.leadSource !== undefined ? event.leadSourceSnapshotSource || 'current' : 'current' };
 }
 export function matchesReportFilters(deal: Deal, ownerId: string, productId: string) {
   return (!ownerId || deal.ownerId === ownerId) && (!productId || (productId === '__none__'

@@ -1,6 +1,9 @@
 import type { Board, Deal } from '@/types';
 import { compareHistoricalDates, dealAtEvent, matchesReportFilters, normalizeWonEpisodes, type LifecycleEvent, type PerformanceMode } from './performanceHistory';
 import { firstCustomerStage, isAutomaticWonStage, isLostBoardStage } from '@/lib/boards/boardOutcome';
+import { getDealLeadSource } from '@/lib/deals/leadSource';
+import { groupLeadSources } from './leadSourceReport';
+import type { HistoricalReportDeal } from './performanceHistory';
 export type { LifecycleEvent, PerformanceMode } from './performanceHistory';
 
 export interface StageEvent { dealId: string; stageId: string; date: string; fromStageId?: string; boardId?: string }
@@ -73,11 +76,11 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   const ledgerFor = (id: string) => ledgerByDeal.get(id) || [];
   const historical = (event: LifecycleEvent) => dealAtEvent(byId.get(event.dealId)!, event);
   const legacyIds = new Set<string>();
-  const snapshotAt = (deal: Deal, date: string, stageId?: string): Deal => {
+  const snapshotAt = (deal: Deal, date: string, stageId?: string): HistoricalReportDeal => {
     const exact = ledgerFor(deal.id).find(event => time(event.date) === time(date) && (!stageId || event.stageId === stageId));
     const snapshot = exact || ledgerFor(deal.id).filter(event => time(event.date) <= time(date)).at(-1);
     if (!exact || exact.snapshotSource === 'current') legacyIds.add(deal.id);
-    const value = snapshot ? historical(snapshot) : { ...deal, boardId: board.id, isWon: false, isLost: false, closedAt: undefined, qualifiedAt: undefined };
+    const value: HistoricalReportDeal = snapshot ? historical(snapshot) : { ...deal, boardId: board.id, isWon: false, isLost: false, closedAt: undefined, qualifiedAt: undefined, leadSourceSnapshotSource: 'current' };
     return { ...value, status: stageId || value.status, updatedAt: date };
   };
   const canonical = [...ledger];
@@ -90,6 +93,7 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
     canonical.push({ id, dealId: deal.id, boardId: board.id, type, date,
       recordedAt: exact?.recordedAt, source: exact?.source || 'history', snapshotSource: exact?.snapshotSource || 'current', stageId, ownerId: snapshot.ownerId, owner: snapshot.owner,
       value: snapshot.value, title: snapshot.title, dealCreatedAt: snapshot.createdAt, items: snapshot.items,
+      leadSource: getDealLeadSource(snapshot), leadSourceSnapshotSource: exact?.leadSourceSnapshotSource || 'current',
       lossCategory: snapshot.lossCategory, lossReason: snapshot.lossReason, isWon: type === 'won', isLost: type === 'lost' });
     return id;
   };
@@ -174,6 +178,8 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   const currentDeals = deals.filter(deal => deal.boardId === board.id && !deal.isWon && !deal.isLost && !derivedCustomerWin(deal) && filtered(deal));
   const currentValue = currentDeals.reduce((sum, deal) => sum + deal.value, 0);
   const entries = mode === 'cohort' ? cohort : mode === 'current' ? currentDeals : distinct(select('entered_board').map(historical));
+  const leadSourceGroups = groupLeadSources(entries);
+  const legacyLeadSourceSnapshotCount = mode === 'current' ? 0 : entries.filter(deal => (deal as HistoricalReportDeal).leadSourceSnapshotSource !== 'transition').length;
   const qualifiedDeals = mode === 'current' ? [] : distinct(select('qualified').map(historical));
   const qualifiedIds = new Set(qualifiedDeals.map(deal => deal.id));
   const qualificationDates = new Map([...firstQualified].filter(([id]) => qualifiedIds.has(id)).map(([id, event]) => [id, event.date]));
@@ -227,12 +233,13 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   const reportedIds = new Set([...entries, ...qualifiedDeals, ...wonDeals, ...lostDeals, ...reopenedDeals, ...stageData.flatMap(stage => stage.deals)].map(deal => deal.id));
   return {
     mode, usesCustomerPromotion: board.linkedLifecycleStage !== 'CUSTOMER', cutoffDate: new Date(cutoff).toISOString(), entries, qualifiedDeals, cohortWonDeals, currentDeals, currentValue, reopenedDeals,
+    leadSourceGroups, leadSourceTotal: entries.length,
     estimatedQualificationIds, qualifiedIds, qualificationDates, leadQualificationDates, qualifiedCount: qualifiedIds.size,
     qualificationRate: mode === 'cohort' && rules.qualifiedIndex >= 0 ? rate(qualifiedIds.size, entries.length) : null,
     closingRate: mode === 'cohort' && rules.qualifiedIndex >= 0 ? rate(cohortWonDeals.length, qualifiedIds.size) : null,
     hasQualifiedStage: rules.qualifiedIndex >= 0, wonDeals, lostDeals, unknownQualification, unknownClosure,
     coverage: { unknownQualificationCount: unknownQualification.length, estimatedQualificationCount: estimatedQualificationIds.size, unknownBoardMembershipCount,
-      unknownClosureCount: unknownClosure.length, legacySnapshotCount: [...legacyIds].filter(id => reportedIds.has(id)).length },
+      unknownClosureCount: unknownClosure.length, legacySnapshotCount: [...legacyIds].filter(id => reportedIds.has(id)).length, legacyLeadSourceSnapshotCount },
     wonRevenue, previousRevenue, revenueChange: previousRevenue !== null && previousRevenue > 0 ? (wonRevenue - previousRevenue) / previousRevenue * 100 : null,
     fastestSalesCycle: cycles.length ? Math.round(Math.min(...cycles)) : null,
     slowestSalesCycle: cycles.length ? Math.round(Math.max(...cycles)) : null,

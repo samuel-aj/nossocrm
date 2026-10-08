@@ -1,3 +1,4 @@
+import { publicDealSource } from '@/lib/public-api/leadSource';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { withActor } from '@/lib/supabase/actorClient';
 import { normalizeEmail, normalizePhone } from '@/lib/public-api/sanitize';
@@ -121,11 +122,11 @@ export async function moveStageByDealId(opts: {
     .eq('organization_id', opts.organizationId)
     .eq('id', dealId)
     .eq('board_id', boardId)
-    .select('id,title,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at')
+    .select('id,title,value,lead_source,lead_source_initialized,custom_fields,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at')
     .maybeSingle();
   if (error) return { ok: false as const, status: 500, body: { error: error.message, code: 'DB_ERROR' } };
   if (!data) return { ok: false as const, status: 404, body: { error: 'Deal not found', code: 'NOT_FOUND' } };
-  return { ok: true as const, status: 200, body: { data, action: 'moved' } };
+  return { ok: true as const, status: 200, body: { data: publicDealSource(data), action: 'moved' } };
 }
 
 export async function moveStageByIdentity(opts: {
@@ -226,10 +227,10 @@ export async function moveStageByIdentity(opts: {
     .eq('organization_id', opts.organizationId)
     .eq('id', dealId)
     .eq('board_id', boardId)
-    .select('id,title,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at')
+    .select('id,title,value,lead_source,lead_source_initialized,custom_fields,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at')
     .maybeSingle();
   if (updateError) return { ok: false as const, status: 500, body: { error: updateError.message, code: 'DB_ERROR' } };
   if (!updated) return { ok: false as const, status: 404, body: { error: 'Deal not found', code: 'NOT_FOUND' } };
-  return { ok: true as const, status: 200, body: { data: updated, action: 'moved' } };
+  return { ok: true as const, status: 200, body: { data: publicDealSource(updated), action: 'moved' } };
 }
 

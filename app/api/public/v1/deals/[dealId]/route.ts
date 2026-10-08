@@ -1,3 +1,4 @@
+import { leadSourceSchema, leadSourceWrite, publicDealSource } from '@/lib/public-api/leadSource';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { authPublicApi } from '@/lib/public-api/auth';
@@ -38,6 +39,7 @@ const DealPatchSchema = z.object({
   loss_reason: z.string().nullable().optional(),
   // Full-replace semantics (backwards compatible).
   tags: z.array(z.string()).optional(),
+  lead_source: leadSourceSchema,
   custom_fields: z.record(z.string(), z.any()).optional(),
   // Incremental semantics — additive / subtractive so integrations don't
   // need to GET-merge-PATCH just to add a tag or set a single custom field.
@@ -86,7 +88,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ dealId: str
   const sb = withActor(createStaticAdminClient(), { kind: 'integration' });
   const { data, error } = await sb
     .from('deals')
-    .select('id,title,description,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id,tags,custom_fields,probability,priority')
+    .select('id,title,description,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id,tags,custom_fields,lead_source,lead_source_initialized,probability,priority')
     .eq('organization_id', auth.organizationId)
     .is('deleted_at', null)
     .eq('id', dealId)
@@ -109,7 +111,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ dealId: str
 
   return NextResponse.json({
     data: {
-      ...data,
+      ...publicDealSource(data),
       description: data.description ?? null,
       value: Number(data.value ?? 0),
       tags: data.tags ?? [],
@@ -267,7 +269,8 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
   } else if (parsed.data.custom_fields_patch !== undefined) {
     const merged: Record<string, unknown> = { ...currentCustomFields };
     for (const [k, v] of Object.entries(parsed.data.custom_fields_patch)) {
-      if (v === null) delete merged[k];
+      // Legacy source clear must remain explicit for the native-source trigger.
+      if (v === null && k !== 'origem') delete merged[k];
       else merged[k] = v;
     }
     updates.custom_fields = merged;
@@ -275,6 +278,7 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
 
   if (parsed.data.probability !== undefined) updates.probability = parsed.data.probability;
   if (parsed.data.priority !== undefined) updates.priority = parsed.data.priority;
+  Object.assign(updates, leadSourceWrite(parsed.data.lead_source));
   const now = new Date().toISOString();
   updates.updated_at = now;
 
@@ -364,7 +368,7 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
   // the stage move in a single payload.
   const { data: finalRow, error: finalErr } = await sb
     .from('deals')
-    .select('id,title,description,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id,tags,custom_fields,probability,priority')
+    .select('id,title,description,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id,tags,custom_fields,lead_source,lead_source_initialized,probability,priority')
     .eq('organization_id', auth.organizationId)
     .eq('id', dealId)
     .maybeSingle();
@@ -381,7 +385,7 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
 
   const responseBody: Record<string, unknown> = {
     data: {
-      ...finalRow,
+      ...publicDealSource(finalRow),
       description: finalRow.description ?? null,
       value: Number(finalRow.value ?? 0),
       tags: finalRow.tags ?? [],

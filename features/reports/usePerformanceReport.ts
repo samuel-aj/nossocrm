@@ -8,16 +8,18 @@ import { calculatePerformance, type PeriodRange, type StageEvent, type Performan
 import { lifecycleEventFromRow, type DbLifecycleEvent } from './performanceHistory';
 import { collectPages } from './collectPages';
 import type { DbDealItem } from '@/lib/supabase/deals';
+import { readDbLeadSource } from '@/lib/deals/leadSource';
 
 interface ReportDealRow {
   id: string; title: string; board_id: string; stage_id: string; created_at: string; updated_at: string;
   closed_at: string | null; qualified_at: string | null; qualification_date_source: Deal['qualificationDateSource'];
   is_won: boolean; is_lost: boolean; value: number | string; owner_id: string | null;
   loss_category: Deal['lossCategory']; loss_reason: string | null;
+  lead_source?: string | null; lead_source_initialized?: boolean | null; custom_fields?: Deal['customFields'];
 }
 interface StageEventRow { deal_id: string; board_id: string; from_stage_id: string | null; to_stage_id: string; occurred_at: string }
-const DEAL_COLUMNS = 'id,title,board_id,stage_id,created_at,updated_at,closed_at,qualified_at,qualification_date_source,is_won,is_lost,value,owner_id,loss_category,loss_reason';
-const EVENT_COLUMNS = 'id,deal_id,board_id,event_type,occurred_at,recorded_at,source,snapshot_source,stage_id,owner_id,value,title,deal_created_at,items,loss_category,loss_reason,is_won,is_lost';
+const DEAL_COLUMNS = 'id,title,board_id,stage_id,created_at,updated_at,closed_at,qualified_at,qualification_date_source,is_won,is_lost,value,owner_id,loss_category,loss_reason,lead_source,lead_source_initialized,custom_fields';
+const EVENT_COLUMNS = 'id,deal_id,board_id,event_type,occurred_at,recorded_at,source,snapshot_source,stage_id,owner_id,value,title,deal_created_at,items,loss_category,loss_reason,is_won,is_lost,lead_source,lead_source_snapshot_source';
 
 export function usePerformanceReport(board: Board | undefined, range: PeriodRange, ownerId: string, comparisonRange?: PeriodRange, productId = '', mode: PerformanceMode = 'cohort') {
   const { user, organizationId, loading } = useAuth();
@@ -69,6 +71,7 @@ export function usePerformanceReport(board: Board | undefined, range: PeriodRang
         ownerId: row.owner_id || undefined, lossCategory: row.loss_category || undefined,
         lossReason: row.loss_reason || undefined, owner: { name: row.owner_id ? 'Responsável não disponível' : 'Sem responsável', avatar: '' },
         contactId: '', items: [], tags: [], priority: 'medium', probability: 0,
+        leadSource: readDbLeadSource(row), customFields: row.custom_fields || {},
       }));
       const dealsById = new Map(deals.map(deal => [deal.id, deal]));
       const lifecycleEvents = lifecycleRows.filter(row => dealsById.has(row.deal_id)).map(lifecycleEventFromRow);

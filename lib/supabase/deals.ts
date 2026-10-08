@@ -1,4 +1,5 @@
 import { dealPatch } from '@/lib/realtime/dealPayload';
+import { normalizeLeadSource, readDbLeadSource } from '@/lib/deals/leadSource';
 /**
  * @fileoverview Serviço Supabase para gerenciamento de deals (negócios/oportunidades).
  * 
@@ -72,6 +73,8 @@ export interface DbDeal {
   last_stage_change_date: string | null;
   /** Campos customizados. */
   custom_fields: Record<string, any>;
+  lead_source?: string | null;
+  lead_source_initialized?: boolean;
   /** Data de criação. */
   active_alert?: import('@/types/types').DealAlert | null;
   created_at: string;
@@ -151,6 +154,7 @@ const transformDeal = (db: DbDeal, items: DbDealItem[]): Deal => {
     tags: db.tags || [],
     lastStageChangeDate: db.last_stage_change_date || undefined,
     customFields: db.custom_fields || {},
+    leadSource: readDbLeadSource(db),
     activeAlert: db.active_alert ?? null,
     createdAt: db.created_at,
     updatedAt: db.updated_at,
@@ -208,6 +212,10 @@ const transformDealToDb = (deal: Partial<Deal>): Partial<DbDeal> => {
   if (deal.tags !== undefined) db.tags = deal.tags;
   if (deal.lastStageChangeDate !== undefined) db.last_stage_change_date = deal.lastStageChangeDate || null;
   if (deal.customFields !== undefined) db.custom_fields = deal.customFields;
+  if (deal.leadSource !== undefined) {
+    db.lead_source = normalizeLeadSource(deal.leadSource);
+    db.lead_source_initialized = true;
+  }
   if (deal.ownerId !== undefined) db.owner_id = sanitizeUUID(deal.ownerId);
   // Inativos: string ISO grava; null limpa (devolve o lead pro funil)
   if (deal.inactiveAt !== undefined) db.inactive_at = deal.inactiveAt;
@@ -375,6 +383,10 @@ export const dealsService = {
         client_company_id: sanitizeUUID(deal.clientCompanyId || deal.companyId),
         tags: deal.tags || [],
         custom_fields: deal.customFields || {},
+        ...(deal.leadSource !== undefined ? {
+          lead_source: normalizeLeadSource(deal.leadSource),
+          lead_source_initialized: true,
+        } : {}),
         owner_id: sanitizeUUID(deal.ownerId),
         // Importante: deals legados podem ficar com is_won/is_lost = NULL se o schema
         // estiver permissivo ou se defaults não estiverem aplicados. Forçamos valores

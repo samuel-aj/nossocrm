@@ -176,6 +176,8 @@ export function describeEvent(e: DealEvent, c: Ctx): { icon: React.ReactNode; te
       };
     case 'value':
       return { icon: <CircleDot size={13} />, text: <>Valor: <OldNew oldV={BRL(e.old_value)} newV={BRL(e.new_value)} /></> };
+    case 'lead_source':
+      return { icon: <CircleDot size={13} />, text: <>Origem do lead: <OldNew oldV={str(e.old_value) || 'Não informado'} newV={str(e.new_value) || 'Não informado'} /></> };
     case 'title':
       return { icon: <Pencil size={13} />, text: <>Nome do lead: <OldNew oldV={str(e.old_value)} newV={str(e.new_value)} /></> };
     case 'description':

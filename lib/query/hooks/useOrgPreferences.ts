@@ -1,11 +1,12 @@
 /**
  * Preferências da organização (GET/PATCH /api/settings/org).
  * Hoje: etapa "Inativos" (inactive_leads_enabled) e motivos de perda
- * personalizados (loss_reasons_*; null = padrão do sistema). Leitura para
+ * personalizados e categorias de origem (null = padrão do sistema). Leitura para
  * qualquer membro; gravação só admin (o servidor valida).
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
+import { DEFAULT_LEAD_SOURCES } from '@/lib/deals/leadSource';
 
 /** Filtro de status com que o quadro abre. */
 export type DealStatusFilter = 'open' | 'won' | 'lost' | 'all';
@@ -16,6 +17,7 @@ interface OrgPreferences {
   loss_reasons_disqualified: string[] | null;
   /** null = "open" (padrão do sistema) */
   default_deal_status_filter: DealStatusFilter | null;
+  lead_source_options: string[] | null;
 }
 
 /**
@@ -94,6 +96,24 @@ export const useOrgPreferences = () => {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['orgPreferences'] }),
   });
 
+  const setLeadSourceOptions = useMutation({
+    mutationFn: async (options: string[] | null) => {
+      const res = await fetch('/api/settings/org', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ lead_source_options: options }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((json as { error?: string }).error || 'Falha ao salvar origens');
+      return json as { lead_source_options: string[] | null };
+    },
+    onSuccess: (saved) => {
+      qc.setQueryData<OrgPreferences>(['orgPreferences'], old => old ? { ...old, lead_source_options: saved.lead_source_options } : old);
+      return qc.invalidateQueries({ queryKey: ['orgPreferences'] });
+    },
+  });
+
   return {
     inactiveLeadsEnabled: !!query.data?.inactive_leads_enabled,
     /** null = organização usa os motivos padrão do sistema. */
@@ -101,9 +121,12 @@ export const useOrgPreferences = () => {
     lossReasonsDisqualified: query.data?.loss_reasons_disqualified ?? null,
     /** Filtro com que o quadro abre; undefined enquanto carrega (não força nada) */
     defaultDealStatusFilter: query.data ? (query.data.default_deal_status_filter ?? 'open') : undefined,
+    leadSourceOptions: query.data?.lead_source_options ?? DEFAULT_LEAD_SOURCES,
     isLoading: query.isLoading,
+    isError: query.isError,
     setInactiveLeadsEnabled,
     setDefaultDealStatusFilter,
     setLossReasons,
+    setLeadSourceOptions,
   };
 };

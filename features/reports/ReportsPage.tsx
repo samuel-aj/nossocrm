@@ -8,6 +8,7 @@ import { getDateRange, PeriodFilter, PERIOD_LABELS, COMPARISON_LABELS } from '..
 import { ReportFiltersPopover } from './ReportFiltersPopover';
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
 import { LossReasonsCard } from './LossReasonsCard';
+import { LeadSourceChart } from './LeadSourceChart';
 import { REPORT_MODES, formatReportRate, type ReportMode } from './reportPresentation';
 import { generateReportPDF } from './utils/generateReportPDF';
 import { useCRM } from '@/context/CRMContext';
@@ -314,6 +315,9 @@ const ReportsPage: React.FC = () => {
         <button type="button" onClick={() => setSelection({ kind: 'entries' })} className="rounded-lg border border-slate-200 dark:border-white/10 px-4 py-3 hover:border-primary-400 focus-visible:ring-2 focus-visible:ring-primary-500">Entradas no funil: <strong>{metrics.entries.length}</strong></button>
         <button type="button" onClick={() => setSelection({ kind: 'reopened' })} className="rounded-lg border border-slate-200 dark:border-white/10 px-4 py-3 hover:border-primary-400 focus-visible:ring-2 focus-visible:ring-primary-500">Reaberturas: <strong>{metrics.reopenedDeals.length}</strong></button>
       </div>}
+      <LeadSourceChart groups={metrics.leadSourceGroups} total={metrics.leadSourceTotal} mode={mode}
+        legacySnapshotCount={metrics.coverage.legacyLeadSourceSnapshotCount}
+        onSelect={keys => setSelection({ kind: 'source', keys })} />
       {/* Fileira: Leads Perdidos + Conversão por Etapa lado a lado */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Loss by Category */}

@@ -1,4 +1,5 @@
 import type { Deal } from '@/types';
+import { readDbLeadSource } from '@/lib/deals/leadSource';
 
 /** Only fields present in the event; joined items/owner are never erased. */
 export function dealPatch(row: Record<string, unknown>): Partial<Deal> & { id: string } {
@@ -16,5 +17,12 @@ export function dealPatch(row: Record<string, unknown>): Partial<Deal> & { id: s
     if (db in row) { patch[app] = row[db]; delete patch[db]; }
   }
   if ('client_company_id' in row) patch.companyId = row.client_company_id || '';
+  // Partial payloads containing only custom_fields must not erase an explicit
+  // native clear already in cache. Real database events include both columns.
+  if ('lead_source' in row || 'lead_source_initialized' in row) {
+    patch.leadSource = readDbLeadSource(row as Parameters<typeof readDbLeadSource>[0]);
+  }
+  delete patch.lead_source;
+  delete patch.lead_source_initialized;
   return patch as Partial<Deal> & { id: string };
 }

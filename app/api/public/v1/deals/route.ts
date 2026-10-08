@@ -1,3 +1,5 @@
+import { readDbLeadSource } from '@/lib/deals/leadSource';
+import { leadSourceSchema, leadSourceWrite, publicDealSource } from '@/lib/public-api/leadSource';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { authPublicApi } from '@/lib/public-api/auth';
@@ -37,6 +39,7 @@ const DealCreateSchema = z.object({
   priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
   probability: z.number().int().min(0).max(100).optional(),
   tags: z.array(z.string().max(100)).max(20).optional(),
+  lead_source: leadSourceSchema,
   custom_fields: z.record(z.string(), z.unknown()).optional(),
   external_id: z.string().min(1).max(200).optional(),
   // Produto(s) do deal — criados como deal_items na mesma chamada (dispensa /deals/{id}/items).
@@ -77,7 +80,7 @@ export async function GET(request: Request) {
 
   let query = sb
     .from('deals')
-    .select('id,title,description,ai_context,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id', { count: 'exact' })
+    .select('id,title,description,ai_context,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,lead_source,lead_source_initialized,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id', { count: 'exact' })
     .eq('organization_id', auth.organizationId)
     .is('deleted_at', null)
     .order('updated_at', { ascending: false });
@@ -139,6 +142,7 @@ export async function GET(request: Request) {
       client_company_id: d.client_company_id ?? null,
       tags: d.tags ?? [],
       custom_fields: d.custom_fields ?? {},
+      lead_source: readDbLeadSource(d),
       is_won: !!d.is_won,
       is_lost: !!d.is_lost,
       loss_reason: d.loss_reason ?? null,
@@ -220,7 +224,7 @@ export async function POST(request: Request) {
   if (externalId) {
     const existing = await sb
       .from('deals')
-      .select('id,title,description,ai_context,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id')
+      .select('id,title,description,ai_context,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,lead_source,lead_source_initialized,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id')
       .eq('organization_id', auth.organizationId)
       .eq('external_id', externalId)
       .is('deleted_at', null)
@@ -235,7 +239,7 @@ export async function POST(request: Request) {
       ]);
       return NextResponse.json({
         data: {
-          ...d,
+          ...publicDealSource(d),
           description: d.description ?? null,
           ai_context: d.ai_context ?? null,
           value: Number(d.value ?? 0),
@@ -400,6 +404,7 @@ export async function POST(request: Request) {
     probability: parsed.data.probability ?? 0,
     tags: parsed.data.tags ?? [],
     custom_fields: parsed.data.custom_fields ?? {},
+    ...leadSourceWrite(parsed.data.lead_source),
     is_won: false,
     is_lost: false,
     created_at: now,
@@ -410,7 +415,7 @@ export async function POST(request: Request) {
   const { data, error } = await sb
     .from('deals')
     .insert(insertPayload)
-    .select('id,title,description,ai_context,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id')
+    .select('id,title,description,ai_context,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,lead_source,lead_source_initialized,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id')
     .single();
   if (error) {
     // Race: another request inserted the same external_id between our check above and this insert.
@@ -418,7 +423,7 @@ export async function POST(request: Request) {
     if (externalId && (error as any).code === '23505') {
       const recovered = await sb
         .from('deals')
-        .select('id,title,description,ai_context,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id')
+        .select('id,title,description,ai_context,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,lead_source,lead_source_initialized,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id')
         .eq('organization_id', auth.organizationId)
         .eq('external_id', externalId)
         .is('deleted_at', null)
@@ -432,7 +437,7 @@ export async function POST(request: Request) {
           .eq('deal_id', d.id);
         return NextResponse.json({
           data: {
-            ...d,
+            ...publicDealSource(d),
             description: d.description ?? null,
             ai_context: d.ai_context ?? null,
             value: Number(d.value ?? 0),
@@ -454,7 +459,7 @@ export async function POST(request: Request) {
     if ((error as any).code === '23505') {
       const dup = await sb
         .from('deals')
-        .select('id,title,description,ai_context,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id')
+        .select('id,title,description,ai_context,value,priority,probability,board_id,stage_id,contact_id,client_company_id,tags,custom_fields,lead_source,lead_source_initialized,is_won,is_lost,loss_reason,closed_at,created_at,updated_at,owner_id')
         .eq('organization_id', auth.organizationId)
         .eq('contact_id', contactId)
         .eq('stage_id', stageId)
@@ -473,7 +478,7 @@ export async function POST(request: Request) {
         ]);
         return NextResponse.json({
           data: {
-            ...d,
+            ...publicDealSource(d),
             description: d.description ?? null,
             ai_context: d.ai_context ?? null,
             value: Number(d.value ?? 0),
@@ -523,7 +528,7 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     data: {
-      ...data,
+      ...publicDealSource(data),
       description: data.description ?? null,
       value: Number(data.value ?? 0),
       tags: data.tags ?? [],

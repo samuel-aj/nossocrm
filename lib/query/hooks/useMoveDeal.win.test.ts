@@ -117,3 +117,16 @@ it('never fabricates an optimistic close date and ignores stale confirmation aft
   expect(client.getQueryData<Deal[]>(DEALS_VIEW_KEY)?.[0]).toMatchObject({ status: 'lead', isWon: false, closedAt: undefined });
   expect(client.getQueryData(queryKeys.deals.detail('deal'))).toMatchObject({ status: 'lead', isWon: false, closedAt: undefined });
 });
+
+
+it.each([
+  [{ leadSource: 'Google Ads', customFields: { origem: 'Meta Ads' } }, 'Google Ads'],
+  [{ leadSource: null, customFields: { origem: 'Meta Ads' } }, null],
+  [{ customFields: { origem: 'Meta Ads' } }, 'Meta Ads'],
+])('preserves acquisition when copying the same deal to the next board: %j', async (source, expected) => {
+  mocks.update.mockResolvedValue({ data: { isWon: true, closedAt: '2026-10-08T16:01:23Z' }, error: null });
+  const { move } = setup({ ...deal, ...source });
+  await act(async () => { await move('contract'); });
+  await waitFor(() => expect(mocks.create).toHaveBeenCalledOnce());
+  expect(mocks.create.mock.calls[0][0]).toMatchObject({ leadSource: expected, boardId: 'service' });
+});

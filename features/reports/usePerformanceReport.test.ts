@@ -22,7 +22,7 @@ class Query implements PromiseLike<Result> {
   private offset = 0;
   private limit = Infinity;
   constructor(private table: string) {}
-  select() { return this; }
+  select(columns?: string) { filters.push([this.table, 'select', columns]); return this; }
   eq(key: string, value: unknown) { filters.push([this.table, 'eq', key, value]); this.predicates.push(row => row[key] === value); return this; }
   is(key: string, value: unknown) { filters.push([this.table, 'is', key, value]); this.predicates.push(row => row[key] === value); return this; }
   in(key: string, values: unknown[]) { filters.push([this.table, 'in', key, values]); this.predicates.push(row => values.includes(row[key])); return this; }
@@ -107,4 +107,26 @@ it('erro de histórico não é apresentado como um relatório completo com zeros
   tables.deals = [row('current')];
   renderHook(() => usePerformanceReport(board, august, ''));
   await expect(queryOptions().queryFn()).rejects.toThrow('history unavailable');
+});
+
+it('carrega origem nativa/legada atual e mantém origem/null do evento sem herdar o cadastro ou contato', async () => {
+  tables = {
+    deals: [row('edited', { lead_source: 'Google Ads', lead_source_initialized: true, custom_fields: { origem: 'Presencial' } }),
+      row('cleared', { lead_source: null, lead_source_initialized: true, custom_fields: { origem: 'Meta Ads' } }),
+      row('legacy', { lead_source: null, lead_source_initialized: false, custom_fields: { origem: 'Indicação' } })],
+    deal_lifecycle_events: [history('entered_board', '2026-08-01', { id: 'e1', deal_id: 'edited', lead_source: 'Meta Ads', lead_source_snapshot_source: 'transition' }),
+      history('entered_board', '2026-08-01', { id: 'e2', deal_id: 'cleared', lead_source: null, lead_source_snapshot_source: 'transition' }),
+      history('entered_board', '2026-08-01', { id: 'e3', deal_id: 'legacy', lead_source: 'Indicação', lead_source_snapshot_source: 'current' })],
+  };
+  const { rerender } = renderHook(({ mode }: { mode: 'cohort' | 'current' }) => usePerformanceReport(board, august, '', undefined, '', mode), { initialProps: { mode: 'cohort' } });
+  const historical = await queryOptions().queryFn();
+  expect(historical.leadSourceGroups.map(group => [group.label, group.count])).toEqual([['Indicação', 1], ['Meta Ads', 1], ['Não informado', 1]]);
+  expect(historical.coverage.legacyLeadSourceSnapshotCount).toBe(1);
+  expect(filters).toContainEqual(['deals', 'select', expect.stringContaining('lead_source,lead_source_initialized,custom_fields')]);
+  expect(filters).toContainEqual(['deal_lifecycle_events', 'select', expect.stringContaining('lead_source,lead_source_snapshot_source')]);
+  rerender({ mode: 'current' });
+  const current = await queryOptions().queryFn();
+  expect(current.leadSourceGroups.map(group => [group.label, group.count])).toEqual([['Google Ads', 1], ['Indicação', 1], ['Não informado', 1]]);
+  expect(current.coverage.legacyLeadSourceSnapshotCount).toBe(0);
+  expect(mocks.from).not.toHaveBeenCalledWith('contacts');
 });

@@ -1,5 +1,6 @@
 import type { Board, Deal } from '@/types';
 import type { LifecycleEvent, StageEvent } from './performanceMetrics';
+import { getDealLeadSource } from '@/lib/deals/leadSource';
 export const board: Board = { id: 'board', name: 'Vendas', createdAt: '2026-01-01', wonStageId: 'won', lostStageId: 'lost', stages: [
   { id: 'new', label: 'Novo', color: 'bg-blue-500' }, { id: 'q', label: 'Proposta enviada', color: 'bg-orange-500', linkedLifecycleStage: 'MQL' },
   { id: 'proposal', label: 'Contrato', color: '#a855f7', linkedLifecycleStage: 'SALES_QUALIFIED' },
@@ -18,5 +19,6 @@ export const lifecycle = (deal: Deal, type: LifecycleEvent['type'], date: string
   id: `${deal.id}:${type}:${date}`, dealId: deal.id, boardId: board.id, type, date, stageId: deal.status,
   source: 'transition', snapshotSource: 'transition', ownerId: deal.ownerId, owner: deal.owner,
   value: deal.value, title: deal.title, dealCreatedAt: deal.createdAt, items: deal.items,
+  leadSource: getDealLeadSource(deal), leadSourceSnapshotSource: 'transition',
   lossCategory: deal.lossCategory, lossReason: deal.lossReason, isWon: type === 'won', isLost: type === 'lost', ...extra,
 });

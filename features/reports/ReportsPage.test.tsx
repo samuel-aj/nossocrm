@@ -4,6 +4,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import ReportsPage from './ReportsPage';
 import { calculatePerformance } from './performanceMetrics';
 import type { Board, Deal } from '@/types';
+import { august, board as fixtureBoard, lead, lifecycle, snapshot } from './performanceTestFixtures';
 
 const state = vi.hoisted(() => ({ data: null as any, error: null as any, isError: false, isFetching: false, pdf: vi.fn(), query: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
@@ -33,6 +34,22 @@ describe('tela Performance', () => {
   const board = { id: 'board', name: 'Teste', stages: [{ id: 'q', label: 'Proposta enviada', linkedLifecycleStage: 'MQL' }] } as Board;
   const range = { start: new Date('2026-08-01'), end: new Date('2026-08-31') };
   const empty = () => ({ ...calculatePerformance([], [], board, range), deals: [] });
+  it('conecta a rosca aos leads da origem selecionada e mostra o valor histórico na lista', () => {
+    const deals = [lead('source-meta', { title: 'Entrada Meta', leadSource: 'Google Ads' }), lead('source-unknown', { title: 'Entrada sem origem', leadSource: null })];
+    const lifecycleEvents = deals.map(deal => lifecycle(deal, 'entered_board', deal.createdAt, { leadSource: deal.id === 'source-meta' ? 'Meta Ads' : null }));
+    state.data = { ...calculatePerformance(deals, [], fixtureBoard, august, '', undefined, snapshot, { lifecycleEvents }), deals };
+    render(<ReportsPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Detalhar Meta Ads: 1 lead, 50,0%' }));
+    const modal = screen.getByRole('dialog');
+    expect(within(modal).getAllByRole('link')).toHaveLength(1);
+    expect(within(modal).getByRole('link', { name: /Entrada Meta/ })).toBeInTheDocument();
+    expect(within(modal).getByRole('columnheader', { name: 'Origem do lead' })).toBeInTheDocument();
+    expect(within(modal).getByRole('cell', { name: 'Meta Ads' })).toBeInTheDocument();
+    expect(within(modal).queryByRole('cell', { name: 'Google Ads' })).not.toBeInTheDocument();
+    fireEvent.click(within(modal).getByRole('button', { name: /Fechar/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ver todas as origens' }));
+    expect(within(screen.getByRole('dialog')).getAllByRole('link')).toHaveLength(2);
+  });
   it('explica perdas qualificadas e exporta a visão selecionada', () => {
     state.data = { ...empty(), qualifiedCount: 40, qualificationRate: 80, closingRate: 37.5,
       hasQualifiedStage: true, cohortWonDeals: Array(15).fill({}), wonDeals: Array.from({length:15}, (_, i) => ({ id: String(i), value: 100, owner: { name: 'Samuel' } })),

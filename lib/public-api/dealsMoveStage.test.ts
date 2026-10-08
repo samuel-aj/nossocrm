@@ -17,7 +17,7 @@ beforeEach(() => {
       const rows = table === 'boards' ? [{ id: boardId, won_stage_id: protocolId, lost_stage_id: lostId }]
         : table === 'board_stages' ? [{ id: stageId }]
         : table === 'contacts' ? [{ id: 'contact' }]
-        : [{ id: dealId, board_id: boardId, stage_id: 'before', is_won: false, ...patch }];
+        : [{ id: dealId, board_id: boardId, stage_id: 'before', is_won: false, lead_source: null, lead_source_initialized: true, custom_fields: { origem: 'Meta Ads' }, ...patch }];
       if (patch) h.writes.push(patch);
       return { data: single ? rows[0] : rows, error: null };
     };
@@ -45,4 +45,12 @@ describe('API stage movement delegates automatic commercial outcomes to the DB',
     await move(false);
     expect(h.writes[0]).toMatchObject({ is_won: false, is_lost: true, loss_category: 'qualified', loss_reason: 'Preço' });
   });
+});
+
+it.each([false, true])('movement responses keep explicit unknown without leaking storage flags (identity=%s)', async identity => {
+  const result = await move(identity);
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error('Expected movement response');
+  expect(result.body.data.lead_source).toBeNull();
+  expect(result.body.data).not.toHaveProperty('lead_source_initialized');
 });

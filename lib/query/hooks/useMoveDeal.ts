@@ -1,3 +1,4 @@
+import { getDealLeadSource } from '@/lib/deals/leadSource';
 /**
  * Unified hook for moving deals between stages
  * 
@@ -153,6 +154,7 @@ export const useMoveDeal = () => {
 
               const { error: copyError } = await dealsService.create({
                 title: deal.title,
+                leadSource: getDealLeadSource(deal),
                 value: deal.value,
                 contactId: deal.contactId,
                 boardId: targetBoard.id,

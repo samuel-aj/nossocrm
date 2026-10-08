@@ -1,6 +1,7 @@
 import type { Deal } from '@/types';
 import type { PerformanceMetrics } from './performanceMetrics';
 import { lossReasonGroupKey, lossReasonGroupLabel } from '@/lib/utils/lossDetails';
+import { LEAD_SOURCE_BASE, LEAD_SOURCE_HISTORY_NOTE } from './leadSourceReport';
 export { lossCategoryLabel, lossReasonLabel } from '@/lib/utils/lossDetails';
 
 export const NO_PRODUCT = '__none__';
@@ -16,11 +17,12 @@ export function filterReportProducts(deals: Deal[], productId: string) {
 export type ReportSelection =
   | { kind: 'revenue' | 'qualification' | 'closing' | 'cycle' | 'closures' | 'entries' | 'reopened' }
   | { kind: 'loss'; category?: 'qualified' | 'disqualified' | 'unknown'; reason?: string; reasonKey?: string }
+  | { kind: 'source'; keys?: string[] }
   | { kind: 'owner'; ownerId: string; ownerName: string };
 export interface ReportLeadGroup { id: string; label: string; description: string; deals: Deal[] }
 export interface ReportDrilldown {
   title: string; groups: ReportLeadGroup[]; formula?: string; showRevenue?: boolean; showCycle?: boolean; showLoss?: boolean;
-  contextDescription?: string; dateBasisLabel?: string;
+  contextDescription?: string; dateBasisLabel?: string; showSource?: boolean;
 }
 export function reportDrilldown(metrics: PerformanceMetrics & { deals: Deal[] }, selection: ReportSelection): ReportDrilldown {
   const cohort = metrics.mode === 'cohort';
@@ -37,6 +39,18 @@ export function reportDrilldown(metrics: PerformanceMetrics & { deals: Deal[] },
   const entries: ReportLeadGroup = { id: 'entries', label: metrics.mode === 'current' ? 'Carteira aberta' : 'Entradas', description: cohort ? 'Leads criados no período e com presença comprovada neste funil até o corte.' : metrics.mode === 'current' ? 'Leads abertos no funil agora.' : 'Leads com entrada registrada no funil no período.', deals: metrics.entries };
   const qualifiedLost: ReportLeadGroup = { id: 'qualified-lost', label: 'Perdas qualificadas', description: 'Perdas registradas nesta base e classificadas como qualificadas.', deals: metrics.lostDeals.filter(deal => deal.lossCategory === 'qualified') };
   switch (selection.kind) {
+    case 'source': {
+      const sourceGroups = metrics.leadSourceGroups.filter(group => !selection.keys || selection.keys.includes(group.key));
+      const deals = sourceGroups.flatMap(group => group.deals);
+      const label = sourceGroups.length === 1 ? sourceGroups[0].label : selection.keys ? 'Outros (agrupados)' : 'Todas as origens';
+      const groups = sourceGroups.map(group => ({ id: group.key, label: group.label,
+        description: `${group.count} de ${metrics.leadSourceTotal} leads da base selecionada.`, deals: group.deals }));
+      if (groups.length !== 1) groups.unshift({ id: 'all-sources', label, description: LEAD_SOURCE_BASE[metrics.mode], deals });
+      return { title: `Origem dos leads · ${label}`, groups, showSource: true,
+        contextDescription: `${LEAD_SOURCE_BASE[metrics.mode]} Não informado também conta no denominador.${metrics.coverage.legacyLeadSourceSnapshotCount > 0 ? ` ${LEAD_SOURCE_HISTORY_NOTE}` : ''}`,
+        dateBasisLabel: metrics.mode === 'current' ? 'Origem do cadastro atual' : 'Origem registrada na entrada ou na primeira presença comprovada no funil',
+        formula: `${deals.length} leads selecionados ÷ ${metrics.leadSourceTotal} leads da base` };
+    }
     case 'entries': return { ...context, title: cohort ? 'Leads da coorte' : metrics.mode === 'current' ? 'Carteira aberta' : 'Entradas no funil', groups: [entries] };
     case 'reopened': return { ...context, title: 'Reaberturas', groups: [{ id: 'reopened', label: 'Reabertos', description: cohort ? 'Leads da coorte com reabertura registrada até o corte.' : 'Leads distintos com reabertura registrada no período.', deals: metrics.reopenedDeals }] };
     case 'revenue': return { ...context, title: metrics.mode === 'current' ? 'Valor da carteira' : 'Faturamento fechado', groups: metrics.mode === 'current' ? [{ ...entries, deals: metrics.currentDeals }] : [won], showRevenue: true };

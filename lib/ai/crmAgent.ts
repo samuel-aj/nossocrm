@@ -7,6 +7,7 @@ import { CRMCallOptionsSchema, type CRMCallOptions } from '@/types/ai';
 import { createCRMTools } from './tools';
 import { formatPriorityPtBr } from '@/lib/utils/priority';
 import { AIProvider as AIProviderConst } from '@/types/constants';
+import { getDealLeadSource } from '@/lib/deals/leadSource';
 
 type AIProvider = 'google' | 'openai' | 'anthropic';
 
@@ -22,7 +23,7 @@ function clampText(v: unknown, max = 240): string | undefined {
     return s.slice(0, max - 1) + '…';
 }
 
-function formatCockpitSnapshotForPrompt(snapshot: any): string[] {
+export function formatCockpitSnapshotForPrompt(snapshot: any): string[] {
     if (!snapshot || typeof snapshot !== 'object') return [];
 
     const lines: string[] = [];
@@ -35,6 +36,7 @@ function formatCockpitSnapshotForPrompt(snapshot: any): string[] {
         const priority = clampText(deal.priority, 30);
         const status = clampText(deal.status, 80);
         lines.push(`🧾 Deal (cockpit): ${title ?? '(sem título)'}${value != null ? ` — R$ ${value.toLocaleString('pt-BR')}` : ''}`);
+        lines.push(`   - Origem de aquisição do lead: ${getDealLeadSource(deal) ?? 'Não informado'}`);
         if (probability != null) lines.push(`   - Probabilidade: ${probability}%`);
         if (priority) lines.push(`   - Prioridade: ${formatPriorityPtBr(priority)}`);
         if (status) lines.push(`   - Status/Stage ID: ${status}`);

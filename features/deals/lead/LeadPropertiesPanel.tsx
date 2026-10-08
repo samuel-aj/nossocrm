@@ -43,6 +43,8 @@ import { invalidateLeadHistory } from "./leadHistoryInvalidation";
 import { LeadContactEditor } from "./LeadContactEditor";
 import { queryKeys } from "@/lib/query/queryKeys";
 import { newerRecord } from "@/lib/query/dealCache";
+import { LeadSourceSelect } from "@/features/deals/components/LeadSourceSelect";
+import { getDealLeadSource } from "@/lib/deals/leadSource";
 
 export type LeadPropertiesPanelProps = {
   deal: Deal | DealView;
@@ -237,7 +239,7 @@ export function LeadPropertiesPanel({
     (f) =>
       !hiddenGroups.has((f.groupName ?? "").trim()),
   );
-  const fieldDefinitions = visibleDefinitions.filter(f => !f.key.startsWith("utm_"));
+  const fieldDefinitions = visibleDefinitions.filter(f => !f.key.startsWith("utm_") && f.key !== 'origem');
   const utmDefinitions = visibleDefinitions.filter(f => f.key.startsWith("utm_"));
   const groups = new Map<string, CustomFieldDefinition[]>();
   for (const field of fieldDefinitions) {
@@ -1000,6 +1002,11 @@ export function LeadPropertiesPanel({
           <div className="mt-3">
             <span className="block text-xs text-slate-500">Prioridade</span>
             <span>{formatPriorityPtBr(deal.priority)}</span>
+          </div>
+          <div className="mt-3">
+            <LeadSourceSelect value={getDealLeadSource(deal)}
+              disabled={!canEdit || pendingRef.current.has(`${identity}:leadSource`)}
+              onChange={leadSource => { if (canEdit) void save('leadSource', () => updateDeal({ leadSource })); }} />
           </div>
           <div className="mt-3 border-t border-slate-100 dark:border-white/10 pt-3">
             <span className="block text-xs text-slate-500">Descrição</span>

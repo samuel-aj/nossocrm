@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { loadDealContext } from './context';
+import { loadDealContext, buildLeadDataBlock, type ConversationContext } from './context';
 
 const org = '11111111-1111-4111-8111-111111111111';
 const id = '22222222-2222-4222-8222-222222222222';
 function client(field: unknown, rawDeal: unknown = { id, title: 'Lead', custom_fields: {}, whatsapp_group_id: 'client@g.us' }, error: unknown = null) {
   const rpc = vi.fn().mockResolvedValue({ data: field, error });
   const from = vi.fn((table: string) => {
-    const q = { select: () => q, eq: () => q, is: () => q, maybeSingle: async () => ({ data: rawDeal }), order: async () => ({ data: table === 'deal_items' ? [] : null }) };
+    const q = { select: () => q, eq: () => q, is: () => q, in: () => Promise.resolve({ data: [] }), maybeSingle: async () => ({ data: rawDeal }), order: async () => ({ data: table === 'deal_items' ? [] : null }) };
     return q;
   });
   return { admin: { from, rpc } as unknown as SupabaseClient, rpc };
@@ -30,4 +30,30 @@ describe('agent deal context group field', () => {
     expect(await loadDealContext(admin, org, { dealId: id })).toBe(null);
     expect(rpc).not.toHaveBeenCalled();
   });
+});
+
+
+describe('agent acquisition source', () => {
+  it.each([
+    [{ lead_source: 'Indicação', lead_source_initialized: true }, 'Indicação'],
+    [{ lead_source: null, lead_source_initialized: true }, null],
+    [{ lead_source: null, lead_source_initialized: false }, 'Meta Ads'],
+  ])('reads native source without replacing it with a raw UTM: %j', async (source, expected) => {
+    const custom_fields = { origem: 'Meta Ads', utm_source: 'Instagram_Feed' };
+    const deal = await loadDealContext(client({}, { id, title: 'Lead', ...source, custom_fields }).admin, org, { dealId: id });
+    expect(deal?.source).toBe(expected);
+    expect(deal?.custom_fields).toEqual(custom_fields);
+  });
+  it('does not infer a source from ambiguous UTM or contact data', async () => {
+    const deal = await loadDealContext(client({}, { id, title: 'Lead', source: 'WEBSITE', custom_fields: { utm_source: 'ig' } }).admin, org, { dealId: id });
+    expect(deal?.source).toBeNull();
+  });
+});
+
+it('does not tell the agent a stale legacy source after native source was cleared', async () => {
+  const deal = await loadDealContext(client({}, { id, title: 'Lead', lead_source: null, lead_source_initialized: true, custom_fields: { origem: 'Meta Ads', utm_source: 'Instagram_Feed' } }).admin, org, { dealId: id });
+  const block = buildLeadDataBlock({ deal } as ConversationContext);
+  expect(block).toContain('Origem: Não informado');
+  expect(block).toContain('utm_source: Instagram_Feed');
+  expect(block).not.toContain('Meta Ads');
 });

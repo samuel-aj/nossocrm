@@ -1,3 +1,4 @@
+import { readDbLeadSource } from '@/lib/deals/leadSource';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { tool } from 'ai';
 import { z } from 'zod';
@@ -663,6 +664,7 @@ export function createCRMTools(context: CRMCallOptions, userId: string, scopedCl
                     status: deal.is_won ? '✅ Ganho' : deal.is_lost ? '❌ Perdido' : '🔄 Aberto',
                     stage: (deal.stage as any)?.name || (deal.stage as any)?.label || 'N/A',
                     priority: deal.priority || DealPriority.MEDIUM,
+                    leadSource: readDbLeadSource(deal),
                     contact: (deal.contact as any)?.name || 'N/A',
                     contactEmail: (deal.contact as any)?.email || 'N/A',
                     pendingActivities: pendingActivities.length,
