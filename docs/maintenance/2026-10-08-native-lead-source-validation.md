@@ -46,3 +46,10 @@ A pedido do usuário após revisar a prévia, o gráfico de origens ocupa a colu
 As etapas voltaram a colunas verticais, com escala iniciada em zero, quantidades acima das colunas, nomes completos e percentuais. A explicação da conversão está disponível por foco/tooltip. Em telas estreitas a rolagem horizontal fica dentro do gráfico. Nenhuma fórmula, base, filtro, regra de ganho/qualificação, migration ou exportação foi alterada nesta revisão.
 
 Validação desta revisão: 15/15 testes existentes em ReportsPage, LeadSourceChart, LossReasonsCard e StagePerformanceChart; lint dos cinco arquivos alterados; TypeScript (`npm run typecheck`); diff sem erros. Prévia real com dados fictícios conferida em desktop e viewport de 390px; largura do documento igual à largura visível no celular (375px úteis). Capturas locais: `tmp/performance-preview/report-layout-final.jpg` e `report-layout-mobile.jpg`. Continua somente local, sem publicação.
+
+
+## Opção A aprovada e aplicada — 08/10/2026
+
+Após comparar três propostas, o usuário escolheu Rosca em destaque. LeadSourceChart usa rosca central maior, total destacado, legenda em duas colunas e rodapé com detalhes. A explicação completa da base fica no botão de informação; o aviso numérico de origem reconstruída/indisponível segue visível. Estado vazio, histórico, fontes e callbacks preservados; agrupamento Outros âmbar e Não informado cinza por chave apenas nesta apresentação.
+
+9 testes existentes de componente/integração passaram; lint focal e TypeScript passaram. Revisão independente sem achados bloqueadores. Desktop, celular e tema escuro conferidos na prévia isolada. Detalhamento por teclado retorna os6desconhecidos de50 da fixture, sem duplicar. Cálculos, filtros, PDF, etapas verticais e produção preservados. Plano: `docs/superpowers/plans/2026-10-08-lead-source-donut-design.md`.
