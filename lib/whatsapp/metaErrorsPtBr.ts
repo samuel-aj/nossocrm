@@ -83,6 +83,10 @@ const ERROS: Array<{ codes: string[]; msg: string }> = [
 /** Traduz o erro cru do provedor pra uma explicação em pt-BR + código técnico. */
 export function traduzErroWhatsApp(raw: string): { explicacao: string; codigo: string | null } {
   const texto = (raw || '').trim();
+  // Preserve the bounded diagnostic captured by the Evolution webhook.
+  if (texto.startsWith('Evolution:')) {
+    return { explicacao: `${texto.slice('Evolution:'.length).trim()} Verifique a conexão do número antes de tentar novamente.`, codigo: null };
+  }
   const codigo = texto.match(/\b(\d{3,6})\b/)?.[1] ?? null;
 
   if (codigo) {

@@ -32,6 +32,7 @@ import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { getGroupParticipants } from '@/lib/whatsapp/groups';
 import { resolveGroupMentions, type GroupMention } from '@/lib/whatsapp/groupParticipants';
 import { normalizePhoneE164 } from '@/lib/phone';
+import { checkSendWindow } from '@/lib/whatsapp/sendWindow';
 
 const MEDIA_KINDS: OutboundMediaKind[] = ['image', 'video', 'document', 'audio', 'sticker'];
 
@@ -134,6 +135,10 @@ export async function POST(req: Request) {
         409
       );
     }
+    const windowError = await checkSendWindow(auth.admin, auth.user.organizationId, conn, to, {
+      template: !!templateName && !media,
+    });
+    if (windowError) return json({ ok: false, error: windowError, code: 'WHATSAPP_SERVICE_WINDOW' }, 409);
     conv = await ensureConversation(auth.admin, auth.user.organizationId, conn.id, to);
   }
   if (parsedMentions.data.length) {
