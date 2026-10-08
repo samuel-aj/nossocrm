@@ -135,7 +135,7 @@ const ReportsPage: React.FC = () => {
   const handleExportPDF = useCallback(() => {
     if (!metrics || report.isFetching || report.isError) return;
     generateReportPDF(metrics, {
-      mode, boardName: selectedBoard?.name || '', period: PERIOD_LABELS[period],
+      mode, customerPipeline: selectedBoard?.linkedLifecycleStage === 'CUSTOMER', boardName: selectedBoard?.name || '', period: PERIOD_LABELS[period],
       owner: ownersList.find(owner => owner.id === selectedOwnerId)?.name || 'Todos os vendedores', product: productLabel,
       range: range.start.toLocaleDateString('pt-BR') + ' a ' + range.end.toLocaleDateString('pt-BR'), generatedBy,
     });
@@ -212,6 +212,7 @@ const ReportsPage: React.FC = () => {
         <p className="text-sm text-slate-700 dark:text-slate-300">{modeInfo.description}</p>
         <p className="text-xs text-slate-500">{scopeLabel} · {ownersList.find(owner => owner.id === selectedOwnerId)?.name || 'Todos os vendedores'} · {productLabel}</p>
         <p className="text-xs text-slate-500">{mode === 'cohort' ? 'Filtros: responsável na entrada no funil e produtos associados atualmente. Ao editar produtos, o grupo filtrado pode mudar.' : mode === 'period' ? 'Filtros: responsável e produtos registrados no instante de cada acontecimento. Produtos adicionados depois não alteram eventos anteriores.' : 'Filtros: responsável e produtos atuais.'}</p>
+        {selectedBoard?.linkedLifecycleStage !== 'CUSTOMER' && <p className="text-sm text-slate-700 dark:text-slate-300"><strong>Fechamento = promoção para Cliente.</strong> Etapas posteriores, como protocolo, acompanham o avanço após a venda e preservam a data do fechamento.</p>}
       </section>
       {report.isError && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">Não foi possível carregar o relatório. {report.error.message} <button className="underline" onClick={() => void report.refetch()}>Tentar novamente</button></div>}
       {!metrics && !report.isError && <p role="status">Carregando histórico de movimentações…</p>}

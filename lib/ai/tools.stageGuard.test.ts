@@ -29,6 +29,7 @@ function client() {
     const builder = {
       select: () => builder,
       eq: (column: string, value: unknown) => { filters.push(row => row[column] === value); return builder; },
+      is: (column: string, value: unknown) => { filters.push(row => (row[column] ?? null) === value); return builder; },
       in: (column: string, values: unknown[]) => { filters.push(row => values.includes(row[column])); return builder; },
       or: () => builder,
       order: () => builder,
@@ -97,5 +98,35 @@ describe('AI stage ownership guards', () => {
     expect(await tools().moveDeal.execute({ dealId: 'deal', stageId: 'own' })).toMatchObject({ success: false, error: expect.stringContaining('mudou de board') });
     expect(writes[0].ids).toEqual([]);
     expect(tables.deals[0].stage_id).toBe('old');
+  });
+});
+
+
+describe('AI explicit commercial win destination', () => {
+  it('chooses CUSTOMER in the actual board rather than a stage called Protocolado', async () => {
+    tables.boards[0].won_stage_id = 'protocol';
+    tables.board_stages.push(
+      { id: 'signed', organization_id: 'org-a', board_id: 'board-a', linked_lifecycle_stage: 'CUSTOMER', order: 1 },
+      { id: 'protocol', organization_id: 'org-a', board_id: 'board-a', linked_lifecycle_stage: 'CUSTOM_PROTOCOL', order: 2 },
+    );
+    const api = createCRMTools({ organizationId: 'org-a', boardId: 'stale-board', wonStage: 'Protocolado' }, 'user', client());
+    expect(await api.markDealAsWon.execute({ dealId: 'deal' })).toMatchObject({ success: true });
+    expect(writes[0].updates).toMatchObject({ stage_id: 'signed', is_won: true });
+  });
+  it('preserves an explicit stay-in-stage win option', async () => {
+    tables.boards[0].won_stay_in_stage = true;
+    expect(await tools().markDealAsWon.execute({ dealId: 'deal' })).toMatchObject({ success: true });
+    expect(writes[0].updates).not.toHaveProperty('stage_id');
+    expect(writes[0].updates.is_won).toBe(true);
+  });
+  it('uses the configured manual destination when no CUSTOMER stage exists', async () => {
+    tables.boards[0].won_stage_id = 'own';
+    expect(await tools().markDealAsWon.execute({ dealId: 'deal' })).toMatchObject({ success: true });
+    expect(writes[0].updates).toMatchObject({ stage_id: 'own', is_won: true });
+  });
+  it('rejects a manual destination outside the current board', async () => {
+    tables.boards[0].won_stage_id = 'other-board';
+    expect(await tools().markDealAsWon.execute({ dealId: 'deal' })).toMatchObject({ success: false });
+    expect(writes).toEqual([]);
   });
 });

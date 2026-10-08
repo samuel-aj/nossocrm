@@ -3,7 +3,7 @@ import type { LifecycleEvent, StageEvent } from './performanceMetrics';
 export const board: Board = { id: 'board', name: 'Vendas', createdAt: '2026-01-01', wonStageId: 'won', lostStageId: 'lost', stages: [
   { id: 'new', label: 'Novo', color: 'bg-blue-500' }, { id: 'q', label: 'Proposta enviada', color: 'bg-orange-500', linkedLifecycleStage: 'MQL' },
   { id: 'proposal', label: 'Contrato', color: '#a855f7', linkedLifecycleStage: 'SALES_QUALIFIED' },
-  { id: 'signed', label: 'Assinado', color: '' }, { id: 'won', label: 'Protocolado', color: '' }, { id: 'lost', label: 'Perdido', color: '' },
+  { id: 'signed', label: 'Assinado', color: '', linkedLifecycleStage: 'CUSTOMER' }, { id: 'won', label: 'Protocolado', color: '', linkedLifecycleStage: 'custom-protocol' }, { id: 'lost', label: 'Perdido', color: '' },
 ] };
 export const august = { start: new Date('2026-08-01T00:00:00Z'), end: new Date('2026-08-31T23:59:59.999Z') };
 export const snapshot = new Date('2026-10-08T12:00:00Z');

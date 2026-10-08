@@ -1,3 +1,5 @@
+> Regra de ganho revisada pelo usuário após esta auditoria: promoção a Cliente define fechamento comercial; Protocolado é acompanhamento posterior. A conclusão original sobre Protocolado abaixo é histórica e foi substituída no design/implementação.
+
 # Revisão de relatórios e registros do kanban — MPL
 
 Data: 08/10/2026. Escopo: diagnóstico do relatório Performance dos funis DBA e BPC Autista, fórmulas, persistência de marcos e clareza da interface. Código equivalente ao main publicado `8700a209e088f577580e495a608e7d8d145433af`, checkout `nossocrm-envio-fix`, HEAD `2bf6c72d6b0ecd373fce9e7f62a04e889f20549f`. Consultas de produção somente leitura; não houve mudanças de configuração, leads, banco ou publicação.

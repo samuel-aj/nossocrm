@@ -24,11 +24,14 @@ export interface ReportDrilldown {
 }
 export function reportDrilldown(metrics: PerformanceMetrics & { deals: Deal[] }, selection: ReportSelection): ReportDrilldown {
   const cohort = metrics.mode === 'cohort';
+  const closingBasis = metrics.usesCustomerPromotion ? 'Primeira promoção comprovada a Cliente em cada episódio; avanços posteriores como protocolo não mudam a data do ganho.' : 'Primeiro ganho registrado em cada episódio de encerramento.';
+  const showsWins = ['revenue', 'closing', 'cycle', 'closures', 'owner'].includes(selection.kind);
   const context = {
     contextDescription: cohort ? 'Mesma coorte de leads criados no período, apurada até a data de corte. O responsável vem da primeira presença registrada no funil; o filtro de produto usa os vínculos atuais. Os resultados mostram os dados do evento.' :
       metrics.mode === 'period' ? 'Acontecimentos no período; cada volume usa sua própria data e os dados registrados no evento. Não são taxas de conversão.' : 'Carteira aberta no estado atual.',
-    dateBasisLabel: cohort ? 'Coorte até a data de corte' : metrics.mode === 'period' ? 'Data do acontecimento' : 'Estado atual',
+    dateBasisLabel: metrics.mode === 'current' ? 'Estado atual' : showsWins && metrics.usesCustomerPromotion ? 'Data da promoção a Cliente' : 'Data do acontecimento',
   };
+  context.contextDescription += metrics.mode === 'current' || !showsWins ? '' : ` ${closingBasis}`;
   const won: ReportLeadGroup = { id: 'won', label: 'Ganhos', description: cohort ? 'Ganhos de leads da coorte registrados até o corte.' : 'Ganhos registrados no período, incluindo leads criados antes dele.', deals: metrics.wonDeals };
   const qualified: ReportLeadGroup = { id: 'qualified', label: 'Qualificados', description: cohort ? 'Leads da coorte com qualificação observada até o corte. Estimativas ficam fora da taxa.' : 'Primeira qualificação observada no período. Estimativas ficam fora deste volume.', deals: metrics.qualifiedDeals };
   const entries: ReportLeadGroup = { id: 'entries', label: metrics.mode === 'current' ? 'Carteira aberta' : 'Entradas', description: cohort ? 'Leads criados no período e com presença comprovada neste funil até o corte.' : metrics.mode === 'current' ? 'Leads abertos no funil agora.' : 'Leads com entrada registrada no funil no período.', deals: metrics.entries };

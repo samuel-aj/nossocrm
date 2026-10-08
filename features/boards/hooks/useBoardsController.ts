@@ -1,5 +1,6 @@
 import { useBoardAutomations } from './useBoardAutomations';
 import { matchesAutomation } from '@/lib/boards/automationState';
+import { isLostBoardStage, manualWinStage } from '@/lib/boards/boardOutcome';
 import { useBoardFilters } from '../filters/useBoardFilters';
 import { matchesPeriod, matchesProduct, periodRange } from '../filters/boardFilters';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
@@ -791,7 +792,7 @@ export const useBoardsController = () => {
     setDraggingId(null);
   };
 
-  const handleDrop = (e: React.DragEvent, stageId: string) => {
+  const handleDrop = (e: React.DragEvent, stageId: string, explicitWin = false) => {
     e.preventDefault();
     const dealId = e.dataTransfer.getData('dealId') || lastMouseDownDealId.current;
     const dealTitle = e.dataTransfer.getData('dealTitle') || '';
@@ -828,10 +829,10 @@ export const useBoardsController = () => {
       reactivateInactiveContact(deal);
 
       // Find the target stage to check if it's a won/lost stage
-      const targetStage = activeBoard.stages.find(s => s.id === stageId);
+      const targetStage = explicitWin ? manualWinStage(activeBoard, deal.status) : activeBoard.stages.find(s => s.id === stageId);
 
       // Check linkedLifecycleStage to determine won/lost status
-      if (targetStage?.linkedLifecycleStage === 'OTHER') {
+      if (!explicitWin && isLostBoardStage(activeBoard, stageId)) {
         // Dropping into LOST stage - open modal to ask for reason
         setLossReasonModal({
           isOpen: true,
@@ -843,7 +844,8 @@ export const useBoardsController = () => {
         // Use unified moveDeal for all other cases (WON or regular stages)
         moveDealMutation.mutate({
           dealId,
-          targetStageId: stageId,
+          targetStageId: targetStage?.id || stageId,
+          explicitWin,
           deal,
           board: activeBoard,
           lifecycleStages,

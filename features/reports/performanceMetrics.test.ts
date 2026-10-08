@@ -5,7 +5,8 @@ import { august, board, lead, lifecycle, movement, snapshot } from './performanc
 describe('coorte de criação', () => {
   it('é o padrão: qualificados e ganhos são subconjuntos da mesma coorte', () => {
     const deals = [lead('new'), lead('old', { createdAt: '2026-07-01', isWon: true, closedAt: '2026-08-20' }), lead('win', { isWon: true, closedAt: '2026-08-20' })];
-    const data = calculatePerformance(deals, deals.map(deal => movement(deal.id, 'q')), board, august, '', undefined, snapshot);
+    const data = calculatePerformance(deals, deals.map(deal => movement(deal.id, 'q')), board, august, '', undefined, snapshot,
+      { lifecycleEvents: deals.filter(deal => deal.isWon).map(deal => lifecycle(deal, 'won', deal.closedAt!, { stageId: 'signed' })) });
     expect(data.mode).toBe('cohort');
     expect(data.entries.map(deal => deal.id)).toEqual(['new', 'win']);
     expect(data.qualifiedCount).toBe(2);
@@ -33,17 +34,19 @@ describe('coorte de criação', () => {
     expect(data.stageData[1].conversionRate).toBeNull();
   });
   it('ganho sem qualificação comprovada não aumenta o numerador da taxa de fechamento', () => {
-    const data = calculatePerformance([lead('q'), lead('win', { isWon: true, closedAt: '2026-08-20' })], [movement('q', 'q')], board, august, '', undefined, snapshot);
+    const winner = lead('win', { isWon: true, closedAt: '2026-08-20' });
+    const data = calculatePerformance([lead('q'), winner], [movement('q', 'q')], board, august, '', undefined, snapshot,
+      { lifecycleEvents: [lifecycle(winner, 'won', winner.closedAt!, { stageId: 'signed' })] });
     expect(data.wonDeals).toHaveLength(1);
     expect(data.qualifiedCount).toBe(1);
     expect(data.cohortWonDeals).toHaveLength(0);
     expect(data.closingRate).toBe(0);
   });
-  it('MQL tem prioridade sobre SQL/nome e somente Protocolado é ganho explícito', () => {
+  it('MQL tem prioridade sobre SQL/nome e CUSTOMER define ganho independente do atalho', () => {
     const rules = getStageRules(board);
     expect(rules.steps[rules.qualifiedIndex].id).toBe('q');
-    expect(rules.won('signed')).toBe(false);
-    expect(rules.won('won')).toBe(true);
+    expect(rules.won('signed')).toBe(true);
+    expect(rules.won('won')).toBe(false);
     const data = calculatePerformance([lead('a')], [movement('a', 'q')], board, august, '', undefined, snapshot);
     expect(data.hasQualifiedStage).toBe(true);
     expect(data.qualifiedCount).toBe(1);
@@ -131,7 +134,8 @@ describe('fluxo e carteira', () => {
     const data = calculatePerformance([lead('a', { isLost: true, lossCategory: 'qualified' }), lead('b', { isWon: true, closedAt: '2026-07-01' })], [], board, august, '', undefined, snapshot, { mode: 'period' });
     expect(data.wonDeals).toHaveLength(0);
     expect(data.lostDeals).toHaveLength(0);
-    expect(data.coverage.unknownClosureCount).toBe(1);
+    expect(data.coverage.unknownClosureCount).toBe(2);
+    expect(data.unknownClosure.map(deal => deal.id)).toEqual(['a', 'b']);
   });
   it('atividades sem board e títulos ambíguos não viram datas observadas', () => {
     const activity = { deal_id: 'a', title: 'Moveu para Proposta enviada', date: '2026-08-01' };
@@ -176,7 +180,7 @@ describe('fluxo e carteira', () => {
     const customerBoard = { ...board, wonStageId: undefined, linkedLifecycleStage: 'CUSTOMER', stages: board.stages.map(stage => ({ ...stage, linkedLifecycleStage: stage.id === 'won' ? 'CUSTOMER' : stage.linkedLifecycleStage })) };
     expect(getStageRules(customerBoard).won('won')).toBe(false);
     expect(getStageRules({ ...customerBoard, linkedLifecycleStage: 'LEAD' }).won('won')).toBe(true);
-    expect(getStageRules({ ...customerBoard, linkedLifecycleStage: 'LEAD' }).won('signed')).toBe(false);
+    expect(getStageRules({ ...customerBoard, linkedLifecycleStage: 'LEAD' }).won('signed')).toBe(true);
   });
   it('visita usa snapshot exato de estágio, não responsável/produto da entrada nem atuais', () => {
     const original = lead('a');

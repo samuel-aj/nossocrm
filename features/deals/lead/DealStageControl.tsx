@@ -15,10 +15,10 @@ import { LossReasonModal } from '@/components/ui/LossReasonModal';
 import ConfirmModal from '@/components/ConfirmModal';
 import type { Board, BoardStage, Deal, DealView } from '@/types';
 import { StageCascadePicker } from './StageCascadePicker';
+import { isAutomaticWonStage, isLostBoardStage, manualWinStage } from '@/lib/boards/boardOutcome';
 
 export function isLostStage(board: Board, stageId: string): boolean {
-  const s = board.stages.find(x => x.id === stageId);
-  return board.lostStageId ? board.lostStageId === stageId : s?.linkedLifecycleStage === 'OTHER';
+  return isLostBoardStage(board, stageId);
 }
 
 type Props = {
@@ -54,22 +54,17 @@ export function DealStageControl({ deal, size = 'md', align = 'left' }: Props) {
   };
 
   const selectedMove = pendingMove ? resolveMove(pendingMove) : null;
-  const targetIsWon = !!selectedMove && !isLostStage(selectedMove.target, selectedMove.targetStage.id) && (
-    selectedMove.target.wonStageId
-      ? selectedMove.target.wonStageId === selectedMove.targetStage.id
-      : selectedMove.target.linkedLifecycleStage !== 'CUSTOMER' && selectedMove.targetStage.linkedLifecycleStage === 'CUSTOMER'
-  );
+  const targetIsWon = !!selectedMove && isAutomaticWonStage(selectedMove.target, selectedMove.targetStage.id);
   const targetIsSuccess = targetIsWon || ['MQL', 'SALES_QUALIFIED'].includes(selectedMove?.targetStage.linkedLifecycleStage ?? '');
   const effect = selectedMove && (
     isLostStage(selectedMove.target, selectedMove.targetStage.id)
       ? 'O lead será marcado como perdido após informar o motivo.'
-      : selectedMove.target.wonStageId === selectedMove.targetStage.id ||
-        (!selectedMove.target.wonStageId && selectedMove.targetStage.linkedLifecycleStage === 'CUSTOMER' && selectedMove.target.linkedLifecycleStage !== 'CUSTOMER')
+      : targetIsWon
         ? 'O lead será marcado como ganho.'
         : deal.isWon || deal.isLost ? 'O lead será reaberto no funil de destino.' : null
   );
 
-  const doMove = async (board: Board, stage: BoardStage, loss?: { reason: string; category: 'qualified' | 'disqualified' }, win = false) => {
+  const doMove = async (board: Board, stage: BoardStage, loss?: { reason: string; category: 'qualified' | 'disqualified' }, win = false, reopen = false) => {
     if (submittingRef.current || !permissions.deals.move) return;
     submittingRef.current = true;
     try {
@@ -83,6 +78,7 @@ export function DealStageControl({ deal, size = 'md', align = 'left' }: Props) {
         lossCategory: loss?.category,
         explicitLost: !!loss,
         explicitWin: win,
+        explicitReopen: reopen,
       });
       addToast(
         board.id !== deal.boardId ? `Lead movido para ${board.name}, etapa ${stage.label}` : `Etapa alterada para ${stage.label}`,
@@ -101,7 +97,7 @@ export function DealStageControl({ deal, size = 'md', align = 'left' }: Props) {
     const stage = board?.stages.find(s => s.id === deal.status);
     if (!board || !stage) return;
     if (outcome === 'lost') setPendingLost({ dealId: deal.id, sourceBoardId: deal.boardId, sourceStageId: deal.status, targetBoardId: board.id, targetStageId: stage.id });
-    else void doMove(board, stage, undefined, true);
+    else void doMove(board, manualWinStage(board, stage.id) || stage, undefined, true);
   };
 
   const onPick = (board: Board, stage: BoardStage) => {
@@ -113,6 +109,10 @@ export function DealStageControl({ deal, size = 'md', align = 'left' }: Props) {
     const selection = { dealId: deal.id, sourceBoardId: deal.boardId, sourceStageId: deal.status, targetBoardId: board.id, targetStageId: stage.id };
     if (board.id !== deal.boardId) {
       setPendingMove(selection);
+      return;
+    }
+    if (stage.id === deal.status && (deal.isWon || deal.isLost)) {
+      void doMove(board, stage, undefined, false, true);
       return;
     }
     if (isLostStage(board, stage.id)) {

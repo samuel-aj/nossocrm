@@ -1,6 +1,6 @@
 # Relatórios de performance confiáveis
 
-Desenho aprovado pelo usuário ao solicitar avançar depois da revisão de 08/10/2026. Regras explicitamente confirmadas: MQL = Qualificado; BPC ganha somente em Protocolado. Base técnica e evidências em docs/maintenance/2026-10-08-performance-review.md.
+Desenho aprovado pelo usuário ao solicitar avançar depois da revisão de 08/10/2026. Regra de ganho corrigida pelo usuário após a primeira entrega: MQL = Qualificado; ganho comercial ao promover para CUSTOMER (Cliente), assinatura no BPC; protocolo é acompanhamento posterior. Base técnica e evidências em docs/maintenance/2026-10-08-performance-review.md.
 
 ## Decisão
 
@@ -12,7 +12,7 @@ Aplicar a solução completa de regra, histórico e apresentação. Uma alteraç
 
 ## Dados e limites
 
-MQL tem prioridade sobre compatibilidade com SQL/nome legado. wonStageId/lostStageId explícitos continuam prevalecendo. Chegadas em etapas posteriores podem provar o marco de qualificação segundo a regra do board; isso não inventa visita às etapas intermediárias ou opcionais. Eventos ocorridos depois do corte não entram no histórico selecionado.
+MQL tem prioridade sobre compatibilidade com SQL/nome legado. CUSTOMER define a promoção automática a ganho em funis comerciais; wonStageId indica destino de ação manual e não substitui essa regra. Boards já CUSTOMER mantêm semântica de pós-venda/renovação, sem contar cada etapa como nova promoção. lostStageId continua definindo a perda. Chegadas em etapas posteriores podem provar o marco de qualificação segundo a regra do board; isso não inventa visita às etapas intermediárias ou opcionais. Eventos ocorridos depois do corte não entram no histórico selecionado.
 
 O novo diário append-only deal_lifecycle_events guarda entered_board, left_board, stage_changed, qualified, won, lost, reopened, data observada, origem, identidade de board/etapa e snapshots dos campos usados no relatório. Escrita por trigger privado, leitura com RLS dos negócios visíveis. Reabertura/transferência não apagam o resultado passado. A carteira operacional continua usando o estado atual.
 
@@ -31,3 +31,9 @@ Implementação e testes locais autorizados. Publicação em produção será tr
 ## Precisão dos filtros de produto
 
 A criação atual grava negócio e produtos em requisições separadas. Para manter os leads acessíveis pelo produto escolhido no formulário, a visão de captação filtra produto pela associação atual, explicitamente; responsável continua ancorado na entrada. Editar produtos pode mudar esse grupo filtrado, mas numerador e denominador sempre usam os mesmos IDs. Nos volumes por período o produto é o registrado no instante do acontecimento; adicionar depois não reescreve o passado. Criação atômica com itens é uma melhoria separada de persistência, registrada na revisão; não será improvisada nesta migration de relatórios.
+
+## Correção de regra — confirmação posterior do usuário
+
+A orientação anterior de ganho apenas em Protocolado foi revogada. No BPC atual, Assinado com Pendência está associado ao lifecycle CUSTOMER; Protocolado tem lifecycle custom Protocolo. Conta-se a primeira promoção para Cliente de cada jornada (deal+board). Avançar na região posterior à promoção preserva ganho e data; protocolo isolado não comprova assinatura nem fabrica data. Perda, regressão para antes de Cliente ou reabertura explícita encerra a jornada; uma promoção futura observada pode criar outro ganho.
+
+Recuperação histórica deve priorizar evidência da promoção e não usar o encerramento antigo em protocolo como data da assinatura. Registros sem data comprovada permanecem sinalizados. Movimentos via UI, API e robôs usam a mesma regra, e a automação de próximo board não se repete em toda etapa posterior ao ganho.

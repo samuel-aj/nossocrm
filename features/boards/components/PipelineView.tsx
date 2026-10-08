@@ -21,6 +21,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
 import PageLoader from '@/components/PageLoader';
 import { UserRole } from '@/types/constants';
+import { isAutomaticWonStage, isLostBoardStage, manualWinStage } from '@/lib/boards/boardOutcome';
 
 /**
  * Zona de soltar da barra flutuante do drag (estilo Kommo), com visual de
@@ -136,7 +137,7 @@ interface PipelineViewProps {
   handleDragStart: (e: React.DragEvent, id: string, title: string) => void;
   handleDragOver: (e: React.DragEvent) => void;
   handleDragEnd: () => void;
-  handleDrop: (e: React.DragEvent, stageId: string) => void;
+  handleDrop: (e: React.DragEvent, stageId: string, explicitWin?: boolean) => void;
   // Zonas flutuantes de drag (Ganho/Perdido/Excluir)
   deleteDealModal: { dealId: string; dealTitle: string } | null;
   handleDropDelete: (dealId: string) => void;
@@ -430,7 +431,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
     ? []
     : statusFilter === 'open' && !automationActive
       ? activeBoard.stages.filter(
-          (s) => s.id !== activeBoard.wonStageId && s.id !== activeBoard.lostStageId
+          (s) => !isAutomaticWonStage(activeBoard, s.id) && !isLostBoardStage(activeBoard, s.id)
         )
       : activeBoard.stages;
 
@@ -713,15 +714,16 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
       {/* Barra flutuante de drag (estilo Kommo): previews das colunas de
           Ganho/Perdido (label + cor do estágio real) + Excluir */}
       {draggingId && activeBoard && (() => {
-        const wonStage = activeBoard.stages.find((s) => s.id === activeBoard.wonStageId);
+        const draggedStage = filteredDeals.find(deal => deal.id === draggingId)?.status || '';
+        const wonStage = manualWinStage(activeBoard, draggedStage);
         const lostStage = activeBoard.stages.find((s) => s.id === activeBoard.lostStageId);
         return (
           <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex gap-3 max-md:left-2 max-md:right-2 max-md:translate-x-0 max-md:grid max-md:grid-cols-2 max-md:gap-2 max-md:bottom-[calc(var(--app-bottom-nav-height,0px)+var(--app-safe-area-bottom,0px)+0.5rem)]">
-            {activeBoard.wonStageId && (
+            {wonStage && (
               <DragDropZone
-                onDropCard={(e) => handleDrop(e, activeBoard.wonStageId!)}
+                onDropCard={(e) => handleDrop(e, wonStage.id, true)}
                 colorBar={wonStage?.color || 'bg-green-500'}
-                title={wonStage?.label || 'Ganho'}
+                title={activeBoard.wonStayInStage ? 'Ganho · manter etapa' : `Ganho · ${wonStage.label}`}
                 icon={<CheckCircle2 size={14} className="text-green-500 shrink-0" />}
                 overClass="border-green-500 bg-green-100/95 dark:bg-green-900/70 ring-4 ring-green-400/50"
               />

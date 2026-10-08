@@ -23,6 +23,13 @@ describe('PDF Performance', () => {
     expect(rows).toContainEqual(['Taxa de fechamento', '—', '0 ganhos entre os qualificados / 0 qualificados do mesmo grupo; 0 ganhos sem qualificação prévia comprovada ficam fora da taxa']);
     expect(JSON.stringify(rows)).toContain('Estimativas não entram nas taxas');
     expect(JSON.stringify(rows)).not.toContain('Taxas acima de 100% são válidas');
+    expect(JSON.stringify(rows)).toContain('Fechamento automático = promoção para Cliente');
+    expect(JSON.stringify(rows)).toContain('não geram outro ganho nem alteram sua data');
+  });
+  it('não aplica a explicação de promoção comercial a um funil de clientes', () => {
+    const metrics = calculatePerformance([], [], { ...board, linkedLifecycleStage: 'CUSTOMER' }, range);
+    generateReportPDF(metrics, { ...context, customerPipeline: true });
+    expect(JSON.stringify(tables())).not.toContain('Fechamento automático = promoção para Cliente');
   });
   it('exporta volumes do período sem taxas e agrupa grafias preservadas', () => {
     const metrics = calculatePerformance([], [], board, range, '', undefined, new Date(), { mode: 'period' });

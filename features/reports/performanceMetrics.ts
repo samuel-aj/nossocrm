@@ -1,5 +1,6 @@
 import type { Board, Deal } from '@/types';
-import { dealAtEvent, matchesReportFilters, type LifecycleEvent, type PerformanceMode } from './performanceHistory';
+import { compareHistoricalDates, dealAtEvent, matchesReportFilters, normalizeWonEpisodes, type LifecycleEvent, type PerformanceMode } from './performanceHistory';
+import { firstCustomerStage, isAutomaticWonStage, isLostBoardStage } from '@/lib/boards/boardOutcome';
 export type { LifecycleEvent, PerformanceMode } from './performanceHistory';
 
 export interface StageEvent { dealId: string; stageId: string; date: string; fromStageId?: string; boardId?: string }
@@ -25,22 +26,17 @@ const STAGE_COLORS: Record<string, string> = {
   'bg-pink-500': '#ec4899', 'bg-indigo-500': '#6366f1', 'bg-teal-500': '#14b8a6', 'bg-slate-500': '#64748b',
 };
 export function getStageRules(board: Board) {
-  const won = (id: string) => {
-    if (board.wonStageId) return id === board.wonStageId;
-    const stage = board.stages.find(s => s.id === id);
-    return !!stage && board.linkedLifecycleStage !== 'CUSTOMER' && stage.linkedLifecycleStage === 'CUSTOMER';
-  };
-  const lost = (id: string) => {
-    if (board.lostStageId) return id === board.lostStageId;
-    const stage = board.stages.find(s => s.id === id);
-    return !!stage && stage.linkedLifecycleStage === 'OTHER';
-  };
+  const won = (id: string) => isAutomaticWonStage(board, id);
+  const lost = (id: string) => isLostBoardStage(board, id);
   // Keep the configured order, including outcome stages, just like the DB rule.
   const steps = board.stages;
   const mql = steps.findIndex(stage => stage.linkedLifecycleStage === 'MQL');
   const sql = steps.findIndex(stage => stage.linkedLifecycleStage === 'SALES_QUALIFIED');
   const qualifiedIndex = mql >= 0 ? mql : sql >= 0 ? sql : steps.findIndex(stage => /^qualificad/.test(normalize(stage.label)));
-  return { won, lost, steps, qualifiedIndex };
+  const customerStage = firstCustomerStage(board);
+  const customerIndex = customerStage ? steps.findIndex(stage => stage.id === customerStage.id) : -1;
+  const customerRegion = (id: string) => customerIndex >= 0 && steps.findIndex(stage => stage.id === id) >= customerIndex && !lost(id);
+  return { won, lost, steps, qualifiedIndex, customerIndex, customerRegion };
 }
 
 /** Calendar periods compare equal elapsed portions, capped at the previous period's end. */
@@ -59,7 +55,7 @@ export function performanceComparisonRange(range: PeriodRange, period: string): 
 export function calculatePerformance(deals: Deal[], events: StageEvent[], board: Board, range: PeriodRange, ownerId = '', comparisonRange?: PeriodRange, snapshotDate = new Date(), options: PerformanceOptions = {}) {
   const mode = options.mode || 'cohort';
   const productId = options.productId || '';
-  const cutoff = Math.min(range.end.getTime(), snapshotDate.getTime());
+  const cutoff = mode === 'current' ? snapshotDate.getTime() : Math.min(range.end.getTime(), snapshotDate.getTime());
   const rules = getStageRules(board);
   const qualifiedStage = rules.steps[rules.qualifiedIndex]?.id;
   const stepIndex = (id?: string) => rules.steps.findIndex(stage => stage.id === id);
@@ -69,7 +65,7 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   const filtered = (deal: Deal) => matchesReportFilters(deal, ownerId, productId);
   const boardLedger = (options.lifecycleEvents || []).filter(event => event.boardId === board.id && byId.has(event.dealId));
   const ledger = boardLedger.filter(event => validDate(event.date, event.dealCreatedAt))
-    .sort((a, b) => time(a.date) - time(b.date) || a.id.localeCompare(b.id));
+    .sort((a, b) => compareHistoricalDates(a.date, b.date) || (a.recordedAt && b.recordedAt ? compareHistoricalDates(a.recordedAt, b.recordedAt) : 0) || a.id.localeCompare(b.id));
   const history = events.filter(event => event.boardId === board.id && byId.has(event.dealId) && validDate(event.date, byId.get(event.dealId)!.createdAt))
     .sort((a, b) => time(a.date) - time(b.date));
   const ledgerByDeal = new Map<string, LifecycleEvent[]>();
@@ -85,12 +81,17 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
     return { ...value, status: stageId || value.status, updatedAt: date };
   };
   const canonical = [...ledger];
+  const requiresEpisodeReset = new Set<string>();
   const addLegacy = (deal: Deal, type: LifecycleEvent['type'], date: string, stageId?: string) => {
     if (!validDate(date, deal.createdAt) || canonical.some(event => event.dealId === deal.id && event.type === type && time(event.date) === time(date))) return;
-    canonical.push({ id: `legacy:${deal.id}:${type}:${date}`, dealId: deal.id, boardId: board.id, type, date,
-      source: 'history', snapshotSource: 'current', stageId, ownerId: deal.ownerId, owner: deal.owner,
-      value: deal.value, title: deal.title, dealCreatedAt: deal.createdAt, items: deal.items,
-      lossCategory: deal.lossCategory, lossReason: deal.lossReason, isWon: type === 'won', isLost: type === 'lost' });
+    const exact = ledgerFor(deal.id).find(event => time(event.date) === time(date) && (!stageId || event.stageId === stageId));
+    const snapshot = exact ? historical(exact) : deal;
+    const id = `legacy:${deal.id}:${type}:${date}`;
+    canonical.push({ id, dealId: deal.id, boardId: board.id, type, date,
+      recordedAt: exact?.recordedAt, source: exact?.source || 'history', snapshotSource: exact?.snapshotSource || 'current', stageId, ownerId: snapshot.ownerId, owner: snapshot.owner,
+      value: snapshot.value, title: snapshot.title, dealCreatedAt: snapshot.createdAt, items: snapshot.items,
+      lossCategory: snapshot.lossCategory, lossReason: snapshot.lossReason, isWon: type === 'won', isLost: type === 'lost' });
+    return id;
   };
   for (const event of history) {
     const deal = byId.get(event.dealId)!;
@@ -103,8 +104,20 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
       (origin >= 0 && !originQualifies && destinationQualifies))) {
       if (!ledgerFor(deal.id).some(e => e.type === 'qualified')) addLegacy(deal, 'qualified', event.date, event.stageId);
     }
-    for (const type of ['won', 'lost'] as const) {
-      if (rules[type](event.stageId) && !ledgerFor(deal.id).some(e => e.type === type)) addLegacy(deal, type, event.date, event.stageId);
+    if (rules.lost(event.stageId) && !ledgerFor(deal.id).some(e => e.type === 'lost')) addLegacy(deal, 'lost', event.date, event.stageId);
+    // CUSTOMER -> CUSTOMER/post-customer is continuation, not a dated first promotion.
+    // Keep earlier observed promotions even when an old protocol outcome exists later.
+    const authoritativeOpenArrival = ledgerFor(deal.id).some(record => record.snapshotSource === 'transition' && !record.isWon &&
+      (record.type === 'stage_changed' || record.type === 'entered_board') && record.stageId === event.stageId &&
+      compareHistoricalDates(record.date, event.date) === 0);
+    if (!authoritativeOpenArrival && rules.won(event.stageId) && (board.linkedLifecycleStage === 'CUSTOMER' || !event.fromStageId || origin >= 0)) {
+      const id = addLegacy(deal, 'won', event.date, event.stageId);
+      // A witnessed pre-customer -> custom protocol jump proves an open origin;
+      // merely being above the CUSTOMER index does not prove an earlier gain.
+      const observedOpenOrigin = !rules.won(event.fromStageId || '') && history.some(previous => previous.dealId === deal.id &&
+        previous.stageId === event.fromStageId && compareHistoricalDates(previous.date, event.date) < 0 &&
+        stepIndex(previous.fromStageId) >= 0 && !rules.customerRegion(previous.fromStageId || ''));
+      if (id && rules.customerRegion(event.fromStageId || '') && !observedOpenOrigin) requiresEpisodeReset.add(id);
     }
   }
   for (const deal of deals) {
@@ -115,9 +128,18 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
       !recorded.some(event => event.type === 'qualified') &&
       !hasLaterEntry(deal.qualifiedAt)) addLegacy(deal, 'qualified', deal.qualifiedAt);
     const closure = deal.isWon !== deal.isLost ? deal.isWon ? 'won' : deal.isLost ? 'lost' : undefined : undefined;
-    if (closure && deal.closedAt && !hasLaterEntry(deal.closedAt) && !boardLedger.some(event => event.dealId === deal.id && ['won', 'lost', 'reopened'].includes(event.type))) addLegacy(deal, closure, deal.closedAt, deal.status);
+    // A legacy protocol closed_at is not evidence of when the lead became a client.
+    if (closure && (closure === 'lost' || board.linkedLifecycleStage === 'CUSTOMER') && deal.closedAt && !hasLaterEntry(deal.closedAt) && !boardLedger.some(event => event.dealId === deal.id && ['won', 'lost', 'reopened'].includes(event.type))) addLegacy(deal, closure, deal.closedAt, deal.status);
   }
-  canonical.sort((a, b) => time(a.date) - time(b.date) || a.id.localeCompare(b.id));
+  canonical.sort((a, b) => compareHistoricalDates(a.date, b.date) || (a.recordedAt && b.recordedAt ? compareHistoricalDates(a.recordedAt, b.recordedAt) : 0) || a.id.localeCompare(b.id));
+  const episodes = normalizeWonEpisodes(canonical, history,
+    id => rules.lost(id) || (rules.customerIndex >= 0 && stepIndex(id) >= 0 && stepIndex(id) < rules.customerIndex) ||
+      (board.linkedLifecycleStage === 'CUSTOMER' && stepIndex(id) >= 0 && !rules.won(id)),
+    visit => rules.customerIndex < 0 ? undefined : rules.won(visit.stageId) ? 'direct'
+      : rules.customerRegion(visit.stageId) && rules.won(visit.fromStageId || '') ? 'origin' : undefined, requiresEpisodeReset);
+  const acceptedWinIds = new Set(episodes.wins.map(event => event.id));
+  const normalizedCanonical = canonical.filter(event => event.type !== 'won' || acceptedWinIds.has(event.id));
+  canonical.splice(0, canonical.length, ...normalizedCanonical);
   const first = (type: LifecycleEvent['type']) => {
     const result = new Map<string, LifecycleEvent>();
     for (const event of canonical) if (event.type === type && !result.has(event.dealId)) result.set(event.dealId, event);
@@ -142,12 +164,14 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   const firstQualified = first('qualified');
   const leadQualificationDates = new Map([...firstQualified].map(([id, event]) => [id, event.date]));
   const select = (type: LifecycleEvent['type']) => {
-    const candidates = type === 'qualified' ? [...firstQualified.values()] : canonical.filter(event => event.type === type);
+    const candidates = type === 'qualified' ? [...firstQualified.values()] : type === 'won' ? episodes.wins : canonical.filter(event => event.type === type);
     return candidates.filter(event => mode === 'cohort' ? cohortIds.has(event.dealId) : inPeriod(event.date) && filtered(historical(event)));
   };
   const selectedEvents = mode === 'current' ? [] : [...select('entered_board'), ...select('qualified'), ...select('won'), ...select('lost'), ...select('reopened')];
   for (const event of selectedEvents) if (event.snapshotSource === 'current') legacyIds.add(event.dealId);
-  const currentDeals = deals.filter(deal => deal.boardId === board.id && !deal.isWon && !deal.isLost && filtered(deal));
+  const derivedCustomerWin = (deal: Deal) => rules.customerIndex >= 0 && !deal.isLost &&
+    ((rules.won(deal.status) && !episodes.resetIds.has(deal.id)) || (rules.customerRegion(deal.status) && episodes.activeCustomerIds.has(deal.id)));
+  const currentDeals = deals.filter(deal => deal.boardId === board.id && !deal.isWon && !deal.isLost && !derivedCustomerWin(deal) && filtered(deal));
   const currentValue = currentDeals.reduce((sum, deal) => sum + deal.value, 0);
   const entries = mode === 'cohort' ? cohort : mode === 'current' ? currentDeals : distinct(select('entered_board').map(historical));
   const qualifiedDeals = mode === 'current' ? [] : distinct(select('qualified').map(historical));
@@ -163,7 +187,11 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
     (deal.lossCategory === 'qualified' || deal.isWon || (!rules.lost(deal.status) && stepIndex(deal.status) >= rules.qualifiedIndex)) &&
     !(options.lifecycleEvents || []).some(event => event.dealId === deal.id && event.boardId === board.id && event.type === 'qualified' && time(event.date) > cutoff) &&
     !events.some(event => event.dealId === deal.id && event.boardId === board.id && event.stageId === qualifiedStage && time(event.date) > cutoff));
-  const unknownClosure = coverageDeals.filter(deal => (deal.isWon || deal.isLost) && !Number.isFinite(time(deal.closedAt)) && !canonical.some(event => event.dealId === deal.id && (event.type === 'won' || event.type === 'lost')));
+  const unknownClosure = coverageDeals.filter(deal => deal.isLost
+    ? !Number.isFinite(time(deal.closedAt)) && !canonical.some(event => event.dealId === deal.id && event.type === 'lost')
+    : (deal.isWon || derivedCustomerWin(deal)) && (board.linkedLifecycleStage === 'CUSTOMER'
+      ? !Number.isFinite(time(deal.closedAt)) && !episodes.activeWonIds.has(deal.id)
+      : !episodes.activeWonIds.has(deal.id)));
   const chartStages = mode === 'current' ? board.stages : board.stages.filter(stage => !rules.lost(stage.id));
   const populations = new Map(chartStages.map(stage => [stage.id, new Map<string, Deal>()]));
   if (mode === 'current') {
@@ -198,7 +226,7 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   const cycles = wonDeals.map(deal => (time(deal.closedAt) - time(deal.createdAt)) / 86400000).filter(days => Number.isFinite(days) && days >= 0);
   const reportedIds = new Set([...entries, ...qualifiedDeals, ...wonDeals, ...lostDeals, ...reopenedDeals, ...stageData.flatMap(stage => stage.deals)].map(deal => deal.id));
   return {
-    mode, cutoffDate: new Date(cutoff).toISOString(), entries, qualifiedDeals, cohortWonDeals, currentDeals, currentValue, reopenedDeals,
+    mode, usesCustomerPromotion: board.linkedLifecycleStage !== 'CUSTOMER', cutoffDate: new Date(cutoff).toISOString(), entries, qualifiedDeals, cohortWonDeals, currentDeals, currentValue, reopenedDeals,
     estimatedQualificationIds, qualifiedIds, qualificationDates, leadQualificationDates, qualifiedCount: qualifiedIds.size,
     qualificationRate: mode === 'cohort' && rules.qualifiedIndex >= 0 ? rate(qualifiedIds.size, entries.length) : null,
     closingRate: mode === 'cohort' && rules.qualifiedIndex >= 0 ? rate(cohortWonDeals.length, qualifiedIds.size) : null,

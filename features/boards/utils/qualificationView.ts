@@ -1,4 +1,5 @@
 import { Board, BoardStage, DealView } from '@/types';
+import { isAutomaticWonStage, isLostBoardStage } from '@/lib/boards/boardOutcome';
 
 /** Aba ativa da visualização de qualificação. */
 export type QualificationTab = 'qualificacao' | 'sql';
@@ -67,10 +68,7 @@ export function computeQualificationView(deals: DealView[], board: Board): Quali
     : -1;
 
   const isClosedStage = (s: BoardStage) =>
-    s.id === board.wonStageId ||
-    s.id === board.lostStageId ||
-    s.linkedLifecycleStage === 'CUSTOMER' ||
-    s.linkedLifecycleStage === 'OTHER';
+    isAutomaticWonStage(board, s.id) || isLostBoardStage(board, s.id);
 
   const openDealsByStage = new Map<string, DealView[]>();
   for (const deal of deals) {

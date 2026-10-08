@@ -217,6 +217,9 @@ export function BoardStagesEditor({
                 </option>
               ))}
             </NativeSelect>
+            {current.linkedLifecycleStage === 'CUSTOMER' && <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+              Nos funis de vendas, esta promoção marca o negócio como ganho. Etapas posteriores mantêm o ganho e a data original. Funis que já gerenciam clientes usam sua configuração de conclusão.
+            </p>}
             {onManageLifecycle ? (
               <button
                 type="button"

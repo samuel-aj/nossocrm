@@ -4,7 +4,7 @@ import type { PerformanceMetrics } from '../performanceMetrics';
 import { groupLossReasons } from '@/lib/utils/lossDetails';
 import { REPORT_MODES, formatReportRate, type ReportMode } from '../reportPresentation';
 
-export interface ReportContext { mode?: ReportMode; boardName: string; period: string; range: string; owner: string; product?: string; generatedBy: string }
+export interface ReportContext { mode?: ReportMode; boardName: string; period: string; range: string; owner: string; product?: string; customerPipeline?: boolean; generatedBy: string }
 
 export function generateReportPDF(data: PerformanceMetrics & { webhookUnavailable?: boolean }, context: ReportContext) {
   const doc = new jsPDF();
@@ -50,6 +50,7 @@ export function generateReportPDF(data: PerformanceMetrics & { webhookUnavailabl
   const coverage = data.coverage;
   autoTable(doc, { head: [['Como ler este relatório']], body: [
     [info.description],
+    ...(!context.customerPipeline ? [['Fechamento automático = promoção para Cliente. Etapas posteriores, como protocolo, não geram outro ganho nem alteram sua data. A primeira promoção comprovada de cada jornada define o fechamento; reaberturas iniciam uma nova jornada.']] : []),
     [cohort ? 'Qualificação: qualificados / leads do mesmo grupo. Fechamento: ganhos entre os qualificados / qualificados do mesmo grupo. Sem denominador: traço.' : mode === 'period' ? 'Os volumes usam as datas de cada acontecimento; não são taxas de conversão. Um lead pode ter perda, reabertura e ganho no mesmo intervalo.' : 'Cada negócio aberto aparece na sua etapa atual.'],
     ...(mode !== 'current' ? [
       ['Gráfico: somente chegadas comprovadas. Saltos não criam visitas intermediárias. Percentuais, quando presentes, mostram leads da etapa que também chegaram à próxima.'],

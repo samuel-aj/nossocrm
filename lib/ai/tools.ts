@@ -916,22 +916,27 @@ export function createCRMTools(context: CRMCallOptions, userId: string, scopedCl
                     return { error: 'Não consegui identificar o deal. Forneça o ID, título ou nome do estágio.' };
                 }
 
-                // Se existir um estágio de "Ganho" no board, também mova o card para ele.
-                // Isso evita a sensação de "não moveu" quando a UI do kanban é baseada em stage_id.
+                // Resolve the actual board, not a potentially stale chat context.
+                const { data: currentDeal, error: currentDealError } = await supabase.from('deals')
+                    .select('board_id').eq('organization_id', organizationId).eq('id', targetDealId).is('deleted_at', null).maybeSingle();
+                if (currentDealError || !currentDeal) return { success: false, error: currentDealError?.message || 'Deal não encontrado' };
+                const actualBoardId = currentDeal.board_id;
+                const { data: boardConfig, error: boardError } = await supabase.from('boards')
+                    .select('linked_lifecycle_stage,won_stage_id,won_stay_in_stage').eq('organization_id', organizationId).eq('id', actualBoardId).maybeSingle();
+                if (boardError) return { success: false, error: boardError.message };
                 let wonStageId: string | null = null;
-                const wonStageNameFromContext = context.wonStage || 'Ganho';
-
-                if (targetBoardId && wonStageNameFromContext) {
-                    const { data: wonStages } = await supabase
-                        .from('board_stages')
-                        .select('id, name, label')
-                        .eq('organization_id', organizationId)
-                        .eq('board_id', targetBoardId)
-                        .or(`name.ilike.%${wonStageNameFromContext}%,label.ilike.%${wonStageNameFromContext}%`)
-                        .limit(1);
-
-                    if (wonStages && wonStages.length > 0) {
-                        wonStageId = wonStages[0].id;
+                if (!boardConfig?.won_stay_in_stage) {
+                    if (boardConfig?.linked_lifecycle_stage !== 'CUSTOMER') {
+                        const { data: customerStage, error: stageError } = await supabase.from('board_stages')
+                            .select('id').eq('organization_id', organizationId).eq('board_id', actualBoardId)
+                            .eq('linked_lifecycle_stage', 'CUSTOMER').order('order').limit(1).maybeSingle();
+                        if (stageError) return { success: false, error: stageError.message };
+                        wonStageId = customerStage?.id || null;
+                    }
+                    if (!wonStageId && boardConfig?.won_stage_id) {
+                        const stage = await resolveStageIdForBoard({ boardId: actualBoardId, stageId: boardConfig.won_stage_id });
+                        if (!stage.ok) return { success: false, error: stage.error };
+                        wonStageId = stage.stageId;
                     }
                 }
 
@@ -949,6 +954,7 @@ export function createCRMTools(context: CRMCallOptions, userId: string, scopedCl
                     .update(updateData)
                     .eq('organization_id', organizationId)
                     .eq('id', targetDealId)
+                    .eq('board_id', actualBoardId)
                     .select('title, value')
                     .single();
 

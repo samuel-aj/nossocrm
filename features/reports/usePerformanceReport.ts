@@ -17,7 +17,7 @@ interface ReportDealRow {
 }
 interface StageEventRow { deal_id: string; board_id: string; from_stage_id: string | null; to_stage_id: string; occurred_at: string }
 const DEAL_COLUMNS = 'id,title,board_id,stage_id,created_at,updated_at,closed_at,qualified_at,qualification_date_source,is_won,is_lost,value,owner_id,loss_category,loss_reason';
-const EVENT_COLUMNS = 'id,deal_id,board_id,event_type,occurred_at,source,snapshot_source,stage_id,owner_id,value,title,deal_created_at,items,loss_category,loss_reason,is_won,is_lost';
+const EVENT_COLUMNS = 'id,deal_id,board_id,event_type,occurred_at,recorded_at,source,snapshot_source,stage_id,owner_id,value,title,deal_created_at,items,loss_category,loss_reason,is_won,is_lost';
 
 export function usePerformanceReport(board: Board | undefined, range: PeriodRange, ownerId: string, comparisonRange?: PeriodRange, productId = '', mode: PerformanceMode = 'cohort') {
   const { user, organizationId, loading } = useAuth();

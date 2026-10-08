@@ -592,18 +592,16 @@ async function moveDealToBoardStage(
   if (stageError) throw new Error(stageError.message);
   if (!stage) throw new Error('etapa de destino não pertence ao pipeline escolhido');
   const now = nowIso();
-  // Etapa de ganho/perda do quadro de destino marca o lead (antes a troca de pipeline ignorava)
+  // O banco aplica a promoção CUSTOMER e preserva a data comercial nas etapas posteriores.
   const { data: boardCfg } = await admin
     .from('boards')
-    .select('won_stage_id, lost_stage_id')
+    .select('lost_stage_id')
     .eq('organization_id', orgId)
     .eq('id', boardId)
     .maybeSingle();
-  const cfg = (boardCfg as { won_stage_id?: string | null; lost_stage_id?: string | null } | null) ?? {};
+  const cfg = (boardCfg as { lost_stage_id?: string | null } | null) ?? {};
   const updates: Record<string, unknown> = { board_id: boardId, stage_id: stageId, last_stage_change_date: now, updated_at: now };
-  if (cfg.won_stage_id && cfg.won_stage_id === stageId) {
-    Object.assign(updates, { is_won: true, is_lost: false, closed_at: now, loss_reason: null });
-  } else if (cfg.lost_stage_id && cfg.lost_stage_id === stageId) {
+  if (cfg.lost_stage_id && cfg.lost_stage_id === stageId) {
     Object.assign(updates, { is_lost: true, is_won: false, closed_at: now });
     if (loss.reason?.trim()) updates.loss_reason = loss.reason.trim().slice(0, 200);
     if (loss.category) updates.loss_category = loss.category;

@@ -17,14 +17,28 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
   SELECT t.q IS NOT NULL AND s."order">=t.q AND NOT (
       coalesce(s.id=s.lost_stage_id,false) OR
       (s.lost_stage_id IS NULL AND s.linked_lifecycle_stage IS NOT DISTINCT FROM 'OTHER')),
-    CASE WHEN s.won_stage_id IS NOT NULL THEN s.id=s.won_stage_id
-      ELSE coalesce(s.board_lifecycle<>'CUSTOMER',true) AND s.linked_lifecycle_stage IS NOT DISTINCT FROM 'CUSTOMER' END,
+    CASE WHEN s.board_lifecycle IS NOT DISTINCT FROM 'CUSTOMER' THEN coalesce(s.id=s.won_stage_id,false)
+      ELSE s.linked_lifecycle_stage IS NOT DISTINCT FROM 'CUSTOMER' END,
     CASE WHEN s.lost_stage_id IS NOT NULL THEN s.id=s.lost_stage_id
       ELSE s.linked_lifecycle_stage IS NOT DISTINCT FROM 'OTHER' END,
     s."order"=t.q
   FROM stages s CROSS JOIN threshold t WHERE s.id=p_stage;
 $$;
 REVOKE ALL ON FUNCTION crm_internal.deal_stage_rules(uuid,uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
+
+-- Promotion is the CUSTOMER identity, never its display name or the manual-win
+-- shortcut. Later operational stages preserve an existing win but cannot prove
+-- the date of the original promotion (e.g. a direct jump to Protocolado).
+CREATE FUNCTION crm_internal.deal_customer_phase(p_board uuid,p_org uuid,p_stage uuid)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
+  SELECT coalesce((SELECT b.linked_lifecycle_stage IS DISTINCT FROM 'CUSTOMER'
+    AND s."order">=(SELECT min(c."order") FROM public.board_stages c
+      WHERE c.board_id=b.id AND c.organization_id=p_org AND c.linked_lifecycle_stage='CUSTOMER')
+    AND NOT (CASE WHEN b.lost_stage_id IS NOT NULL THEN s.id=b.lost_stage_id ELSE s.linked_lifecycle_stage IS NOT DISTINCT FROM 'OTHER' END)
+    FROM public.boards b JOIN public.board_stages s ON s.board_id=b.id AND s.organization_id=p_org
+    WHERE b.id=p_board AND b.organization_id=p_org AND s.id=p_stage),false);
+$$;
+REVOKE ALL ON FUNCTION crm_internal.deal_customer_phase(uuid,uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
 
 CREATE TABLE public.deal_lifecycle_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -35,6 +49,7 @@ CREATE TABLE public.deal_lifecycle_events (
   board_id uuid NOT NULL,
   event_type text NOT NULL CHECK (event_type IN ('entered_board','left_board','stage_changed','qualified','won','lost','reopened')),
   occurred_at timestamptz NOT NULL,
+  recorded_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   source text NOT NULL CHECK (source IN ('transition','history')),
   snapshot_source text NOT NULL CHECK (snapshot_source IN ('transition','current')),
   stage_id uuid,
@@ -169,6 +184,7 @@ WHERE e.created_at BETWEEN d.created_at AND now();
 -- An audit outcome's board is established by a dated stage/creation record;
 -- absent one, a later transfer's old board can locate the earlier outcome.
 -- Ambiguous simultaneous records on different boards are deliberately skipped.
+CREATE TEMP TABLE performance_history_outcomes AS
 WITH positions AS (
   SELECT organization_id,deal_id,board_id,to_stage_id AS stage_id,occurred_at FROM public.deal_stage_events
   UNION ALL
@@ -199,11 +215,20 @@ WITH positions AS (
   WHERE e.kind IN ('won','lost','reopened') AND coalesce(e.detail->>'updated','false')<>'true'
     AND e.created_at BETWEEN d.created_at AND now()
 )
+SELECT * FROM outcomes e WHERE historical_board IS NOT NULL AND NOT coalesce(ambiguous,false)
+  -- The old Protocolado rule reopened a deal when returning to another stage in
+  -- the same CUSTOMER phase. That automatic artifact is not an explicit reopen.
+  AND NOT (e.kind='reopened' AND EXISTS (
+    SELECT 1 FROM public.deal_stage_events s WHERE s.deal_id=e.deal_id AND s.organization_id=e.organization_id
+      AND s.board_id=e.historical_board AND s.occurred_at=e.created_at
+      AND crm_internal.deal_customer_phase(s.board_id,s.organization_id,s.from_stage_id)
+      AND crm_internal.deal_customer_phase(s.board_id,s.organization_id,s.to_stage_id)));
+
 SELECT crm_internal.append_deal_lifecycle_event(d,e.historical_board,e.kind,e.created_at,
   'history','current','deal_event:'||e.id::text||':'||e.kind,e.historical_stage,
   e.kind='won',e.kind='lost',CASE WHEN e.kind='lost' THEN e.detail->>'category' END,
   CASE WHEN e.kind='lost' THEN e.detail->>'reason' END)
-FROM outcomes e JOIN public.deals d ON d.id=e.deal_id WHERE e.historical_board IS NOT NULL AND NOT coalesce(e.ambiguous,false);
+FROM performance_history_outcomes e JOIN public.deals d ON d.id=e.deal_id WHERE e.kind IN ('lost','reopened');
 
 -- Older stage events predate the richer audit log. A recorded arrival in an
 -- explicitly configured outcome stage also proves that outcome at that time.
@@ -213,7 +238,7 @@ WITH arrivals AS (
   FROM public.deal_stage_events e
   CROSS JOIN LATERAL crm_internal.deal_stage_rules(e.board_id,e.organization_id,e.to_stage_id) dest
   LEFT JOIN LATERAL crm_internal.deal_stage_rules(e.board_id,e.organization_id,e.from_stage_id) origin ON true
-  WHERE (dest.won AND NOT coalesce(origin.won,false)) OR (dest.lost AND NOT coalesce(origin.lost,false))
+  WHERE dest.lost AND NOT coalesce(origin.lost,false)
 )
 SELECT crm_internal.append_deal_lifecycle_event(d,e.board_id,e.outcome,e.occurred_at,
   'history','current','stage:'||e.id::text||':'||e.outcome,e.to_stage_id,e.outcome='won',e.outcome='lost',NULL,NULL)
@@ -226,19 +251,116 @@ WHERE e.occurred_at BETWEEN d.created_at AND now()
 -- Only fill a missing current closure; never replace an existing outcome event.
 SELECT crm_internal.append_deal_lifecycle_event(d,d.board_id,CASE WHEN d.is_won THEN 'won' ELSE 'lost' END,d.closed_at,
   'history','current','closed_at:'||d.id::text,d.stage_id,d.is_won,d.is_lost,d.loss_category,d.loss_reason)
-FROM public.deals d WHERE d.board_id IS NOT NULL AND d.is_won<>d.is_lost
+FROM public.deals d WHERE d.board_id IS NOT NULL AND d.is_lost AND NOT d.is_won
   AND d.closed_at BETWEEN d.created_at AND now()
   AND NOT EXISTS (SELECT 1 FROM public.deal_lifecycle_events e WHERE e.deal_id=d.id AND e.board_id=d.board_id
     AND e.event_type=CASE WHEN d.is_won THEN 'won' ELSE 'lost' END AND e.occurred_at=d.closed_at)
   AND NOT EXISTS (SELECT 1 FROM public.deal_events t WHERE t.deal_id=d.id AND t.organization_id=d.organization_id
     AND t.kind='stage' AND t.detail->>'old_board_id' IS DISTINCT FROM t.detail->>'board_id' AND t.created_at>d.closed_at);
 
+-- Normalize commercial wins BEFORE the ledger is exposed. Old automatic wins at
+-- the Protocolado shortcut are not evidence of when CUSTOMER was first reached.
+-- Every evidenced re-open/loss/regression/board exit starts another episode.
+WITH arrivals AS (
+  SELECT e.organization_id,e.deal_id,e.board_id,e.to_stage_id AS stage_id,e.from_stage_id,
+    e.occurred_at,'stage:'||e.id::text AS evidence_key
+  FROM public.deal_stage_events e
+  UNION ALL
+  SELECT e.organization_id,e.deal_id,b.id,
+    CASE WHEN pg_catalog.pg_input_is_valid(e.new_value#>>'{}','uuid') THEN (e.new_value#>>'{}')::uuid END,
+    CASE WHEN e.kind='stage' AND e.detail->>'old_board_id'=e.detail->>'board_id'
+      AND pg_catalog.pg_input_is_valid(e.old_value#>>'{}','uuid') THEN (e.old_value#>>'{}')::uuid END,
+    e.created_at,'audit_stage:'||e.id::text
+  FROM public.deal_events e JOIN public.boards b ON b.id::text=e.detail->>'board_id' AND b.organization_id=e.organization_id
+  WHERE e.kind IN ('created','stage')
+  UNION ALL
+  SELECT e.organization_id,e.deal_id,b.id,e.to_stage_id,e.from_stage_id,
+    CASE WHEN pg_catalog.pg_input_is_valid(e.payload->>'occurred_at','timestamp with time zone')
+      THEN (e.payload->>'occurred_at')::timestamptz ELSE e.created_at END,'webhook:'||e.id::text
+  FROM public.webhook_events_out e JOIN public.boards b ON b.id::text=e.payload->'deal'->>'board_id' AND b.organization_id=e.organization_id
+  WHERE e.event_type IN ('deal.created','deal.stage_changed')
+), resets AS (
+  SELECT organization_id,deal_id,board_id,occurred_at FROM public.deal_lifecycle_events
+  WHERE event_type IN ('lost','reopened','left_board')
+  UNION ALL
+  SELECT a.organization_id,a.deal_id,a.board_id,a.occurred_at FROM arrivals a
+  JOIN public.boards b ON b.id=a.board_id AND b.organization_id=a.organization_id
+  JOIN public.board_stages s ON s.id=a.stage_id AND s.board_id=a.board_id AND s.organization_id=a.organization_id
+  WHERE CASE WHEN b.linked_lifecycle_stage='CUSTOMER'
+    THEN s.id IS DISTINCT FROM b.won_stage_id
+    ELSE NOT crm_internal.deal_customer_phase(a.board_id,a.organization_id,a.stage_id) END
+), candidates AS (
+  SELECT a.*,0 AS priority FROM arrivals a
+  JOIN public.boards b ON b.id=a.board_id AND b.organization_id=a.organization_id
+  CROSS JOIN LATERAL crm_internal.deal_stage_rules(a.board_id,a.organization_id,a.stage_id) dest
+  LEFT JOIN LATERAL crm_internal.deal_stage_rules(a.board_id,a.organization_id,a.from_stage_id) origin ON true
+  CROSS JOIN LATERAL (SELECT max(r.occurred_at) AS at FROM resets r WHERE r.organization_id=a.organization_id
+    AND r.deal_id=a.deal_id AND r.board_id=a.board_id AND r.occurred_at<a.occurred_at) last_reset
+  WHERE dest.won AND CASE WHEN b.linked_lifecycle_stage='CUSTOMER' THEN NOT coalesce(origin.won,false)
+    ELSE (NOT coalesce(origin.won,false)
+      OR EXISTS (SELECT 1 FROM public.deal_lifecycle_events r WHERE r.deal_id=a.deal_id AND r.board_id=a.board_id
+        AND r.event_type='reopened' AND r.occurred_at=last_reset.at
+        AND crm_internal.deal_customer_phase(r.board_id,r.organization_id,r.stage_id)))
+      AND NOT EXISTS (SELECT 1 FROM arrivals earlier WHERE earlier.deal_id=a.deal_id AND earlier.organization_id=a.organization_id
+        AND earlier.board_id=a.board_id AND earlier.occurred_at<a.occurred_at
+        AND earlier.occurred_at>coalesce(last_reset.at,'-infinity'::timestamptz)
+        AND EXISTS (SELECT 1 FROM public.board_stages prior_customer WHERE prior_customer.board_id=a.board_id
+          AND prior_customer.organization_id=a.organization_id AND prior_customer.linked_lifecycle_stage='CUSTOMER'
+          AND prior_customer.id IN (earlier.stage_id,earlier.from_stage_id))) END
+  UNION ALL
+  SELECT e.organization_id,e.deal_id,e.historical_board,e.historical_stage,NULL,e.created_at,'audit_won:'||e.id::text,1
+  FROM performance_history_outcomes e JOIN public.boards b ON b.id=e.historical_board AND b.organization_id=e.organization_id
+  LEFT JOIN public.board_stages shortcut ON shortcut.id=b.won_stage_id AND shortcut.organization_id=b.organization_id
+  LEFT JOIN public.board_stages actual ON actual.id=e.historical_stage AND actual.organization_id=b.organization_id
+  WHERE e.kind='won' AND (b.linked_lifecycle_stage='CUSTOMER' OR (actual.linked_lifecycle_stage='CUSTOMER'
+      AND (actual.id IS DISTINCT FROM b.won_stage_id OR actual."order"=(SELECT min(c."order") FROM public.board_stages c
+        WHERE c.board_id=b.id AND c.organization_id=b.organization_id AND c.linked_lifecycle_stage='CUSTOMER')))
+    OR (e.historical_stage IS NOT NULL AND e.historical_stage IS DISTINCT FROM b.won_stage_id)
+    OR (e.historical_stage IS NULL AND shortcut.linked_lifecycle_stage='CUSTOMER' AND shortcut."order"=(SELECT min(c."order") FROM public.board_stages c
+      WHERE c.board_id=b.id AND c.organization_id=b.organization_id AND c.linked_lifecycle_stage='CUSTOMER')))
+    AND (b.linked_lifecycle_stage='CUSTOMER' OR NOT EXISTS (SELECT 1 FROM arrivals a WHERE a.deal_id=e.deal_id
+      AND a.organization_id=e.organization_id AND a.board_id=e.historical_board AND a.occurred_at=e.created_at
+      AND crm_internal.deal_customer_phase(a.board_id,a.organization_id,a.from_stage_id)
+      AND crm_internal.deal_customer_phase(a.board_id,a.organization_id,a.stage_id)))
+  UNION ALL
+  SELECT d.organization_id,d.id,d.board_id,d.stage_id,NULL,d.closed_at,'closed_at:'||d.id::text,2
+  FROM public.deals d JOIN public.boards b ON b.id=d.board_id AND b.organization_id=d.organization_id
+  LEFT JOIN public.board_stages shortcut ON shortcut.id=b.won_stage_id AND shortcut.organization_id=b.organization_id
+  WHERE d.is_won AND NOT d.is_lost AND (b.linked_lifecycle_stage='CUSTOMER' OR (shortcut.linked_lifecycle_stage='CUSTOMER'
+    AND shortcut."order"=(SELECT min(c."order") FROM public.board_stages c
+      WHERE c.board_id=b.id AND c.organization_id=b.organization_id AND c.linked_lifecycle_stage='CUSTOMER')))
+    AND (b.linked_lifecycle_stage='CUSTOMER' OR NOT EXISTS (SELECT 1 FROM arrivals a WHERE a.deal_id=d.id
+      AND a.organization_id=d.organization_id AND a.board_id=d.board_id AND a.occurred_at=d.closed_at
+      AND crm_internal.deal_customer_phase(a.board_id,a.organization_id,a.from_stage_id)
+      AND crm_internal.deal_customer_phase(a.board_id,a.organization_id,a.stage_id)))
+    AND NOT EXISTS (SELECT 1 FROM public.deal_events t WHERE t.deal_id=d.id AND t.organization_id=d.organization_id
+      AND t.kind='stage' AND t.detail->>'old_board_id' IS DISTINCT FROM t.detail->>'board_id' AND t.created_at>d.closed_at)
+), episodes AS (
+  SELECT c.*, (SELECT max(r.occurred_at) FROM resets r WHERE r.organization_id=c.organization_id
+    AND r.deal_id=c.deal_id AND r.board_id=c.board_id AND r.occurred_at<c.occurred_at) AS episode_start
+  FROM candidates c JOIN public.deals d ON d.id=c.deal_id AND d.organization_id=c.organization_id
+  WHERE c.occurred_at BETWEEN d.created_at AND now()
+), first_wins AS (
+  SELECT DISTINCT ON (organization_id,deal_id,board_id,episode_start) * FROM episodes
+  ORDER BY organization_id,deal_id,board_id,episode_start,occurred_at,priority,evidence_key
+)
+SELECT crm_internal.append_deal_lifecycle_event(d,e.board_id,'won',e.occurred_at,'history','current',
+  e.evidence_key||':won',e.stage_id,true,false,NULL,NULL)
+FROM first_wins e JOIN public.deals d ON d.id=e.deal_id;
+DROP TABLE performance_history_outcomes;
+
 CREATE OR REPLACE FUNCTION crm_internal.sync_deal_lifecycle_dates()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
-DECLARE r record; q record; moved boolean; board_changed boolean; previous_closed boolean; outcome_changed boolean; origin_qualifies boolean;
+DECLARE r record; prior_rules record; q record; last_result record; moved boolean; board_changed boolean;
+  previous_closed boolean; outcome_changed boolean; origin_qualifies boolean; old_phase boolean:=false; target_phase boolean;
+  requested_reopen boolean:=false; requested_loss boolean:=false;
+  restore_win boolean:=false; fresh_win boolean:=false; episode_open boolean:=false;
 BEGIN
   IF NEW.deleted_at IS NOT NULL THEN RETURN NEW; END IF;
+  SELECT false AS won INTO prior_rules;
+  SELECT NULL::text AS event_type,NULL::timestamptz AS occurred_at INTO last_result;
   SELECT * INTO r FROM crm_internal.deal_stage_rules(NEW.board_id,NEW.organization_id,NEW.stage_id);
+  target_phase := crm_internal.deal_customer_phase(NEW.board_id,NEW.organization_id,NEW.stage_id);
   moved := TG_OP='INSERT'; board_changed := TG_OP='INSERT';
   previous_closed := false; outcome_changed := true;
   IF TG_OP='UPDATE' THEN
@@ -246,6 +368,15 @@ BEGIN
     moved := NEW.stage_id IS DISTINCT FROM OLD.stage_id OR board_changed;
     previous_closed := coalesce(OLD.is_won,false) OR coalesce(OLD.is_lost,false);
     outcome_changed := NEW.is_won IS DISTINCT FROM OLD.is_won OR NEW.is_lost IS DISTINCT FROM OLD.is_lost;
+    requested_reopen := previous_closed AND NOT NEW.is_won AND NOT NEW.is_lost AND outcome_changed;
+    requested_loss := NEW.is_lost AND NOT OLD.is_lost;
+    old_phase := NOT board_changed AND crm_internal.deal_customer_phase(OLD.board_id,OLD.organization_id,OLD.stage_id);
+    SELECT * INTO prior_rules FROM crm_internal.deal_stage_rules(OLD.board_id,OLD.organization_id,OLD.stage_id);
+    SELECT e.event_type,e.occurred_at INTO last_result FROM public.deal_lifecycle_events e
+      WHERE e.deal_id=NEW.id AND e.organization_id=NEW.organization_id AND e.board_id=NEW.board_id
+        AND e.event_type IN ('won','lost','reopened','left_board')
+      ORDER BY e.occurred_at DESC,e.recorded_at DESC LIMIT 1;
+    episode_open := coalesce(last_result.event_type IN ('lost','reopened','left_board'),false);
     NEW.qualified_at := CASE WHEN NOT board_changed THEN OLD.qualified_at END;
     NEW.qualification_date_source := CASE WHEN NOT board_changed THEN OLD.qualification_date_source END;
     IF OLD.stage_id IS NULL THEN origin_qualifies := false;
@@ -257,8 +388,20 @@ BEGIN
   END IF;
   IF moved THEN
     NEW.last_stage_change_date := now();
-    IF coalesce(r.won,false) THEN NEW.is_won := true; NEW.is_lost := false;
+    IF requested_loss THEN NEW.is_won := false; NEW.is_lost := true;
+    ELSIF requested_reopen THEN NEW.is_won := false; NEW.is_lost := false;
     ELSIF coalesce(r.lost,false) THEN NEW.is_won := false; NEW.is_lost := true;
+    ELSIF coalesce(r.won,false) THEN
+      NEW.is_won := true; NEW.is_lost := false;
+      -- Existing CUSTOMER phase is not another conversion. Even a legacy false
+      -- flag is normalized without dating the old signature at today's move.
+      restore_win := old_phase AND NOT episode_open AND
+        (coalesce(OLD.is_won,false) OR coalesce(prior_rules.won,false) OR coalesce(last_result.event_type='won',false));
+      fresh_win := NOT restore_win AND (TG_OP='INSERT' OR board_changed OR NOT coalesce(OLD.is_won,false) OR episode_open);
+    ELSIF TG_OP='UPDATE' AND NOT board_changed AND target_phase
+      AND (OLD.is_won OR (old_phase AND NOT episode_open AND
+        (coalesce(prior_rules.won,false) OR last_result.event_type='won'))) THEN
+      NEW.is_won := true; NEW.is_lost := false; restore_win := true;
     ELSIF TG_OP='UPDATE' AND previous_closed AND NOT outcome_changed THEN NEW.is_won := false; NEW.is_lost := false;
     END IF;
     -- Restore the first witnessed qualification on re-entry to the same board.
@@ -274,7 +417,10 @@ BEGIN
   END IF;
   IF NEW.is_won AND NEW.is_lost THEN RAISE EXCEPTION 'O negócio não pode estar ganho e perdido ao mesmo tempo'; END IF;
   IF NEW.is_won OR NEW.is_lost THEN
-    IF TG_OP='UPDATE' AND NOT board_changed AND OLD.is_won IS NOT DISTINCT FROM NEW.is_won
+    IF fresh_win THEN NEW.closed_at := now();
+    ELSIF restore_win THEN
+      NEW.closed_at := CASE WHEN last_result.event_type='won' THEN last_result.occurred_at END;
+    ELSIF TG_OP='UPDATE' AND NOT board_changed AND OLD.is_won IS NOT DISTINCT FROM NEW.is_won
       AND OLD.is_lost IS NOT DISTINCT FROM NEW.is_lost THEN NEW.closed_at := OLD.closed_at;
     ELSE NEW.closed_at := now(); END IF;
   ELSE
@@ -313,7 +459,7 @@ BEGIN
     PERFORM crm_internal.append_deal_lifecycle_event(NEW,NEW.board_id,'qualified',NEW.qualified_at,
       'transition','transition',key_base||':qualified',NEW.stage_id,NEW.is_won,NEW.is_lost,NEW.loss_category,NEW.loss_reason);
   END IF;
-  IF NEW.is_won AND (moved_board OR NOT coalesce(OLD.is_won,false)) THEN
+  IF NEW.is_won AND NEW.closed_at=at_time AND (moved_board OR NOT coalesce(OLD.is_won,false) OR NEW.closed_at IS DISTINCT FROM OLD.closed_at) THEN
     PERFORM crm_internal.append_deal_lifecycle_event(NEW,NEW.board_id,'won',at_time,
       'transition','transition',key_base||':won',NEW.stage_id,true,false,NULL,NULL);
   END IF;
