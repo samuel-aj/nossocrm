@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({ org: 'org-a' }));
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ profile: { organization_id: mocks.org } }) }));
 vi.mock('@/lib/tabOrg', () => ({ readTabOrg: () => ({ id: mocks.org }) }));
 import { useConversationLead } from './useConversationLead';
+import { ChatCrmHeader } from './ChatCrmHeader';
+import { render, screen, fireEvent } from '@testing-library/react';
 
 const conversation = { id: 'chat', contact_id: 'contact', deal_id: null, deal_link_mode: 'auto', is_group: false };
 const key = ['waConversations', 'org-a'];
@@ -15,6 +17,8 @@ function setup() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 } } });
   clients.push(client);
   client.setQueryData(key, { data: [conversation, { ...conversation, id: 'other' }] });
+  // Layout always mounts this query; its response is a counter, not a list.
+  client.setQueryData(['waConversations', 'unread'], { total: 7 });
   const wrapper = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
   return { client, wrapper };
 }
@@ -48,6 +52,25 @@ describe('open chat lead resolution', () => {
     const { result } = renderHook(() => useConversationLead(conversation), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data?.deal_id).toBeNull();
+  });
+  it('offers lead creation after a successful empty lookup with the unread badge mounted', async () => {
+    fetcher.mockImplementation(async () => response(null));
+    const { client, wrapper } = setup();
+    const createLead = vi.fn();
+    function Header() {
+      const lookup = useConversationLead(conversation);
+      return <ChatCrmHeader conversationId={conversation.id} contactId={conversation.contact_id}
+        deal={null} contactDeals={[]} loading={lookup.isFetching} linkError={lookup.isError}
+        saving={false} detailsOpen={false} ownerName={null} labels={[]}
+        onCreateLead={createLead} onRetryLink={() => void lookup.refetch()}
+        onLinkDeal={vi.fn()} onOpenDeal={vi.fn()} onAddContact={vi.fn()} onOpenLabels={vi.fn()} />;
+    }
+    render(<Header />, { wrapper });
+    fireEvent.click(await screen.findByRole('button', { name: 'Criar lead' }));
+    expect(createLead).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: /Não foi possível consultar/ })).not.toBeInTheDocument();
+    expect(client.getQueryData(['waConversations', 'unread'])).toEqual({ total: 7 });
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
   it('reports server failures without changing the cached link', async () => {
     fetcher.mockImplementation(async () => new Response(JSON.stringify({ error: 'offline' }), { status: 500 }));

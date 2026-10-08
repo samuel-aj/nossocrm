@@ -492,6 +492,8 @@ export interface PaginatedResponse<T> {
  * Extensão dos filtros existentes com suporte a paginação.
  */
 export interface ContactsServerFilters {
+  /** Excluir registros removidos (deleted_at), antes da contagem e paginação. */
+  excludeDeleted?: boolean;
   /** Busca por nome ou email (case-insensitive). */
   search?: string;
   /** Filtro por estágio do funil. */

@@ -1,6 +1,6 @@
-import { QueryClient } from '@tanstack/react-query';
+import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
-import type { Deal, DealView } from '@/types';
+import type { Contact, Deal, DealView } from '@/types';
 import { DEALS_VIEW_KEY, queryKeys } from './queryKeys';
 import { isDealSaving, reconcileDeal, saveDeal } from './dealCache';
 const org = vi.hoisted(() => ({ id: 'org-a' }));
@@ -17,6 +17,54 @@ function setup() {
 const current = (client: QueryClient) => client.getQueryData<DealView[]>(DEALS_VIEW_KEY)![0];
 
 describe('confirmed lead cache', () => {
+  it('updates contact fields in the shared list/detail and unlinks only incompatible chats after confirmation', async () => {
+    const client = setup();
+    client.setQueryData(queryKeys.contacts.detail('joao'), { id: 'joao', name: 'João', phone: '+5511999999999', email: 'joao@example.test' } as Contact);
+    const rows = [
+      { id: 'old', deal_id: 'lead', contact_id: 'contact', deal_link_mode: 'manual', label_ids: ['label'] },
+      { id: 'new', deal_id: 'lead', contact_id: 'joao' },
+      { id: 'group', deal_id: 'lead', contact_id: 'contact', is_group: true },
+      { id: 'other', deal_id: 'other', contact_id: 'contact' },
+    ];
+    client.setQueryData(['waConversations'], { data: rows });
+    client.setQueryData(['waConversations', 'unread'], { total: 7 });
+    client.setQueryData(['waConversationLink', 'org-a', 'old', 'contact'], { conversation: rows[0] });
+    const pending = deferred<{ data: Partial<Deal>; error: null }>();
+    const save = saveDeal(client, 'lead', { contactId: 'joao' }, () => pending.promise);
+    expect(current(client)).toMatchObject({ contactId: 'joao', contactName: 'João', contactPhone: '+5511999999999' });
+    expect(client.getQueryData<DealView>(queryKeys.deals.detail('lead'))?.contactEmail).toBe('joao@example.test');
+    expect(client.getQueryData(['waConversations'])).toEqual({ data: rows });
+    pending.resolve({ data: { contactId: 'joao', updatedAt: '2026-10-08T12:00:00Z' }, error: null });
+    await save;
+    expect(client.getQueryData(['waConversations'])).toEqual({ data: [{ ...rows[0], deal_id: null }, ...rows.slice(1)] });
+    expect(client.getQueryData(['waConversations', 'unread'])).toEqual({ total: 7 });
+    expect(client.getQueryData(['waConversationLink', 'org-a', 'old', 'contact'])).toBeUndefined();
+    expect(current(client).contactName).toBe('João');
+  });
+  it('refreshes an observed resolver after confirmation instead of leaving an orphaned active query', async () => {
+    const client = setup();
+    const key = ['waConversationLink', 'org-a', 'old', 'contact'];
+    client.setQueryData(key, { conversation: { deal_id: 'lead' } });
+    const lookup = vi.fn().mockResolvedValue({ conversation: { deal_id: null } });
+    const observer = new QueryObserver(client, { queryKey: key, queryFn: lookup, staleTime: Infinity });
+    const unsubscribe = observer.subscribe(() => undefined);
+    await saveDeal(client, 'lead', { contactId: 'joao' }, async () => ({ data: { contactId: 'joao' }, error: null }));
+    await vi.waitFor(() => expect(observer.getCurrentResult().data).toEqual({ conversation: { deal_id: null } }));
+    expect(lookup).toHaveBeenCalledOnce();
+    unsubscribe();
+  });
+  it('restores the old contact on failure and leaves conversations intact', async () => {
+    const client = setup();
+    client.setQueryData(DEALS_VIEW_KEY, [{ ...lead(), contactName: 'Cíntia', contactPhone: 'old-phone' }]);
+    client.setQueryData(queryKeys.deals.detail('lead'), { ...lead(), contactName: 'Cíntia', contactPhone: 'old-phone' });
+    client.setQueryData(queryKeys.contacts.lists(), [{ id: 'joao', name: 'João', phone: 'new-phone' }]);
+    const conversation = { id: 'old', deal_id: 'lead', contact_id: 'contact' };
+    client.setQueryData(['waConversations'], { data: [conversation] });
+    await expect(saveDeal(client, 'lead', { contactId: 'joao' }, async () => ({ error: new Error('Sem permissão para editar lead') }))).rejects.toThrow('Sem permissão');
+    expect(current(client)).toMatchObject({ contactId: 'contact', contactName: 'Cíntia', contactPhone: 'old-phone' });
+    expect(client.getQueryData<DealView>(queryKeys.deals.detail('lead'))?.contactName).toBe('Cíntia');
+    expect(client.getQueryData(['waConversations'])).toEqual({ data: [conversation] });
+  });
   it('accepts the server response even when the browser clock differs, then accepts another user change', async () => {
     const client = setup();
     await saveDeal(client, 'lead', { status: 'qualified' }, async () => ({ data: { status: 'qualified', updatedAt: '2026-09-28T12:00:01.123Z' }, error: null }));

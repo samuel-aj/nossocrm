@@ -12,6 +12,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Contact, Deal } from "@/types";
 import { LeadPropertiesPanel } from "./LeadPropertiesPanel";
+import { queryKeys } from "@/lib/query/queryKeys";
 
 beforeAll(() => {
   HTMLElement.prototype.hasPointerCapture = () => false;
@@ -94,6 +95,12 @@ vi.mock("@/lib/permissions/useMyActionPermissions", () => ({
   }),
 }));
 vi.mock("@/lib/query/hooks", () => ({
+  useContactsPaginated: () => ({
+    data: { data: [{ id: "joao", name: "João", phone: "+556798671148", email: "joao@example.com" }], hasMore: false },
+    isLoading: false,
+    isError: false,
+    isPlaceholderData: false,
+  }),
   useOrgUsers: () => ({ isAdmin: mocks.edit }),
   useOrgMembers: () => ({
     data: [{ id: "owner-1", name: "Samuel", member: true }],
@@ -180,6 +187,39 @@ beforeEach(() => {
 });
 
 describe("LeadPropertiesPanel", () => {
+  it("changes only the lead contact and seeds the selected contact for the chat", async () => {
+    const { client } = setup();
+    client.setQueryData(queryKeys.contacts.lists(), [contact]);
+    fireEvent.click(screen.getByRole("button", { name: "Trocar contato" }));
+    fireEvent.click(screen.getByRole("button", { name: /João/ }));
+    expect(mocks.updateDeal).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Salvar contato" }));
+    await waitFor(() => expect(mocks.updateDeal).toHaveBeenCalledWith(
+      "lead-1", { contactId: "joao" }, { throwOnError: true },
+    ));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Salvar contato" })).not.toBeInTheDocument());
+    expect(client.getQueryData<Contact>(queryKeys.contacts.detail("joao"))?.name).toBe("João");
+    expect(client.getQueryData<Contact[]>(queryKeys.contacts.lists())?.map(row => row.id)).toEqual(["contact", "joao"]);
+    expect(mocks.updateContact).not.toHaveBeenCalled();
+  });
+
+  it("retains the contact selection and does not claim success on save failure", async () => {
+    mocks.updateDeal.mockRejectedValue(new Error("Sem permissão para alterar o contato"));
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "Trocar contato" }));
+    fireEvent.click(screen.getByRole("button", { name: /João/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Salvar contato" }));
+    await waitFor(() => expect(screen.getByText(/Não foi possível trocar o contato/)).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Salvar contato" })).toBeEnabled();
+    expect(screen.queryByText(/Salvo ·/)).not.toBeInTheDocument();
+  });
+
+  it("hides contact replacement without permission to edit the lead", () => {
+    mocks.edit = false;
+    setup();
+    expect(screen.queryByRole("button", { name: "Trocar contato" })).not.toBeInTheDocument();
+  });
+
   it("uses the information icon for Detalhes", () => {
     setup();
     const details = screen.getByRole("button", { name: /Detalhes/ });

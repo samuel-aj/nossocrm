@@ -2,6 +2,7 @@
 import { GroupRelationsPanel } from '@/features/group-links/GroupRelationsPanel';
 
 import { useConversationLead } from './useConversationLead';
+import { patchConversationCache } from '@/lib/whatsapp/conversationCache';
 import { newerRecord } from '@/lib/query/dealCache';
 import { unifyConversations } from './unifiedConversation';
 import { labelDelta, linkedDeal } from '@/lib/whatsapp/labelCompatibility';
@@ -721,9 +722,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
       if (!res.ok) throw new Error(j.error || `Falha (HTTP ${res.status})`);
       await queryClient.cancelQueries({ queryKey: ['waConversationLink'] });
       await queryClient.cancelQueries({ queryKey: ['waConversations'] });
-      if (j.conversation) queryClient.setQueriesData<{ data: ConvRow[] }>({ queryKey: ['waConversations'] }, old => old ? {
-        ...old, data: old.data.map(c => c.id === conversationId ? { ...c, ...j.conversation } : c),
-      } : old);
+      if (j.conversation) patchConversationCache(queryClient, conversationId, j.conversation);
       await refreshLinkedLabels(queryClient);
       return true;
     } catch (e) {
