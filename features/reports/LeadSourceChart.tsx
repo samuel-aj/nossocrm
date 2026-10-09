@@ -36,7 +36,10 @@ export function LeadSourceChart({ groups, total, mode, legacySnapshotCount, onSe
           <p className="font-semibold">Base do gráfico</p>
           <p>{LEAD_SOURCE_BASE[mode]}</p>
           <p>Cada lead conta uma vez. Não informado faz parte do total.{mode !== 'current' && ' A origem considerada é a registrada na entrada no funil.'}</p>
-          {legacySnapshotCount > 0 && <p className="text-amber-700 dark:text-amber-300">{LEAD_SOURCE_HISTORY_NOTE}</p>}
+          {legacySnapshotCount > 0 && <>
+            <p className="text-amber-700 dark:text-amber-300">{LEAD_SOURCE_HISTORY_NOTE}</p>
+            <p className="text-amber-700 dark:text-amber-300">{legacySnapshotCount} {legacySnapshotCount === 1 ? 'lead tem origem histórica reconstruída ou indisponível' : 'leads têm origem histórica reconstruída ou indisponível'}.</p>
+          </>}
         </PopoverContent>
       </Popover>
     </div>
@@ -69,11 +72,9 @@ export function LeadSourceChart({ groups, total, mode, legacySnapshotCount, onSe
           </span>
         </button></li>)}
       </ul>
-      <div className="mt-auto flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-slate-100 pt-4 dark:border-white/10">
-        <p className="text-[11px] text-slate-500 dark:text-slate-400">Inclui origens não informadas</p>
+      <div className="mt-auto flex flex-wrap items-center justify-end gap-x-3 gap-y-2 border-t border-slate-100 pt-4 dark:border-white/10">
         <button type="button" aria-label="Ver todas as origens" onClick={() => onSelect()} className="inline-flex items-center gap-1 rounded-md text-xs font-medium text-primary-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-primary-400">Ver detalhes<ArrowUpRight size={13} aria-hidden="true" /></button>
       </div>
     </div>}
-    {legacySnapshotCount > 0 && <p className="mt-3 text-xs leading-5 text-amber-700 dark:text-amber-300">{legacySnapshotCount} {legacySnapshotCount === 1 ? 'lead tem origem histórica reconstruída ou indisponível' : 'leads têm origem histórica reconstruída ou indisponível'}.</p>}
   </section>;
 }
