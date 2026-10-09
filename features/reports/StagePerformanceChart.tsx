@@ -68,7 +68,7 @@ export function StageConversionChart({ data, onStageClick, description = 'Quanti
                         </span>
                         <span className="mt-3 block px-1 text-[11px] leading-4 font-medium text-slate-700 dark:text-slate-200 break-words [overflow-wrap:anywhere]">{stage.name}</span>
                         {(stage.milestone || stage.role) && <span className="mt-1 text-[10px] font-semibold text-slate-500 dark:text-slate-400">{stage.milestoneLabel || (stage.milestone === 'qualification' ? 'MQL · Qualificados' : stage.milestone === 'customer' ? 'Cliente · Ganhos' : 'Pós-venda')}</span>}
-                        {percentage !== null && <span aria-hidden="true" className="mt-1 text-[10px] leading-4 tabular-nums text-slate-500 dark:text-slate-400">{percentage}{stage.countingMethod === 'reached_or_beyond' && ' → próxima'}</span>}
+                        {percentage !== null && <span aria-hidden="true" className="mt-1 text-[10px] leading-4 tabular-nums text-slate-500 dark:text-slate-400">{percentage}</span>}
                         {description && <span id={`${descriptionId}-${index}`} className="sr-only">{description}</span>}
                       </button>
                     </TooltipTrigger>

@@ -54,7 +54,8 @@ it('identifica os marcos MQL e Cliente com as taxas entre etapas visíveis', () 
     { stageId: 'protocol', name: 'Protocolado', count: 4, fill: '#6366f1', countingMethod: 'reached_or_beyond', role: 'postcustomer' },
   ]} onStageClick={vi.fn()} />);
   expect(screen.getByRole('button', { name: 'Ver 25 leads em Proposta enviada' })).toHaveAccessibleDescription('16% · para a próxima etapa · 4 ganhos ÷ 25 qualificados');
-  expect(screen.getByText('16% → próxima')).toBeVisible();
+  expect(screen.getByText('16%')).toBeVisible();
+  expect(screen.queryByText(/→ próxima/)).not.toBeInTheDocument();
   expect(screen.getByText('MQL · Qualificados')).toBeVisible();
   expect(screen.getByRole('button', { name: 'Ver 4 leads em Assinado' })).toHaveTextContent('Cliente · Ganhos');
   expect(screen.getByText('Pós-venda')).toBeVisible();
