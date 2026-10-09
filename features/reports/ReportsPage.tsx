@@ -9,7 +9,7 @@ import { ReportFiltersPopover } from './ReportFiltersPopover';
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
 import { LossReasonsCard } from './LossReasonsCard';
 import { LeadSourceChart } from './LeadSourceChart';
-import { REPORT_MODES } from './reportPresentation';
+import { REPORT_MODES, formatReportRate } from './reportPresentation';
 import { generateReportPDF } from './utils/generateReportPDF';
 import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
@@ -26,7 +26,7 @@ import { NO_PRODUCT, reportDrilldown, type ReportSelection } from './reportDrill
 const ReportsPage: React.FC = () => {
   const { boards, deals: allCrmDeals, products = [] } = useCRM();
   const { profile } = useAuth();
-  const mode = 'period';
+  const mode = 'conversion';
   const [dayKey, setDayKey] = useState(() => new Date().toDateString());
   useEffect(() => {
     const timer = setInterval(() => setDayKey(new Date().toDateString()), 60_000);
@@ -153,7 +153,7 @@ const ReportsPage: React.FC = () => {
             Relatórios de Performance
           </h1>
           <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
-            Análise detalhada de vendas e tendências.
+            Conversão dos leads que entraram no período selecionado.
           </p>
         </div>
         <div className="flex min-w-0 items-center justify-end gap-2 sm:gap-3 max-md:w-full">
@@ -210,35 +210,35 @@ const ReportsPage: React.FC = () => {
           </p>
         </button>
 
-        {/* Primeiras qualificações no período selecionado */}
+        {/* Mesmos qualificados do marco MQL do gráfico. */}
         <button type="button" onClick={() => setSelection({ kind: 'qualification' })} className="glass text-left p-4 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm hover:border-primary-400 dark:hover:border-primary-500/50 focus-visible:ring-2 focus-visible:ring-primary-500 transition-colors">
           <div className="flex items-center gap-2 mb-2">
             <div className="p-2 rounded-lg bg-emerald-500/10">
               <Target className="text-emerald-500" size={18} />
             </div>
-            <span className="text-xs text-slate-500">Qualificados no período</span>
+            <span className="text-xs text-slate-500">Taxa de Qualificação</span>
           </div>
           <p className="text-2xl font-bold text-slate-900 dark:text-white">
-            {metrics.qualifiedCount}
+            {formatReportRate(metrics.qualificationRate)}
           </p>
           <p className="text-xs text-slate-500">
-            Primeira qualificação comprovada no intervalo
+            {metrics.hasQualifiedStage ? `${metrics.qualifiedCount} qualificados de ${metrics.entries.length} leads` : 'Configure a etapa MQL do funil'}
           </p>
         </button>
 
-        {/* Ganhos no período selecionado */}
+        {/* Mesmos ganhos comprovados do marco Cliente do gráfico. */}
         <button type="button" onClick={() => setSelection({ kind: 'closing' })} className="glass text-left p-4 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm hover:border-primary-400 dark:hover:border-primary-500/50 focus-visible:ring-2 focus-visible:ring-primary-500 transition-colors">
           <div className="flex items-center gap-2 mb-2">
             <div className="p-2 rounded-lg bg-teal-500/10">
               <TrendingUp className="text-teal-500" size={18} />
             </div>
-            <span className="text-xs text-slate-500">Ganhos no período</span>
+            <span className="text-xs text-slate-500">Taxa de Fechamento</span>
           </div>
           <p className="text-2xl font-bold text-slate-900 dark:text-white">
-            {wonDeals.length}
+            {formatReportRate(metrics.closingRate)}
           </p>
           <p className="text-xs text-slate-500">
-            Ganhos pela data do acontecimento
+            {metrics.hasQualifiedStage ? `${wonDeals.length} ganhos de ${metrics.qualifiedCount} qualificados` : 'Configure a etapa MQL do funil'}
           </p>
         </button>
 
@@ -270,6 +270,7 @@ const ReportsPage: React.FC = () => {
           <p className="text-xs text-slate-500">
             {lostDeals.filter(deal => deal.lossCategory === 'qualified').length} perdas qualificadas
           </p>
+          <p className="mt-1 text-xs text-slate-500">Conversão total: {formatReportRate(metrics.totalConversionRate)} dos leads</p>
         </button>
       </div>
 
@@ -298,8 +299,12 @@ const ReportsPage: React.FC = () => {
             </button>
           </div>
           <LazyStageConversionChart data={stageConversionData} onStageClick={setSelectedStageId}
-            description="Dos leads que entraram no período, quantos chegaram a cada etapa ou avançaram além dela." />
-          <p className="mt-4 text-xs text-slate-500">Avanço pela ordem das etapas, até o fim do período. Cada lead conta uma vez por coluna; etapas puladas não viram movimentações no histórico.</p>
+            description={metrics.usesCustomerPromotion ? 'Mesma base dos cartões. MQL conta os qualificados; Cliente conta os ganhos comprovados.' : 'Mesma base dos cartões. Qualificação e ganho exigem registros comprovados.'} />
+          <p className="mt-4 text-xs text-slate-500">Percentuais mostram a conversão para a próxima etapa.{metrics.usesCustomerPromotion && ' Protocolo acompanha os clientes após o ganho.'}</p>
+          {metrics.diagnosticsDeals.length > 0 && <button type="button" onClick={() => setSelection({ kind: 'diagnostics' })}
+            className="mt-2 self-start rounded text-left text-xs text-slate-500 underline underline-offset-2 hover:text-primary-600 focus-visible:ring-2 focus-visible:ring-primary-500">
+            Conferir {metrics.diagnosticsDeals.length} {metrics.diagnosticsDeals.length === 1 ? 'registro fora' : 'registros fora'} da conversão comprovada
+          </button>}
           {metrics.entryFunnel.unknownStageCount > 0 && <p className="mt-2 text-xs text-slate-500">
             {metrics.entryFunnel.unknownStageCount} {metrics.entryFunnel.unknownStageCount === 1 ? 'entrada sem etapa válida para este gráfico fica' : 'entradas sem etapa válida para este gráfico ficam'} fora das colunas.
           </p>}

@@ -18,9 +18,70 @@ const events = [
   ...[won, undocumented, old].map(deal => lifecycle(deal, 'won', '2026-08-03', { stageId: 'won', value: 240 })),
   ...[lostQ, lostDQ, lostQ2, unknown].map(deal => lifecycle(deal, 'lost', '2026-08-04', { stageId: 'lost' })),
 ];
-const fixture = (mode: 'cohort' | 'period' = 'cohort') => ({ ...calculatePerformance(deals, [], board, august, '', undefined, snapshot, { mode, lifecycleEvents: events }), deals });
+const fixture = (mode: 'cohort' | 'period' | 'conversion' = 'cohort') => ({ ...calculatePerformance(deals, [], board, august, '', undefined, snapshot, { mode, lifecycleEvents: events }), deals });
 
 describe('detalhamento reconciliado com indicadores', () => {
+  it('conversão reconcilia entradas, marcos, numeradores e denominadores pelos mesmos IDs', () => {
+    const qualified = lead('entry-qualified');
+    const converted = lead('entry-converted');
+    const noQualification = lead('entry-no-qualification');
+    const open = lead('entry-open');
+    const earlier = lead('earlier-entry', { createdAt: '2026-07-01' });
+    const conversionDeals = [qualified, converted, noQualification, open, earlier];
+    const history = [
+      ...[qualified, converted, noQualification, open].map(deal => lifecycle(deal, 'entered_board', '2026-08-02')),
+      lifecycle(earlier, 'entered_board', '2026-07-01'),
+      ...[qualified, converted, earlier].map(deal => lifecycle(deal, 'qualified', '2026-08-03', { stageId: 'q' })),
+      ...[converted, noQualification, earlier].map(deal => lifecycle(deal, 'won', '2026-08-05', { stageId: 'signed', value: 240 })),
+      lifecycle(converted, 'stage_changed', '2026-08-06', { stageId: 'won', isWon: true }),
+    ];
+    const metrics = { ...calculatePerformance(conversionDeals, [], board, august, '', undefined, snapshot,
+      { mode: 'conversion', lifecycleEvents: history }), deals: conversionDeals };
+    const ids = (rows: typeof conversionDeals) => rows.map(deal => deal.id).sort();
+    const qualification = reportDrilldown(metrics, { kind: 'qualification' });
+    const closing = reportDrilldown(metrics, { kind: 'closing' });
+    const total = reportDrilldown(metrics, { kind: 'total-conversion' });
+    expect(ids(qualification.groups[0].deals)).toEqual(['entry-converted', 'entry-qualified']);
+    expect(qualification.groups[0].deals).toBe(metrics.qualifiedDeals);
+    expect(qualification.groups[1].deals).toBe(metrics.entries);
+    expect(ids(qualification.groups[0].deals)).toEqual(ids(metrics.entryFunnel.stages.find(stage => stage.milestone === 'qualification')!.deals));
+    expect(ids(closing.groups[0].deals)).toEqual(['entry-converted']);
+    expect(ids(closing.groups[0].deals)).toEqual(ids(metrics.entryFunnel.stages.find(stage => stage.milestone === 'customer')!.deals));
+    expect(closing.groups[1].deals).toBe(metrics.qualifiedDeals);
+    expect(total.groups[0].deals).toBe(metrics.cohortWonDeals);
+    expect(total.groups[1].deals).toBe(metrics.entries);
+    expect(qualification.formula).toBe('2 qualificados ÷ 4 entradas no funil');
+    expect(closing.formula).toBe('1 ganhos entre os qualificados ÷ 2 qualificados da base de entradas');
+    expect(total.formula).toBe('1 ganhos entre os qualificados ÷ 4 entradas no funil');
+    expect(qualification.contextDescription).toContain('entrada registrada no funil');
+    expect(qualification.contextDescription).not.toMatch(/criados no período|própria data|Não são taxas/);
+    expect(reportDrilldown(metrics, { kind: 'revenue' }).groups[0].deals).toBe(metrics.wonDeals);
+    const diagnostics = reportDrilldown(metrics, { kind: 'diagnostics' });
+    expect(diagnostics.groups[0].deals).toBe(metrics.diagnosticsDeals);
+    expect(diagnostics.diagnosticReasonsByDeal).toBe(metrics.diagnosticReasonsByDeal);
+    expect(diagnostics.groups[0].deals.some(deal => deal.id === noQualification.id)).toBe(true);
+    expect(diagnostics.diagnosticReasonsByDeal?.get(noQualification.id)?.length).toBeGreaterThan(0);
+    expect(metrics.unqualifiedWonDeals.map(deal => deal.id)).toContain(noQualification.id);
+  });
+
+  it('fechamentos revela o denominador da conversão total e preserva ganhos e perdas qualificadas', () => {
+    const metrics = fixture('conversion');
+    const detail = reportDrilldown(metrics, { kind: 'closures' });
+    expect(detail.groups.map(group => group.id)).toEqual(['won', 'qualified-lost', 'entries']);
+    expect(detail.groups[0].deals).toBe(metrics.wonDeals);
+    expect(detail.groups[0].deals.map(deal => deal.id)).toEqual(['won']);
+    expect(detail.groups[1].deals.map(deal => deal.id)).toEqual(['lost-q', 'lost-q2']);
+    expect(detail.groups[2].deals).toBe(metrics.entries);
+    expect(detail.groups[2].deals).toHaveLength(7);
+    expect(detail.groups[2].deals.some(deal => deal.id === 'old')).toBe(false);
+    expect(detail.formula).toBe('Conversão total: 1 ganhos entre os qualificados ÷ 7 entradas no funil');
+  });
+  it.each(['cohort', 'period'] as const)('fechamentos preserva o detalhe anterior no modo %s', mode => {
+    const detail = reportDrilldown(fixture(mode), { kind: 'closures' });
+    expect(detail.groups.map(group => group.id)).toEqual(['won', 'qualified-lost']);
+    expect(detail.formula).toBeUndefined();
+  });
+
   it('taxas usam os mesmos subconjuntos e ganhos sem data qualificada continuam na receita', () => {
     const metrics = fixture();
     const qualification = reportDrilldown(metrics, { kind: 'qualification' });

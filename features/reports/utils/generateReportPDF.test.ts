@@ -17,6 +17,56 @@ const context = { boardName: 'DBA', period: 'Agosto', range: '01/08 a 31/08', ow
 const tables = () => output.table.mock.calls.map(call => call[1]);
 beforeEach(() => vi.clearAllMocks());
 describe('PDF Performance', () => {
+  it('exporta as três taxas e os mesmos conjuntos dos cartões, marcos e detalhes da base de entradas', () => {
+    const qualified = lead('entry-qualified');
+    const converted = lead('entry-converted');
+    const noQualification = lead('entry-no-qualification');
+    const open = lead('entry-open', { leadSource: null });
+    const earlier = lead('earlier-entry', { createdAt: '2026-07-01' });
+    const deals = [qualified, converted, noQualification, open, earlier];
+    const history = [
+      ...[qualified, converted, noQualification, open].map(deal => lifecycle(deal, 'entered_board', '2026-08-02')),
+      lifecycle(earlier, 'entered_board', '2026-07-01'),
+      ...[qualified, converted, earlier].map(deal => lifecycle(deal, 'qualified', '2026-08-03', { stageId: 'q' })),
+      ...[converted, noQualification, earlier].map(deal => lifecycle(deal, 'won', '2026-08-05', { stageId: 'signed', value: 240 })),
+      lifecycle(converted, 'stage_changed', '2026-08-06', { stageId: 'won', isWon: true }),
+    ];
+    const metrics = calculatePerformance(deals, [], fixtureBoard, august, '', undefined, snapshot, { mode: 'conversion', lifecycleEvents: history });
+    generateReportPDF(metrics, { ...context, mode: 'conversion' });
+    const indicators = tables()[0].body;
+    expect(indicators).toContainEqual(['Taxa de qualificação', '50,0%', '2 qualificados / 4 entradas no funil']);
+    expect(indicators).toContainEqual(['Taxa de fechamento', '50,0%', '1 ganhos entre os qualificados / 2 qualificados da base de entradas']);
+    expect(indicators).toContainEqual(['Conversão total', '25,0%', '1 ganhos entre os qualificados / 4 entradas no funil']);
+    expect(indicators.find((row: string[]) => row[0] === 'Entradas')[1]).toBe('4');
+    expect(indicators.find((row: string[]) => row[0] === 'Ganhos')[1]).toBe('1');
+    expect(indicators.find((row: string[]) => row[0] === 'Faturamento fechado')[1]).toMatch(/240,00/);
+    const progression = tables()[1];
+    expect(progression.head[0][1]).toBe('Leads da base de entradas');
+    const qualifiedStage = metrics.entryFunnel.stages.find(stage => stage.milestone === 'qualification')!;
+    const customerStage = metrics.entryFunnel.stages.find(stage => stage.milestone === 'customer')!;
+    const qualification = reportDrilldown({ ...metrics, deals }, { kind: 'qualification' });
+    const closing = reportDrilldown({ ...metrics, deals }, { kind: 'closing' });
+    const ids = (rows: Deal[]) => rows.map(deal => deal.id).sort();
+    expect(ids(qualification.groups[0].deals)).toEqual(ids(qualifiedStage.deals));
+    expect(ids(closing.groups[0].deals)).toEqual(ids(customerStage.deals));
+    expect(progression.body.find((row: unknown[]) => row[0] === qualifiedStage.name)[1]).toBe(qualification.groups[0].deals.length);
+    expect(progression.body.find((row: unknown[]) => row[0] === customerStage.name)[1]).toBe(closing.groups[0].deals.length);
+    expect(tables()[2].body.at(-1)).toEqual(['Total da base', 4, '100,0%']);
+    const notes = JSON.stringify(tables().at(-1).body);
+    expect(notes).toContain('Todos os indicadores usam a mesma base de entradas');
+    expect(notes).toContain('Saltos não comprovam passagens intermediárias');
+    expect(notes).toContain('protocolo, não substituem a prova de promoção a Cliente');
+    expect(notes).toContain('1 ganhos não têm qualificação prévia válida');
+    expect(notes).not.toMatch(/não são taxas de conversão|filtros usam o instante do acontecimento|produto é o associado atualmente/);
+    expect(output.save).toHaveBeenCalledWith(expect.stringContaining('performance-conversion-'));
+  });
+
+  it('exporta denominadores vazios como traço na conversão', () => {
+    const metrics = calculatePerformance([], [], fixtureBoard, august, '', undefined, snapshot, { mode: 'conversion' });
+    generateReportPDF(metrics, context);
+    expect(tables()[0].body.filter((row: string[]) => ['Taxa de qualificação', 'Taxa de fechamento', 'Conversão total'].includes(row[0])).map((row: string[]) => row[1])).toEqual(['—', '—', '—']);
+  });
+
   it('exporta todas as origens da mesma base da pizza e lista, incluindo null e histórico reconstruído', () => {
     const deals = [lead('one', { leadSource: 'Meta Ads' }), lead('two', { leadSource: null }), lead('three', { leadSource: 'Google Ads' })];
     const events = deals.map(deal => lifecycle(deal, 'entered_board', deal.createdAt, { leadSourceSnapshotSource: deal.id === 'three' ? 'current' : 'transition' }));

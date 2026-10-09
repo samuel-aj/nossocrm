@@ -12,6 +12,9 @@ interface StageConversionData {
   comparisonBase?: string;
   conversionLabel?: string;
   countingMethod?: 'reached_or_beyond';
+  milestone?: 'qualification' | 'customer';
+  milestoneLabel?: string;
+  role?: 'postcustomer';
 }
 
 interface StageConversionChartProps {
@@ -57,14 +60,15 @@ export function StageConversionChart({ data, onStageClick, description = 'Quanti
                   return <Tooltip key={stage.stageId}>
                     <TooltipTrigger asChild>
                       <button type="button" disabled={!onStageClick} onClick={() => onStageClick?.(stage.stageId)}
-                        aria-label={`Ver ${stage.count} leads em ${stage.name}${stage.countingMethod === 'reached_or_beyond' ? ' ou além' : ''}`} aria-describedby={description ? `${descriptionId}-${index}` : undefined}
+                        aria-label={`Ver ${stage.count} leads em ${stage.name}${stage.countingMethod === 'reached_or_beyond' && !stage.milestone ? ' ou além' : ''}`} aria-describedby={description ? `${descriptionId}-${index}` : undefined}
                         className="group flex min-w-0 flex-col items-stretch rounded-lg pb-2 text-center hover:bg-slate-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500 disabled:cursor-default">
                         <span className="relative block shrink-0" style={{ height: PLOT_HEIGHT + LABEL_SPACE }}>
                           <span className="absolute inset-x-0 text-sm font-semibold tabular-nums leading-5 text-slate-900 dark:text-white" style={{ bottom: height + 5 }}>{stage.count.toLocaleString('pt-BR')}</span>
                           <span aria-hidden="true" className="absolute inset-x-0 bottom-0 mx-auto block w-3/5 max-w-14 rounded-t-md group-hover:brightness-110" style={{ height, backgroundColor: stage.fill }} />
                         </span>
                         <span className="mt-3 block px-1 text-[11px] leading-4 font-medium text-slate-700 dark:text-slate-200 break-words [overflow-wrap:anywhere]">{stage.name}</span>
-                        {percentage !== null && <span aria-hidden="true" className="mt-1 text-[10px] leading-4 tabular-nums text-slate-500 dark:text-slate-400">{percentage}</span>}
+                        {(stage.milestone || stage.role) && <span className="mt-1 text-[10px] font-semibold text-slate-500 dark:text-slate-400">{stage.milestoneLabel || (stage.milestone === 'qualification' ? 'MQL · Qualificados' : stage.milestone === 'customer' ? 'Cliente · Ganhos' : 'Pós-venda')}</span>}
+                        {percentage !== null && <span aria-hidden="true" className="mt-1 text-[10px] leading-4 tabular-nums text-slate-500 dark:text-slate-400">{percentage}{stage.countingMethod === 'reached_or_beyond' && ' → próxima'}</span>}
                         {description && <span id={`${descriptionId}-${index}`} className="sr-only">{description}</span>}
                       </button>
                     </TooltipTrigger>

@@ -1,4 +1,10 @@
 export const REPORT_MODES = {
+  conversion: {
+    label: 'Resultados no período',
+    description: 'Conversão dos mesmos leads que entraram no funil no período, acompanhados até o fim do intervalo.',
+    chartTitle: 'Conversão dos leads no funil',
+    chartBasis: 'Mesmos leads dos indicadores',
+  },
   cohort: {
     label: 'Conversão dos leads captados',
     description: 'Acompanha os mesmos leads, criados no intervalo selecionado, até a data de apuração.',
