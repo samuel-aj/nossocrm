@@ -11,18 +11,20 @@ interface StageConversionData {
   populationLabel?: string;
   comparisonBase?: string;
   conversionLabel?: string;
+  countingMethod?: 'reached_or_beyond';
 }
 
 interface StageConversionChartProps {
   data: StageConversionData[];
   onStageClick?: (stageId: string) => void;
+  description?: string;
 }
 
 const PLOT_HEIGHT = 208;
 const LABEL_SPACE = 28;
 
 /** Columns start at zero; their buttons retain the exact underlying count. */
-export function StageConversionChart({ data, onStageClick }: StageConversionChartProps) {
+export function StageConversionChart({ data, onStageClick, description = 'Quantidade de leads distintos. Selecione uma etapa para ver os registros.' }: StageConversionChartProps) {
   const descriptionId = useId();
   const maximum = Math.max(1, ...data.map(stage => stage.count));
   const roughStep = maximum / 4;
@@ -34,7 +36,7 @@ export function StageConversionChart({ data, onStageClick }: StageConversionChar
   return (
     <figure aria-label="Negócios por etapa" className="w-full min-w-0">
       <figcaption className="text-xs text-slate-500 dark:text-slate-400 mb-3">
-        Quantidade de leads distintos. Selecione uma etapa para ver os registros.
+        {description}
       </figcaption>
       <div className="flex min-w-0 gap-2">
         <div aria-hidden="true" className="relative w-9 shrink-0 text-right text-[10px] tabular-nums text-slate-400 dark:text-slate-500" style={{ height: PLOT_HEIGHT + LABEL_SPACE }}>
@@ -55,7 +57,7 @@ export function StageConversionChart({ data, onStageClick }: StageConversionChar
                   return <Tooltip key={stage.stageId}>
                     <TooltipTrigger asChild>
                       <button type="button" disabled={!onStageClick} onClick={() => onStageClick?.(stage.stageId)}
-                        aria-label={`Ver ${stage.count} leads em ${stage.name}`} aria-describedby={description ? `${descriptionId}-${index}` : undefined}
+                        aria-label={`Ver ${stage.count} leads em ${stage.name}${stage.countingMethod === 'reached_or_beyond' ? ' ou além' : ''}`} aria-describedby={description ? `${descriptionId}-${index}` : undefined}
                         className="group flex min-w-0 flex-col items-stretch rounded-lg pb-2 text-center hover:bg-slate-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500 disabled:cursor-default">
                         <span className="relative block shrink-0" style={{ height: PLOT_HEIGHT + LABEL_SPACE }}>
                           <span className="absolute inset-x-0 text-sm font-semibold tabular-nums leading-5 text-slate-900 dark:text-white" style={{ bottom: height + 5 }}>{stage.count.toLocaleString('pt-BR')}</span>

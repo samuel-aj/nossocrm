@@ -8,8 +8,8 @@ export const REPORT_MODES = {
   period: {
     label: 'Resultados no período',
     description: 'Conta acontecimentos nas datas selecionadas, incluindo leads captados em meses anteriores.',
-    chartTitle: 'Chegadas por etapa no período',
-    chartBasis: 'Leads distintos por acontecimento',
+    chartTitle: 'Progressão dos leads no funil',
+    chartBasis: 'Entradas do período · avanço acumulado',
   },
   current: {
     label: 'Carteira atual',

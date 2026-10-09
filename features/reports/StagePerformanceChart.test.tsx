@@ -38,3 +38,11 @@ it('explica ausência de etapas e não oferece ação sem callback', () => {
   rerender(<StageConversionChart data={[{ stageId: 'q', name: 'Qualificado', count: 13, fill: '#a855f7' }]} />);
   expect(screen.getByRole('button', { name: 'Ver 13 leads em Qualificado' })).toBeDisabled();
 });
+
+it('identifica a contagem acumulada no controle acessível sem afirmar presença literal na etapa', () => {
+  render(<StageConversionChart description="Mesmos leads que entraram no período" data={[
+    { stageId: 'q', name: 'Qualificado', count: 12, fill: '#a855f7', countingMethod: 'reached_or_beyond', populationLabel: 'Nesta etapa ou em uma posterior' },
+  ]} onStageClick={vi.fn()} />);
+  expect(screen.getByText('Mesmos leads que entraram no período')).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Ver 12 leads em Qualificado ou além' })).toHaveAccessibleDescription('Nesta etapa ou em uma posterior');
+});
