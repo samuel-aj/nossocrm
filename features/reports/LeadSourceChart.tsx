@@ -22,7 +22,7 @@ export function LeadSourceChart({ groups, total, mode, legacySnapshotCount, onSe
     color: slice.key === 'overflow' ? '#f1a536' : slice.key === UNKNOWN_LEAD_SOURCE_KEY ? '#94a3b8' : slice.color,
   }));
   let offset = 0;
-  return <section aria-labelledby={titleId} className="flex min-w-0 flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-slate-900/60 sm:p-6">
+  return <section aria-labelledby={titleId} className="flex h-full min-w-0 flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-slate-900/60 sm:p-6">
     <div className="flex items-start justify-between gap-3">
       <div>
         <h2 id={titleId} className="text-[17px] font-semibold tracking-tight text-slate-900 dark:text-white">Origem dos leads</h2>

@@ -274,11 +274,11 @@ const ReportsPage: React.FC = () => {
       </div>
 
       {/* Origens à esquerda; etapas em colunas verticais à direita. */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid auto-rows-fr grid-cols-1 items-stretch gap-4 lg:grid-cols-3">
         <LeadSourceChart groups={metrics.leadSourceGroups} total={metrics.leadSourceTotal} mode={mode}
           legacySnapshotCount={metrics.coverage.legacyLeadSourceSnapshotCount}
           onSelect={keys => setSelection({ kind: 'source', keys })} />
-        <section aria-label={modeInfo.chartTitle} className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col min-w-0 lg:col-span-2">
+        <section aria-label={modeInfo.chartTitle} className="glass h-full p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col min-w-0 lg:col-span-2">
           <div className="flex flex-wrap justify-between items-center gap-2 mb-4 shrink-0">
             <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display">
               {modeInfo.chartTitle}

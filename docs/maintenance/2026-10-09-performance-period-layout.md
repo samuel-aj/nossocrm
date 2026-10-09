@@ -19,3 +19,9 @@ Solicitação: usar somente Resultados no período, retirar seletor de visão e 
 - Prévia sintética dos componentes reais conferida no Chrome: http://127.0.0.1:4176/. Captura `relatorio-periodo-simplificado.jpg` na pasta de visualizações desta conversa.
 
 Implementação local a partir de main `699eb2c`, sem nova publicação nesta rodada.
+
+## Altura dos quadros
+
+Origem dos leads e Chegadas por etapa acompanham a mesma altura, determinada pelo maior conteúdo. O grid usa linhas de igual proporção e os dois quadros preenchem sua linha, sem altura fixa ou medição por JavaScript.
+
+Conferência no navegador: em 1440px, ambos com 586,5px e mesmos limites superior/inferior; em 390px, empilhados, ambos com 629px. ESLint focal, diff check e revisão independente passaram. Captura `relatorio-alturas-iguais.jpg` na pasta de visualizações. Ajuste visual local, sem nova publicação.
