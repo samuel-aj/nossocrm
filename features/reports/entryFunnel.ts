@@ -1,10 +1,11 @@
 import type { Deal } from '@/types';
 import { compareHistoricalDates, type LifecycleEvent } from './performanceHistory';
 
-export interface EntryFunnelEvidence { stageName: string; date: string; observedAtStage: boolean }
+export interface EntryFunnelEvidence { stageName: string; date: string; observedAtStage: boolean; kind?: 'stage' | 'qualification' | 'customer' | 'win' }
 export interface EntryFunnelStage {
   stageId: string; name: string; fill: string; deals: Deal[]; count: number;
-  conversionRate: null; conversionLabel: string; comparisonBase: string; populationLabel: string;
+  conversionRate: number | null; conversionLabel: string; comparisonBase: string; populationLabel: string;
+  milestone?: 'qualification' | 'customer'; milestoneLabel?: string; role?: 'postcustomer';
   countingMethod: 'reached_or_beyond'; evidenceByDeal: Map<string, EntryFunnelEvidence>;
 }
 export interface EntryFunnel { stages: EntryFunnelStage[]; baseCount: number; unknownStageCount: number }

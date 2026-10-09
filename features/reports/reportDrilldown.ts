@@ -15,7 +15,7 @@ export function filterReportProducts(deals: Deal[], productId: string) {
     : deal.items.some(item => item.productId === productId)));
 }
 export type ReportSelection =
-  | { kind: 'revenue' | 'qualification' | 'closing' | 'cycle' | 'closures' | 'entries' | 'reopened' }
+  | { kind: 'revenue' | 'qualification' | 'closing' | 'total-conversion' | 'cycle' | 'closures' | 'entries' | 'reopened' | 'diagnostics' }
   | { kind: 'loss'; category?: 'qualified' | 'disqualified' | 'unknown'; reason?: string; reasonKey?: string }
   | { kind: 'source'; keys?: string[] }
   | { kind: 'owner'; ownerId: string; ownerName: string };
@@ -23,22 +23,28 @@ export interface ReportLeadGroup { id: string; label: string; description: strin
 export interface ReportDrilldown {
   title: string; groups: ReportLeadGroup[]; formula?: string; showRevenue?: boolean; showCycle?: boolean; showLoss?: boolean;
   contextDescription?: string; dateBasisLabel?: string; showSource?: boolean;
+  diagnosticReasonsByDeal?: Map<string, string[]>;
 }
 export function reportDrilldown(metrics: PerformanceMetrics & { deals: Deal[] }, selection: ReportSelection): ReportDrilldown {
   const cohort = metrics.mode === 'cohort';
+  const conversion = metrics.mode === 'conversion';
+  const showsRates = cohort || conversion;
   const closingBasis = metrics.usesCustomerPromotion ? 'Primeira promoção comprovada a Cliente em cada episódio; avanços posteriores como protocolo não mudam a data do ganho.' : 'Primeiro ganho registrado em cada episódio de encerramento.';
-  const showsWins = ['revenue', 'closing', 'cycle', 'closures', 'owner'].includes(selection.kind);
+  const showsWins = ['revenue', 'closing', 'total-conversion', 'cycle', 'closures', 'owner'].includes(selection.kind);
   const context = {
-    contextDescription: cohort ? 'Mesma coorte de leads criados no período, apurada até a data de corte. O responsável vem da primeira presença registrada no funil; o filtro de produto usa os vínculos atuais. Os resultados mostram os dados do evento.' :
+    contextDescription: conversion ? 'Mesmos leads com entrada registrada no funil no período, apurados até a data de corte. Responsável e produto são os da entrada selecionada. Qualificados e ganhos usam os mesmos IDs dos marcos do gráfico; etapas puladas não comprovam qualificação ou ganho.' : cohort ? 'Mesma coorte de leads criados no período, apurada até a data de corte. O responsável vem da primeira presença registrada no funil; o filtro de produto usa os vínculos atuais. Os resultados mostram os dados do evento.' :
       metrics.mode === 'period' ? 'Acontecimentos no período; cada volume usa sua própria data e os dados registrados no evento. Não são taxas de conversão.' : 'Carteira aberta no estado atual.',
     dateBasisLabel: metrics.mode === 'current' ? 'Estado atual' : showsWins && metrics.usesCustomerPromotion ? 'Data da promoção a Cliente' : 'Data do acontecimento',
   };
   context.contextDescription += metrics.mode === 'current' || !showsWins ? '' : ` ${closingBasis}`;
-  const won: ReportLeadGroup = { id: 'won', label: 'Ganhos', description: cohort ? 'Ganhos de leads da coorte registrados até o corte.' : 'Ganhos registrados no período, incluindo leads criados antes dele.', deals: metrics.wonDeals };
-  const qualified: ReportLeadGroup = { id: 'qualified', label: 'Qualificados', description: cohort ? 'Leads da coorte com qualificação observada até o corte. Estimativas ficam fora da taxa.' : 'Primeira qualificação observada no período. Estimativas ficam fora deste volume.', deals: metrics.qualifiedDeals };
+  const won: ReportLeadGroup = { id: 'won', label: 'Ganhos', description: conversion ? 'Ganhos comprovados entre os qualificados da base de entradas. Cada lead conta uma vez; protocolo não gera outro ganho.' : cohort ? 'Ganhos de leads da coorte registrados até o corte.' : 'Ganhos registrados no período, incluindo leads criados antes dele.', deals: metrics.wonDeals };
+  const qualified: ReportLeadGroup = { id: 'qualified', label: 'Qualificados', description: conversion ? 'Leads da base de entradas com qualificação comprovada e válida para esta jornada até o corte. Estimativas e a posição atual isolada não contam como prova.' : cohort ? 'Leads da coorte com qualificação observada até o corte. Estimativas ficam fora da taxa.' : 'Primeira qualificação observada no período. Estimativas ficam fora deste volume.', deals: metrics.qualifiedDeals };
   const entries: ReportLeadGroup = { id: 'entries', label: metrics.mode === 'current' ? 'Carteira aberta' : 'Entradas', description: cohort ? 'Leads criados no período e com presença comprovada neste funil até o corte.' : metrics.mode === 'current' ? 'Leads abertos no funil agora.' : 'Leads com entrada registrada no funil no período. No histórico antigo, inclui a chegada inicial registrada pelo banco: criação, transferência ou primeira atribuição de etapa. A data usada é a do registro, não uma estimativa da criação.', deals: metrics.entries };
   const qualifiedLost: ReportLeadGroup = { id: 'qualified-lost', label: 'Perdas qualificadas', description: 'Perdas registradas nesta base e classificadas como qualificadas.', deals: metrics.lostDeals.filter(deal => deal.lossCategory === 'qualified') };
   switch (selection.kind) {
+    case 'diagnostics': return { ...context, title: 'Registros para revisão',
+      groups: [{ id: 'diagnostics', label: 'Registros para revisão', description: 'Os motivos abaixo explicam por que estes registros não compõem um ou mais indicadores. A lista não acrescenta entradas, qualificações ou ganhos.', deals: metrics.diagnosticsDeals }],
+      diagnosticReasonsByDeal: metrics.diagnosticReasonsByDeal };
     case 'source': {
       const sourceGroups = metrics.leadSourceGroups.filter(group => !selection.keys || selection.keys.includes(group.key));
       const deals = sourceGroups.flatMap(group => group.deals);
@@ -52,11 +58,13 @@ export function reportDrilldown(metrics: PerformanceMetrics & { deals: Deal[] },
         formula: `${deals.length} leads selecionados ÷ ${metrics.leadSourceTotal} leads da base` };
     }
     case 'entries': return { ...context, title: cohort ? 'Leads da coorte' : metrics.mode === 'current' ? 'Carteira aberta' : 'Entradas no funil', groups: [entries] };
-    case 'reopened': return { ...context, title: 'Reaberturas', groups: [{ id: 'reopened', label: 'Reabertos', description: cohort ? 'Leads da coorte com reabertura registrada até o corte.' : 'Leads distintos com reabertura registrada no período.', deals: metrics.reopenedDeals }] };
+    case 'reopened': return { ...context, title: 'Reaberturas', groups: [{ id: 'reopened', label: 'Reabertos', description: conversion ? 'Leads da base com reabertura registrada após a entrada selecionada e até o corte.' : cohort ? 'Leads da coorte com reabertura registrada até o corte.' : 'Leads distintos com reabertura registrada no período.', deals: metrics.reopenedDeals }] };
     case 'revenue': return { ...context, title: metrics.mode === 'current' ? 'Valor da carteira' : 'Faturamento fechado', groups: metrics.mode === 'current' ? [{ ...entries, deals: metrics.currentDeals }] : [won], showRevenue: true };
-    case 'qualification': return { ...context, title: cohort ? 'Taxa de Qualificação' : 'Qualificações no período', groups: cohort ? [qualified, entries] : [qualified], formula: cohort ? `${metrics.qualifiedCount} qualificados ÷ ${metrics.entries.length} leads da coorte` : undefined };
-    case 'closing': return { ...context, title: cohort ? 'Taxa de Fechamento' : 'Ganhos no período', groups: cohort ? [{ ...won, label: 'Ganhos entre os qualificados', deals: metrics.cohortWonDeals }, qualified] : [won], formula: cohort ? `${metrics.cohortWonDeals.length} ganhos entre os qualificados ÷ ${metrics.qualifiedCount} qualificados da coorte` : undefined };
-    case 'closures': return { ...context, title: 'Fechamentos', groups: [won, qualifiedLost] };
+    case 'qualification': return { ...context, title: showsRates ? 'Taxa de Qualificação' : 'Qualificações no período', groups: showsRates ? [qualified, entries] : [qualified], formula: showsRates ? `${metrics.qualifiedCount} qualificados ÷ ${metrics.entries.length} ${conversion ? 'entradas no funil' : 'leads da coorte'}` : undefined };
+    case 'closing': return { ...context, title: showsRates ? 'Taxa de Fechamento' : 'Ganhos no período', groups: showsRates ? [{ ...won, label: 'Ganhos entre os qualificados', deals: metrics.cohortWonDeals }, qualified] : [won], formula: showsRates ? `${metrics.cohortWonDeals.length} ganhos entre os qualificados ÷ ${metrics.qualifiedCount} qualificados ${conversion ? 'da base de entradas' : 'da coorte'}` : undefined };
+    case 'total-conversion': return { ...context, title: 'Conversão total', groups: [{ ...won, label: 'Ganhos entre os qualificados', deals: metrics.cohortWonDeals }, entries], formula: `${metrics.cohortWonDeals.length} ganhos entre os qualificados ÷ ${metrics.entries.length} ${conversion ? 'entradas no funil' : 'leads da coorte'}` };
+    case 'closures': return { ...context, title: 'Fechamentos', groups: conversion ? [won, qualifiedLost, entries] : [won, qualifiedLost],
+      formula: conversion ? `Conversão total: ${metrics.cohortWonDeals.length} ganhos entre os qualificados ÷ ${metrics.entries.length} entradas no funil` : undefined };
     case 'cycle': return { ...context, title: 'Ciclo Médio', groups: [{ ...won, deals: won.deals.filter(deal => salesCycleDays(deal) !== null) }], showCycle: true };
     case 'owner': return { ...context, title: `Ganhos · ${selection.ownerName}`, groups: [{ ...won, deals: won.deals.filter(deal => (deal.ownerId || 'unassigned') === selection.ownerId) }], showRevenue: true };
     case 'loss': {
@@ -64,7 +72,7 @@ export function reportDrilldown(metrics: PerformanceMetrics & { deals: Deal[] },
       const reasonKey = selection.reasonKey ?? (selection.reason === undefined ? undefined : lossReasonGroupKey(selection.reason));
       const deals = metrics.lostDeals.filter(deal => (!selection.category || (selection.category === 'unknown' ? !deal.lossCategory : deal.lossCategory === selection.category)) && (reasonKey === undefined || lossReasonGroupKey(deal.lossReason) === reasonKey));
       const reasonLabel = reasonKey === undefined ? undefined : deals.length ? lossReasonGroupLabel(deals[0].lossReason) : selection.reason;
-      return { ...context, title: reasonLabel === undefined ? label : `${label} · ${reasonLabel}`, groups: [{ id: 'lost', label, description: cohort ? 'Perdas da coorte registradas até o corte.' : 'Perdas registradas no período selecionado.', deals }], showLoss: true };
+      return { ...context, title: reasonLabel === undefined ? label : `${label} · ${reasonLabel}`, groups: [{ id: 'lost', label, description: conversion ? 'Perdas da base de entradas registradas após a entrada selecionada e até o corte.' : cohort ? 'Perdas da coorte registradas até o corte.' : 'Perdas registradas no período selecionado.', deals }], showLoss: true };
     }
   }
 }

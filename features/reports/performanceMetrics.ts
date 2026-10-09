@@ -4,6 +4,7 @@ import { firstCustomerStage, isAutomaticWonStage, isLostBoardStage } from '@/lib
 import { getDealLeadSource } from '@/lib/deals/leadSource';
 import { groupLeadSources } from './leadSourceReport';
 import { buildEntryFunnel, type EntryFunnel } from './entryFunnel';
+import { buildConversionFunnel, selectConversionPopulation } from './conversionFunnel';
 import type { HistoricalReportDeal } from './performanceHistory';
 export type { LifecycleEvent, PerformanceMode } from './performanceHistory';
 
@@ -65,6 +66,7 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   const productId = options.productId || '';
   const cutoff = mode === 'current' ? snapshotDate.getTime() : Math.min(range.end.getTime(), snapshotDate.getTime());
   const rules = getStageRules(board);
+  const usesCustomerPromotion = rules.customerIndex >= 0;
   const qualifiedStage = rules.steps[rules.qualifiedIndex]?.id;
   const stepIndex = (id?: string) => rules.steps.findIndex(stage => stage.id === id);
   const byId = new Map(deals.map(deal => [deal.id, deal]));
@@ -176,11 +178,18 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   const unknownBoardMembershipCount = mode === 'cohort' ? deals.filter(deal => deal.boardId === board.id && inPeriod(deal.createdAt) && filtered(deal) &&
     !canonical.some(event => event.dealId === deal.id) && !history.some(event => event.dealId === deal.id)).length : 0;
   const firstQualified = first('qualified');
-  const leadQualificationDates = new Map([...firstQualified].map(([id, event]) => [id, event.date]));
-  const select = (type: LifecycleEvent['type']) => {
+  const selectOriginal = (type: LifecycleEvent['type']) => {
     const candidates = type === 'qualified' ? [...firstQualified.values()] : type === 'won' ? episodes.wins : canonical.filter(event => event.type === type);
     return candidates.filter(event => mode === 'cohort' ? cohortIds.has(event.dealId) : inPeriod(event.date) && filtered(historical(event)));
   };
+  const conversion = mode === 'conversion' ? selectConversionPopulation({ entryEvents: selectOriginal('entered_board'), events: canonical,
+    visits: history, boardId: board.id, stageIds: board.stages.map(stage => stage.id), qualifiedStageId: qualifiedStage,
+    customerStageId: rules.steps[rules.customerIndex]?.id || board.wonStageId, usesCustomerPromotion,
+    lost: rules.lost, cutoffDate: new Date(cutoff).toISOString(),
+  }) : undefined;
+  const select = (type: LifecycleEvent['type']) => conversion ? conversion.selected[type] || [] : selectOriginal(type);
+  const reportQualifications = conversion?.qualifications || firstQualified;
+  const leadQualificationDates = new Map([...reportQualifications].map(([id, event]) => [id, event.date]));
   const selectedEvents = mode === 'current' ? [] : [...select('entered_board'), ...select('qualified'), ...select('won'), ...select('lost'), ...select('reopened')];
   for (const event of selectedEvents) if (event.snapshotSource === 'current') legacyIds.add(event.dealId);
   const derivedCustomerWin = (deal: Deal) => rules.customerIndex >= 0 && !deal.isLost &&
@@ -192,14 +201,20 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   const legacyLeadSourceSnapshotCount = mode === 'current' ? 0 : entries.filter(deal => (deal as HistoricalReportDeal).leadSourceSnapshotSource !== 'transition').length;
   const qualifiedDeals = mode === 'current' ? [] : distinct(select('qualified').map(historical));
   const qualifiedIds = new Set(qualifiedDeals.map(deal => deal.id));
-  const qualificationDates = new Map([...firstQualified].filter(([id]) => qualifiedIds.has(id)).map(([id, event]) => [id, event.date]));
+  const qualificationDates = new Map([...reportQualifications].filter(([id]) => qualifiedIds.has(id)).map(([id, event]) => [id, event.date]));
   const wonDeals = mode === 'current' ? [] : distinct(select('won').map(historical));
   const lostDeals = mode === 'current' ? [] : distinct(select('lost').map(historical));
   const reopenedDeals = mode === 'current' ? [] : distinct(select('reopened').map(historical));
-  const cohortWonDeals = wonDeals.filter(deal => qualifiedIds.has(deal.id) && time(qualificationDates.get(deal.id)) <= time(deal.closedAt));
-  const coverageDeals = deals.filter(deal => (mode === 'cohort' ? cohortIds.has(deal.id) || (deal.boardId === board.id && inPeriod(deal.createdAt) && filtered(deal)) : deal.boardId === board.id && filtered(deal)) && time(deal.createdAt) <= cutoff);
-  const estimatedQualificationIds = new Set(coverageDeals.filter(deal => deal.qualificationDateSource === 'estimated' && !firstQualified.has(deal.id)).map(deal => deal.id));
-  const unknownQualification = rules.qualifiedIndex < 0 ? [] : coverageDeals.filter(deal => !firstQualified.has(deal.id) && !estimatedQualificationIds.has(deal.id) &&
+  const cohortWonDeals = conversion ? wonDeals : wonDeals.filter(deal => qualifiedIds.has(deal.id) && time(qualificationDates.get(deal.id)) <= time(deal.closedAt));
+  const unqualifiedWonDeals = conversion ? [...conversion.unqualifiedWins.values()].map(historical) : [];
+  const excludedQualificationDeals = conversion ? distinct(conversion.excludedQualifications.map(historical)) : [];
+  const diagnosticReasonsByDeal = conversion?.diagnostics || new Map<string, string[]>();
+  const diagnosticsDeals = conversion ? [...diagnosticReasonsByDeal.keys()].map(id => historical(conversion.diagnosticEvents.get(id) || conversion.anchors.get(id)!)) : [];
+  const qualificationCarryInIds = conversion?.qualificationCarryInIds || new Set<string>();
+  const unknownStageDeals = conversion ? entries.filter(deal => conversion.unknownStageIds.has(deal.id)) : [];
+  const coverageDeals = conversion ? entries : deals.filter(deal => (mode === 'cohort' ? cohortIds.has(deal.id) || (deal.boardId === board.id && inPeriod(deal.createdAt) && filtered(deal)) : deal.boardId === board.id && filtered(deal)) && time(deal.createdAt) <= cutoff);
+  const estimatedQualificationIds = new Set(coverageDeals.filter(deal => deal.qualificationDateSource === 'estimated' && !reportQualifications.has(deal.id)).map(deal => deal.id));
+  const unknownQualification = rules.qualifiedIndex < 0 ? [] : coverageDeals.filter(deal => !reportQualifications.has(deal.id) && !estimatedQualificationIds.has(deal.id) &&
     (deal.lossCategory === 'qualified' || deal.isWon || (!rules.lost(deal.status) && stepIndex(deal.status) >= rules.qualifiedIndex)) &&
     !(options.lifecycleEvents || []).some(event => event.dealId === deal.id && event.boardId === board.id && event.type === 'qualified' && time(event.date) > cutoff) &&
     !events.some(event => event.dealId === deal.id && event.boardId === board.id && event.stageId === qualifiedStage && time(event.date) > cutoff));
@@ -234,7 +249,7 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
         mode === 'period' ? 'Leads distintos com chegada registrada nesta etapa no período.' : 'Leads abertos que estão nesta etapa agora.',
       comparisonBase: mode === 'cohort' && next && population.length > 0 ? `${numerator} também em ${next.label} ÷ ${population.length} em ${stage.label}` : '' };
   });
-  const entryFunnel: EntryFunnel = mode === 'period' ? buildEntryFunnel({ entries, entryEvents: select('entered_board'),
+  const entryFunnel: EntryFunnel = conversion ? buildConversionFunnel(conversion, entries, qualifiedDeals, wonDeals, stageData) : mode === 'period' ? buildEntryFunnel({ entries, entryEvents: select('entered_board'),
     stageEvents: history, lifecycleEvents: ledger, boardId: board.id, stages: stageData, cutoffDate: new Date(cutoff).toISOString(),
   }) : { stages: [], baseCount: 0, unknownStageCount: 0 };
   const wonRevenue = wonDeals.reduce((sum, deal) => sum + deal.value, 0);
@@ -245,19 +260,22 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   const cycles = wonDeals.map(deal => (time(deal.closedAt) - time(deal.createdAt)) / 86400000).filter(days => Number.isFinite(days) && days >= 0);
   const reportedIds = new Set([...entries, ...qualifiedDeals, ...wonDeals, ...lostDeals, ...reopenedDeals, ...stageData.flatMap(stage => stage.deals)].map(deal => deal.id));
   return {
-    mode, usesCustomerPromotion: board.linkedLifecycleStage !== 'CUSTOMER', cutoffDate: new Date(cutoff).toISOString(), entries, qualifiedDeals, cohortWonDeals, currentDeals, currentValue, reopenedDeals,
+    mode, usesCustomerPromotion, cutoffDate: new Date(cutoff).toISOString(), entries, qualifiedDeals, cohortWonDeals, currentDeals, currentValue, reopenedDeals,
     leadSourceGroups, leadSourceTotal: entries.length,
     estimatedQualificationIds, qualifiedIds, qualificationDates, leadQualificationDates, qualifiedCount: qualifiedIds.size,
-    qualificationRate: mode === 'cohort' && rules.qualifiedIndex >= 0 ? rate(qualifiedIds.size, entries.length) : null,
-    closingRate: mode === 'cohort' && rules.qualifiedIndex >= 0 ? rate(cohortWonDeals.length, qualifiedIds.size) : null,
+    qualificationRate: (mode === 'cohort' || conversion) && rules.qualifiedIndex >= 0 ? rate(qualifiedIds.size, entries.length) : null,
+    closingRate: (mode === 'cohort' || conversion) && rules.qualifiedIndex >= 0 ? rate(cohortWonDeals.length, qualifiedIds.size) : null,
+    totalConversionRate: conversion ? rate(wonDeals.length, entries.length) : null,
+    unqualifiedWonDeals, excludedQualificationDeals, diagnosticsDeals, diagnosticReasonsByDeal, qualificationCarryInIds, unknownStageDeals,
     hasQualifiedStage: rules.qualifiedIndex >= 0, wonDeals, lostDeals, unknownQualification, unknownClosure,
     coverage: { unknownQualificationCount: unknownQualification.length, estimatedQualificationCount: estimatedQualificationIds.size, unknownBoardMembershipCount,
-      unknownClosureCount: unknownClosure.length, legacySnapshotCount: [...legacyIds].filter(id => reportedIds.has(id)).length, legacyLeadSourceSnapshotCount },
+      unknownClosureCount: unknownClosure.length, legacySnapshotCount: [...legacyIds].filter(id => reportedIds.has(id)).length, legacyLeadSourceSnapshotCount,
+      excludedQualificationCount: excludedQualificationDeals.length },
     wonRevenue, previousRevenue, revenueChange: previousRevenue !== null && previousRevenue > 0 ? (wonRevenue - previousRevenue) / previousRevenue * 100 : null,
     fastestSalesCycle: cycles.length ? Math.round(Math.min(...cycles)) : null,
     slowestSalesCycle: cycles.length ? Math.round(Math.max(...cycles)) : null,
     avgSalesCycle: cycles.length ? Math.round(cycles.reduce((a, b) => a + b, 0) / cycles.length) : null,
-    stageData, entryFunnel,
+    stageData: conversion ? entryFunnel.stages : stageData, entryFunnel,
   };
 }
 export type PerformanceMetrics = ReturnType<typeof calculatePerformance>;

@@ -18,11 +18,13 @@ interface StageLeadsModalProps {
 export function StageLeadsModal({ stage, qualificationDates, estimatedQualificationIds, onClose }: StageLeadsModalProps) {
   const leads = [...stage.deals].sort((a, b) => a.title.localeCompare(b.title, 'pt-BR'));
   const evidence = 'evidenceByDeal' in stage ? stage.evidenceByDeal : undefined;
+  const milestone = 'milestone' in stage ? stage.milestone : undefined;
+  const suffix = evidence && !milestone ? ' ou além' : '';
   return (
-    <Modal isOpen onClose={onClose} title={stage.name + (evidence ? ' ou além' : '') + ' · ' + leads.length + ' leads'}
+    <Modal isOpen onClose={onClose} title={stage.name + suffix + ' · ' + leads.length + ' leads'}
       className="max-w-4xl" bodyClassName="p-0 overflow-auto">
       <p className="px-5 py-3 text-sm text-slate-500">{stage.populationLabel}{stage.comparisonBase && ` ${stage.comparisonBase}`}</p>
-      {evidence && <p className="px-5 pb-3 text-xs text-slate-500">A inclusão por etapa posterior indica avanço na ordem do funil, sem comprovar passagem pelas etapas puladas. Não comprova assinatura nem altera as datas de qualificação ou ganho.</p>}
+      {evidence && <p className="px-5 pb-3 text-xs text-slate-500">{milestone ? 'Os leads deste marco são os mesmos usados no indicador e na taxa correspondente.' : 'Avanços por etapas posteriores não criam visitas nas etapas puladas. Qualificação e ganho exigem seus próprios registros.'}</p>}
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead className="sticky top-0 bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400">
@@ -45,7 +47,7 @@ export function StageLeadsModal({ stage, qualificationDates, estimatedQualificat
                 </td>
                 {evidence && <td className="px-5 py-3 min-w-48">
                   <span>{evidence.get(lead.id)?.stageName || '—'}</span>
-                  <span className="block text-xs text-slate-500">{evidence.get(lead.id)?.observedAtStage ? 'Passagem registrada' : 'Incluído por etapa posterior'} · {formatDate(evidence.get(lead.id)?.date)}</span>
+                  <span className="block text-xs text-slate-500">{evidence.get(lead.id)?.kind === 'qualification' ? 'Qualificação registrada' : evidence.get(lead.id)?.kind === 'customer' ? 'Promoção a Cliente registrada' : evidence.get(lead.id)?.kind === 'win' ? 'Ganho registrado' : evidence.get(lead.id)?.observedAtStage ? 'Passagem registrada' : 'Incluído por etapa posterior'} · {formatDate(evidence.get(lead.id)?.date)}</span>
                 </td>}
                 <td className="px-5 py-3 whitespace-nowrap">{formatDate(lead.createdAt)}</td>
                 <td className="px-5 py-3 whitespace-nowrap">{formatDate(qualificationDates.get(lead.id))}

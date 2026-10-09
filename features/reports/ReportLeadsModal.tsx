@@ -25,6 +25,7 @@ export function ReportLeadsModal({ detail, board, filtersLabel, qualificationDat
     .sort((a, b) => a.title.localeCompare(b.title, 'pt-BR')), [group.deals, search]);
   const stages = new Map(board.stages.map(stage => [stage.id, stage.label]));
   const showLoss = detail.showLoss || group.id === 'qualified-lost';
+  const showValue = detail.showRevenue || !!detail.diagnosticReasonsByDeal;
   return (
     <Modal isOpen onClose={onClose} title={detail.title} className="max-w-6xl" bodyClassName="p-0 overflow-auto">
       <div className="px-5 py-4 space-y-3 border-b border-slate-200 dark:border-white/10">
@@ -53,15 +54,16 @@ export function ReportLeadsModal({ detail, board, filtersLabel, qualificationDat
       <div className="overflow-x-auto">
         <table className="w-full text-sm text-left">
           <thead className="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400"><tr>
-            {['Lead / Responsável', 'Etapa registrada', 'Produto', ...(detail.showSource ? ['Origem do lead'] : []), ...(detail.showRevenue ? ['Valor'] : []), ...(showLoss ? ['Classificação', 'Motivo'] : []), 'Criação', 'Qualificação', 'Encerramento', ...(detail.showCycle ? ['Duração'] : [])].map(label => <th key={label} scope="col" className="px-4 py-3 font-medium whitespace-nowrap">{label}</th>)}
+            {['Lead / Responsável', 'Etapa registrada', ...(detail.diagnosticReasonsByDeal ? ['Conferência do histórico'] : []), 'Produto', ...(detail.showSource ? ['Origem do lead'] : []), ...(showValue ? ['Valor'] : []), ...(showLoss ? ['Classificação', 'Motivo'] : []), 'Criação', 'Qualificação', 'Encerramento', ...(detail.showCycle ? ['Duração'] : [])].map(label => <th key={label} scope="col" className="px-4 py-3 font-medium whitespace-nowrap">{label}</th>)}
           </tr></thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
             {leads.map(lead => <tr key={lead.id} className="text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5">
               <td className="px-4 py-3 min-w-48"><a href={'/boards?deal=' + encodeURIComponent(lead.id)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 font-medium text-primary-600 dark:text-primary-400 hover:underline focus-visible:ring-2 focus-visible:ring-primary-500 rounded-sm">{lead.title}<ExternalLink size={14} aria-hidden="true" /><span className="sr-only"> (abrir lead em nova aba)</span></a><span className="block text-xs text-slate-500 dark:text-slate-400 mt-1">{lead.owner?.name || 'Sem responsável'}</span></td>
               <td className="px-4 py-3">{stages.get(lead.status) || 'Etapa indisponível'}</td>
+              {detail.diagnosticReasonsByDeal && <td className="px-4 py-3 min-w-64 text-xs">{detail.diagnosticReasonsByDeal.get(lead.id)?.join(' ') || 'Registro sem marco anterior comprovado.'}</td>}
               <td className="px-4 py-3 min-w-36">{[...new Set(lead.items.map(item => item.name))].join(', ') || 'Sem produto'}</td>
               {detail.showSource && <td className="px-4 py-3 min-w-36">{getDealLeadSource(lead) || 'Não informado'}</td>}
-              {detail.showRevenue && <td className="px-4 py-3 whitespace-nowrap">{money(lead.value)}</td>}
+              {showValue && <td className="px-4 py-3 whitespace-nowrap">{money(lead.value)}</td>}
               {showLoss && <><td className="px-4 py-3">{lossCategoryLabel(lead.lossCategory)}</td><td className="px-4 py-3 min-w-44 whitespace-pre-wrap break-words">{lossReasonLabel(lead.lossReason)}</td></>}
               <td className="px-4 py-3 whitespace-nowrap">{date(lead.createdAt)}</td>
               <td className="px-4 py-3 whitespace-nowrap">{date(qualificationDates.get(lead.id))}{estimatedQualificationIds.has(lead.id) && <span className="block text-xs text-amber-600 dark:text-amber-400">Estimada</span>}</td>
