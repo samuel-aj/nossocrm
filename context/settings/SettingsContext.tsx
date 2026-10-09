@@ -752,8 +752,10 @@ export const SettingsProvider: React.FC<{ children: ReactNode }> = ({ children }
     });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      setError(body?.error || `Falha ao remover campo (HTTP ${res.status})`);
-      return;
+      const message = body?.error || `Falha ao remover campo (HTTP ${res.status})`;
+      setError(message);
+      // Let callers stop cleanup of stored values and avoid a success toast.
+      throw new Error(message);
     }
     setCustomFieldDefinitions(prev => prev.filter(f => f.id !== id));
   }, []);

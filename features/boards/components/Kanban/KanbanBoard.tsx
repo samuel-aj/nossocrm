@@ -10,6 +10,7 @@ import { useCRM } from '@/context/CRMContext';
 import { Archive, Hourglass, Undo2, UserX, ChevronLeft, ChevronRight } from 'lucide-react';
 import { AUTOMATION_DRAG_TYPE, StageAutomationsPanel } from '@/features/boards/automations/StageAutomationsPanel';
 import type { KanbanAutomation } from '@/features/boards/automations/AutomationLayer';
+import { KebabMenu } from '@/components/ui/KebabMenu';
 
 // Shared immutable default so every card without pending activities reuses
 // the same reference — React.memo on DealCard can then bail out on re-renders.
@@ -401,6 +402,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                   {stage.label}
                 </span>
                 <span className="flex items-center gap-1">
+                  {automation?.onEditStage && <KebabMenu label={`Configurar etapa ${stage.label}`} items={[{ label: 'Editar etapa', onSelect: () => automation.onEditStage?.(stage) }]} />}
                   <span className="text-xs font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded text-slate-600 dark:text-slate-300">
                     {automation ? (automation.byStage.get(stage.id)?.length ?? 0) : stageDeals.length}
                   </span>
@@ -434,7 +436,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
 
               <div className="text-xs text-slate-500 dark:text-slate-400 font-medium text-right">
                 {automation ? (
-                  <span className="text-primary-600 dark:text-primary-300">Automações da etapa</span>
+                  <span className="text-primary-600 dark:text-primary-300">{stage.requiredFields?.length ? `${stage.requiredFields.length} campo(s) obrigatório(s) · ` : ''}Automações da etapa</span>
                 ) : (
                   <>
                     Total:{' '}

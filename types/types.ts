@@ -312,6 +312,8 @@ export interface BoardStage {
   label: string;
   color: string;
   linkedLifecycleStage?: string; // ID do LifecycleStage
+  /** Required on entry: products, leadSource, ownerId or custom:<definition UUID>. */
+  requiredFields?: string[];
 }
 
 // Metas do Board (Revenue Ops)

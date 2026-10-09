@@ -687,31 +687,29 @@ export const useBoardsController = () => {
 
   // Mover todos os selecionados p/ uma etapa. Etapa de perda SEM motivo →
   // guarda a etapa e a UI abre o modal de motivo (uma vez p/ todos).
-  const bulkMoveToStage = (stageId: string, lossReason?: string, lossCategory?: 'qualified' | 'disqualified') => {
-    if (!activeBoard) return;
+  const bulkMovingRef = useRef(false);
+  const bulkMoveToStage = async (stageId: string, lossReason?: string, lossCategory?: 'qualified' | 'disqualified') => {
+    if (!activeBoard || bulkMovingRef.current) return;
     const targetStage = activeBoard.stages.find(s => s.id === stageId);
     if (targetStage?.linkedLifecycleStage === 'OTHER' && !lossReason) {
-      setBulkLossStageId(stageId);
-      return;
+      setBulkLossStageId(stageId); return;
     }
-    let moved = 0;
-    for (const dealId of selectedDealIds) {
-      const deal = deals.find(d => d.id === dealId);
-      if (!deal || deal.id.startsWith('temp-')) continue;
-      moveDealMutation.mutate({
-        dealId,
-        targetStageId: stageId,
-        ...(lossReason ? { lossReason } : {}),
-        ...(lossCategory ? { lossCategory } : {}),
-        deal,
-        board: activeBoard,
-        lifecycleStages,
-      });
-      moved++;
-    }
-    addToast(`${moved} negócio(s) movidos de etapa.`, 'success');
     setBulkLossStageId(null);
-    clearDealSelection();
+    bulkMovingRef.current = true;
+    let moved = 0;
+    try {
+      for (const dealId of selectedDealIds) {
+        const deal = deals.find(d => d.id === dealId);
+        if (!deal || deal.id.startsWith('temp-') || deal.status === stageId) continue;
+        const result = await moveDealMutation.mutateAsync({ dealId, targetStageId: stageId, lossReason, lossCategory, deal, board: activeBoard, lifecycleStages });
+        if (result.cancelled || result.scopeChanged) break;
+        if (deal.inactiveAt && !result.completedWithRequirements) updateDeal(deal.id, { inactiveAt: null });
+        reactivateInactiveContact(deal);
+        moved++;
+      }
+      if (moved) addToast(moved + ' negócio(s) movidos de etapa.', 'success');
+    } catch (e) { addToast(moved + ' negócio(s) movidos. ' + ((e as Error).message || 'Não foi possível concluir a movimentação.'), 'error'); }
+    finally { bulkMovingRef.current = false; clearDealSelection(); }
   };
 
   // Adicionar/remover uma tag em todos os selecionados.
@@ -832,13 +830,6 @@ export const useBoardsController = () => {
         return;
       }
 
-      // Saindo de "Inativos": soltar numa etapa devolve o lead pro funil
-      // (reativando o contato junto, senão ele voltaria pros Inativos).
-      if (deal.inactiveAt) {
-        updateDeal(deal.id, { inactiveAt: null });
-      }
-      reactivateInactiveContact(deal);
-
       // Find the target stage to check if it's a won/lost stage
       const targetStage = explicitWin ? manualWinStage(activeBoard, deal.status) : activeBoard.stages.find(s => s.id === stageId);
 
@@ -860,7 +851,11 @@ export const useBoardsController = () => {
           deal,
           board: activeBoard,
           lifecycleStages,
-        });
+        }, { onSuccess: result => {
+          if (result.cancelled || result.scopeChanged) return;
+          if (deal.inactiveAt && !result.completedWithRequirements) updateDeal(deal.id, { inactiveAt: null });
+          reactivateInactiveContact(deal);
+        }, onError: error => addToast(error.message || 'Não foi possível mover o lead.', 'error') });
       }
     }
     setDraggingId(null);
@@ -879,7 +874,11 @@ export const useBoardsController = () => {
           deal,
           board: activeBoard,
           lifecycleStages,
-        });
+        }, { onSuccess: result => {
+          if (result.cancelled || result.scopeChanged) return;
+          if (deal.inactiveAt && !result.completedWithRequirements) updateDeal(deal.id, { inactiveAt: null });
+          reactivateInactiveContact(deal);
+        }, onError: error => addToast(error.message || 'Não foi possível mover o lead.', 'error') });
       }
       setLossReasonModal(null);
     }
@@ -933,13 +932,6 @@ export const useBoardsController = () => {
       return;
     }
 
-    // Mudar de etapa também devolve o lead caso esteja em "Inativos"
-    // (reativando o contato junto, senão ele voltaria pros Inativos).
-    if (deal.inactiveAt) {
-      updateDeal(deal.id, { inactiveAt: null });
-    }
-    reactivateInactiveContact(deal);
-
     // Find the target stage to check if it's a lost stage
     const targetStage = activeBoard.stages.find(s => s.id === newStageId);
 
@@ -960,7 +952,11 @@ export const useBoardsController = () => {
         deal,
         board: activeBoard,
         lifecycleStages,
-      });
+      }, { onSuccess: result => {
+          if (result.cancelled || result.scopeChanged) return;
+          if (deal.inactiveAt && !result.completedWithRequirements) updateDeal(deal.id, { inactiveAt: null });
+          reactivateInactiveContact(deal);
+        }, onError: error => addToast(error.message || 'Não foi possível mover o lead.', 'error') });
     }
   };
 

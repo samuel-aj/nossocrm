@@ -1,4 +1,6 @@
 import { getDealLeadSource } from '@/lib/deals/leadSource';
+import { useStageRequirements } from '@/features/boards/requirements/StageRequirementsContext';
+import { useLayoutEffect, useRef } from 'react';
 /**
  * Unified hook for moving deals between stages
  * 
@@ -39,6 +41,9 @@ interface MoveDealParams {
 }
 
 interface MoveDealResult {
+  cancelled?: boolean;
+  completedWithRequirements?: boolean;
+  scopeChanged?: boolean;
   dealId: string;
   newStatus: string;
   isWon?: boolean;
@@ -48,6 +53,7 @@ interface MoveDealResult {
 
 // Context type for optimistic updates
 interface MoveDealContext {
+  deferred?: boolean;
   previousDeals: DealView[] | undefined;
   previousDetail: Deal | undefined;
 }
@@ -60,7 +66,10 @@ export const useMoveDeal = () => {
   const queryClient = useQueryClient();
   // Autor do movimento: vai na atividade ("Fulano moveu para X"). 'Sistema'
   // fica reservado para automações (LinkedStage, NextBoard).
-  const { profile } = useAuth();
+  const { profile, organizationId } = useAuth();
+  const scope = useRef(organizationId);
+  useLayoutEffect(() => { scope.current = organizationId; }, [organizationId]);
+  const completeRequirements = useStageRequirements();
   const autor = {
     name:
       profile?.nickname ||
@@ -74,6 +83,7 @@ export const useMoveDeal = () => {
 
   return useMutation<MoveDealResult, Error, MoveDealParams, MoveDealContext>({
     mutationFn: async ({ dealId, targetStageId, lossReason, lossCategory, deal, board, lifecycleStages, explicitWin, explicitLost, explicitReopen }) => {
+      const initialScope = scope.current;
       const targetStage = board.stages.find(s => s.id === targetStageId);
       if (!targetStage) throw new Error('Etapa indisponível neste funil. Atualize a página.');
       const outcome = resolveBoardMoveOutcome({ board, deal, targetStageId, explicitWin, explicitLost, explicitReopen });
@@ -94,10 +104,27 @@ export const useMoveDeal = () => {
       };
 
       // 1. Update the deal
-      const { data: confirmed, error: dealError } = await dealsService.update(dealId, updates);
-      if (dealError) {
-        throw dealError;
+      let confirmed: Partial<Deal> | undefined;
+      const completedWithRequirements = changingStage && !!targetStage.requiredFields?.length;
+      if (completedWithRequirements) {
+        if (!completeRequirements) throw new Error('Não foi possível abrir as pendências. Atualize a página.');
+        const fresh = await dealsService.getById(dealId);
+        if (fresh.error) throw fresh.error;
+        if (!fresh.data || fresh.data.boardId !== deal.boardId || fresh.data.status !== deal.status) throw new Error('O lead mudou. Atualize e tente novamente.');
+        if (scope.current !== initialScope) throw new Error('A organização mudou. Reabra o lead.');
+        const completed = await completeRequirements({ deal: fresh.data, stage: targetStage, persist: values => {
+          if (scope.current !== initialScope) throw new Error('A organização mudou. Reabra o lead.');
+          return dealsService.completeStageMove({ deal: fresh.data!, targetBoardId: board.id, targetStageId,
+            changes: { ...(!outcome.recoveringLegacyWin && { isWon, isLost }), ...(lossReason && { lossReason }), ...(lossCategory && { lossCategory }) }, values });
+        } });
+        if (!completed) return { dealId, newStatus: deal.status, cancelled: true };
+        confirmed = completed;
+      } else {
+        const response = await dealsService.update(dealId, updates);
+        if (response.error) throw response.error;
+        confirmed = response.data;
       }
+      if (scope.current !== initialScope) return { dealId, newStatus: targetStageId, confirmed, completedWithRequirements, scopeChanged: true };
 
       // 2. Create activity "Moveu para X" (fire and forget - don't block UI)
       const stageLabel = targetStage?.label || targetStageId;
@@ -151,11 +178,12 @@ export const useMoveDeal = () => {
             const targetBoard = await boardsService.get(board.nextBoardId!);
             if (targetBoard && targetBoard.stages.length > 0) {
               const entryStageId = targetBoard.stages[0].id;
+              const completedDeal = { ...deal, ...confirmed };
 
               const { error: copyError } = await dealsService.create({
                 title: deal.title,
-                leadSource: getDealLeadSource(deal),
-                value: deal.value,
+                leadSource: getDealLeadSource(completedDeal),
+                value: completedDeal.value,
                 contactId: deal.contactId,
                 boardId: targetBoard.id,
                 // Status/stage devem refletir o board de destino (não o stage do board anterior)
@@ -163,9 +191,9 @@ export const useMoveDeal = () => {
                 priority: deal.priority,
                 // Compat: DealView/Deal ainda pode ter companyId legado
                 clientCompanyId: deal.clientCompanyId ?? deal.companyId,
-                ownerId: deal.ownerId,
-                owner: deal.owner || { name: 'Unknown', avatar: '' },
-                items: deal.items || [],
+                ownerId: completedDeal.ownerId,
+                owner: completedDeal.owner || { name: 'Unknown', avatar: '' },
+                items: completedDeal.items || [],
                 tags: deal.tags || [],
                 // Rastreabilidade (ajuda também a prevenir duplicidade no futuro)
                 customFields: {
@@ -198,7 +226,7 @@ export const useMoveDeal = () => {
         })();
       }
 
-      return { dealId, newStatus: targetStageId, isWon: confirmed?.isWon ?? isWon, isLost: confirmed?.isLost ?? isLost, confirmed };
+      return { dealId, newStatus: targetStageId, isWon: confirmed?.isWon ?? isWon, isLost: confirmed?.isLost ?? isLost, confirmed, completedWithRequirements };
     },
 
     // Optimistic update: update UI instantly before server responds
@@ -209,6 +237,9 @@ export const useMoveDeal = () => {
       // Snapshot previous state
       const previousDeals = queryClient.getQueryData<DealView[]>(DEALS_VIEW_KEY);
       const previousDetail = queryClient.getQueryData<Deal>(queryKeys.deals.detail(dealId));
+      if ((deal.boardId !== board.id || deal.status !== targetStageId) && board.stages.find(s => s.id === targetStageId)?.requiredFields?.length) {
+        return { previousDeals, previousDetail, deferred: true };
+      }
 
       // Determine new status
       const { isWon, isLost, closedAt } = resolveBoardMoveOutcome({ board, deal, targetStageId, explicitWin, explicitLost, explicitReopen });
@@ -263,7 +294,16 @@ export const useMoveDeal = () => {
     },
 
     onSuccess: (result, variables) => {
-      if (!result.confirmed) return;
+      if (!result.confirmed || result.cancelled || result.scopeChanged) return;
+      if (result.completedWithRequirements) {
+        const applyCompleted = <T extends Deal>(old: T): T => {
+          if (result.confirmed?.updatedAt && old.updatedAt > result.confirmed.updatedAt) return old;
+          return { ...old, ...result.confirmed, owner: result.confirmed?.ownerId === old.ownerId ? old.owner : result.confirmed?.owner ?? old.owner };
+        };
+        queryClient.setQueryData<DealView[]>(DEALS_VIEW_KEY, old => old?.map(row => row.id === result.dealId ? applyCompleted(row) : row));
+        queryClient.setQueryData<Deal>(queryKeys.deals.detail(result.dealId), old => old ? applyCompleted(old) : old);
+        return;
+      }
       // Dates and final outcome come from the transactional database result.
       // Don't overwrite a subsequent move or unrelated fields edited meanwhile.
       const fields = ['isWon', 'isLost', 'closedAt', 'qualifiedAt', 'qualificationDateSource', 'lastStageChangeDate'] as const;
@@ -276,6 +316,7 @@ export const useMoveDeal = () => {
 
     // Rollback on error
     onError: (_err, variables, context) => {
+      if (context?.deferred) return;
       if (context?.previousDeals) {
         queryClient.setQueryData(DEALS_VIEW_KEY, context.previousDeals);
       }

@@ -109,6 +109,7 @@ export interface DbBoard {
  * @interface DbBoardStage
  */
 export interface DbBoardStage {
+  required_fields?: string[] | null;
   /** ID único do estágio (UUID). */
   id: string;
   /** ID da organização/tenant. */
@@ -138,6 +139,7 @@ export interface DbBoardStage {
  * @returns Estágio no formato da aplicação.
  */
 const transformStage = (db: DbBoardStage): BoardStage => ({
+  requiredFields: db.required_fields ?? [],
   id: db.id,
   organizationId: db.organization_id,
   boardId: db.board_id,
@@ -286,6 +288,7 @@ const transformStageToDb = (
   label: stage.label,
   color: stage.color || 'bg-gray-500',
   order: orderNum,
+  required_fields: stage.requiredFields ?? [],
   linked_lifecycle_stage: stage.linkedLifecycleStage || null,
 });
 
@@ -853,6 +856,7 @@ export const boardsService = {
           label: stage.label,
           color: stage.color || 'bg-gray-500',
           order: nextOrder,
+          required_fields: stage.requiredFields ?? [],
           linked_lifecycle_stage: stage.linkedLifecycleStage || null,
         })
         .select()
@@ -874,16 +878,22 @@ export const boardsService = {
 
       if (updates.label !== undefined) dbUpdates.label = updates.label;
       if (updates.color !== undefined) dbUpdates.color = updates.color;
+      if (updates.requiredFields !== undefined) dbUpdates.required_fields = updates.requiredFields;
       if (updates.linkedLifecycleStage !== undefined) {
         dbUpdates.linked_lifecycle_stage = updates.linkedLifecycleStage || null;
       }
 
-      const { error } = await supabase
+      const orgId = await getCurrentOrganizationId();
+      if (!orgId) return { error: new Error('Organização indisponível') };
+      const { data, error } = await supabase
         .from('board_stages')
         .update(dbUpdates)
-        .eq('id', stageId);
+        .eq('id', stageId)
+        .eq('organization_id', orgId)
+        .select('id')
+        .maybeSingle();
 
-      return { error };
+      return { error: error ?? (!data ? new Error('Etapa indisponível ou sem permissão para editar.') : null) };
     } catch (e) {
       return { error: e as Error };
     }
