@@ -9,7 +9,7 @@ import { ReportFiltersPopover } from './ReportFiltersPopover';
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
 import { LossReasonsCard } from './LossReasonsCard';
 import { LeadSourceChart } from './LeadSourceChart';
-import { REPORT_MODES, formatReportRate, type ReportMode } from './reportPresentation';
+import { REPORT_MODES } from './reportPresentation';
 import { generateReportPDF } from './utils/generateReportPDF';
 import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
@@ -26,7 +26,7 @@ import { NO_PRODUCT, reportDrilldown, type ReportSelection } from './reportDrill
 const ReportsPage: React.FC = () => {
   const { boards, deals: allCrmDeals, products = [] } = useCRM();
   const { profile } = useAuth();
-  const [mode, setMode] = useState<ReportMode>('cohort');
+  const mode = 'period';
   const [dayKey, setDayKey] = useState(() => new Date().toDateString());
   useEffect(() => {
     const timer = setInterval(() => setDayKey(new Date().toDateString()), 60_000);
@@ -37,7 +37,7 @@ const ReportsPage: React.FC = () => {
   const [selectedOwnerId, setSelectedOwnerId] = useState<string>('');
   const [selectedProductId, setSelectedProductId] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const activeFilterCount = Number(mode !== 'current' && period !== 'all') + Number(Boolean(selectedOwnerId)) + Number(Boolean(selectedProductId));
+  const activeFilterCount = Number(period !== 'all') + Number(Boolean(selectedOwnerId)) + Number(Boolean(selectedProductId));
   const [selection, setSelection] = useState<ReportSelection | null>(null);
   const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
   useEffect(() => { setSelectedStageId(null); setSelection(null); }, [mode, period, selectedBoardId, selectedOwnerId, selectedProductId]);
@@ -120,13 +120,6 @@ const ReportsPage: React.FC = () => {
 
   const stageConversionData = metrics?.stageData || [];
   const selectedStage = stageConversionData.find(stage => stage.stageId === selectedStageId);
-  const funnelRates = {
-    total: metrics?.entries.length || 0, wonCount: wonDeals.length,
-    qualified: metrics?.qualifiedCount || 0,
-    hasQualifiedStage: metrics?.hasQualifiedStage || false,
-    qualificationRate: metrics?.qualificationRate ?? null,
-    conversionRate: metrics?.closingRate ?? null,
-  };
 
   const generatedBy = useMemo(() => {
     if (profile?.first_name && profile?.last_name) return `${profile.first_name} ${profile.last_name}`;
@@ -147,11 +140,6 @@ const ReportsPage: React.FC = () => {
       onSelect={reasonKey => setSelection({ kind: 'loss', category, reasonKey })} />
   );
   const modeInfo = REPORT_MODES[mode];
-  const cutoff = new Date(Math.min(range.end.getTime(), Date.now()));
-  const scopeLabel = mode === 'current' ? 'Carteira de agora · filtro de período não se aplica'
-    : `${range.start.toLocaleDateString('pt-BR')} a ${range.end.toLocaleDateString('pt-BR')} · Apuração até ${cutoff.toLocaleDateString('pt-BR')}`;
-  const coverage = metrics?.coverage;
-  const incomplete = coverage && (coverage.unknownQualificationCount + coverage.estimatedQualificationCount + coverage.unknownClosureCount + coverage.unknownBoardMembershipCount > 0);
 
   return (
     // min-h (não h fixo!): com altura FIXA o conteúdo transbordava e os cards
@@ -180,7 +168,7 @@ const ReportsPage: React.FC = () => {
                 {activeFilterCount > 0 && <span aria-label={`${activeFilterCount} filtros ativos`} className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary-500/15 px-1 text-xs text-primary-600 dark:text-primary-300">{activeFilterCount}</span>}
               </button>
             </PopoverTrigger>
-            {filtersOpen && <ReportFiltersPopover hidePeriod={mode === 'current'} filters={{ period, ownerId: selectedOwnerId, productId: selectedProductId }}
+            {filtersOpen && <ReportFiltersPopover filters={{ period, ownerId: selectedOwnerId, productId: selectedProductId }}
               owners={ownersList} products={productOptions} onClose={() => setFiltersOpen(false)}
               onApply={filters => {
                 setPeriod(filters.period);
@@ -203,29 +191,9 @@ const ReportsPage: React.FC = () => {
         </div>
       </div>
 
-      <section aria-label="Visão e base do relatório" className="space-y-3">
-        <div role="group" aria-label="Visão do relatório" className="flex flex-wrap gap-2">
-          {(Object.keys(REPORT_MODES) as ReportMode[]).map(value => <button key={value} type="button" aria-pressed={mode === value}
-            onClick={() => setMode(value)} className={`min-h-11 rounded-lg px-4 py-2 text-sm font-medium focus-visible:ring-2 focus-visible:ring-primary-500 ${mode === value ? 'bg-primary-600 text-white' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/15 text-slate-600 dark:text-slate-300'}`}>
-            {REPORT_MODES[value].label}
-          </button>)}
-        </div>
-        <p className="text-sm text-slate-700 dark:text-slate-300">{modeInfo.description}</p>
-        <p className="text-xs text-slate-500">{scopeLabel} · {ownersList.find(owner => owner.id === selectedOwnerId)?.name || 'Todos os vendedores'} · {productLabel}</p>
-        <p className="text-xs text-slate-500">{mode === 'cohort' ? 'Filtros: responsável na entrada no funil e produtos associados atualmente. Ao editar produtos, o grupo filtrado pode mudar.' : mode === 'period' ? 'Filtros: responsável e produtos registrados no instante de cada acontecimento. Produtos adicionados depois não alteram eventos anteriores.' : 'Filtros: responsável e produtos atuais.'}</p>
-        {selectedBoard?.linkedLifecycleStage !== 'CUSTOMER' && <p className="text-sm text-slate-700 dark:text-slate-300"><strong>Fechamento = promoção para Cliente.</strong> Etapas posteriores, como protocolo, acompanham o avanço após a venda e preservam a data do fechamento.</p>}
-      </section>
       {report.isError && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">Não foi possível carregar o relatório. {report.error.message} <button className="underline" onClick={() => void report.refetch()}>Tentar novamente</button></div>}
       {!metrics && !report.isError && <p role="status">Carregando histórico de movimentações…</p>}
       {metrics && !report.isError && <>
-      {mode !== 'current' && coverage && (incomplete || coverage.legacySnapshotCount > 0) && <aside className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:bg-amber-950/20 dark:border-amber-800 dark:text-amber-200">
-        {incomplete && <p><strong>Histórico incompleto.</strong> Qualificação sem data comprovada: {coverage.unknownQualificationCount}; com data estimada: {coverage.estimatedQualificationCount}; encerramento sem data: {coverage.unknownClosureCount}; presença no funil sem comprovação: {coverage.unknownBoardMembershipCount}. As taxas e os períodos usam apenas datas e vínculos com o funil comprovados.</p>}
-        {coverage.legacySnapshotCount > 0 && <p className={incomplete ? 'mt-2' : ''}>{coverage.legacySnapshotCount} leads têm dados históricos incompletos: alguns campos usam o cadastro atual ou o registro anterior disponível.</p>}
-      </aside>}
-      {mode === 'current' ? <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="glass rounded-xl border border-slate-200 dark:border-white/10 p-5"><p className="text-sm text-slate-500">Negócios abertos</p><p className="text-2xl font-bold">{metrics.currentDeals.length}</p></div>
-        <div className="glass rounded-xl border border-slate-200 dark:border-white/10 p-5"><p className="text-sm text-slate-500">Valor da carteira aberta</p><p className="text-2xl font-bold">{formatCurrency(metrics.currentValue)}</p></div>
-      </div> : <>
       {/* KPI Cards Grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 shrink-0">
         {/* Pipeline Value - FEATURE #2 */}
@@ -234,48 +202,43 @@ const ReportsPage: React.FC = () => {
             <div className="p-2 rounded-lg bg-blue-500/10">
               <DollarSign className="text-blue-500" size={18} />
             </div>
-            <span className="text-xs text-slate-500">{mode === 'cohort' ? 'Valor ganho pelos leads do grupo' : 'Faturamento fechado'}</span>
+            <span className="text-xs text-slate-500">Faturamento fechado</span>
           </div>
           <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatCurrency(wonRevenue)}</p>
           <p className={`text-xs ${metrics.revenueChange == null ? 'text-slate-500' : metrics.revenueChange < 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-            {mode === 'cohort' ? 'Ganhos comprovados até a apuração' : period === 'all' ? 'Ganhos em todo o período' : metrics.revenueChange == null ? 'Sem base no período anterior' : `${metrics.revenueChange >= 0 ? '+' : ''}${metrics.revenueChange.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% ${COMPARISON_LABELS[period]}`}
+            {period === 'all' ? 'Ganhos em todo o período' : metrics.revenueChange == null ? 'Sem base no período anterior' : `${metrics.revenueChange >= 0 ? '+' : ''}${metrics.revenueChange.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% ${COMPARISON_LABELS[period]}`}
           </p>
         </button>
 
-        {/* Taxa de Qualificação = qualificados ÷ total de leads do funil */}
+        {/* Primeiras qualificações no período selecionado */}
         <button type="button" onClick={() => setSelection({ kind: 'qualification' })} className="glass text-left p-4 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm hover:border-primary-400 dark:hover:border-primary-500/50 focus-visible:ring-2 focus-visible:ring-primary-500 transition-colors">
           <div className="flex items-center gap-2 mb-2">
             <div className="p-2 rounded-lg bg-emerald-500/10">
               <Target className="text-emerald-500" size={18} />
             </div>
-            <span className="text-xs text-slate-500">{mode === 'cohort' ? 'Taxa de Qualificação' : 'Qualificados no período'}</span>
+            <span className="text-xs text-slate-500">Qualificados no período</span>
           </div>
           <p className="text-2xl font-bold text-slate-900 dark:text-white">
-            {mode === 'cohort' ? formatReportRate(funnelRates.qualificationRate) : funnelRates.qualified}
+            {metrics.qualifiedCount}
           </p>
           <p className="text-xs text-slate-500">
-            {mode === 'period' ? 'Primeira qualificação comprovada no intervalo' : funnelRates.hasQualifiedStage
-              ? `${funnelRates.qualified} qualificados de ${funnelRates.total} leads`
-              : 'Configure uma etapa MQL no pipeline'}
+            Primeira qualificação comprovada no intervalo
           </p>
         </button>
 
-        {/* Taxa de Conversão = ganhos ÷ qualificados */}
+        {/* Ganhos no período selecionado */}
         <button type="button" onClick={() => setSelection({ kind: 'closing' })} className="glass text-left p-4 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm hover:border-primary-400 dark:hover:border-primary-500/50 focus-visible:ring-2 focus-visible:ring-primary-500 transition-colors">
           <div className="flex items-center gap-2 mb-2">
             <div className="p-2 rounded-lg bg-teal-500/10">
               <TrendingUp className="text-teal-500" size={18} />
             </div>
-            <span className="text-xs text-slate-500">{mode === 'cohort' ? 'Taxa de Fechamento' : 'Ganhos no período'}</span>
+            <span className="text-xs text-slate-500">Ganhos no período</span>
           </div>
           <p className="text-2xl font-bold text-slate-900 dark:text-white">
-            {mode === 'cohort' ? formatReportRate(funnelRates.conversionRate) : wonDeals.length}
+            {wonDeals.length}
           </p>
           <p className="text-xs text-slate-500">
-            {mode === 'period' ? 'Ganhos pela data do acontecimento' : funnelRates.hasQualifiedStage
-              ? `${metrics.cohortWonDeals.length} ganhos de ${funnelRates.qualified} qualificados`
-              : 'Configure uma etapa MQL no pipeline'}
-            {mode === 'cohort' && wonDeals.length > metrics.cohortWonDeals.length && <span className="mt-1 block text-amber-700 dark:text-amber-400">{wonDeals.length - metrics.cohortWonDeals.length} ganhos sem qualificação prévia comprovada ficam fora desta taxa.</span>}
+            Ganhos pela data do acontecimento
           </p>
         </button>
 
@@ -310,17 +273,12 @@ const ReportsPage: React.FC = () => {
         </button>
       </div>
 
-      </>}
-      {mode === 'period' && <div className="flex flex-wrap gap-3 text-sm">
-        <button type="button" onClick={() => setSelection({ kind: 'entries' })} className="rounded-lg border border-slate-200 dark:border-white/10 px-4 py-3 hover:border-primary-400 focus-visible:ring-2 focus-visible:ring-primary-500">Entradas no funil: <strong>{metrics.entries.length}</strong></button>
-        <button type="button" onClick={() => setSelection({ kind: 'reopened' })} className="rounded-lg border border-slate-200 dark:border-white/10 px-4 py-3 hover:border-primary-400 focus-visible:ring-2 focus-visible:ring-primary-500">Reaberturas: <strong>{metrics.reopenedDeals.length}</strong></button>
-      </div>}
       {/* Origens à esquerda; etapas em colunas verticais à direita. */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid auto-rows-fr grid-cols-1 items-stretch gap-4 lg:grid-cols-3">
         <LeadSourceChart groups={metrics.leadSourceGroups} total={metrics.leadSourceTotal} mode={mode}
           legacySnapshotCount={metrics.coverage.legacyLeadSourceSnapshotCount}
           onSelect={keys => setSelection({ kind: 'source', keys })} />
-        <div className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col min-w-0 lg:col-span-2">
+        <section aria-label={modeInfo.chartTitle} className="glass h-full p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col min-w-0 lg:col-span-2">
           <div className="flex flex-wrap justify-between items-center gap-2 mb-4 shrink-0">
             <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display">
               {modeInfo.chartTitle}
@@ -329,13 +287,23 @@ const ReportsPage: React.FC = () => {
               {modeInfo.chartBasis}
             </span>
           </div>
+          <div className="mb-4 flex flex-wrap gap-x-5 gap-y-2 text-sm">
+            <button type="button" onClick={() => setSelection({ kind: 'entries' })}
+              className="rounded-md py-1 text-slate-500 hover:text-primary-600 focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-slate-400 dark:hover:text-primary-400">
+              Entradas no funil: <strong className="text-slate-900 dark:text-white">{metrics.entries.length}</strong>
+            </button>
+            <button type="button" onClick={() => setSelection({ kind: 'reopened' })}
+              className="rounded-md py-1 text-slate-500 hover:text-primary-600 focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-slate-400 dark:hover:text-primary-400">
+              Reaberturas: <strong className="text-slate-900 dark:text-white">{metrics.reopenedDeals.length}</strong>
+            </button>
+          </div>
           <LazyStageConversionChart data={stageConversionData} onStageClick={setSelectedStageId} />
-          <p className="mt-4 text-xs text-slate-500">Clique em uma etapa para conferir os leads. {mode === 'cohort' ? 'Percentuais mostram quantos dos leads de uma etapa também chegaram à próxima. Etapas puladas não contam como visitas.' : mode === 'period' ? 'Um lead pode aparecer em mais de uma etapa ou desfecho no intervalo.' : 'Cada lead aparece apenas na sua etapa atual.'}</p>
-        </div>
+          <p className="mt-4 text-xs text-slate-500">Clique em uma etapa para conferir os leads. Um lead pode aparecer em mais de uma etapa ou desfecho no intervalo.</p>
+        </section>
       </div>
 
       {/* Fileira de baixo: Motivos de Perda + Desqualificação (+ Top Vendedores) */}
-      {mode !== 'current' && <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
         {lostDeals.length > 0 && <div className="lg:col-span-2 space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
             <section aria-label="Perdas qualificadas" className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
@@ -363,16 +331,10 @@ const ReportsPage: React.FC = () => {
               {renderLossReasons(lostDeals.filter(d => d.lossCategory === 'disqualified'), 'bg-red-500', 'disqualified')}
             </section>
           </div>
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm px-1">
-            <button type="button" onClick={() => setSelection({ kind: 'loss' })}
-              className="rounded-md py-1 text-slate-600 dark:text-slate-300 hover:text-primary-600 focus-visible:ring-2 focus-visible:ring-primary-500">
-              Total perdidos: <strong className="text-slate-900 dark:text-white">{lostDeals.length}</strong>
-            </button>
-            {lostDeals.some(d => !d.lossCategory) && <button type="button" onClick={() => setSelection({ kind: 'loss', category: 'unknown' })}
-              className="rounded-md py-1 text-slate-500 hover:text-primary-600 focus-visible:ring-2 focus-visible:ring-primary-500">
-              Sem classificação: <strong>{lostDeals.filter(d => !d.lossCategory).length}</strong>
-            </button>}
-          </div>
+          {lostDeals.some(d => !d.lossCategory) && <button type="button" onClick={() => setSelection({ kind: 'loss', category: 'unknown' })}
+            className="rounded-md px-1 py-1 text-sm text-slate-500 hover:text-primary-600 focus-visible:ring-2 focus-visible:ring-primary-500">
+            Sem classificação: <strong>{lostDeals.filter(d => !d.lossCategory).length}</strong>
+          </button>}
         </div>}
 
         {/* Leaderboard - FEATURE #3 (Top Performers) */}
@@ -428,7 +390,6 @@ const ReportsPage: React.FC = () => {
         </div>
       </div>
 
-      }
       {/* Espaçador REAL depois do último bloco: quando o conteúdo transborda
           a altura fixa do container, padding no root não aparece (fica no
           limite nominal da caixa, não abaixo do conteúdo transbordado) —

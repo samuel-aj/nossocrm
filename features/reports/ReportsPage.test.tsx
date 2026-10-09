@@ -33,11 +33,11 @@ describe('tela Performance', () => {
   });
   const board = { id: 'board', name: 'Teste', stages: [{ id: 'q', label: 'Proposta enviada', linkedLifecycleStage: 'MQL' }] } as Board;
   const range = { start: new Date('2026-08-01'), end: new Date('2026-08-31') };
-  const empty = () => ({ ...calculatePerformance([], [], board, range), deals: [] });
+  const empty = () => ({ ...calculatePerformance([], [], board, range, '', undefined, snapshot, { mode: 'period' }), deals: [] });
   it('conecta a rosca aos leads da origem selecionada e mostra o valor histórico na lista', () => {
     const deals = [lead('source-meta', { title: 'Entrada Meta', leadSource: 'Google Ads' }), lead('source-unknown', { title: 'Entrada sem origem', leadSource: null })];
     const lifecycleEvents = deals.map(deal => lifecycle(deal, 'entered_board', deal.createdAt, { leadSource: deal.id === 'source-meta' ? 'Meta Ads' : null }));
-    state.data = { ...calculatePerformance(deals, [], fixtureBoard, august, '', undefined, snapshot, { lifecycleEvents }), deals };
+    state.data = { ...calculatePerformance(deals, [], fixtureBoard, august, '', undefined, snapshot, { mode: 'period', lifecycleEvents }), deals };
     render(<ReportsPage />);
     fireEvent.click(screen.getByRole('button', { name: 'Detalhar Meta Ads: 1 lead, 50,0%' }));
     const modal = screen.getByRole('dialog');
@@ -50,7 +50,7 @@ describe('tela Performance', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Ver todas as origens' }));
     expect(within(screen.getByRole('dialog')).getAllByRole('link')).toHaveLength(2);
   });
-  it('explica perdas qualificadas e exporta a visão selecionada', () => {
+  it('consulta e exporta sempre os resultados do período, sem seletor de visão', () => {
     state.data = { ...empty(), qualifiedCount: 40, qualificationRate: 80, closingRate: 37.5,
       hasQualifiedStage: true, cohortWonDeals: Array(15).fill({}), wonDeals: Array.from({length:15}, (_, i) => ({ id: String(i), value: 100, owner: { name: 'Samuel' } })),
       lostDeals: [...Array(10).fill({ lossCategory: 'qualified' }), ...Array(5).fill({ lossCategory: 'disqualified' })],
@@ -59,8 +59,10 @@ describe('tela Performance', () => {
     const card = screen.getByText('Fechamentos').parentElement!.parentElement!;
     expect(within(card).getByText('15 ganhos')).toBeInTheDocument();
     expect(within(card).getByText('10 perdas qualificadas')).toBeInTheDocument();
-    expect(screen.getByText('Valor ganho pelos leads do grupo')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Resultados no período' }));
+    expect(screen.queryByRole('group', { name: 'Visão do relatório' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resultados no período' })).not.toBeInTheDocument();
+    expect(screen.getByText('Faturamento fechado')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Total perdidos/ })).not.toBeInTheDocument();
     expect(screen.queryByText('Taxa de Qualificação')).not.toBeInTheDocument();
     expect(screen.getByText('Qualificados no período')).toBeInTheDocument();
     expect(screen.getByText('-31,6% vs mês passado')).toBeInTheDocument();
@@ -68,25 +70,31 @@ describe('tela Performance', () => {
     fireEvent.click(screen.getByRole('button', { name: 'PDF' }));
     expect(state.pdf).toHaveBeenCalledWith(state.data, expect.objectContaining({ mode: 'period' }));
   });
-  it('mostra cobertura histórica e não apresenta taxas na carteira atual', () => {
-    state.data = { ...empty(), coverage: { unknownQualificationCount: 3, estimatedQualificationCount: 2, unknownClosureCount: 1, legacySnapshotCount: 5, unknownBoardMembershipCount: 2 }, currentDeals: Array(4).fill({}), currentValue: 400 };
+  it('mantém entradas e reaberturas detalháveis junto das etapas, sem avisos no cabeçalho', () => {
+    const deal = lead('reopened', { title: 'Lead reaberto' });
+    const lifecycleEvents = [lifecycle(deal, 'entered_board', deal.createdAt), lifecycle(deal, 'reopened', '2026-08-10')];
+    state.data = { ...calculatePerformance([deal], [], fixtureBoard, august, '', undefined, snapshot, { mode: 'period', lifecycleEvents }), deals: [deal] };
+    state.data.coverage.unknownQualificationCount = 3;
+    state.data.coverage.legacySnapshotCount = 5;
     render(<ReportsPage />);
-    expect(screen.getByText('Histórico incompleto.')).toBeInTheDocument();
-    expect(screen.getByText(/As taxas e os períodos usam apenas datas e vínculos/)).toHaveTextContent('com data estimada: 2');
-    fireEvent.click(screen.getByRole('button', { name: 'Carteira atual' }));
-    expect(screen.queryByText('Taxa de Fechamento')).not.toBeInTheDocument();
-    expect(screen.getByText('Negócios abertos')).toBeInTheDocument();
-    expect(screen.getByText('4')).toBeInTheDocument();
     expect(screen.queryByText('Histórico incompleto.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Visão e base do relatório' })).not.toBeInTheDocument();
+    const stages = screen.getByRole('region', { name: 'Chegadas por etapa no período' });
+    fireEvent.click(within(stages).getByRole('button', { name: 'Entradas no funil: 1' }));
+    expect(within(screen.getByRole('dialog')).getByRole('link', { name: /Lead reaberto/ })).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Fechar/i }));
+    fireEvent.click(within(stages).getByRole('button', { name: 'Reaberturas: 1' }));
+    expect(within(screen.getByRole('dialog')).getByRole('link', { name: /Lead reaberto/ })).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Fechar/i }));
     fireEvent.click(screen.getByRole('button', { name: /^Filtros/ }));
-    expect(within(screen.getByRole('dialog')).queryByText('Período')).not.toBeInTheDocument();
+    expect(within(screen.getByRole('dialog')).getByText('Período')).toBeInTheDocument();
   });
 
   it('abre os leads de perdas e motivos, permite buscar e conserva o link do cartão', () => {
     const board = { id: 'board', name: 'Teste', stages: [{ id: 'q', label: 'Qualificado' }] } as Board;
     const deals = ['Contato repetido', 'Sem interesse'].map((reason, i) => ({ id: `lost-${i}`, title: `Lead ${i}`, boardId: 'board', status: 'q', owner: { name: 'Ana' }, items: [],
       createdAt: '2026-08-01', isLost: true, isWon: false, closedAt: '2026-08-05', lossCategory: 'disqualified', lossReason: reason, value: 0 } as Deal));
-    state.data = { ...calculatePerformance(deals, deals.map(deal => ({ dealId: deal.id, stageId: 'q', boardId: 'board', date: deal.createdAt })), board, { start: new Date('2026-08-01'), end: new Date('2026-08-31') }), deals };
+    state.data = { ...calculatePerformance(deals, deals.map(deal => ({ dealId: deal.id, stageId: 'q', boardId: 'board', date: deal.createdAt })), board, { start: new Date('2026-08-01'), end: new Date('2026-08-31') }, '', undefined, snapshot, { mode: 'period' }), deals };
     render(<ReportsPage />);
     fireEvent.click(screen.getByRole('button', { name: 'Total desqualificados 2' }));
     const modal = screen.getByRole('dialog');
@@ -99,16 +107,15 @@ describe('tela Performance', () => {
     expect(within(screen.getByRole('dialog')).getAllByRole('link')).toHaveLength(1);
   });
 
-  it('mostra as duas bases da taxa e propaga o filtro de produto para consulta e PDF', () => {
+  it('detalha qualificações e propaga o filtro de produto para consulta e PDF do período', () => {
     const board = { id: 'board', name: 'Teste', stages: [{ id: 'q', label: 'Qualificado' }] } as Board;
     const deals = [{ id: 'q1', title: 'Lead qualificado', owner: { name: 'Ana' }, boardId: 'board', status: 'q', items: [], createdAt: '2026-08-01', qualifiedAt: '2026-08-03', qualificationDateSource: 'history', isLost: false, isWon: false } as Deal];
-    state.data = { ...calculatePerformance(deals, deals.map(deal => ({ dealId: deal.id, stageId: 'q', boardId: 'board', date: deal.createdAt })), board, { start: new Date('2026-08-01'), end: new Date('2026-08-31') }), deals, productOptions: [{ id: 'product', name: 'Produto Teste' }] };
+    state.data = { ...calculatePerformance(deals, deals.map(deal => ({ dealId: deal.id, stageId: 'q', boardId: 'board', date: deal.createdAt })), board, { start: new Date('2026-08-01'), end: new Date('2026-08-31') }, '', undefined, snapshot, { mode: 'period' }), deals, productOptions: [{ id: 'product', name: 'Produto Teste' }] };
     render(<ReportsPage />);
-    fireEvent.click(screen.getByRole('button', { name: /Taxa de Qualificação/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Qualificados no período/ }));
     const modal = screen.getByRole('dialog');
     expect(within(modal).getByRole('link', { name: /Lead qualificado/ })).toBeInTheDocument();
-    fireEvent.click(within(modal).getByRole('button', { name: 'Entradas (1)' }));
-    expect(within(modal).getByRole('link', { name: /Lead qualificado/ })).toBeInTheDocument();
+    expect(within(modal).queryByRole('button', { name: 'Entradas (1)' })).not.toBeInTheDocument();
     fireEvent.click(within(modal).getByRole('button', { name: /Fechar/i }));
     expect(screen.getByRole('combobox', { name: 'Selecionar Pipeline' })).toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: 'Filtrar por Produto' })).not.toBeInTheDocument();
@@ -116,13 +123,13 @@ describe('tela Performance', () => {
     expect(within(screen.getByRole('dialog')).queryByRole('combobox', { name: 'Selecionar Pipeline' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('combobox', { name: 'Filtrar por Produto' }));
     fireEvent.click(screen.getByRole('option', { name: 'Produto Teste' }));
-    expect(state.query).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), '', expect.anything(), '', 'cohort');
+    expect(state.query).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), '', expect.anything(), '', 'period');
     fireEvent.click(screen.getByRole('button', { name: 'Aplicar filtros' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(state.query).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), '', expect.anything(), 'product', 'cohort');
+    expect(state.query).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), '', expect.anything(), 'product', 'period');
     fireEvent.click(screen.getByRole('combobox', { name: 'Selecionar Pipeline' }));
     fireEvent.click(screen.getByRole('option', { name: 'Outra pipeline' }));
-    expect(state.query).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'other' }), expect.anything(), '', expect.anything(), 'product', 'cohort');
+    expect(state.query).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'other' }), expect.anything(), '', expect.anything(), 'product', 'period');
     fireEvent.click(screen.getByRole('button', { name: /^Filtros/ }));
     expect(screen.getByRole('combobox', { name: 'Filtrar por Produto' })).toHaveTextContent('Produto Teste');
     fireEvent.click(screen.getByRole('combobox', { name: 'Filtrar por Produto' }));

@@ -18,11 +18,14 @@ it('mostra quantidade/percentual acessíveis e abre os mesmos leads por legenda 
   expect(onSelect).toHaveBeenLastCalledWith(['source:meta ads']);
   fireEvent.click(screen.getByRole('button', { name: 'Ver todas as origens' }));
   expect(onSelect).toHaveBeenLastCalledWith();
-  expect(screen.getByText(/1 lead tem origem histórica reconstruída/)).toBeInTheDocument();
+  expect(screen.queryByText('Inclui origens não informadas')).not.toBeInTheDocument();
+  expect(screen.queryByText(/1 lead tem origem histórica reconstruída/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Sobre a origem dos leads' }));
   const information = await screen.findByRole('dialog');
   expect(within(information).getByText(/Leads criados no período e registrados neste funil/)).toBeInTheDocument();
   expect(within(information).getByText(/Ela não comprova a origem na data histórica/)).toBeInTheDocument();
+  expect(within(information).getByText(/Não informado faz parte do total/)).toBeInTheDocument();
+  expect(within(information).getByText(/1 lead tem origem histórica reconstruída/)).toBeInTheDocument();
 });
 it('exibe estado vazio sem fatias nem percentuais artificiais', () => {
   render(<LeadSourceChart groups={[]} total={0} mode="current" legacySnapshotCount={0} onSelect={vi.fn()} />);

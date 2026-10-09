@@ -22,7 +22,7 @@ export function LeadSourceChart({ groups, total, mode, legacySnapshotCount, onSe
     color: slice.key === 'overflow' ? '#f1a536' : slice.key === UNKNOWN_LEAD_SOURCE_KEY ? '#94a3b8' : slice.color,
   }));
   let offset = 0;
-  return <section aria-labelledby={titleId} className="flex min-w-0 flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-slate-900/60 sm:p-6">
+  return <section aria-labelledby={titleId} className="flex h-full min-w-0 flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-slate-900/60 sm:p-6">
     <div className="flex items-start justify-between gap-3">
       <div>
         <h2 id={titleId} className="text-[17px] font-semibold tracking-tight text-slate-900 dark:text-white">Origem dos leads</h2>
@@ -36,7 +36,10 @@ export function LeadSourceChart({ groups, total, mode, legacySnapshotCount, onSe
           <p className="font-semibold">Base do gráfico</p>
           <p>{LEAD_SOURCE_BASE[mode]}</p>
           <p>Cada lead conta uma vez. Não informado faz parte do total.{mode !== 'current' && ' A origem considerada é a registrada na entrada no funil.'}</p>
-          {legacySnapshotCount > 0 && <p className="text-amber-700 dark:text-amber-300">{LEAD_SOURCE_HISTORY_NOTE}</p>}
+          {legacySnapshotCount > 0 && <>
+            <p className="text-amber-700 dark:text-amber-300">{LEAD_SOURCE_HISTORY_NOTE}</p>
+            <p className="text-amber-700 dark:text-amber-300">{legacySnapshotCount} {legacySnapshotCount === 1 ? 'lead tem origem histórica reconstruída ou indisponível' : 'leads têm origem histórica reconstruída ou indisponível'}.</p>
+          </>}
         </PopoverContent>
       </Popover>
     </div>
@@ -69,11 +72,9 @@ export function LeadSourceChart({ groups, total, mode, legacySnapshotCount, onSe
           </span>
         </button></li>)}
       </ul>
-      <div className="mt-auto flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-slate-100 pt-4 dark:border-white/10">
-        <p className="text-[11px] text-slate-500 dark:text-slate-400">Inclui origens não informadas</p>
+      <div className="mt-auto flex flex-wrap items-center justify-end gap-x-3 gap-y-2 border-t border-slate-100 pt-4 dark:border-white/10">
         <button type="button" aria-label="Ver todas as origens" onClick={() => onSelect()} className="inline-flex items-center gap-1 rounded-md text-xs font-medium text-primary-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-primary-400">Ver detalhes<ArrowUpRight size={13} aria-hidden="true" /></button>
       </div>
     </div>}
-    {legacySnapshotCount > 0 && <p className="mt-3 text-xs leading-5 text-amber-700 dark:text-amber-300">{legacySnapshotCount} {legacySnapshotCount === 1 ? 'lead tem origem histórica reconstruída ou indisponível' : 'leads têm origem histórica reconstruída ou indisponível'}.</p>}
   </section>;
 }
