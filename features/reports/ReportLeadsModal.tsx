@@ -26,6 +26,7 @@ export function ReportLeadsModal({ detail, board, filtersLabel, qualificationDat
   const stages = new Map(board.stages.map(stage => [stage.id, stage.label]));
   const showLoss = detail.showLoss || group.id === 'qualified-lost';
   const showValue = detail.showRevenue || !!detail.diagnosticReasonsByDeal;
+  const showQualificationEvidence = group.deals.some(deal => detail.qualificationEvidenceByDeal?.has(deal.id));
   return (
     <Modal isOpen onClose={onClose} title={detail.title} className="max-w-6xl" bodyClassName="p-0 overflow-auto">
       <div className="px-5 py-4 space-y-3 border-b border-slate-200 dark:border-white/10">
@@ -54,7 +55,7 @@ export function ReportLeadsModal({ detail, board, filtersLabel, qualificationDat
       <div className="overflow-x-auto">
         <table className="w-full text-sm text-left">
           <thead className="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400"><tr>
-            {['Lead / Responsável', 'Etapa registrada', ...(detail.diagnosticReasonsByDeal ? ['Conferência do histórico'] : []), 'Produto', ...(detail.showSource ? ['Origem do lead'] : []), ...(showValue ? ['Valor'] : []), ...(showLoss ? ['Classificação', 'Motivo'] : []), 'Criação', 'Qualificação', 'Encerramento', ...(detail.showCycle ? ['Duração'] : [])].map(label => <th key={label} scope="col" className="px-4 py-3 font-medium whitespace-nowrap">{label}</th>)}
+            {['Lead / Responsável', detail.stageColumnLabel || 'Etapa registrada', ...(detail.diagnosticReasonsByDeal ? ['Conferência do histórico'] : []), 'Produto', ...(detail.showSource ? ['Origem do lead'] : []), ...(showValue ? ['Valor'] : []), ...(showLoss ? ['Classificação', 'Motivo'] : []), 'Criação', 'Qualificação', ...(showQualificationEvidence ? ['Prova da qualificação'] : []), detail.closureColumnLabel || 'Encerramento', ...(detail.showCycle ? ['Duração'] : [])].map(label => <th key={label} scope="col" className="px-4 py-3 font-medium whitespace-nowrap">{label}</th>)}
           </tr></thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
             {leads.map(lead => <tr key={lead.id} className="text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5">
@@ -66,7 +67,11 @@ export function ReportLeadsModal({ detail, board, filtersLabel, qualificationDat
               {showValue && <td className="px-4 py-3 whitespace-nowrap">{money(lead.value)}</td>}
               {showLoss && <><td className="px-4 py-3">{lossCategoryLabel(lead.lossCategory)}</td><td className="px-4 py-3 min-w-44 whitespace-pre-wrap break-words">{lossReasonLabel(lead.lossReason)}</td></>}
               <td className="px-4 py-3 whitespace-nowrap">{date(lead.createdAt)}</td>
-              <td className="px-4 py-3 whitespace-nowrap">{date(qualificationDates.get(lead.id))}{estimatedQualificationIds.has(lead.id) && <span className="block text-xs text-amber-600 dark:text-amber-400">Estimada</span>}</td>
+              <td className="px-4 py-3 whitespace-nowrap">{qualificationDates.has(lead.id) ? date(qualificationDates.get(lead.id)) : detail.unknownQualificationLabel || '—'}{estimatedQualificationIds.has(lead.id) && <span className="block text-xs text-amber-600 dark:text-amber-400">Estimada</span>}</td>
+              {showQualificationEvidence && <td className="px-4 py-3 min-w-48 text-xs">{(() => {
+                const evidence = detail.qualificationEvidenceByDeal?.get(lead.id);
+                return evidence ? `${evidence.kind === 'qualification' ? 'Qualificação registrada' : `Chegada observada em ${evidence.stageName}`} · ${date(evidence.date)}` : 'Sem evidência detalhada';
+              })()}</td>}
               <td className="px-4 py-3 whitespace-nowrap">{date(lead.isWon || lead.isLost ? lead.closedAt : undefined)}</td>
               {detail.showCycle && <td className="px-4 py-3 whitespace-nowrap">{salesCycleDays(lead)?.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} dias</td>}
             </tr>)}

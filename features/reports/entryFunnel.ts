@@ -1,7 +1,7 @@
 import type { Deal } from '@/types';
 import { compareHistoricalDates, type LifecycleEvent } from './performanceHistory';
 
-export interface EntryFunnelEvidence { stageName: string; date: string; observedAtStage: boolean; kind?: 'stage' | 'qualification' | 'customer' | 'win' }
+export interface EntryFunnelEvidence { stageName: string; date: string; observedAtStage: boolean; kind?: 'stage' | 'qualification' | 'customer' | 'win' | 'current-stage' }
 export interface EntryFunnelStage {
   stageId: string; name: string; fill: string; deals: Deal[]; count: number;
   conversionRate: number | null; conversionLabel: string; comparisonBase: string; populationLabel: string;

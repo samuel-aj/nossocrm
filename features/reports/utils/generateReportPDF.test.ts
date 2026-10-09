@@ -4,6 +4,7 @@ import { calculatePerformance } from '../performanceMetrics';
 import { generateReportPDF } from './generateReportPDF';
 import { august, board as fixtureBoard, lead, lifecycle, movement, snapshot } from '../performanceTestFixtures';
 import { reportDrilldown } from '../reportDrilldown';
+import { monthlyPresentationFixture } from '../monthlyPresentationTestFixture';
 
 const output = vi.hoisted(() => ({ table: vi.fn(), text: vi.fn(), save: vi.fn() }));
 vi.mock('jspdf', () => ({ jsPDF: class {
@@ -17,6 +18,41 @@ const context = { boardName: 'DBA', period: 'Agosto', range: '01/08 a 31/08', ow
 const tables = () => output.table.mock.calls.map(call => call[1]);
 beforeEach(() => vi.clearAllMocks());
 describe('PDF Performance', () => {
+  it('mensal exporta contratos antigos, totais e subconjunto da taxa reconciliados com marcos e listas', () => {
+    const metrics = monthlyPresentationFixture();
+    generateReportPDF(metrics, { ...context, mode: 'monthly' });
+    const indicators = tables()[0].body;
+    expect(indicators.find((row: string[]) => row[0] === 'Leads com atividade')).toBeUndefined();
+    expect(indicators.find((row: string[]) => row[0] === 'Entradas')[1]).toBe('10');
+    expect(indicators.find((row: string[]) => row[0] === 'Ganhos')[1]).toBe('7');
+    expect(indicators.find((row: string[]) => row[0] === 'Faturamento fechado')[1]).toMatch(/700,00/);
+    expect(indicators).toContainEqual(['Taxa de qualificação', '60,0%', '6 qualificados / 10 entradas no funil']);
+    expect(indicators.find((row: string[]) => row[0] === 'Taxa de fechamento')).toEqual(['Taxa de fechamento', '66,7%', '4 ganhos entre os qualificados / 6 qualificados da base de entradas; 3 ganhos fora da base e 0 ganhos da base sem qualificação prévia comprovada ficam fora desta taxa']);
+    expect(indicators).toContainEqual(['Conversão total', '40,0%', '4 ganhos da base de entradas / 10 entradas no funil']);
+    const gains = metrics.entryFunnel.stages.find(stage => stage.milestone === 'customer')!;
+    const closures = reportDrilldown(metrics, { kind: 'closures' });
+    expect(gains.deals.map(row => row.id).sort()).toEqual(closures.groups[0].deals.map(row => row.id).sort());
+    expect(tables()[1].body.find((row: unknown[]) => row[0] === `${gains.name} · Ganhos do período`)[1]).toBe(7);
+    expect(tables()[1].body.find((row: unknown[]) => row[0] === 'Protocolado · Pós-venda atual dos ganhos do período')[1]).toBe(7);
+    expect(tables()[1].head[0][1]).toBe('Leads / Ganhos do período');
+    expect(tables()[2].body.at(-1)).toEqual(['Total da base', 10, '100,0%']);
+    const notes = JSON.stringify(tables().at(-1).body);
+    expect(notes).toContain('Data do ganho registrado');
+    expect(notes).toContain('não comprova a data da assinatura');
+    expect(notes).toContain('cadastro atual');
+    expect(notes).toContain('responsável, produtos e valores atuais');
+    expect(notes).toContain('preserva os filtros e a origem da entrada selecionada');
+    expect(notes).toContain('pode ter sido movimentado após o período selecionado');
+    expect(notes).toContain('qualificação precisa estar comprovada antes do ganho');
+    expect(notes).toContain('Ganhos fora da base');
+    expect(notes).not.toMatch(/leads com atividade|Fechamento automático = promoção|data da promoção a Cliente/);
+    expect(output.save).toHaveBeenCalledWith(expect.stringContaining('performance-monthly-'));
+  });
+  it('mensal mantém traços com denominadores vazios', () => {
+    generateReportPDF(calculatePerformance([], [], fixtureBoard, august, '', undefined, snapshot, { mode: 'monthly' }), context);
+    expect(tables()[0].body.filter((row: string[]) => ['Taxa de qualificação', 'Taxa de fechamento', 'Conversão total'].includes(row[0])).map((row: string[]) => row[1])).toEqual(['—', '—', '—']);
+  });
+
   it('exporta as três taxas e os mesmos conjuntos dos cartões, marcos e detalhes da base de entradas', () => {
     const qualified = lead('entry-qualified');
     const converted = lead('entry-converted');

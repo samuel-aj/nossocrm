@@ -10,6 +10,7 @@ interface Props {
   onSelect: (keys?: string[]) => void;
 }
 const BASE_SUMMARY: Record<PerformanceMode, string> = {
+  monthly: 'Entradas no funil no período selecionado',
   conversion: 'Mesma base dos indicadores e das etapas',
   cohort: 'Leads captados no período selecionado',
   period: 'Entradas no funil no período selecionado',

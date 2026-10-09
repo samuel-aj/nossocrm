@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { calculatePerformance } from './performanceMetrics';
 import { filterReportProducts, NO_PRODUCT, reportDrilldown, salesCycleDays } from './reportDrilldown';
 import { august, board, lead, lifecycle, snapshot } from './performanceTestFixtures';
+import { monthlyPresentationFixture } from './monthlyPresentationTestFixture';
 
 const q = lead('q');
 const won = lead('won');
@@ -21,6 +22,57 @@ const events = [
 const fixture = (mode: 'cohort' | 'period' | 'conversion' = 'cohort') => ({ ...calculatePerformance(deals, [], board, august, '', undefined, snapshot, { mode, lifecycleEvents: events }), deals });
 
 describe('detalhamento reconciliado com indicadores', () => {
+  it('mensal mantém sete contratos, mas a base e as taxas não incorporam os três ganhos de fora', () => {
+    const metrics = monthlyPresentationFixture();
+    const qualification = reportDrilldown(metrics, { kind: 'qualification' });
+    const closing = reportDrilldown(metrics, { kind: 'closing' });
+    const closures = reportDrilldown(metrics, { kind: 'closures' });
+    const total = reportDrilldown(metrics, { kind: 'total-conversion' });
+    const ids = (rows: typeof metrics.deals) => rows.map(row => row.id).sort();
+    expect(metrics.workedDeals).toHaveLength(10);
+    expect(metrics.entries).toHaveLength(10);
+    expect(metrics.qualifiedDeals).toHaveLength(6);
+    expect(metrics.wonDeals).toHaveLength(7);
+    expect(metrics.cohortWonDeals).toHaveLength(4);
+    expect(qualification.groups[1].deals).toBe(metrics.entries);
+    expect(qualification.formula).toBe('6 qualificados ÷ 10 entradas no funil');
+    expect(closing.groups[0].deals).toBe(metrics.cohortWonDeals);
+    expect(closing.groups.find(group => group.id === 'all-won')!.deals).toBe(metrics.wonDeals);
+    expect(closing.groups.find(group => group.id === 'unqualified-won')!.deals).toHaveLength(0);
+    expect(closing.groups.find(group => group.id === 'outside-entry-won')!.deals.map(row => row.id)).toEqual(['winner-5', 'winner-6', 'winner-7']);
+    expect(closing.formula).toContain('4 ganhos entre os qualificados ÷ 6 qualificados');
+    expect(closing.formula).toContain('Total do período: 7 ganhos, incluindo 3 fora da base');
+    expect(closures.groups[0].deals).toBe(metrics.wonDeals);
+    expect(total.groups[0].deals).toBe(metrics.entryWonDeals);
+    expect(total.groups[1].deals).toBe(metrics.entries);
+    expect(total.formula).toBe('4 ganhos da base de entradas ÷ 10 entradas no funil');
+    expect(ids(closures.groups[0].deals)).toEqual(ids(metrics.entryFunnel.stages.find(stage => stage.milestone === 'customer')!.deals));
+    expect(ids(qualification.groups[0].deals)).toEqual(ids(metrics.entryFunnel.stages.find(stage => stage.milestone === 'qualification')!.deals));
+    expect(reportDrilldown(metrics, { kind: 'revenue' }).groups[0].deals).toBe(metrics.wonDeals);
+    expect(reportDrilldown(metrics, { kind: 'entries' }).groups[0].deals).toBe(metrics.entries);
+    expect(reportDrilldown(metrics, { kind: 'worked' }).groups[0].deals).toBe(metrics.entries);
+    expect(closures.dateBasisLabel).toBe('Data do ganho registrado');
+    expect(closures.contextDescription).toContain('não comprova a data da assinatura');
+    expect(closures.contextDescription).toContain('selecionados pelos dados da entrada');
+    expect(closures.contextDescription).toContain('responsável, produtos e valores atuais');
+    expect(closures.contextDescription).not.toContain('com atividade');
+  });
+
+  it('mensal explica que qualificação posterior ao ganho não entra na taxa, sem retirar o contrato', () => {
+    const deal = lead('later-q', { status: 'won', isWon: true, closedAt: '2026-08-10T12:00:00Z' });
+    const metrics = { ...calculatePerformance([deal], [], board, august, '', undefined, snapshot, {
+      mode: 'monthly', lifecycleEvents: [lifecycle(deal, 'entered_board', deal.createdAt, { stageId: 'new', isWon: false }), lifecycle(deal, 'qualified', '2026-08-12T12:00:00Z', { stageId: 'q' })],
+    }), deals: [deal] };
+    const detail = reportDrilldown(metrics, { kind: 'closing' });
+    expect(detail.groups[0].deals).toHaveLength(0);
+    expect(detail.groups[1].deals.map(row => row.id)).toEqual([deal.id]);
+    expect(detail.groups.find(group => group.id === 'all-won')!.deals.map(row => row.id)).toEqual([deal.id]);
+    const noPriorQualification = detail.groups.find(group => group.id === 'unqualified-won')!;
+    expect(noPriorQualification.deals.map(row => row.id)).toEqual([deal.id]);
+    expect(noPriorQualification.description).toContain('uma qualificação posterior não entra nesse numerador');
+    expect(detail.formula).toContain('sem qualificação prévia comprovada');
+  });
+
   it('conversão reconcilia entradas, marcos, numeradores e denominadores pelos mesmos IDs', () => {
     const qualified = lead('entry-qualified');
     const converted = lead('entry-converted');
