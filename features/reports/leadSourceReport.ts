@@ -9,7 +9,7 @@ export interface LeadSourceSlice extends LeadSourceGroup { sourceKeys: string[] 
 export const UNKNOWN_LEAD_SOURCE_KEY = 'not_informed';
 export const LEAD_SOURCE_BASE: Record<PerformanceMode, string> = {
   cohort: 'Leads criados no período e registrados neste funil até a data de apuração.',
-  period: 'Leads distintos com entrada registrada no funil no período. Reentradas contam uma vez.',
+  period: 'Leads distintos com entrada registrada no funil no período. No histórico antigo, inclui a chegada inicial registrada pelo banco, inclusive transferência ou primeira atribuição de etapa. Reentradas contam uma vez.',
   current: 'Negócios abertos no funil agora, com a origem do cadastro atual.',
 };
 export const LEAD_SOURCE_HISTORY_NOTE = 'Nos registros antigos sem origem preservada no evento, a origem foi reconstruída do cadastro disponível. Ela não comprova a origem na data histórica.';

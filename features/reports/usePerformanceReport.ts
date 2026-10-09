@@ -77,6 +77,7 @@ export function usePerformanceReport(board: Board | undefined, range: PeriodRang
       const lifecycleEvents = lifecycleRows.filter(row => dealsById.has(row.deal_id)).map(lifecycleEventFromRow);
       const events: StageEvent[] = stageRows.filter(row => dealsById.has(row.deal_id)).map(row => ({
         dealId: row.deal_id, boardId: row.board_id, fromStageId: row.from_stage_id || undefined, stageId: row.to_stage_id, date: row.occurred_at,
+        isInitialArrival: row.from_stage_id === null,
       }));
       for (let offset = 0; offset < deals.length; offset += 100) {
         const ids = deals.slice(offset, offset + 100).map(deal => deal.id);

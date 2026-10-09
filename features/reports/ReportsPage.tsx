@@ -118,7 +118,7 @@ const ReportsPage: React.FC = () => {
     return `R$ ${value.toLocaleString('pt-BR')}`;
   }, []);
 
-  const stageConversionData = metrics?.stageData || [];
+  const stageConversionData = metrics?.entryFunnel.stages || [];
   const selectedStage = stageConversionData.find(stage => stage.stageId === selectedStageId);
 
   const generatedBy = useMemo(() => {
@@ -297,8 +297,12 @@ const ReportsPage: React.FC = () => {
               Reaberturas: <strong className="text-slate-900 dark:text-white">{metrics.reopenedDeals.length}</strong>
             </button>
           </div>
-          <LazyStageConversionChart data={stageConversionData} onStageClick={setSelectedStageId} />
-          <p className="mt-4 text-xs text-slate-500">Clique em uma etapa para conferir os leads. Um lead pode aparecer em mais de uma etapa ou desfecho no intervalo.</p>
+          <LazyStageConversionChart data={stageConversionData} onStageClick={setSelectedStageId}
+            description="Dos leads que entraram no período, quantos chegaram a cada etapa ou avançaram além dela." />
+          <p className="mt-4 text-xs text-slate-500">Avanço pela ordem das etapas, até o fim do período. Cada lead conta uma vez por coluna; etapas puladas não viram movimentações no histórico.</p>
+          {metrics.entryFunnel.unknownStageCount > 0 && <p className="mt-2 text-xs text-slate-500">
+            {metrics.entryFunnel.unknownStageCount} {metrics.entryFunnel.unknownStageCount === 1 ? 'entrada sem etapa válida para este gráfico fica' : 'entradas sem etapa válida para este gráfico ficam'} fora das colunas.
+          </p>}
         </section>
       </div>
 

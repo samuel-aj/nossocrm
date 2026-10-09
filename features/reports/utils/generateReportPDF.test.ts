@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { Board, Deal } from '@/types';
 import { calculatePerformance } from '../performanceMetrics';
 import { generateReportPDF } from './generateReportPDF';
-import { august, board as fixtureBoard, lead, lifecycle, snapshot } from '../performanceTestFixtures';
+import { august, board as fixtureBoard, lead, lifecycle, movement, snapshot } from '../performanceTestFixtures';
 import { reportDrilldown } from '../reportDrilldown';
 
 const output = vi.hoisted(() => ({ table: vi.fn(), text: vi.fn(), save: vi.fn() }));
@@ -66,5 +66,20 @@ describe('PDF Performance', () => {
     expect(tables()[0].body).toHaveLength(2);
     expect(JSON.stringify(output.text.mock.calls)).toContain('período não se aplica');
     expect(output.save).toHaveBeenCalledWith(expect.stringContaining('performance-current-'));
+  });
+
+  it('exporta a progressão acumulada dos mesmos entrantes, mantendo os resultados do período separados', () => {
+    const entrant = lead('entry');
+    const old = lead('old', { createdAt: '2026-07-01' });
+    const lifecycleEvents = [lifecycle(entrant, 'entered_board', entrant.createdAt), lifecycle(old, 'entered_board', old.createdAt)];
+    const history = [movement(entrant.id, 'proposal', '2026-08-10', 'new'), movement(old.id, 'signed', '2026-08-10', 'new')];
+    const data = calculatePerformance([entrant, old], history, fixtureBoard, august, '', undefined, snapshot, { mode: 'period', lifecycleEvents });
+    generateReportPDF(data, context);
+    const progression = tables().find(table => table.head[0][0] === 'Progressão dos leads no funil');
+    expect(progression.head[0][1]).toBe('Leads nesta etapa ou além');
+    expect(progression.body.map((row: unknown[]) => row[1])).toEqual([1, 1, 1, 0, 0]);
+    expect(JSON.stringify(tables())).toContain('mesma base de 1 leads com entrada registrada no período');
+    expect(JSON.stringify(tables())).toContain('não comprova passagem pelas etapas puladas');
+    expect(tables()[0].body.find((row: string[]) => row[0] === 'Ganhos')[1]).toBe('1');
   });
 });

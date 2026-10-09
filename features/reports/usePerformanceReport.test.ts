@@ -102,6 +102,21 @@ it('recusa organização alterada antes de consultar qualquer tabela', async () 
   expect(mocks.from).not.toHaveBeenCalled();
 });
 
+it('identifica chegada inicial pelo NULL explícito do trigger, sem exigir timestamp igual à criação', async () => {
+  tables = {
+    deals: [row('created'), row('unknown')],
+    deal_stage_events: [
+      { id: 'initial', organization_id: 'org', deal_id: 'created', board_id: 'board', from_stage_id: null, to_stage_id: 'q', occurred_at: '2026-08-01T00:00:00.331Z' },
+      { id: 'unknown-origin', organization_id: 'org', deal_id: 'unknown', board_id: 'board', to_stage_id: 'q', occurred_at: '2026-08-01T00:00:00.331Z' },
+    ],
+  };
+  renderHook(() => usePerformanceReport(board, august, '', undefined, '', 'period'));
+  const data = await queryOptions().queryFn();
+  expect(data.entries.map(deal => deal.id)).toEqual(['created']);
+  expect(data.entryFunnel.baseCount).toBe(1);
+  expect(data.entryFunnel.stages.map(stage => stage.count)).toEqual([1, 1, 0, 0, 0]);
+});
+
 it('erro de histórico não é apresentado como um relatório completo com zeros', async () => {
   failedTable = 'deal_lifecycle_events';
   tables.deals = [row('current')];

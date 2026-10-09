@@ -3,10 +3,15 @@ import { compareHistoricalDates, dealAtEvent, matchesReportFilters, normalizeWon
 import { firstCustomerStage, isAutomaticWonStage, isLostBoardStage } from '@/lib/boards/boardOutcome';
 import { getDealLeadSource } from '@/lib/deals/leadSource';
 import { groupLeadSources } from './leadSourceReport';
+import { buildEntryFunnel, type EntryFunnel } from './entryFunnel';
 import type { HistoricalReportDeal } from './performanceHistory';
 export type { LifecycleEvent, PerformanceMode } from './performanceHistory';
 
-export interface StageEvent { dealId: string; stageId: string; date: string; fromStageId?: string; boardId?: string }
+export interface StageEvent {
+  dealId: string; stageId: string; date: string; fromStageId?: string; boardId?: string;
+  /** DB trigger arrival with a null origin: insert, transfer or initial stage assignment; never a generic activity. */
+  isInitialArrival?: boolean;
+}
 export interface MovementActivity { deal_id: string | null; title: string; date: string; board_id?: string }
 export interface PeriodRange { start: Date; end: Date }
 export interface PerformanceOptions { mode?: PerformanceMode; lifecycleEvents?: LifecycleEvent[]; productId?: string }
@@ -99,7 +104,12 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   };
   for (const event of history) {
     const deal = byId.get(event.dealId)!;
-    if (!event.fromStageId && time(event.date) === time(deal.createdAt) && !ledgerFor(deal.id).some(e => e.type === 'entered_board')) addLegacy(deal, 'entered_board', event.date, event.stageId);
+    // The application creation clock and the DB trigger clock need not match.
+    // A null-origin DB arrival proves the start of a recorded stage history on
+    // this board. Use its actual timestamp, not the lead's creation timestamp.
+    // Generic activities with missing origin do not establish an entry.
+    if (!event.fromStageId && (event.isInitialArrival || time(event.date) === time(deal.createdAt)) &&
+      !ledgerFor(deal.id).some(e => e.type === 'entered_board')) addLegacy(deal, 'entered_board', event.date, event.stageId);
     const origin = stepIndex(event.fromStageId);
     const destination = stepIndex(event.stageId);
     const originQualifies = origin >= rules.qualifiedIndex && !rules.lost(event.fromStageId || '');
@@ -224,6 +234,9 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
         mode === 'period' ? 'Leads distintos com chegada registrada nesta etapa no período.' : 'Leads abertos que estão nesta etapa agora.',
       comparisonBase: mode === 'cohort' && next && population.length > 0 ? `${numerator} também em ${next.label} ÷ ${population.length} em ${stage.label}` : '' };
   });
+  const entryFunnel: EntryFunnel = mode === 'period' ? buildEntryFunnel({ entries, entryEvents: select('entered_board'),
+    stageEvents: history, lifecycleEvents: ledger, boardId: board.id, stages: stageData, cutoffDate: new Date(cutoff).toISOString(),
+  }) : { stages: [], baseCount: 0, unknownStageCount: 0 };
   const wonRevenue = wonDeals.reduce((sum, deal) => sum + deal.value, 0);
   const effectiveComparison = comparisonRange && (cutoff < range.end.getTime() ? { start: comparisonRange.start,
     end: new Date(Math.min(comparisonRange.end.getTime(), comparisonRange.start.getTime() + Math.max(0, cutoff - range.start.getTime()))) } : comparisonRange);
@@ -244,7 +257,7 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
     fastestSalesCycle: cycles.length ? Math.round(Math.min(...cycles)) : null,
     slowestSalesCycle: cycles.length ? Math.round(Math.max(...cycles)) : null,
     avgSalesCycle: cycles.length ? Math.round(cycles.reduce((a, b) => a + b, 0) / cycles.length) : null,
-    stageData,
+    stageData, entryFunnel,
   };
 }
 export type PerformanceMetrics = ReturnType<typeof calculatePerformance>;

@@ -4,11 +4,14 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import ReportsPage from './ReportsPage';
 import { calculatePerformance } from './performanceMetrics';
 import type { Board, Deal } from '@/types';
-import { august, board as fixtureBoard, lead, lifecycle, snapshot } from './performanceTestFixtures';
+import { august, board as fixtureBoard, lead, lifecycle, movement, snapshot } from './performanceTestFixtures';
 
 const state = vi.hoisted(() => ({ data: null as any, error: null as any, isError: false, isFetching: false, pdf: vi.fn(), query: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
-vi.mock('next/dynamic', () => ({ default: () => () => null }));
+vi.mock('next/dynamic', async () => {
+  const { StageConversionChart } = await import('./StagePerformanceChart');
+  return { default: () => StageConversionChart };
+});
 vi.mock('next/image', () => ({ default: () => null }));
 vi.mock('@/context/CRMContext', () => ({ useCRM: () => ({ boards: [{ id: 'board', name: 'Teste', isDefault: true, stages: [{ id: 'q', label: 'Qualificado' }] }, { id: 'other', name: 'Outra pipeline', stages: [] }], deals: [] }) }));
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ profile: { first_name: 'Teste' } }) }));
@@ -79,7 +82,7 @@ describe('tela Performance', () => {
     render(<ReportsPage />);
     expect(screen.queryByText('Histórico incompleto.')).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Visão e base do relatório' })).not.toBeInTheDocument();
-    const stages = screen.getByRole('region', { name: 'Chegadas por etapa no período' });
+    const stages = screen.getByRole('region', { name: 'Progressão dos leads no funil' });
     fireEvent.click(within(stages).getByRole('button', { name: 'Entradas no funil: 1' }));
     expect(within(screen.getByRole('dialog')).getByRole('link', { name: /Lead reaberto/ })).toBeInTheDocument();
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Fechar/i }));
@@ -88,6 +91,26 @@ describe('tela Performance', () => {
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Fechar/i }));
     fireEvent.click(screen.getByRole('button', { name: /^Filtros/ }));
     expect(within(screen.getByRole('dialog')).getByText('Período')).toBeInTheDocument();
+  });
+
+  it('o gráfico usa a mesma base de entradas e detalha um salto sem afirmar passagem na etapa pulada', () => {
+    const entrant = lead('entry', { title: 'Entrou neste período' });
+    const old = lead('old', { title: 'Entrada anterior', createdAt: '2026-07-01' });
+    const lifecycleEvents = [lifecycle(entrant, 'entered_board', entrant.createdAt), lifecycle(old, 'entered_board', old.createdAt)];
+    const history = [movement(entrant.id, 'signed', '2026-08-10', 'new'), movement(old.id, 'q', '2026-08-11', 'new')];
+    state.data = { ...calculatePerformance([entrant, old], history, fixtureBoard, august, '', undefined, snapshot, { mode: 'period', lifecycleEvents }), deals: [entrant, old] };
+    render(<ReportsPage />);
+    const chart = screen.getByRole('region', { name: 'Progressão dos leads no funil' });
+    expect(within(chart).getByRole('button', { name: 'Entradas no funil: 1' })).toBeVisible();
+    fireEvent.click(within(chart).getByRole('button', { name: 'Ver 1 leads em Proposta enviada ou além' }));
+    const modal = screen.getByRole('dialog', { name: 'Proposta enviada ou além · 1 leads' });
+    expect(within(modal).getAllByRole('link')).toHaveLength(1);
+    expect(within(modal).getByRole('link', { name: /Entrou neste período/ })).toBeVisible();
+    expect(within(modal).queryByText('Entrada anterior')).not.toBeInTheDocument();
+    expect(within(modal).getByRole('columnheader', { name: 'Registro que explica a inclusão' })).toBeVisible();
+    expect(within(modal).queryByRole('columnheader', { name: 'Encerramento' })).not.toBeInTheDocument();
+    expect(within(modal).getByText('Assinado', { exact: true })).toBeVisible();
+    expect(within(modal).getByText(/Incluído por etapa posterior/)).toBeVisible();
   });
 
   it('abre os leads de perdas e motivos, permite buscar e conserva o link do cartão', () => {
