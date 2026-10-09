@@ -9,6 +9,7 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import type { Board, BoardStage } from '@/types';
+import { isAutomaticWonStage } from '@/lib/boards/boardOutcome';
 
 type Props = {
   boards: Board[];
@@ -53,7 +54,7 @@ export function StageCascadePicker({
   const focusStages = useMemo(() => {
     const stages = [...(focusBoard?.stages ?? [])];
     if (onOutcome && focusBoard?.id === boardId) {
-      if (focusBoard.wonStayInStage || !stages.some(s => focusBoard.wonStageId ? s.id === focusBoard.wonStageId : s.linkedLifecycleStage === 'CUSTOMER')) {
+      if (focusBoard.wonStayInStage || !stages.some(s => isAutomaticWonStage(focusBoard, s.id))) {
         stages.push({ id: '__won', label: 'Ganho', color: 'bg-emerald-500' });
       }
       if (focusBoard.lostStayInStage || !stages.some(s => focusBoard.lostStageId ? s.id === focusBoard.lostStageId : s.linkedLifecycleStage === 'OTHER')) {
@@ -233,7 +234,7 @@ export function StageCascadePicker({
                 const current = focusBoard?.id === boardId && s.id === stageId;
                 const focused = pane === 'stages' && i === stageIdx;
                 const lost = focusBoard?.lostStageId === s.id || (!focusBoard?.lostStageId && s.linkedLifecycleStage === 'OTHER');
-                const won = focusBoard?.wonStageId === s.id || (!focusBoard?.wonStageId && s.linkedLifecycleStage === 'CUSTOMER');
+                const won = !!focusBoard && isAutomaticWonStage(focusBoard, s.id);
                 return (
                   <div
                     key={s.id}

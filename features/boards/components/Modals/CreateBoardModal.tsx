@@ -778,7 +778,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                    🏆 Estágio Ganho (Won)
+                    🏆 Destino do botão Ganho
                   </label>
                   <NativeSelect
                     value={wonStayInStage ? 'archive' : wonStageId}
@@ -800,7 +800,7 @@ export const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                     ))}
                   </NativeSelect>
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    O botão "Ganho" moverá o card para cá.
+                    Nas vendas, o botão usa a primeira etapa que promove o contato para Cliente. Sem essa etapa, usa este destino. Arquivar mantém a etapa atual. O destino, por si só, não define ganho automático; funis que já gerenciam clientes mantêm sua etapa de conclusão.
                   </p>
                 </div>
                 <div>

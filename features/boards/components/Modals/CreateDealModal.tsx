@@ -8,6 +8,7 @@ import { X, Building2, User, Mail, Phone, AlertCircle, Loader2, Package, Shuffle
 import { DebugFillButton } from '@/components/debug/DebugFillButton';
 import { fakeDeal, fakeContact, fakeCompany } from '@/lib/debug';
 import { ContactSearchCombobox } from '@/components/ui/ContactSearchCombobox';
+import { LeadSourceSelect } from '@/features/deals/components/LeadSourceSelect';
 
 interface CreateDealModalProps {
     isOpen: boolean;
@@ -79,6 +80,7 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
         title: '',
         value: ''
     });
+    const [leadSource, setLeadSource] = useState<string | null>(null);
 
     // Produto selecionado
     const [selectedProductId, setSelectedProductId] = useState<string>('');
@@ -88,6 +90,7 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
         if (!isOpen) return;
         // Ao abrir (ou trocar de board), volta para a primeira etapa
         setSelectedStageId('');
+        setLeadSource(null);
     }, [isOpen, activeBoard?.id]);
 
     // Estado de UI
@@ -207,6 +210,7 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
                         ? { name: 'Sem responsável', avatar: '' }
                         : { name: ownerName, avatar: profile?.avatar_url || '' },
                 customFields: {},
+                leadSource,
                 isWon: false,
                 isLost: false,
             };
@@ -446,6 +450,7 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({
                             </div>
 
                             {/* Etapa em que o negócio é criado (automações da etapa disparam nela) */}
+                            <LeadSourceSelect value={leadSource} onChange={setLeadSource} disabled={isSubmitting} />
                             <div>
                                 <label htmlFor="new-deal-stage" className="block text-xs font-medium text-slate-500 mb-1">Etapa</label>
                                 <div className="relative">

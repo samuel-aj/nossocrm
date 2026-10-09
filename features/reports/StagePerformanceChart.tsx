@@ -1,25 +1,16 @@
-import React from 'react';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Rectangle,
-  LabelList,
-} from 'recharts';
+import React, { useId } from 'react';
+import { Portal as TooltipPortal } from '@radix-ui/react-tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface StageConversionData {
   stageId: string;
   name: string;
   count: number;
   fill: string;
-  conversionRate?: number | null; // % that converted to next stage
+  conversionRate?: number | null;
   populationLabel?: string;
   comparisonBase?: string;
-  conversionLabel?: string; // "avançam" or "fecham"
+  conversionLabel?: string;
 }
 
 interface StageConversionChartProps {
@@ -27,105 +18,68 @@ interface StageConversionChartProps {
   onStageClick?: (stageId: string) => void;
 }
 
-const CustomTooltip = ({ active, payload }: any) => {
-  if (!active || !payload?.length) return null;
-  const d = payload[0].payload as StageConversionData;
+const PLOT_HEIGHT = 208;
+const LABEL_SPACE = 28;
+
+/** Columns start at zero; their buttons retain the exact underlying count. */
+export function StageConversionChart({ data, onStageClick }: StageConversionChartProps) {
+  const descriptionId = useId();
+  const maximum = Math.max(1, ...data.map(stage => stage.count));
+  const roughStep = maximum / 4;
+  const magnitude = 10 ** Math.floor(Math.log10(roughStep));
+  const step = Math.max(1, ([1, 2, 5, 10].find(value => value * magnitude >= roughStep) || 10) * magnitude);
+  const axisMaximum = Math.ceil(maximum / step) * step;
+  const ticks = Array.from({ length: Math.round(axisMaximum / step) + 1 }, (_, index) => index * step);
+  if (!data.length) return <p className="py-10 text-center text-sm text-slate-500">Nenhuma etapa disponível para esta visão.</p>;
   return (
-    <div
-      style={{
-        backgroundColor: 'var(--chart-tooltip-bg)',
-        border: '1px solid var(--chart-tooltip-border)',
-        borderRadius: '12px',
-        color: 'var(--chart-tooltip-text)',
-        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-        padding: '10px 14px',
-      }}
-    >
-      <p style={{ fontWeight: 700, marginBottom: 4 }}>{d.name}</p>
-      <p style={{ fontSize: 13 }}>{d.count} negócio{d.count !== 1 ? 's' : ''}</p>
-      {d.populationLabel && <p style={{ fontSize: 12, maxWidth: 300 }}>{d.populationLabel}</p>}
-      {d.comparisonBase && <p style={{ fontSize: 12 }}>{d.comparisonBase}</p>}
-      {d.conversionRate !== undefined && (
-        <p style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>
-          {d.conversionRate === null ? '—' : d.conversionRate.toFixed(1) + '%'} {d.conversionLabel || 'avançam'}
-        </p>
-      )}
-    </div>
+    <figure aria-label="Negócios por etapa" className="w-full min-w-0">
+      <figcaption className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+        Quantidade de leads distintos. Selecione uma etapa para ver os registros.
+      </figcaption>
+      <div className="flex min-w-0 gap-2">
+        <div aria-hidden="true" className="relative w-9 shrink-0 text-right text-[10px] tabular-nums text-slate-400 dark:text-slate-500" style={{ height: PLOT_HEIGHT + LABEL_SPACE }}>
+          {ticks.map(tick => <span key={tick} className="absolute right-0 -translate-y-1/2" style={{ top: LABEL_SPACE + PLOT_HEIGHT * (1 - tick / axisMaximum) }}>{tick.toLocaleString('pt-BR')}</span>)}
+        </div>
+        <div className="min-w-0 flex-1 overflow-x-auto overscroll-x-contain pb-2">
+          <div className="relative" style={{ minWidth: data.length * 92 }}>
+            <div aria-hidden="true" className="pointer-events-none absolute inset-x-0" style={{ top: LABEL_SPACE, height: PLOT_HEIGHT }}>
+              {ticks.map(tick => <span key={tick} className={`absolute inset-x-0 border-t ${tick === 0 ? 'border-slate-300 dark:border-slate-600' : 'border-dashed border-slate-200 dark:border-slate-700/70'}`} style={{ top: `${(1 - tick / axisMaximum) * 100}%` }} />)}
+            </div>
+            <TooltipProvider delayDuration={150}>
+              <div className="relative grid gap-2 px-1" style={{ gridTemplateColumns: `repeat(${data.length}, minmax(0, 1fr))` }}>
+                {data.map((stage, index) => {
+                  const percentage = stage.conversionRate == null ? null : `${stage.conversionRate.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
+                  const comparison = percentage === null ? '' : `${percentage} · ${stage.conversionLabel || 'conversão'}${stage.comparisonBase ? ` · ${stage.comparisonBase}` : ''}`;
+                  const description = [comparison, stage.populationLabel].filter(Boolean).join('. ');
+                  const height = stage.count / axisMaximum * PLOT_HEIGHT;
+                  return <Tooltip key={stage.stageId}>
+                    <TooltipTrigger asChild>
+                      <button type="button" disabled={!onStageClick} onClick={() => onStageClick?.(stage.stageId)}
+                        aria-label={`Ver ${stage.count} leads em ${stage.name}`} aria-describedby={description ? `${descriptionId}-${index}` : undefined}
+                        className="group flex min-w-0 flex-col items-stretch rounded-lg pb-2 text-center hover:bg-slate-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500 disabled:cursor-default">
+                        <span className="relative block shrink-0" style={{ height: PLOT_HEIGHT + LABEL_SPACE }}>
+                          <span className="absolute inset-x-0 text-sm font-semibold tabular-nums leading-5 text-slate-900 dark:text-white" style={{ bottom: height + 5 }}>{stage.count.toLocaleString('pt-BR')}</span>
+                          <span aria-hidden="true" className="absolute inset-x-0 bottom-0 mx-auto block w-3/5 max-w-14 rounded-t-md group-hover:brightness-110" style={{ height, backgroundColor: stage.fill }} />
+                        </span>
+                        <span className="mt-3 block px-1 text-[11px] leading-4 font-medium text-slate-700 dark:text-slate-200 break-words [overflow-wrap:anywhere]">{stage.name}</span>
+                        {percentage !== null && <span aria-hidden="true" className="mt-1 text-[10px] leading-4 tabular-nums text-slate-500 dark:text-slate-400">{percentage}</span>}
+                        {description && <span id={`${descriptionId}-${index}`} className="sr-only">{description}</span>}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipPortal><TooltipContent side="top" className="max-w-64 border-slate-700 bg-slate-900 text-slate-100 shadow-lg px-3 py-2 text-xs leading-5">
+                      <p className="font-semibold break-words">{stage.name} · {stage.count.toLocaleString('pt-BR')} leads</p>
+                      {comparison && <p>{comparison}</p>}
+                      {stage.populationLabel && <p className="text-slate-300">{stage.populationLabel}</p>}
+                    </TooltipContent></TooltipPortal>
+                  </Tooltip>;
+                })}
+              </div>
+            </TooltipProvider>
+          </div>
+        </div>
+      </div>
+    </figure>
   );
-};
-
-const renderConversionLabel = (props: any) => {
-  const { x, y, width, value } = props;
-  if (value === undefined) return null;
-  return (
-    <text
-      x={x + width / 2}
-      y={y - 8}
-      fill="var(--chart-text)"
-      textAnchor="middle"
-      fontSize={11}
-      fontWeight={600}
-    >
-      {value === null ? '—' : value.toFixed(0) + '%'}
-    </text>
-  );
-};
-
-const abbreviateStage = (name: string) => {
-  const shortened = name.trim()
-    .replace(/contato/gi, 'Cont.')
-    .replace(/contrato/gi, 'Contr.')
-    .replace(/qualificação/gi, 'qualif.')
-    .replace(/qualificado/gi, 'Qualif.')
-    .replace(/proposta/gi, 'Prop.')
-    .replace(/pendente/gi, 'pend.')
-    .replace(/assinado/gi, 'ass.')
-    .replace(/protocolado/gi, 'Protoc.');
-  return shortened.length > 14 ? shortened.slice(0, 13).trimEnd() + '…' : shortened;
-};
-
-export const StageConversionChart: React.FC<StageConversionChartProps> = ({ data, onStageClick }) => (
-  <ResponsiveContainer width="100%" height="100%">
-    <BarChart data={data} margin={{ top: 24, right: 12, bottom: 8, left: 4 }}>
-      <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
-      <XAxis
-        dataKey="name"
-        tickFormatter={abbreviateStage}
-        axisLine={false}
-        tickLine={false}
-        tick={{ fill: 'var(--chart-text)', fontSize: 11 }}
-        interval="preserveStartEnd"
-        height={32}
-        angle={0}
-        textAnchor="middle"
-        dy={6}
-      />
-      <YAxis
-        axisLine={false}
-        tickLine={false}
-        tick={{ fill: 'var(--chart-text)', fontSize: 12 }}
-        allowDecimals={false}
-      />
-      <Tooltip content={<CustomTooltip />} cursor={{ fill: 'var(--chart-grid)', opacity: 0.5 }} />
-      <Bar isAnimationActive={false} dataKey="count" radius={[6, 6, 0, 0]} maxBarSize={56}
-        cursor={onStageClick ? 'pointer' : undefined}
-        shape={(props: any) => (
-          <Rectangle {...props}
-            tabIndex={onStageClick ? 0 : undefined}
-            role={onStageClick ? 'button' : undefined}
-            aria-label={'Ver ' + props.payload.count + ' leads em ' + props.payload.name}
-            onClick={() => onStageClick?.(props.payload.stageId)}
-            onKeyDown={event => {
-              if (onStageClick && (event.key === 'Enter' || event.key === ' ')) {
-                event.preventDefault();
-                onStageClick(props.payload.stageId);
-              }
-            }} />
-        )}>
-        {data.some(entry => entry.conversionRate !== undefined) ? <LabelList dataKey="conversionRate" content={renderConversionLabel} /> : <LabelList dataKey="count" position="top" fill="var(--chart-text)" fontSize={11} />}
-      </Bar>
-    </BarChart>
-  </ResponsiveContainer>
-);
+}
 
 export default StageConversionChart;

@@ -1,5 +1,6 @@
 import { useBoardAutomations } from './useBoardAutomations';
 import { matchesAutomation } from '@/lib/boards/automationState';
+import { isLostBoardStage, manualWinStage } from '@/lib/boards/boardOutcome';
 import { useBoardFilters } from '../filters/useBoardFilters';
 import { matchesPeriod, matchesProduct, periodRange } from '../filters/boardFilters';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
@@ -27,6 +28,7 @@ import { useToast } from '@/context/ToastContext';
 import { useAuth } from '@/context/AuthContext';
 import { useCRM } from '@/context/CRMContext';
 import { useAI } from '@/context/AIContext';
+import { DEFAULT_LEAD_SOURCES, getDealLeadSource, normalizeLeadSource } from '@/lib/deals/leadSource';
 
 /**
  * Função pública `isDealRotting` do projeto.
@@ -167,7 +169,7 @@ export const useBoardsController = () => {
     []
   );
   // 'all' = todos | 'mine' = meus (profile.id) | 'none' = sem responsável | <userId> = um responsável específico
-  const { inactiveLeadsEnabled, defaultDealStatusFilter } = useOrgPreferences();
+  const { inactiveLeadsEnabled, defaultDealStatusFilter, leadSourceOptions = DEFAULT_LEAD_SOURCES } = useOrgPreferences();
   const urlStatusValue = searchParams?.get('status');
   const urlStatus = urlStatusValue === 'open' || urlStatusValue === 'won' || urlStatusValue === 'lost' || urlStatusValue === 'all' ? urlStatusValue : undefined;
   const filterControls = useBoardFilters(profile?.id, organizationId, effectiveActiveBoardId, defaultDealStatusFilter ?? 'open', urlStatus);
@@ -419,12 +421,14 @@ export const useBoardsController = () => {
   // sem definição são sempre texto. Ignora metadados internos (inbound_).
   const customFieldOptions = useMemo(() => {
     // valores observados nos leads: fallback de opções p/ selects sem options
-    const byKey = new Map<string, Set<string>>();
+    const byKey = new Map<string, Set<string>>([['origem', new Set(leadSourceOptions)]]);
     for (const d of deals) {
+      const source = getDealLeadSource(d);
+      if (source) byKey.get('origem')!.add(source);
       const cf = d.customFields;
       if (!cf || typeof cf !== 'object') continue;
       for (const k of Object.keys(cf)) {
-        if (k.startsWith('inbound_')) continue;
+        if (k === 'origem' || k.startsWith('inbound_')) continue;
         const raw = (cf as Record<string, unknown>)[k];
         if (raw === null || raw === undefined) continue;
         const value = (Array.isArray(raw) ? raw.join(', ') : String(raw)).trim();
@@ -440,6 +444,7 @@ export const useBoardsController = () => {
     const defByKey = new Map(orgFieldDefs.map((f) => [f.key, f]));
     return Array.from(byKey.entries())
       .map(([key, observed]) => {
+        if (key === 'origem') return { key, label: 'Origem do lead', kind: 'select' as const, options: Array.from(observed) };
         const def = defByKey.get(key);
         const isSelect = !key.startsWith('utm_') && (def?.type === 'select' || def?.type === 'multiselect');
         const options = isSelect
@@ -453,7 +458,7 @@ export const useBoardsController = () => {
         };
       })
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [deals, orgFieldDefs]);
+  }, [deals, orgFieldDefs, leadSourceOptions]);
 
   // Opções do filtro de TAG: tags cadastradas (Configurações → Tags) + tags já
   // usadas nos leads (inclui as criadas por dentro do card), dedup case-insensitive.
@@ -498,7 +503,9 @@ export const useBoardsController = () => {
       if (activeCfConditions.length > 0) {
         const cf = l.customFields;
         const evalCondition = (c: { field: string; operator: string; value: string }) => {
-          const raw = cf && typeof cf === 'object' ? (cf as Record<string, unknown>)[c.field] : undefined;
+          const raw = c.field === 'origem'
+            ? getDealLeadSource(l)
+            : cf && typeof cf === 'object' ? (cf as Record<string, unknown>)[c.field] : undefined;
           const str = raw === null || raw === undefined
             ? ''
             : (Array.isArray(raw) ? raw.join(', ') : String(raw)).trim();
@@ -741,6 +748,11 @@ export const useBoardsController = () => {
     for (const dealId of selectedDealIds) {
       const deal = deals.find(d => d.id === dealId);
       if (!deal || deal.id.startsWith('temp-')) continue;
+      if (key === 'origem') {
+        updateDeal(dealId, { leadSource: normalizeLeadSource(value) });
+        changed++;
+        continue;
+      }
       const next = { ...(deal.customFields || {}) } as Record<string, unknown>;
       if (value.trim() === '') delete next[key];
       else next[key] = value;
@@ -791,7 +803,7 @@ export const useBoardsController = () => {
     setDraggingId(null);
   };
 
-  const handleDrop = (e: React.DragEvent, stageId: string) => {
+  const handleDrop = (e: React.DragEvent, stageId: string, explicitWin = false) => {
     e.preventDefault();
     const dealId = e.dataTransfer.getData('dealId') || lastMouseDownDealId.current;
     const dealTitle = e.dataTransfer.getData('dealTitle') || '';
@@ -828,10 +840,10 @@ export const useBoardsController = () => {
       reactivateInactiveContact(deal);
 
       // Find the target stage to check if it's a won/lost stage
-      const targetStage = activeBoard.stages.find(s => s.id === stageId);
+      const targetStage = explicitWin ? manualWinStage(activeBoard, deal.status) : activeBoard.stages.find(s => s.id === stageId);
 
       // Check linkedLifecycleStage to determine won/lost status
-      if (targetStage?.linkedLifecycleStage === 'OTHER') {
+      if (!explicitWin && isLostBoardStage(activeBoard, stageId)) {
         // Dropping into LOST stage - open modal to ask for reason
         setLossReasonModal({
           isOpen: true,
@@ -843,7 +855,8 @@ export const useBoardsController = () => {
         // Use unified moveDeal for all other cases (WON or regular stages)
         moveDealMutation.mutate({
           dealId,
-          targetStageId: stageId,
+          targetStageId: targetStage?.id || stageId,
+          explicitWin,
           deal,
           board: activeBoard,
           lifecycleStages,

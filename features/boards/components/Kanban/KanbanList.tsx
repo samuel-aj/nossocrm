@@ -8,6 +8,7 @@ import { OwnerBadge } from './OwnerBadge';
 import { FocusTrap } from '@/lib/a11y/components/FocusTrap';
 import type { DealActivityStatus } from '@/features/boards/utils/dealActivityStatus';
 import type { OrgMember } from '@/lib/query/hooks';
+import { getDealLeadSource } from '@/lib/deals/leadSource';
 
 /** Iniciais do responsável nas opções do menu (o OwnerBadge tem as dele,
  *  mas não exporta o helper). */
@@ -786,7 +787,7 @@ export const KanbanListRow = React.memo(function KanbanListRow({
       {/* Custom Fields Cells */}
       {customFieldDefinitions.map((field) => (
         <td key={field.id} className={`${CELULA} text-right text-sm text-slate-600 dark:text-slate-300`}>
-          {deal.customFields?.[field.key] || <span className="text-slate-300 dark:text-slate-600">—</span>}
+          {(field.key === 'origem' ? getDealLeadSource(deal) : deal.customFields?.[field.key]) || <span className="text-slate-300 dark:text-slate-600">—</span>}
         </td>
       ))}
     </tr>

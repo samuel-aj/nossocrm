@@ -32,6 +32,7 @@ import {
     Building
 } from 'lucide-react';
 import { Deal, Activity, Contact, Board } from '@/types';
+import { buildDealLeadSourceContext } from '@/lib/deals/leadSourceContext';
 import { useAIDealAnalysis, deriveHealthFromProbability } from '../hooks/useAIDealAnalysis';
 import { useDealNotes } from '../hooks/useDealNotes';
 import { useDealFiles } from '../hooks/useDealFiles';
@@ -504,7 +505,7 @@ export const FocusContextPanel: React.FC<FocusContextPanelProps> = ({
             nextActivity: deal.nextActivity,
             tags: deal.tags,
             items: deal.items,
-            customFields: deal.customFields,
+            ...buildDealLeadSourceContext(deal),
             lastStageChangeDate: deal.lastStageChangeDate,
             lossReason: deal.lossReason,
             createdAt: deal.createdAt,

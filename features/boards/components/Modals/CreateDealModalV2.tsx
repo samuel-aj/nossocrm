@@ -7,6 +7,7 @@ import { Modal, ModalForm } from '@/components/ui/Modal';
 import { InputField, SubmitButton } from '@/components/ui/FormField';
 import { dealFormSchema } from '@/lib/validations/schemas';
 import type { DealFormData } from '@/lib/validations/schemas';
+import { LeadSourceSelect } from '@/features/deals/components/LeadSourceSelect';
 
 interface CreateDealModalV2Props {
   isOpen: boolean;
@@ -21,6 +22,7 @@ interface CreateDealModalV2Props {
  */
 export const CreateDealModalV2: React.FC<CreateDealModalV2Props> = ({ isOpen, onClose }) => {
   const { addDeal, activeBoard, activeBoardId } = useCRM();
+  const [leadSource, setLeadSource] = React.useState<string | null>(null);
 
   const form = useForm<DealFormData>({
     // @ts-expect-error - zodResolver type variance with optional value field, safe at runtime
@@ -46,6 +48,7 @@ export const CreateDealModalV2: React.FC<CreateDealModalV2Props> = ({ isOpen, on
   React.useEffect(() => {
     if (isOpen) {
       reset();
+      setLeadSource(null);
     }
   }, [isOpen, reset]);
 
@@ -79,6 +82,7 @@ export const CreateDealModalV2: React.FC<CreateDealModalV2Props> = ({ isOpen, on
       tags: ['Novo'],
       owner: { name: 'Eu', avatar: 'https://i.pravatar.cc/150?u=me' },
       customFields: {},
+      leadSource,
       isWon: false,
       isLost: false,
     };
@@ -142,6 +146,7 @@ export const CreateDealModalV2: React.FC<CreateDealModalV2Props> = ({ isOpen, on
           </div>
         </div>
 
+        <LeadSourceSelect value={leadSource} onChange={setLeadSource} disabled={isSubmitting} />
         <SubmitButton isLoading={isSubmitting}>Criar Negócio</SubmitButton>
       </ModalForm>
     </Modal>

@@ -224,6 +224,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
             loss_reason: { type: ['string', 'null'] },
             closed_at: { type: ['string', 'null'] },
             tags: { type: 'array', items: { type: 'string' }, description: 'Tags do deal' },
+            lead_source: { type: ['string', 'null'], maxLength: 120, description: 'Origem nativa deste lead (ex.: Meta Ads, Google Ads, Indicação). null significa Não informado; omitir preserva a origem. Aceita rótulos personalizados. custom_fields.origem permanece compatível; lead_source explícito tem prioridade. UTMs ficam separadas nos campos personalizados.' },
             custom_fields: { type: 'object', additionalProperties: true, description: 'Campos personalizados (JSONB)' },
             probability: { type: 'integer', minimum: 0, maximum: 100, description: 'Probabilidade de ganho (0-100)' },
             priority: { type: 'string', enum: ['low', 'medium', 'high', 'urgent'], description: 'Prioridade' },
@@ -1116,6 +1117,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
                     owner_id: { type: 'string', description: 'RESPONSÁVEL pelo lead: UUID de um usuário da organização (422 se não pertencer à org)' },
                     owner_email: { type: 'string', description: 'RESPONSÁVEL pelo lead: e-mail de um usuário da organização (alternativa ao owner_id)' },
                     tags: { type: 'array', items: { type: 'string' }, description: 'Tags do deal' },
+                    lead_source: { type: ['string', 'null'], maxLength: 120, description: 'Origem nativa deste lead (ex.: Meta Ads, Google Ads, Indicação). null significa Não informado; omitir preserva a origem. Aceita rótulos personalizados. custom_fields.origem permanece compatível; lead_source explícito tem prioridade. UTMs ficam separadas nos campos personalizados.' },
                     custom_fields: { type: 'object', additionalProperties: true, description: 'Campos personalizados, indexados pela KEY do campo (veja GET /custom-fields). As UTMs também vão aqui, com as keys utm_source, utm_medium, utm_campaign, utm_content e utm_term — o CRM mostra na seção "UTMs" do card e no filtro. Ex: {"motivo_busca": "Revisão de contrato", "utm_source": "google"}' },
                     probability: { type: 'integer', minimum: 0, maximum: 100, description: 'Probabilidade de ganho (0-100)' },
                     priority: { type: 'string', enum: ['low', 'medium', 'high', 'urgent'], description: 'Prioridade' },
@@ -1226,6 +1228,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
                     tags: { type: 'array', items: { type: 'string' }, description: 'Substitui todas as tags' },
                     tags_add: { type: 'array', items: { type: 'string' }, description: 'Adiciona tags (dedup). Exclusivo com tags.' },
                     tags_remove: { type: 'array', items: { type: 'string' }, description: 'Remove tags. Exclusivo com tags.' },
+                    lead_source: { type: ['string', 'null'], maxLength: 120, description: 'Origem nativa deste lead (ex.: Meta Ads, Google Ads, Indicação). null significa Não informado; omitir preserva a origem. Aceita rótulos personalizados. custom_fields.origem permanece compatível; lead_source explícito tem prioridade. UTMs ficam separadas nos campos personalizados.' },
                     custom_fields: { type: 'object', additionalProperties: true, description: 'Substitui todos os campos personalizados (pela KEY)' },
                     custom_fields_patch: { type: 'object', additionalProperties: true, description: 'Mescla campos; valor null remove a key. Exclusivo com custom_fields.' },
                     probability: { type: 'integer', minimum: 0, maximum: 100 },
@@ -1278,7 +1281,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
                     },
                   },
                   editarCampos: {
-                    value: { title: 'Maria Silva', priority: 'high', custom_fields_patch: { origem: 'Meta Ads' } },
+                    value: { title: 'Maria Silva', priority: 'high', lead_source: 'Meta Ads' },
                   },
                   definirResponsavel: {
                     summary: 'Definir/trocar o responsável do lead',

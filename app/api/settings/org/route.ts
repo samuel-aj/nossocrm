@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { withTabOrg } from '@/lib/supabase/tabOrgScope';
+import { normalizeLeadSource } from '@/lib/deals/leadSource';
 
 export const runtime = 'nodejs';
 
@@ -55,6 +56,7 @@ export async function GET() {
     loss_reasons_disqualified: (row.loss_reasons_disqualified as string[] | null | undefined) ?? null,
     // null = quadro abre em "Em aberto" (comportamento de sempre)
     default_deal_status_filter: (row.default_deal_status_filter as string | null | undefined) ?? null,
+    lead_source_options: (row.lead_source_options as string[] | null | undefined) ?? null,
   });
 }
 
@@ -86,6 +88,7 @@ const PatchSchema = z.object({
   loss_reasons_disqualified: LossReasonsSchema,
   // Filtro com que o quadro abre; null volta ao padrão ("Em aberto")
   default_deal_status_filter: z.union([z.enum(['open', 'won', 'lost', 'all']), z.null()]).optional(),
+  lead_source_options: z.array(z.string().trim().min(1).max(120)).max(50).nullable().optional(),
 }).strict();
 
 export async function PATCH(req: Request) {
@@ -101,7 +104,8 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: 'Invalid payload' }, { status: 422 });
   }
 
-  // Grava só o que veio no payload; lista vazia equivale a voltar ao padrão.
+  // Grava só o que veio no payload. Nos motivos de perda, [] volta ao padrão;
+  // nas categorias de origem, [] mantém apenas a opção Não informado.
   const updates: Record<string, unknown> = {};
   if (parsed.data.inactive_leads_enabled !== undefined) {
     updates.inactive_leads_enabled = parsed.data.inactive_leads_enabled;
@@ -119,6 +123,19 @@ export async function PATCH(req: Request) {
     const v = parsed.data.default_deal_status_filter;
     updates.default_deal_status_filter = v && v !== 'open' ? v : null;
   }
+  if (parsed.data.lead_source_options !== undefined) {
+    const seen = new Set<string>();
+    const options = (parsed.data.lead_source_options ?? []).flatMap(raw => {
+      const value = normalizeLeadSource(raw);
+      if (!value) return [];
+      const key = value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      if (key === 'nao informado' || seen.has(key)) return [];
+      seen.add(key);
+      return [value];
+    });
+    // null restores defaults; [] deliberately leaves only Não informado.
+    updates.lead_source_options = parsed.data.lead_source_options === null ? null : options;
+  }
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: 'Invalid payload' }, { status: 422 });
   }
@@ -135,6 +152,9 @@ export async function PATCH(req: Request) {
     );
 
   if (error) {
+    if (/lead_source_options/i.test(error.message)) {
+      return NextResponse.json({ error: 'As origens do lead ainda não estão habilitadas neste banco (migração pendente).' }, { status: 503 });
+    }
     // Banco ainda sem a coluna (migração pendente): mensagem clara em vez de
     // "erro ao salvar" genérico
     if (/default_deal_status_filter/i.test(error.message)) {

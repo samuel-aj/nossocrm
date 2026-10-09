@@ -81,6 +81,7 @@ docs/security/
 scripts/*
 !scripts/smoke-deals.mjs
 !scripts/smoke-integrations.mjs
+!scripts/test-performance-db.mjs
 
 # Test documentation (test code stays, docs are local)
 test/*.md

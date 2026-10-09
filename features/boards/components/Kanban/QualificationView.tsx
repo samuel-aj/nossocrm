@@ -13,6 +13,7 @@ import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
 import { useSettings } from '@/context/settings/SettingsContext';
 import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
+import { getDealLeadSource } from '@/lib/deals/leadSource';
 
 type QuickAddType = 'CALL' | 'MEETING' | 'EMAIL';
 
@@ -309,8 +310,8 @@ export const QualificationView: React.FC<QualificationViewProps> = ({
 
       if (sortColumn.startsWith('custom:')) {
         const key = sortColumn.slice('custom:'.length);
-        const av = String(a.customFields?.[key] ?? '');
-        const bv = String(b.customFields?.[key] ?? '');
+        const av = String((key === 'origem' ? getDealLeadSource(a) : a.customFields?.[key]) ?? '');
+        const bv = String((key === 'origem' ? getDealLeadSource(b) : b.customFields?.[key]) ?? '');
         return sign * av.localeCompare(bv, 'pt-BR');
       }
 

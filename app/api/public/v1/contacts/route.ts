@@ -191,7 +191,7 @@ export async function POST(request: Request) {
     avatar: normalizeText(parsed.data.avatar),
     status: normalizeText(parsed.data.status),
     stage: normalizeText(parsed.data.stage),
-    source: normalizeText(parsed.data.source),
+    ...(parsed.data.source !== undefined ? { source: normalizeText(parsed.data.source) } : {}),
     notes: normalizeText(parsed.data.notes),
     birth_date: birthDate,
     last_interaction: lastInteraction,

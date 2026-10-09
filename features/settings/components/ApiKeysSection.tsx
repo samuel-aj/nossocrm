@@ -6,6 +6,7 @@ import ConfirmModal from '@/components/ConfirmModal';
 import { useOptionalToast } from '@/context/ToastContext';
 import { useBoards } from '@/context/boards/BoardsContext';
 import { supabase } from '@/lib/supabase/client';
+import { isAutomaticWonStage, isLostBoardStage } from '@/lib/boards/boardOutcome';
 
 import { SettingsSection } from './SettingsSection';
 
@@ -231,11 +232,11 @@ export const ApiKeysSection: React.FC = () => {
     return stage?.label || '';
   }, [selectedToStageId, stagesForBoard]);
   const suggestedMark = useMemo<'won' | 'lost' | null>(() => {
-    if (!selectedToStageId) return null;
-    if (selectedBoard?.wonStageId && selectedToStageId === selectedBoard.wonStageId) return 'won';
-    if (selectedBoard?.lostStageId && selectedToStageId === selectedBoard.lostStageId) return 'lost';
+    if (!selectedToStageId || !selectedBoard) return null;
+    if (isLostBoardStage(selectedBoard, selectedToStageId)) return 'lost';
+    if (isAutomaticWonStage(selectedBoard, selectedToStageId)) return 'won';
     return null;
-  }, [selectedBoard?.wonStageId, selectedBoard?.lostStageId, selectedToStageId]);
+  }, [selectedBoard, selectedToStageId]);
 
   const curlExample = useMemo(() => {
     const token = (apiKeyToken.trim() || createdToken?.trim() || '') || 'SUA_API_KEY';

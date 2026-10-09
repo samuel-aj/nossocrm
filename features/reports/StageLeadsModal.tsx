@@ -20,6 +20,7 @@ export function StageLeadsModal({ stage, qualificationDates, estimatedQualificat
   return (
     <Modal isOpen onClose={onClose} title={stage.name + ' · ' + leads.length + ' leads'}
       className="max-w-4xl" bodyClassName="p-0 overflow-auto">
+      <p className="px-5 py-3 text-sm text-slate-500">{stage.populationLabel}. {stage.comparisonBase}</p>
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead className="sticky top-0 bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400">

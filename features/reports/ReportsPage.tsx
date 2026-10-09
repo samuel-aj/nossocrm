@@ -3,11 +3,13 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
 const LazyStageConversionChart = dynamic(() => import('./StagePerformanceChart').then(module => module.StageConversionChart), { ssr: false });
-import { TrendingUp, Clock, Target, DollarSign, Trophy, Users, Download, ThumbsDown, UserX, CheckCircle2, SlidersHorizontal } from 'lucide-react';
+import { TrendingUp, Clock, Target, DollarSign, Trophy, Users, Download, UserX, CheckCircle2, SlidersHorizontal } from 'lucide-react';
 import { getDateRange, PeriodFilter, PERIOD_LABELS, COMPARISON_LABELS } from '../dashboard/hooks/useDashboardMetrics';
 import { ReportFiltersPopover } from './ReportFiltersPopover';
 import { Popover, PopoverTrigger } from '@/components/ui/popover';
-import { ChartWrapper } from '@/components/charts';
+import { LossReasonsCard } from './LossReasonsCard';
+import { LeadSourceChart } from './LeadSourceChart';
+import { REPORT_MODES, formatReportRate, type ReportMode } from './reportPresentation';
 import { generateReportPDF } from './utils/generateReportPDF';
 import { useCRM } from '@/context/CRMContext';
 import { useAuth } from '@/context/AuthContext';
@@ -15,7 +17,7 @@ import { performanceComparisonRange } from './performanceMetrics';
 import { usePerformanceReport } from './usePerformanceReport';
 import { StageLeadsModal } from './StageLeadsModal';
 import { ReportLeadsModal } from './ReportLeadsModal';
-import { NO_PRODUCT, lossReasonLabel, reportDrilldown, type ReportSelection } from './reportDrilldown';
+import { NO_PRODUCT, reportDrilldown, type ReportSelection } from './reportDrilldown';
 
 /**
  * Componente React `ReportsPage`.
@@ -24,15 +26,21 @@ import { NO_PRODUCT, lossReasonLabel, reportDrilldown, type ReportSelection } fr
 const ReportsPage: React.FC = () => {
   const { boards, deals: allCrmDeals, products = [] } = useCRM();
   const { profile } = useAuth();
+  const [mode, setMode] = useState<ReportMode>('cohort');
+  const [dayKey, setDayKey] = useState(() => new Date().toDateString());
+  useEffect(() => {
+    const timer = setInterval(() => setDayKey(new Date().toDateString()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
   const [period, setPeriod] = useState<PeriodFilter>('this_month');
   const [selectedBoardId, setSelectedBoardId] = useState<string>('');
   const [selectedOwnerId, setSelectedOwnerId] = useState<string>('');
   const [selectedProductId, setSelectedProductId] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const activeFilterCount = Number(period !== 'all') + Number(Boolean(selectedOwnerId)) + Number(Boolean(selectedProductId));
+  const activeFilterCount = Number(mode !== 'current' && period !== 'all') + Number(Boolean(selectedOwnerId)) + Number(Boolean(selectedProductId));
   const [selection, setSelection] = useState<ReportSelection | null>(null);
   const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
-  useEffect(() => { setSelectedStageId(null); setSelection(null); }, [period, selectedBoardId, selectedOwnerId, selectedProductId]);
+  useEffect(() => { setSelectedStageId(null); setSelection(null); }, [mode, period, selectedBoardId, selectedOwnerId, selectedProductId]);
 
   // Performance: avoid recomputing the "default board id" logic inside the effect.
   const defaultBoardId = useMemo(() => {
@@ -57,12 +65,12 @@ const ReportsPage: React.FC = () => {
     return boards.find(b => b.id === boardIdEfetivo);
   }, [boards, boardIdEfetivo]);
 
-  const range = useMemo(() => getDateRange(period), [period]);
+  const range = useMemo(() => getDateRange(period), [period, dayKey]);
   const comparisonRange = useMemo(() => performanceComparisonRange(range, period), [range, period]);
-  const report = usePerformanceReport(selectedBoard, range, selectedOwnerId, comparisonRange, selectedProductId);
+  const report = usePerformanceReport(selectedBoard, range, selectedOwnerId, comparisonRange, selectedProductId, mode);
   const metrics = report.data;
   const productOptions = useMemo(() => {
-    const options = new Map((metrics?.productOptions || []).map(product => [product.id, product.name]));
+    const options = new Map<string, string>((metrics?.productOptions || []).map(product => [product.id, product.name]));
     for (const product of products) options.set(product.id, product.name);
     return [...options].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
   }, [metrics?.productOptions, products]);
@@ -128,46 +136,22 @@ const ReportsPage: React.FC = () => {
   const handleExportPDF = useCallback(() => {
     if (!metrics || report.isFetching || report.isError) return;
     generateReportPDF(metrics, {
-      boardName: selectedBoard?.name || '', period: PERIOD_LABELS[period],
+      mode, customerPipeline: selectedBoard?.linkedLifecycleStage === 'CUSTOMER', boardName: selectedBoard?.name || '', period: PERIOD_LABELS[period],
       owner: ownersList.find(owner => owner.id === selectedOwnerId)?.name || 'Todos os vendedores', product: productLabel,
       range: range.start.toLocaleDateString('pt-BR') + ' a ' + range.end.toLocaleDateString('pt-BR'), generatedBy,
     });
-  }, [metrics, report.isFetching, report.isError, selectedBoard, period, selectedOwnerId, ownersList, range, generatedBy, productLabel]);
+  }, [mode, metrics, report.isFetching, report.isError, selectedBoard, period, selectedOwnerId, ownersList, range, generatedBy, productLabel]);
 
-  // Ranking de motivos (barra + contagem) usado pelos cards "Motivos de
-  // Perda" e "Desqualificação" — cada card recebe só as perdas da sua
-  // categoria, então aqui não há mais etiqueta misturando os dois mundos.
-  const renderLossReasons = (dealsSubset: typeof lostDeals, barClass: string, category: 'qualified' | 'disqualified') => {
-    const map = new Map<string, number>();
-    for (const d of dealsSubset) {
-      const reason = lossReasonLabel(d.lossReason);
-      map.set(reason, (map.get(reason) || 0) + 1);
-    }
-    const sorted = [...map.entries()].sort((a, b) => b[1] - a[1]);
-    const maxCount = sorted[0]?.[1] || 1;
-    if (sorted.length === 0) {
-      return <p className="text-sm text-slate-500 italic text-center py-4">Nenhum motivo registrado.</p>;
-    }
-    return (
-      <div className="space-y-2">
-        {sorted.map(([reason, count]) => (
-          <button key={reason} type="button" onClick={() => setSelection({ kind: 'loss', category, reason })}
-            aria-label={`${reason}: ver ${count} leads`} className="block w-full text-left rounded-lg p-1 -m-1 hover:bg-slate-100 dark:hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-primary-500">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-sm text-slate-700 dark:text-slate-300 truncate">{reason}</span>
-              <span className="text-sm font-bold text-slate-900 dark:text-white ml-2 shrink-0">{count}</span>
-            </div>
-            <div className="w-full bg-slate-100 dark:bg-white/5 rounded-full h-2">
-              <div
-                className={`${barClass} h-2 rounded-full transition-all`}
-                style={{ width: `${(count / maxCount) * 100}%` }}
-              />
-            </div>
-          </button>
-        ))}
-      </div>
-    );
-  };
+  const renderLossReasons = (dealsSubset: typeof lostDeals, barClass: string, category: 'qualified' | 'disqualified') => (
+    <LossReasonsCard key={`${mode}:${boardIdEfetivo}:${period}:${category}`} deals={dealsSubset} barClass={barClass}
+      onSelect={reasonKey => setSelection({ kind: 'loss', category, reasonKey })} />
+  );
+  const modeInfo = REPORT_MODES[mode];
+  const cutoff = new Date(Math.min(range.end.getTime(), Date.now()));
+  const scopeLabel = mode === 'current' ? 'Carteira de agora · filtro de período não se aplica'
+    : `${range.start.toLocaleDateString('pt-BR')} a ${range.end.toLocaleDateString('pt-BR')} · Apuração até ${cutoff.toLocaleDateString('pt-BR')}`;
+  const coverage = metrics?.coverage;
+  const incomplete = coverage && (coverage.unknownQualificationCount + coverage.estimatedQualificationCount + coverage.unknownClosureCount + coverage.unknownBoardMembershipCount > 0);
 
   return (
     // min-h (não h fixo!): com altura FIXA o conteúdo transbordava e os cards
@@ -196,7 +180,7 @@ const ReportsPage: React.FC = () => {
                 {activeFilterCount > 0 && <span aria-label={`${activeFilterCount} filtros ativos`} className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary-500/15 px-1 text-xs text-primary-600 dark:text-primary-300">{activeFilterCount}</span>}
               </button>
             </PopoverTrigger>
-            {filtersOpen && <ReportFiltersPopover filters={{ period, ownerId: selectedOwnerId, productId: selectedProductId }}
+            {filtersOpen && <ReportFiltersPopover hidePeriod={mode === 'current'} filters={{ period, ownerId: selectedOwnerId, productId: selectedProductId }}
               owners={ownersList} products={productOptions} onClose={() => setFiltersOpen(false)}
               onApply={filters => {
                 setPeriod(filters.period);
@@ -219,9 +203,29 @@ const ReportsPage: React.FC = () => {
         </div>
       </div>
 
+      <section aria-label="Visão e base do relatório" className="space-y-3">
+        <div role="group" aria-label="Visão do relatório" className="flex flex-wrap gap-2">
+          {(Object.keys(REPORT_MODES) as ReportMode[]).map(value => <button key={value} type="button" aria-pressed={mode === value}
+            onClick={() => setMode(value)} className={`min-h-11 rounded-lg px-4 py-2 text-sm font-medium focus-visible:ring-2 focus-visible:ring-primary-500 ${mode === value ? 'bg-primary-600 text-white' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/15 text-slate-600 dark:text-slate-300'}`}>
+            {REPORT_MODES[value].label}
+          </button>)}
+        </div>
+        <p className="text-sm text-slate-700 dark:text-slate-300">{modeInfo.description}</p>
+        <p className="text-xs text-slate-500">{scopeLabel} · {ownersList.find(owner => owner.id === selectedOwnerId)?.name || 'Todos os vendedores'} · {productLabel}</p>
+        <p className="text-xs text-slate-500">{mode === 'cohort' ? 'Filtros: responsável na entrada no funil e produtos associados atualmente. Ao editar produtos, o grupo filtrado pode mudar.' : mode === 'period' ? 'Filtros: responsável e produtos registrados no instante de cada acontecimento. Produtos adicionados depois não alteram eventos anteriores.' : 'Filtros: responsável e produtos atuais.'}</p>
+        {selectedBoard?.linkedLifecycleStage !== 'CUSTOMER' && <p className="text-sm text-slate-700 dark:text-slate-300"><strong>Fechamento = promoção para Cliente.</strong> Etapas posteriores, como protocolo, acompanham o avanço após a venda e preservam a data do fechamento.</p>}
+      </section>
       {report.isError && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">Não foi possível carregar o relatório. {report.error.message} <button className="underline" onClick={() => void report.refetch()}>Tentar novamente</button></div>}
       {!metrics && !report.isError && <p role="status">Carregando histórico de movimentações…</p>}
       {metrics && !report.isError && <>
+      {mode !== 'current' && coverage && (incomplete || coverage.legacySnapshotCount > 0) && <aside className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:bg-amber-950/20 dark:border-amber-800 dark:text-amber-200">
+        {incomplete && <p><strong>Histórico incompleto.</strong> Qualificação sem data comprovada: {coverage.unknownQualificationCount}; com data estimada: {coverage.estimatedQualificationCount}; encerramento sem data: {coverage.unknownClosureCount}; presença no funil sem comprovação: {coverage.unknownBoardMembershipCount}. As taxas e os períodos usam apenas datas e vínculos com o funil comprovados.</p>}
+        {coverage.legacySnapshotCount > 0 && <p className={incomplete ? 'mt-2' : ''}>{coverage.legacySnapshotCount} leads têm dados históricos incompletos: alguns campos usam o cadastro atual ou o registro anterior disponível.</p>}
+      </aside>}
+      {mode === 'current' ? <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="glass rounded-xl border border-slate-200 dark:border-white/10 p-5"><p className="text-sm text-slate-500">Negócios abertos</p><p className="text-2xl font-bold">{metrics.currentDeals.length}</p></div>
+        <div className="glass rounded-xl border border-slate-200 dark:border-white/10 p-5"><p className="text-sm text-slate-500">Valor da carteira aberta</p><p className="text-2xl font-bold">{formatCurrency(metrics.currentValue)}</p></div>
+      </div> : <>
       {/* KPI Cards Grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 shrink-0">
         {/* Pipeline Value - FEATURE #2 */}
@@ -230,11 +234,11 @@ const ReportsPage: React.FC = () => {
             <div className="p-2 rounded-lg bg-blue-500/10">
               <DollarSign className="text-blue-500" size={18} />
             </div>
-            <span className="text-xs text-slate-500">Faturamento fechado</span>
+            <span className="text-xs text-slate-500">{mode === 'cohort' ? 'Valor ganho pelos leads do grupo' : 'Faturamento fechado'}</span>
           </div>
           <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatCurrency(wonRevenue)}</p>
           <p className={`text-xs ${metrics.revenueChange == null ? 'text-slate-500' : metrics.revenueChange < 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-            {period === 'all' ? 'Ganhos em todo o período' : metrics.revenueChange == null ? 'Sem base no período anterior' : `${metrics.revenueChange >= 0 ? '+' : ''}${metrics.revenueChange.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% ${COMPARISON_LABELS[period]}`}
+            {mode === 'cohort' ? 'Ganhos comprovados até a apuração' : period === 'all' ? 'Ganhos em todo o período' : metrics.revenueChange == null ? 'Sem base no período anterior' : `${metrics.revenueChange >= 0 ? '+' : ''}${metrics.revenueChange.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% ${COMPARISON_LABELS[period]}`}
           </p>
         </button>
 
@@ -244,15 +248,15 @@ const ReportsPage: React.FC = () => {
             <div className="p-2 rounded-lg bg-emerald-500/10">
               <Target className="text-emerald-500" size={18} />
             </div>
-            <span className="text-xs text-slate-500">Taxa de Qualificação</span>
+            <span className="text-xs text-slate-500">{mode === 'cohort' ? 'Taxa de Qualificação' : 'Qualificados no período'}</span>
           </div>
           <p className="text-2xl font-bold text-slate-900 dark:text-white">
-            {funnelRates.qualificationRate !== null ? `${funnelRates.qualificationRate.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%` : '--'}
+            {mode === 'cohort' ? formatReportRate(funnelRates.qualificationRate) : funnelRates.qualified}
           </p>
           <p className="text-xs text-slate-500">
-            {funnelRates.hasQualifiedStage
+            {mode === 'period' ? 'Primeira qualificação comprovada no intervalo' : funnelRates.hasQualifiedStage
               ? `${funnelRates.qualified} qualificados de ${funnelRates.total} leads`
-              : 'Board sem etapa "Qualificado"'}
+              : 'Configure uma etapa MQL no pipeline'}
           </p>
         </button>
 
@@ -262,15 +266,16 @@ const ReportsPage: React.FC = () => {
             <div className="p-2 rounded-lg bg-teal-500/10">
               <TrendingUp className="text-teal-500" size={18} />
             </div>
-            <span className="text-xs text-slate-500">Taxa de Fechamento</span>
+            <span className="text-xs text-slate-500">{mode === 'cohort' ? 'Taxa de Fechamento' : 'Ganhos no período'}</span>
           </div>
           <p className="text-2xl font-bold text-slate-900 dark:text-white">
-            {funnelRates.conversionRate !== null ? `${funnelRates.conversionRate.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%` : '--'}
+            {mode === 'cohort' ? formatReportRate(funnelRates.conversionRate) : wonDeals.length}
           </p>
           <p className="text-xs text-slate-500">
-            {funnelRates.hasQualifiedStage
-              ? `${funnelRates.wonCount} ganhos de ${funnelRates.qualified} qualificados`
-              : 'Pipeline sem etapa de qualificação'}
+            {mode === 'period' ? 'Ganhos pela data do acontecimento' : funnelRates.hasQualifiedStage
+              ? `${metrics.cohortWonDeals.length} ganhos de ${funnelRates.qualified} qualificados`
+              : 'Configure uma etapa MQL no pipeline'}
+            {mode === 'cohort' && wonDeals.length > metrics.cohortWonDeals.length && <span className="mt-1 block text-amber-700 dark:text-amber-400">{wonDeals.length - metrics.cohortWonDeals.length} ganhos sem qualificação prévia comprovada ficam fora desta taxa.</span>}
           </p>
         </button>
 
@@ -297,123 +302,82 @@ const ReportsPage: React.FC = () => {
             <span className="text-xs text-slate-500">Fechamentos</span>
           </div>
           <p className="text-2xl font-bold text-slate-900 dark:text-white">
-            <span className="text-emerald-500">{wonDeals.length}</span>
-            <span className="text-slate-400 mx-1">/</span>
-            <span className="text-red-500">{lostDeals.filter(deal => deal.lossCategory === 'qualified').length}</span>
+            <span className="text-emerald-600">{wonDeals.length} ganhos</span>
           </p>
           <p className="text-xs text-slate-500">
-            Ganhos / Perdas qualificadas
+            {lostDeals.filter(deal => deal.lossCategory === 'qualified').length} perdas qualificadas
           </p>
         </button>
       </div>
 
-      {/* Fileira: Leads Perdidos + Conversão por Etapa lado a lado */}
+      </>}
+      {mode === 'period' && <div className="flex flex-wrap gap-3 text-sm">
+        <button type="button" onClick={() => setSelection({ kind: 'entries' })} className="rounded-lg border border-slate-200 dark:border-white/10 px-4 py-3 hover:border-primary-400 focus-visible:ring-2 focus-visible:ring-primary-500">Entradas no funil: <strong>{metrics.entries.length}</strong></button>
+        <button type="button" onClick={() => setSelection({ kind: 'reopened' })} className="rounded-lg border border-slate-200 dark:border-white/10 px-4 py-3 hover:border-primary-400 focus-visible:ring-2 focus-visible:ring-primary-500">Reaberturas: <strong>{metrics.reopenedDeals.length}</strong></button>
+      </div>}
+      {/* Origens à esquerda; etapas em colunas verticais à direita. */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Loss by Category */}
-        {lostDeals.length > 0 && (
-          <div className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2 mb-4">
-              <ThumbsDown className="text-red-500" size={20} />
-              Perdas no Período
-            </h2>
-            {(() => {
-              // Sem categoria gravada (perdas antigas) = "Sem classificação";
-              // não dá pra afirmar que era qualificado só por ter motivo
-              const qualified = lostDeals.filter(d => d.lossCategory === 'qualified');
-              const disqualified = lostDeals.filter(d => d.lossCategory === 'disqualified');
-              const noCategory = lostDeals.filter(d => !d.lossCategory);
-              return (
-                <div className="space-y-3">
-                  <button type="button" onClick={() => setSelection({ kind: 'loss', category: 'qualified' })} className="w-full text-left focus-visible:ring-2 focus-visible:ring-primary-500 hover:brightness-110 flex items-center justify-between p-3 rounded-lg bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-500/20">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 size={16} className="text-orange-500" />
-                      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Qualificados</span>
-                    </div>
-                    <span className="text-lg font-bold text-orange-600 dark:text-orange-400">{qualified.length}</span>
-                  </button>
-                  <button type="button" onClick={() => setSelection({ kind: 'loss', category: 'disqualified' })} className="w-full text-left focus-visible:ring-2 focus-visible:ring-primary-500 hover:brightness-110 flex items-center justify-between p-3 rounded-lg bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-500/20">
-                    <div className="flex items-center gap-2">
-                      <UserX size={16} className="text-red-500" />
-                      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Desqualificados</span>
-                    </div>
-                    <span className="text-lg font-bold text-red-600 dark:text-red-400">{disqualified.length}</span>
-                  </button>
-                  {noCategory.length > 0 && (
-                    <button type="button" onClick={() => setSelection({ kind: 'loss', category: 'unknown' })} className="w-full text-left focus-visible:ring-2 focus-visible:ring-primary-500 flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10">
-                      <span className="text-sm font-medium text-slate-500">Sem classificação</span>
-                      <span className="text-lg font-bold text-slate-400">{noCategory.length}</span>
-                    </button>
-                  )}
-                  <button type="button" onClick={() => setSelection({ kind: 'loss' })} className="w-full text-left focus-visible:ring-2 focus-visible:ring-primary-500 pt-2 border-t border-slate-200 dark:border-white/10 flex items-center justify-between">
-                    <span className="text-sm font-medium text-slate-500">Total perdidos</span>
-                    <span className="text-lg font-bold text-slate-900 dark:text-white">{lostDeals.length}</span>
-                  </button>
-                </div>
-              );
-            })()}
-          </div>
-        )}
-
-        {/* Conversão por Etapa: ao lado de Leads Perdidos (ocupa a fileira
-            inteira quando não há perdas pra mostrar) */}
-        <div
-          className={`glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col min-h-[320px] ${
-            lostDeals.length > 0 ? 'lg:col-span-2' : 'lg:col-span-3'
-          }`}
-        >
-          <div className="flex justify-between items-center mb-2 shrink-0">
+        <LeadSourceChart groups={metrics.leadSourceGroups} total={metrics.leadSourceTotal} mode={mode}
+          legacySnapshotCount={metrics.coverage.legacyLeadSourceSnapshotCount}
+          onSelect={keys => setSelection({ kind: 'source', keys })} />
+        <div className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col min-w-0 lg:col-span-2">
+          <div className="flex flex-wrap justify-between items-center gap-2 mb-4 shrink-0">
             <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display">
-              Avanços por Etapa no Período
+              {modeInfo.chartTitle}
             </h2>
             <span className="text-xs text-slate-500 bg-slate-100 dark:bg-white/5 px-2 py-1 rounded">
-              Por criação · Ganhos por encerramento
+              {modeInfo.chartBasis}
             </span>
           </div>
-          {/* max-md:min-h: gráfico absolute colapsava quando o grid empilha */}
-          <div className="flex-1 min-h-0 relative max-md:min-h-[280px]">
-            <div className="absolute inset-0">
-              <ChartWrapper height="100%">
-                <LazyStageConversionChart data={stageConversionData} onStageClick={setSelectedStageId} />
-              </ChartWrapper>
-            </div>
-          </div>
+          <LazyStageConversionChart data={stageConversionData} onStageClick={setSelectedStageId} />
+          <p className="mt-4 text-xs text-slate-500">Clique em uma etapa para conferir os leads. {mode === 'cohort' ? 'Percentuais mostram quantos dos leads de uma etapa também chegaram à próxima. Etapas puladas não contam como visitas.' : mode === 'period' ? 'Um lead pode aparecer em mais de uma etapa ou desfecho no intervalo.' : 'Cada lead aparece apenas na sua etapa atual.'}</p>
         </div>
       </div>
 
       {/* Fileira de baixo: Motivos de Perda + Desqualificação (+ Top Vendedores) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 flex-1 min-h-[250px]">
-        {/* Motivos de Perda: perdas QUALIFICADAS (+ antigas sem categoria,
-            que nasceram antes da classificação existir) */}
-        {lostDeals.length > 0 && (
-          <div className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2 mb-4">
-              <CheckCircle2 className="text-orange-500" size={20} />
-              Motivos de Perda — Qualificados
-            </h2>
-            {renderLossReasons(
-              lostDeals.filter(d => d.lossCategory === 'qualified'),
-              'bg-orange-500', 'qualified'
-            )}
+      {mode !== 'current' && <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+        {lostDeals.length > 0 && <div className="lg:col-span-2 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+            <section aria-label="Perdas qualificadas" className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2 mb-4">
+                <CheckCircle2 className="text-orange-500" size={20} />
+                Motivos de Perda — Qualificados
+              </h2>
+              <button type="button" onClick={() => setSelection({ kind: 'loss', category: 'qualified' })}
+                className="mb-4 w-full text-left focus-visible:ring-2 focus-visible:ring-primary-500 hover:brightness-110 flex items-center justify-between gap-3 p-3 rounded-lg bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-500/20">
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Qualificados perdidos</span>
+                <span className="text-lg font-bold text-orange-600 dark:text-orange-400">{lostDeals.filter(d => d.lossCategory === 'qualified').length}</span>
+              </button>
+              {renderLossReasons(lostDeals.filter(d => d.lossCategory === 'qualified'), 'bg-orange-500', 'qualified')}
+            </section>
+            <section aria-label="Desqualificações" className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2 mb-4">
+                <UserX className="text-red-500" size={20} />
+                Desqualificação
+              </h2>
+              <button type="button" onClick={() => setSelection({ kind: 'loss', category: 'disqualified' })}
+                className="mb-4 w-full text-left focus-visible:ring-2 focus-visible:ring-primary-500 hover:brightness-110 flex items-center justify-between gap-3 p-3 rounded-lg bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-500/20">
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Total desqualificados</span>
+                <span className="text-lg font-bold text-red-600 dark:text-red-400">{lostDeals.filter(d => d.lossCategory === 'disqualified').length}</span>
+              </button>
+              {renderLossReasons(lostDeals.filter(d => d.lossCategory === 'disqualified'), 'bg-red-500', 'disqualified')}
+            </section>
           </div>
-        )}
-
-        {/* Desqualificação: perdas DESQUALIFICADAS (lead fora do perfil) */}
-        {lostDeals.length > 0 && (
-          <div className="glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white font-display flex items-center gap-2 mb-4">
-              <UserX className="text-red-500" size={20} />
-              Desqualificação
-            </h2>
-            {renderLossReasons(
-              lostDeals.filter(d => d.lossCategory === 'disqualified'),
-              'bg-red-500', 'disqualified'
-            )}
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm px-1">
+            <button type="button" onClick={() => setSelection({ kind: 'loss' })}
+              className="rounded-md py-1 text-slate-600 dark:text-slate-300 hover:text-primary-600 focus-visible:ring-2 focus-visible:ring-primary-500">
+              Total perdidos: <strong className="text-slate-900 dark:text-white">{lostDeals.length}</strong>
+            </button>
+            {lostDeals.some(d => !d.lossCategory) && <button type="button" onClick={() => setSelection({ kind: 'loss', category: 'unknown' })}
+              className="rounded-md py-1 text-slate-500 hover:text-primary-600 focus-visible:ring-2 focus-visible:ring-primary-500">
+              Sem classificação: <strong>{lostDeals.filter(d => !d.lossCategory).length}</strong>
+            </button>}
           </div>
-        )}
+        </div>}
 
         {/* Leaderboard - FEATURE #3 (Top Performers) */}
         <div
-          className={`glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col h-full overflow-hidden ${
+          className={`glass p-5 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm flex flex-col overflow-hidden ${
             lostDeals.length > 0 ? '' : 'lg:col-span-3'
           }`}
         >
@@ -464,13 +428,14 @@ const ReportsPage: React.FC = () => {
         </div>
       </div>
 
+      }
       {/* Espaçador REAL depois do último bloco: quando o conteúdo transborda
           a altura fixa do container, padding no root não aparece (fica no
           limite nominal da caixa, não abaixo do conteúdo transbordado) —
           este elemento garante a margem inferior em qualquer cenário */}
       <div className="shrink-0 h-2" aria-hidden="true" />
       {detail && metrics && selectedBoard && <ReportLeadsModal key={JSON.stringify(selection)} detail={detail} board={selectedBoard}
-        filtersLabel={`${selectedBoard.name} · ${PERIOD_LABELS[period]} · ${ownersList.find(owner => owner.id === selectedOwnerId)?.name || 'Todos os vendedores'} · ${productLabel}`}
+        filtersLabel={`${selectedBoard.name} · ${modeInfo.label} · ${PERIOD_LABELS[period]} · ${ownersList.find(owner => owner.id === selectedOwnerId)?.name || 'Todos os vendedores'} · ${productLabel}`}
         qualificationDates={metrics.leadQualificationDates} estimatedQualificationIds={metrics.estimatedQualificationIds} onClose={() => setSelection(null)} />}
       {selectedStage && metrics && <StageLeadsModal stage={selectedStage}
         qualificationDates={metrics.leadQualificationDates} estimatedQualificationIds={metrics.estimatedQualificationIds} onClose={() => setSelectedStageId(null)} />}

@@ -149,12 +149,26 @@ it.each([undefined, 'LEAD', 'MQL', 'SALES_QUALIFIED', 'CUSTOMER'])('announces on
  expect(!!screen.queryByText(/próximo funil/)).toBe(['MQL', 'SALES_QUALIFIED', 'CUSTOMER'].includes(lifecycle || ''));
 });
 it.each([
-  { lifecycle: 'CUSTOMER', wonStageId: 'another', expected: false },
-  { lifecycle: 'LEAD', wonStageId: 'destination', expected: true },
+  { lifecycle: 'CUSTOMER', wonStageId: 'another', expected: true },
+  { lifecycle: 'LEAD', wonStageId: 'destination', expected: false },
   { lifecycle: 'CUSTOMER', linkedLifecycleStage: 'CUSTOMER', expected: false },
-])('matches configured won-stage overrides for $lifecycle', ({ lifecycle, wonStageId, linkedLifecycleStage, expected }) => {
+])('uses Customer identity for sales and explicit completion for customer boards ($lifecycle)', ({ lifecycle, wonStageId, linkedLifecycleStage, expected }) => {
   mocks.boards = [source, { ...target, nextBoardId: 'next', wonStageId, linkedLifecycleStage, stages: [{ ...target.stages[0], linkedLifecycleStage: lifecycle }] } as Board];
   setup({ ...deal, contactId: 'contact' }); pick('Destino', /Etapa destino/);
   expect(screen.getByText(/etapa do contato poderá/)).toBeInTheDocument();
   expect(!!screen.queryByText(/próximo funil/)).toBe(expected);
+});
+
+it('reopens a closed lead explicitly when selecting its own Customer stage', async () => {
+  mocks.boards = [{ ...source, stages: [{ ...source.stages[0], linkedLifecycleStage: 'CUSTOMER' }] }];
+  setup({ ...deal, isWon: true });
+  pick('Origem', /Atual/);
+  await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ targetStageId: 'current', explicitReopen: true, explicitWin: false })));
+});
+
+it('keeps an explicit archive win in its current stage even with a Customer destination', async () => {
+  mocks.boards = [{ ...source, wonStayInStage: true, wonStageId: 'same', stages: [...source.stages, { id: 'customer', label: 'Contrato', color: 'bg-green-500', linkedLifecycleStage: 'CUSTOMER' }] }];
+  setup();
+  pick('Origem', /^Ganho$/);
+  await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ targetStageId: 'current', explicitWin: true })));
 });

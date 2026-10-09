@@ -1,5 +1,5 @@
 import React from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { StageLeadsModal } from './StageLeadsModal';
 import { calculatePerformance } from './performanceMetrics';
@@ -12,7 +12,7 @@ it('mostra as quatro colunas, datas reais, vazios e permite fechar', () => {
     { id: 'a', title: 'Ana', boardId: 'b', status: 'q', createdAt: '2026-08-02T12:00:00Z', closedAt: '2026-08-20T12:00:00Z', isWon: true },
     { id: 'b', title: 'Bruno', boardId: 'b', status: 'q', createdAt: '2026-08-03T12:00:00Z' },
   ] as Deal[];
-  const stage = calculatePerformance(leads, [], board, range).stageData[0];
+  const stage = { ...calculatePerformance([], [], board, range).stageData[0], deals: leads, count: leads.length };
   const onClose = vi.fn();
   render(<StageLeadsModal stage={stage} qualificationDates={new Map([['a', '2026-08-10T12:00:00Z']])} onClose={onClose} />);
   const dialog = screen.getByRole('dialog', { name: 'Qualificado · 2 leads' });
@@ -29,7 +29,7 @@ it('mostra as quatro colunas, datas reais, vazios e permite fechar', () => {
 
 it('identifica estimativa e oculta encerramento antigo de lead reaberto', () => {
   const leads=[{id:'a',title:'Reaberto',boardId:'b',status:'q',createdAt:'2026-08-02',closedAt:'2026-08-20',isWon:false,isLost:false}] as Deal[];
-  const stage=calculatePerformance(leads,[],board,range).stageData[0];
+  const stage={ ...calculatePerformance([], [], board, range).stageData[0], deals: leads, count: leads.length };
   render(<StageLeadsModal stage={stage} qualificationDates={new Map([['a','2026-08-10T12:00:00Z']])} estimatedQualificationIds={new Set(['a'])} onClose={()=>{}} />);
   expect(screen.getByText('Estimada')).toBeInTheDocument();
   expect(within(screen.getByText('Reaberto').closest('tr')!).getAllByRole('cell')[3]).toHaveTextContent('');

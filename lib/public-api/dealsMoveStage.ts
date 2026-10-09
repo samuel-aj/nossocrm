@@ -1,3 +1,4 @@
+import { publicDealSource } from '@/lib/public-api/leadSource';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { withActor } from '@/lib/supabase/actorClient';
 import { normalizeEmail, normalizePhone } from '@/lib/public-api/sanitize';
@@ -73,13 +74,12 @@ export async function moveStageByDealId(opts: {
   const boardId = (deal as any).board_id as string;
   const { data: boardCfg, error: boardCfgError } = await sb
     .from('boards')
-    .select('won_stage_id,lost_stage_id')
+    .select('lost_stage_id')
     .eq('organization_id', opts.organizationId)
     .is('deleted_at', null)
     .eq('id', boardId)
     .maybeSingle();
   if (boardCfgError) return { ok: false as const, status: 500, body: { error: boardCfgError.message, code: 'DB_ERROR' } };
-  const wonStageId = sanitizeUUID((boardCfg as any)?.won_stage_id) || null;
   const lostStageId = sanitizeUUID((boardCfg as any)?.lost_stage_id) || null;
   const stageId = await resolveStageIdForBoard({
     organizationId: opts.organizationId,
@@ -100,8 +100,9 @@ export async function moveStageByDealId(opts: {
   }
 
   const now = new Date().toISOString();
+  // Plain moves let the database apply CUSTOMER promotion and preserve post-sale dates.
   const updates: any = { stage_id: stageId, last_stage_change_date: now, updated_at: now };
-  if (opts.mark === 'won' || (wonStageId && stageId === wonStageId)) {
+  if (opts.mark === 'won') {
     updates.is_won = true;
     updates.is_lost = false;
     updates.closed_at = now;
@@ -120,11 +121,12 @@ export async function moveStageByDealId(opts: {
     .update(updates)
     .eq('organization_id', opts.organizationId)
     .eq('id', dealId)
-    .select('id,title,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at')
+    .eq('board_id', boardId)
+    .select('id,title,value,lead_source,lead_source_initialized,custom_fields,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at')
     .maybeSingle();
   if (error) return { ok: false as const, status: 500, body: { error: error.message, code: 'DB_ERROR' } };
   if (!data) return { ok: false as const, status: 404, body: { error: 'Deal not found', code: 'NOT_FOUND' } };
-  return { ok: true as const, status: 200, body: { data, action: 'moved' } };
+  return { ok: true as const, status: 200, body: { data: publicDealSource(data), action: 'moved' } };
 }
 
 export async function moveStageByIdentity(opts: {
@@ -148,13 +150,12 @@ export async function moveStageByIdentity(opts: {
   const sb = withActor(createStaticAdminClient(), { kind: 'integration' });
   const { data: boardCfg, error: boardCfgError } = await sb
     .from('boards')
-    .select('won_stage_id,lost_stage_id')
+    .select('lost_stage_id')
     .eq('organization_id', opts.organizationId)
     .is('deleted_at', null)
     .eq('id', boardId)
     .maybeSingle();
   if (boardCfgError) return { ok: false as const, status: 500, body: { error: boardCfgError.message, code: 'DB_ERROR' } };
-  const wonStageId = sanitizeUUID((boardCfg as any)?.won_stage_id) || null;
   const lostStageId = sanitizeUUID((boardCfg as any)?.lost_stage_id) || null;
 
   let contactsQuery = sb
@@ -207,8 +208,9 @@ export async function moveStageByIdentity(opts: {
   }
 
   const now = new Date().toISOString();
+  // Plain moves let the database apply CUSTOMER promotion and preserve post-sale dates.
   const updates: any = { stage_id: stageId, last_stage_change_date: now, updated_at: now };
-  if (opts.mark === 'won' || (wonStageId && stageId === wonStageId)) {
+  if (opts.mark === 'won') {
     updates.is_won = true;
     updates.is_lost = false;
     updates.closed_at = now;
@@ -224,10 +226,11 @@ export async function moveStageByIdentity(opts: {
     .update(updates)
     .eq('organization_id', opts.organizationId)
     .eq('id', dealId)
-    .select('id,title,value,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at')
+    .eq('board_id', boardId)
+    .select('id,title,value,lead_source,lead_source_initialized,custom_fields,board_id,stage_id,contact_id,client_company_id,is_won,is_lost,loss_reason,closed_at,created_at,updated_at')
     .maybeSingle();
   if (updateError) return { ok: false as const, status: 500, body: { error: updateError.message, code: 'DB_ERROR' } };
   if (!updated) return { ok: false as const, status: 404, body: { error: 'Deal not found', code: 'NOT_FOUND' } };
-  return { ok: true as const, status: 200, body: { data: updated, action: 'moved' } };
+  return { ok: true as const, status: 200, body: { data: publicDealSource(updated), action: 'moved' } };
 }
 

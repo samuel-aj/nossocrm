@@ -506,3 +506,17 @@ describe('bot template media delivery', () => {
     expect(signed).toHaveBeenCalledWith('org/conn/asset/photo.png',600);
   });
 });
+
+
+it('troca para protocolo pelo robô sem forçar ganho pela configuração antiga do botão', async () => {
+  const boardId = '00000000-0000-4000-8000-00000000000b';
+  const stageId = '00000000-0000-4000-8000-00000000000c';
+  const r = run({ deal_id: 'deal-1' });
+  const tables = db(bot([{ id: 'mv', type: 'move_stage', board_id: boardId, stage_id: stageId }]), [r]);
+  tables.boards = [{ id: boardId, organization_id: ORG, won_stage_id: stageId }];
+  tables.board_stages = [{ id: stageId, board_id: boardId, organization_id: ORG, linked_lifecycle_stage: 'CUSTOM_PROTOCOL' }];
+  Object.assign(tables.deals[0], { board_id: 'b1', stage_id: 's1', is_won: false, is_lost: false });
+  await processBotRun(fakeDb(tables), r);
+  expect(tables.deals[0]).toMatchObject({ board_id: boardId, stage_id: stageId, is_won: false });
+  expect(tables.deals[0]).not.toHaveProperty('closed_at');
+});

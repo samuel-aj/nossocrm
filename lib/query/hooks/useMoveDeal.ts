@@ -1,3 +1,4 @@
+import { getDealLeadSource } from '@/lib/deals/leadSource';
 /**
  * Unified hook for moving deals between stages
  * 
@@ -20,6 +21,7 @@ import { contactsService } from '@/lib/supabase/contacts';
 import type { Deal, DealView, Board, Activity } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { lossDetailsDescription } from '@/lib/utils/lossDetails';
+import { resolveBoardMoveOutcome } from '@/lib/boards/boardOutcome';
 
 interface MoveDealParams {
   dealId: string;
@@ -33,6 +35,7 @@ interface MoveDealParams {
   lifecycleStages?: { id: string; name: string }[];
   explicitWin?: boolean;
   explicitLost?: boolean;
+  explicitReopen?: boolean;
 }
 
 interface MoveDealResult {
@@ -40,6 +43,7 @@ interface MoveDealResult {
   newStatus: string;
   isWon?: boolean;
   isLost?: boolean;
+  confirmed?: Partial<Deal>;
 }
 
 // Context type for optimistic updates
@@ -69,65 +73,28 @@ export const useMoveDeal = () => {
   };
 
   return useMutation<MoveDealResult, Error, MoveDealParams, MoveDealContext>({
-    mutationFn: async ({ dealId, targetStageId, lossReason, lossCategory, deal, board, lifecycleStages, explicitWin, explicitLost }) => {
+    mutationFn: async ({ dealId, targetStageId, lossReason, lossCategory, deal, board, lifecycleStages, explicitWin, explicitLost, explicitReopen }) => {
       const targetStage = board.stages.find(s => s.id === targetStageId);
-
-      // Determine isWon/isLost based on params OR linkedLifecycleStage
-      let isWon: boolean | undefined;
-      let isLost: boolean | undefined;
-      let closedAt: string | null | undefined;
-
-      if (explicitWin) {
-        isWon = true;
-        isLost = false;
-        closedAt = new Date().toISOString();
-      } else if (explicitLost) {
-        isLost = true;
-        isWon = false;
-        closedAt = new Date().toISOString();
-      } else if (
-        // Prefer explicit won/lost stages when configured on the board.
-        // Fallback to lifecycle hints ONLY when the board doesn't define won/lost IDs.
-        (
-          board.wonStageId
-            ? targetStageId === board.wonStageId
-            : (board.linkedLifecycleStage !== 'CUSTOMER' && targetStage?.linkedLifecycleStage === 'CUSTOMER')
-        )
-      ) {
-        isWon = true;
-        isLost = false;
-        closedAt = new Date().toISOString();
-      } else if (
-        (board.lostStageId ? targetStageId === board.lostStageId : targetStage?.linkedLifecycleStage === 'OTHER')
-      ) {
-        isLost = true;
-        isWon = false;
-        closedAt = new Date().toISOString();
-      } else {
-        // Moving to a regular stage - reopen if was closed (trocar de funil
-        // sempre recomeça a jornada: ganho/perda do funil antigo não acompanham)
-        if (deal.isWon || deal.isLost || board.id !== deal.boardId) {
-          isWon = false;
-          isLost = false;
-          closedAt = null;
-        }
-      }
+      if (!targetStage) throw new Error('Etapa indisponível neste funil. Atualize a página.');
+      const outcome = resolveBoardMoveOutcome({ board, deal, targetStageId, explicitWin, explicitLost, explicitReopen });
+      const { isWon, isLost } = outcome;
 
       // Build updates object
       const changingBoard = board.id !== deal.boardId;
+      const changingStage = changingBoard || targetStageId !== deal.status;
       const updates: Partial<Deal> = {
         ...(changingBoard && { boardId: board.id }),
         status: targetStageId,
-        lastStageChangeDate: new Date().toISOString(),
+        ...(changingStage && { lastStageChangeDate: new Date().toISOString() }),
         ...(lossReason && { lossReason }),
         ...(lossCategory && { lossCategory }),
-        ...(isWon !== undefined && { isWon }),
-        ...(isLost !== undefined && { isLost }),
-        ...(closedAt !== undefined && { closedAt: closedAt as string }),
+        // A legacy Customer-stage correction is normalized by the DB from its
+        // evidence. Sending a fresh explicit win could invent a new win date.
+        ...(!outcome.recoveringLegacyWin && { isWon, isLost }),
       };
 
       // 1. Update the deal
-      const { error: dealError } = await dealsService.update(dealId, updates);
+      const { data: confirmed, error: dealError } = await dealsService.update(dealId, updates);
       if (dealError) {
         throw dealError;
       }
@@ -146,7 +113,7 @@ export const useMoveDeal = () => {
       } as Omit<Activity, 'id' | 'createdAt'>).catch(console.error);
 
       // 3. LinkedStage: Update contact stage when moving to linked column
-      if (targetStage?.linkedLifecycleStage && deal.contactId) {
+      if (targetStage.linkedLifecycleStage && deal.contactId && changingStage && !explicitReopen) {
         const lifecycleStageName =
           lifecycleStages?.find(ls => ls.id === targetStage.linkedLifecycleStage)?.name ||
           targetStage.linkedLifecycleStage;
@@ -168,10 +135,15 @@ export const useMoveDeal = () => {
       }
 
       // 4. NextBoard Automation (async, don't block)
+      // A false flag on a Customer column can also be an explicit reopening.
+      // Only the transactional response can distinguish a fresh gain there
+      // from restoration of an old, possibly undated, legacy gain.
+      const confirmedNewPromotion = !deal.isWon && confirmed?.isWon
+        && !!confirmed.closedAt && confirmed.closedAt === confirmed.lastStageChangeDate
+        && confirmed.closedAt !== deal.closedAt;
       const isSuccessStage =
-        isWon ||
-        targetStage?.linkedLifecycleStage === 'MQL' ||
-        targetStage?.linkedLifecycleStage === 'SALES_QUALIFIED';
+        ((outcome.newPromotion || confirmedNewPromotion) && (confirmed?.isWon ?? isWon)) ||
+        (changingStage && !isLost && ['MQL', 'SALES_QUALIFIED'].includes(targetStage.linkedLifecycleStage || ''));
 
       if (isSuccessStage && board.nextBoardId) {
         (async () => {
@@ -182,6 +154,7 @@ export const useMoveDeal = () => {
 
               const { error: copyError } = await dealsService.create({
                 title: deal.title,
+                leadSource: getDealLeadSource(deal),
                 value: deal.value,
                 contactId: deal.contactId,
                 boardId: targetBoard.id,
@@ -225,11 +198,11 @@ export const useMoveDeal = () => {
         })();
       }
 
-      return { dealId, newStatus: targetStageId, isWon, isLost };
+      return { dealId, newStatus: targetStageId, isWon: confirmed?.isWon ?? isWon, isLost: confirmed?.isLost ?? isLost, confirmed };
     },
 
     // Optimistic update: update UI instantly before server responds
-    onMutate: async ({ dealId, targetStageId, deal, explicitWin, explicitLost, board, lossCategory, lossReason }) => {
+    onMutate: async ({ dealId, targetStageId, deal, explicitWin, explicitLost, explicitReopen, board, lossCategory, lossReason }) => {
       // Cancel any outgoing refetches
       await queryClient.cancelQueries({ queryKey: queryKeys.deals.all });
 
@@ -238,23 +211,16 @@ export const useMoveDeal = () => {
       const previousDetail = queryClient.getQueryData<Deal>(queryKeys.deals.detail(dealId));
 
       // Determine new status
-      const targetStage = board.stages.find(s => s.id === targetStageId);
-      const isWon =
-        explicitWin
-        || (
-          board.wonStageId
-            ? targetStageId === board.wonStageId
-            : (board.linkedLifecycleStage !== 'CUSTOMER' && targetStage?.linkedLifecycleStage === 'CUSTOMER')
-        );
-      const isLost =
-        explicitLost
-        || (board.lostStageId ? targetStageId === board.lostStageId : targetStage?.linkedLifecycleStage === 'OTHER');
+      const { isWon, isLost, closedAt } = resolveBoardMoveOutcome({ board, deal, targetStageId, explicitWin, explicitLost, explicitReopen });
       const boardUpdate = board.id !== deal.boardId ? { boardId: board.id } : {};
+      const stageDateUpdate = board.id !== deal.boardId || targetStageId !== deal.status
+        ? { lastStageChangeDate: new Date().toISOString() }
+        : {};
 
       const lossUpdates = isLost ? {
         ...(lossCategory && { lossCategory }), ...(lossReason && { lossReason }),
-        closedAt: deal.isLost ? deal.closedAt : new Date().toISOString(),
-      } : { lossCategory: undefined, lossReason: undefined, ...(!isWon && { closedAt: undefined }) };
+        closedAt,
+      } : { lossCategory: undefined, lossReason: undefined, closedAt };
 
       // Optimistically update APENAS DEALS_VIEW_KEY (única fonte de verdade)
       queryClient.setQueryData<DealView[]>(DEALS_VIEW_KEY, (old) => {
@@ -266,7 +232,7 @@ export const useMoveDeal = () => {
               ...d,
               ...boardUpdate,
               status: targetStageId,
-              lastStageChangeDate: new Date().toISOString(),
+              ...stageDateUpdate,
               isWon: isWon ?? d.isWon,
               isLost: isLost ?? d.isLost,
               ...lossUpdates,
@@ -285,7 +251,7 @@ export const useMoveDeal = () => {
           ...old,
           ...boardUpdate,
           status: targetStageId,
-          lastStageChangeDate: new Date().toISOString(),
+          ...stageDateUpdate,
           isWon: isWon ?? old.isWon,
           isLost: isLost ?? old.isLost,
           ...lossUpdates,
@@ -294,6 +260,18 @@ export const useMoveDeal = () => {
       });
 
       return { previousDeals, previousDetail };
+    },
+
+    onSuccess: (result, variables) => {
+      if (!result.confirmed) return;
+      // Dates and final outcome come from the transactional database result.
+      // Don't overwrite a subsequent move or unrelated fields edited meanwhile.
+      const fields = ['isWon', 'isLost', 'closedAt', 'qualifiedAt', 'qualificationDateSource', 'lastStageChangeDate'] as const;
+      const confirmed = Object.fromEntries(fields.filter(key => key in result.confirmed!).map(key => [key, result.confirmed![key]]));
+      const apply = <T extends Deal>(old: T): T => old.boardId === variables.board.id && old.status === variables.targetStageId
+        ? { ...old, ...confirmed } : old;
+      queryClient.setQueryData<DealView[]>(DEALS_VIEW_KEY, old => old?.map(row => row.id === result.dealId ? apply(row) : row));
+      queryClient.setQueryData<Deal>(queryKeys.deals.detail(result.dealId), old => old ? apply(old) : old);
     },
 
     // Rollback on error

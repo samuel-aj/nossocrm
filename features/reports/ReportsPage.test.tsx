@@ -4,6 +4,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import ReportsPage from './ReportsPage';
 import { calculatePerformance } from './performanceMetrics';
 import type { Board, Deal } from '@/types';
+import { august, board as fixtureBoard, lead, lifecycle, snapshot } from './performanceTestFixtures';
 
 const state = vi.hoisted(() => ({ data: null as any, error: null as any, isError: false, isFetching: false, pdf: vi.fn(), query: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
@@ -30,43 +31,64 @@ describe('tela Performance', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Falha de acesso');
     expect(screen.getByRole('button', { name: 'PDF' })).toBeDisabled();
   });
-  it('separa perdas desqualificadas dos encerramentos qualificados', () => {
-    state.data = { entries: [], qualifiedCount: 40, qualificationRate: 80, closingRate: 37.5,
-      hasQualifiedStage: true, wonDeals: Array.from({length:15}, (_, i) => ({ id: String(i), value: 100, owner: { name: 'Samuel' } })),
+  const board = { id: 'board', name: 'Teste', stages: [{ id: 'q', label: 'Proposta enviada', linkedLifecycleStage: 'MQL' }] } as Board;
+  const range = { start: new Date('2026-08-01'), end: new Date('2026-08-31') };
+  const empty = () => ({ ...calculatePerformance([], [], board, range), deals: [] });
+  it('conecta a rosca aos leads da origem selecionada e mostra o valor histórico na lista', () => {
+    const deals = [lead('source-meta', { title: 'Entrada Meta', leadSource: 'Google Ads' }), lead('source-unknown', { title: 'Entrada sem origem', leadSource: null })];
+    const lifecycleEvents = deals.map(deal => lifecycle(deal, 'entered_board', deal.createdAt, { leadSource: deal.id === 'source-meta' ? 'Meta Ads' : null }));
+    state.data = { ...calculatePerformance(deals, [], fixtureBoard, august, '', undefined, snapshot, { lifecycleEvents }), deals };
+    render(<ReportsPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Detalhar Meta Ads: 1 lead, 50,0%' }));
+    const modal = screen.getByRole('dialog');
+    expect(within(modal).getAllByRole('link')).toHaveLength(1);
+    expect(within(modal).getByRole('link', { name: /Entrada Meta/ })).toBeInTheDocument();
+    expect(within(modal).getByRole('columnheader', { name: 'Origem do lead' })).toBeInTheDocument();
+    expect(within(modal).getByRole('cell', { name: 'Meta Ads' })).toBeInTheDocument();
+    expect(within(modal).queryByRole('cell', { name: 'Google Ads' })).not.toBeInTheDocument();
+    fireEvent.click(within(modal).getByRole('button', { name: /Fechar/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ver todas as origens' }));
+    expect(within(screen.getByRole('dialog')).getAllByRole('link')).toHaveLength(2);
+  });
+  it('explica perdas qualificadas e exporta a visão selecionada', () => {
+    state.data = { ...empty(), qualifiedCount: 40, qualificationRate: 80, closingRate: 37.5,
+      hasQualifiedStage: true, cohortWonDeals: Array(15).fill({}), wonDeals: Array.from({length:15}, (_, i) => ({ id: String(i), value: 100, owner: { name: 'Samuel' } })),
       lostDeals: [...Array(10).fill({ lossCategory: 'qualified' }), ...Array(5).fill({ lossCategory: 'disqualified' })],
-      wonRevenue: 1500, revenueChange: -31.6, fastestSalesCycle: 3, slowestSalesCycle: 50, avgSalesCycle: 18, stageData: [], unknownQualification: [], unknownClosure: [],
-      webhookUnavailable: false, deals: [], qualifiedIds: new Set() };
+      wonRevenue: 1500, revenueChange: -31.6, fastestSalesCycle: 3, slowestSalesCycle: 50, avgSalesCycle: 18 };
     render(<ReportsPage />);
     const card = screen.getByText('Fechamentos').parentElement!.parentElement!;
-    expect(within(card).getByText('15')).toBeInTheDocument();
-    expect(within(card).getByText('10')).toBeInTheDocument();
-    expect(screen.getByText('Faturamento fechado')).toBeInTheDocument();
+    expect(within(card).getByText('15 ganhos')).toBeInTheDocument();
+    expect(within(card).getByText('10 perdas qualificadas')).toBeInTheDocument();
+    expect(screen.getByText('Valor ganho pelos leads do grupo')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Resultados no período' }));
+    expect(screen.queryByText('Taxa de Qualificação')).not.toBeInTheDocument();
+    expect(screen.getByText('Qualificados no período')).toBeInTheDocument();
     expect(screen.getByText('-31,6% vs mês passado')).toBeInTheDocument();
-    expect(screen.getByText('Rápido: 3d | Lento: 50d')).toBeInTheDocument();
-    expect(screen.queryByText('Receita ganha no período')).not.toBeInTheDocument();
-    expect(screen.queryByText(/Conferir qualificados no período/)).not.toBeInTheDocument();
-    expect(within(card).getByText('Ganhos / Perdas qualificadas')).toBeInTheDocument();
-  });
-  it('mostra a taxa acima de 100% e exporta exatamente os mesmos dados', () => {
-    state.data = { entries: Array(10).fill({}), qualifiedCount: 12, qualificationRate: 120, closingRate: 25,
-      hasQualifiedStage: true, wonDeals: [], lostDeals: [], wonRevenue: 0, avgSalesCycle: null,
-      stageData: [{ name: 'Qualificado', count: 12 }], unknownQualification: [], unknownClosure: [],
-      webhookUnavailable: false, deals: [], qualifiedIds: new Set() };
-    render(<ReportsPage />);
-    expect(screen.getByText('120,0%')).toBeInTheDocument();
-    expect(screen.getByText('25,0%')).toBeInTheDocument();
-    expect(screen.getByText('12 qualificados de 10 leads')).toBeInTheDocument();
+    expect(state.query).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), '', expect.anything(), '', 'period');
     fireEvent.click(screen.getByRole('button', { name: 'PDF' }));
-    expect(state.pdf).toHaveBeenCalledWith(state.data, expect.objectContaining({ boardName: 'Teste', owner: 'Todos os vendedores' }));
+    expect(state.pdf).toHaveBeenCalledWith(state.data, expect.objectContaining({ mode: 'period' }));
+  });
+  it('mostra cobertura histórica e não apresenta taxas na carteira atual', () => {
+    state.data = { ...empty(), coverage: { unknownQualificationCount: 3, estimatedQualificationCount: 2, unknownClosureCount: 1, legacySnapshotCount: 5, unknownBoardMembershipCount: 2 }, currentDeals: Array(4).fill({}), currentValue: 400 };
+    render(<ReportsPage />);
+    expect(screen.getByText('Histórico incompleto.')).toBeInTheDocument();
+    expect(screen.getByText(/As taxas e os períodos usam apenas datas e vínculos/)).toHaveTextContent('com data estimada: 2');
+    fireEvent.click(screen.getByRole('button', { name: 'Carteira atual' }));
+    expect(screen.queryByText('Taxa de Fechamento')).not.toBeInTheDocument();
+    expect(screen.getByText('Negócios abertos')).toBeInTheDocument();
+    expect(screen.getByText('4')).toBeInTheDocument();
+    expect(screen.queryByText('Histórico incompleto.')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Filtros/ }));
+    expect(within(screen.getByRole('dialog')).queryByText('Período')).not.toBeInTheDocument();
   });
 
   it('abre os leads de perdas e motivos, permite buscar e conserva o link do cartão', () => {
     const board = { id: 'board', name: 'Teste', stages: [{ id: 'q', label: 'Qualificado' }] } as Board;
     const deals = ['Contato repetido', 'Sem interesse'].map((reason, i) => ({ id: `lost-${i}`, title: `Lead ${i}`, boardId: 'board', status: 'q', owner: { name: 'Ana' }, items: [],
       createdAt: '2026-08-01', isLost: true, isWon: false, closedAt: '2026-08-05', lossCategory: 'disqualified', lossReason: reason, value: 0 } as Deal));
-    state.data = { ...calculatePerformance(deals, [], board, { start: new Date('2026-08-01'), end: new Date('2026-08-31') }), deals };
+    state.data = { ...calculatePerformance(deals, deals.map(deal => ({ dealId: deal.id, stageId: 'q', boardId: 'board', date: deal.createdAt })), board, { start: new Date('2026-08-01'), end: new Date('2026-08-31') }), deals };
     render(<ReportsPage />);
-    fireEvent.click(screen.getByRole('button', { name: 'Desqualificados 2' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Total desqualificados 2' }));
     const modal = screen.getByRole('dialog');
     expect(within(modal).getAllByRole('link')).toHaveLength(2);
     expect(within(modal).getByRole('link', { name: /Lead 0/ })).toHaveAttribute('href', '/boards?deal=lost-0');
@@ -79,14 +101,14 @@ describe('tela Performance', () => {
 
   it('mostra as duas bases da taxa e propaga o filtro de produto para consulta e PDF', () => {
     const board = { id: 'board', name: 'Teste', stages: [{ id: 'q', label: 'Qualificado' }] } as Board;
-    const deals = [{ id: 'q1', title: 'Lead antigo', owner: { name: 'Ana' }, boardId: 'board', status: 'q', items: [], createdAt: '2026-07-01', qualifiedAt: '2026-08-03', isLost: false, isWon: false } as Deal];
-    state.data = { ...calculatePerformance(deals, [], board, { start: new Date('2026-08-01'), end: new Date('2026-08-31') }), deals, productOptions: [{ id: 'product', name: 'Produto Teste' }] };
+    const deals = [{ id: 'q1', title: 'Lead qualificado', owner: { name: 'Ana' }, boardId: 'board', status: 'q', items: [], createdAt: '2026-08-01', qualifiedAt: '2026-08-03', qualificationDateSource: 'history', isLost: false, isWon: false } as Deal];
+    state.data = { ...calculatePerformance(deals, deals.map(deal => ({ dealId: deal.id, stageId: 'q', boardId: 'board', date: deal.createdAt })), board, { start: new Date('2026-08-01'), end: new Date('2026-08-31') }), deals, productOptions: [{ id: 'product', name: 'Produto Teste' }] };
     render(<ReportsPage />);
     fireEvent.click(screen.getByRole('button', { name: /Taxa de Qualificação/ }));
     const modal = screen.getByRole('dialog');
-    expect(within(modal).getByRole('link', { name: /Lead antigo/ })).toBeInTheDocument();
-    fireEvent.click(within(modal).getByRole('button', { name: 'Total de leads (0)' }));
-    expect(within(modal).queryByRole('link')).not.toBeInTheDocument();
+    expect(within(modal).getByRole('link', { name: /Lead qualificado/ })).toBeInTheDocument();
+    fireEvent.click(within(modal).getByRole('button', { name: 'Entradas (1)' }));
+    expect(within(modal).getByRole('link', { name: /Lead qualificado/ })).toBeInTheDocument();
     fireEvent.click(within(modal).getByRole('button', { name: /Fechar/i }));
     expect(screen.getByRole('combobox', { name: 'Selecionar Pipeline' })).toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: 'Filtrar por Produto' })).not.toBeInTheDocument();
@@ -94,13 +116,13 @@ describe('tela Performance', () => {
     expect(within(screen.getByRole('dialog')).queryByRole('combobox', { name: 'Selecionar Pipeline' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('combobox', { name: 'Filtrar por Produto' }));
     fireEvent.click(screen.getByRole('option', { name: 'Produto Teste' }));
-    expect(state.query).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), '', expect.anything(), '');
+    expect(state.query).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), '', expect.anything(), '', 'cohort');
     fireEvent.click(screen.getByRole('button', { name: 'Aplicar filtros' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(state.query).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), '', expect.anything(), 'product');
+    expect(state.query).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), '', expect.anything(), 'product', 'cohort');
     fireEvent.click(screen.getByRole('combobox', { name: 'Selecionar Pipeline' }));
     fireEvent.click(screen.getByRole('option', { name: 'Outra pipeline' }));
-    expect(state.query).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'other' }), expect.anything(), '', expect.anything(), 'product');
+    expect(state.query).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'other' }), expect.anything(), '', expect.anything(), 'product', 'cohort');
     fireEvent.click(screen.getByRole('button', { name: /^Filtros/ }));
     expect(screen.getByRole('combobox', { name: 'Filtrar por Produto' })).toHaveTextContent('Produto Teste');
     fireEvent.click(screen.getByRole('combobox', { name: 'Filtrar por Produto' }));

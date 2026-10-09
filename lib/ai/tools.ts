@@ -1,3 +1,4 @@
+import { readDbLeadSource } from '@/lib/deals/leadSource';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { tool } from 'ai';
 import { z } from 'zod';
@@ -89,7 +90,20 @@ export function createCRMTools(context: CRMCallOptions, userId: string, scopedCl
         stageId?: string;
         stageName?: string;
     }) => {
-        if (params.stageId) return { ok: true as const, stageId: params.stageId };
+        if (params.stageId) {
+            // The AI may use a service-role client, so a raw ID must never
+            // bypass board/tenant validation (the name path is already scoped).
+            const { data: stage, error } = await supabase
+                .from('board_stages')
+                .select('id')
+                .eq('organization_id', organizationId)
+                .eq('board_id', params.boardId)
+                .eq('id', params.stageId)
+                .maybeSingle();
+            if (error) return { ok: false as const, error: formatSupabaseFailure(error) };
+            if (!stage) return { ok: false as const, error: 'O estágio destino não pertence ao board e à organização deste negócio.' };
+            return { ok: true as const, stageId: stage.id };
+        }
 
         const stageName = (params.stageName || '').trim();
         if (!stageName) {
@@ -650,6 +664,7 @@ export function createCRMTools(context: CRMCallOptions, userId: string, scopedCl
                     status: deal.is_won ? '✅ Ganho' : deal.is_lost ? '❌ Perdido' : '🔄 Aberto',
                     stage: (deal.stage as any)?.name || (deal.stage as any)?.label || 'N/A',
                     priority: deal.priority || DealPriority.MEDIUM,
+                    leadSource: readDbLeadSource(deal),
                     contact: (deal.contact as any)?.name || 'N/A',
                     contactEmail: (deal.contact as any)?.email || 'N/A',
                     pendingActivities: pendingActivities.length,
@@ -675,49 +690,37 @@ export function createCRMTools(context: CRMCallOptions, userId: string, scopedCl
                     return { error: 'Nenhum deal especificado.' };
                 }
 
-                const { data: deal } = await supabase
+                const { data: deal, error: dealError } = await supabase
                     .from('deals')
                     .select('board_id, title')
                     .eq('organization_id', organizationId)
                     .eq('id', targetDealId)
                     .single();
 
+                if (dealError) return { error: formatSupabaseFailure(dealError) };
                 if (!deal) {
                     return { error: 'Deal não encontrado.' };
                 }
 
-                let targetStageId = stageId;
-                if (!targetStageId && stageName) {
-                    const { data: stages } = await supabase
-                        .from('board_stages')
-                        .select('id, name, label')
-                        .eq('organization_id', organizationId)
-                        .eq('board_id', deal.board_id)
-                        .or(`name.ilike.%${stageName}%,label.ilike.%${stageName}%`);
+                const stageRes = await resolveStageIdForBoard({ boardId: deal.board_id, stageId, stageName });
+                if (!stageRes.ok) return { error: stageRes.error };
 
-                    if (stages && stages.length > 0) {
-                        targetStageId = stages[0].id;
-                    } else {
-                        return { error: `Estágio "${stageName}" não encontrado.` };
-                    }
-                }
-
-                if (!targetStageId) {
-                    return { error: 'Especifique o estágio destino.' };
-                }
-
-                const { error } = await supabase
+                const { data: moved, error } = await supabase
                     .from('deals')
                     .update({
-                        stage_id: targetStageId,
+                        stage_id: stageRes.stageId,
                         updated_at: new Date().toISOString()
                     })
                     .eq('organization_id', organizationId)
-                    .eq('id', targetDealId);
+                    .eq('board_id', deal.board_id)
+                    .eq('id', targetDealId)
+                    .select('id')
+                    .maybeSingle();
 
                 if (error) {
                     return { success: false, error: error.message };
                 }
+                if (!moved) return { success: false, error: 'O negócio mudou de board ou não está mais disponível. Consulte-o novamente antes de mover.' };
 
                 return { success: true, message: `Deal "${deal.title}" movido com sucesso!` };
             },
@@ -915,22 +918,27 @@ export function createCRMTools(context: CRMCallOptions, userId: string, scopedCl
                     return { error: 'Não consegui identificar o deal. Forneça o ID, título ou nome do estágio.' };
                 }
 
-                // Se existir um estágio de "Ganho" no board, também mova o card para ele.
-                // Isso evita a sensação de "não moveu" quando a UI do kanban é baseada em stage_id.
+                // Resolve the actual board, not a potentially stale chat context.
+                const { data: currentDeal, error: currentDealError } = await supabase.from('deals')
+                    .select('board_id').eq('organization_id', organizationId).eq('id', targetDealId).is('deleted_at', null).maybeSingle();
+                if (currentDealError || !currentDeal) return { success: false, error: currentDealError?.message || 'Deal não encontrado' };
+                const actualBoardId = currentDeal.board_id;
+                const { data: boardConfig, error: boardError } = await supabase.from('boards')
+                    .select('linked_lifecycle_stage,won_stage_id,won_stay_in_stage').eq('organization_id', organizationId).eq('id', actualBoardId).maybeSingle();
+                if (boardError) return { success: false, error: boardError.message };
                 let wonStageId: string | null = null;
-                const wonStageNameFromContext = context.wonStage || 'Ganho';
-
-                if (targetBoardId && wonStageNameFromContext) {
-                    const { data: wonStages } = await supabase
-                        .from('board_stages')
-                        .select('id, name, label')
-                        .eq('organization_id', organizationId)
-                        .eq('board_id', targetBoardId)
-                        .or(`name.ilike.%${wonStageNameFromContext}%,label.ilike.%${wonStageNameFromContext}%`)
-                        .limit(1);
-
-                    if (wonStages && wonStages.length > 0) {
-                        wonStageId = wonStages[0].id;
+                if (!boardConfig?.won_stay_in_stage) {
+                    if (boardConfig?.linked_lifecycle_stage !== 'CUSTOMER') {
+                        const { data: customerStage, error: stageError } = await supabase.from('board_stages')
+                            .select('id').eq('organization_id', organizationId).eq('board_id', actualBoardId)
+                            .eq('linked_lifecycle_stage', 'CUSTOMER').order('order').limit(1).maybeSingle();
+                        if (stageError) return { success: false, error: stageError.message };
+                        wonStageId = customerStage?.id || null;
+                    }
+                    if (!wonStageId && boardConfig?.won_stage_id) {
+                        const stage = await resolveStageIdForBoard({ boardId: actualBoardId, stageId: boardConfig.won_stage_id });
+                        if (!stage.ok) return { success: false, error: stage.error };
+                        wonStageId = stage.stageId;
                     }
                 }
 
@@ -948,6 +956,7 @@ export function createCRMTools(context: CRMCallOptions, userId: string, scopedCl
                     .update(updateData)
                     .eq('organization_id', organizationId)
                     .eq('id', targetDealId)
+                    .eq('board_id', actualBoardId)
                     .select('title, value')
                     .single();
 
