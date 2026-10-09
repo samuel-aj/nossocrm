@@ -1,11 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import { calculatePerformance } from './performanceMetrics';
 import { dealAtEvent, lifecycleEventFromRow, type DbLifecycleEvent } from './performanceHistory';
-import { groupLeadSources, leadSourceSlices, UNKNOWN_LEAD_SOURCE_KEY } from './leadSourceReport';
+import { groupLeadSources, leadSourceSlices, UNKNOWN_LEAD_SOURCE_KEY, LEAD_SOURCE_BASE } from './leadSourceReport';
 import { reportDrilldown } from './reportDrilldown';
 import { august, board, lead, lifecycle, movement, snapshot } from './performanceTestFixtures';
+import { monthlyPresentationFixture } from './monthlyPresentationTestFixture';
 
 describe('origem dos leads na mesma base do relatório', () => {
+  it('mensal preserva entradas, origem e filtros históricos sem incluir ganhos de fora', () => {
+    const metrics = monthlyPresentationFixture();
+    const ids = (rows: typeof metrics.deals) => rows.map(row => row.id).sort();
+    expect(metrics.leadSourceTotal).toBe(10);
+    expect(ids(metrics.leadSourceGroups.flatMap(group => group.deals))).toEqual(ids(metrics.entries));
+    expect(metrics.entries).toHaveLength(10);
+    expect(metrics.leadSourceGroups.find(group => group.label === 'Meta Ads')!.deals.map(row => row.id)).toEqual(['winner-1']);
+    expect(metrics.leadSourceGroups.some(group => group.label === 'Google Ads')).toBe(false);
+    const filtered = calculatePerformance(metrics.deals, metrics.stageEvents, metrics.board, august, 'bia', undefined, snapshot,
+      { mode: 'monthly', lifecycleEvents: metrics.lifecycleEvents, productId: 'p2' });
+    expect(filtered.leadSourceTotal).toBe(0);
+    expect(filtered.wonDeals.map(row => row.id)).toEqual(['winner-1']);
+    const baseline = calculatePerformance(metrics.deals, metrics.stageEvents, metrics.board, august, '', undefined, snapshot,
+      { mode: 'conversion', lifecycleEvents: metrics.lifecycleEvents });
+    expect(metrics.leadSourceGroups).toEqual(baseline.leadSourceGroups);
+    const detail = reportDrilldown(metrics, { kind: 'source' });
+    expect(ids(detail.groups[0].deals)).toEqual(ids(metrics.entries));
+    expect(detail.contextDescription).toContain('origem da entrada selecionada');
+    expect(LEAD_SOURCE_BASE.monthly).toContain('Ganhos fora da base não aumentam este total');
+  });
+
   it('inclui origem vazia no denominador, respeita null explícito e nunca infere por UTM', () => {
     const deals = [lead('native', { leadSource: 'Meta Ads', customFields: { origem: 'Google Ads' } }),
       lead('legacy', { customFields: { origem: 'Google Ads' } }),

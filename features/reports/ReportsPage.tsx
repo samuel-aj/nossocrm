@@ -26,7 +26,7 @@ import { NO_PRODUCT, reportDrilldown, type ReportSelection } from './reportDrill
 const ReportsPage: React.FC = () => {
   const { boards, deals: allCrmDeals, products = [] } = useCRM();
   const { profile } = useAuth();
-  const mode = 'conversion';
+  const mode = 'monthly';
   const [dayKey, setDayKey] = useState(() => new Date().toDateString());
   useEffect(() => {
     const timer = setInterval(() => setDayKey(new Date().toDateString()), 60_000);
@@ -153,7 +153,7 @@ const ReportsPage: React.FC = () => {
             Relatórios de Performance
           </h1>
           <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
-            Conversão dos leads que entraram no período selecionado.
+            Análise detalhada de vendas e tendências.
           </p>
         </div>
         <div className="flex min-w-0 items-center justify-end gap-2 sm:gap-3 max-md:w-full">
@@ -226,7 +226,7 @@ const ReportsPage: React.FC = () => {
           </p>
         </button>
 
-        {/* Mesmos ganhos comprovados do marco Cliente do gráfico. */}
+        {/* Conversão somente entre os leads da base de entradas. */}
         <button type="button" onClick={() => setSelection({ kind: 'closing' })} className="glass text-left p-4 rounded-xl border border-slate-200 dark:border-white/5 shadow-sm hover:border-primary-400 dark:hover:border-primary-500/50 focus-visible:ring-2 focus-visible:ring-primary-500 transition-colors">
           <div className="flex items-center gap-2 mb-2">
             <div className="p-2 rounded-lg bg-teal-500/10">
@@ -238,8 +238,11 @@ const ReportsPage: React.FC = () => {
             {formatReportRate(metrics.closingRate)}
           </p>
           <p className="text-xs text-slate-500">
-            {metrics.hasQualifiedStage ? `${wonDeals.length} ganhos de ${metrics.qualifiedCount} qualificados` : 'Configure a etapa MQL do funil'}
+            {metrics.hasQualifiedStage ? `${metrics.cohortWonDeals.length} ganhos dos ${metrics.qualifiedCount} qualificados da base` : 'Configure a etapa MQL do funil'}
           </p>
+          {metrics.unqualifiedWonDeals.length > 0 && <p className="mt-1 text-xs text-slate-500">
+            {metrics.unqualifiedWonDeals.length} ganhos da base sem qualificação comprovada.
+          </p>}
         </button>
 
         {/* Ciclo Médio */}
@@ -262,15 +265,18 @@ const ReportsPage: React.FC = () => {
             <div className="p-2 rounded-lg bg-orange-500/10">
               <TrendingUp className="text-orange-500" size={18} />
             </div>
-            <span className="text-xs text-slate-500">Fechamentos</span>
+            <span className="text-xs text-slate-500">Fechamentos no período</span>
           </div>
           <p className="text-2xl font-bold text-slate-900 dark:text-white">
             <span className="text-emerald-600">{wonDeals.length} ganhos</span>
           </p>
+          {metrics.outsideEntryWonDeals.length > 0 && <p className="text-xs text-slate-500">
+            {metrics.entryWonDeals.length} da base · {metrics.outsideEntryWonDeals.length} fora da base
+          </p>}
           <p className="text-xs text-slate-500">
             {lostDeals.filter(deal => deal.lossCategory === 'qualified').length} perdas qualificadas
           </p>
-          <p className="mt-1 text-xs text-slate-500">Conversão total: {formatReportRate(metrics.totalConversionRate)} dos leads</p>
+          <p className="mt-1 text-xs text-slate-500">Conversão da base: {formatReportRate(metrics.totalConversionRate)}</p>
         </button>
       </div>
 
@@ -299,8 +305,8 @@ const ReportsPage: React.FC = () => {
             </button>
           </div>
           <LazyStageConversionChart data={stageConversionData} onStageClick={setSelectedStageId}
-            description={metrics.usesCustomerPromotion ? 'Mesma base dos cartões. MQL conta os qualificados; Cliente conta os ganhos comprovados.' : 'Mesma base dos cartões. Qualificação e ganho exigem registros comprovados.'} />
-          <p className="mt-4 text-xs text-slate-500">Percentuais mostram a conversão para a próxima etapa.{metrics.usesCustomerPromotion && ' Protocolo acompanha os clientes após o ganho.'}</p>
+            description="Avanço das entradas do período. O marco de ganhos mostra todos os fechamentos do intervalo." />
+          <p className="mt-4 text-xs text-slate-500">Taxas calculadas sobre a base de entradas. Ganhos fora dessa base aparecem somente nos fechamentos do período e no pós-venda.</p>
           {metrics.diagnosticsDeals.length > 0 && <button type="button" onClick={() => setSelection({ kind: 'diagnostics' })}
             className="mt-2 self-start rounded text-left text-xs text-slate-500 underline underline-offset-2 hover:text-primary-600 focus-visible:ring-2 focus-visible:ring-primary-500">
             Conferir {metrics.diagnosticsDeals.length} {metrics.diagnosticsDeals.length === 1 ? 'registro fora' : 'registros fora'} da conversão comprovada
@@ -407,7 +413,7 @@ const ReportsPage: React.FC = () => {
       {detail && metrics && selectedBoard && <ReportLeadsModal key={JSON.stringify(selection)} detail={detail} board={selectedBoard}
         filtersLabel={`${selectedBoard.name} · ${modeInfo.label} · ${PERIOD_LABELS[period]} · ${ownersList.find(owner => owner.id === selectedOwnerId)?.name || 'Todos os vendedores'} · ${productLabel}`}
         qualificationDates={metrics.leadQualificationDates} estimatedQualificationIds={metrics.estimatedQualificationIds} onClose={() => setSelection(null)} />}
-      {selectedStage && metrics && <StageLeadsModal stage={selectedStage}
+      {selectedStage && metrics && <StageLeadsModal stage={selectedStage} mode={mode}
         qualificationDates={metrics.leadQualificationDates} estimatedQualificationIds={metrics.estimatedQualificationIds} onClose={() => setSelectedStageId(null)} />}
       </>}
     </div>

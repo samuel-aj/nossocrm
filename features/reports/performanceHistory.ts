@@ -1,7 +1,7 @@
 import type { Deal, DealItem } from '@/types';
 import { getDealLeadSource, normalizeLeadSource } from '@/lib/deals/leadSource';
 
-export type PerformanceMode = 'cohort' | 'period' | 'current' | 'conversion';
+export type PerformanceMode = 'cohort' | 'period' | 'current' | 'conversion' | 'monthly';
 export type LifecycleEventType = 'entered_board' | 'left_board' | 'qualified' | 'won' | 'lost' | 'reopened' | 'stage_changed';
 export interface LifecycleEvent {
   id: string; dealId: string; boardId: string; type: LifecycleEventType; date: string; recordedAt?: string;

@@ -6,6 +6,7 @@ import { groupLeadSources } from './leadSourceReport';
 import { buildEntryFunnel, type EntryFunnel } from './entryFunnel';
 import { buildConversionFunnel, selectConversionPopulation } from './conversionFunnel';
 import type { HistoricalReportDeal } from './performanceHistory';
+import { calculateMonthlyResults, type MonthlyQualificationEvidence } from './monthlyResults';
 export type { LifecycleEvent, PerformanceMode } from './performanceHistory';
 
 export interface StageEvent {
@@ -182,7 +183,7 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
     const candidates = type === 'qualified' ? [...firstQualified.values()] : type === 'won' ? episodes.wins : canonical.filter(event => event.type === type);
     return candidates.filter(event => mode === 'cohort' ? cohortIds.has(event.dealId) : inPeriod(event.date) && filtered(historical(event)));
   };
-  const conversion = mode === 'conversion' ? selectConversionPopulation({ entryEvents: selectOriginal('entered_board'), events: canonical,
+  const conversion = mode === 'conversion' || mode === 'monthly' ? selectConversionPopulation({ entryEvents: selectOriginal('entered_board'), events: canonical,
     visits: history, boardId: board.id, stageIds: board.stages.map(stage => stage.id), qualifiedStageId: qualifiedStage,
     customerStageId: rules.steps[rules.customerIndex]?.id || board.wonStageId, usesCustomerPromotion,
     lost: rules.lost, cutoffDate: new Date(cutoff).toISOString(),
@@ -252,14 +253,23 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   const entryFunnel: EntryFunnel = conversion ? buildConversionFunnel(conversion, entries, qualifiedDeals, wonDeals, stageData) : mode === 'period' ? buildEntryFunnel({ entries, entryEvents: select('entered_board'),
     stageEvents: history, lifecycleEvents: ledger, boardId: board.id, stages: stageData, cutoffDate: new Date(cutoff).toISOString(),
   }) : { stages: [], baseCount: 0, unknownStageCount: 0 };
-  const wonRevenue = wonDeals.reduce((sum, deal) => sum + deal.value, 0);
+  const monthly = mode === 'monthly' ? calculateMonthlyResults({ deals, board,
+    startDate: range.start.toISOString(), cutoffDate: new Date(cutoff).toISOString(), ownerId, productId,
+    entries, qualifiedDeals, qualificationDates, leadQualificationDates,
+    qualificationConfirmedDates: new Map([...(conversion?.qualificationConfirmedAt || [])].map(([id, proof]) => [id, proof.date])),
+    entryFunnel, hasQualifiedStage: rules.qualifiedIndex >= 0, diagnosticReasonsByDeal, diagnosticsDeals, excludedQualificationDeals }) : undefined;
+  const revenueDeals = monthly?.wonDeals || wonDeals;
+  const wonRevenue = revenueDeals.reduce((sum, deal) => sum + deal.value, 0);
   const effectiveComparison = comparisonRange && (cutoff < range.end.getTime() ? { start: comparisonRange.start,
     end: new Date(Math.min(comparisonRange.end.getTime(), comparisonRange.start.getTime() + Math.max(0, cutoff - range.start.getTime()))) } : comparisonRange);
   const previousRevenue: number | null = effectiveComparison && mode !== 'current'
     ? calculatePerformance(deals, events, board, effectiveComparison, ownerId, undefined, snapshotDate, options).wonRevenue : null;
-  const cycles = wonDeals.map(deal => (time(deal.closedAt) - time(deal.createdAt)) / 86400000).filter(days => Number.isFinite(days) && days >= 0);
+  const cycles = revenueDeals.map(deal => (time(deal.closedAt) - time(deal.createdAt)) / 86400000).filter(days => Number.isFinite(days) && days >= 0);
   const reportedIds = new Set([...entries, ...qualifiedDeals, ...wonDeals, ...lostDeals, ...reopenedDeals, ...stageData.flatMap(stage => stage.deals)].map(deal => deal.id));
   return {
+    workedDeals: entries, qualificationEvidenceByDeal: new Map<string, MonthlyQualificationEvidence>(),
+    entryWonDeals: cohortWonDeals, outsideEntryWonDeals: [] as Deal[],
+    outcomePolicy: undefined as 'current_retained' | undefined,
     mode, usesCustomerPromotion, cutoffDate: new Date(cutoff).toISOString(), entries, qualifiedDeals, cohortWonDeals, currentDeals, currentValue, reopenedDeals,
     leadSourceGroups, leadSourceTotal: entries.length,
     estimatedQualificationIds, qualifiedIds, qualificationDates, leadQualificationDates, qualifiedCount: qualifiedIds.size,
@@ -276,6 +286,7 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
     slowestSalesCycle: cycles.length ? Math.round(Math.max(...cycles)) : null,
     avgSalesCycle: cycles.length ? Math.round(cycles.reduce((a, b) => a + b, 0) / cycles.length) : null,
     stageData: conversion ? entryFunnel.stages : stageData, entryFunnel,
+    ...monthly,
   };
 }
 export type PerformanceMetrics = ReturnType<typeof calculatePerformance>;
