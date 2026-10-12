@@ -632,7 +632,9 @@ export const CustomFieldsManager: React.FC = () => {
         isOpen={confirmField !== null}
         onClose={() => setConfirmField(null)}
         onConfirm={() => {
-          if (confirmField) void removeCustomField(confirmField.id).then(() => addToast('Campo excluído.', 'info'));
+          if (confirmField) void removeCustomField(confirmField.id)
+            .then(() => addToast('Campo excluído.', 'info'))
+            .catch((error: Error) => addToast(error.message || 'Não foi possível excluir o campo.', 'error'));
           setConfirmField(null);
         }}
         title="Excluir campo?"

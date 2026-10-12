@@ -15,10 +15,13 @@ import type { Board, BoardStage } from '@/types';
 import { useStageAutomations, type PipelineRule, type StageAutomation } from './useStageAutomations';
 import { StageActionModal } from './StageActionModal';
 import { PipelineWebhookRuleModal } from './PipelineWebhookRuleModal';
+import { StageSettingsModal } from '../requirements/StageSettingsModal';
+import { useAuth } from '@/context/AuthContext';
 
 export type KanbanAutomation = {
   byStage: Map<string, StageAutomation[]>;
   loading: boolean;
+  onEditStage?: (stage: BoardStage) => void;
   onAdd: (stage: BoardStage) => void;
   onOpen: (item: StageAutomation) => void;
   onToggle: (item: StageAutomation) => void;
@@ -39,6 +42,8 @@ function ActiveLayer({ board, children }: { board: Board; children: Children }) 
   const { addToast } = useToast();
   const { agentsApproved } = useWaAgentsAccess();
   const auto = useStageAutomations(board);
+  const { profile } = useAuth();
+  const [editingStage, setEditingStage] = useState<BoardStage | null>(null);
   const [action, setAction] = useState<{ key: number; stage: BoardStage; item: StageAutomation | null } | null>(null);
   const [webhook, setWebhook] = useState<{ stage: BoardStage; rule: PipelineRule | null } | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<StageAutomation | null>(null);
@@ -60,6 +65,7 @@ function ActiveLayer({ board, children }: { board: Board; children: Children }) 
   const automation: KanbanAutomation = {
     byStage: auto.byStage,
     loading: auto.isLoading,
+    onEditStage: ['admin', 'super_admin'].includes(profile?.role ?? '') ? setEditingStage : undefined,
     onAdd: (stage) => setAction({ key: Date.now(), stage, item: null }),
     onOpen: (item) => {
       const stage = stageOf(item.stageId);
@@ -103,6 +109,7 @@ function ActiveLayer({ board, children }: { board: Board; children: Children }) 
   return (
     <>
       {children(automation)}
+      {editingStage && <StageSettingsModal key={editingStage.id} board={board} stage={editingStage} onClose={() => setEditingStage(null)} />}
       {action ? (
         <StageActionModal
           key={action.key}

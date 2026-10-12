@@ -140,8 +140,9 @@ export const useSettingsController = () => {
   };
 
   const handleRemoveField = (id: string) => {
-    removeCustomField(id);
-    addToast('Campo personalizado removido.', 'info');
+    void removeCustomField(id)
+      .then(() => addToast('Campo personalizado removido.', 'info'))
+      .catch((error: Error) => addToast(error.message || 'Não foi possível excluir o campo.', 'error'));
   };
 
   // Grupos: criar vazio, excluir (campos voltam pra "gerais") e mover campo via drag & drop

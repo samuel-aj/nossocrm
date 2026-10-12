@@ -1363,7 +1363,8 @@ export default function DealCockpitClient({ dealId }: { dealId?: string }) {
       if (nextStageId === selectedDeal.status) return;
 
       try {
-        await moveDeal(selectedDeal, nextStageId);
+        const result = await moveDeal(selectedDeal, nextStageId);
+        if (result?.cancelled || result?.scopeChanged) return;
         const next = selectedBoard.stages.find((s) => s.id === nextStageId);
         pushToast(`Etapa: ${next?.label ?? 'Atualizada'}`, 'success');
 

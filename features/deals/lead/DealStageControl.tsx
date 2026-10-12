@@ -68,7 +68,7 @@ export function DealStageControl({ deal, size = 'md', align = 'left' }: Props) {
     if (submittingRef.current || !permissions.deals.move) return;
     submittingRef.current = true;
     try {
-      await move.mutateAsync({
+      const result = await move.mutateAsync({
         dealId: deal.id,
         targetStageId: stage.id,
         deal,
@@ -80,6 +80,7 @@ export function DealStageControl({ deal, size = 'md', align = 'left' }: Props) {
         explicitWin: win,
         explicitReopen: reopen,
       });
+      if (result?.cancelled || result?.scopeChanged) return;
       addToast(
         board.id !== deal.boardId ? `Lead movido para ${board.name}, etapa ${stage.label}` : `Etapa alterada para ${stage.label}`,
         'success'

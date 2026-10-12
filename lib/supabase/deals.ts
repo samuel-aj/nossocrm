@@ -242,6 +242,23 @@ const transformDealToDb = (deal: Partial<Deal>): Partial<DbDeal> => {
  * ```
  */
 export const dealsService = {
+  async completeStageMove(args: {
+    deal: Deal; targetBoardId: string; targetStageId: string;
+    changes: Pick<Partial<Deal>, 'isWon' | 'isLost' | 'lossReason' | 'lossCategory'>;
+    values: import('@/lib/deals/stageRequirements').StageRequirementValues;
+  }): Promise<Deal> {
+    if (!supabase) throw new Error('Supabase não configurado');
+    const orgId = await getCurrentOrganizationId();
+    if (!orgId || args.deal.organizationId !== orgId) throw new Error('A organização mudou. Reabra o lead.');
+    const { data, error } = await supabase.rpc('complete_deal_stage_move', {
+      p_deal_id: args.deal.id, p_expected_board_id: args.deal.boardId, p_expected_stage_id: args.deal.status,
+      p_target_board_id: args.targetBoardId, p_target_stage_id: args.targetStageId,
+      p_changes: args.changes, p_values: args.values,
+    });
+    if (error) throw error;
+    if (!data?.deal) throw new Error('Não foi possível confirmar a movimentação. Atualize o lead.');
+    return transformDeal(data.deal as DbDeal, (data.items ?? []) as DbDealItem[]);
+  },
   /**
    * Busca todos os deals da organização com seus itens.
    * 
