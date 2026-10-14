@@ -44,7 +44,12 @@ export async function POST(req: Request) {
   }
 
   const created = await createMetaGroup(conn, { subject, description: description || undefined });
-  if (!created.ok) return json({ error: `A Meta não criou o grupo: ${created.error}` }, 502);
+  if (!created.ok) {
+    if (created.code === 'GROUPS_NOT_ELIGIBLE') {
+      return json({ error: created.error, code: created.code }, 422);
+    }
+    return json({ error: `A Meta não criou o grupo: ${created.error}` }, 502);
+  }
 
   // link de convite: best-effort (a conversa existe mesmo sem ele; dá pra gerar depois)
   const invite = await getMetaGroupInviteLink(conn, created.groupId);

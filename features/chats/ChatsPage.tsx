@@ -255,12 +255,13 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
   const [leadSource, setLeadSource] = useState<string | null>(null);
   const [leadBusy, setLeadBusy] = useState(false);
 
-  // Modal "Novo grupo" (Groups API da Meta: grupo criado pela empresa, entrada por convite)
+  // Modal "Novo grupo": explica o fluxo de cada conexão sem trocar o número silenciosamente.
   const [newGroupOpen, setNewGroupOpen] = useState(false);
   const [ngSubject, setNgSubject] = useState('');
   const [ngDesc, setNgDesc] = useState('');
   const [ngConn, setNgConn] = useState('');
   const [ngBusy, setNgBusy] = useState(false);
+  const [ngError, setNgError] = useState<{ message: string; code?: string } | null>(null);
 
   // Número conectado escolhido pra ver os chats ('all' = todos). Persiste por
   // ABA (sessionStorage), casando com o modelo de org por aba: aba em outra
@@ -997,21 +998,28 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
     }
   };
 
-  // Números da API oficial conectados: só eles criam grupo pelo CRM
-  const metaConns = connsList.filter(c => c.provider === 'meta_cloud' && c.status === 'connected');
-  const canCreateGroup = groupsEnabled && metaConns.length > 0;
+  const groupConns = connsList.filter(c => c.status === 'connected');
+  const canOpenNewGroup = groupsEnabled && groupConns.length > 0;
+  const ngConnection = groupConns.find(c => c.id === ngConn);
+  const ngIsMeta = ngConnection?.provider === 'meta_cloud';
+  const ngIsQr = ngConnection?.provider === 'evolution';
+  const ngEligibilityRefused = ngError?.code === 'GROUPS_NOT_ELIGIBLE';
 
   const openNewGroupModal = () => {
     setNgSubject('');
     setNgDesc('');
-    setNgConn(metaConns[0]?.id ?? '');
+    const preferred = effectiveConn !== 'all' ? effectiveConn : contextConnectionId;
+    const preferredConnection = groupConns.find(c => c.id === preferred);
+    setNgConn(preferred ? preferredConnection?.id ?? '' : groupConns.length === 1 ? groupConns[0].id : '');
+    setNgError(null);
     setNewGroupOpen(true);
   };
 
   const handleCreateGroup = async () => {
     const subject = ngSubject.trim();
-    const connectionId = ngConn || metaConns[0]?.id || '';
-    if (!subject || !connectionId || ngBusy) return;
+    const connectionId = ngConn;
+    if (!subject || !connectionId || !ngIsMeta || !groupsEnabled || ngEligibilityRefused || ngBusy) return;
+    setNgError(null);
     setNgBusy(true);
     try {
       const res = await fetch('/api/whatsapp/groups/create', {
@@ -1024,8 +1032,12 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
         conversationId?: string;
         inviteLink?: string | null;
         error?: string;
+        code?: string;
       };
-      if (!res.ok || !j.conversationId) throw new Error(j.error || `HTTP ${res.status}`);
+      if (!res.ok || !j.conversationId) {
+        setNgError({ message: j.error || 'Não foi possível criar o grupo. Tente novamente.', code: j.code });
+        return;
+      }
       if (j.inviteLink) {
         try {
           await navigator.clipboard.writeText(j.inviteLink);
@@ -1048,7 +1060,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
         participantsCount: 1,
       });
     } catch (e) {
-      addToast((e as Error).message || 'Não deu para criar o grupo.', 'error');
+      setNgError({ message: (e as Error).message || 'Não foi possível criar o grupo. Tente novamente.' });
     } finally {
       setNgBusy(false);
     }
@@ -1259,11 +1271,11 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                   {connected ? 'Conectado' : 'Desconectado'}
                 </span>
               )}
-              {canCreateGroup && (
+              {canOpenNewGroup && (
                 <button
                   type="button"
                   onClick={openNewGroupModal}
-                  title="Novo grupo (WhatsApp API oficial)"
+                  title="Novo grupo — escolher número"
                   aria-label="Novo grupo"
                   className="h-8 w-8 inline-flex items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 hover:text-violet-600 dark:hover:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors"
                 >
@@ -1888,7 +1900,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
       )}
       {leadConversation.dialogs}
 
-      {/* ============ MODAL: Novo grupo (API oficial) ============ */}
+      {/* ============ MODAL: Novo grupo ============ */}
       {newGroupOpen && (
         <div
           className="fixed inset-0 z-[10000] flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4"
@@ -1899,7 +1911,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
           aria-modal="true"
           aria-label="Novo grupo"
         >
-          <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl bg-white dark:bg-dark-card shadow-2xl border border-slate-200 dark:border-white/10 overflow-hidden">
+          <div className="w-full sm:max-w-md max-h-[90dvh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-white dark:bg-dark-card shadow-2xl border border-slate-200 dark:border-white/10">
             <div className="flex items-start gap-3 px-4 py-3 border-b border-slate-200 dark:border-white/10">
               <span className="mt-0.5 w-8 h-8 rounded-full bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-300 flex items-center justify-center shrink-0">
                 <Users size={16} />
@@ -1907,7 +1919,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold text-slate-900 dark:text-white">Novo grupo</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Grupo da WhatsApp API oficial: você cria, manda o link de convite e as pessoas entram (até 8).
+                  Escolha o número e confira como criar o grupo nessa conexão.
                 </p>
               </div>
               <button
@@ -1921,52 +1933,77 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
               </button>
             </div>
             <div className="px-4 py-3 space-y-3">
-              {metaConns.length > 1 && (
-                <label className="block">
-                  <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Número</span>
-                  <NativeSelect
-                    value={ngConn}
-                    onChange={e => setNgConn(e.target.value)}
-                    aria-label="Número do grupo"
-                    className="w-full bg-slate-100 dark:bg-black/20 border border-transparent focus:border-emerald-400 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none"
-                  >
-                    {metaConns.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.phoneNumber || c.profileName || 'Número'}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                </label>
+              <label className="block">
+                <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Número do grupo</span>
+                <NativeSelect
+                  value={ngConn}
+                  onChange={e => { setNgConn(e.target.value); setNgError(null); }}
+                  disabled={ngBusy}
+                  aria-label="Número do grupo"
+                  className="w-full bg-slate-100 dark:bg-black/20 border border-transparent focus:border-emerald-400 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none"
+                >
+                  <option value="">Selecione o número</option>
+                  {groupConns.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.phoneNumber || c.profileName || 'Número sem identificação'} — {c.provider === 'meta_cloud' ? 'API oficial' : c.provider === 'evolution' ? 'QR Code' : 'Outra conexão'}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </label>
+              {ngIsQr && (
+                <div className="rounded-xl border border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/30 p-3 text-sm text-sky-900 dark:text-sky-200">
+                  <p className="font-semibold">Grupo pelo WhatsApp do celular</p>
+                  <p className="mt-1">Crie o grupo no WhatsApp do celular usando o número selecionado. Ele aparecerá nos Chats após a sincronização desta conexão.</p>
+                </div>
               )}
-              <label className="block">
-                <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Nome do grupo</span>
-                <input
-                  autoFocus
-                  type="text"
-                  value={ngSubject}
-                  maxLength={128}
-                  onChange={e => setNgSubject(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      void handleCreateGroup();
-                    }
-                  }}
-                  placeholder="Ex.: Atendimento Dra. Ana"
-                  className="w-full bg-slate-100 dark:bg-black/20 border border-transparent focus:border-emerald-400 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
-                />
-              </label>
-              <label className="block">
-                <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Descrição (opcional)</span>
-                <textarea
-                  value={ngDesc}
-                  maxLength={2048}
-                  onChange={e => setNgDesc(e.target.value)}
-                  rows={2}
-                  placeholder="Para que serve o grupo"
-                  className="w-full bg-slate-100 dark:bg-black/20 border border-transparent focus:border-emerald-400 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none resize-none"
-                />
-              </label>
+              {ngConnection && !ngIsQr && !ngIsMeta && (
+                <p className="text-sm text-slate-600 dark:text-slate-300">Esta conexão não permite criar grupos pelo CRM. Escolha outro número.</p>
+              )}
+              {ngIsMeta && (
+                <>
+                  <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm text-amber-900 dark:text-amber-200">
+                    <p className="font-semibold">Grupos pela API oficial</p>
+                    <p className="mt-1">Disponível somente para números habilitados pela Meta para grupos. Estar conectado à API oficial não garante essa habilitação.</p>
+                    <p className="mt-1">Após criar, os participantes entram por link de convite.</p>
+                  </div>
+                  <label className="block">
+                    <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Nome do grupo</span>
+                    <input
+                      autoFocus
+                      type="text"
+                      value={ngSubject}
+                      disabled={ngBusy}
+                      maxLength={128}
+                      onChange={e => setNgSubject(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          void handleCreateGroup();
+                        }
+                      }}
+                      placeholder="Ex.: Atendimento Dra. Ana"
+                      className="w-full bg-slate-100 dark:bg-black/20 border border-transparent focus:border-emerald-400 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Descrição (opcional)</span>
+                    <textarea
+                      value={ngDesc}
+                      disabled={ngBusy}
+                      maxLength={2048}
+                      onChange={e => setNgDesc(e.target.value)}
+                      rows={2}
+                      placeholder="Para que serve o grupo"
+                      className="w-full bg-slate-100 dark:bg-black/20 border border-transparent focus:border-emerald-400 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none resize-none"
+                    />
+                  </label>
+                </>
+              )}
+              {ngError && (
+                <div role="alert" className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 p-3 text-sm text-red-800 dark:text-red-200">
+                  {ngError.message}
+                </div>
+              )}
             </div>
             <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-slate-200 dark:border-white/10">
               <button
@@ -1980,7 +2017,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
               <button
                 type="button"
                 onClick={() => void handleCreateGroup()}
-                disabled={!ngSubject.trim() || ngBusy}
+                disabled={!ngIsMeta || !ngSubject.trim() || ngEligibilityRefused || !groupsEnabled || ngBusy}
                 className="h-9 px-4 inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold"
               >
                 {ngBusy ? 'Criando...' : 'Criar grupo'}

@@ -14,7 +14,7 @@ import type { WaConnectionRow } from '@/lib/whatsapp/service';
 const GRAPH = () => `https://graph.facebook.com/${(process.env.META_GRAPH_VERSION || 'v21.0').trim()}`;
 
 type Ok<T> = { ok: true } & T;
-type Fail = { ok: false; error: string };
+type Fail = { ok: false; error: string; code?: 'GROUPS_NOT_ELIGIBLE' };
 
 interface GraphError {
   error?: { message?: string; error_data?: { details?: string }; code?: number };
@@ -48,6 +48,16 @@ async function graph<T>(
   }
   if (!res.ok || data?.error) {
     const err = data?.error;
+    const eligibilityRefused = [err?.error_data?.details, err?.message].some(message =>
+      typeof message === 'string' && /groups? apis? are only available for eligible phone numbers/i.test(message)
+    );
+    if (eligibilityRefused) {
+      return {
+        ok: false,
+        code: 'GROUPS_NOT_ELIGIBLE',
+        error: 'Este número não está habilitado pela Meta para criar grupos pela API oficial. A conexão ativa não garante acesso a esse recurso. Verifique a elegibilidade com a Meta ou selecione um número conectado por QR Code para ver como criar o grupo pelo celular.',
+      };
+    }
     return { ok: false, error: err?.error_data?.details || err?.message || `Meta respondeu ${res.status}` };
   }
   return { ok: true, data: data as T };
