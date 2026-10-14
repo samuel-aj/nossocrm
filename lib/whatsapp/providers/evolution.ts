@@ -132,7 +132,8 @@ export class EvolutionProvider implements WhatsAppProvider {
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     path: string,
     body?: unknown,
-    timeoutMs?: number
+    timeoutMs?: number,
+    signal?: AbortSignal
   ): Promise<{ ok: boolean; status: number; data: T | null }> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
@@ -141,7 +142,7 @@ export class EvolutionProvider implements WhatsAppProvider {
         apikey: this.token,
       },
       body: body ? JSON.stringify(body) : undefined,
-      ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
+      ...(signal ? { signal } : timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
       // sem cache; chamadas server-side
       cache: 'no-store',
     });
@@ -303,7 +304,7 @@ export class EvolutionProvider implements WhatsAppProvider {
       text: input.text,
       ...(input.isGroup && input.mentioned?.length ? { mentioned: input.mentioned } : {}),
       ...(buildQuoted(input.quoted) ? { quoted: buildQuoted(input.quoted) } : {}),
-    });
+    }, undefined, input.signal);
 
     if (!ok) {
       return { ok: false, error: describeEvolutionError(status, data), raw: data };
@@ -340,7 +341,7 @@ export class EvolutionProvider implements WhatsAppProvider {
     }
 
     if (input.isGroup && input.mentioned?.length) body.mentioned = input.mentioned;
-    const { ok, status, data } = await this.call<{ key?: { id?: string } }>('POST', path, body);
+    const { ok, status, data } = await this.call<{ key?: { id?: string } }>('POST', path, body, undefined, input.signal);
     if (!ok) return { ok: false, error: describeEvolutionError(status, data), raw: data };
     return { ok: true, providerMessageId: data?.key?.id, raw: data };
   }

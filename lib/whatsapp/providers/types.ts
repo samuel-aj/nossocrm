@@ -39,6 +39,8 @@ export interface QuotedRef {
 }
 
 export interface SendTextInput {
+  /** Optional caller deadline; cancellation never implies the message was not sent. */
+  signal?: AbortSignal;
   /** Verified group participant JIDs (never arbitrary numbers from the client). */
   mentioned?: string[];
   /** Telefone do destinatário (E.164 ou só dígitos — o adapter normaliza) */
@@ -53,6 +55,7 @@ export interface SendTextInput {
 export type OutboundMediaKind = 'image' | 'video' | 'document' | 'audio' | 'sticker';
 
 export interface SendMediaInput {
+  signal?: AbortSignal;
   mentioned?: string[];
   to: string;
   /** URL (pública/assinada) OU base64 do arquivo */
@@ -70,6 +73,7 @@ export interface SendMediaInput {
 }
 
 export interface SendTemplateInput {
+  signal?: AbortSignal;
   to: string;
   /** GRUPO: `to` é o id do grupo (só Meta) */
   isGroup?: boolean;

@@ -4,11 +4,14 @@ vi.mock('@/lib/whatsapp/api', () => ({ requireOrgUser: async () => ({ ok: true, 
   from: () => { const q = { select: () => q, eq: () => q, maybeSingle: async () => ({ data: { meta_status: 'APPROVED' } }) }; return q; },
 } }), json: (b: unknown, status = 200) => Response.json(b, { status }) }));
 vi.mock('@/lib/permissions/server', () => ({ connectionAllowed: () => true, getVisibilityRules: async () => null }));
+vi.mock('@/lib/permissions/conversationAccess', () => ({ conversationAllowed: async () => true }));
 vi.mock('@/lib/whatsapp/sendWindow', () => ({ checkSendWindow: m.guard }));
 vi.mock('@/lib/whatsapp/templateMedia', () => ({ resolveTemplateComponents: async () => [] }));
 vi.mock('@/lib/whatsapp/service', () => ({ getConnectionByOrg: async () => ({ id: 'sender', provider: 'meta_cloud', status: 'connected' }), getConnectionByIdForOrg: async () => ({ id: 'sender', provider: 'meta_cloud', status: 'connected' }), ensureConversation: m.ensure, getGroupConversation: vi.fn(), getWaGroupsEnabled: vi.fn(), getQuotableMessage: vi.fn(), recordOutboundMessage: m.record, replicateOutboundToSiblings: vi.fn() }));
 vi.mock('@/lib/whatsapp', () => ({ getProvider: () => ({ sendText: m.sendText, sendMedia: m.sendMedia, sendTemplate: m.sendTemplate }) }));
 import { POST } from './route';
+import { sendMessage } from '@/lib/whatsapp/sendMessage';
+import { requireOrgUser } from '@/lib/whatsapp/api';
 const req = (extra = {}) => new Request('https://crm.test/api/whatsapp/send', { method: 'POST', headers: { host: 'crm.test', origin: 'https://crm.test', 'content-type': 'application/json' }, body: JSON.stringify({ to: '+551198765432', text: 'teste', connectionId: 'sender', ...extra }) });
 beforeEach(() => {
   vi.clearAllMocks(); m.guard.mockResolvedValue('Janela fechada'); m.ensure.mockResolvedValue({ id: 'conv' });
@@ -32,4 +35,14 @@ it('allows approved templates through the dedicated template path', async () => 
 it('sends ordinary text when the server confirms an open window', async () => {
   m.guard.mockResolvedValue(null);
   expect((await POST(req())).status).toBe(200); expect(m.sendText).toHaveBeenCalled();
+});
+it('uses the exact authorized direct conversation without creating or claiming another thread', async () => {
+  m.guard.mockResolvedValue(null);
+  const auth = await requireOrgUser();
+  if (!auth.ok) throw new Error('test auth');
+  const response = await sendMessage(auth, { connectionId: 'sender', text: 'Olá!\n\n*Revisão* → 😊' }, {
+    exactConversation: { id: 'exact', organization_id: 'org', connection_id: 'sender', contact_id: null, wa_phone: '+551198765432', wa_name: 'Local', last_message_at: null, is_group: false },
+  });
+  expect(response.status).toBe(200); expect(m.ensure).not.toHaveBeenCalled();
+  expect(m.record).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ conversationId: 'exact', sentBy: 'u', text: 'Olá!\n\n*Revisão* → 😊' }));
 });

@@ -8,15 +8,7 @@
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { getConnectionByOrg } from '@/lib/whatsapp/service';
 
-function sanitizeFileName(name: string): string {
-  // O Storage do Supabase rejeita chaves com caracteres fora do ASCII seguro
-  // ('Invalid key') — translitera acentos (Petição.pdf -> Peticao.pdf) e
-  // troca o resto por "_".
-  const trimmed = (name || 'arquivo').slice(-120);
-  const ascii = trimmed.normalize('NFD').replace(/[̀-ͯ]/g, '');
-  const safe = ascii.replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^[_.]+/, '');
-  return safe || 'arquivo';
-}
+import { sanitizeFileName } from '@/lib/whatsapp/storageFileName';
 
 export async function POST(req: Request) {
   const auth = await requireOrgUser();

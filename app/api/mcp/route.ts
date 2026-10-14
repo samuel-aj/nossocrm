@@ -3,8 +3,12 @@ import { authPublicApi } from '@/lib/public-api/auth';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { buildCrmMcpRegistry } from '@/lib/mcp/crmRegistry';
 import { zodToJsonSchema2020 } from '@/lib/mcp/zodToJsonSchema';
+import { resolveMcpOwner } from '@/lib/mcp/whatsapp/access';
+import { addWhatsAppTools } from '@/lib/mcp/whatsapp/tools';
 
 export const runtime = 'nodejs';
+export const maxDuration = 60;
+const PROTOCOLS = ['2025-11-25', '2025-06-18', '2025-03-26'];
 
 type JsonRpcRequest = {
   jsonrpc: '2.0';
@@ -59,43 +63,49 @@ function toToolResult(payload: unknown, opts?: { isError?: boolean }) {
   };
 }
 
-async function resolveApiKeyOwnerUserId(opts: { apiKeyId: string; organizationId: string }) {
-  const sb = createStaticAdminClient();
-  const { data, error } = await sb
-    .from('api_keys')
-    .select('id, organization_id, created_by')
-    .eq('id', opts.apiKeyId)
-    .maybeSingle();
-
-  if (error || !data) return null;
-  if (data.organization_id !== opts.organizationId) return null;
-  return data.created_by as string | null;
-}
-
 export async function GET() {
-  return NextResponse.json({
-    ok: true,
-    name: 'crmia-next-mcp',
-    endpoint: '/api/mcp',
-    auth: 'Authorization: Bearer <API_KEY> (or X-Api-Key header)',
-    protocolVersion: '2025-11-25',
-  });
+  return new NextResponse(null, { status: 405, headers: { Allow: 'POST' } });
+}
+export const DELETE = GET;
+
+async function readRpcBody(request: Request) {
+  const reader = request.body?.getReader();
+  if (!reader) return null;
+  let size = 0;
+  const chunks: Uint8Array[] = [];
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > 512 * 1024) return null;
+      chunks.push(value);
+    }
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch { return null; }
+  finally { await reader.cancel().catch(() => undefined); }
 }
 
 export async function POST(request: Request) {
+  const origin = request.headers.get('origin');
+  if (origin && origin !== new URL(request.url).origin) return new NextResponse(null, { status: 403 });
+  const protocol = request.headers.get('mcp-protocol-version');
+  if (protocol && !PROTOCOLS.includes(protocol)) return NextResponse.json(jsonRpcError(null, -32600, 'Unsupported protocol version'), { status: 400 });
+  if (!request.headers.get('content-type')?.includes('application/json')) return new NextResponse(null, { status: 415 });
   const auth = await authMcp(request);
   if (!auth.ok) {
     // JSON-RPC friendly error envelope (MCP clients will still see 401 if they surface it)
     return NextResponse.json({ jsonrpc: '2.0', id: null, error: { code: -32001, message: auth.body.error, data: auth.body } }, { status: auth.status });
   }
 
-  const body = (await request.json().catch(() => null)) as JsonRpcRequest | null;
-  if (!body || body.jsonrpc !== '2.0' || typeof body.method !== 'string') {
+  const body = (await readRpcBody(request)) as JsonRpcRequest | null;
+  if (!body || body.jsonrpc !== '2.0' || typeof body.method !== 'string' || (body.id !== undefined && typeof body.id !== 'string' && typeof body.id !== 'number')) {
     return NextResponse.json(jsonRpcError(null, -32600, 'Invalid Request'), { status: 400 });
   }
 
-  const userId = await resolveApiKeyOwnerUserId({ apiKeyId: auth.apiKeyId, organizationId: auth.organizationId });
-  if (!userId) {
+  const admin = createStaticAdminClient();
+  const user = await resolveMcpOwner(admin, auth.apiKeyId, auth.organizationId);
+  if (!user) {
     return NextResponse.json(
       { jsonrpc: '2.0', id: body.id ?? null, error: { code: -32001, message: 'Invalid API key owner', data: { code: 'AUTH_OWNER_INVALID' } } },
       { status: 401 }
@@ -103,25 +113,23 @@ export async function POST(request: Request) {
   }
 
   // Minimal context for MCP execution. Tool args can still include boardId/dealId/etc.
-  const registry = buildCrmMcpRegistry({
+  const registry = addWhatsAppTools(buildCrmMcpRegistry({
     context: { organizationId: auth.organizationId },
-    userId,
-  });
+    userId: user.id,
+  }), { admin, user, apiKeyId: auth.apiKeyId });
+
+  if (body.id === undefined) return new NextResponse(null, { status: 202 });
+  if (body.method === 'ping') return NextResponse.json(jsonRpcResult(body.id, {}));
 
   // MCP core methods
   if (body.method === 'initialize') {
     return NextResponse.json(
       jsonRpcResult(body.id, {
-        protocolVersion: '2025-11-25',
-        serverInfo: { name: 'crmia-next-mcp', version: '0.1.0' },
+        protocolVersion: PROTOCOLS.includes(body.params?.protocolVersion) ? body.params.protocolVersion : PROTOCOLS[0],
+        serverInfo: { name: 'crmia-next-mcp', version: '0.2.0' },
         capabilities: { tools: { listChanged: false } },
       })
     );
-  }
-
-  if (body.method === 'notifications/initialized') {
-    // Notification: no response required by JSON-RPC, but returning 204 keeps proxies happy.
-    return new NextResponse(null, { status: 204 });
   }
 
   if (body.method === 'tools/list') {
@@ -130,6 +138,7 @@ export async function POST(request: Request) {
       title: t.title,
       description: t.description,
       inputSchema: zodToJsonSchema2020(t.inputSchemaZod),
+      ...(t.annotations ? { annotations: t.annotations } : {}),
     }));
 
     return NextResponse.json(jsonRpcResult(body.id, { tools }));
@@ -173,6 +182,6 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.json(jsonRpcError(body.id, -32601, `Method not found: ${body.method}`), { status: 404 });
+  return NextResponse.json(jsonRpcError(body.id, -32601, `Method not found: ${body.method}`), { status: 200 });
 }
 
