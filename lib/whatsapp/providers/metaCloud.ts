@@ -52,7 +52,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
     this.graphVersion = (process.env.META_GRAPH_VERSION || DEFAULT_GRAPH_VERSION).trim();
   }
 
-  private async send(payload: Record<string, unknown>, version?: string): Promise<SendResult> {
+  private async send(payload: Record<string, unknown>, version?: string, signal?: AbortSignal): Promise<SendResult> {
     if (!this.phoneNumberId) return { ok: false, error: 'phone_number_id não configurado' };
     if (!this.token) return { ok: false, error: 'token da Meta não configurado' };
 
@@ -67,6 +67,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
             Authorization: `Bearer ${this.token}`,
           },
           body: JSON.stringify({ messaging_product: 'whatsapp', ...payload }),
+          ...(signal ? { signal } : {}),
           cache: 'no-store',
         }
       );
@@ -154,7 +155,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
       type: 'text',
       text: { preview_url: true, body: input.text },
       ...this.context(input.quoted),
-    });
+    }, undefined, input.signal);
   }
 
   /** Modelo aprovado: único jeito de iniciar conversa fora da janela de 24h. */
@@ -169,7 +170,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
         language: { code: input.language || 'pt_BR' },
         ...(input.components?.length ? { components: input.components } : {}),
       },
-    });
+    }, undefined, input.signal);
   }
 
   /**
@@ -181,7 +182,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
   private async uploadMedia(input: SendMediaInput): Promise<{ id?: string; error?: string }> {
     let dl: Response;
     try {
-      dl = await fetch(input.media, { cache: 'no-store' });
+      dl = await fetch(input.media, { cache: 'no-store', ...(input.signal ? { signal: input.signal } : {}) });
     } catch (e) {
       return { error: `Falha ao ler a mídia do storage: ${(e as Error).message}` };
     }
@@ -212,7 +213,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
     try {
       res = await fetch(
         `https://graph.facebook.com/${this.graphVersion}/${encodeURIComponent(this.phoneNumberId)}/media`,
-        { method: 'POST', headers: { Authorization: `Bearer ${this.token}` }, body: form, cache: 'no-store' }
+        { method: 'POST', headers: { Authorization: `Bearer ${this.token}` }, body: form, cache: 'no-store', ...(input.signal ? { signal: input.signal } : {}) }
       );
     } catch (e) {
       return { error: `Falha de rede ao subir a mídia pra Meta: ${(e as Error).message}` };
@@ -266,7 +267,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
         media = { type: 'image', image: { id, ...(input.caption ? { caption: input.caption } : {}) } };
         break;
     }
-    return this.send({ ...dest, ...media, ...this.context(input.quoted) });
+    return this.send({ ...dest, ...media, ...this.context(input.quoted) }, undefined, input.signal);
   }
 
   // Cloud API é por credenciais, sem sessão/QR.

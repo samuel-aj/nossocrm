@@ -25,6 +25,7 @@ export type McpToolDraft = {
   inputSchemaZod: unknown;
   /** Whether the underlying tool was marked as requiring approval in the product UI. */
   needsApproval: boolean;
+  annotations?: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean; openWorldHint: boolean };
 };
 
 export type CrmMcpRegistry = {

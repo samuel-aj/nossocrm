@@ -23,9 +23,8 @@ import {
   ensureConversation,
   getConnectionByIdForOrg,
   getConnectionByOrg,
-  recordOutboundMessage,
-  replicateOutboundToSiblings,
 } from '@/lib/whatsapp/service';
+import { dispatchOutbound } from '@/lib/whatsapp/outbound';
 import { traduzErroWhatsApp } from '@/lib/whatsapp/metaErrorsPtBr';
 
 export const runtime = 'nodejs';
@@ -145,9 +144,10 @@ export async function POST(request: Request) {
     }
   }
 
-  let result;
+  let send: () => ReturnType<typeof provider.sendText>;
   let bodyText = text;
   if (body.template) {
+    const template = body.template;
     if (!provider.sendTemplate) {
       return NextResponse.json(
         { error: 'Templates are only available on official API (meta_cloud) connections', code: 'TEMPLATE_UNSUPPORTED' },
@@ -158,38 +158,30 @@ export async function POST(request: Request) {
     const components =
       body.template.components ??
       (params.length ? [{ type: 'body', parameters: params.map(t => ({ type: 'text', text: t })) }] : undefined);
-    result = await provider.sendTemplate({
+    send = () => provider.sendTemplate!({
       to,
-      name: body.template.name,
-      language: body.template.language || 'pt_BR',
+      name: template.name,
+      language: template.language || 'pt_BR',
       components,
     });
     // O chat do CRM mostra QUAL modelo saiu (e as variáveis) em vez de vazio
     bodyText = text || `[Modelo: ${body.template.name}]${params.length ? ' ' + params.join(' | ') : ''}`;
   } else {
-    result = await provider.sendText({ to, text });
+    send = () => provider.sendText({ to, text });
   }
 
-  const message = await recordOutboundMessage(sb, {
-    orgId,
-    conversationId: conv.id,
-    text: bodyText,
-    providerMessageId: result.providerMessageId,
-    fromPhone: conn.phone_number,
-    toPhone: to,
-    sentBy: null,
-    source: 'api',
-    status: result.ok ? 'sent' : 'failed',
-    error: result.ok ? null : result.error,
-  });
-
-  if (result.ok) {
-    await replicateOutboundToSiblings(sb, conn, {
+  const { result, message } = await dispatchOutbound({
+    admin: sb, connection: conn, send,
+    record: {
+      orgId,
+      conversationId: conv.id,
+      text: bodyText,
+      fromPhone: conn.phone_number,
       toPhone: to,
-      text: message.body,
-      providerMessageId: result.providerMessageId,
-    });
-  }
+      sentBy: null,
+      source: 'api',
+    },
+  });
 
   const out = {
     id: message.id,

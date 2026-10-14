@@ -83,6 +83,8 @@ scripts/*
 !scripts/smoke-integrations.mjs
 !scripts/test-performance-db.mjs
 !scripts/test-stage-requirements-db.mjs
+!scripts/test-mcp-whatsapp-db.mjs
+!scripts/mcp-upload-pdf.mjs
 
 # Test documentation (test code stays, docs are local)
 test/*.md
