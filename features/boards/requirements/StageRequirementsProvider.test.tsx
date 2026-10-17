@@ -67,3 +67,47 @@ it('requires edit permission to submit missing values', () => {
   act(() => { void request!({ deal, stage, persist: vi.fn() }); });
   expect(screen.getByRole('button', { name: 'Salvar e mover' })).toBeDisabled();
 });
+
+it.each(['', '0', '-5'])('blocks an empty or nonpositive deal value (%s) before persisting', async value => {
+  render(ui); const persist = vi.fn();
+  act(() => { void request!({ deal: { ...deal, value: 0 }, stage: { ...stage, requiredFields: ['value'] }, persist }); });
+  const input = screen.getByLabelText('Valor do negócio (R$)');
+  fireEvent.change(input, { target: { value } });
+  fireEvent.submit(input.closest('form')!);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Valor do negócio');
+  expect(persist).not.toHaveBeenCalled();
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+});
+it('saves a positive amount with cents and moves in the same operation', async () => {
+  render(ui); const persist = vi.fn().mockResolvedValue({ ...deal, value: 1500.25, status: 'signed' });
+  let result!: Promise<Deal | null>;
+  act(() => { result = request!({ deal: { ...deal, value: 0 }, stage: { ...stage, requiredFields: ['value'] }, persist }); });
+  const input = screen.getByLabelText('Valor do negócio (R$)');
+  fireEvent.change(input, { target: { value: '1500.25' } });
+  fireEvent.submit(input.closest('form')!);
+  await act(async () => { expect(await result).toMatchObject({ value: 1500.25, status: 'signed' }); });
+  expect(persist).toHaveBeenCalledExactlyOnceWith({ value: 1500.25 });
+});
+it('discards the entered amount when cancelling', async () => {
+  render(ui); const persist = vi.fn(); let result!: Promise<Deal | null>;
+  act(() => { result = request!({ deal: { ...deal, value: 0 }, stage: { ...stage, requiredFields: ['value'] }, persist }); });
+  fireEvent.change(screen.getByLabelText('Valor do negócio (R$)'), { target: { value: '300' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+  expect(await result).toBeNull(); expect(persist).not.toHaveBeenCalled();
+});
+it('uses an existing positive amount without opening the completion dialog', async () => {
+  render(ui); const filled = { ...deal, value: 0.01 }; const persist = vi.fn().mockResolvedValue(filled);
+  await act(async () => { await request!({ deal: filled, stage: { ...stage, requiredFields: ['value'] }, persist }); });
+  expect(persist).toHaveBeenCalledExactlyOnceWith({}); expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+it('submits the deal amount together with the required product', async () => {
+  render(ui); const persist = vi.fn().mockResolvedValue({ ...deal, value: 500, status: 'signed' });
+  let result!: Promise<Deal | null>;
+  act(() => { result = request!({ deal: { ...deal, value: 0 }, stage: { ...stage, requiredFields: ['products', 'value'] }, persist }); });
+  fireEvent.change(screen.getByLabelText('Produto ou serviço'), { target: { value: 'p' } });
+  const input = screen.getByLabelText('Valor do negócio (R$)');
+  fireEvent.change(input, { target: { value: '500' } });
+  fireEvent.submit(input.closest('form')!);
+  await act(async () => { await result; });
+  expect(persist).toHaveBeenCalledExactlyOnceWith({ product: { productId: 'p', price: 200, quantity: 1 }, value: 500 });
+});

@@ -9,7 +9,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useOrgMembers } from '@/lib/query/hooks/useOrgMembers';
 import { useMyActionPermissions } from '@/lib/permissions/useMyActionPermissions';
 import { LeadSourceSelect } from '@/features/deals/components/LeadSourceSelect';
-import { customStageValueFilled, getMissingStageFields, isKnownLeadSource, type RequiredStageField, type StageRequirementValues } from '@/lib/deals/stageRequirements';
+import { customStageValueFilled, getMissingStageFields, isKnownLeadSource, isPositiveDealValue, type RequiredStageField, type StageRequirementValues } from '@/lib/deals/stageRequirements';
 import { StageRequirementsContext, type StageCompletionRequest } from './StageRequirementsContext';
 import type { Deal } from '@/types';
 
@@ -70,6 +70,7 @@ function CompletionDialog({ pending, currentScope, scopeRef, finish }: {
     if (submitting.current || blocked) return;
     if (scopeRef.current !== pending.scope) { finish(null); return; }
     const invalid = pending.fields.filter(f => {
+      if (f.id === 'value') return !isPositiveDealValue(values.value);
       if (f.id === 'products') return !values.product?.productId || !Number.isInteger(values.product.quantity) || values.product.quantity < 1 || !Number.isFinite(values.product.price) || values.product.price < 0;
       if (f.id === 'leadSource') return !isKnownLeadSource(values.leadSource);
       if (f.id === 'ownerId') return !members.some(m => m.member && m.id === values.ownerId);
@@ -98,6 +99,14 @@ function CompletionDialog({ pending, currentScope, scopeRef, finish }: {
         <p className="flex items-center gap-2 text-sm text-slate-500"><ListChecks size={18} />Preencha as pendências desta etapa.</p>
         <fieldset disabled={busy || blocked} className="space-y-4">
           {pending.fields.map(field => {
+            if (field.id === 'value') return <div key={field.id}>
+              <label className="block text-sm font-medium">Valor do negócio (R$)
+                <input type="number" inputMode="decimal" required min="0.01" step="0.01" className={inputClass}
+                  aria-describedby="required-deal-value-help" value={values.value ?? ''}
+                  onChange={e => setValues(v => ({ ...v, value: e.target.value === '' ? undefined : Number(e.target.value) }))} />
+              </label>
+              <p id="required-deal-value-help" className="mt-1 text-xs text-slate-500">Informe um valor maior que R$ 0,00.</p>
+            </div>;
             if (field.id === 'products') return <div key={field.id} className="space-y-3">
               <label className="block text-sm font-medium">Produto ou serviço
                 <select required value={values.product?.productId ?? ''} className={inputClass} onChange={e => {
