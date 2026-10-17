@@ -15,6 +15,13 @@ describe('stage entry requirements', () => {
     expect(getMissingStageFields(filled, stage(['products','leadSource','ownerId']), [])).toEqual([]);
     expect(getMissingStageFields({ ...filled, leadSource: ' Não informado ' }, stage(['leadSource']), [])).toHaveLength(1);
   });
+  it.each([undefined, null, 0, -1, NaN, Infinity, -Infinity, '100'])('asks for a positive deal value when it is %s', value => {
+    const missing = getMissingStageFields({ ...deal, value } as Deal, stage(['value']), []);
+    expect(missing).toEqual([{ id: 'value', label: 'Valor do negócio', description: 'Um valor maior que R$ 0,00' }]);
+  });
+  it.each([0.01, 1500.25])('accepts an existing positive deal value of %s without asking again', value => {
+    expect(getMissingStageFields({ ...deal, value }, stage(['value']), [])).toEqual([]);
+  });
   it('keeps zero valid, rejects invalid dates and empty or obsolete choices', () => {
     expect(customStageValueFilled(field('currency'), 0)).toBe(true);
     expect(customStageValueFilled(field('number'), '0')).toBe(true);

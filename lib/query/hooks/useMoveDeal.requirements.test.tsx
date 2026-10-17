@@ -14,7 +14,7 @@ vi.mock('@/lib/supabase/boards', () => ({ boardsService: { get: mocks.board } })
 vi.mock('@/lib/supabase/contacts', () => ({ contactsService: { update: mocks.contact } }));
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ organizationId: 'org', profile: { first_name: 'Ana' } }) }));
 const board = { id: 'board', name: 'Vendas', nextBoardId: 'next', stages: [
-  { id: 'lead', label: 'Novo' }, { id: 'signed', label: 'Assinado', linkedLifecycleStage: 'CUSTOMER', requiredFields: ['products'] },
+  { id: 'lead', label: 'Novo' }, { id: 'signed', label: 'Assinado', linkedLifecycleStage: 'CUSTOMER', requiredFields: ['products', 'value'] },
 ] } as Board;
 const deal = { id: 'd', title: 'Lead', organizationId: 'org', boardId: 'board', status: 'lead', contactId: 'contact', items: [], updatedAt: '2026-10-09T10:00:00Z' } as unknown as Deal;
 const saved = { ...deal, status: 'signed', isWon: true, closedAt: '2026-10-09T11:00:00Z', lastStageChangeDate: '2026-10-09T11:00:00Z', updatedAt: '2026-10-09T11:00:00Z', items: [{ id: 'i', productId: 'p', name: 'Serviço', price: 300, quantity: 1 }], value: 300 };
@@ -44,7 +44,7 @@ it('does not move optimistically, record history, win, copy or promote when canc
   expect(client.getQueryData(queryKeys.deals.detail(deal.id))).toEqual(deal);
 });
 it('uses one atomic operation, confirms cache and copies the completed product to the next board', async () => {
-  const values = { product: { productId: 'p', price: 300, quantity: 1 } };
+  const values = { product: { productId: 'p', price: 300, quantity: 1 }, value: 300 };
   const { client, move, other } = setup(req => req.persist(values));
   await act(async () => { await move(); });
   expect(mocks.complete).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ deal, values, targetStageId: 'signed', changes: { isWon: true, isLost: false } }));

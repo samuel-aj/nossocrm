@@ -2,17 +2,22 @@ import type { BoardStage, CustomFieldDefinition, Deal } from '@/types';
 import { getDealLeadSource } from './leadSource';
 
 export const NATIVE_STAGE_FIELDS = [
+  { id: 'value', label: 'Valor do negócio', description: 'Um valor maior que R$ 0,00' },
   { id: 'products', label: 'Produto', description: 'Pelo menos um produto ou serviço vinculado' },
   { id: 'leadSource', label: 'Origem do lead', description: 'Uma origem diferente de Não informado' },
   { id: 'ownerId', label: 'Responsável', description: 'Uma pessoa responsável pelo negócio' },
 ] as const;
 export type RequiredStageField = { id: string; label: string; definition?: CustomFieldDefinition; unavailable?: boolean };
 export type StageRequirementValues = {
+  value?: number;
   leadSource?: string;
   ownerId?: string;
   customFields?: Record<string, unknown>;
   product?: { productId: string; price: number; quantity: number };
 };
+export function isPositiveDealValue(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
 export function isKnownLeadSource(value: unknown): boolean {
   return typeof value === 'string' && !!value.trim() && value.trim().toLocaleLowerCase('pt-BR') !== 'não informado';
 }
@@ -41,6 +46,7 @@ export function resolveStageFields(stage: BoardStage, definitions: CustomFieldDe
 }
 export function getMissingStageFields(deal: Deal, stage: BoardStage, definitions: CustomFieldDefinition[]): RequiredStageField[] {
   return resolveStageFields(stage, definitions).filter(field => {
+    if (field.id === 'value') return !isPositiveDealValue(deal.value);
     if (field.id === 'products') return !deal.items?.some(item => item.quantity > 0 && item.price >= 0 && !!item.name?.trim());
     if (field.id === 'leadSource') return !isKnownLeadSource(getDealLeadSource(deal));
     if (field.id === 'ownerId') return !deal.ownerId;

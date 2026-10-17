@@ -22,10 +22,11 @@ function setup() {
 it('saves only the selected stage, by stable custom field ID, and preserves other rules', async () => {
   const { client, close } = setup();
   fireEvent.click(screen.getByRole('checkbox', { name: /Origem do lead/ }));
+  fireEvent.click(screen.getByRole('checkbox', { name: /Valor do negócio/ }));
   fireEvent.click(screen.getByRole('checkbox', { name: /Assinatura/ }));
   fireEvent.submit(screen.getByLabelText('Nome da etapa').closest('form')!);
   await waitFor(() => expect(close).toHaveBeenCalledOnce());
-  expect(mocks.update).toHaveBeenCalledExactlyOnceWith('first', { label: 'Proposta', requiredFields: ['leadSource', 'custom:f'] });
+  expect(mocks.update).toHaveBeenCalledExactlyOnceWith('first', { label: 'Proposta', requiredFields: ['leadSource', 'value', 'custom:f'] });
   expect(client.getQueryData<Board[]>(queryKeys.boards.lists())?.[0].stages[1]).toEqual(second);
 });
 it('does not close or claim success when the server rejects the configuration', async () => {
