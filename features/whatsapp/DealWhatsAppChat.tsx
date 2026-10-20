@@ -4,6 +4,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { traduzErroWhatsApp } from '@/lib/whatsapp/metaErrorsPtBr';
 import Link from 'next/link';
+import ConfirmModal from '@/components/ConfirmModal';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Send,
@@ -62,7 +63,8 @@ import {
   type TemplateButton,
 } from '@/lib/messageTemplates';
 import { formatRemaining, getServiceWindow, senderLastInbound } from '@/lib/whatsapp/serviceWindow';
-import { useOlderWhatsAppMessages, useWhatsAppChat, type WaChatMessage, type WaMediaKind, type WaSender } from './useWhatsAppChat';
+import { useOlderWhatsAppMessages, useWhatsAppChat, type WaChatMessage, type WaMediaKind } from './useWhatsAppChat';
+import { useConversationSender } from './useConversationSender';
 import { transcodeToMp3 } from './audioTranscode';
 import { useWaAgentsAccess } from '@/hooks/useWaAgentsAccess';
 import { useToast } from '@/context/ToastContext';
@@ -1080,7 +1082,17 @@ interface Attachment {
   asSticker: boolean;
 }
 
-export function DealWhatsAppChat({
+export function DealWhatsAppChat(props: React.ComponentProps<typeof DealWhatsAppChatSession>) {
+  // A pending send, recording or template belongs to this lead/contact only.
+  const sessionKey = JSON.stringify([
+    props.conversationScopeId ?? null, props.contact?.id ?? null,
+    normalizePhoneE164(props.contact?.phone || ''), props.group?.conversationId ?? null,
+    props.connectionId ?? null,
+  ]);
+  return <DealWhatsAppChatSession key={sessionKey} {...props} />;
+}
+
+function DealWhatsAppChatSession({
   contact,
   contactLoadState,
   onRetryContact,
@@ -1096,6 +1108,8 @@ export function DealWhatsAppChat({
   onSenderChange,
 }: {
   contact: { id: string; name?: string | null; phone?: string | null } | null;
+  /** Isola intenções de envio entre negócios do mesmo contato. */
+  conversationScopeId?: string;
   contactLoadState?: 'loading' | 'error' | 'unavailable';
   onRetryContact?: () => void;
   /** Valores extras pras variáveis dos modelos (lead.titulo, escritorio.nome...) */
@@ -1223,6 +1237,7 @@ export function DealWhatsAppChat({
   // único jeito de falar com o lead fora da janela de 24h.
   const [pendingTemplate, setPendingTemplate] = useState<{
     id: string;
+    connectionId: string;
     name: string;
     metaName: string;
     language: string;
@@ -1258,11 +1273,6 @@ export function DealWhatsAppChat({
   // conversão MP3 em andamento entre o "Enviar áudio" e o send.mutate: trava
   // o Mic (que aparece no MESMO lugar do botão) contra duplo clique
   const [preparingVoice, setPreparingVoice] = useState(false);
-  // MULTI-NÚMERO: qual conexão ENVIA as mensagens deste usuário. Persistido
-  // no navegador; validado contra os números conectados a cada render.
-  const [senderId, setSenderId] = useState<string | null>(() =>
-    initialSenderId ?? (typeof window !== 'undefined' ? window.localStorage.getItem('wa-sender-connection') : null)
-  );
   const [senderMenuOpen, setSenderMenuOpen] = useState(false);
   // AGENTE DE IA nesta conversa: pausa sozinho quando um atendente responde
   // (gatilho no banco); aqui o usuário pausa/retoma na mão.
@@ -1379,7 +1389,6 @@ export function DealWhatsAppChat({
   const recSessionRef = useRef<{ cancel: boolean; pause: boolean } | null>(null);
   const recSecondsRef = useRef(0); // espelho síncrono do timer (o onstop lê fora do render)
   const voiceNoteUrlRef = useRef<string | null>(null); // p/ revogar blob URL da prévia no unmount
-  const providerRef = useRef<string | null>(null); // provider ATUAL (o onstop roda fora do render)
   const timerRef = useRef<number | null>(null);
   // guards SÍNCRONOS (state só atualiza no próximo render):
   const sendGateRef = useRef(false); // evita envio duplo durante awaits do onSend
@@ -1406,19 +1415,16 @@ export function DealWhatsAppChat({
   }, [messages, timeline?.entries]);
   // Mensagens por id: a bolha de resposta acha a original (miniatura + pular para)
   const messagesById = useMemo(() => new Map(messages.map(m => [m.id, m])), [messages]);
-  // Números conectados + o remetente ATIVO (escolhido ou o padrão). O ref
-  // espelha pro onstop do gravador (roda fora do render) enviar pelo certo.
+  // O remetente pertence à conversa, nunca à última seleção de outro lead.
   const senders = data?.senders ?? [];
-  // Conversa presa a um número: o remetente é ELE, sem escolha nem fallback
-  // pra outro número (se ele desconectar, o composer avisa em vez de enviar
-  // pelo número errado).
-  const activeSender = connectionId
-    ? senders.find(s => s.id === connectionId) ?? null
-    : senders.find(s => s.id === senderId) ?? senders[0] ?? null;
-  const senderRef = useRef<WaSender | null>(null);
-  useEffect(() => {
-    senderRef.current = activeSender;
-  }, [activeSender]);
+  const fixedSenderId = connectionId ?? (isGroup ? data?.conversation?.connection_id : null);
+  const sender = useConversationSender({
+    data,
+    initialSenderId,
+    fixedConnectionId: fixedSenderId,
+  });
+  const activeSender = sender.activeSender;
+  const senderId = sender.selectedSenderId;
   useEffect(() => {
     if (data) onSenderChange?.(activeSender?.id ?? null);
   }, [data, activeSender?.id, onSenderChange]);
@@ -1456,6 +1462,7 @@ export function DealWhatsAppChat({
     }
     setPendingTemplate({
       id: t.id,
+      connectionId: activeSender!.id,
       name: t.name,
       metaName: t.meta_name,
       language: t.language || 'pt_BR',
@@ -1463,19 +1470,37 @@ export function DealWhatsAppChat({
       buttons: t.buttons ?? null,
     });
   };
-  const sendPendingTemplate = () => {
+  const sendPendingTemplate = async () => {
     if (!pendingTemplate || send.isPending || sendGateRef.current) return;
+    if (pendingTemplate.connectionId !== activeSender?.id) {
+      showToast('Selecione um modelo do número que vai enviar.', 'error');
+      return;
+    }
     const tpl = pendingTemplate;
-    setPendingTemplate(null);
-    forceScrollRef.current = true;
-    send.mutate(
-      {
-        text: fillTemplate(tpl.body, templateEffective),
-        template: { name: tpl.metaName, language: tpl.language, params: templateParams(tpl.body, templateEffective) },
-        connectionId: connectionId ?? senderRef.current?.id,
-      },
-      { onError: () => setPendingTemplate(curr => curr ?? tpl) }
-    );
+    const values = templateEffective;
+    sendGateRef.current = true;
+    let dispatched = false;
+    try {
+      const permit = await sender.authorize();
+      if (!permit || !sender.isCurrent(permit)) return;
+      setPendingTemplate(null);
+      forceScrollRef.current = true;
+      send.mutate(
+        {
+          text: fillTemplate(tpl.body, values),
+          template: { name: tpl.metaName, language: tpl.language, params: templateParams(tpl.body, values) },
+          connectionId: permit.sender.id,
+        },
+        {
+          onSuccess: () => sender.markSent(permit),
+          onError: () => { if (!disposedRef.current) setPendingTemplate(curr => curr ?? tpl); },
+          onSettled: () => { sendGateRef.current = false; },
+        }
+      );
+      dispatched = true;
+    } finally {
+      if (!dispatched) sendGateRef.current = false;
+    }
   };
 
   // Divisórias por número na visão unificada: rótulo de cada número da org
@@ -1483,7 +1508,7 @@ export function DealWhatsAppChat({
   // realmente passou por 2+ números.
   const numbersById = data?.numbers ?? {};
   const connLabel = (id: string | null | undefined): string => {
-    const n = id ? numbersById[id] : undefined;
+    const n = id ? numbersById[id] ?? senders.find(s => s.id === id) : undefined;
     if (n) return n.phoneNumber || n.profileName || 'Número';
     return 'número removido';
   };
@@ -1499,7 +1524,8 @@ export function DealWhatsAppChat({
     (!data.hasConnection ||
       !data.connected ||
       // conversa presa a um número que caiu: avisa em vez de enviar por outro
-      (!!connectionId && !senders.some(s => s.id === connectionId)));
+      (!!connectionId && !senders.some(s => s.id === connectionId)) ||
+      (isGroup && !activeSender));
   // primeira carga da conversa: abre DIRETO na mensagem mais recente (embaixo)
   const initialScrollDoneRef = useRef(false);
   // Página antiga carregada: mantém na tela o que a pessoa estava lendo
@@ -1621,10 +1647,6 @@ export function DealWhatsAppChat({
   useEffect(() => {
     voiceNoteUrlRef.current = voiceNote?.url ?? null;
   }, [voiceNote]);
-  useEffect(() => {
-    // provider do número que VAI enviar (guarda do áudio cru por formato)
-    providerRef.current = activeSender?.provider ?? data?.provider ?? null;
-  }, [activeSender?.provider, data?.provider]);
 
   // menu do número: fecha com clique/toque fora e Escape
   useEffect(() => {
@@ -1744,6 +1766,7 @@ export function DealWhatsAppChat({
 
   // limpeza ao desmontar: para gravação/timer e libera o preview
   useEffect(() => {
+    disposedRef.current = false;
     return () => {
       disposedRef.current = true;
       if (timerRef.current) window.clearInterval(timerRef.current);
@@ -1767,6 +1790,7 @@ export function DealWhatsAppChat({
 
   const onPickFile = (f: File | null) => {
     if (!f) return;
+    sender.cancel();
     clearAttachment();
     const kind = forcedKindRef.current === 'document' ? 'document' : kindFromFile(f);
     forcedKindRef.current = null;
@@ -1882,8 +1906,10 @@ export function DealWhatsAppChat({
     const replySnapshot = replyTo;
     const leading = text.length - text.trimStart().length;
     const sentMentions = mentions.map(m => ({ ...m, start: m.start - leading, end: m.end - leading })).filter(m => m.start >= 0 && m.end <= t.length);
-
+    let dispatched = false;
     try {
+      const permit = await sender.authorize();
+      if (!permit || !sender.isCurrent(permit)) return;
       if (attachment) {
         let file: File | Blob = attachment.file;
         let kind: WaMediaKind = attachment.kind;
@@ -1896,6 +1922,7 @@ export function DealWhatsAppChat({
             fileName = fileName.replace(/\.[^.]+$/, '') + '.webp';
           }
         }
+        if (!sender.isCurrent(permit)) return;
         const snapshot = attachment;
         setText('');
         clearAttachment();
@@ -1908,12 +1935,14 @@ export function DealWhatsAppChat({
             file,
             kind,
             fileName,
-            connectionId: connectionId ?? senderRef.current?.id,
+            connectionId: permit.sender.id,
             replyTo: replySnapshot ?? undefined,
           },
           {
+            onSuccess: () => sender.markSent(permit),
             onSettled: releaseGate,
             onError: () => {
+              if (disposedRef.current) return;
               // restaura sem clobberar o que o usuário fez enquanto enviava,
               // e recria o preview (o blob URL antigo foi revogado no clear)
               restoreDraft(t, sentMentions);
@@ -1935,18 +1964,21 @@ export function DealWhatsAppChat({
         setReplyTo(null);
         forceScrollRef.current = true;
         send.mutate(
-          { text: t, mentions: sentMentions, connectionId: connectionId ?? senderRef.current?.id, replyTo: replySnapshot ?? undefined },
+          { text: t, mentions: sentMentions, connectionId: permit.sender.id, replyTo: replySnapshot ?? undefined },
           {
+            onSuccess: () => sender.markSent(permit),
             onSettled: releaseGate,
             onError: () => {
+              if (disposedRef.current) return;
               restoreDraft(t, sentMentions);
               setReplyTo(curr => curr ?? replySnapshot);
             },
           }
         );
       }
-    } catch {
-      releaseGate();
+      dispatched = true;
+    } finally {
+      if (!dispatched) releaseGate();
     }
     setEmojiOpen(false);
     setAttachMenuOpen(false);
@@ -1954,9 +1986,22 @@ export function DealWhatsAppChat({
 
   /** Prepara (conversão pra MP3) e envia uma gravação de voz — usado tanto
    *  pelo "Enviar áudio" direto quanto pela prévia pausada. */
-  const sendVoiceBlob = async (recorded: Blob, recMime: string) => {
+  const sendVoiceBlob = async (recorded: Blob, recMime: string, existingNote?: NonNullable<typeof voiceNote>) => {
+    if (disposedRef.current || sendGateRef.current || send.isPending) return;
+    sendGateRef.current = true;
     setPreparingVoice(true);
+    // Mesmo o envio direto do gravador mantém uma prévia se o aviso for cancelado.
+    const note = existingNote ?? {
+      blob: recorded, mime: recMime, url: URL.createObjectURL(recorded),
+      seconds: Math.max(1, recSecondsRef.current),
+    };
+    voiceNoteUrlRef.current = note.url;
+    setVoiceNote(note);
+    const replySnapshot = replyToRef.current;
+    let dispatched = false;
     try {
+      const permit = await sender.authorize();
+      if (!permit || !sender.isCurrent(permit)) return;
       let blob = recorded;
       const lower = (recMime || '').toLowerCase();
       let ext = lower.includes('mp4') ? 'm4a' : lower.includes('ogg') ? 'ogg' : 'webm';
@@ -1975,19 +2020,9 @@ export function DealWhatsAppChat({
           // conexão é Evolution (lá funciona); na Meta — ou com o provider
           // ainda não carregado — seria RECUSADO na certa: guarda a
           // gravação como anexo e avisa.
-          const prov = providerRef.current;
+          if (!sender.isCurrent(permit)) return;
+          const prov = permit.sender.provider;
           if (prov !== 'evolution' && prov !== 'evolution_business') {
-            const fileName = `voz_${Date.now()}.${ext}`;
-            setAttachment(curr =>
-              curr
-                ? curr
-                : {
-                    file: new File([recorded], fileName, { type: recorded.type }),
-                    kind: 'audio',
-                    previewUrl: null,
-                    asSticker: false,
-                  }
-            );
             setMicError(
               'Não deu pra preparar o áudio neste navegador. Atualize a página (Ctrl+Shift+R) e tente de novo.'
             );
@@ -1995,9 +2030,11 @@ export function DealWhatsAppChat({
           }
         }
       }
+      if (!sender.isCurrent(permit)) return;
       const fileName = `voz_${Date.now()}.${ext}`;
-      // áudio também pode ser resposta a uma mensagem (o onstop roda fora do render: usa o ref)
-      const replySnapshot = replyToRef.current;
+      setVoiceNote(curr => curr?.blob === recorded ? null : curr);
+      URL.revokeObjectURL(note.url);
+      voiceNoteUrlRef.current = null;
       setReplyTo(null);
       forceScrollRef.current = true;
       send.mutate(
@@ -2005,11 +2042,14 @@ export function DealWhatsAppChat({
           file: blob,
           kind: 'audio',
           fileName,
-          connectionId: connectionId ?? senderRef.current?.id,
+          connectionId: permit.sender.id,
           replyTo: replySnapshot ?? undefined,
         },
         {
+          onSuccess: () => sender.markSent(permit),
+          onSettled: () => { sendGateRef.current = false; },
           onError: () => {
+            if (disposedRef.current) return;
             setReplyTo(curr => curr ?? replySnapshot);
             // não perde a gravação: vira anexo pro usuário reenviar
             setAttachment(curr =>
@@ -2025,8 +2065,10 @@ export function DealWhatsAppChat({
           },
         }
       );
+      dispatched = true;
     } finally {
-      setPreparingVoice(false);
+      if (!dispatched) sendGateRef.current = false;
+      if (!disposedRef.current) setPreparingVoice(false);
     }
   };
 
@@ -2142,6 +2184,7 @@ export function DealWhatsAppChat({
   };
 
   const discardVoiceNote = () => {
+    sender.cancel();
     setVoiceNote(v => {
       if (v) URL.revokeObjectURL(v.url);
       return null;
@@ -2151,9 +2194,7 @@ export function DealWhatsAppChat({
   const sendVoiceNote = () => {
     const v = voiceNote;
     if (!v || send.isPending || preparingVoice) return;
-    setVoiceNote(null);
-    URL.revokeObjectURL(v.url);
-    void sendVoiceBlob(v.blob, v.mime);
+    void sendVoiceBlob(v.blob, v.mime, v);
   };
 
   return (
@@ -2507,7 +2548,7 @@ export function DealWhatsAppChat({
             </div>
             <button
               type="button"
-              onClick={clearAttachment}
+              onClick={() => { sender.cancel(); clearAttachment(); }}
               className="shrink-0 text-slate-400 hover:text-red-500 transition-colors"
               aria-label="Remover anexo"
             >
@@ -2718,14 +2759,14 @@ export function DealWhatsAppChat({
             não restar dúvida. Preso a um número (página Chats): rótulo fixo;
             visão unificada com 2+ números: seletor (menu abre pra cima). */}
         {activeSender &&
-          (connectionId ||
+          (fixedSenderId ||
             senders.length > 1 ||
             (!!senderId && senderId !== activeSender.id)) && (
           <div className="flex items-center gap-1.5 pb-1.5 px-0.5">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
               Enviando por
             </span>
-            {connectionId ? (
+            {fixedSenderId ? (
               <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400">
                 <MessageCircle size={11} />
                 {activeSender.phoneNumber || activeSender.profileName || 'Número'}
@@ -2756,12 +2797,8 @@ export function DealWhatsAppChat({
                         key={s.id}
                         type="button"
                         onClick={() => {
-                          setSenderId(s.id);
-                          try {
-                            window.localStorage.setItem('wa-sender-connection', s.id);
-                          } catch {
-                            // navegação anônima sem storage: só não persiste
-                          }
+                          sender.selectSender(s.id);
+                          if (pendingTemplate?.connectionId !== s.id) setPendingTemplate(null);
                           setSenderMenuOpen(false);
                         }}
                         className="w-full flex items-center gap-2 text-left px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
@@ -3165,6 +3202,46 @@ export function DealWhatsAppChat({
             )}
           </div>
         )}
+      </div>
+
+      <div data-esc-local="" onKeyDown={event => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          sender.cancel();
+        }
+      }}>
+      <ConfirmModal
+        isOpen={!!sender.confirmation}
+        onClose={sender.cancel}
+        onConfirm={sender.confirm}
+        closeOnConfirm={false}
+        title={sender.confirmation?.fromId ? 'Enviar por outro número?' : 'Confirmar número de envio'}
+        message={sender.confirmation && (
+          <div className="space-y-3 text-left">
+            <p>Conversa com <strong>{contactName}</strong>.</p>
+            {sender.confirmation.fromId && (
+              <p><strong>Número anterior:</strong> {connLabel(sender.confirmation.fromId)}</p>
+            )}
+            <p><strong>Enviar por:</strong> {sender.confirmation.to.phoneNumber || sender.confirmation.to.profileName || 'Número selecionado'}</p>
+            <p>{sender.confirmation.fromId
+              ? 'O contato receberá esta mensagem por um número diferente.'
+              : 'Confira o número que será usado para iniciar este atendimento.'}</p>
+            {senders.some(s => s.id === sender.confirmation?.fromId) && (
+              <button type="button" className="text-primary-600 dark:text-primary-400 font-semibold hover:underline"
+                onClick={() => {
+                  if (pendingTemplate?.connectionId !== sender.confirmation?.fromId) setPendingTemplate(null);
+                  sender.usePrevious();
+                }}>
+                Usar número anterior
+              </button>
+            )}
+          </div>
+        )}
+        confirmText="Confirmar e enviar"
+        cancelText="Voltar"
+        variant="primary"
+      />
       </div>
 
       {membersOpen && <GroupMembersModal name={contactName} members={membersQuery.data?.participants ?? []} loading={membersQuery.isLoading} error={membersQuery.error?.message ?? null} onClose={() => setMembersOpen(false)} onRetry={() => void membersQuery.refetch()} onOpenChat={onOpenGroupMember && membersQuery.data ? member => {
