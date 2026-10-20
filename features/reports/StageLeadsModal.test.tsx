@@ -44,16 +44,16 @@ it('mensal preserva a data de qualificação comprovada da base de entradas', ()
 });
 it('mostra as quatro colunas, datas reais, vazios e permite fechar', () => {
   const leads = [
-    { id: 'a', title: 'Ana', boardId: 'b', status: 'q', createdAt: '2026-08-02T12:00:00Z', closedAt: '2026-08-20T12:00:00Z', isWon: true },
-    { id: 'b', title: 'Bruno', boardId: 'b', status: 'q', createdAt: '2026-08-03T12:00:00Z' },
+    { id: 'a', title: 'Ana', boardId: 'b', status: 'q', leadSource: 'Google Ads', createdAt: '2026-08-02T12:00:00Z', closedAt: '2026-08-20T12:00:00Z', isWon: true },
+    { id: 'b', title: 'Bruno', boardId: 'b', status: 'q', leadSource: null, customFields: { origem: 'Origem antiga removida' }, createdAt: '2026-08-03T12:00:00Z' },
   ] as Deal[];
   const stage = { ...calculatePerformance([], [], board, range).stageData[0], deals: leads, count: leads.length };
   const onClose = vi.fn();
   render(<StageLeadsModal stage={stage} qualificationDates={new Map([['a', '2026-08-10T12:00:00Z']])} onClose={onClose} />);
   const dialog = screen.getByRole('dialog', { name: 'Qualificado · 2 leads' });
   expect(within(dialog).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Nome do lead', 'Criação', 'Qualificação', 'Encerramento']);
-  expect(within(screen.getByText('Ana').closest('tr')!).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['Ana (abrir lead em nova aba)', '02/08/2026', '10/08/2026', '20/08/2026']);
-  expect(within(screen.getByText('Bruno').closest('tr')!).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['Bruno (abrir lead em nova aba)', '03/08/2026', '', '']);
+  expect(within(screen.getByText('Ana').closest('tr')!).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['Ana (abrir lead em nova aba)Origem: Google Ads', '02/08/2026', '10/08/2026', '20/08/2026']);
+  expect(within(screen.getByText('Bruno').closest('tr')!).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['Bruno (abrir lead em nova aba)Origem: Não informado', '03/08/2026', '', '']);
   const link = screen.getByRole('link', { name: 'Ana (abrir lead em nova aba)' });
   expect(link).toHaveAttribute('href', '/boards?deal=a');
   expect(link).toHaveAttribute('target', '_blank');
