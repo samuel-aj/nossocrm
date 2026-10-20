@@ -1,6 +1,7 @@
 import React from 'react';
 import { ExternalLink } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
+import { getDealLeadSource } from '@/lib/deals/leadSource';
 import type { PerformanceMetrics, PerformanceMode } from './performanceMetrics';
 
 const formatDate = (value?: string) => {
@@ -47,6 +48,9 @@ export function StageLeadsModal({ stage, qualificationDates, estimatedQualificat
                     <ExternalLink size={14} className="shrink-0" aria-hidden="true" />
                     <span className="sr-only"> (abrir lead em nova aba)</span>
                   </a>
+                  <span className="mt-1 block text-xs font-normal text-slate-500 dark:text-slate-400">
+                    Origem: {getDealLeadSource(lead) || 'Não informado'}
+                  </span>
                 </td>
                 {evidence && <td className="px-5 py-3 min-w-48">
                   <span>{evidence.get(lead.id)?.stageName || '—'}</span>
