@@ -338,6 +338,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
         >
           {propertiesDrawer && <button ref={propertiesTriggerRef} type="button" aria-expanded={propertiesOpen} onClick={() => setPropertiesOpen(true)} className="shrink-0 self-start m-2 text-sm">Abrir propriedades</button>}
           <DealWhatsAppChat
+            conversationScopeId={deal.id}
             contact={contact}
             contactLoadState={contactLoadState}
             onRetryContact={() => {
