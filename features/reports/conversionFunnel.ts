@@ -184,9 +184,12 @@ export function buildConversionFunnel(population: ConversionPopulation, entries:
       const win = population.wins.get(id);
       if (postCustomer && !win || qIndex >= 0 && index > qIndex && !q) continue;
       const confirmation = population.qualificationConfirmedAt.get(id);
+      // One transition can record its arrival before its qualification snapshot.
+      // Their shared occurred_at establishes simultaneous progress; recorded_at
+      // still orders reentry anchors and episode resets elsewhere.
       const visits = (postCustomer ? population.postCustomerVisits : population.visits).filter(visit => visit.dealId === id &&
         (ranks.get(visit.stageId) ?? -1) >= index &&
-        (!(qIndex >= 0 && index > qIndex) || !confirmation || compareConversionEvents(visit, confirmation) >= 0));
+        (!(qIndex >= 0 && index > qIndex) || !confirmation || compareHistoricalDates(visit.date, confirmation.date) >= 0));
       const direct = visits.find(visit => visit.stageId === stage.stageId);
       const later = [...visits].sort((a, b) => (ranks.get(b.stageId) ?? -1) - (ranks.get(a.stageId) ?? -1) || compareConversionEvents(a, b))[0];
       const visit = direct || later;
