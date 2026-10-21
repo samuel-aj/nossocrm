@@ -47,6 +47,16 @@ it('identifica a contagem acumulada no controle acessível sem afirmar presença
   expect(screen.getByRole('button', { name: 'Ver 12 leads em Qualificado ou além' })).toHaveAccessibleDescription('Nesta etapa ou em uma posterior');
 });
 
+it('identifica chegadas do pós-venda sem afirmar avanço por etapas posteriores', () => {
+  render(<StageConversionChart data={[
+    { stageId: 'protocol', name: 'Protocolado', count: 7, fill: '#6366f1', countingMethod: 'arrivals_in_period',
+      role: 'postcustomer', milestoneLabel: 'Pós-venda no período', populationLabel: 'Chegadas registradas nesta etapa durante o intervalo' },
+  ]} onStageClick={vi.fn()} />);
+  expect(screen.getByRole('button', { name: 'Ver 7 leads em Protocolado' })).toHaveAccessibleDescription('Chegadas registradas nesta etapa durante o intervalo');
+  expect(screen.getByText('Pós-venda no período')).toBeVisible();
+  expect(screen.queryByRole('button', { name: /ou além/ })).not.toBeInTheDocument();
+});
+
 it('identifica os marcos MQL e Cliente com as taxas entre etapas visíveis', () => {
   render(<StageConversionChart data={[
     { stageId: 'q', name: 'Proposta enviada', count: 25, fill: '#a855f7', countingMethod: 'reached_or_beyond', milestone: 'qualification', conversionRate: 16, conversionLabel: 'para a próxima etapa', comparisonBase: '4 ganhos ÷ 25 qualificados' },

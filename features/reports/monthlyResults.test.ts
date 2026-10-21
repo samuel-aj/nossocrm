@@ -132,15 +132,16 @@ describe('monthly retained-gain overlay', () => {
     expect(result.lostDeals).toEqual(calculate([deal], events, ledger, 'conversion').lostDeals);
   });
 
-  it('shows current post-sale position without dating an arrival, keeping pre-gain evidence unchanged', () => {
+  it('requires a retained post-sale arrival in the period without inferring it from current position', () => {
     const undocumented = gain('undocumented');
     const advancedLater = gain('later');
     const regressed = gain('regressed', { status: 'signed' });
     const result = calculate([undocumented, advancedLater, regressed], [movement(advancedLater.id, 'won', '2026-09-02T12:00:00Z'), movement(regressed.id, 'won')]);
     const postSale = result.entryFunnel.stages.find(stage => stage.role === 'postcustomer')!;
-    expect(ids(postSale.deals)).toEqual(['later', 'undocumented']);
-    expect(postSale.evidenceByDeal.get('undocumented')).toEqual({ kind: 'current-stage', date: '', stageName: 'Protocolado', observedAtStage: false });
-    expect(postSale.milestoneLabel).toBe('Pós-venda atual');
+    expect(postSale.deals).toEqual([]);
+    expect(postSale.evidenceByDeal.size).toBe(0);
+    expect(postSale.countingMethod).toBe('arrivals_in_period');
+    expect(postSale.milestoneLabel).toBe('Pós-venda no período');
     expect(result.entries).toEqual([]);
     expect(result.entryFunnel.stages.filter(stage => !stage.role && stage.milestone !== 'customer').every(stage => stage.count === 0)).toBe(true);
   });

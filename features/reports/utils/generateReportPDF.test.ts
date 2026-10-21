@@ -4,7 +4,7 @@ import { calculatePerformance } from '../performanceMetrics';
 import { generateReportPDF } from './generateReportPDF';
 import { august, board as fixtureBoard, lead, lifecycle, movement, snapshot } from '../performanceTestFixtures';
 import { reportDrilldown } from '../reportDrilldown';
-import { monthlyPresentationFixture } from '../monthlyPresentationTestFixture';
+import { monthlyPostSalePresentationFixture, monthlyPresentationFixture } from '../monthlyPresentationTestFixture';
 
 const output = vi.hoisted(() => ({ table: vi.fn(), text: vi.fn(), save: vi.fn() }));
 vi.mock('jspdf', () => ({ jsPDF: class {
@@ -33,8 +33,8 @@ describe('PDF Performance', () => {
     const closures = reportDrilldown(metrics, { kind: 'closures' });
     expect(gains.deals.map(row => row.id).sort()).toEqual(closures.groups[0].deals.map(row => row.id).sort());
     expect(tables()[1].body.find((row: unknown[]) => row[0] === `${gains.name} · Ganhos do período`)[1]).toBe(7);
-    expect(tables()[1].body.find((row: unknown[]) => row[0] === 'Protocolado · Pós-venda atual dos ganhos do período')[1]).toBe(7);
-    expect(tables()[1].head[0][1]).toBe('Leads / Ganhos do período');
+    expect(tables()[1].body.find((row: unknown[]) => row[0] === 'Protocolado · Pós-venda no período')[1]).toBe(7);
+    expect(tables()[1].head[0][1]).toBe('Leads / Ganhos / Pós-venda');
     expect(tables()[2].body.at(-1)).toEqual(['Total da base', 10, '100,0%']);
     const notes = JSON.stringify(tables().at(-1).body);
     expect(notes).toContain('Data do ganho registrado');
@@ -42,7 +42,9 @@ describe('PDF Performance', () => {
     expect(notes).toContain('cadastro atual');
     expect(notes).toContain('responsável, produtos e valores atuais');
     expect(notes).toContain('preserva os filtros e a origem da entrada selecionada');
-    expect(notes).toContain('pode ter sido movimentado após o período selecionado');
+    expect(notes).toContain('chegadas registradas na etapa durante o intervalo');
+    expect(notes).toContain('Inclui leads ganhos antes ou sem ganho registrado');
+    expect(notes).not.toContain('Pós-venda atual');
     expect(notes).toContain('qualificação precisa estar comprovada antes do ganho');
     expect(notes).toContain('Ganhos fora da base');
     expect(notes).not.toMatch(/leads com atividade|Fechamento automático = promoção|data da promoção a Cliente/);
@@ -51,6 +53,17 @@ describe('PDF Performance', () => {
   it('mensal mantém traços com denominadores vazios', () => {
     generateReportPDF(calculatePerformance([], [], fixtureBoard, august, '', undefined, snapshot, { mode: 'monthly' }), context);
     expect(tables()[0].body.filter((row: string[]) => ['Taxa de qualificação', 'Taxa de fechamento', 'Conversão total'].includes(row[0])).map((row: string[]) => row[1])).toEqual(['—', '—', '—']);
+  });
+
+  it('exporta protocolos pela chegada sem tratá-los como novos ganhos ou entradas', () => {
+    generateReportPDF(monthlyPostSalePresentationFixture(), { ...context, mode: 'monthly' });
+    const indicators = tables()[0].body;
+    expect(indicators.find((row: string[]) => row[0] === 'Entradas')[1]).toBe('2');
+    expect(indicators.find((row: string[]) => row[0] === 'Ganhos')[1]).toBe('1');
+    expect(indicators.find((row: string[]) => row[0] === 'Faturamento fechado')[1]).toMatch(/100,00/);
+    expect(tables()[1].body.find((row: unknown[]) => row[0] === 'Assinado · Ganhos do período')[1]).toBe(1);
+    expect(tables()[1].body.find((row: unknown[]) => row[0] === 'Protocolado · Pós-venda no período')[1]).toBe(3);
+    expect(tables()[2].body.at(-1)).toEqual(['Total da base', 2, '100,0%']);
   });
 
   it('exporta as três taxas e os mesmos conjuntos dos cartões, marcos e detalhes da base de entradas', () => {

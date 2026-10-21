@@ -5,6 +5,7 @@ import ReportsPage from './ReportsPage';
 import { calculatePerformance } from './performanceMetrics';
 import type { Board, Deal } from '@/types';
 import { august, board as fixtureBoard, lead, lifecycle, movement, snapshot } from './performanceTestFixtures';
+import { monthlyPostSalePresentationFixture } from './monthlyPresentationTestFixture';
 
 const state = vi.hoisted(() => ({ data: null as any, error: null as any, isError: false, isFetching: false, pdf: vi.fn(), query: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
@@ -182,6 +183,22 @@ describe('tela Performance', () => {
     expect(within(modal).getByRole('cell', { name: '05/08/2026' })).toBeVisible();
     expect(state.data.wonDeals).toHaveLength(1);
     expect(state.data.cohortWonDeals).toHaveLength(0);
+  });
+
+  it('detalha protocolos do intervalo independentemente do ganho sem ampliar cartões ou origens', () => {
+    state.data = monthlyPostSalePresentationFixture();
+    render(<ReportsPage />);
+    expect(screen.getByRole('button', { name: 'Taxa de Qualificação 50,0% 1 qualificados de 2 leads' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Taxa de Fechamento 100,0% 1 ganhos dos 1 qualificados da base' })).toBeVisible();
+    expect(screen.getByRole('group', { name: 'Distribuição de 2 leads por origem' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Ver 1 leads em Assinado' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Ver 3 leads em Protocolado' }));
+    const modal = screen.getByRole('dialog', { name: 'Protocolado · 3 leads' });
+    expect(within(modal).getAllByRole('link').map(link => link.getAttribute('href')).sort()).toEqual([
+      '/boards?deal=current-winner', '/boards?deal=earlier-winner', '/boards?deal=without-win',
+    ]);
+    expect(within(modal).getAllByText('Passagem registrada · 15/08/2026')).toHaveLength(3);
+    expect(within(modal).getByText(/sem aumentar entradas, ganhos ou faturamento/)).toBeVisible();
   });
 
   it('detalha qualificações e propaga o filtro de produto para consulta e PDF do período', () => {

@@ -21,17 +21,19 @@ it('mensal mostra todos os ganhos mantidos sem transformar encerramento em assin
   expect(within(unknown).getByText(/Ganho registrado ·/)).toBeVisible();
   expect(within(dialog).queryByText(/Promoção a Cliente registrada/)).not.toBeInTheDocument();
 });
-it('mensal mostra pós-venda atual sem transformar a posição em visita datada', () => {
+it('mensal mostra a chegada comprovada do pós-venda no período', () => {
   const metrics = monthlyPresentationFixture();
   const stage = metrics.entryFunnel.stages.find(row => row.role === 'postcustomer')!;
   render(<StageLeadsModal mode="monthly" stage={stage} qualificationDates={metrics.leadQualificationDates} onClose={() => {}} />);
   const dialog = screen.getByRole('dialog');
   expect(within(dialog).getAllByRole('link')).toHaveLength(7);
-  expect(within(dialog).getByText(/Pós-venda atual: posição atual/)).toBeVisible();
-  expect(within(dialog).getByText(/movimentado após o período selecionado/)).toBeVisible();
-  expect(within(dialog).getAllByText('Etapa atual · chegada sem data registrada')).toHaveLength(7);
+  expect(within(dialog).getByText(/Pós-venda no período: chegadas registradas/)).toBeVisible();
+  expect(within(dialog).getByText(/Inclui leads ganhos antes ou sem ganho registrado/)).toBeVisible();
+  expect(within(dialog).getAllByText('Passagem registrada · 15/08/2026')).toHaveLength(7);
+  expect(within(dialog).queryByText(/Etapa atual · chegada sem data registrada/)).not.toBeInTheDocument();
   const row = within(dialog).getByRole('link', { name: /Contrato 7/ }).closest('tr')!;
-  expect(within(row).queryByText(/Passagem registrada|Incluído por etapa posterior|Ganho registrado/)).not.toBeInTheDocument();
+  expect(within(row).getByText('Passagem registrada · 15/08/2026')).toBeVisible();
+  expect(within(row).queryByText(/Incluído por etapa posterior|Ganho registrado/)).not.toBeInTheDocument();
   expect(row.textContent).not.toContain('11/08/2026');
 });
 it('mensal preserva a data de qualificação comprovada da base de entradas', () => {

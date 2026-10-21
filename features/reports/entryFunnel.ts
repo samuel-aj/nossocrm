@@ -6,7 +6,7 @@ export interface EntryFunnelStage {
   stageId: string; name: string; fill: string; deals: Deal[]; count: number;
   conversionRate: number | null; conversionLabel: string; comparisonBase: string; populationLabel: string;
   milestone?: 'qualification' | 'customer'; milestoneLabel?: string; role?: 'postcustomer';
-  countingMethod: 'reached_or_beyond'; evidenceByDeal: Map<string, EntryFunnelEvidence>;
+  countingMethod: 'reached_or_beyond' | 'arrivals_in_period'; evidenceByDeal: Map<string, EntryFunnelEvidence>;
 }
 export interface EntryFunnel { stages: EntryFunnelStage[]; baseCount: number; unknownStageCount: number }
 interface Arrival { dealId: string; boardId?: string; stageId: string; date: string; recordedAt?: string }

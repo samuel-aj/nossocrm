@@ -8,6 +8,8 @@ interface MonthlyInput {
   entries: Deal[]; qualifiedDeals: Deal[]; qualificationDates: Map<string, string>; qualificationConfirmedDates: Map<string, string>;
   leadQualificationDates: Map<string, string>;
   entryFunnel: EntryFunnel; hasQualifiedStage: boolean;
+  /** Distinct arrivals in the interval, with owner/product/source snapshots at arrival. */
+  stageArrivals: readonly { stageId: string; deals: readonly Deal[] }[];
   diagnosticReasonsByDeal: Map<string, string[]>; diagnosticsDeals: Deal[]; excludedQualificationDeals: Deal[];
 }
 const rate = (numerator: number, denominator: number) => denominator ? numerator / denominator * 100 : null;
@@ -16,6 +18,7 @@ const rate = (numerator: number, denominator: number) => denominator ? numerator
  * Entry snapshots, qualification, losses, filters, sources and pre-gain progress
  * remain the caller's baseline. Only the retained-gain population uses today's
  * explicit outcome and closedAt; CUSTOMER visits never create a gain.
+ * Post-sale counts dated arrivals still retained there, independently of gains.
  */
 export function calculateMonthlyResults(input: MonthlyInput) {
   const { board, entries, qualifiedDeals, startDate, cutoffDate } = input;
@@ -54,19 +57,28 @@ export function calculateMonthlyResults(input: MonthlyInput) {
   const diagnosticsDeals = [...diagnosticReasonsByDeal.keys()].flatMap(id => diagnosticById.has(id) ? [diagnosticById.get(id)!] : []);
 
   const ranks = new Map(input.entryFunnel.stages.map((stage, position) => [stage.stageId, position]));
-  const stageName = (id: string) => board.stages.find(stage => stage.id === id)?.label || 'Etapa atual';
+  const currentById = new Map(input.deals.map(deal => [deal.id, deal]));
+  const arrivalsByStage = new Map(input.stageArrivals.map(stage => [stage.stageId, stage.deals]));
   const stageData: EntryFunnelStage[] = input.entryFunnel.stages.map(stage => {
     if (stage.milestone !== 'customer' && stage.role !== 'postcustomer') return { ...stage };
-    const deals = stage.milestone === 'customer' ? wonDeals : wonDeals.filter(deal =>
-      (ranks.get(deal.status) ?? -1) >= (ranks.get(stage.stageId) ?? Number.POSITIVE_INFINITY));
+    const deals = stage.milestone === 'customer' ? wonDeals : (arrivalsByStage.get(stage.stageId) || []).filter(arrival => {
+      const current = currentById.get(arrival.id);
+      // A protocol can follow an earlier gain, or a direct jump without a gain.
+      // Neither changes its arrival date or creates a financial outcome. Keep
+      // today's loss/rollback/board-transfer exclusions from the existing report.
+      return current?.boardId === board.id && !current.isLost &&
+        (ranks.get(current.status) ?? -1) >= (ranks.get(stage.stageId) ?? Number.POSITIVE_INFINITY) &&
+        validForLead(arrival.updatedAt, arrival.createdAt) && compareHistoricalDates(arrival.updatedAt, startDate) >= 0;
+    });
     const evidenceByDeal = new Map<string, EntryFunnelEvidence>(deals.map(deal => [deal.id, stage.milestone === 'customer'
       ? { kind: 'win', date: deal.closedAt!, stageName: 'Ganho registrado', observedAtStage: false }
-      : { kind: 'current-stage', date: '', stageName: stageName(deal.status), observedAtStage: false }]));
+      : { kind: 'stage', date: deal.updatedAt, stageName: stage.name, observedAtStage: true }]));
     return { ...stage, deals, count: deals.length, evidenceByDeal,
-      milestoneLabel: stage.milestone === 'customer' ? 'Ganhos do período' : 'Pós-venda atual',
+      countingMethod: stage.milestone === 'customer' ? stage.countingMethod : 'arrivals_in_period',
+      milestoneLabel: stage.milestone === 'customer' ? 'Ganhos do período' : 'Pós-venda no período',
       populationLabel: stage.milestone === 'customer'
         ? `Ganhos mantidos no período: ${entryWonDeals.length} da base de entradas e ${outsideEntryWonDeals.length} fora da base. Os ganhos fora da base não ampliam as entradas ou suas taxas.`
-        : 'Pós-venda atual dos ganhos do período. A posição atual não comprova a data da chegada.' };
+        : 'Leads com chegada registrada nesta etapa no período, ainda nesta etapa ou em uma posterior. Inclui ganhos anteriores e leads sem ganho registrado; exclui perdidos e retornos a etapas anteriores.' };
   });
   // Period gains need not be a subset of the preceding entry-stage population.
   // The intersection states how many of that column also appear in the next.
