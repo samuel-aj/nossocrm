@@ -84,9 +84,10 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   const ledgerFor = (id: string) => ledgerByDeal.get(id) || [];
   const historical = (event: LifecycleEvent) => dealAtEvent(byId.get(event.dealId)!, event);
   const legacyIds = new Set<string>();
-  const snapshotAt = (deal: Deal, date: string, stageId?: string): HistoricalReportDeal => {
-    const exact = ledgerFor(deal.id).find(event => time(event.date) === time(date) && (!stageId || event.stageId === stageId));
-    const snapshot = exact || ledgerFor(deal.id).filter(event => time(event.date) <= time(date)).at(-1);
+  const snapshotAt = (deal: Deal, date: string, stageId?: string, precise = false): HistoricalReportDeal => {
+    const compare = (event: LifecycleEvent) => precise ? compareHistoricalDates(event.date, date) : time(event.date) - time(date);
+    const exact = ledgerFor(deal.id).find(event => compare(event) === 0 && (!stageId || event.stageId === stageId));
+    const snapshot = exact || ledgerFor(deal.id).filter(event => compare(event) <= 0).at(-1);
     if (!exact || exact.snapshotSource === 'current') legacyIds.add(deal.id);
     const value: HistoricalReportDeal = snapshot ? historical(snapshot) : { ...deal, boardId: board.id, isWon: false, isLost: false, closedAt: undefined, qualifiedAt: undefined, leadSourceSnapshotSource: 'current' };
     return { ...value, status: stageId || value.status, updatedAt: date };
@@ -225,15 +226,19 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
       ? !Number.isFinite(time(deal.closedAt)) && !episodes.activeWonIds.has(deal.id)
       : !episodes.activeWonIds.has(deal.id)));
   const chartStages = mode === 'current' ? board.stages : board.stages.filter(stage => !rules.lost(stage.id));
+  const postSaleBoundary = rules.customerIndex >= 0 ? rules.customerIndex : stepIndex(board.wonStageId);
   const populations = new Map(chartStages.map(stage => [stage.id, new Map<string, Deal>()]));
   if (mode === 'current') {
     for (const deal of currentDeals) populations.get(deal.status)?.set(deal.id, deal);
   } else {
     const arrivals = [...history, ...ledger.filter(event => event.stageId && (event.type === 'entered_board' || event.type === 'stage_changed')).map(event => ({
       dealId: event.dealId, boardId: event.boardId, stageId: event.stageId!, date: event.date,
-    }))].sort((a, b) => time(a.date) - time(b.date));
+    }))].sort((a, b) => mode === 'monthly' ? compareHistoricalDates(a.date, b.date) : time(a.date) - time(b.date));
     for (const event of arrivals) {
-      const deal = snapshotAt(byId.get(event.dealId)!, event.date, event.stageId);
+      // PostgreSQL arrivals can differ within one millisecond. Match the new
+      // post-sale population to its own snapshot, never a neighbouring event.
+      const precise = mode === 'monthly' && postSaleBoundary >= 0 && stepIndex(event.stageId) > postSaleBoundary;
+      const deal = snapshotAt(byId.get(event.dealId)!, event.date, event.stageId, precise);
       if (mode === 'cohort' ? cohortIds.has(event.dealId) : inPeriod(event.date) && filtered(deal)) populations.get(event.stageId)?.set(event.dealId, deal);
     }
   }
@@ -255,7 +260,7 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   }) : { stages: [], baseCount: 0, unknownStageCount: 0 };
   const monthly = mode === 'monthly' ? calculateMonthlyResults({ deals, board,
     startDate: range.start.toISOString(), cutoffDate: new Date(cutoff).toISOString(), ownerId, productId,
-    entries, qualifiedDeals, qualificationDates, leadQualificationDates,
+    entries, qualifiedDeals, qualificationDates, leadQualificationDates, stageArrivals: stageData,
     qualificationConfirmedDates: new Map([...(conversion?.qualificationConfirmedAt || [])].map(([id, proof]) => [id, proof.date])),
     entryFunnel, hasQualifiedStage: rules.qualifiedIndex >= 0, diagnosticReasonsByDeal, diagnosticsDeals, excludedQualificationDeals }) : undefined;
   const revenueDeals = monthly?.wonDeals || wonDeals;

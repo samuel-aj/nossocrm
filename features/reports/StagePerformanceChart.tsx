@@ -11,7 +11,7 @@ interface StageConversionData {
   populationLabel?: string;
   comparisonBase?: string;
   conversionLabel?: string;
-  countingMethod?: 'reached_or_beyond';
+  countingMethod?: 'reached_or_beyond' | 'arrivals_in_period';
   milestone?: 'qualification' | 'customer';
   milestoneLabel?: string;
   role?: 'postcustomer';

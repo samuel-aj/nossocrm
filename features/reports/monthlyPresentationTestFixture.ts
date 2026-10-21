@@ -28,7 +28,24 @@ export function monthlyPresentationFixture() {
     lifecycle(notSigned, 'won', '2026-08-10T12:00:00Z', { stageId: 'signed' }),
   ];
   const stageEvents = [movement(observed.id, 'proposal', '2026-08-03T12:00:00Z', 'proposal'),
-    movement(notSigned.id, 'signed', '2026-08-10T12:00:00Z', 'proposal')];
+    movement(notSigned.id, 'signed', '2026-08-10T12:00:00Z', 'proposal'),
+    ...winners.map(deal => movement(deal.id, 'won', '2026-08-15T12:00:00Z', 'signed'))];
   const metrics = calculatePerformance(deals, stageEvents, board, august, '', undefined, snapshot, { mode: 'monthly', lifecycleEvents });
   return { ...metrics, deals, board, lifecycleEvents, stageEvents, winners, observed, notSigned, entrant, outside };
+}
+
+export function monthlyPostSalePresentationFixture() {
+  const currentWinner = lead('current-winner', { title: 'Ganho do período', status: 'won', isWon: true,
+    createdAt: '2026-08-01T12:00:00Z', closedAt: '2026-08-05T12:00:00Z' });
+  const earlierWinner = lead('earlier-winner', { title: 'Ganho anterior', status: 'won', isWon: true,
+    createdAt: '2026-07-01T12:00:00Z', closedAt: '2026-07-10T12:00:00Z' });
+  const withoutWin = lead('without-win', { title: 'Protocolo sem ganho registrado', status: 'won', createdAt: '2026-08-01T12:00:00Z' });
+  const deals = [currentWinner, earlierWinner, withoutWin];
+  const lifecycleEvents = [
+    ...deals.map(deal => lifecycle(deal, 'entered_board', deal.createdAt, { stageId: 'new', isWon: false })),
+    lifecycle(currentWinner, 'qualified', '2026-08-03T12:00:00Z', { stageId: 'q', isWon: false }),
+    ...deals.map(deal => lifecycle(deal, 'stage_changed', '2026-08-15T12:00:00Z', { stageId: 'won', isWon: deal.isWon })),
+  ];
+  const metrics = calculatePerformance(deals, [], board, august, '', undefined, snapshot, { mode: 'monthly', lifecycleEvents });
+  return { ...metrics, deals };
 }
