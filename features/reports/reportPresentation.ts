@@ -1,7 +1,7 @@
 export const REPORT_MODES = {
   monthly: {
     label: 'Resultados no período',
-    description: 'Origens e conversão acompanham as entradas do período. Fechamentos incluem todos os ganhos mantidos com encerramento registrado no período, inclusive os de fora dessa base. O pós-venda usa as chegadas registradas no intervalo, independentemente da data do ganho.',
+    description: 'Origens e conversão acompanham as entradas do período. Fechamentos incluem todos os ganhos mantidos com encerramento registrado no período, inclusive os de fora dessa base. O pós-venda usa chegadas e cumprimentos registrados no intervalo, independentemente da data do ganho.',
     chartTitle: 'Progressão dos leads no funil',
     chartBasis: 'Entradas · ganhos · pós-venda no período',
   },
@@ -14,7 +14,7 @@ export const REPORT_MODES = {
   cohort: {
     label: 'Conversão dos leads captados',
     description: 'Acompanha os mesmos leads, criados no intervalo selecionado, até a data de apuração.',
-    chartTitle: 'Etapas com passagem comprovada',
+    chartTitle: 'Etapas com cumprimento registrado',
     chartBasis: 'Mesmos leads · histórico até a data de apuração',
   },
   period: {

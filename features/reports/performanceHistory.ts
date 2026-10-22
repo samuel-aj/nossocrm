@@ -2,7 +2,7 @@ import type { Deal, DealItem } from '@/types';
 import { getDealLeadSource, normalizeLeadSource } from '@/lib/deals/leadSource';
 
 export type PerformanceMode = 'cohort' | 'period' | 'current' | 'conversion' | 'monthly';
-export type LifecycleEventType = 'entered_board' | 'left_board' | 'qualified' | 'won' | 'lost' | 'reopened' | 'stage_changed';
+export type LifecycleEventType = 'entered_board' | 'left_board' | 'qualified' | 'won' | 'lost' | 'reopened' | 'stage_changed' | 'stage_completed';
 export interface LifecycleEvent {
   id: string; dealId: string; boardId: string; type: LifecycleEventType; date: string; recordedAt?: string;
   source: 'transition' | 'history'; snapshotSource: 'transition' | 'current';
@@ -11,7 +11,10 @@ export interface LifecycleEvent {
   isWon: boolean; isLost: boolean;
   leadSource?: string | null; leadSourceSnapshotSource?: 'transition' | 'current';
 }
-export type HistoricalReportDeal = Deal & { leadSourceSnapshotSource?: 'transition' | 'current' };
+export type HistoricalReportDeal = Deal & {
+  leadSourceSnapshotSource?: 'transition' | 'current';
+  stageEvidenceKind?: 'stage' | 'stage-completion';
+};
 export interface DbLifecycleEvent {
   id: string; deal_id: string; board_id: string; event_type: LifecycleEventType;
   occurred_at: string; recorded_at?: string | null; source: LifecycleEvent['source']; snapshot_source: LifecycleEvent['snapshotSource'];

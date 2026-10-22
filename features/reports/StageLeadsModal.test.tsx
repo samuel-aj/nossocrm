@@ -5,6 +5,7 @@ import { StageLeadsModal } from './StageLeadsModal';
 import { calculatePerformance } from './performanceMetrics';
 import type { Board, Deal } from '@/types';
 import { monthlyPresentationFixture } from './monthlyPresentationTestFixture';
+import type { EntryFunnelEvidence } from './entryFunnel';
 
 const board = { id: 'b', stages: [{ id: 'q', label: 'Qualificado', color: '' }] } as Board;
 const range = { start: new Date('2026-08-01'), end: new Date('2026-08-31T23:59:59Z') };
@@ -27,7 +28,7 @@ it('mensal mostra a chegada comprovada do pós-venda no período', () => {
   render(<StageLeadsModal mode="monthly" stage={stage} qualificationDates={metrics.leadQualificationDates} onClose={() => {}} />);
   const dialog = screen.getByRole('dialog');
   expect(within(dialog).getAllByRole('link')).toHaveLength(7);
-  expect(within(dialog).getByText(/Pós-venda no período: chegadas registradas/)).toBeVisible();
+  expect(within(dialog).getByText(/Pós-venda no período: chegadas ou cumprimentos registrados/)).toBeVisible();
   expect(within(dialog).getByText(/Inclui leads ganhos antes ou sem ganho registrado/)).toBeVisible();
   expect(within(dialog).getAllByText('Passagem registrada · 15/08/2026')).toHaveLength(7);
   expect(within(dialog).queryByText(/Etapa atual · chegada sem data registrada/)).not.toBeInTheDocument();
@@ -43,6 +44,27 @@ it('mensal preserva a data de qualificação comprovada da base de entradas', ()
   const row = screen.getByRole('link', { name: /Qualificação registrada na entrada/ }).closest('tr')!;
   expect(within(row).getByRole('cell', { name: '03/08/2026' })).toBeVisible();
   expect(within(row).getByText(/Qualificação registrada · 03\/08\/2026/)).toBeVisible();
+});
+
+it('distingue cumprimento ao avançar de passagens e inclusões antigas, preservando cada data', () => {
+  const metrics = monthlyPresentationFixture();
+  const stage = metrics.entryFunnel.stages.find(row => row.role === 'postcustomer')!;
+  const leads = stage.deals.slice(0, 3);
+  const evidenceByDeal = new Map<string, EntryFunnelEvidence>([
+    [leads[0].id, { stageName: stage.name, date: '2026-08-15T12:00:00Z', observedAtStage: false, kind: 'stage-completion' as const }],
+    [leads[1].id, { stageName: stage.name, date: '2026-08-04T12:00:00Z', observedAtStage: true, kind: 'stage' as const }],
+    [leads[2].id, { stageName: 'Etapa posterior', date: '2026-08-06T12:00:00Z', observedAtStage: false, kind: 'stage' as const }],
+  ]);
+  render(<StageLeadsModal mode="monthly" stage={{ ...stage, deals: leads, count: 3, evidenceByDeal }}
+    qualificationDates={metrics.leadQualificationDates} onClose={() => {}} />);
+  const completed = screen.getByRole('link', { name: new RegExp(leads[0].title) }).closest('tr')!;
+  const direct = screen.getByRole('link', { name: new RegExp(leads[1].title) }).closest('tr')!;
+  const legacy = screen.getByRole('link', { name: new RegExp(leads[2].title) }).closest('tr')!;
+  expect(within(completed).getByText('Cumprimento registrado ao avançar · 15/08/2026')).toBeVisible();
+  expect(within(direct).getByText('Passagem registrada · 04/08/2026')).toBeVisible();
+  expect(within(legacy).getByText('Incluído por etapa posterior · 06/08/2026')).toBeVisible();
+  expect(within(direct).queryByText(/Cumprimento registrado ao avançar/)).not.toBeInTheDocument();
+  expect(within(legacy).queryByText(/Cumprimento registrado ao avançar/)).not.toBeInTheDocument();
 });
 it('mostra as quatro colunas, datas reais, vazios e permite fechar', () => {
   const leads = [

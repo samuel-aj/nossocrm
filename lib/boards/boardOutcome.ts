@@ -1,6 +1,6 @@
 import type { Board, BoardStage, Deal } from '@/types';
 
-/** Sales gain is the configured promotion to Customer, never a stage's name. */
+/** Identifies the Customer milestone; later stages confirm this milestone too. */
 export function firstCustomerStage(board: Board): BoardStage | undefined {
   return board.linkedLifecycleStage === 'CUSTOMER' ? undefined
     : board.stages.find(stage => stage.linkedLifecycleStage === 'CUSTOMER');
@@ -17,6 +17,16 @@ export function isAutomaticWonStage(board: Board, stageId: string): boolean {
   // keeps its legacy meaning, rather than winning at every Customer column.
   return board.linkedLifecycleStage === 'CUSTOMER' ? stageId === board.wonStageId
     : board.stages.some(stage => stage.id === stageId && stage.linkedLifecycleStage === 'CUSTOMER');
+}
+
+/** A sales destination at or after Customer completes the commercial process. */
+export function isAutomaticWonDestination(board: Board, stageId: string): boolean {
+  if (isLostBoardStage(board, stageId)) return false;
+  if (board.linkedLifecycleStage === 'CUSTOMER') return isAutomaticWonStage(board, stageId);
+  const customer = firstCustomerStage(board);
+  if (!customer) return false;
+  return board.stages.findIndex(stage => stage.id === stageId)
+    >= board.stages.findIndex(stage => stage.id === customer.id);
 }
 
 /** Destination of an explicit Win action. Archiving deliberately stays put. */
@@ -38,16 +48,20 @@ export function resolveBoardMoveOutcome({ board, deal, targetStageId, explicitWi
   const targetIndex = board.stages.findIndex(stage => stage.id === targetStageId);
   const sourceIndex = sameBoard ? board.stages.findIndex(stage => stage.id === deal.status) : -1;
   // A legacy Customer column is evidence of the episode, not evidence of its
-  // date. The database restores a proven date or keeps it unknown.
+  // date. The database preserves a proven date or dates a newly confirmed
+  // milestone at the real advance; optimistic state never invents this date.
   const legacyCustomer = sameBoard && firstIndex >= 0 && !deal.isWon && !deal.isLost && isAutomaticWonStage(board, deal.status);
   const inCustomerRegion = firstIndex >= 0 && targetIndex >= firstIndex;
   const sameStage = sameBoard && deal.status === targetStageId;
+  const advancing = targetIndex >= 0 && !sameStage
+    && (!sameBoard || isLostBoardStage(board, deal.status) || targetIndex > sourceIndex);
   const preserveWin = (sameStage && !!deal.isWon) || (sameBoard && inCustomerRegion && (!!deal.isWon || (legacyCustomer && targetIndex >= sourceIndex)));
   let isWon = false;
   let isLost = false;
   if (explicitReopen) { /* Explicit re-opening always starts another episode. */ }
   else if (explicitLost || (!explicitWin && (isLostBoardStage(board, targetStageId) || (sameStage && deal.isLost)))) isLost = true;
-  else if (explicitWin || isAutomaticWonStage(board, targetStageId) || preserveWin) isWon = true;
+  else if (explicitWin || isAutomaticWonStage(board, targetStageId)
+    || (advancing && isAutomaticWonDestination(board, targetStageId)) || preserveWin) isWon = true;
   const recoveringLegacyWin = isWon && legacyCustomer && !explicitWin;
   const newPromotion = isWon && !(sameBoard && deal.isWon) && !recoveringLegacyWin;
   const closedAt = sameBoard && ((isWon && deal.isWon) || (isLost && deal.isLost) || recoveringLegacyWin)

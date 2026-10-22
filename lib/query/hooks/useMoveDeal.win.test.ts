@@ -51,13 +51,18 @@ it('wins at Customer, adopts the authoritative date and automates only this deal
   await waitFor(() => expect(mocks.create).toHaveBeenCalledOnce());
 });
 
-it('does not win or copy a lead that jumps straight to Protocolado', async () => {
+it('records a gain when jumping straight to Protocolado and runs the gain automation once', async () => {
+  const date = '2026-10-13T16:00:00Z';
+  mocks.update.mockResolvedValue({ data: { isWon: true, isLost: false, qualifiedAt: date, closedAt: date, lastStageChangeDate: date }, error: null });
   const { move, client } = setup();
   await act(async () => { await move('protocol'); });
-  expect(mocks.update).toHaveBeenCalledWith('deal', expect.objectContaining({ isWon: false, isLost: false }));
-  expect(client.getQueryData<Deal[]>(DEALS_VIEW_KEY)?.[0].isWon).toBe(false);
-  expect(mocks.create).not.toHaveBeenCalled();
-  expect(mocks.getBoard).not.toHaveBeenCalled();
+  expect(mocks.update).toHaveBeenCalledExactlyOnceWith('deal', expect.objectContaining({ status: 'protocol', isWon: true, isLost: false }));
+  expect(mocks.update.mock.calls[0][1]).not.toHaveProperty('closedAt');
+  expect(client.getQueryData<Deal[]>(DEALS_VIEW_KEY)?.[0]).toMatchObject({ status: 'protocol', isWon: true, qualifiedAt: date, closedAt: date });
+  expect(client.getQueryData(queryKeys.deals.detail('deal'))).toMatchObject({ status: 'protocol', isWon: true, qualifiedAt: date, closedAt: date });
+  // Only the actual destination is moved to. No intermediate contact promotion.
+  expect(mocks.contact).not.toHaveBeenCalled();
+  await waitFor(() => expect(mocks.create).toHaveBeenCalledOnce());
 });
 
 it.each(['second-customer', 'protocol'])('preserves the episode date without copying again at %s', async target => {
@@ -88,6 +93,16 @@ it('automates one new gain after a Customer-stage reopening only when the databa
   await act(async () => { await move('second-customer'); });
   expect(mocks.update.mock.calls[0][1]).not.toHaveProperty('isWon');
   expect(client.getQueryData<Deal[]>(DEALS_VIEW_KEY)?.[0]).toMatchObject({ isWon: true, closedAt: date });
+  await waitFor(() => expect(mocks.create).toHaveBeenCalledOnce());
+});
+
+it('adopts a missing gain date confirmed by the database on a real legacy advance', async () => {
+  const date = '2026-10-13T16:00:00Z';
+  mocks.update.mockResolvedValue({ data: { isWon: true, isLost: false, qualifiedAt: date, closedAt: date, lastStageChangeDate: date }, error: null });
+  const { move, client } = setup({ ...deal, status: 'contract' });
+  await act(async () => { await move('protocol'); });
+  expect(mocks.update.mock.calls[0][1]).not.toHaveProperty('closedAt');
+  expect(client.getQueryData<Deal[]>(DEALS_VIEW_KEY)?.[0]).toMatchObject({ status: 'protocol', isWon: true, closedAt: date });
   await waitFor(() => expect(mocks.create).toHaveBeenCalledOnce());
 });
 
