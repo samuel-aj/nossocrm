@@ -1,7 +1,7 @@
 import type { Deal } from '@/types';
 import { compareHistoricalDates, type LifecycleEvent } from './performanceHistory';
 
-export interface EntryFunnelEvidence { stageName: string; date: string; observedAtStage: boolean; kind?: 'stage' | 'qualification' | 'customer' | 'win' | 'current-stage' }
+export interface EntryFunnelEvidence { stageName: string; date: string; observedAtStage: boolean; kind?: 'stage' | 'stage-completion' | 'qualification' | 'customer' | 'win' | 'current-stage' }
 export interface EntryFunnelStage {
   stageId: string; name: string; fill: string; deals: Deal[]; count: number;
   conversionRate: number | null; conversionLabel: string; comparisonBase: string; populationLabel: string;
@@ -9,7 +9,7 @@ export interface EntryFunnelStage {
   countingMethod: 'reached_or_beyond' | 'arrivals_in_period'; evidenceByDeal: Map<string, EntryFunnelEvidence>;
 }
 export interface EntryFunnel { stages: EntryFunnelStage[]; baseCount: number; unknownStageCount: number }
-interface Arrival { dealId: string; boardId?: string; stageId: string; date: string; recordedAt?: string }
+interface Arrival { dealId: string; boardId?: string; stageId: string; date: string; recordedAt?: string; completed?: boolean }
 interface Stage { stageId: string; name: string; fill: string }
 interface EntryFunnelInput {
   entries: readonly Deal[]; entryEvents: readonly LifecycleEvent[];
@@ -38,8 +38,9 @@ export function buildEntryFunnel({ entries, entryEvents, stageEvents, lifecycleE
   const rank = new Map(stages.map((stage, index) => [stage.stageId, index]));
   const ledgerArrivals: Arrival[] = lifecycleEvents.flatMap(event =>
     event.boardId === boardId && base.has(event.dealId) && event.stageId &&
-      (event.type === 'entered_board' || event.type === 'stage_changed')
-      ? [{ dealId: event.dealId, boardId, stageId: event.stageId, date: event.date, recordedAt: event.recordedAt }] : []);
+      (event.type === 'entered_board' || event.type === 'stage_changed' || event.type === 'stage_completed')
+      ? [{ dealId: event.dealId, boardId, stageId: event.stageId, date: event.date, recordedAt: event.recordedAt,
+        completed: event.type === 'stage_completed' }] : []);
   // The same arrival may exist in both tables. Keep the ledger's recorded_at
   // ordering so an earlier same-transaction visit cannot move past the anchor.
   const recordedKeys = new Set(ledgerArrivals.map(arrivalKey));
@@ -70,11 +71,12 @@ export function buildEntryFunnel({ entries, entryEvents, stageEvents, lifecycleE
         const direct = visits.get(index);
         const evidence = direct || visits.get(maximum)!;
         deals.push(deal);
-        evidenceByDeal.set(id, { stageName: direct ? stage.name : stages[maximum].name, date: evidence.date, observedAtStage: !!direct });
+        evidenceByDeal.set(id, { stageName: direct ? stage.name : stages[maximum].name, date: evidence.date,
+          observedAtStage: !!direct && !evidence.completed, ...(evidence.completed ? { kind: 'stage-completion' as const } : {}) });
       }
       return { ...stage, deals, count: deals.length, countingMethod: 'reached_or_beyond', evidenceByDeal,
         conversionRate: null, conversionLabel: '', comparisonBase: '',
-        populationLabel: 'Leads que entraram no funil no período e alcançaram esta etapa ou uma posterior até a apuração. Saltos contam como avanço, não como passagem registrada.' };
+        populationLabel: 'Leads que entraram no funil no período e alcançaram esta etapa ou uma posterior até a apuração. Cumprimentos registrados ao avançar usam a data do movimento; o histórico anterior mantém suas evidências.' };
     }),
   };
 }

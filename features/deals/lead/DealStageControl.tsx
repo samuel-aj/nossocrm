@@ -15,7 +15,7 @@ import { LossReasonModal } from '@/components/ui/LossReasonModal';
 import ConfirmModal from '@/components/ConfirmModal';
 import type { Board, BoardStage, Deal, DealView } from '@/types';
 import { StageCascadePicker } from './StageCascadePicker';
-import { isAutomaticWonStage, isLostBoardStage, manualWinStage } from '@/lib/boards/boardOutcome';
+import { isAutomaticWonDestination, isLostBoardStage, manualWinStage } from '@/lib/boards/boardOutcome';
 
 export function isLostStage(board: Board, stageId: string): boolean {
   return isLostBoardStage(board, stageId);
@@ -54,7 +54,7 @@ export function DealStageControl({ deal, size = 'md', align = 'left' }: Props) {
   };
 
   const selectedMove = pendingMove ? resolveMove(pendingMove) : null;
-  const targetIsWon = !!selectedMove && isAutomaticWonStage(selectedMove.target, selectedMove.targetStage.id);
+  const targetIsWon = !!selectedMove && isAutomaticWonDestination(selectedMove.target, selectedMove.targetStage.id);
   const targetIsSuccess = targetIsWon || ['MQL', 'SALES_QUALIFIED'].includes(selectedMove?.targetStage.linkedLifecycleStage ?? '');
   const effect = selectedMove && (
     isLostStage(selectedMove.target, selectedMove.targetStage.id)

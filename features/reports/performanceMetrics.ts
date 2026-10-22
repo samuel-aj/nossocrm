@@ -87,7 +87,8 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   const snapshotAt = (deal: Deal, date: string, stageId?: string, precise = false): HistoricalReportDeal => {
     const compare = (event: LifecycleEvent) => precise ? compareHistoricalDates(event.date, date) : time(event.date) - time(date);
     const exact = ledgerFor(deal.id).find(event => compare(event) === 0 && (!stageId || event.stageId === stageId));
-    const snapshot = exact || ledgerFor(deal.id).filter(event => compare(event) <= 0).at(-1);
+    // Completion snapshots describe the confirmed stage, not a new live state.
+    const snapshot = exact || ledgerFor(deal.id).filter(event => event.type !== 'stage_completed' && compare(event) <= 0).at(-1);
     if (!exact || exact.snapshotSource === 'current') legacyIds.add(deal.id);
     const value: HistoricalReportDeal = snapshot ? historical(snapshot) : { ...deal, boardId: board.id, isWon: false, isLost: false, closedAt: undefined, qualifiedAt: undefined, leadSourceSnapshotSource: 'current' };
     return { ...value, status: stageId || value.status, updatedAt: date };
@@ -165,7 +166,7 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   };
   // A board-proven stage event also establishes membership, but not an invented entry date.
   const cohort = deals.flatMap(deal => {
-    const entry = canonical.find(event => event.dealId === deal.id);
+    const entry = canonical.find(event => event.dealId === deal.id && event.type !== 'stage_completed');
     const firstVisit = history.find(event => event.dealId === deal.id);
     const created = entry?.dealCreatedAt || deal.createdAt;
     if (!inPeriod(created) || (!entry && !firstVisit)) return [];
@@ -178,7 +179,7 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   });
   const cohortIds = new Set(cohort.map(deal => deal.id));
   const unknownBoardMembershipCount = mode === 'cohort' ? deals.filter(deal => deal.boardId === board.id && inPeriod(deal.createdAt) && filtered(deal) &&
-    !canonical.some(event => event.dealId === deal.id) && !history.some(event => event.dealId === deal.id)).length : 0;
+    !canonical.some(event => event.dealId === deal.id && event.type !== 'stage_completed') && !history.some(event => event.dealId === deal.id)).length : 0;
   const firstQualified = first('qualified');
   const selectOriginal = (type: LifecycleEvent['type']) => {
     const candidates = type === 'qualified' ? [...firstQualified.values()] : type === 'won' ? episodes.wins : canonical.filter(event => event.type === type);
@@ -231,14 +232,16 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   if (mode === 'current') {
     for (const deal of currentDeals) populations.get(deal.status)?.set(deal.id, deal);
   } else {
-    const arrivals = [...history, ...ledger.filter(event => event.stageId && (event.type === 'entered_board' || event.type === 'stage_changed')).map(event => ({
-      dealId: event.dealId, boardId: event.boardId, stageId: event.stageId!, date: event.date,
+    const arrivals = [...history.map(event => ({ ...event, completed: false })), ...ledger.filter(event => event.stageId &&
+      (event.type === 'entered_board' || event.type === 'stage_changed' || event.type === 'stage_completed')).map(event => ({
+      dealId: event.dealId, boardId: event.boardId, stageId: event.stageId!, date: event.date, completed: event.type === 'stage_completed',
     }))].sort((a, b) => mode === 'monthly' ? compareHistoricalDates(a.date, b.date) : time(a.date) - time(b.date));
     for (const event of arrivals) {
       // PostgreSQL arrivals can differ within one millisecond. Match the new
       // post-sale population to its own snapshot, never a neighbouring event.
       const precise = mode === 'monthly' && postSaleBoundary >= 0 && stepIndex(event.stageId) > postSaleBoundary;
       const deal = snapshotAt(byId.get(event.dealId)!, event.date, event.stageId, precise);
+      if (event.completed) deal.stageEvidenceKind = 'stage-completion';
       if (mode === 'cohort' ? cohortIds.has(event.dealId) : inPeriod(event.date) && filtered(deal)) populations.get(event.stageId)?.set(event.dealId, deal);
     }
   }

@@ -305,8 +305,8 @@ const ReportsPage: React.FC = () => {
             </button>
           </div>
           <LazyStageConversionChart data={stageConversionData} onStageClick={setSelectedStageId}
-            description="Avanço das entradas do período. Ganhos pela data do fechamento; pós-venda pela data de chegada à etapa." />
-          <p className="mt-4 text-xs text-slate-500">Taxas calculadas sobre a base de entradas. O pós-venda inclui chegadas no intervalo, mesmo com ganho anterior, sem ampliar entradas ou fechamentos.</p>
+            description="Avanço das entradas do período. Ganhos pela data do fechamento; pós-venda pela data do registro na etapa." />
+          <p className="mt-4 text-xs text-slate-500">Taxas calculadas sobre a base de entradas. O pós-venda inclui etapas cumpridas no intervalo, mesmo com ganho anterior, sem ampliar entradas ou fechamentos.</p>
           {metrics.diagnosticsDeals.length > 0 && <button type="button" onClick={() => setSelection({ kind: 'diagnostics' })}
             className="mt-2 self-start rounded text-left text-xs text-slate-500 underline underline-offset-2 hover:text-primary-600 focus-visible:ring-2 focus-visible:ring-primary-500">
             Conferir {metrics.diagnosticsDeals.length} {metrics.diagnosticsDeals.length === 1 ? 'registro fora' : 'registros fora'} da conversão comprovada

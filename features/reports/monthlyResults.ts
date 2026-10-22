@@ -1,5 +1,5 @@
 import type { Board, Deal } from '@/types';
-import { compareHistoricalDates, matchesReportFilters } from './performanceHistory';
+import { compareHistoricalDates, matchesReportFilters, type HistoricalReportDeal } from './performanceHistory';
 import type { EntryFunnel, EntryFunnelEvidence, EntryFunnelStage } from './entryFunnel';
 
 export interface MonthlyQualificationEvidence { kind: 'qualification' | 'stage'; date: string; stageId?: string; stageName: string }
@@ -72,7 +72,8 @@ export function calculateMonthlyResults(input: MonthlyInput) {
     });
     const evidenceByDeal = new Map<string, EntryFunnelEvidence>(deals.map(deal => [deal.id, stage.milestone === 'customer'
       ? { kind: 'win', date: deal.closedAt!, stageName: 'Ganho registrado', observedAtStage: false }
-      : { kind: 'stage', date: deal.updatedAt, stageName: stage.name, observedAtStage: true }]));
+      : { kind: (deal as HistoricalReportDeal).stageEvidenceKind || 'stage', date: deal.updatedAt, stageName: stage.name,
+        observedAtStage: (deal as HistoricalReportDeal).stageEvidenceKind !== 'stage-completion' }]));
     return { ...stage, deals, count: deals.length, evidenceByDeal,
       countingMethod: stage.milestone === 'customer' ? stage.countingMethod : 'arrivals_in_period',
       milestoneLabel: stage.milestone === 'customer' ? 'Ganhos do período' : 'Pós-venda no período',

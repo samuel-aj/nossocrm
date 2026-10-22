@@ -166,6 +166,17 @@ it('reopens a closed lead explicitly when selecting its own Customer stage', asy
   await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ targetStageId: 'current', explicitReopen: true, explicitWin: false })));
 });
 
+it('describes the cumulative gain when transferring straight to a post-sale stage', () => {
+  mocks.boards = [source, { ...target, stages: [
+    { id: 'signed', label: 'Assinado', color: 'bg-blue-500', linkedLifecycleStage: 'CUSTOMER' },
+    { id: 'protocol', label: 'Protocolado', color: 'bg-green-500' },
+    target.stages[1],
+  ] } as Board];
+  setup(); pick('Destino', /Protocolado/);
+  expect(screen.getByRole('alertdialog')).toHaveTextContent('O lead será marcado como ganho.');
+  expect(mocks.mutateAsync).not.toHaveBeenCalled();
+});
+
 it('keeps an explicit archive win in its current stage even with a Customer destination', async () => {
   mocks.boards = [{ ...source, wonStayInStage: true, wonStageId: 'same', stages: [...source.stages, { id: 'customer', label: 'Contrato', color: 'bg-green-500', linkedLifecycleStage: 'CUSTOMER' }] }];
   setup();

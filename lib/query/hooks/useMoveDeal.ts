@@ -99,7 +99,7 @@ export const useMoveDeal = () => {
         ...(lossReason && { lossReason }),
         ...(lossCategory && { lossCategory }),
         // A legacy Customer-stage correction is normalized by the DB from its
-        // evidence. Sending a fresh explicit win could invent a new win date.
+        // evidence or the current real advance. Let the DB choose that date.
         ...(!outcome.recoveringLegacyWin && { isWon, isLost }),
       };
 

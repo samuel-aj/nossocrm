@@ -3,10 +3,20 @@ import { ExternalLink } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { getDealLeadSource } from '@/lib/deals/leadSource';
 import type { PerformanceMetrics, PerformanceMode } from './performanceMetrics';
+import type { EntryFunnelEvidence } from './entryFunnel';
 
 const formatDate = (value?: string) => {
   if (!value || !Number.isFinite(Date.parse(value))) return '';
   return new Date(value).toLocaleDateString('pt-BR');
+};
+
+const evidenceLabel = (evidence?: EntryFunnelEvidence) => {
+  if (evidence?.kind === 'current-stage') return 'Etapa atual · chegada sem data registrada';
+  if (evidence?.kind === 'stage-completion') return 'Cumprimento registrado ao avançar';
+  if (evidence?.kind === 'qualification') return 'Qualificação registrada';
+  if (evidence?.kind === 'customer') return 'Promoção a Cliente registrada';
+  if (evidence?.kind === 'win') return 'Ganho registrado';
+  return evidence?.observedAtStage ? 'Passagem registrada' : 'Incluído por etapa posterior';
 };
 
 interface StageLeadsModalProps {
@@ -28,7 +38,7 @@ export function StageLeadsModal({ stage, qualificationDates, estimatedQualificat
     <Modal isOpen onClose={onClose} title={stage.name + suffix + (monthly && milestone === 'customer' ? ' · Ganhos do período' : '') + ' · ' + leads.length + ' leads'}
       className="max-w-4xl" bodyClassName="p-0 overflow-auto">
       <p className="px-5 py-3 text-sm text-slate-500">{stage.populationLabel}{stage.comparisonBase && ` ${stage.comparisonBase}`}</p>
-      {evidence && <p className="px-5 pb-3 text-xs text-slate-500">{periodPostSale ? 'Pós-venda no período: chegadas registradas nesta etapa durante o intervalo, mantidas hoje nesta etapa ou em uma posterior do mesmo funil. Inclui leads ganhos antes ou sem ganho registrado; perdidos e retornos a etapas anteriores ficam fora. Cada lead conta uma vez, sem aumentar entradas, ganhos ou faturamento.' : monthly ? milestone === 'customer' ? 'Ganhos do período: os mesmos contratos de Fechamentos e faturamento, inclusive os fora da base de entradas. Esses ganhos de fora não aumentam a base de leads ou origens. A taxa de fechamento usa somente os ganhos entre qualificados da base de entradas. A data do ganho registrado não comprova a data da assinatura.' : 'Somente leads da base de entradas do período. A prova abaixo explica a inclusão, sem inventar a data da primeira qualificação ou visitas a etapas puladas.' : milestone ? 'Os leads deste marco são os mesmos usados no indicador e na taxa correspondente.' : 'Avanços por etapas posteriores não criam visitas nas etapas puladas. Qualificação e ganho exigem seus próprios registros.'}</p>}
+      {evidence && <p className="px-5 pb-3 text-xs text-slate-500">{periodPostSale ? 'Pós-venda no período: chegadas ou cumprimentos registrados nesta etapa durante o intervalo, mantidos hoje nesta etapa ou em uma posterior do mesmo funil. Inclui leads ganhos antes ou sem ganho registrado; perdidos e retornos a etapas anteriores ficam fora. Cada lead conta uma vez, sem aumentar entradas, ganhos ou faturamento.' : monthly ? milestone === 'customer' ? 'Ganhos do período: os mesmos contratos de Fechamentos e faturamento, inclusive os fora da base de entradas. Esses ganhos de fora não aumentam a base de leads ou origens. A taxa de fechamento usa somente os ganhos entre qualificados da base de entradas. A data exibida é a do ganho registrado no CRM; datas anteriores já registradas são preservadas.' : 'Somente leads da base de entradas do período. A lista distingue passagens registradas e cumprimentos confirmados ao avançar, preservando as datas existentes. Registros antigos sem confirmação continuam identificados como avanço por etapa posterior.' : milestone ? 'Os leads deste marco são os mesmos usados no indicador e na taxa correspondente.' : 'A lista distingue passagens registradas, cumprimento registrado ao avançar e inclusão por etapa posterior. Movimentações antigas sem confirmação não recebem novas datas.'}</p>}
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead className="sticky top-0 bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400">
@@ -54,7 +64,7 @@ export function StageLeadsModal({ stage, qualificationDates, estimatedQualificat
                 </td>
                 {evidence && <td className="px-5 py-3 min-w-48">
                   <span>{evidence.get(lead.id)?.stageName || '—'}</span>
-                  <span className="block text-xs text-slate-500">{evidence.get(lead.id)?.kind === 'current-stage' ? 'Etapa atual · chegada sem data registrada' : <>{evidence.get(lead.id)?.kind === 'qualification' ? 'Qualificação registrada' : evidence.get(lead.id)?.kind === 'customer' ? 'Promoção a Cliente registrada' : evidence.get(lead.id)?.kind === 'win' ? 'Ganho registrado' : evidence.get(lead.id)?.observedAtStage ? 'Passagem registrada' : 'Incluído por etapa posterior'}{formatDate(evidence.get(lead.id)?.date) && ` · ${formatDate(evidence.get(lead.id)?.date)}`}</>}</span>
+                  <span className="block text-xs text-slate-500">{evidenceLabel(evidence.get(lead.id))}{evidence.get(lead.id)?.kind !== 'current-stage' && formatDate(evidence.get(lead.id)?.date) && ` · ${formatDate(evidence.get(lead.id)?.date)}`}</span>
                 </td>}
                 <td className="px-5 py-3 whitespace-nowrap">{formatDate(lead.createdAt)}</td>
                 <td className="px-5 py-3 whitespace-nowrap">{formatDate(qualificationDates.get(lead.id)) || (monthly ? 'Sem data registrada' : '')}

@@ -3,7 +3,7 @@ import { compareHistoricalDates, type LifecycleEvent, type LifecycleEventType } 
 import type { EntryFunnel, EntryFunnelEvidence, EntryFunnelStage } from './entryFunnel';
 
 interface Timed { date: string; recordedAt?: string }
-interface Visit extends Timed { dealId: string; boardId?: string; stageId: string; fromStageId?: string }
+interface Visit extends Timed { dealId: string; boardId?: string; stageId: string; fromStageId?: string; completed?: boolean }
 interface Rules {
   boardId: string; stageIds: readonly string[]; qualifiedStageId?: string; customerStageId?: string;
   usesCustomerPromotion: boolean;
@@ -34,8 +34,10 @@ export function selectConversionPopulation(input: ConversionInput) {
     const anchor = anchors.get(event.dealId);
     return !!anchor && withinCutoff(event.date) && compareConversionEvents(event, anchor) >= 0;
   };
-  const ledgerVisits: Visit[] = events.flatMap(event => event.stageId && (event.type === 'entered_board' || event.type === 'stage_changed')
-    ? [{ dealId: event.dealId, boardId, stageId: event.stageId, date: event.date, recordedAt: event.recordedAt }] : []);
+  const ledgerVisits: Visit[] = events.flatMap(event => event.stageId &&
+    (event.type === 'entered_board' || event.type === 'stage_changed' || event.type === 'stage_completed')
+    ? [{ dealId: event.dealId, boardId, stageId: event.stageId, date: event.date, recordedAt: event.recordedAt,
+      completed: event.type === 'stage_completed' }] : []);
   const recordedKeys = new Set(ledgerVisits.map(visitKey));
   const visits = [...ledgerVisits, ...input.visits.filter(visit => visit.boardId === boardId && withinCutoff(visit.date) && !recordedKeys.has(visitKey(visit)))]
     .sort(compareConversionEvents);
@@ -115,7 +117,8 @@ export function selectConversionPopulation(input: ConversionInput) {
     else if (event.type === 'won') timeline.push({ timed: event, dealId: event.dealId, win: event });
   }
   for (const visit of anchoredVisits) timeline.push({ timed: visit, dealId: visit.dealId, visit,
-    reset: lost(visit.stageId) || (customerIndex >= 0 && stageIndex(visit.stageId) >= 0 && stageIndex(visit.stageId) < customerIndex) });
+    // A completion confirms an earlier milestone without moving the lead back.
+    reset: !visit.completed && (lost(visit.stageId) || (customerIndex >= 0 && stageIndex(visit.stageId) >= 0 && stageIndex(visit.stageId) < customerIndex)) });
   timeline.sort((a, b) => compareConversionEvents(a.timed, b.timed) || Number(!!b.reset) - Number(!!a.reset) || Number(!!b.win) - Number(!!a.win));
   const activeWins = new Map<string, LifecycleEvent>();
   const postCustomerVisits: Visit[] = [];
@@ -126,7 +129,20 @@ export function selectConversionPopulation(input: ConversionInput) {
       else activeWins.delete(item.dealId);
     }
     if (item.visit && customerIndex >= 0 && stageIndex(item.visit.stageId) > customerIndex && !lost(item.visit.stageId)) {
-      if (activeWins.has(item.dealId)) postCustomerVisits.push(item.visit);
+      // A transition records its arrival before the canonical gain at the same
+      // occurred_at. Require an explicit won snapshot or cumulative evidence;
+      // an already-recorded prefix will not produce new completion events.
+      // Selective historical repairs keep the original transition snapshot and
+      // append a won completion instead of rewriting the original open arrival.
+      const cooccurringWin = !activeWins.has(item.dealId) && events.some(event => event.dealId === item.dealId &&
+        event.snapshotSource === 'transition' && compareHistoricalDates(event.date, item.visit!.date) === 0 &&
+        ((event.type === 'stage_completed' && (event.source === 'transition' || (event.source === 'history' && event.isWon && !event.isLost))) ||
+          (event.source === 'transition' && (event.type === 'stage_changed' || event.type === 'entered_board') &&
+          event.isWon && !event.isLost && event.stageId === item.visit!.stageId && compareConversionEvents(event, item.timed) === 0))) &&
+        eligibleWins.some(event => event.dealId === item.dealId && compareHistoricalDates(event.date, item.visit!.date) === 0 &&
+          compareConversionEvents(event, item.timed) > 0 && !timeline.some(other => other.dealId === item.dealId && other.reset &&
+            compareConversionEvents(other.timed, item.timed) > 0 && compareConversionEvents(other.timed, event) <= 0));
+      if (activeWins.has(item.dealId) || cooccurringWin) postCustomerVisits.push(item.visit);
       else {
         const exact = events.find(event => event.dealId === item.dealId && event.stageId === item.visit!.stageId &&
           compareHistoricalDates(event.date, item.visit!.date) === 0 && (event.type === 'stage_changed' || event.type === 'entered_board'));
@@ -194,7 +210,8 @@ export function buildConversionFunnel(population: ConversionPopulation, entries:
       const later = [...visits].sort((a, b) => (ranks.get(b.stageId) ?? -1) - (ranks.get(a.stageId) ?? -1) || compareConversionEvents(a, b))[0];
       const visit = direct || later;
       let evidence: EntryFunnelEvidence | undefined;
-      if (visit) evidence = { kind: 'stage', stageName: stageName(visit.stageId), date: visit.date, observedAtStage: !!direct };
+      if (visit) evidence = { kind: visit.completed ? 'stage-completion' : 'stage', stageName: stageName(visit.stageId),
+        date: visit.date, observedAtStage: !!direct && !visit.completed };
       else if (!postCustomer && win && customerIndex >= 0 && index < customerIndex) evidence = milestoneEvidence('customer', win);
       else if (q && qIndex >= 0 && index < qIndex) evidence = milestoneEvidence('qualification', q);
       if (!evidence) continue;
@@ -211,7 +228,7 @@ export function buildConversionFunnel(population: ConversionPopulation, entries:
           postCustomer ? population.usesCustomerPromotion
             ? 'Leads convertidos com avanço registrado nesta etapa ou além durante um episódio de Cliente válido.'
             : 'Leads com avanço registrado nesta etapa ou além durante um episódio de ganho comprovado.' :
-            `Avanço acumulado dos leads da base, limitado pelos marcos de qualificação e ${population.usesCustomerPromotion ? 'Cliente' : 'ganho'} comprovados. Não comprova passagem por etapas puladas.` };
+            `Avanço acumulado dos leads da base, limitado pelos marcos de qualificação e ${population.usesCustomerPromotion ? 'Cliente' : 'ganho'} comprovados. Inclui cumprimentos registrados ao avançar, com suas próprias datas.` };
   });
   // A percentage belongs to the CURRENT column and uses the NEXT column as
   // numerator. The final column and an empty denominator never display a rate.
