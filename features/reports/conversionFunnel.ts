@@ -132,9 +132,12 @@ export function selectConversionPopulation(input: ConversionInput) {
       // A transition records its arrival before the canonical gain at the same
       // occurred_at. Require an explicit won snapshot or cumulative evidence;
       // an already-recorded prefix will not produce new completion events.
+      // Selective historical repairs keep the original transition snapshot and
+      // append a won completion instead of rewriting the original open arrival.
       const cooccurringWin = !activeWins.has(item.dealId) && events.some(event => event.dealId === item.dealId &&
-        event.source === 'transition' && event.snapshotSource === 'transition' && compareHistoricalDates(event.date, item.visit!.date) === 0 &&
-        (event.type === 'stage_completed' || ((event.type === 'stage_changed' || event.type === 'entered_board') &&
+        event.snapshotSource === 'transition' && compareHistoricalDates(event.date, item.visit!.date) === 0 &&
+        ((event.type === 'stage_completed' && (event.source === 'transition' || (event.source === 'history' && event.isWon && !event.isLost))) ||
+          (event.source === 'transition' && (event.type === 'stage_changed' || event.type === 'entered_board') &&
           event.isWon && !event.isLost && event.stageId === item.visit!.stageId && compareConversionEvents(event, item.timed) === 0))) &&
         eligibleWins.some(event => event.dealId === item.dealId && compareHistoricalDates(event.date, item.visit!.date) === 0 &&
           compareConversionEvents(event, item.timed) > 0 && !timeline.some(other => other.dealId === item.dealId && other.reset &&

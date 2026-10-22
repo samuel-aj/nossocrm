@@ -229,4 +229,42 @@ describe('dated cumulative stage completions', () => {
     expect(result.wonDeals).toHaveLength(1);
     if (count) expect(result.diagnosticsDeals).toEqual([]);
   });
+
+  it.each([
+    { label: 'historical repair with original snapshot', completionSnapshot: 'transition' as const, includeCompletion: true, completionWon: true, converted: 1 },
+    { label: 'reconstructed completion snapshot', completionSnapshot: 'current' as const, includeCompletion: true, completionWon: true, converted: 0 },
+    { label: 'historical gain without completion evidence', completionSnapshot: 'transition' as const, includeCompletion: false, completionWon: true, converted: 0 },
+    { label: 'open historical completion', completionSnapshot: 'transition' as const, includeCompletion: true, completionWon: false, converted: 0 },
+  ])('preserves a repaired protocol date and immutable open arrival: $label', ({ completionSnapshot, includeCompletion, completionWon, converted }) => {
+    const fixture = jump('selective-repair');
+    const qualified = '2026-10-13T12:30:00Z';
+    const deal = { ...fixture.deal, qualifiedAt: qualified };
+    const original = [
+      lifecycle(deal, 'entered_board', created, { stageId: 'new', isWon: false }),
+      lifecycle(deal, 'qualified', qualified, { stageId: 'q' }),
+      lifecycle(deal, 'stage_changed', advanced, { stageId: 'won', isWon: false, recordedAt: '2026-10-13T14:00:00.200100Z' }),
+    ];
+    const unchanged = structuredClone(original);
+    const repair = [lifecycle(deal, 'won', advanced, { stageId: 'won', source: 'history', snapshotSource: 'transition',
+      recordedAt: '2026-10-22T12:00:00.100100Z' }),
+      ...(includeCompletion ? ['proposal', 'signed', 'review'].map((id, index) => completed(deal, id, advanced, {
+        source: 'history', snapshotSource: completionSnapshot, isWon: completionWon, recordedAt: `2026-10-22T12:00:00.100${200 + index}Z`,
+      })) : []),
+    ];
+    for (const range of [day, month]) for (const mode of ['monthly', 'conversion'] as const) {
+      const result = report([deal], [...original, ...repair], fixture.visits, range, mode);
+      expect([result.entries.length, result.qualifiedCount, result.wonDeals.length, result.wonRevenue]).toEqual([1, 1, 1, 100]);
+      expect([result.qualificationRate, result.closingRate, result.totalConversionRate]).toEqual([100, 100, 100]);
+      expect(result.entries[0]).toMatchObject({ status: 'new', updatedAt: created, leadSource: 'Google Ads' });
+      expect(result.qualificationDates.get(deal.id)).toBe(qualified);
+      expect(result.wonDeals[0].closedAt).toBe(advanced);
+      expect(stage(result, 'won').count).toBe(mode === 'monthly' ? 1 : converted);
+      if (converted) {
+        expect(stage(result, 'won').evidenceByDeal.get(deal.id)).toEqual({ kind: 'stage', date: advanced, stageName: 'Protocolado', observedAtStage: true });
+        expect(stage(result, 'review').evidenceByDeal.get(deal.id)).toEqual({ kind: 'stage-completion', date: advanced, stageName: 'Revisão documental', observedAtStage: false });
+        expect(result.diagnosticsDeals).toEqual([]);
+      }
+    }
+    expect(original).toEqual(unchanged);
+  });
 });
