@@ -13,6 +13,9 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
 import { embedMany, type EmbeddingModel } from 'ai';
+import { createUsageContext } from '@/lib/ai-usage/budget';
+import { AiUsageError, assertUsageHealthy, failUsage, requireUsageContext, runWithUsageContext } from '@/lib/ai-usage/context';
+import { meterEmbeddingModel } from '@/lib/ai-usage/meteredModel';
 import { errorMessage } from './errors';
 import { getOrganizationApiKey } from './model';
 import { getAgentFileInfo } from './storage';
@@ -315,16 +318,18 @@ export async function embedTexts(
   texts: string[],
   opts: { prefer?: string | null; abortSignal?: AbortSignal } = {}
 ): Promise<EmbedTextsResult | null> {
+  if (requireUsageContext().organizationId !== organizationId) throw failUsage(new AiUsageError('AI_USAGE_ORGANIZATION_MISMATCH'));
   const setup = await resolveEmbeddingModel(admin, organizationId, opts.prefer);
   if (!setup) return null;
   const out: number[][] = [];
   for (let i = 0; i < texts.length; i += EMBED_BATCH_SIZE) {
     const batch = texts.slice(i, i + EMBED_BATCH_SIZE);
     const { embeddings } = await embedMany({
-      model: setup.model,
+      model: meterEmbeddingModel(setup.model, { provider: setup.provider, modelId: setup.id, operation: 'embedding' }),
       values: batch,
       providerOptions: setup.providerOptions,
       maxParallelCalls: 2,
+      maxRetries: 0,
       abortSignal: opts.abortSignal,
     });
     for (const e of embeddings) {
@@ -490,6 +495,14 @@ export async function processDocument(
   admin: SupabaseClient,
   input: { organizationId: string; documentId: string }
 ): Promise<ProcessDocumentResult> {
+  const usage = await createUsageContext(admin, { organizationId: input.organizationId, scope: 'knowledge' });
+  return runWithUsageContext(usage, () => processDocumentWithUsage(admin, input));
+}
+
+async function processDocumentWithUsage(
+  admin: SupabaseClient,
+  input: { organizationId: string; documentId: string }
+): Promise<ProcessDocumentResult> {
   const doc = await loadDocument(admin, input.organizationId, input.documentId);
   if (!doc) return { ok: false, chunkCount: 0, embedded: false, error: 'Documento não encontrado' };
   await setDocumentStatus(admin, doc, { status: 'processing', error: null });
@@ -551,6 +564,7 @@ export async function processDocument(
       embedded = await embedTexts(admin, doc.organization_id, toEmbed, { prefer: profile.model, abortSignal: abort });
     } catch (e) {
       // Sem embedding o documento continua útil pela busca por texto
+      assertUsageHealthy();
       console.error('[wa-agents] embeddings falharam, seguindo só com busca por texto:', errorMessage(e));
       embedded = null;
     }

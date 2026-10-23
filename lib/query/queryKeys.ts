@@ -19,6 +19,12 @@ import { PaginationState, ContactsServerFilters } from '@/types';
  * ```
  */
 export const queryKeys = {
+    aiUsage: {
+        all: ['aiUsage'] as const,
+        policy: (orgId: string) => ['aiUsage', orgId, 'policy'] as const,
+        summary: (orgId: string, filters: unknown) => ['aiUsage', orgId, 'summary', filters] as const,
+        conversation: (orgId: string, id: string) => ['aiUsage', orgId, 'conversation', id] as const,
+    },
     // Standard entity keys (using factory)
     deals: createQueryKeys('deals'),
 

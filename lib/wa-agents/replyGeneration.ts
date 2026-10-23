@@ -42,6 +42,8 @@ export async function generateAgentReply(input: {
   };
   const result = await generateText({
     model: input.model,
+    maxRetries: 0,
+    maxOutputTokens: 2000,
     system: input.system,
     messages: input.messages,
     temperature: supportsTemperature(input.agent) ? input.agent.temperature : undefined,

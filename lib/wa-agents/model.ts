@@ -4,6 +4,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { LanguageModel } from 'ai';
 import { getModel } from '@/lib/ai/config';
+import { AiUsageError, failUsage, requireUsageContext } from '@/lib/ai-usage/context';
+import { meterLanguageModel } from '@/lib/ai-usage/meteredModel';
 import { PROVIDER_LABELS } from './catalog';
 import { WaAgentError } from './errors';
 import type { AgentProvider, AgentRow } from './types';
@@ -85,8 +87,10 @@ export async function checkAgentApiKey(
 export async function resolveAgentModel(
   admin: SupabaseClient,
   organizationId: string,
-  agent: AgentRow
+  agent: AgentRow,
+  operation = 'reply'
 ): Promise<{ model: LanguageModel; provider: AgentProvider; modelId: string }> {
+  if (requireUsageContext().organizationId !== organizationId) throw failUsage(new AiUsageError('AI_USAGE_ORGANIZATION_MISMATCH'));
   const provider = agent.provider;
   const own = (agent.api_key ?? '').trim();
   const apiKey = own || (await getOrganizationApiKey(admin, organizationId, provider));
@@ -98,6 +102,6 @@ export async function resolveAgentModel(
   }
   const modelId = (agent.model || '').trim();
   if (!modelId) throw new WaAgentError('MODEL_NOT_CONFIGURED', 'Modelo não configurado no agente');
-  const model = getModel(provider, apiKey, modelId) as LanguageModel;
+  const model = meterLanguageModel(getModel(provider, apiKey, modelId) as LanguageModel, { provider, modelId, operation, agentId: agent.id });
   return { model, provider, modelId };
 }

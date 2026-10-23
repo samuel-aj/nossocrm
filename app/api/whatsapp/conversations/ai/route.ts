@@ -2,6 +2,7 @@ import { conversationAllowed } from '@/lib/permissions/conversationAccess';
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { isValidUUID } from '@/lib/supabase/utils';
+import { checkConversationBudget } from '@/lib/ai-usage/budget';
 
 export const runtime = 'nodejs';
 
@@ -27,6 +28,14 @@ export async function POST(req: Request) {
   }
 
   if (!(await conversationAllowed(auth.admin, auth.user, { id: conversationId }))) return json({ error: 'Conversa indisponível' }, 404);
+  if (status === 'active') {
+    try {
+      const budget = await checkConversationBudget(auth.admin, auth.user.organizationId, conversationId);
+      if (budget.blocked_at) return json({ error: 'O responsável deve liberar saldo antes de retomar a IA.' }, 409);
+    } catch {
+      return json({ error: 'Não foi possível conferir o limite de consumo. Tente novamente.' }, 503);
+    }
+  }
   const { data, error } = await auth.admin
     .from('wa_conversations')
     .update({

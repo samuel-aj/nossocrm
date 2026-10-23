@@ -4,6 +4,7 @@
  * robô). Também expõe o robô em andamento na conversa (ConversationBotInfo).
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { checkConversationBudget } from '@/lib/ai-usage/budget';
 import { botConnectionIds, createBotRun } from './bots';
 import { loadAgent, loadConversationContext, type WaConversationFull } from './context';
 import { errorMessage } from './errors';
@@ -184,6 +185,10 @@ export async function applyConversationAction(
     if (loadErr) return fail(500, loadErr.message);
     if (!raw) return fail(404, 'Conversa não encontrada');
     const conv = raw as WaConversationFull;
+    if (['start', 'resume', 'approve'].includes(action)) {
+      const budget = await checkConversationBudget(admin, organizationId, conversationId);
+      if (budget.blocked_at) return fail(409, 'IA pausada pelo limite de consumo. O responsável deve liberar saldo antes de retomar.');
+    }
     const now = new Date().toISOString();
 
     // Agente externo (n8n via API pública) = ai_status preenchido sem agente nativo.

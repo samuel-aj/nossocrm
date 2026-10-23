@@ -63,6 +63,7 @@
     "recharts": "^3.5.1",
     "remark-gfm": "^4.0.1",
     "server-only": "^0.0.1",
+    "sharp": "0.34.5",
     "tailwind-merge": "^3.4.0",
     "unpdf": "^1.8.1",
     "wasm-media-encoders": "^0.7.0",

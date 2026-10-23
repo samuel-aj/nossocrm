@@ -8,17 +8,18 @@
  * /settings/agentes abre em Agentes, /settings/ai abre na Central.
  */
 import React, { useEffect, useState } from 'react';
-import { Bot, History, Sparkles, Workflow, Lock } from 'lucide-react';
+import { Bot, History, Sparkles, Workflow, Lock, Gauge } from 'lucide-react';
+import { ConsumptionDashboard } from '@/features/ai-usage/ConsumptionDashboard';
 import { useWaAgentsAccess } from '@/hooks/useWaAgentsAccess';
 import { Spinner } from '@/features/wa-agents/ui';
 import { WaAgentsSettings } from '@/features/wa-agents/WaAgentsSettings';
 import { AICenterSettings } from './AICenterSettings';
 import { SettingsHeader, SubTabs } from './components/SettingsUi';
 
-export type AiSubTab = 'agentes' | 'robos' | 'execucoes' | 'central';
+export type AiSubTab = 'agentes' | 'robos' | 'execucoes' | 'central' | 'consumo';
 
 function isAiSubTab(v: string): v is AiSubTab {
-  return v === 'agentes' || v === 'robos' || v === 'execucoes' || v === 'central';
+  return v === 'agentes' || v === 'robos' || v === 'execucoes' || v === 'central' || v === 'consumo';
 }
 
 export const AiAutomationsSettings: React.FC<{ initialSub?: AiSubTab }> = ({ initialSub = 'agentes' }) => {
@@ -57,6 +58,7 @@ export const AiAutomationsSettings: React.FC<{ initialSub?: AiSubTab }> = ({ ini
           },
           { id: 'robos' as const, label: 'Robôs', icon: Workflow },
           { id: 'execucoes' as const, label: 'Execuções', icon: History },
+          { id: 'consumo' as const, label: 'Consumo e limites', icon: Gauge },
         ]
       : []),
     { id: 'central' as const, label: 'Central de IA', icon: Sparkles },
@@ -78,7 +80,7 @@ export const AiAutomationsSettings: React.FC<{ initialSub?: AiSubTab }> = ({ ini
       ) : (
         <>
           <SubTabs tabs={tabs} value={effective} onChange={go} ariaLabel="Seções de IA e Automações" />
-          {effective === 'central' ? <AICenterSettings embedded /> : <WaAgentsSettings embedded tab={effective} />}
+          {effective === 'central' ? <AICenterSettings embedded /> : effective === 'consumo' ? <ConsumptionDashboard /> : <WaAgentsSettings embedded tab={effective} />}
         </>
       )}
     </div>

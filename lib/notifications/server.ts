@@ -3,6 +3,7 @@ import type { RequireOrgResult } from '@/lib/whatsapp/api';
 import { getTeamAccess, visibleLead } from '@/lib/permissions/teamAccessServer';
 import { getVisibilityRules, connectionAllowed } from '@/lib/permissions/server';
 import { DEFAULT_PREFERENCES, PreferencesSchema, type Preferences, type Notice } from './types';
+import { usageNotices } from '@/lib/ai-usage/notifications';
 
 interface MessageRow {id:string;conversation_id:string;wa_timestamp:string|null}
 interface ConversationRow {id:string;contact_id:string|null;connection_id:string|null;wa_name:string|null;wa_phone:string;label_ids:string[]}
@@ -36,12 +37,20 @@ export async function saveSettings(auth: Auth, preferences: Preferences) {
 }
 export async function feed(auth: Auth, since: string | null, after: string | null, until: string | null) {
   const serverTime = new Date().toISOString();
-  if (!since) return {events:[],serverTime,nextAfter:null};
   const ctx = await context(auth);
   const {preferences:p,access,rules} = ctx;
   if (!p.messages && !p.leads && !p.alerts) return {events:[],serverTime,nextAfter:null};
-  const lower = new Date(Math.max(Date.parse(since),Date.now()-120_000)).toISOString();
   const upper = until && until < serverTime ? until : serverTime;
+  // A usage block remains actionable after an offline interval. Load unresolved
+  // notices on boot and each first page; stable IDs use the existing client dedupe.
+  // Ordinary message/lead notifications retain their baseline and short window.
+  let budgetNotices: Notice[] = [];
+  if (p.alerts && !after) {
+    try { budgetNotices = await usageNotices(auth.admin, auth.user, null, upper); }
+    catch (error) { console.error('[notifications] alertas de consumo indisponíveis:', error); }
+  }
+  if (!since) return {events:budgetNotices,serverTime:upper,nextAfter:null};
+  const lower = new Date(Math.max(Date.parse(since),Date.now()-120_000)).toISOString();
   let query = auth.admin.from('crm_notification_events').select('id,kind,source_id,board_id,created_at')
     .eq('organization_id',auth.user.organizationId).gte('created_at',lower).lte('created_at',upper).order('id').limit(200);
   if (after) query=query.gt('id',after);
@@ -102,5 +111,7 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
       notices.push({id:String(event.id),kind:'message',title:'Nova mensagem de lead',message:c.wa_name || c.wa_phone || 'Abra a conversa para ler',href:`/chats?conversation=${c.id}`,createdAt:event.created_at});
     }
   }
+  // Usage alerts use stable prefixed IDs; CRM's bigint cursor stays exclusive to its own feed.
+  notices.push(...budgetNotices);
   return {events:notices,serverTime:upper,nextAfter:events.length===200 ? String(events[events.length-1].id) : null};
 }
