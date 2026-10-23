@@ -43,4 +43,15 @@ describe('usage mutation routes', () => {
     h.role = 'admin'; expect((await PATCH(request({ ...body, conversation_tokens: null }, undefined, 'PATCH'))).status).toBe(400);
     expect((await PATCH(request(body, undefined, 'PATCH'))).status).toBe(200); expect(h.policy).toHaveBeenCalledWith({}, 'server-org', body);
   });
+  it('enables only the requested conversation quota without inventing daily or audio limits', async () => {
+    const body = { enabled: true, conversation_tokens: 300000, organization_daily_tokens: null, conversation_audio_seconds: null, timezone: 'America/Manaus' };
+    expect((await PATCH(request(body, undefined, 'PATCH'))).status).toBe(200);
+    expect(h.policy).toHaveBeenCalledExactlyOnceWith({}, 'server-org', body);
+    expect(h.grant).not.toHaveBeenCalled();
+  });
+  it.each([0, -1])('rejects a nonpositive optional daily limit %s', async daily => {
+    const body = { enabled: true, conversation_tokens: 300000, organization_daily_tokens: daily, conversation_audio_seconds: null, timezone: 'America/Manaus' };
+    expect((await PATCH(request(body, undefined, 'PATCH'))).status).toBe(400);
+    expect(h.policy).not.toHaveBeenCalled();
+  });
 });

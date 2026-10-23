@@ -70,8 +70,10 @@ try {
   check(await realpath(version.rows[0].data_directory) === await realpath(dataDirectory), 'fresh isolated data directory verified');
   await observer.query(await sqlFile('supabase/tests/ai_usage.fixture.sql'));
   await observer.query(await sqlFile('supabase/migrations/20261023141552_ai_usage_controls.sql'));
+  await observer.query(await sqlFile('supabase/migrations/20261023192659_ai_usage_optional_secondary_limits.sql'));
   await observer.query(await sqlFile('supabase/tests/ai_usage.sql'));
-  check(true, 'all 69 isolated SQL regressions passed on real PostgreSQL');
+  await observer.query(await sqlFile('supabase/tests/ai_usage_optional_limits.sql'));
+  check(true, 'all 94 isolated SQL regressions passed on real PostgreSQL');
   const a = await connect('worker-a');
   const b = await connect('worker-b');
   const pidA = (await a.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
@@ -126,7 +128,7 @@ try {
     }
   };
 
-  const shared = await scenario(1000);
+  const shared = await scenario(1000, { orgTokens: null });
   const [r1, r2] = await contested('same-contact reservation',
     () => rpc(a, 'ai_usage_reserve', [shared.reserveA('reserve-a')]),
     () => rpc(b, 'ai_usage_reserve', [shared.reserveB('reserve-b')]));
@@ -140,7 +142,7 @@ try {
     () => rpc(b, 'ai_usage_reserve', [organization.reserveB('org-b')]));
   check(o1.allowed && !o2.allowed && o2.reason === 'organization_daily_token_limit', 'different contacts cannot jointly exceed organization quota');
 
-  const dispatch = await scenario(3000);
+  const dispatch = await scenario(3000, { orgTokens: null });
   const reserved = await rpc(a, 'ai_usage_reserve', [dispatch.reserveA('dispatch-once', 20)]);
   const [d1, d2] = await contested('dispatch once',
     () => rpc(a, 'ai_usage_dispatch', [dispatch.org, reserved.attempt_id]),
@@ -158,27 +160,44 @@ try {
   const state = await observer.query('SELECT ai_status FROM public.wa_conversations WHERE id=$1', [dispatch.first]);
   check(state.rows[0].ai_status === 'paused', 'manual quota release never resumes or sends automatically');
 
-  const reservePolicy = await scenario(4000, { enabled: false });
+  const reservePolicy = await scenario(4000, { enabled: false, orgTokens: null });
   const [, pr] = await contested('enable before reserve',
     () => rpc(a, 'ai_usage_policy_set', [reservePolicy.org, { enabled: true }]),
     () => rpc(b, 'ai_usage_reserve', [reservePolicy.reserveB('stale-unprotected-reserve', 20, false)]));
   check(!pr.allowed && pr.reason === 'enforcement_not_checked', 'stale measurement-only context cannot reserve after concurrent activation');
 
-  const dispatchPolicy = await scenario(5000, { enabled: false });
+  const dispatchPolicy = await scenario(5000, { enabled: false, orgTokens: null });
   const beforeEnable = await rpc(a, 'ai_usage_reserve', [dispatchPolicy.reserveA('before-enable', 20, false)]);
   const [, pd] = await contested('enable before dispatch',
     () => rpc(a, 'ai_usage_policy_set', [dispatchPolicy.org, { enabled: true }]),
     () => rpc(b, 'ai_usage_dispatch', [dispatchPolicy.org, beforeEnable.attempt_id]));
   check(pd === false, 'concurrent activation prevents dispatch of an unchecked reservation');
 
-  const disablePolicy = await scenario(6000);
+  const disablePolicy = await scenario(6000, { orgTokens: null });
   const [, blocked] = await contested('disable before block',
     () => rpc(a, 'ai_usage_policy_set', [disablePolicy.org, { enabled: false }]),
     () => rpc(b, 'ai_usage_block', [disablePolicy.org, disablePolicy.secondAccount, disablePolicy.second, 'usage_unknown']));
   check(blocked === false && (await rpc(a, 'ai_usage_budget', [disablePolicy.org, disablePolicy.second])).blocked_at === null,
     'concurrent disabling prevents a new durable block from a stale enabled context');
 
-  console.log(`PASS: ${evidence.assertions.length} real PostgreSQL checks, ${evidence.lockProofs.length} demonstrated concurrent lock waits, plus 69 SQL regressions.`);
+  const independent = await scenario(7000, { sharedContact: false, orgTokens: null });
+  const [independentA, independentB] = await contested('optional organization cap',
+    () => rpc(a, 'ai_usage_reserve', [independent.reserveA('independent-a')]),
+    () => rpc(b, 'ai_usage_reserve', [independent.reserveB('independent-b')]));
+  check(independentA.allowed && independentB.allowed, 'null organization cap permits independent concurrent conversation quotas');
+  check(await rpc(a, 'ai_usage_dispatch', [independent.org, independentA.attempt_id]) &&
+    await rpc(b, 'ai_usage_dispatch', [independent.org, independentB.attempt_id]), 'combined usage above one conversation quota does not create an implicit organization cap');
+
+  const audioPolicy = await scenario(8000, { orgTokens: null });
+  const audio = await rpc(a, 'ai_usage_reserve', [{ ...audioPolicy.reserveA('uncapped-audio', 20), unit: 'seconds' }]);
+  const [, audioDispatch] = await contested('audio cap enabled before dispatch',
+    () => rpc(a, 'ai_usage_policy_set', [audioPolicy.org, { conversation_audio_seconds: 10 }]),
+    () => rpc(b, 'ai_usage_dispatch', [audioPolicy.org, audio.attempt_id]));
+  check(audio.allowed && audioDispatch === false, 'concurrently enabling an optional audio cap is enforced before provider dispatch');
+  check((await rpc(a, 'ai_usage_budget', [audioPolicy.org, audioPolicy.first])).blocked_reason === 'conversation_audio_limit',
+    'audio limit race creates the persistent manual-review block');
+
+  console.log(`PASS: ${evidence.assertions.length} real PostgreSQL checks, ${evidence.lockProofs.length} demonstrated concurrent lock waits, plus 94 SQL regressions.`);
 } catch (error) {
   failure = error;
   evidence.error = { message: error.message, code: error.code, stdout: error.stdout?.slice(-2000), stderr: error.stderr?.slice(-2000) };

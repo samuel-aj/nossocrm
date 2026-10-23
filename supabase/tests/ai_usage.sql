@@ -86,7 +86,7 @@ DO $$ DECLARE org uuid:=usage_test.id(1); r jsonb; attempt uuid; data jsonb; n i
  PERFORM usage_test.assert((data->>'seconds_used')::int=4 AND (data->>'tokens_used')::int=0,'audio is not counted as zero-cost tokens');
  PERFORM usage_test.assert(NOT (usage_test.reserve(105,'audio-b',57,'seconds')->>'allowed')::boolean,'audio reservation enforces remaining seconds');
  PERFORM public.ai_usage_policy_set(org,'{"conversation_audio_seconds":null}');
- PERFORM usage_test.assert(NOT (usage_test.reserve(106,'unconfigured-audio',1,'seconds')->>'allowed')::boolean,'protected audio without quota fails closed');
+ PERFORM usage_test.assert((usage_test.reserve(106,'unconfigured-audio',1,'seconds')->>'allowed')::boolean,'audio without optional quota remains measured and available');
  PERFORM public.ai_usage_policy_set(usage_test.id(2),'{"enabled":true,"conversation_tokens":100,"organization_daily_tokens":60}');
  r:=usage_test.reserve(201,'org-used',50); attempt:=(r->>'attempt_id')::uuid;
  PERFORM public.ai_usage_dispatch(usage_test.id(2),attempt); PERFORM public.ai_usage_settle(usage_test.id(2),attempt,'{"status":"completed","actualAmount":40}');
@@ -129,8 +129,8 @@ DO $$ DECLARE org uuid:=usage_test.id(3); conv uuid:=usage_test.id(301); input j
   'scope','conversation','idempotency_key','before-enabling','operation','reply','provider','fixture','model','unverified','unit','tokens','reserved_amount',40,'metadata','{"enforcementChecked":false}'::jsonb);
  r:=public.ai_usage_reserve(input); attempt:=(r->>'attempt_id')::uuid;
  PERFORM usage_test.assert((r->>'allowed')::boolean,'measurement-only attempt may reserve before activation');
- err:=false; BEGIN PERFORM public.ai_usage_policy_set(org,'{"enabled":true,"conversation_tokens":100}'); EXCEPTION WHEN OTHERS THEN err:=true; END;
- PERFORM usage_test.assert(err,'activation requires organization and conversation quotas even through direct RPC');
+ err:=false; BEGIN PERFORM public.ai_usage_policy_set(org,'{"enabled":true,"organization_daily_tokens":500}'); EXCEPTION WHEN OTHERS THEN err:=true; END;
+ PERFORM usage_test.assert(err,'activation requires a conversation quota even through direct RPC');
  PERFORM public.ai_usage_policy_set(org,'{"enabled":true,"conversation_tokens":100,"organization_daily_tokens":500}');
  PERFORM usage_test.assert(NOT public.ai_usage_dispatch(org,attempt),'activation between reserve and dispatch rejects unchecked provider');
  PERFORM usage_test.assert(public.ai_usage_budget(org,conv)->>'blocked_reason'='enforcement_not_checked','activation race persists a block');
