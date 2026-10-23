@@ -8,6 +8,7 @@
  * Nada aqui lança: o resultado fica no status/erro do item.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { checkConversationBudget } from '@/lib/ai-usage/budget';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { ensureConversation, getConnectionByIdForOrg } from '@/lib/whatsapp/service';
 import { isAiAgentsApproved } from './beta';
@@ -107,6 +108,8 @@ async function processDealStart(admin: SupabaseClient, row: DealStartRow): Promi
     .maybeSingle();
   const full = (fullRaw as WaConversationFull | null) ?? null;
   if (!full) return { status: 'error', reason: 'conversa não encontrada' };
+  const budget = await checkConversationBudget(admin, orgId, full.id);
+  if (budget.blocked_at) return { status: 'cancelled', reason: 'IA pausada pelo limite de consumo; liberação manual necessária' };
 
   // Atendimento em andamento (ativo, pausado ou aguardando aprovação), nativo ou externo, não recebe
   // outro início. Conversa parada (nativa ou externa) e conversa sem estado seguem para o início.

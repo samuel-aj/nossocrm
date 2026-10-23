@@ -170,8 +170,6 @@ const CUSTOM_MODEL = '__custom__';
 
 /** Sem intervalo fixo entre linhas: o "digitando..." dá o ritmo. */
 const FIXED_LINE_DELAY_MS = 0;
-/** Sem limite de respostas por atendimento. */
-const FIXED_MAX_REPLIES = 0;
 /** O agente sempre lê a descrição e os campos personalizados do lead. */
 const FIXED_LEAD_CONTEXT = { ...DEFAULT_AGENT_LEAD_CONTEXT, description: true, custom_fields: true } as const;
 
@@ -188,7 +186,6 @@ function legacyDefaultsPatch(agent: AgentPublic | null): Partial<AgentInput> {
   if (!agent) return {};
   const out: Partial<AgentInput> = {};
   if ((agent.line_delay_ms ?? FIXED_LINE_DELAY_MS) !== FIXED_LINE_DELAY_MS) out.line_delay_ms = FIXED_LINE_DELAY_MS;
-  if ((agent.max_replies ?? FIXED_MAX_REPLIES) !== FIXED_MAX_REPLIES) out.max_replies = FIXED_MAX_REPLIES;
   const typing = normalizeTyping(agent.typing);
   if (!typing.enabled) out.typing = { ...typing, enabled: true };
   const lead = { ...DEFAULT_AGENT_LEAD_CONTEXT, ...(agent.lead_context ?? {}) };
@@ -323,7 +320,6 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
     history_limit: clampField('history_limit', form.history_limit),
     line_delay_ms: FIXED_LINE_DELAY_MS,
     human_pause_minutes: clampField('human_pause_minutes', form.human_pause_minutes),
-    max_replies: FIXED_MAX_REPLIES,
     only_new_conversations: form.only_new_conversations,
     start_mode: form.start_mode,
     followups: form.followups,

@@ -11,6 +11,9 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { generateText, experimental_transcribe as transcribe } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { getModel } from '@/lib/ai/config';
+import { AiUsageError, failUsage, requireUsageContext } from '@/lib/ai-usage/context';
+import { audioDurationBound } from '@/lib/ai-usage/audioBound';
+import { meterLanguageModel, meteredOperation, rejectUnsupportedUsage } from '@/lib/ai-usage/meteredModel';
 import { extractDocumentText } from './knowledge';
 import { errorMessage } from './errors';
 import { getOrganizationApiKey } from './model';
@@ -107,12 +110,22 @@ async function transcribeAudio(
   mime: string
 ): Promise<string | null> {
   if (plan.via === 'whisper') {
+    const context = requireUsageContext();
+    const seconds = audioDurationBound(new Uint8Array(bytes));
+    if (context.policyEnabled && (!seconds || seconds > 600)) return rejectUnsupportedUsage();
     const openai = createOpenAI({ apiKey: plan.key });
-    const result = await transcribe({ model: openai.transcription('whisper-1'), audio: new Uint8Array(bytes) });
+    const result = await meteredOperation({
+      operation: 'audio_transcription', provider: 'openai', model: 'whisper-1', unit: 'seconds', bound: seconds ?? 21600,
+      metadata: { boundVersion: seconds ? 'local-audio-frames-v1' : 'unprotected-unknown-duration' },
+      execute: () => transcribe({ model: openai.transcription('whisper-1'), audio: new Uint8Array(bytes), maxRetries: 0 }),
+      usage: result => result.durationInSeconds ?? null,
+    });
     return (result.text || '').trim() || null;
   }
   const result = await generateText({
-    model: getModel('google', plan.key, modelId || 'gemini-2.5-flash'),
+    model: meterLanguageModel(getModel('google', plan.key, modelId || 'gemini-2.5-flash'), { provider: 'google', modelId: modelId || 'gemini-2.5-flash', operation: 'audio_understanding' }),
+    maxRetries: 0,
+    maxOutputTokens: 2000,
     messages: [
       {
         role: 'user',
@@ -139,7 +152,9 @@ async function describeImage(
   const pergunta = sticker ? STICKER_PROMPT : IMAGE_PROMPT;
   const texto = caption.trim() ? `${pergunta}\n\nO lead mandou junto: "${caption.trim()}"` : pergunta;
   const result = await generateText({
-    model: getModel(provider, apiKey, modelId),
+    model: meterLanguageModel(getModel(provider, apiKey, modelId), { provider, modelId, operation: 'image_understanding' }),
+    maxRetries: 0,
+    maxOutputTokens: 2000,
     messages: [
       {
         role: 'user',
@@ -179,6 +194,7 @@ export async function understandMedia(
   const cfg = agent.media_understanding;
   const querAlgo = cfg.audio || cfg.image || cfg.document;
   if (!querAlgo) return messages;
+  if (requireUsageContext().organizationId !== organizationId) throw failUsage(new AiUsageError('AI_USAGE_ORGANIZATION_MISMATCH'));
 
   const pendentes = messages.filter(
     m => m.media_type && !(m.transcription ?? '').trim() && (m as MediaMessageRow).media_url

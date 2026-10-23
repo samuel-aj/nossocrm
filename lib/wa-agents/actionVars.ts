@@ -103,7 +103,7 @@ export async function resolveAiVarValues(
   if (vars.length === 0) return fallback;
 
   try {
-    const { model, modelId } = await resolveAgentModel(admin, ctx.conversation.organization_id, agent);
+    const { model, modelId } = await resolveAgentModel(admin, ctx.conversation.organization_id, agent, 'action_variables');
     const history = await buildHistoryMessages(admin, ctx, Math.min(agent.history_limit, 60));
     const spec = vars
       .map(v => `- "${v.name}": ${v.instruction}${v.example ? ` (exemplo de resultado: ${JSON.stringify(v.example)})` : ''}`)
@@ -117,6 +117,8 @@ export async function resolveAiVarValues(
     ].join('\n');
     const result = await generateText({
       model,
+      maxRetries: 0,
+      maxOutputTokens: 2000,
       system,
       messages: [
         ...history,

@@ -1,5 +1,6 @@
 import {beforeEach,describe,expect,it,vi} from 'vitest';
 vi.mock('server-only',()=>({}));
+vi.mock('@/lib/ai-usage/notifications',()=>({usageNotices:vi.fn()}));
 vi.mock('@/lib/permissions/teamAccessServer',async()=>{
   const actual=await vi.importActual<typeof import('@/lib/permissions/teamAccessServer')>('@/lib/permissions/teamAccessServer');
   return {...actual,getTeamAccess:vi.fn()};
@@ -10,6 +11,7 @@ import {getVisibilityRules} from '@/lib/permissions/server';
 import {DEFAULT_VISIBILITY_RULES} from '@/lib/permissions/types';
 import {context,feed,saveSettings} from './server';
 import {DEFAULT_PREFERENCES,PreferencesSchema} from './types';
+import {usageNotices} from '@/lib/ai-usage/notifications';
 
 const org='org-a',user='user-a';
 let tables:Record<string,Record<string,unknown>[]>;
@@ -27,6 +29,7 @@ const now=()=>new Date().toISOString();
 async function notices(){return (await feed(auth,now(),null,null)).events;}
 beforeEach(()=>{
   queries.length=0;
+  vi.mocked(usageNotices).mockReset().mockResolvedValue([]);
   vi.mocked(getTeamAccess).mockResolvedValue({fullAccess:true,canManage:false,legacy:true,masterUserId:null,boards:[]});
   vi.mocked(getVisibilityRules).mockResolvedValue(null);
   tables={boards:[{id:'b',name:'Vendas'}],crm_notification_preferences:[{preferences:{...DEFAULT_PREFERENCES,messages:true,scope:'all',leads:true,boardIds:['11111111-1111-4111-8111-111111111111']}}],crm_notification_events:[{id:1,kind:'message',source_id:'m',created_at:now()}],wa_messages:[{id:'m',conversation_id:'c'}],wa_conversations:[{id:'c',contact_id:'contact',connection_id:'connection',wa_name:'Cliente',label_ids:[]}],deals:[{id:'d',title:'Lead',board_id:'b',owner_id:user,contact_id:'contact',is_won:false,is_lost:false}]};
@@ -63,4 +66,44 @@ it('suppresses recovery alerts outside board/lead visibility and when preference
   tables.deals[0].active_alert={id:'a'};
   vi.mocked(getTeamAccess).mockResolvedValue({fullAccess:false,canManage:false,legacy:false,masterUserId:null,boards:[]});
   expect(await notices()).toEqual([]);
+});
+
+describe('durable usage alerts in the personal feed',()=>{
+  const oldNotice={id:'ai-usage-old',kind:'alert' as const,title:'IA pausada por consumo',message:'Liberação manual necessária',href:'/chats?conversation=c',createdAt:'2026-09-01T10:00:00Z'};
+  const enableAlerts=()=>{tables.crm_notification_preferences[0].preferences={...DEFAULT_PREFERENCES,messages:true,alerts:true};};
+  it('shows an old unresolved block on boot without replaying messages or leads',async()=>{
+    enableAlerts();vi.mocked(usageNotices).mockResolvedValue([oldNotice]);
+    const result=await feed(auth,null,null,null);
+    expect(result.events).toEqual([oldNotice]);
+    expect(result.nextAfter).toBeNull();
+    expect(usageNotices).toHaveBeenCalledWith(auth.admin,auth.user,null,result.serverTime);
+    expect(queries.some(q=>q.table==='crm_notification_events')).toBe(false);
+    expect(queries.some(q=>q.table==='wa_messages')).toBe(false);
+  });
+  it('keeps unresolved alerts after an offline interval and uses stable IDs on repeated polls',async()=>{
+    enableAlerts();vi.mocked(usageNotices).mockResolvedValue([oldNotice]);
+    const first=await feed(auth,'2026-09-01T00:00:00Z',null,null);
+    const second=await feed(auth,first.serverTime,null,null);
+    expect(first.events.filter(n=>n.id.startsWith('ai-usage-'))).toEqual([oldNotice]);
+    expect(second.events.filter(n=>n.id.startsWith('ai-usage-'))).toEqual([oldNotice]);
+    expect(first.events.find(n=>n.kind==='message')?.href).toBe('/chats?conversation=c');
+    expect(usageNotices).toHaveBeenNthCalledWith(1,auth.admin,auth.user,null,first.serverTime);
+    expect(usageNotices).toHaveBeenNthCalledWith(2,auth.admin,auth.user,null,second.serverTime);
+  });
+  it('keeps the CRM bigint cursor independent and loads budget notices only on the first page',async()=>{
+    enableAlerts();vi.mocked(usageNotices).mockResolvedValue([oldNotice]);
+    tables.crm_notification_events=Array.from({length:200},(_,i)=>({id:i+1,kind:'message',source_id:'m',created_at:now()}));
+    const first=await feed(auth,now(),null,null);
+    expect(first.nextAfter).toBe('200');
+    const second=await feed(auth,now(),first.nextAfter,first.serverTime);
+    expect(second.serverTime).toBe(first.serverTime);
+    expect(second.events.some(n=>n.id.startsWith('ai-usage-'))).toBe(false);
+    expect(usageNotices).toHaveBeenCalledTimes(1);
+  });
+  it('respects disabled alert preferences even on boot',async()=>{
+    tables.crm_notification_preferences[0].preferences={...DEFAULT_PREFERENCES,messages:true,alerts:false};
+    vi.mocked(usageNotices).mockResolvedValue([oldNotice]);
+    expect((await feed(auth,null,null,null)).events).toEqual([]);
+    expect(usageNotices).not.toHaveBeenCalled();
+  });
 });

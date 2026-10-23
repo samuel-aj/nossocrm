@@ -5,6 +5,9 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { generateObject, type LanguageModel } from 'ai';
+import { createUsageContext } from '@/lib/ai-usage/budget';
+import { AiUsageError, failUsage, requireUsageContext, runWithUsageContext } from '@/lib/ai-usage/context';
+import { meterLanguageModel } from '@/lib/ai-usage/meteredModel';
 import { z } from 'zod';
 import { getModel } from '@/lib/ai/config';
 import { MODEL_CATALOG, PROMPT_VARIABLES, PROVIDER_LABELS } from './catalog';
@@ -142,6 +145,7 @@ export async function resolveAssistModel(
   organizationId: string,
   input: { provider?: AgentProvider; model?: string }
 ): Promise<{ model: LanguageModel; provider: AgentProvider; modelId: string }> {
+  if (requireUsageContext().organizationId !== organizationId) throw failUsage(new AiUsageError('AI_USAGE_ORGANIZATION_MISMATCH'));
   let provider: AgentProvider | undefined = input.provider;
   let modelId = (input.model ?? '').trim();
   if (!provider) {
@@ -160,7 +164,7 @@ export async function resolveAssistModel(
   if (!apiKey) {
     throw new WaAgentError('AI_KEY_NOT_CONFIGURED', `Chave da API não configurada para ${PROVIDER_LABELS[provider]}`);
   }
-  return { model: getModel(provider, apiKey, modelId) as LanguageModel, provider, modelId };
+  return { model: meterLanguageModel(getModel(provider, apiKey, modelId) as LanguageModel, { provider, modelId, operation: 'agent_configuration' }), provider, modelId };
 }
 
 /** Chave válida (/^[a-z0-9_-]{1,40}$/) a partir de texto livre; fallback com o índice. */
@@ -204,12 +208,22 @@ export async function assistAgentConfig(
   admin: SupabaseClient,
   input: { organizationId: string } & AssistInput
 ): Promise<AssistResult> {
+  const usage = await createUsageContext(admin, { organizationId: input.organizationId, scope: 'configuration' });
+  return runWithUsageContext(usage, () => assistAgentConfigWithUsage(admin, input));
+}
+
+async function assistAgentConfigWithUsage(
+  admin: SupabaseClient,
+  input: { organizationId: string } & AssistInput
+): Promise<AssistResult> {
   const invalid = validateAssistInput(input);
   if (invalid) throw new WaAgentError('VALIDATION_ERROR', invalid);
 
   const resolved = await resolveAssistModel(admin, input.organizationId, { provider: input.provider, model: input.model });
   const { object } = await generateObject({
     model: resolved.model,
+    maxRetries: 0,
+    maxOutputTokens: 8000,
     schema: AssistObjectSchema,
     schemaName: 'roteiro_do_agente',
     schemaDescription: 'Roteiro, persona, resultados do encerramento e ações durante a conversa de um agente de pré-atendimento',

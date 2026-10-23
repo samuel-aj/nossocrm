@@ -6,6 +6,8 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ModelMessage } from 'ai';
+import { createUsageContext } from '@/lib/ai-usage/budget';
+import { assertUsageHealthy, runWithUsageContext } from '@/lib/ai-usage/context';
 import { buildSystemPrompt, type ConversationContext } from './context';
 import {
   generateAgentReply,
@@ -134,6 +136,14 @@ export async function testAgentReply(
   admin: SupabaseClient,
   input: { organizationId: string; agent: AgentRow; messages: TestMessage[]; state?: Record<string, unknown> }
 ): Promise<TestAgentReplyResult> {
+  const usage = await createUsageContext(admin, { organizationId: input.organizationId, agentId: input.agent.id, scope: 'test' });
+  return runWithUsageContext(usage, () => testAgentReplyWithUsage(admin, input));
+}
+
+async function testAgentReplyWithUsage(
+  admin: SupabaseClient,
+  input: { organizationId: string; agent: AgentRow; messages: TestMessage[]; state?: Record<string, unknown> }
+): Promise<TestAgentReplyResult> {
   const startedAt = Date.now();
   const { organizationId, agent } = input;
   const { data: orgRow } = await admin
@@ -194,6 +204,7 @@ export async function testAgentReply(
   let generated: GeneratedReply | null = null;
   try {
     const gen = await generateAgentReply({ model: resolved.model, agent, system, messages, runtime });
+    assertUsageHealthy();
     generated = gen;
     if (gen.outputSafety.status === 'blocked') throw new Error('Resposta da IA bloqueada por conter dados internos. Revise o roteiro e tente novamente.');
     const lines = gen.text && gen.text !== NO_REPLY_TOKEN ? splitLines(gen.text) : [];

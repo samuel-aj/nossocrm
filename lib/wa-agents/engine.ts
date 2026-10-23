@@ -4,6 +4,8 @@
  * esteira do encerramento. Nada aqui lança sem registrar a execução.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { blockConversationBudget, checkConversationBudget, createUsageContext } from '@/lib/ai-usage/budget';
+import { AiUsageError, assertUsageHealthy, getUsageContext, getUsageFailure, runWithUsageContext } from '@/lib/ai-usage/context';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { getProvider, type SendResult } from '@/lib/whatsapp';
 import { recordOutboundMessage, replicateOutboundToSiblings } from '@/lib/whatsapp/service';
@@ -101,10 +103,6 @@ export const MAX_KNOWLEDGE_CALLS_PER_RUN = 3;
 /** Limite por conversa: execuções por mensagem recebida numa janela de minutos. */
 export const RATE_WINDOW_MINUTES = 10;
 export const RATE_MAX_RUNS = 20;
-/** Orçamento de tokens por organização em 24 h (janela móvel); env WA_AGENTS_DAILY_TOKEN_LIMIT (0 desliga). */
-export const DEFAULT_DAILY_TOKEN_LIMIT = 5_000_000;
-/** Acima do orçamento a conversa pausa por este tempo (a retomada confere de novo). */
-const BUDGET_PAUSE_MINUTES = 60;
 
 export function sleep(ms: number): Promise<void> {
   if (ms <= 0) return Promise.resolve();
@@ -143,30 +141,7 @@ export function lockSecondsFor(
   );
 }
 
-/** Orçamento diário de tokens por org: env WA_AGENTS_DAILY_TOKEN_LIMIT (0 desliga) ou o padrão. */
-export function dailyTokenLimit(): number {
-  const raw = process.env.WA_AGENTS_DAILY_TOKEN_LIMIT;
-  if (raw === undefined || raw.trim() === '') return DEFAULT_DAILY_TOKEN_LIMIT;
-  const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : DEFAULT_DAILY_TOKEN_LIMIT;
-}
 
-/** Tokens usados pela org nas últimas 24 h (RPC wa_ai_agent_usage_tokens). Em erro, 0 (não bloqueia). */
-async function orgTokensLast24h(admin: SupabaseClient, organizationId: string): Promise<number> {
-  try {
-    const since = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
-    const { data, error } = await admin.rpc('wa_ai_agent_usage_tokens', { p_org: organizationId, p_since: since });
-    if (error) {
-      console.error('[wa-agents] consulta de uso de tokens falhou:', error.message);
-      return 0;
-    }
-    const n = Number(data);
-    return Number.isFinite(n) ? n : 0;
-  } catch (e) {
-    console.error('[wa-agents] consulta de uso de tokens falhou:', errorMessage(e));
-    return 0;
-  }
-}
 
 /** true quando a conversa já teve RATE_MAX_RUNS execuções por mensagem recebida na janela. Em erro, false. */
 async function inboundRateLimited(admin: SupabaseClient, organizationId: string, conversationId: string): Promise<boolean> {
@@ -454,8 +429,33 @@ async function sendLines(
 // Execução do agente numa conversa
 // ---------------------------------------------------------------------------
 export async function runAgentOnConversation(input: RunAgentInput): Promise<RunResult> {
-  // o que o agente altera no lead entra no histórico como "agente de IA"
   const admin = withActor(createStaticAdminClient(), { kind: 'agent', id: input.agentId ?? null });
+  try {
+    if (!(await isAiAgentsApproved(admin, input.organizationId))) {
+      return { status: 'skipped', reason: 'agente de IA não liberado para esta organização' };
+    }
+    const budget = await checkConversationBudget(admin, input.organizationId, input.conversationId);
+    if (budget.blocked_at) return { status: 'skipped', reason: 'IA pausada pelo limite de consumo; liberação manual necessária' };
+    const conversation = await loadConversationContext(admin, input.organizationId, input.conversationId);
+    const usageContext = await createUsageContext(admin, {
+      organizationId: input.organizationId, conversationId: input.conversationId,
+      agentId: input.agentId ?? conversation.conversation.ai_agent_id,
+      dealId: conversation.deal?.id ?? null, scope: 'conversation',
+    });
+    // Resolving a newly saved contact may join an already blocked identity from another number.
+    const resolvedBudget = await checkConversationBudget(admin, input.organizationId, input.conversationId);
+    if (resolvedBudget.blocked_at) return { status: 'skipped', reason: 'IA pausada pelo limite de consumo; liberação manual necessária' };
+    return await runWithUsageContext(usageContext, () => runAgentWithUsage(input, admin));
+  } catch (error) {
+    // An unavailable ledger never authorizes an unmetered model call or an outbound webhook.
+    const reason = errorMessage(error);
+    console.error('[wa-agents] controle de consumo indisponível:', reason);
+    return { status: 'error', reason };
+  }
+}
+
+async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): Promise<RunResult> {
+  // o que o agente altera no lead entra no histórico como "agente de IA"
   const { organizationId, conversationId, trigger } = input;
   const depth = input.depth ?? 0;
   const startedAt = Date.now();
@@ -583,6 +583,8 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     // 4b. Lead automático: contato sem negócio aberto ganha um antes do
     // atendimento (dentro da trava; a própria função reconfere duplicidade)
     await ensureAutoLead(admin, { agent, ctx, pushEvent });
+    const usageContext = getUsageContext();
+    if (usageContext) usageContext.dealId = ctx.deal?.id ?? null;
 
     // "Limpar memória" (ai_state.memoria_desde): o agente não enxerga nem responde o que veio antes
     const memoriaDesde = ((conv.ai_state ?? {}) as ConversationAiState).memoria_desde ?? null;
@@ -599,6 +601,7 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
         messages: pending,
         onEvent: (type, data) => pushEvent(type, data),
       });
+      assertUsageHealthy();
       await renew();
     }
     inputText = pending.map(messageText).filter(Boolean).join('\n') || null;
@@ -611,29 +614,7 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
       }
     }
 
-    // 4b. Orçamento diário de tokens da organização: acima do teto a conversa pausa por 1 h
-    // (a retomada confere de novo) e o webhook 'error' avisa
-    const tokenLimit = dailyTokenLimit();
-    if (tokenLimit > 0) {
-      const used = await orgTokensLast24h(admin, organizationId);
-      if (used >= tokenLimit) {
-        const now = new Date();
-        const resumeAt = new Date(now.getTime() + BUDGET_PAUSE_MINUTES * 60_000).toISOString();
-        await updateConversation(admin, ctx, {
-          ai_status: 'paused',
-          ai_status_changed_at: now.toISOString(),
-          ai_paused_by: null,
-          ai_resume_at: resumeAt,
-        });
-        ctx.conversation.ai_status = 'paused';
-        ctx.conversation.ai_resume_at = resumeAt;
-        await emit('error', {
-          code: 'DAILY_TOKEN_LIMIT',
-          message: `Orçamento de tokens da organização em 24 h esgotado (${used} de ${tokenLimit}); conversa pausada até ${resumeAt}`,
-        });
-        return await finish('skipped', { reason: 'orçamento diário de tokens esgotado' });
-      }
-    }
+    // Every paid attempt reserves its balance atomically through the model middleware.
 
     // 5. Modelo, recursos (documentos, mídias, auxiliares), prompt e histórico
     const resolved = await resolveAgentModel(admin, organizationId, agent);
@@ -726,6 +707,7 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
 
     // 6. Geração
     const gen = await generateAgentReply({ model: resolved.model, agent, system, messages, runtime });
+    assertUsageHealthy();
     toolCalls.push(...gen.toolCalls);
     usage = gen.usage;
     const text = gen.text;
@@ -753,6 +735,7 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     const lines: string[] = [];
     const mediaSent: string[] = [];
     for (const seg of gen.segments) {
+      assertUsageHealthy();
       if (seg.kind === 'text') {
         const t = segmentText(seg);
         if (!t) continue;
@@ -1005,6 +988,25 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     return res;
   } catch (e) {
     const msg = errorMessage(e);
+    if (e instanceof AiUsageError || getUsageFailure()) {
+      const usageContext = getUsageContext();
+      try {
+        if (usageContext) {
+          // Measurement alone interrupts this attempt without turning a provider
+          // timeout into a permanent manual stop. Re-read the current policy;
+          // the block RPC checks it again under its lock to close the toggle race.
+          const currentBudget = await checkConversationBudget(admin, organizationId, conversationId);
+          if (currentBudget.policy.enabled || currentBudget.blocked_at) {
+            await blockConversationBudget(usageContext, e instanceof AiUsageError ? e.code : 'AI_USAGE_UNAVAILABLE');
+          }
+        }
+      } catch (blockError) {
+        console.error('[wa-agents] não foi possível persistir o bloqueio de consumo:', errorMessage(blockError));
+      }
+      // No error webhook: quota warnings stay inside the CRM and never message the lead.
+      pushEvent('usage_interrupted', { message: msg });
+      return await finish('error', { reason: msg, error: msg });
+    }
     const code = e instanceof WaAgentError ? e.code : undefined;
     console.error('[wa-agents] execução falhou:', msg);
     try {
@@ -1076,6 +1078,8 @@ export async function handleInboundMessage(input: {
 
     let ctx = await loadConversationContext(admin, organizationId, conversationId);
     const conv = ctx.conversation;
+    const inboundBudget = await checkConversationBudget(admin, organizationId, conversationId);
+    if (inboundBudget.blocked_at) return await skip('IA pausada pelo limite de consumo; liberação manual necessária', conv.ai_agent_id);
     let agent: AgentRow | null = null;
 
     // Mensagem que disparou (texto ou transcrição): gatilhos por palavra-chave e evento
@@ -1247,6 +1251,12 @@ export async function resumeDueConversations(
             .eq('id', c.id)
             .eq('organization_id', c.organization_id)
             .eq('ai_status', 'paused');
+          continue;
+        }
+        const budget = await checkConversationBudget(admin, c.organization_id, c.id);
+        if (budget.blocked_at) {
+          await admin.from('wa_conversations').update({ ai_resume_at: null })
+            .eq('id', c.id).eq('organization_id', c.organization_id).eq('ai_status', 'paused');
           continue;
         }
         const { data: upd } = await admin

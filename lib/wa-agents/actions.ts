@@ -5,6 +5,7 @@
  * motor.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { assertUsageHealthy } from '@/lib/ai-usage/context';
 import { moveStageByDealId } from '@/lib/public-api/dealsMoveStage';
 import { buildActionSystemVars, resolveActionTexts, resolveAiVarValues } from './actionVars';
 import type { ConversationContext } from './context';
@@ -333,10 +334,12 @@ export async function executeActions(
     actions: input.actions ?? [],
     pushEvent,
   });
+  assertUsageHealthy();
 
   // Todas as ações rodam na ordem configurada; a falha de uma não impede as seguintes.
   // `pos` identifica qual delas (duas do mesmo tipo ficam distinguíveis no histórico).
   for (const [pos, action] of (input.actions ?? []).entries()) {
+    assertUsageHealthy();
     const at = new Date().toISOString();
     if (input.renewLock) await input.renewLock();
     try {

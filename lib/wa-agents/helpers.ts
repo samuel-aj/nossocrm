@@ -78,7 +78,7 @@ export async function consultHelperAgent(admin: SupabaseClient, input: ConsultHe
   if (!helper.enabled) return `Não foi possível consultar o agente ${name}: agente desligado.`;
 
   try {
-    const resolved = await resolveAgentModel(admin, organizationId, helper);
+    const resolved = await resolveAgentModel(admin, organizationId, helper, 'helper');
     const documents = await loadReadyDocuments(admin, organizationId, helper.id).catch(() => []);
     const hits =
       documents.length > 0
@@ -102,6 +102,7 @@ export async function consultHelperAgent(admin: SupabaseClient, input: ConsultHe
       tools,
       temperature: supportsTemperature(helper) ? helper.temperature : undefined,
       maxOutputTokens: HELPER_MAX_OUTPUT_TOKENS,
+      maxRetries: 0,
       stopWhen: stepCountIs(HELPER_MAX_STEPS),
       abortSignal: AbortSignal.timeout(HELPER_TIMEOUT_MS),
     });

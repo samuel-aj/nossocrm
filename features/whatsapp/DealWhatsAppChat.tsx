@@ -69,6 +69,7 @@ import { transcodeToMp3 } from './audioTranscode';
 import { useWaAgentsAccess } from '@/hooks/useWaAgentsAccess';
 import { useToast } from '@/context/ToastContext';
 import { ChatAgentBanner } from '@/features/wa-agents/ChatAgentBanner';
+import { ConversationBudget } from '@/features/ai-usage/ConversationBudget';
 import { AutomationsMenu } from '@/features/wa-agents/AutomationsMenu';
 import type { AgentMinimal, BotMinimal, ConversationAiAction } from '@/lib/wa-agents/types';
 
@@ -2678,6 +2679,9 @@ function DealWhatsAppChatSession({
             andamento (pausar/parar/aprovar/cancelar robô); iniciar é pelo botão
             Automações do compositor. Fora do beta: a faixa antiga, só quando um
             agente (externo) já atuou nesta conversa. */}
+        {!isGroup && nativeBanner && (aiState?.conversationId || data?.conversation?.id) && (
+          <ConversationBudget conversationId={(aiState?.conversationId || data?.conversation?.id)!} />
+        )}
         {!isGroup && nativeBanner && (aiState || data?.bot) && (
           <ChatAgentBanner
             ai={aiState}
