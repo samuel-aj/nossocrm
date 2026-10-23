@@ -131,7 +131,7 @@ function fakeDb(tables: Record<string, Row[]>) {
     };
     return b;
   };
-  return { from, rpc: async (name: string, args: Record<string, unknown>) => { if (name === 'activate_deal_alert') h.alertCalls.push(args); return { data: true, error: null }; } } as never;
+  return { from, rpc: async (name: string, args: Record<string, unknown>) => { if (name === 'activate_deal_alert_with_tone') h.alertCalls.push(args); return { data: true, error: null }; } } as never;
 }
 
 const ORG = 'org-1';
@@ -485,13 +485,14 @@ describe('motor dos robôs', () => {
   });
 });
 
- it('activates the resolved run lead using stable run/block identity and continues the graph', async () => {
-  const steps = chain([{ id: 'alert', type: 'activate_alert', message: 'Resposta de {{primeiro_nome}}' }, { id: 'tag', type: 'add_tag', tag: 'recuperado' }]);
+ it.each([undefined, 'green', 'red'] as const)('activates the resolved run lead with tone %s using stable identity and continues the graph without sending', async (tone) => {
+  const steps = chain([{ id: 'alert', type: 'activate_alert', message: 'Resposta de {{primeiro_nome}}', ...(tone ? { tone } : {}) }, { id: 'tag', type: 'add_tag', tag: 'recuperado' }]);
   const tables = db(bot(steps), [run()]);
   await processBotRun(fakeDb(tables), run());
-  expect(h.alertCalls).toEqual([{ p_org: ORG, p_deal: 'deal-1', p_bot: 'bot-1', p_run: 'run-1', p_block: 'alert', p_message: 'Resposta de Maria' }]);
+  expect(h.alertCalls).toEqual([{ p_org: ORG, p_deal: 'deal-1', p_bot: 'bot-1', p_run: 'run-1', p_block: 'alert', p_message: 'Resposta de Maria', p_tone: tone ?? 'green' }]);
   expect(h.tags).toEqual([{ dealId: 'deal-1', tag: 'recuperado' }]);
   expect(tables.wa_bot_runs[0].status).toBe('done');
+  expect(h.sent).toEqual([]);
 });
 
 

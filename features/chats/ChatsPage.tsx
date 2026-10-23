@@ -1,5 +1,7 @@
 'use client';
 import { GroupRelationsPanel } from '@/features/group-links/GroupRelationsPanel';
+import { UsageBlockBadge } from '@/features/ai-usage/UsageBlockBadge';
+import { firstUsageBlock, type UsageBlock } from '@/lib/ai-usage/alerts';
 
 import { useConversationLead } from './useConversationLead';
 import { patchConversationCache } from '@/lib/whatsapp/conversationCache';
@@ -56,6 +58,7 @@ const CHAT_LIST_MAX_WIDTH = 720;
 // ---------------------------------------------------------------------------
 
 type ConvRow = {
+  usage_block?: UsageBlock | null;
   id: string;
   connection_id: string | null;
   wa_phone: string;
@@ -77,6 +80,7 @@ type ConvRow = {
 };
 
 type ConvInfo = {
+  usageBlock?: UsageBlock | null;
   initialSenderId?: string | null;
   conversationIds?: string[];
   connectionIds?: string[];
@@ -112,6 +116,7 @@ type ChatTarget = {
 type ChatFilter = 'all' | 'unread' | 'convs' | 'groups';
 
 type ChatListItem = ChatTarget & {
+  usageBlock?: UsageBlock | null;
   key: string;
   /** Número conectado desta conversa (null = contato ainda sem conversa) */
   connectionId: string | null;
@@ -299,10 +304,12 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
   const effectiveConn =
     connsList.length > 1 && connsList.some(c => c.id === connFilter) ? connFilter : 'all';
 
-  const convsQ = useQuery<{ data: ConvRow[]; groupsEnabled?: boolean }>({
+  type ConversationListResult = { data: ConvRow[]; groupsEnabled?: boolean; usageBlocksUnavailable?: boolean };
+  const conversationListKey = effectiveConn === 'all' ? ['waConversations'] : ['waConversations', effectiveConn];
+  const convsQ = useQuery<ConversationListResult>({
     // Com 'all' a queryKey volta a ser a MESMA do badge do menu lateral
     // (Layout.tsx): um cache só, sem busca duplicada nem contagem defasada.
-    queryKey: effectiveConn === 'all' ? ['waConversations'] : ['waConversations', effectiveConn],
+    queryKey: conversationListKey,
     queryFn: async () => {
       const url =
         effectiveConn === 'all'
@@ -310,7 +317,15 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
           : `/api/whatsapp/conversations?connectionId=${encodeURIComponent(effectiveConn)}`;
       const res = await fetch(url, { credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
+      const next: ConversationListResult = await res.json();
+      if (next.usageBlocksUnavailable) {
+        // Keep only known markers on rows the server still authorizes. A failed
+        // projection is not evidence that the responsible user released a block.
+        const previous = queryClient.getQueryData<ConversationListResult>(conversationListKey);
+        const blocks = new Map(previous?.data?.map(row => [row.id, row.usage_block]));
+        next.data = next.data.map(row => ({ ...row, usage_block: row.usage_block ?? blocks.get(row.id) ?? null }));
+      }
+      return next;
     },
     // 20s: cada aba de Chats aberta repete esta busca sozinha (a conversa
     // aberta tem polling próprio de 4s). Com 10s, somado às outras abas,
@@ -437,6 +452,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
       if (r.is_group) continue; // grupos têm linhas próprias (groupItems)
       const key = `${r.connection_id ?? 'none'}#${phoneKey(r.wa_phone)}`;
       const item: ConvInfo = {
+        usageBlock: r.usage_block,
         connectionId: r.connection_id ?? null,
         phone: r.wa_phone,
         contactId: r.contact_id,
@@ -462,6 +478,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
         conversationId: newer.conversationId ?? prev.conversationId,
         labelIds: newer.labelIds.length ? newer.labelIds : prev.labelIds,
         unread: prev.unread + item.unread,
+        usageBlock: firstUsageBlock([prev.usageBlock, item.usageBlock]),
       });
     }
     return m;
@@ -490,6 +507,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
       if (!r.is_group) continue;
       out.push({
         key: `group#${r.id}`,
+        usageBlock: r.usage_block,
         connectionId: r.connection_id ?? null,
         phone: r.group_jid || r.wa_phone,
         name: (r.wa_name || '').trim() || 'Grupo',
@@ -611,6 +629,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
           lastAt: conv.lastAt,
           preview: conv.preview,
           unread: conv.unread,
+          usageBlock: conv.usageBlock,
           avatarUrl: conv.avatarUrl ?? null,
           conversationId: conv.conversationId,
           labelIds: conv.labelIds,
@@ -635,6 +654,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
           lastAt: conv.lastAt,
           preview: conv.preview,
           unread: conv.unread,
+          usageBlock: conv.usageBlock,
           avatarUrl: conv.avatarUrl ?? null,
           conversationId: conv.conversationId,
           labelIds: conv.labelIds,
@@ -1529,6 +1549,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
         </div>
 
         {/* Lista única: contatos do CRM — com conversa em cima, resto A→Z */}
+        {convsQ.data?.usageBlocksUnavailable && <p role="status" className="px-4 py-2 text-xs text-slate-500">Não foi possível atualizar os avisos de consumo da IA. Tentando novamente…</p>}
         <div className="flex-1 min-h-0 overflow-y-auto scrollbar-custom">
           {stagingDemo && <button type="button" aria-label="Abrir número de teste QR" aria-pressed={showingDemo}
             onClick={() => { setSelectedState(null); setDemoStartedAt(new Date().toISOString()); setDemoOpen(true); }}
@@ -1562,7 +1583,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
             return (
               // wrapper relative: o botão "marcar como não lida" é IRMÃO da
               // linha (botão dentro de botão é HTML inválido), aparece no hover
-              <div key={c.key} className="relative group/row">
+              <div key={c.key} className={`relative group/row ${c.usageBlock ? 'border-l-2 border-violet-400 dark:border-violet-500' : ''}`}>
               <button
                 type="button"
                 onClick={() =>
@@ -1710,6 +1731,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                       )}
                     </span>
                   </span>
+                  {c.usageBlock && <span className="mt-1.5 block"><UsageBlockBadge block={c.usageBlock} /></span>}
                 </span>
               </button>
               {/* Balão do menu da conversa (estilo WhatsApp): `fixed` com a

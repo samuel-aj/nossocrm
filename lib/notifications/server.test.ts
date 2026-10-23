@@ -53,7 +53,9 @@ it('delivers alerts independently to the current responsible seller only', async
   tables.crm_notification_events=[{id:5,kind:'alert',source_id:'a',created_at:now()}];
   tables.deal_alert_events=[{id:'a',deal_id:'d',message:'Recuperado'}];
   tables.deals[0].active_alert={id:'a'};
-  expect(await notices()).toMatchObject([{kind:'alert',message:'Lead · Recuperado',href:'/boards?board=b&deal=d'}]);
+  expect(await notices()).toMatchObject([{kind:'alert',tone:'green',message:'Lead · Recuperado',href:'/boards?board=b&deal=d'}]);
+  tables.deal_alert_events[0].tone='red';
+  expect(await notices()).toMatchObject([{kind:'alert',tone:'red'}]);
   tables.deals[0].owner_id='other';
   expect(await notices()).toEqual([]);
   tables.deals[0].owner_id=user;
@@ -105,5 +107,14 @@ describe('durable usage alerts in the personal feed',()=>{
     vi.mocked(usageNotices).mockResolvedValue([oldNotice]);
     expect((await feed(auth,null,null,null)).events).toEqual([]);
     expect(usageNotices).not.toHaveBeenCalled();
+  });
+  it('marks an incomplete usage projection while continuing to deliver ordinary notices',async()=>{
+    enableAlerts();vi.mocked(usageNotices).mockRejectedValue(new Error('temporarily unavailable'));
+    const log=vi.spyOn(console,'error').mockImplementation(()=>{});
+    try {
+      const result=await feed(auth,now(),null,null);
+      expect(result.usageNoticesUnavailable).toBe(true);
+      expect(result.events.some(n=>n.kind==='message')).toBe(true);
+    } finally { log.mockRestore(); }
   });
 });

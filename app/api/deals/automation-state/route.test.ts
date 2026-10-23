@@ -9,7 +9,7 @@ vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({ from: () 
 import { POST } from './route';
 const id = '11111111-1111-4111-8111-111111111111';
 const req = (body: unknown = { dealIds: [id] }) => new Request('https://crm.test/api/deals/automation-state', { method: 'POST', body: JSON.stringify(body) });
-beforeEach(() => { vi.clearAllMocks(); m.auth.mockResolvedValue({ ok: true, user: { id: 'user', organizationId: 'org' }, admin: {} }); m.visible.mockResolvedValue({ data: [{ id, contact_id: 'contact' }], error: null }); m.load.mockResolvedValue({ [id]: null }); });
+beforeEach(() => { vi.clearAllMocks(); m.auth.mockResolvedValue({ ok: true, user: { id: 'user', organizationId: 'org' }, admin: {} }); m.visible.mockResolvedValue({ data: [{ id, contact_id: 'contact' }], error: null }); m.load.mockResolvedValue({ automations: { [id]: null }, usageBlocks: {}, usageBlocksUnavailable: false }); });
 it('checks organization and RLS before loading privileged state, disables HTTP caching', async () => {
   const response = await POST(req());
   expect(response.status).toBe(200); expect(response.headers.get('Cache-Control')).toBe('no-store');
@@ -17,9 +17,14 @@ it('checks organization and RLS before loading privileged state, disables HTTP c
   expect(m.load).toHaveBeenCalledWith({}, { id: 'user', organizationId: 'org' }, [{ id, contact_id: 'contact' }]);
 });
 it('passes only visible leads, ignoring requested IDs from other tenants', async () => {
-  m.visible.mockResolvedValue({ data: [], error: null }); m.load.mockResolvedValue({});
-  expect(await (await POST(req())).json()).toEqual({ automations: {} });
+  m.visible.mockResolvedValue({ data: [], error: null }); m.load.mockResolvedValue({ automations: {}, usageBlocks: {}, usageBlocksUnavailable: false });
+  expect(await (await POST(req())).json()).toEqual({ automations: {}, usageBlocks: {}, usageBlocksUnavailable: false });
   expect(m.load).toHaveBeenCalledWith({}, expect.anything(), []);
+});
+it('returns an independent usage projection without changing active automation', async () => {
+  const usageBlocks = { [id]: { conversationId: 'conversation', blockedAt: '2026-10-23T12:00:00Z', reason: 'conversation_token_limit' } };
+  m.load.mockResolvedValue({ automations: { [id]: null }, usageBlocks, usageBlocksUnavailable: false });
+  expect(await (await POST(req())).json()).toEqual({ automations: { [id]: null }, usageBlocks, usageBlocksUnavailable: false });
 });
 it('fails closed on database errors instead of reporting no automation', async () => {
   m.visible.mockResolvedValue({ data: null, error: { message: 'database unavailable' } });

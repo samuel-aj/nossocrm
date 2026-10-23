@@ -45,11 +45,12 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
   // notices on boot and each first page; stable IDs use the existing client dedupe.
   // Ordinary message/lead notifications retain their baseline and short window.
   let budgetNotices: Notice[] = [];
+  let usageNoticesUnavailable = false;
   if (p.alerts && !after) {
     try { budgetNotices = await usageNotices(auth.admin, auth.user, null, upper); }
-    catch (error) { console.error('[notifications] alertas de consumo indisponíveis:', error); }
+    catch (error) { usageNoticesUnavailable = true; console.error('[notifications] alertas de consumo indisponíveis:', error); }
   }
-  if (!since) return {events:budgetNotices,serverTime:upper,nextAfter:null};
+  if (!since) return {events:budgetNotices,serverTime:upper,nextAfter:null,usageNoticesUnavailable};
   const lower = new Date(Math.max(Date.parse(since),Date.now()-120_000)).toISOString();
   let query = auth.admin.from('crm_notification_events').select('id,kind,source_id,board_id,created_at')
     .eq('organization_id',auth.user.organizationId).gte('created_at',lower).lte('created_at',upper).order('id').limit(200);
@@ -58,7 +59,7 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
   if (error) throw error;
   const events=rows ?? [];
   const alertIds=events.filter(e=>e.kind==='alert' && p.alerts).map(e=>e.source_id);
-  const alerts=alertIds.length ? await auth.admin.from('deal_alert_events').select('id,deal_id,message').eq('organization_id',auth.user.organizationId).in('id',alertIds).is('acknowledged_at',null) : {data:[],error:null};
+  const alerts=alertIds.length ? await auth.admin.from('deal_alert_events').select('id,deal_id,message,tone').eq('organization_id',auth.user.organizationId).in('id',alertIds).is('acknowledged_at',null) : {data:[],error:null};
   if(alerts.error) throw alerts.error;
   const alertDeals=alerts.data?.length ? await auth.admin.from('deals').select('id,title,board_id,owner_id,active_alert').eq('organization_id',auth.user.organizationId).in('id',alerts.data.map(a=>a.deal_id)).eq('owner_id',auth.user.id).is('deleted_at',null) : {data:[],error:null};
   if(alertDeals.error) throw alertDeals.error;
@@ -87,10 +88,10 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
   const notices:Notice[]=[];
   for(const event of events) {
     if(event.kind==='alert') {
-      const a=(alerts.data as Array<{id:string;deal_id:string;message:string}> | null)?.find(a=>a.id===event.source_id);
+      const a=(alerts.data as Array<{id:string;deal_id:string;message:string;tone?:string}> | null)?.find(a=>a.id===event.source_id);
       const d=(alertDeals.data as Array<{id:string;title:string;board_id:string;owner_id:string|null;active_alert:{id:string}|null}> | null)?.find(d=>d.id===a?.deal_id && d.active_alert?.id===a?.id);
       if(!p.alerts || !a || !d || d.owner_id!==auth.user.id || !allowed(d)) continue;
-      notices.push({id:String(event.id),kind:'alert',title:'Alerta do lead',message:`${d.title} · ${a.message}`,href:`/boards?board=${d.board_id}&deal=${d.id}`,createdAt:event.created_at});
+      notices.push({id:String(event.id),kind:'alert',tone:a.tone==='red'?'red':'green',title:'Alerta do lead',message:`${d.title} · ${a.message}`,href:`/boards?board=${d.board_id}&deal=${d.id}`,createdAt:event.created_at});
     } else if(event.kind==='lead') {
       const d=leadRows.find(d=>d.id===event.source_id);
       if(!d || !p.leads || !p.boardIds.includes(event.board_id) || d.board_id!==event.board_id || !allowed(d)) continue;
@@ -113,5 +114,5 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
   }
   // Usage alerts use stable prefixed IDs; CRM's bigint cursor stays exclusive to its own feed.
   notices.push(...budgetNotices);
-  return {events:notices,serverTime:upper,nextAfter:events.length===200 ? String(events[events.length-1].id) : null};
+  return {events:notices,serverTime:upper,nextAfter:events.length===200 ? String(events[events.length-1].id) : null,usageNoticesUnavailable};
 }

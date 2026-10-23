@@ -1,5 +1,6 @@
 'use client';
 import { GroupLinksVariableField } from '@/features/group-links/GroupLinksVariableField';
+import { AlertEditor } from './AlertEditor';
 import { NativeSelect } from '@/components/ui/NativeSelect';
 
 /**
@@ -920,7 +921,7 @@ function BlockFields({ block, update }: { block: Block; update: (block: Block) =
     case 'move_stage':
       return <MoveStageEditor block={block} update={update} />;
     case 'activate_alert':
-      return <label className="grid gap-2 text-sm">Texto do alerta<input className="rounded-lg border p-2 dark:bg-slate-900" value={block.data.message} maxLength={300} onChange={e => update({ ...block, data: { message: e.target.value } })} /></label>;
+      return <AlertEditor block={block} update={update} />;
     case 'add_tag':
     case 'remove_tag':
       return <TagEditor block={block} update={update} />;
@@ -958,7 +959,7 @@ export function BlockPanel({ bubble, block, index, update, onClose, onRemove }: 
       className="wa-block-panel absolute inset-x-0 bottom-0 z-20 max-h-[65%] flex flex-col rounded-t-2xl border-t border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card shadow-2xl md:static md:inset-auto md:max-h-none md:h-full md:w-[340px] md:shrink-0 md:rounded-none md:border-t-0 md:border-l md:shadow-none"
     >
       <div className="flex items-start gap-2 px-3 py-2.5 border-b border-slate-200 dark:border-white/10">
-        <BlockIcon type={block.type} size={16} />
+        <BlockIcon type={block.type} size={16} tone={block.type === 'activate_alert' ? block.data.tone : undefined} />
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-white truncate">{meta.label}</h3>
           <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">

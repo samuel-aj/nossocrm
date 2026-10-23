@@ -4,6 +4,8 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { Gauge, LockKeyhole, X } from 'lucide-react';
 import { SETTINGS_BTN_PRIMARY, SETTINGS_BTN_SECONDARY, SETTINGS_INPUT_CLASS } from '@/features/settings/components/SettingsUi';
 import { useConversationUsage, useGrantUsage } from './useAiUsage';
+import { USAGE_BLOCK_TONE } from './UsageBlockBadge';
+import { usageBlockLabel } from '@/lib/ai-usage/alerts';
 const integer = (n: number) => new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 }).format(n);
 function pauseReason(reason: string | null): string {
   const labels: Record<string, string> = {
@@ -40,14 +42,14 @@ function ConversationBudgetContent({ conversationId }: { conversationId: string 
     const idempotencyKey = operation ?? crypto.randomUUID(); setOperation(idempotencyKey);
     try { await grant.mutateAsync({ tokens: Number(tokens || 0), seconds: Number(seconds || 0), reason, idempotencyKey }); setOpen(false); setOperation(null); setReason(''); setTokens(''); setSeconds(''); setSuccess(true); } catch { /* shown below */ }
   };
-  return <div className={`rounded-lg border px-3 py-2 text-xs ${blocked ? 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200' : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-white/10 dark:bg-slate-900 dark:text-slate-300'}`}>
-    <div className="flex items-center gap-2 flex-wrap">{blocked ? <LockKeyhole size={14} /> : <Gauge size={14} />}<strong>{blocked ? 'IA pausada pelo controle de consumo' : 'Consumo da IA'}</strong><span>{integer(budget.tokens_used)} tokens usados{budget.policy.enabled ? ` · ${integer(available)} disponíveis` : ''}</span><button className="ml-auto font-semibold text-primary-600 hover:underline" type="button" onClick={() => setOpen(true)}>Ver consumo{canGrant && blocked ? ' e liberar' : ''}</button></div>
+  return <div className={`rounded-lg border px-3 py-2 text-xs ${blocked ? USAGE_BLOCK_TONE : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-white/10 dark:bg-slate-900 dark:text-slate-300'}`}>
+    <div className="flex items-center gap-2 flex-wrap">{blocked ? <LockKeyhole size={14} /> : <Gauge size={14} />}<strong>{blocked ? usageBlockLabel(budget.blocked_reason) : 'Consumo da IA'}</strong><span>{integer(budget.tokens_used)} tokens usados{budget.policy.enabled ? ` · ${integer(available)} disponíveis` : ''}</span><button className="ml-auto font-semibold text-primary-600 hover:underline" type="button" onClick={() => setOpen(true)}>Ver consumo{canGrant && blocked ? ' e liberar' : ''}</button></div>
     {blocked && <p className="mt-1">A retomada depende de liberação manual. Você pode continuar o atendimento humano.</p>}
     {success && <p role="status" className="mt-1 text-emerald-700">Saldo liberado. Retome a IA pelo botão Retomar quando quiser continuar o atendimento automático.</p>}
     <Dialog.Root open={open} onOpenChange={setOpen}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-[100] bg-slate-950/50" /><Dialog.Content className="fixed left-1/2 top-1/2 z-[101] max-h-[90vh] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl bg-white p-6 shadow-xl dark:bg-slate-900">
       <div className="flex justify-between gap-3"><Dialog.Title className="text-lg font-bold text-slate-900 dark:text-white">Consumo deste atendimento</Dialog.Title><Dialog.Close aria-label="Fechar" className="text-slate-500"><X size={20} /></Dialog.Close></div>
       <Dialog.Description className="mt-2 text-sm text-slate-500">Consumo acumulado, independente do período do painel. Liberar quota mantém todo o histórico.</Dialog.Description>
-      {blocked && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{pauseReason(budget.blocked_reason)}</p>}
+      {blocked && <p className={`mt-3 rounded-lg border p-3 text-xs ${USAGE_BLOCK_TONE}`}>{pauseReason(budget.blocked_reason)}</p>}
       <dl className="my-5 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-slate-500">Tokens confirmados</dt><dd className="font-semibold">{integer(budget.tokens_used)}</dd></div><div><dt className="text-slate-500">Tokens reservados</dt><dd className="font-semibold">{integer(budget.tokens_reserved)}</dd></div><div><dt className="text-slate-500">Quota adicional liberada</dt><dd className="font-semibold">{integer(budget.tokens_granted)}</dd></div><div><dt className="text-slate-500">Áudio usado / reservado</dt><dd className="font-semibold">{integer(budget.seconds_used)}s / {integer(budget.seconds_reserved)}s</dd></div></dl>
       {budget.policy.enabled && <p className="mb-4 text-sm"><strong>{integer(available)} tokens disponíveis</strong> da quota total de {integer(tokenQuota)} desta conversa.</p>}
       {budget.tokens_reserved > 0 && <p className="mb-4 text-xs text-amber-700">Reservas incluem operações em andamento ou aguardando confirmação. Elas continuam ocupando saldo.</p>}

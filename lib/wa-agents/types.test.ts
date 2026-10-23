@@ -205,3 +205,9 @@ describe('esquemas do robô (quadro)', () => {
     expect(pub.layout).toEqual({ groups: [] });
   });
 });
+it('accepts legacy and green/red lead alerts while reserving lavender for AI consumption', () => {
+  const alert = { id: 'alert', type: 'activate_alert', message: 'Precisa de atenção' };
+  expect(BotStepSchema.safeParse(alert).success).toBe(true);
+  for (const tone of ['green', 'red']) expect(BotStepSchema.safeParse({ ...alert, tone }).success).toBe(true);
+  for (const tone of ['purple', 'lavender', '', null]) expect(BotStepSchema.safeParse({ ...alert, tone }).success).toBe(false);
+});

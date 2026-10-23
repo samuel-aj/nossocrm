@@ -212,7 +212,7 @@ export interface CustomFieldDefinition {
 }
 
 // O Dinheiro/Oportunidade (O que vai no Kanban)
-export interface DealAlert { id: string; message: string; bot_id: string; run_id: string; block_id: string; created_at: string }
+export interface DealAlert { id: string; message: string; tone?: 'green' | 'red'; bot_id: string; run_id: string; block_id: string; created_at: string }
 
 export interface Deal {
   activeAlert?: DealAlert | null;

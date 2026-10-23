@@ -174,7 +174,7 @@ export function createBlock(type: StepType, id: string = newId()): Block {
     case 'move_stage':
       return { id, type, data: { stage_id: '', board_id: '', loss_reason: '', loss_category: '' } };
     case 'activate_alert':
-      return { id, type, data: { message: 'Respondeu à recuperação' } };
+      return { id, type, data: { message: 'Respondeu à recuperação', tone: 'green' } };
     case 'add_tag':
       return { id, type, data: { tag: '' } };
     case 'remove_tag':
@@ -309,7 +309,7 @@ function stepToBlock(step: BotStep): Block {
         },
       };
     case 'activate_alert':
-      return { id, type: 'activate_alert', data: { message: step.message } };
+      return { id, type: 'activate_alert', data: { message: step.message, tone: step.tone ?? 'green' } };
     case 'add_tag':
       return { id, type: 'add_tag', data: { tag: step.tag } };
     case 'remove_tag':
@@ -580,7 +580,7 @@ function blockToStep(block: Block, to: (handle: string) => string | null, ui: { 
         ui,
       };
     case 'activate_alert':
-      return { id, type: 'activate_alert', message: block.data.message.trim(), next_step_id: to(HANDLE_NEXT), ui };
+      return { id, type: 'activate_alert', message: block.data.message.trim(), tone: block.data.tone ?? 'green', next_step_id: to(HANDLE_NEXT), ui };
     case 'add_tag':
       return { id, type: 'add_tag', tag: block.data.tag.trim(), next_step_id: to(HANDLE_NEXT), ui };
     case 'remove_tag':

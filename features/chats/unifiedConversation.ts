@@ -1,9 +1,12 @@
+import { firstUsageBlock, type UsageBlock } from '@/lib/ai-usage/alerts';
+
 export type ConversationSummary = {
   connectionId: string | null;
   conversationId: string | null;
   lastAt: string | null;
   unread: number;
   labelIds: string[];
+  usageBlock?: UsageBlock | null;
 };
 
 /** Present the already authorized rows together. No persisted records are merged. */
@@ -19,5 +22,6 @@ export function unifyConversations<T extends ConversationSummary>(rows: T[]) {
     connectionIds: [...new Set(rows.flatMap(r => r.connectionId ? [r.connectionId] : []))],
     unread: rows.reduce((sum, row) => sum + row.unread, 0),
     labelIds: [...new Set(rows.flatMap(row => row.labelIds))],
+    usageBlock: firstUsageBlock(rows.map(row => row.usageBlock)),
   }];
 }

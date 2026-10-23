@@ -46,6 +46,7 @@ export const BoardsPage: React.FC = () => {
     return (
         <BoardAutomationsContext.Provider value={controller.automations}>
             {controller.automations.error && <p role="status" className="px-6 py-2 text-sm text-amber-700 dark:text-amber-300">Não foi possível atualizar as automações. Tentando novamente…</p>}
+            {!controller.automations.error && controller.automations.usageBlocksUnavailable && <p role="status" className="px-6 py-2 text-sm text-slate-500">Não foi possível atualizar os avisos de consumo da IA. Tentando novamente…</p>}
             {controller.automations.loading && controller.filterControls.general.automation && controller.filterControls.general.automation !== 'all' && <p role="status" className="px-6 py-2 text-sm text-slate-500">Consultando automações…</p>}
             <PipelineView {...controller} />
 

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import { usePersonalNotifications } from './usePersonalNotifications';
 import { NotificationPreferences } from './NotificationPreferences';
+import { NoticeContent, noticePanelClass, noticeTone } from './NoticeContent';
 
 const getTimeAgo = (date: Date) => {
     const now = new Date();
@@ -23,6 +24,9 @@ const getTimeAgo = (date: Date) => {
 export const NotificationPopover = () => {
     const { notifications, count, hasHighSeverity, markAsRead, markAllAsRead } = useSystemNotifications();
     const personal = usePersonalNotifications();
+    const personalTones = personal.notices.map(noticeTone);
+    const indicatorClass = hasHighSeverity || personalTones.includes('red') ? 'bg-red-500'
+        : personalTones.includes('violet') ? 'bg-violet-500' : personalTones.includes('green') ? 'bg-emerald-500' : 'bg-blue-500';
     const [preferencesOpen, setPreferencesOpen] = useState(false);
     const [isOpen, setIsOpen] = useState(false);
     const popoverRef = useRef<HTMLDivElement>(null);
@@ -83,8 +87,7 @@ export const NotificationPopover = () => {
                 <Bell size={20} aria-hidden="true" />
                 {(count > 0 || personal.notices.length > 0) && (
                     <span
-                        className={`absolute top-1.5 right-1.5 w-2 h-2 rounded-full ring-2 ring-white dark:ring-dark-card ${hasHighSeverity ? 'bg-red-500' : 'bg-blue-500'
-                            }`}
+                        className={`absolute top-1.5 right-1.5 w-2 h-2 rounded-full ring-2 ring-white dark:ring-dark-card ${indicatorClass}`}
                         aria-hidden="true"
                     />
                 )}
@@ -122,8 +125,8 @@ export const NotificationPopover = () => {
                     </div>
                     <div className="max-h-[60vh] overflow-y-auto">
                         {personal.notices.length>0 && <div>
-                            <div className="flex items-center justify-between px-4 py-2 text-xs text-slate-500"><span>Mensagens e leads recentes</span><button onClick={personal.clear}>Limpar avisos</button></div>
-                            {personal.notices.map(n=><Link key={n.id} href={n.href} onClick={()=>setIsOpen(false)} className="block p-4 border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/5"><p className="text-sm font-semibold text-slate-900 dark:text-white">{n.title}</p><p className="text-sm text-slate-500">{n.message}</p><p className="text-xs text-slate-400 mt-1">{getTimeAgo(new Date(n.createdAt))}</p></Link>)}
+                            <div className="flex items-center justify-between gap-2 px-4 py-2 text-xs text-slate-500"><span>Mensagens, leads e IA</span><button onClick={personal.clear}>{personalTones.includes('violet') ? 'Limpar outros avisos' : 'Limpar avisos'}</button></div>
+                            {personal.notices.map(n=><Link key={n.id} href={n.href} onClick={()=>setIsOpen(false)} className={`block border-b p-4 transition-[filter] hover:brightness-95 dark:hover:brightness-110 ${noticePanelClass(n)}`}><NoticeContent notice={n} time={getTimeAgo(new Date(n.createdAt))} /></Link>)}
                         </div>}
                         {notifications.length === 0 && personal.notices.length === 0 ? (
                             <div className="p-8 text-center flex flex-col items-center text-slate-500 dark:text-slate-400">
@@ -181,9 +184,9 @@ export const NotificationPopover = () => {
                 </div>
             )}
             {preferencesOpen && personal.settings && createPortal(<NotificationPreferences settings={personal.settings} onClose={()=>setPreferencesOpen(false)} onSave={personal.save} onTest={personal.test}/>, document.body)}
-            {personal.toast && createPortal(<div role="status" className="fixed bottom-6 right-6 z-[11000] max-w-sm rounded-xl border border-primary-200 dark:border-primary-800 bg-white dark:bg-slate-900 p-4 shadow-xl">
+            {personal.toast && createPortal(<div role="status" className={`fixed bottom-6 right-6 z-[11000] w-[calc(100%-3rem)] max-w-sm rounded-xl border p-4 shadow-xl ${noticePanelClass(personal.toast)}`}>
                 <button aria-label="Fechar aviso" className="absolute right-2 top-1 px-2 text-slate-500" onClick={personal.dismiss}>×</button>
-                <Link href={personal.toast.href} onClick={personal.dismiss} className="block pr-6"><p className="font-semibold text-slate-900 dark:text-white">{personal.toast.title}</p><p className="text-sm text-slate-500 mt-1">{personal.toast.message}</p></Link>
+                <Link href={personal.toast.href} onClick={personal.dismiss} className="block pr-6"><NoticeContent notice={personal.toast} /></Link>
             </div>, document.body)}
         </div>
     );

@@ -317,7 +317,7 @@ export type Block =
   | { id: string; type: 'wait_reply'; data: WaitReplyData }
   | { id: string; type: 'condition'; data: ConditionData }
   | { id: string; type: 'move_stage'; data: MoveStageData }
-  | { id: string; type: 'activate_alert'; data: { message: string } }
+  | { id: string; type: 'activate_alert'; data: { message: string; tone?: 'green' | 'red' } }
   | { id: string; type: 'add_tag'; data: TagData }
   | { id: string; type: 'remove_tag'; data: TagData }
   | { id: string; type: 'create_lead'; data: CreateLeadData }
