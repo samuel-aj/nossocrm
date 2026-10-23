@@ -408,8 +408,7 @@ export const KanbanListRow = React.memo(function KanbanListRow({
         >
           {deal.title}
         </span>
-        <DealAlertBadge alert={deal.activeAlert} />
-        {usageBlock && <UsageBlockBadge block={usageBlock} className="mt-1" />}
+        {usageBlock ? <UsageBlockBadge block={usageBlock} variant="inline" /> : <DealAlertBadge alert={deal.activeAlert} />}
         {deal.contactName ? (
           <span className="mt-0.5 block truncate text-xs text-slate-400 dark:text-slate-500">
             {deal.contactName}

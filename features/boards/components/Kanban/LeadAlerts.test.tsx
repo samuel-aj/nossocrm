@@ -17,11 +17,13 @@ const rowProps = { deal, stageLabel: 'Qualificado', stages: [], customFieldDefin
 function context(children: React.ReactNode, blocked = true) {
   return <BoardAutomationsContext.Provider value={{ data: { lead: null }, usageBlocks: blocked ? { lead: block } : {}, loading: false, error: false }}>{children}</BoardAutomationsContext.Provider>;
 }
-it('highlights the whole card lavender while keeping the red ordinary alert visible and opening unchanged', () => {
+it('shows only the inline robot alert on the lavender card and keeps opening unchanged', () => {
   const onSelect = vi.fn();
   const { container } = render(context(<DealCard {...cardProps} onSelect={onSelect} />));
-  expect(screen.getByText('Nova mensagem')).toBeInTheDocument();
+  expect(screen.queryByText('Nova mensagem')).not.toBeInTheDocument();
   expect(screen.getByText('IA pausada por limite')).toBeInTheDocument();
+  expect(screen.getByText('IA pausada por limite').parentElement).not.toHaveClass('border', 'rounded-md');
+  expect(container.querySelector('.lucide-bot')).toBeInTheDocument();
   expect(container.querySelector('[data-deal-id="lead"]')).toHaveClass('bg-violet-50', '!border-l-violet-500');
   fireEvent.click(container.querySelector('[data-deal-id="lead"]')!);
   expect(onSelect).toHaveBeenCalledWith('lead');
@@ -31,6 +33,7 @@ it('preserves legacy green alerts when the independent block clears on refresh',
   const greenDeal = { ...deal, activeAlert: { ...deal.activeAlert!, tone: undefined } };
   const { container, rerender } = render(context(<DealCard {...cardProps} deal={greenDeal} />));
   expect(container.querySelector('[data-deal-id="lead"]')).toHaveClass('bg-violet-50');
+  expect(screen.queryByText('Nova mensagem')).not.toBeInTheDocument();
   rerender(context(<DealCard {...cardProps} deal={greenDeal} />, false));
   expect(container.querySelector('[data-deal-id="lead"]')).toHaveClass('bg-emerald-50');
   expect(screen.queryByText('IA pausada por limite')).not.toBeInTheDocument();
@@ -38,9 +41,11 @@ it('preserves legacy green alerts when the independent block clears on refresh',
 });
 it('prioritizes lavender in the list and restores the red highlight when the block clears', () => {
   const { container, rerender } = render(context(<table><tbody><KanbanListRow {...rowProps} /></tbody></table>));
-  expect(screen.getByText('Nova mensagem')).toBeInTheDocument();
+  expect(screen.queryByText('Nova mensagem')).not.toBeInTheDocument();
   expect(screen.getByText('IA pausada por limite')).toBeInTheDocument();
   expect(container.querySelector('tr')).toHaveClass('!bg-violet-50');
   rerender(context(<table><tbody><KanbanListRow {...rowProps} /></tbody></table>, false));
   expect(container.querySelector('tr')).toHaveClass('!bg-red-50');
+  expect(screen.getByText('Nova mensagem')).toBeInTheDocument();
+  expect(screen.queryByText('IA pausada por limite')).not.toBeInTheDocument();
 });

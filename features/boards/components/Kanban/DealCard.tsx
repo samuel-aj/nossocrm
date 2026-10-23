@@ -212,8 +212,8 @@ const DealCardComponent: React.FC<DealCardProps> = ({
     if (priority) parts.push(priority);
     if (isRotting && !isClosed) parts.push('estagnado');
     if (contactInactive) parts.push('contato inativo');
-    if (deal.activeAlert) parts.push(deal.activeAlert.message);
     if (usageBlock) parts.push(usageBlockLabel(usageBlock.reason));
+    else if (deal.activeAlert) parts.push(deal.activeAlert.message);
 
     return parts.join(', ');
   };
@@ -360,8 +360,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
       </div>
       )}
 
-      <DealAlertBadge alert={deal.activeAlert} />
-      {usageBlock && <UsageBlockBadge block={usageBlock} className="mb-2" />}
+      {usageBlock ? <UsageBlockBadge block={usageBlock} variant="inline" /> : <DealAlertBadge alert={deal.activeAlert} />}
       <h4
         title={deal.title}
         className={`truncate text-sm font-bold font-display leading-snug mb-0.5 ${isRotting ? 'text-slate-600 dark:text-slate-400' : 'text-slate-900 dark:text-white'}`}
