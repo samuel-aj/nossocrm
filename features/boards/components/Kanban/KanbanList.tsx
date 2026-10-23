@@ -351,7 +351,7 @@ export const KanbanListRow = React.memo(function KanbanListRow({
       tabIndex={0}
       aria-label={selectionMode ? `Selecionar ${deal.title}` : `Abrir ${deal.title}`}
       aria-selected={selectionMode ? selected : undefined}
-      className={`${deal.activeAlert ? deal.activeAlert.tone === 'red' ? '!bg-red-50 dark:!bg-red-950/50 outline outline-1 -outline-offset-1 outline-red-400 dark:outline-red-600' : '!bg-emerald-50 dark:!bg-emerald-950/50 outline outline-1 -outline-offset-1 outline-emerald-400 dark:outline-emerald-600' : ''} group cursor-pointer transition-colors focus-visible-ring hover:bg-primary-50/60 focus-visible:bg-primary-50/80 dark:hover:bg-white/[0.045] dark:focus-visible:bg-white/[0.06] ${
+      className={`${usageBlock ? '!bg-violet-50 dark:!bg-violet-950/50 outline outline-1 -outline-offset-1 outline-violet-400 dark:outline-violet-600' : deal.activeAlert ? deal.activeAlert.tone === 'red' ? '!bg-red-50 dark:!bg-red-950/50 outline outline-1 -outline-offset-1 outline-red-400 dark:outline-red-600' : '!bg-emerald-50 dark:!bg-emerald-950/50 outline outline-1 -outline-offset-1 outline-emerald-400 dark:outline-emerald-600' : ''} group cursor-pointer transition-colors focus-visible-ring hover:bg-primary-50/60 focus-visible:bg-primary-50/80 dark:hover:bg-white/[0.045] dark:focus-visible:bg-white/[0.06] ${
         selected ? 'bg-primary-50/80 dark:bg-primary-500/10' : ''
       }`}
     >

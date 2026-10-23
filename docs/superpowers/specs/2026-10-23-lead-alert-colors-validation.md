@@ -20,6 +20,7 @@ Escopo local aprovado em 23/10/2026: verde/vermelho nos alertas comuns; lavanda 
 - Prévia interativa: `http://127.0.0.1:4189/`, dados fictícios e componentes reais de alerta, consumo e editor. Fontes e capturas privadas em `tmp/alert-colors-preview/`, fora do commit.
 - QA da prévia: desktop 1440 px e celular 390 px; sem overflow, editor de cor funcional, abrir limpa alerta comum e mantém bloqueio, concessão simulada remove bloqueio e conserva pausa. Nenhuma chamada externa, mutação de rede ou erro JavaScript.
 - Tema escuro conferido em cards e sino. A prévia não acrescenta eventos de pausa ao histórico nem alertas comuns à lista de chats; esses locais mostram somente os componentes previstos na implementação.
+- Refinamento visual posterior: card inteiro e linha do Kanban recebem lavanda com prioridade sobre o alerta comum. Os três testes existentes de coexistência/liberação passaram novamente; QA visual confirmou card lavanda no desktop/celular/escuro e restauração da cor anterior após liberação simulada, mantendo texto do alerta comum e nenhum envio real.
 
 ## Publicação futura
 

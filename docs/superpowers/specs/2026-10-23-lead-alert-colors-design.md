@@ -12,4 +12,6 @@ Consulta em lote usa organização e visibilidade já autorizadas. O board acres
 
 Paleta: esmeralda para aviso, vermelho para atenção, fundo lavanda com texto violeta e ícone de IA/pausa para consumo. A cor não substitui texto. Tema claro/escuro e espaços compactos precisam continuar legíveis. Faixa na conversa mantém Ver consumo e liberar e Retomar separado.
 
+Refinamento visual de Samuel: a pausa da IA colore o card inteiro em lavanda, com borda roxa, assim como o destaque dos alertas comuns. Esse destaque tem prioridade quando coexistem; o texto e ícone verde/vermelho continuam no card. Ao liberar o bloqueio, volta a cor do alerta comum ou do estado anterior do lead. A mesma prioridade vale na visualização em lista.
+
 Aceite: estados isolados e simultâneos nos quatro locais; limite persistente após abrir lead; desaparecimento após concessão por refetch/invalidação; pausas humanas não tratadas como consumo; consultas sem vazamento entre organizações; fluxos antigos verdes; nenhum modelo ou mensagem real em teste.

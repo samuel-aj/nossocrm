@@ -146,6 +146,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
       shadow-sm cursor-grab active:cursor-grabbing group hover:shadow-md transition-all relative select-none
     `;
 
+    if (usageBlock) return `${baseClasses} bg-violet-50 dark:bg-violet-950/50 border-violet-400 dark:border-violet-600 ring-1 ring-violet-300/60 dark:ring-violet-700/60 ${localDragging || isDragging ? 'opacity-50 rotate-2 scale-95' : ''}`;
     if (deal.activeAlert) return `${baseClasses} ${deal.activeAlert.tone === 'red'
       ? 'bg-red-50 dark:bg-red-950/50 border-red-400 dark:border-red-600 ring-1 ring-red-300/60 dark:ring-red-700/60'
       : 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-400 dark:border-emerald-600 ring-1 ring-emerald-300/60 dark:ring-emerald-700/60'}`;
@@ -173,6 +174,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
 
   // Get border-left color class based on status
   const getBorderLeftClass = () => {
+    if (usageBlock) return '!border-l-violet-500';
     if (deal.activeAlert) return deal.activeAlert.tone === 'red' ? '!border-l-red-500' : '!border-l-emerald-500';
     if (deal.isWon) return '!border-l-green-500';
     if (deal.isLost) return '!border-l-red-500';
