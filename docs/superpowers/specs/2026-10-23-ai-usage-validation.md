@@ -6,7 +6,7 @@ Data: 23/10/2026. Branch: `codex/ai-consumption-controls`, base `527b39f47f1d18d
 
 Implementados medição das chamadas do motor nativo WhatsApp, reserva de quota, bloqueio durável, concessão manual pelo responsável/admin e painel em **Configurações → IA e Automações → Consumo e limites**. O chat mostra consumo e liberação. Acrescentar quota preserva o histórico e não retoma a IA nem envia mensagem. Alertas internos pendentes reaparecem ao voltar ao CRM, inclusive após ficar offline.
 
-Políticas começam em medição, sem teto numérico arbitrário. Ativar proteção exige quotas explícitas por conversa e por organização. O limite organizacional usa janela móvel de 24 horas; o saldo do atendimento é acumulado. Áudio tem quota em segundos separada.
+Políticas começam em medição, sem teto numérico arbitrário. Ativar proteção exige quota explícita por conversa. Os limites por organização e de áudio são opcionais desde a correção descrita abaixo. O limite organizacional, quando configurado, usa janela móvel de 24 horas; o saldo do atendimento é acumulado. Transcrição de áudio é medida em segundos separadamente.
 
 ## Evidência de testes
 
@@ -69,3 +69,13 @@ Samuel autorizou concluir a validação e publicar em 23/10/2026, mantendo os li
 Recuo deve conservar tabelas de consumo, reservas, concessões e bloqueios. Uma versão anterior do motor desconhece esses bloqueios; antes de retornar a ela, interromper a execução automática de forma controlada. Preferir correção adiante, sem apagar dados ou reativar filas.
 
 **Estado na preparação do release:** aplicação, SQL e concorrência real validados. Publicação autorizada, sem ativação de quotas. A conferência remota compara os IDs anteriores ao mesmo corte para leads, contatos, conversas e mensagens, além de políticas e triggers operacionais; não altera cadastros para testar.
+
+## Configuração por atendimento — complemento de 23/10/2026
+
+Após a publicação inicial, Samuel autorizou 300.000 tokens acumulados por atendimento em MPL, HW Rocha e RCA, com liberação manual e nenhum envio real de teste. Não autorizou um teto diário nem de segundos de áudio.
+
+A migração `20261023192659_ai_usage_optional_secondary_limits.sql` remove a dependência de um teto diário para ativar proteção e interpreta quota de áudio nula como medição sem teto de segundos. Mantém limites explícitos, locks, idempotência, bloqueios e ACLs. Não altera políticas, consumo, concessões, cadastros ou mensagens. A migração inicial publicada permanece intacta. API e formulário aceitam essa mesma configuração sem preencher quotas automaticamente.
+
+Validação adicional: **342 testes em 44 arquivos**; **94 assertions SQL** tanto em PGlite quanto PostgreSQL 17.11; **27 verificações e 9 contenções reais**. A suíte cobre consumo anterior à ativação, contas independentes sem limite global, áudio medido sem quota, quotas explícitas e ativação entre reserva e despacho. Evidência privada em `tmp/ai-usage-postgres/run-Z6zfC6/result.json`, servidor encerrado. Revisão independente confirmou alteração apenas dos condicionais de áudio nos dois RPCs.
+
+Depois de publicar a compatibilidade, aplicar somente `enabled=true` e `conversation_tokens=300000` nas três organizações confirmadas, preservando todos os demais campos. Verificar novamente as políticas, comparando as demais organizações. Não criar concessões nem retomar conversas. O consumo acumulado já medido conta para o teto; não há reinício diário. Transcrição cobrada em segundos não integra esse limite de tokens; proteções técnicas existentes de duração e formato permanecem.

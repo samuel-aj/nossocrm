@@ -9,8 +9,8 @@ const PolicyBody = z.object({
   organization_daily_tokens: z.number().int().min(1).max(1_000_000_000).nullable(),
   conversation_audio_seconds: z.number().int().min(1).max(86400).nullable(),
   timezone: z.string().min(1).max(80).refine(validTimezone, 'Fuso inválido'),
-}).strict().refine(v => !v.enabled || (v.conversation_tokens !== null && v.organization_daily_tokens !== null), {
-  message: 'Defina a quota por conversa e o limite diário da organização antes de ativar', path: ['conversation_tokens'],
+}).strict().refine(v => !v.enabled || v.conversation_tokens !== null, {
+  message: 'Defina a quota de tokens por conversa antes de ativar', path: ['conversation_tokens'],
 });
 export async function GET() {
   const auth = await guardRoute(); if (!auth.ok) return auth.response;
