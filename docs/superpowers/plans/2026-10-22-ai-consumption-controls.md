@@ -2,7 +2,7 @@
 
 ## Objetivo e autorização
 
-Opção B aprovada por Samuel em 23/10/2026: medição, trava e painel, com liberação manual pelo responsável e testes sem mensagens reais. Branch `codex/ai-consumption-controls`, base `527b39f47f1d18dca1e477179718a04cf92c2803`. Publicação deste escopo não foi solicitada. A [especificação](../specs/2026-10-22-ai-consumption-controls-design.md) registra o desenho e as referências da reunião SGM.
+Opção B aprovada por Samuel em 23/10/2026: medição, trava e painel, com liberação manual pelo responsável e testes sem mensagens reais. Branch `codex/ai-consumption-controls`, base `527b39f47f1d18dca1e477179718a04cf92c2803`. Samuel autorizou concluir a validação e publicar, deixando os limites desativados e sem valores para ele configurar. A [especificação](../specs/2026-10-22-ai-consumption-controls-design.md) registra o desenho e as referências da reunião SGM.
 
 Arquitetura: registro durável por tentativa, conta de consumo por contato/conversa, concessões adicionais sem apagar histórico e reserva transacional antes da chamada paga. Adaptadores compartilhados pelo motor WhatsApp alimentam trava e painel. Next.js 16, React 19, TypeScript, AI SDK v6, Supabase/Postgres e TanStack Query.
 
@@ -24,8 +24,8 @@ Arquivos: `lib/ai-usage/{types,identity,context,budget}.ts`.
 - [x] Concessões positivas, com autor, motivo e idempotência; sem zerar consumo ou retomar o agente.
 - [x] RLS e funções sensíveis restritas ao servidor; grants e tentativas não podem ser apagados/truncados pelo service role.
 - [x] Políticas desativadas por padrão. Ativação requer quotas explícitas por conversa e por organização; janela organizacional móvel de 24 horas.
-- [x] 65 verificações SQL isoladas em PGlite: quotas, replay, mudança de política, identidade, unidades, grants, permissões e preservação.
-- [ ] Exercitar corrida em duas sessões PostgreSQL reais antes do piloto protegido. Nesta máquina não havia servidor PostgreSQL nem daemon Docker disponível; PGlite executou cenários serializados e os locks foram revisados, sem alegar concorrência física testada.
+- [x] 69 verificações SQL isoladas em PGlite: quotas, replay, mudança de política, identidade, unidades, grants, permissões, modo somente medição e preservação.
+- [x] Exercitar corrida em duas sessões PostgreSQL 17.11 reais isoladas: 21 verificações, 7 contenções observadas e as 69 regressões SQL passaram. Runtime portátil oficial, sem serviço instalado; servidor encerrado após o teste.
 
 Fixtures em `supabase/tests/ai_usage*.sql`; runner `scripts/test-ai-usage-db.mjs` recebe um módulo PGlite local e nunca lê credenciais de ambiente.
 
@@ -69,8 +69,8 @@ Arquivos: `lib/ai-usage/{access,reporting,notifications}.ts`, `app/api/ai-usage/
 - [x] Testes focados dos componentes, APIs, adaptadores, guards e SQL concluídos; validação integrada final registrada separadamente.
 - [x] Typecheck e build passaram; lint do escopo passou. O lint geral tem warning preexistente em `components/navigation/NavigationRail.tsx:39`.
 - [x] Revisão independente de preservação, permissões, chamadas pagas e transições concluída; correções incorporadas.
-- [ ] Publicação e aplicação da migração: não executadas neste escopo. Aplicar migração antes do código; sem ela o motor recusa chamadas por não conseguir registrar/reservar.
-- [ ] Piloto por organização: escolher valores explícitos e verificar consultas após publicação. Não ativar teto arbitrário para todos.
+- [ ] Publicação e aplicação da migração autorizadas: aplicar migração antes do código; sem ela o motor recusa chamadas por não conseguir registrar/reservar. Conferir preservação e consultas após publicar.
+- [x] Decisão de configuração: deixar as políticas desativadas, com limites vazios, para Samuel configurar depois. Nenhum piloto protegido é ativado por esta publicação.
 
 Recuo: preservar tabelas, tentativas, concessões e bloqueios. Não retornar ao motor anterior sem interromper antes a execução automática, pois ele desconhece os bloqueios duráveis. Preferir correção adiante. Não remover tabelas nem disparar filas ao recuperar uma versão.
 
@@ -78,4 +78,4 @@ Recuo: preservar tabelas, tentativas, concessões e bloqueios. Não retornar ao 
 
 Atendimento automático nativo WhatsApp e seus auxiliares, simulador, configuração e indexação. Transcrição manual, Pilot, chamadas do navegador e n8n externo não foram instrumentados. A UI explicita essa cobertura. Estimativa de custo não é fatura nem garantia monetária absoluta. Nenhum backfill financeiro de dados antigos foi executado.
 
-Validação final: 333 testes da aplicação, 65 verificações SQL, TypeScript, lint do escopo, build e prévia aprovados. [Evidências e roteiro de publicação](../specs/2026-10-23-ai-usage-validation.md).
+Validação da aplicação: 337 testes, 69 verificações SQL, TypeScript, lint do escopo, build e prévia aprovados. [Evidências e roteiro de publicação](../specs/2026-10-23-ai-usage-validation.md).

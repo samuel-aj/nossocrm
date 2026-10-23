@@ -991,12 +991,20 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     if (e instanceof AiUsageError || getUsageFailure()) {
       const usageContext = getUsageContext();
       try {
-        if (usageContext) await blockConversationBudget(usageContext, e instanceof AiUsageError ? e.code : 'AI_USAGE_UNAVAILABLE');
+        if (usageContext) {
+          // Measurement alone interrupts this attempt without turning a provider
+          // timeout into a permanent manual stop. Re-read the current policy;
+          // the block RPC checks it again under its lock to close the toggle race.
+          const currentBudget = await checkConversationBudget(admin, organizationId, conversationId);
+          if (currentBudget.policy.enabled || currentBudget.blocked_at) {
+            await blockConversationBudget(usageContext, e instanceof AiUsageError ? e.code : 'AI_USAGE_UNAVAILABLE');
+          }
+        }
       } catch (blockError) {
         console.error('[wa-agents] não foi possível persistir o bloqueio de consumo:', errorMessage(blockError));
       }
       // No error webhook: quota warnings stay inside the CRM and never message the lead.
-      pushEvent('usage_blocked', { message: msg });
+      pushEvent('usage_interrupted', { message: msg });
       return await finish('error', { reason: msg, error: msg });
     }
     const code = e instanceof WaAgentError ? e.code : undefined;

@@ -162,6 +162,22 @@ DO $$ DECLARE org uuid:=usage_test.id(1); data jsonb; clean uuid; prior_count in
  PERFORM public.ai_usage_context(org,usage_test.id(116));
  PERFORM usage_test.assert((public.ai_usage_budget(org,usage_test.id(116))->>'tokens_used')::int=70,'resolved aliases do not double-count the readonly union');
 END $$;
+DO $$ DECLARE org uuid:=usage_test.id(4); conv uuid:=usage_test.id(401); account uuid; blocked text; BEGIN
+ INSERT INTO public.organizations VALUES(org);
+ INSERT INTO public.wa_conversations(id,organization_id,wa_phone) VALUES(conv,org,'measurement-only-fixture');
+ account:=public.ai_usage_context(org,conv);
+ PERFORM usage_test.assert(NOT public.ai_usage_block(org,account,conv,'usage_unknown'),'measurement-only failure cannot create durable block');
+ PERFORM usage_test.assert(public.ai_usage_budget(org,conv)->>'blocked_at' IS NULL AND
+  NOT EXISTS(SELECT 1 FROM public.ai_usage_notices WHERE organization_id=org) AND
+  (SELECT ai_status='active' FROM public.wa_conversations WHERE id=conv),'measurement-only block has no notice or state side effects');
+ PERFORM public.ai_usage_policy_set(org,'{"enabled":true,"conversation_tokens":100,"organization_daily_tokens":500}');
+ PERFORM usage_test.assert(public.ai_usage_block(org,account,conv,'conversation_token_limit'),'enabled policy creates durable block');
+ blocked:=public.ai_usage_budget(org,conv)->>'blocked_at';
+ PERFORM public.ai_usage_policy_set(org,'{"enabled":false}');
+ PERFORM public.ai_usage_block(org,account,conv,'usage_unknown');
+ PERFORM usage_test.assert(public.ai_usage_budget(org,conv)->>'blocked_at'=blocked AND
+  public.ai_usage_budget(org,conv)->>'blocked_reason'='conversation_token_limit','disabling policy preserves a pre-existing block');
+END $$;
 GRANT USAGE ON SCHEMA usage_test TO service_role,authenticated;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA usage_test TO service_role,authenticated;
 SET ROLE authenticated;

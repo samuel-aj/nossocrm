@@ -195,6 +195,10 @@ BEGIN
  PERFORM ai_usage_internal.lock_org(p_org);
  account:=ai_usage_internal.root(p_org,p_account);
  IF account IS NULL THEN RAISE EXCEPTION 'Usage account not found'; END IF;
+ -- Measurement-only failures must not create a new durable pause. Recheck the
+ -- current policy under the same organization lock, but never erase an old block.
+ IF NOT EXISTS(SELECT 1 FROM public.ai_usage_policies WHERE organization_id=p_org AND enabled)
+  AND NOT EXISTS(SELECT 1 FROM public.ai_usage_accounts WHERE id=account AND blocked_at IS NOT NULL) THEN RETURN false; END IF;
  UPDATE public.ai_usage_accounts SET blocked_at=coalesce(blocked_at,now()),blocked_reason=coalesce(blocked_reason,left(p_reason,200)) WHERE id=account;
  INSERT INTO public.ai_usage_notices(organization_id,account_id,conversation_id,reason) VALUES(p_org,account,p_conversation,left(p_reason,200)) ON CONFLICT DO NOTHING;
  UPDATE public.wa_conversations SET ai_status='paused',ai_resume_at=NULL,ai_status_changed_at=now()
