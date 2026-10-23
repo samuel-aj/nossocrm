@@ -1,5 +1,7 @@
 import { DealAlertBadge } from '../DealAlertBadge';
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { BoardAutomationsContext } from '@/features/boards/hooks/useBoardAutomations';
+import { UsageBlockBadge } from '@/features/ai-usage/UsageBlockBadge';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Check, UserPlus } from 'lucide-react';
 import { DealView, CustomFieldDefinition, BoardStage } from '@/types';
@@ -257,6 +259,7 @@ export const KanbanListRow = React.memo(function KanbanListRow({
   selected = false,
   onToggleSelect,
 }: KanbanListRowProps) {
+  const usageBlock = useContext(BoardAutomationsContext)?.usageBlocks?.[deal.id];
   // Mesma cor/espessura da divisória da aba Todos (divide-slate-200) e, como
   // lá, atravessando a linha INTEIRA — inclusive a célula do alerta. A faixa
   // colorida da etapa é um span posicionado dentro da célula, então ela é
@@ -348,7 +351,7 @@ export const KanbanListRow = React.memo(function KanbanListRow({
       tabIndex={0}
       aria-label={selectionMode ? `Selecionar ${deal.title}` : `Abrir ${deal.title}`}
       aria-selected={selectionMode ? selected : undefined}
-      className={`${deal.activeAlert ? '!bg-emerald-50 dark:!bg-emerald-950/50 outline outline-1 -outline-offset-1 outline-emerald-400 dark:outline-emerald-600' : ''} group cursor-pointer transition-colors focus-visible-ring hover:bg-primary-50/60 focus-visible:bg-primary-50/80 dark:hover:bg-white/[0.045] dark:focus-visible:bg-white/[0.06] ${
+      className={`${deal.activeAlert ? deal.activeAlert.tone === 'red' ? '!bg-red-50 dark:!bg-red-950/50 outline outline-1 -outline-offset-1 outline-red-400 dark:outline-red-600' : '!bg-emerald-50 dark:!bg-emerald-950/50 outline outline-1 -outline-offset-1 outline-emerald-400 dark:outline-emerald-600' : ''} group cursor-pointer transition-colors focus-visible-ring hover:bg-primary-50/60 focus-visible:bg-primary-50/80 dark:hover:bg-white/[0.045] dark:focus-visible:bg-white/[0.06] ${
         selected ? 'bg-primary-50/80 dark:bg-primary-500/10' : ''
       }`}
     >
@@ -406,6 +409,7 @@ export const KanbanListRow = React.memo(function KanbanListRow({
           {deal.title}
         </span>
         <DealAlertBadge alert={deal.activeAlert} />
+        {usageBlock && <UsageBlockBadge block={usageBlock} className="mt-1" />}
         {deal.contactName ? (
           <span className="mt-0.5 block truncate text-xs text-slate-400 dark:text-slate-500">
             {deal.contactName}

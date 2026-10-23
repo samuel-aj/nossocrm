@@ -8,7 +8,7 @@ import { usageNotices } from './notifications';
 const from = '2026-10-23T00:00:00Z';
 const until = '2026-10-24T00:00:00Z';
 const user = { organizationId: 'org', id: 'user' } as OrgUser;
-type Row = { id: string; conversation_id: string | null; created_at: string; organization_id: string; resolved_at: string | null };
+type Row = { id: string; conversation_id: string | null; created_at: string; organization_id: string; resolved_at: string | null; reason?: string | null };
 const row = (id: string, conversationId: string | null = id): Row => ({
   id, conversation_id: conversationId, created_at: '2026-10-23T10:00:00Z', organization_id: 'org', resolved_at: null,
 });
@@ -50,9 +50,20 @@ it('notifies only the visible responsible user with a stable internal alert', as
   const { db, queries } = database([row('hidden'), row('other'), row('own'), row('missing', null)]);
   const result = await usageNotices(db, user, from, until);
   expect(result).toHaveLength(1);
-  expect(result[0]).toMatchObject({ id: 'ai-usage-own', kind: 'alert', href: '/chats?conversation=own' });
+  expect(result[0]).toMatchObject({ id: 'ai-usage-own', kind: 'alert', category: 'ai_usage', href: '/chats?conversation=own' });
   expect(access).toHaveBeenCalledTimes(3);
   expect(queries).toEqual([{ organization: 'org', unresolved: true, from, until, order: 'id', limit: 200 }]);
+});
+
+it('identifies quota blocks without calling an unknown consumption error a reached limit', async () => {
+  access.mockResolvedValue({ allowed: true, canGrant: true });
+  const { db } = database([
+    { ...row('cap'), reason: 'conversation_token_limit' },
+    { ...row('unknown'), reason: 'reservation_unknown' },
+  ]);
+  expect((await usageNotices(db, user, from, until)).map(n => [n.category, n.title])).toEqual([
+    ['ai_usage', 'IA pausada por limite'], ['ai_usage', 'IA pausada por consumo'],
+  ]);
 });
 
 it('keeps 205 notices unique when older rows resolve and newer rows arrive between pages', async () => {

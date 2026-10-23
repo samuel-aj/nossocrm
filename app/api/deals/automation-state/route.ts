@@ -11,14 +11,14 @@ export async function POST(req: Request) {
   if (!auth.ok) return auth.response;
   const parsed = z.object({ dealIds: z.array(z.string().uuid()).max(100) }).strict().safeParse(await req.json().catch(() => null));
   if (!parsed.success) return json({ error: 'Leads inválidos' }, 400);
-  if (!parsed.data.dealIds.length) return json({ automations: {} });
+  if (!parsed.data.dealIds.length) return json({ automations: {}, usageBlocks: {}, usageBlocksUnavailable: false });
   try {
     const client = await createClient();
     const { data, error } = await client.from('deals').select('id,contact_id')
       .eq('organization_id', auth.user.organizationId).in('id', parsed.data.dealIds).is('deleted_at', null);
     if (error) throw error;
-    const automations = await loadAutomationState(auth.admin, auth.user, data || []);
-    const response = json({ automations });
+    const state = await loadAutomationState(auth.admin, auth.user, data || []);
+    const response = json(state);
     response.headers.set('Cache-Control', 'no-store');
     return response;
   } catch (error) {

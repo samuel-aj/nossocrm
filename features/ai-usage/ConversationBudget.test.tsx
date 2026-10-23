@@ -5,7 +5,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 const h = vi.hoisted(() => ({ canGrant: true, grant: vi.fn() }));
 vi.mock('./useAiUsage', () => ({
   useConversationUsage: () => ({ isPending: false, data: { canGrant: h.canGrant, grants: [], budget: {
-    account_id: 'account', blocked_at: '2026-10-23T00:00:00Z', blocked_reason: 'conversation_limit', tokens_used: 900, tokens_reserved: 100, tokens_granted: 0, seconds_used: 20, seconds_reserved: 0, seconds_granted: 0,
+    account_id: 'account', blocked_at: '2026-10-23T00:00:00Z', blocked_reason: 'conversation_token_limit', tokens_used: 900, tokens_reserved: 100, tokens_granted: 0, seconds_used: 20, seconds_reserved: 0, seconds_granted: 0,
     policy: { enabled: true, conversation_tokens: 1000 },
   } } }),
   useGrantUsage: () => ({ mutateAsync: h.grant, isPending: false, error: null }),
@@ -15,6 +15,7 @@ beforeEach(() => { h.canGrant = true; h.grant.mockReset(); });
 describe('conversation spending dialog', () => {
   it('preserves the human path and only authorized staff see the grant form', () => {
     h.canGrant = false; render(<ConversationBudget conversationId="chat" />);
+    expect(screen.getByText('IA pausada por limite')).toBeVisible();
     expect(screen.getByText(/continuar o atendimento humano/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Ver consumo' }));
     expect(screen.queryByRole('button', { name: 'Confirmar liberação' })).toBeNull();

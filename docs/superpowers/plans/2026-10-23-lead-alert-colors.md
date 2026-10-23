@@ -18,13 +18,13 @@ export type UsageBlockMap = Record<string, UsageBlock>;
 
 ## Tarefas e donos
 
-- [ ] Root cria lib/ai-usage/alerts.ts e features/ai-usage/UsageBlockBadge.tsx; labels distinguem quota de consumo desconhecido. Aplica lavanda em ConversationBudget e categoria explícita ai_usage no feed/sino/toast; mensagens verdes e alertas comuns conforme tone.
-- [ ] Worker board cria loader server-only lib/ai-usage/loadUsageBlocks.ts com paginação/identidades canônicas, sem escritas. Integra lib/boards/loadAutomationState.ts, API automation-state, hook/context e DealCard/KanbanList. Integra API de conversations com mesmo loader após filtro de visibilidade. Em falha da projeção adicional preserva leitura de mensagens e sinaliza indisponibilidade.
-- [ ] Worker alerta comum propaga tone opcional no bloco, tipos/serialização/bot/RPC, evento e DealAlertBadge; mantém verde por omissão e compatibilidade do RPC antigo. Migração nova por CLI, somente aditiva; nenhum deploy/aplicação remota. Não editar DealCard/KanbanList (worker board usa tone).
-- [ ] Root integra a projeção na lista de chats e agrupamento dos números, invalida projeção do board após grant e cria prévia visual local usando componentes reais com dados fictícios.
-- [ ] Validar testes significativos: ACL/organização, bloqueios canônicos, ausência de falso alerta em pausa humana, mapeamento explícito antes de contato, alerta normal e IA simultâneos, serialização retrocompatível, grant sem retomada, formulário verde/vermelho.
-- [ ] Rodar Vitest com test/ai-usage/vitest.config.ts (nunca setup remoto genérico), SQL em PGlite se houver migration, TypeScript, lint dos arquivos alterados, build. Conferir prévia desktop/mobile/tema escuro com dados locais.
-- [ ] Revisar diff e preservar tmp/privado. Registrar estado e disponibilizar prévia; sem mensagem real e sem alterar produção neste escopo.
+- [x] Root cria lib/ai-usage/alerts.ts e features/ai-usage/UsageBlockBadge.tsx; labels distinguem quota de consumo desconhecido. Aplica lavanda em ConversationBudget e categoria explícita ai_usage no feed/sino/toast; mensagens verdes e alertas comuns conforme tone.
+- [x] Worker board cria loader server-only lib/ai-usage/loadUsageBlocks.ts com paginação/identidades canônicas, sem escritas. Integra lib/boards/loadAutomationState.ts, API automation-state, hook/context e DealCard/KanbanList. Integra API de conversations com mesmo loader após filtro de visibilidade. Em falha da projeção adicional preserva leitura de mensagens e sinaliza indisponibilidade.
+- [x] Worker alerta comum propaga tone opcional no bloco, tipos/serialização/bot/RPC, evento e DealAlertBadge; mantém verde por omissão e compatibilidade do RPC antigo. Migração nova por CLI, somente aditiva; nenhum deploy/aplicação remota. Não editar DealCard/KanbanList (worker board usa tone).
+- [x] Root integra a projeção na lista de chats e agrupamento dos números, invalida projeção do board após grant e cria prévia visual local usando componentes reais com dados fictícios.
+- [x] Validar testes significativos: ACL/organização, bloqueios canônicos, ausência de falso alerta em pausa humana, mapeamento explícito antes de contato, alerta normal e IA simultâneos, serialização retrocompatível, grant sem retomada, formulário verde/vermelho.
+- [x] Rodar Vitest com test/ai-usage/vitest.config.ts (nunca setup remoto genérico), SQL em PGlite se houver migration, TypeScript, lint dos arquivos alterados, build. Conferir prévia desktop/mobile/tema escuro com dados locais.
+- [x] Revisar diff e preservar tmp/privado. Registrar estado e disponibilizar prévia; sem mensagem real e sem alterar produção neste escopo.
 
 ## Comandos de validação
 

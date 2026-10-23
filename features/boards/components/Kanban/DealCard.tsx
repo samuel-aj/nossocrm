@@ -1,5 +1,8 @@
 import { DealAlertBadge } from '../DealAlertBadge';
-import React, { useState } from 'react';
+import React, { useContext, useState } from 'react';
+import { BoardAutomationsContext } from '@/features/boards/hooks/useBoardAutomations';
+import { UsageBlockBadge } from '@/features/ai-usage/UsageBlockBadge';
+import { usageBlockLabel } from '@/lib/ai-usage/alerts';
 import { DealView, CustomFieldDefinition } from '@/types';
 import { Phone, Copy, Check, Hourglass, Trophy, XCircle, Package, UserX } from 'lucide-react';
 import { ActivityStatusIcon } from './ActivityStatusIcon';
@@ -108,6 +111,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
   const [localDragging, setLocalDragging] = useState(false);
   const podeMover = useMyActionPermissions(deal.boardId).deals.move;
   const isClosed = isDealClosed(deal);
+  const usageBlock = useContext(BoardAutomationsContext)?.usageBlocks?.[deal.id];
 
   const handleToggleMenu = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -142,7 +146,9 @@ const DealCardComponent: React.FC<DealCardProps> = ({
       shadow-sm cursor-grab active:cursor-grabbing group hover:shadow-md transition-all relative select-none
     `;
 
-    if (deal.activeAlert) return `${baseClasses} bg-emerald-50 dark:bg-emerald-950/50 border-emerald-400 dark:border-emerald-600 ring-1 ring-emerald-300/60 dark:ring-emerald-700/60`;
+    if (deal.activeAlert) return `${baseClasses} ${deal.activeAlert.tone === 'red'
+      ? 'bg-red-50 dark:bg-red-950/50 border-red-400 dark:border-red-600 ring-1 ring-red-300/60 dark:ring-red-700/60'
+      : 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-400 dark:border-emerald-600 ring-1 ring-emerald-300/60 dark:ring-emerald-700/60'}`;
     if (deal.isWon) {
       return `${baseClasses} 
         bg-green-50 dark:bg-green-900/20 
@@ -167,7 +173,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
 
   // Get border-left color class based on status
   const getBorderLeftClass = () => {
-    if (deal.activeAlert) return '!border-l-emerald-500';
+    if (deal.activeAlert) return deal.activeAlert.tone === 'red' ? '!border-l-red-500' : '!border-l-emerald-500';
     if (deal.isWon) return '!border-l-green-500';
     if (deal.isLost) return '!border-l-red-500';
     // Priority-based colors for open deals
@@ -204,6 +210,8 @@ const DealCardComponent: React.FC<DealCardProps> = ({
     if (priority) parts.push(priority);
     if (isRotting && !isClosed) parts.push('estagnado');
     if (contactInactive) parts.push('contato inativo');
+    if (deal.activeAlert) parts.push(deal.activeAlert.message);
+    if (usageBlock) parts.push(usageBlockLabel(usageBlock.reason));
 
     return parts.join(', ');
   };
@@ -351,6 +359,7 @@ const DealCardComponent: React.FC<DealCardProps> = ({
       )}
 
       <DealAlertBadge alert={deal.activeAlert} />
+      {usageBlock && <UsageBlockBadge block={usageBlock} className="mb-2" />}
       <h4
         title={deal.title}
         className={`truncate text-sm font-bold font-display leading-snug mb-0.5 ${isRotting ? 'text-slate-600 dark:text-slate-400' : 'text-slate-900 dark:text-white'}`}

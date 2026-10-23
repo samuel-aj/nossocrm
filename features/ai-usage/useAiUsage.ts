@@ -31,6 +31,6 @@ export function useGrantUsage(id: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { tokens: number; seconds?: number; reason: string; idempotencyKey: string }) => waAgentsFetch(`/api/ai-usage/conversations/${id}/grant`, { method: 'POST', body }),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: queryKeys.aiUsage.all }); void qc.invalidateQueries({ queryKey: ['waAgents'] }); },
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: queryKeys.aiUsage.all }); void qc.invalidateQueries({ queryKey: ['waAgents'] }); void qc.invalidateQueries({ queryKey: ['board-automation-state'] }); void qc.invalidateQueries({ queryKey: ['waConversations'] }); },
   });
 }

@@ -5,6 +5,7 @@ import {useRouter} from 'next/navigation';
 import {useAuth} from '@/context/AuthContext';
 import {deliverNotice,presentOnce,unlockNotificationSound} from '@/lib/notifications/delivery';
 import type {Notice,NotificationFeed,NotificationSettings,Preferences} from '@/lib/notifications/types';
+import { clearReadNotices, reconcileUsageNotices } from '@/lib/notifications/history';
 
 async function api<T>(url:string,init?:RequestInit):Promise<T> {
   const r=await fetch(url,{cache:'no-store',...init}); const data=await r.json();
@@ -31,7 +32,9 @@ export function usePersonalNotifications() {
     const poll=async()=>{
       try {
         let after:string|null=null, until:string|null=null;
+        let usageNoticesUnavailable = false;
         do {
+          const firstPage = !after;
           const q=new URLSearchParams();
           if(baseline) q.set('since',new Date(Math.max(Date.parse(baseline),Date.now()-120_000)).toISOString());
           if(after) q.set('after',after);
@@ -40,16 +43,26 @@ export function usePersonalNotifications() {
           if(stopped) return;
           if(!baseline) baseline=data.serverTime;
           until=data.serverTime; after=data.nextAfter;
+          usageNoticesUnavailable ||= !!data.usageNoticesUnavailable;
+          if(firstPage && !data.usageNoticesUnavailable) {
+            setHistory(previous=>({scope,items:reconcileUsageNotices(previous.scope===scope ? previous.items : [],data.events)}));
+            setToast(previous=>previous?.scope===scope && previous.notice.category==='ai_usage' && !data.events.some(n=>n.id===previous.notice.id) ? null : previous);
+          }
           for(const notice of data.events) {
             if(seen.current.has(notice.id)) continue;
             seen.current.add(notice.id);
             if(seen.current.size>2000) seen.current.delete(seen.current.values().next().value!);
-            setHistory(previous=>({scope,items:[notice,...(previous.scope===scope ? previous.items : [])].slice(0,30)}));
+            setHistory(previous=>{
+              const items=previous.scope===scope ? previous.items.filter(n=>n.id!==notice.id) : [];
+              const ordinary=[notice,...items].filter(n=>n.category!=='ai_usage').slice(0,30);
+              const usage=[notice,...items].filter(n=>n.category==='ai_usage');
+              return {scope,items:[...usage,...ordinary]};
+            });
             if(document.visibilityState==='visible') setToast({scope,notice});
             await presentOnce(scope,notice.id,()=>{if(!stopped) deliverNotice(notice,preferences,href=>router.push(href));});
           }
         } while(after && !stopped);
-        setError('');
+        setError(usageNoticesUnavailable ? 'Avisos de consumo da IA temporariamente indisponíveis. Tentando reconectar…' : '');
       } catch { if(!stopped) setError('Avisos temporariamente indisponíveis. Tentando reconectar…'); }
       finally {if(!stopped) timer=setTimeout(poll,4000);}
     };
@@ -76,5 +89,5 @@ export function usePersonalNotifications() {
   }
   return {settings:settings.data,loading:settings.isLoading,error:settings.isError ? 'Não foi possível carregar suas preferências.' : error,save,test,
     notices:history.scope===scope ? history.items : [],toast:toast?.scope===scope ? toast.notice : null,
-    dismiss:()=>setToast(null),clear:()=>setHistory({scope,items:[]})};
+    dismiss:()=>setToast(null),clear:()=>setHistory(previous=>({scope,items:clearReadNotices(previous.scope===scope ? previous.items : [])}))};
 }

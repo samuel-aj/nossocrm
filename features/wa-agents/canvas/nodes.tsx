@@ -82,7 +82,7 @@ const TRIGGER_COLOR = '#f59e0b';
 export function minimapColor(node: FlowNode): string {
   if (node.type === 'trigger') return TRIGGER_COLOR;
   const first = node.type === 'bubble' ? node.data.blocks[0] : undefined;
-  return first ? NODE_META[first.type].color : '#94a3b8';
+  return first?.type === 'activate_alert' && first.data.tone === 'red' ? '#ef4444' : first ? NODE_META[first.type].color : '#94a3b8';
 }
 
 const WAIT_UNIT_SINGULAR: Record<WaitUnit, string> = { s: 'segundo', min: 'minuto', h: 'hora', d: 'dia' };
@@ -524,7 +524,7 @@ function BlockRow({
       >
         <GripVertical size={16} aria-hidden="true" />
       </span>
-      <BlockIcon type={block.type} />
+      <BlockIcon type={block.type} tone={block.type === 'activate_alert' ? block.data.tone : undefined} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1">
           <span className="text-xs font-semibold truncate">{label}</span>

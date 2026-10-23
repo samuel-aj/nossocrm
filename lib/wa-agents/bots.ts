@@ -1144,7 +1144,7 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
         }
         case 'activate_alert': {
           if (!deal) throw new Error('Alerta exige um lead nesta execução');
-          const { error } = await admin.rpc('activate_deal_alert', { p_org: orgId, p_deal: deal.id, p_bot: bot.id, p_run: st.run.id, p_block: step.id, p_message: renderTemplate(step.message, tplVars) });
+          const { error } = await admin.rpc('activate_deal_alert_with_tone', { p_org: orgId, p_deal: deal.id, p_bot: bot.id, p_run: st.run.id, p_block: step.id, p_message: renderTemplate(step.message, tplVars), p_tone: step.tone ?? 'green' });
           if (error) throw error;
           note(st, step, 'Alerta ativado', 'ok');
           idx = next(step);

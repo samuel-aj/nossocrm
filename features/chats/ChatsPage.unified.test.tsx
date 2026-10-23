@@ -3,11 +3,12 @@ import { fireEvent, render, screen, waitFor, cleanup } from '@testing-library/re
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { ChatsPage } from './ChatsPage';
+import type { UsageBlock } from '@/lib/ai-usage/alerts';
 const fixtures = vi.hoisted(() => ({
-  phone: '+5569999926070', search: '',
+  phone: '+5569999926070', search: '', usageBlocksUnavailable: false,
   rows: [
-    { id: 'old', connection_id: 'one', wa_phone: '+5569999926070', contact_id: 'maks', wa_name: 'Maks', last_message_at: '2026-09-23', last_message_preview: 'Antiga', unread_count: 2, label_ids: [], deal_id: null },
-    { id: 'new', connection_id: 'two', wa_phone: '+5569999926070', contact_id: 'maks', wa_name: 'Maks', last_message_at: '2026-09-24', last_message_preview: 'Mais recente', unread_count: 3, label_ids: [], deal_id: null },
+    { id: 'old', connection_id: 'one', wa_phone: '+5569999926070', contact_id: 'maks', wa_name: 'Maks', last_message_at: '2026-09-23', last_message_preview: 'Antiga', unread_count: 2, label_ids: [], deal_id: null, usage_block: null as UsageBlock | null },
+    { id: 'new', connection_id: 'two', wa_phone: '+5569999926070', contact_id: 'maks', wa_name: 'Maks', last_message_at: '2026-09-24', last_message_preview: 'Mais recente', unread_count: 3, label_ids: [], deal_id: null, usage_block: null as UsageBlock | null },
   ],
 }));
 vi.mock('@/context/CRMContext', () => ({ useCRM: () => ({ contacts: [{ id: 'maks', name: 'Maks', phone: fixtures.phone }], deals: [], boards: [], sidebarCollapsed: false, setSidebarCollapsed: vi.fn() }) }));
@@ -21,11 +22,11 @@ vi.mock('@/features/whatsapp/DealWhatsAppChat', () => ({ DealWhatsAppChat: (prop
 let client: QueryClient;
 const network = vi.fn(async (url: string) => {
   if (url.includes('/connection') && !url.includes('/conversations')) return Response.json({ connected: true, connections: [{ id: 'one', phoneNumber: '+5511111111111', status: 'connected' }, { id: 'two', phoneNumber: '+5522222222222', status: 'connected' }] });
-  if (url.includes('/conversations')) return Response.json({ data: url.includes('connectionId=one') ? fixtures.rows.slice(0, 1) : fixtures.rows, groupsEnabled: true });
+  if (url.includes('/conversations')) return Response.json({ data: url.includes('connectionId=one') ? fixtures.rows.slice(0, 1) : fixtures.rows, groupsEnabled: true, usageBlocksUnavailable: fixtures.usageBlocksUnavailable });
   return Response.json({ labels: [] });
 });
 function mount() { client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); render(<QueryClientProvider client={client}><ChatsPage /></QueryClientProvider>); }
-beforeEach(() => { fixtures.search = ''; sessionStorage.clear(); vi.stubGlobal('fetch', network); network.mockClear(); });
+beforeEach(() => { fixtures.search = ''; fixtures.usageBlocksUnavailable = false; fixtures.rows.forEach(row => { row.usage_block = null; }); sessionStorage.clear(); vi.stubGlobal('fetch', network); network.mockClear(); });
 afterEach(() => { cleanup(); client?.clear(); vi.unstubAllGlobals(); });
 
 it('shows one row, the latest preview, combined unread count and both sending numbers', async () => {
@@ -54,4 +55,22 @@ it('marks the complete unified conversation as read using the phone, never the g
   fireEvent.click(screen.getByRole('button', { name: 'Opções da conversa' }));
   fireEvent.click(screen.getByRole('button', { name: 'Marcar como lida' }));
   await waitFor(() => expect(network).toHaveBeenCalledWith('/api/whatsapp/messages?phone=%2B5569999926070', expect.anything()));
+});
+
+it('keeps the block of an older number visible after opening and removes it after authoritative refresh', async () => {
+  fixtures.rows[0].usage_block = { conversationId: 'old', blockedAt: '2026-10-23T10:00:00Z', reason: 'conversation_token_limit' };
+  mount();
+  expect(await screen.findByText('IA pausada por limite')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: /Maks.*Mais recente/ }));
+  expect(screen.getByText('IA pausada por limite')).toBeVisible();
+  fixtures.rows[0].usage_block = null;
+  fixtures.usageBlocksUnavailable = true;
+  await client.invalidateQueries({ queryKey: ['waConversations'] });
+  expect(await screen.findByText(/Não foi possível atualizar os avisos de consumo/)).toBeVisible();
+  expect(screen.getByText('IA pausada por limite')).toBeVisible();
+  fixtures.usageBlocksUnavailable = false;
+  await client.invalidateQueries({ queryKey: ['waConversations'] });
+  await waitFor(() => expect(screen.queryByText('IA pausada por limite')).toBeNull());
+  expect(screen.getByTestId('chat')).toBeVisible();
+  expect(network.mock.calls.every(([url]) => !url.includes('/send'))).toBe(true);
 });

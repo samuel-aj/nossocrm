@@ -12,6 +12,6 @@ export const DEFAULT_PREFERENCES: Preferences = {
   alerts: true, messages: false, scope: 'own', leads: false, boardIds: [], desktop: false, sound: false,
   soundType: 'current', volume: 40,
 };
-export interface Notice { id: string; kind: 'message' | 'lead' | 'alert'; title: string; message: string; href: string; createdAt: string }
+export interface Notice { id: string; kind: 'message' | 'lead' | 'alert'; category?: 'ai_usage'; tone?: 'green' | 'red'; title: string; message: string; href: string; createdAt: string }
 export interface NotificationSettings { preferences: Preferences; boards: Array<{id: string; name: string}> }
-export interface NotificationFeed { events: Notice[]; serverTime: string; nextAfter: string | null }
+export interface NotificationFeed { events: Notice[]; serverTime: string; nextAfter: string | null; usageNoticesUnavailable?: boolean }

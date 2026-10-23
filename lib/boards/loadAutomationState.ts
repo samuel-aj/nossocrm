@@ -2,6 +2,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { OrgUser } from '@/lib/whatsapp/api';
 import { connectionAllowed, filterConversationsByOwner, getVisibilityRules } from '@/lib/permissions/server';
 import { buildAutomationMap, type AutomationConversation, type AutomationRun } from './automationState';
+import { loadUsageBlocks } from '@/lib/ai-usage/loadUsageBlocks';
+import type { UsageBlockMap } from '@/lib/ai-usage/alerts';
 
 type PageResult<T> = { data: T[] | null; error: { message: string } | null };
 /** No silent PostgREST 1,000-row truncation (including contact fallback across boards). */
@@ -17,7 +19,7 @@ async function pages<T>(read: (from: number, to: number) => PromiseLike<PageResu
 type Conversation = AutomationConversation & { connection_id: string | null; label_ids: string[] | null };
 
 export async function loadAutomationState(admin: SupabaseClient, user: OrgUser, deals: { id: string; contact_id: string | null }[]) {
-  if (!deals.length) return {};
+  if (!deals.length) return { automations: {}, usageBlocks: {}, usageBlocksUnavailable: false };
   const org = user.organizationId;
   const ids = deals.map(d => d.id);
   const contacts = [...new Set(deals.flatMap(d => d.contact_id ? [d.contact_id] : []))];
@@ -60,5 +62,33 @@ export async function loadAutomationState(admin: SupabaseClient, user: OrgUser, 
   const [botNames, agentNames] = await Promise.all([names('wa_bots', botIds), names('wa_ai_agents', agentIds)]);
   const latestOpenDealByContact = new Map<string, string>();
   for (const deal of openDeals) if (!latestOpenDealByContact.has(deal.contact_id)) latestOpenDealByContact.set(deal.contact_id, deal.id);
-  return buildAutomationMap({ dealIds: ids, runs, conversations, latestOpenDealByContact, botNames, agentNames });
+  const automations = buildAutomationMap({ dealIds: ids, runs, conversations, latestOpenDealByContact, botNames, agentNames });
+  const usageBlocks: UsageBlockMap = {};
+  let usageBlocksUnavailable = false;
+  try {
+    const blocks = await loadUsageBlocks(admin, org, conversations.map(c => c.id));
+    const visibleIds = new Set(ids);
+    // A running robot can establish the link before the conversation has a
+    // contact/deal. Use its newest explicit target only for that orphan case,
+    // never to override existing linkage; require a visible target below.
+    const runTargetByConversation = new Map<string, string>();
+    for (const run of runs) {
+      if (run.conversation_id && run.deal_id && !runTargetByConversation.has(run.conversation_id)) {
+        runTargetByConversation.set(run.conversation_id, run.deal_id);
+      }
+    }
+    for (const conversation of conversations) {
+      const block = blocks[conversation.id];
+      const target = conversation.deal_id || (conversation.contact_id
+        ? latestOpenDealByContact.get(conversation.contact_id)
+        : runTargetByConversation.get(conversation.id));
+      if (!block || !target || !visibleIds.has(target)) continue;
+      const previous = usageBlocks[target];
+      if (!previous || block.blockedAt < previous.blockedAt || (block.blockedAt === previous.blockedAt && block.conversationId < previous.conversationId)) usageBlocks[target] = block;
+    }
+  } catch {
+    // An unavailable indicator must not hide the board or relabel automation.
+    usageBlocksUnavailable = true;
+  }
+  return { automations, usageBlocks, usageBlocksUnavailable };
 }

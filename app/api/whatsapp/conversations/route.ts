@@ -2,6 +2,8 @@ import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { getConnectionByOrg } from '@/lib/whatsapp/service';
 import { isColunaLabelIdsAusente } from '@/lib/whatsapp/labels';
 import { listVisibleConversations } from '@/lib/whatsapp/visibleConversations';
+import { loadUsageBlocks } from '@/lib/ai-usage/loadUsageBlocks';
+import type { UsageBlockMap } from '@/lib/ai-usage/alerts';
 
 export const runtime = 'nodejs';
 
@@ -59,14 +61,24 @@ export async function GET(req: Request) {
   const linhas = data as Array<
     Record<string, unknown> & { id: string; avatar_path?: string | null; avatar_synced_at?: string | null }
   >;
+  let usageBlocks: UsageBlockMap = {};
+  let usageBlocksUnavailable = false;
+  try {
+    usageBlocks = await loadUsageBlocks(auth.admin, auth.user.organizationId, linhas.map(row => row.id));
+  } catch {
+    // Status is supplemental: reading messages must remain available.
+    usageBlocksUnavailable = true;
+  }
   return json({
     data: linhas.map(({ avatar_synced_at, ...r }) => ({
       ...r,
+      usage_block: usageBlocks[r.id] ?? null,
       avatar_url:
         r.avatar_path && !r.avatar_path.startsWith('http')
           ? `/api/whatsapp/avatars/${r.id}?v=${encodeURIComponent(avatar_synced_at ?? '')}`
           : null,
     })),
     groupsEnabled,
+    usageBlocksUnavailable,
   });
 }

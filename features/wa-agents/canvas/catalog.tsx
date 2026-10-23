@@ -87,7 +87,7 @@ export const NODE_META: Record<StepType, NodeMeta> = {
     color: '#f97316',
     hint: 'Move o negócio para uma etapa',
   },
-  activate_alert: { label: STEP_LABELS.activate_alert, icon: Flag, tone: 'green', color: '#22c55e', hint: 'Destaca o lead até sua próxima abertura' },
+  activate_alert: { label: STEP_LABELS.activate_alert, icon: Flag, tone: 'green', color: '#22c55e', hint: 'Destaca o lead em verde ou vermelho até sua próxima abertura' },
   add_tag: { label: STEP_LABELS.add_tag, icon: Tag, tone: 'pink', color: '#ec4899', hint: 'Adiciona uma tag ao lead' },
   remove_tag: { label: STEP_LABELS.remove_tag, icon: TagsIcon, tone: 'pink', color: '#db2777', hint: 'Tira uma tag do lead (se ele não tiver, segue normalmente)' },
   create_lead: {
@@ -123,11 +123,11 @@ export const NODE_META: Record<StepType, NodeMeta> = {
 };
 
 /** Ícone colorido de um tipo de bloco. */
-export function BlockIcon({ type, size = 14 }: { type: StepType; size?: number }) {
+export function BlockIcon({ type, size = 14, tone }: { type: StepType; size?: number; tone?: NodeTone }) {
   const meta = NODE_META[type];
   const Icon = meta.icon;
   return (
-    <span className={`p-1 rounded-md shrink-0 ${TONE_CLASS[meta.tone]}`} aria-hidden="true">
+    <span className={`p-1 rounded-md shrink-0 ${TONE_CLASS[tone ?? meta.tone]}`} aria-hidden="true">
       <Icon size={size} />
     </span>
   );
