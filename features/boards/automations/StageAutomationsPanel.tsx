@@ -12,6 +12,7 @@ import { KebabMenu, type KebabItem } from '@/components/ui/KebabMenu';
 import type { StageAutomation } from './useStageAutomations';
 import { stageActionStep } from './stageAutomationModel';
 import { StageFollowupCard } from './StageFollowupCard';
+import { StageSignatureCard } from './StageSignatureCard';
 
 const KIND_LABEL = { action: 'Ação da etapa', bot: 'Robô', agent: 'Agente de IA', webhook: 'Webhook' } as const;
 
@@ -160,6 +161,9 @@ export function StageAutomationsPanel({
 
       {/* Outro gatilho da etapa: o lead ficou sem responder */}
       <StageFollowupCard stageId={stageId} stageLabel={stageLabel} />
+
+      {/* Contrato para assinar ao entrar na etapa (ZapSign) */}
+      <StageSignatureCard stageId={stageId} stageLabel={stageLabel} />
     </div>
   );
 }
