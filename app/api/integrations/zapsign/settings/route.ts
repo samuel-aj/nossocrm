@@ -23,11 +23,16 @@ function hint(token: string): string {
   return token.length <= 8 ? '****' : `${token.slice(0, 4)}…${token.slice(-4)}`;
 }
 
-/** URL pública deste CRM para a ZapSign chamar de volta. */
+/**
+ * URL pública deste CRM para a ZapSign chamar de volta: o endereço pelo qual
+ * esta requisição chegou (produção, prévia da Vercel ou local), não um
+ * endereço fixo, para a prévia não cadastrar o webhook apontando para produção.
+ */
 function webhookUrlFor(req: Request, orgId: string): string {
-  const configured = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || '').trim().replace(/\/$/, '');
-  const origin = configured || new URL(req.url).origin;
-  return `${origin}/api/integrations/zapsign/webhook/${orgId}`;
+  const url = new URL(req.url);
+  const host = (req.headers.get('x-forwarded-host') || req.headers.get('host') || url.host).split(',')[0].trim();
+  const proto = (req.headers.get('x-forwarded-proto') || url.protocol.replace(':', '')).split(',')[0].trim();
+  return `${proto}://${host}/api/integrations/zapsign/webhook/${orgId}`;
 }
 
 export async function GET() {
