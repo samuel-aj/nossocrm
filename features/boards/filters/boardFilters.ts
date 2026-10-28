@@ -1,13 +1,15 @@
 import { z } from 'zod';
+import { calendarWeekRange } from '@/lib/calendarWeek';
 
 export const PERIOD_LABELS = {
-  all: 'Sem limite de período', today: 'Hoje', yesterday: 'Ontem', last7: 'Últimos 7 dias',
+  all: 'Sem limite de período', today: 'Hoje', yesterday: 'Ontem',
+  thisWeek: 'Esta semana', lastWeek: 'Semana passada', last7: 'Últimos 7 dias',
   last30: 'Últimos 30 dias', lastMonth: 'Mês passado', thisMonth: 'Este mês', custom: 'Personalizado',
 } as const;
 const date = z.string().refine(v => v === '' || (/^\d{4}-\d{2}-\d{2}$/.test(v) && v >= '1900-01-01' &&
   !Number.isNaN(Date.parse(v)) && new Date(v).toISOString().slice(0, 10) === v));
 export const periodSchema = z.object({
-  preset: z.enum(['all', 'today', 'yesterday', 'last7', 'last30', 'lastMonth', 'thisMonth', 'custom']),
+  preset: z.enum(['all', 'today', 'yesterday', 'thisWeek', 'lastWeek', 'last7', 'last30', 'lastMonth', 'thisMonth', 'custom']),
   start: date, end: date,
   created: z.boolean(), closed: z.boolean(), logic: z.enum(['AND', 'OR']),
 }).strict().refine(v => v.created || v.closed, 'Selecione pelo menos uma data.')
@@ -36,6 +38,10 @@ function localDate(d: Date) {
 export function periodRange(value: PeriodSettings, now = new Date()) {
   if (value.preset === 'all') return { start: '', end: '' };
   if (value.preset === 'custom') return { start: value.start, end: value.end };
+  if (value.preset === 'thisWeek' || value.preset === 'lastWeek') {
+    const week = calendarWeekRange(now, value.preset === 'lastWeek');
+    return { start: localDate(week.start), end: localDate(week.end) };
+  }
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const end = new Date(start);
   if (value.preset === 'yesterday') { start.setDate(start.getDate() - 1); end.setDate(end.getDate() - 1); }
