@@ -235,10 +235,12 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
   const settings = await loadZapSignSettings(admin, orgId);
   if (!settings) return { status: 'cancelled', reason: 'a ZapSign não está conectada nesta organização' };
 
-  // o que enviar: a regra da etapa (origem automática) ou o pedido manual
+  // o que enviar: o pedido conferido por uma pessoa (envio manual ou regra da
+  // etapa confirmada na conferência) ou, sem ele, a regra da etapa como está
   let spec: SignatureRequest | null = row.request;
+  const reviewed = !!row.request;
   let rule: SignatureRule | null = null;
-  if (row.origin === 'rule') {
+  if (!spec && row.origin === 'rule') {
     rule = row.stage_id ? await loadSignatureRule(admin, orgId, row.stage_id) : null;
     if (!rule || !rule.enabled) return { status: 'cancelled', reason: 'a regra da etapa foi desligada' };
     spec = {
@@ -256,7 +258,8 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
 
   const snap = await loadLeadSnapshot(admin, orgId, row.deal_id);
   if (!snap || snap.deal.deleted_at) return { status: 'cancelled', reason: 'lead excluído' };
-  if (row.origin === 'rule') {
+  // sem conferência humana, o envio automático só vale enquanto o lead está na etapa
+  if (row.origin === 'rule' && !reviewed) {
     if (snap.deal.is_won || snap.deal.is_lost) return { status: 'cancelled', reason: 'lead ganho ou perdido' };
     if (snap.deal.stage_id !== row.stage_id) return { status: 'cancelled', reason: 'lead mudou de etapa antes do envio' };
   }
@@ -349,7 +352,7 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
       template_name: spec.template_name ?? null,
       signers,
       sign_url: signUrl,
-      request: row.origin === 'manual' ? row.request : { ...spec, overrides: undefined },
+      request: row.request ?? { ...spec, overrides: undefined },
       contact_id: snap.contact.id,
       updated_at: nowIso(),
     })
@@ -446,15 +449,22 @@ export async function finishSend(admin: SupabaseClient, row: SignatureRow, outco
   if (giveUp) await recordEvent(admin, row, 'failed', { error: outcome.error });
 }
 
-async function recordEvent(admin: SupabaseClient, row: Pick<SignatureRow, 'organization_id' | 'deal_id' | 'id' | 'doc_name' | 'doc_token'>, status: string, detail: Record<string, unknown>): Promise<void> {
+async function recordEvent(
+  admin: SupabaseClient,
+  row: Pick<SignatureRow, 'organization_id' | 'deal_id' | 'id' | 'doc_name' | 'doc_token'> & { template_name?: string | null },
+  status: string,
+  detail: Record<string, unknown>,
+  actor: { kind: 'integration' | 'user'; id?: string | null } = { kind: 'integration' }
+): Promise<void> {
   await admin.from('deal_events').insert({
     organization_id: row.organization_id,
     deal_id: row.deal_id,
     kind: SIGNATURE_EVENT_KIND,
-    field: row.doc_name ?? null,
+    field: row.doc_name ?? row.template_name ?? null,
     new_value: status,
     detail: { provider: 'zapsign', signature_id: row.id, doc_token: row.doc_token, ...detail },
-    actor_kind: 'integration',
+    actor_kind: actor.kind,
+    ...(actor.id ? { actor_id: actor.id } : {}),
   });
 }
 
@@ -483,34 +493,67 @@ export async function processQueuedSignatures(
   return { processed };
 }
 
-/** Envio manual pela tela do lead: cria a linha e executa na hora. */
+/**
+ * Envio conferido por uma pessoa (tela do lead ou modal ao mudar de etapa):
+ * grava a linha e executa na hora. Com `ruleStageId`, aproveita a linha que o
+ * banco preparou ao entrar na etapa ('review'); sem ela, cria um envio manual.
+ */
 export async function createManualSignature(
   admin: SupabaseClient,
-  input: { organizationId: string; dealId: string; userId: string; request: SignatureRequest; deps?: SendDeps }
+  input: { organizationId: string; dealId: string; userId: string; request: SignatureRequest; ruleStageId?: string | null; deps?: SendDeps }
 ): Promise<{ row: SignatureRow; outcome: SendOutcome }> {
   const { data: deal } = await admin.from('deals').select('id, stage_id, contact_id').eq('organization_id', input.organizationId).eq('id', input.dealId).maybeSingle();
   if (!deal) throw new Error('Lead não encontrado');
   const d = deal as { id: string; stage_id: string | null; contact_id: string | null };
-  const { data: inserted, error } = await admin
-    .from('deal_signatures')
-    .insert({
-      organization_id: input.organizationId,
-      deal_id: d.id,
-      contact_id: d.contact_id,
-      stage_id: d.stage_id,
-      origin: 'manual',
-      requested_by: input.userId,
-      template_token: input.request.template_token,
-      template_name: input.request.template_name ?? null,
-      status: 'processing',
-      attempts: 1,
-      lock_until: new Date(Date.now() + 5 * 60_000).toISOString(),
-      request: input.request,
-    })
-    .select('*')
-    .single();
-  if (error) throw new Error(error.message);
-  const row = { ...(inserted as SignatureRow), request: input.request, signers: [] };
+  const lockUntil = new Date(Date.now() + 5 * 60_000).toISOString();
+  let inserted: SignatureRow | null = null;
+  if (input.ruleStageId) {
+    const { data: claimed, error: claimError } = await admin
+      .from('deal_signatures')
+      .update({
+        status: 'processing',
+        attempts: 1,
+        lock_until: lockUntil,
+        requested_by: input.userId,
+        template_token: input.request.template_token,
+        template_name: input.request.template_name ?? null,
+        request: input.request,
+        last_error: null,
+        updated_at: nowIso(),
+      })
+      .eq('organization_id', input.organizationId)
+      .eq('deal_id', d.id)
+      .eq('stage_id', input.ruleStageId)
+      .eq('origin', 'rule')
+      .eq('status', 'review')
+      .select('*')
+      .maybeSingle();
+    if (claimError) throw new Error(claimError.message);
+    inserted = (claimed as SignatureRow | null) ?? null;
+  }
+  if (!inserted) {
+    const { data, error } = await admin
+      .from('deal_signatures')
+      .insert({
+        organization_id: input.organizationId,
+        deal_id: d.id,
+        contact_id: d.contact_id,
+        stage_id: d.stage_id,
+        origin: 'manual',
+        requested_by: input.userId,
+        template_token: input.request.template_token,
+        template_name: input.request.template_name ?? null,
+        status: 'processing',
+        attempts: 1,
+        lock_until: lockUntil,
+        request: input.request,
+      })
+      .select('*')
+      .single();
+    if (error) throw new Error(error.message);
+    inserted = data as SignatureRow;
+  }
+  const row = { ...inserted, request: input.request, signers: [] };
   let outcome: SendOutcome;
   try {
     outcome = await sendSignature(admin, row, input.deps);
@@ -521,6 +564,30 @@ export async function createManualSignature(
   await finishSend(admin, row, outcome);
   const { data: fresh } = await admin.from('deal_signatures').select('*').eq('id', row.id).maybeSingle();
   return { row: (fresh as SignatureRow) ?? row, outcome };
+}
+
+/**
+ * Descarta um contrato que ainda estava aguardando conferência (nada foi
+ * criado na ZapSign). Se o lead entrar de novo na etapa, o banco prepara outro.
+ */
+export async function discardSignature(
+  admin: SupabaseClient,
+  input: { organizationId: string; dealId: string; signatureId: string; userId: string }
+): Promise<SignatureRow | null> {
+  const { data, error } = await admin
+    .from('deal_signatures')
+    .update({ status: 'cancelled', last_error: 'descartado antes do envio', lock_until: null, updated_at: nowIso() })
+    .eq('organization_id', input.organizationId)
+    .eq('deal_id', input.dealId)
+    .eq('id', input.signatureId)
+    .eq('status', 'review')
+    .select('*')
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const row = (data as SignatureRow | null) ?? null;
+  if (!row) return null;
+  await recordEvent(admin, row, 'discarded', {}, { kind: 'user', id: input.userId });
+  return row;
 }
 
 // ---------------------------------------------------------------- webhook da ZapSign

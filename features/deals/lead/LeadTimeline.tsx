@@ -265,6 +265,8 @@ export function describeEvent(e: DealEvent, c: Ctx): { icon: React.ReactNode; te
       const status = String(e.new_value ?? '');
       const doc = e.field ? <b>{e.field}</b> : <b>documento</b>;
       const label = (txt: React.ReactNode, tone?: 'good' | 'bad' | 'warn', icon: React.ReactNode = <FileSignature size={13} />) => ({ icon, text: txt, tone });
+      if (status === 'review') return label(<>Contrato {doc} preparado ao entrar na etapa. <b>Aguardando conferência</b> na aba Contrato antes do envio.</>, 'warn', <Clock size={13} />);
+      if (status === 'discarded') return label(<>Contrato {doc} descartado antes do envio</>);
       if (status === 'sent') {
         const via = String(d.sent_via ?? '');
         const viaTxt = via === 'crm_whatsapp' ? 'link enviado pelo WhatsApp do CRM' : via === 'zapsign_whatsapp' ? 'link enviado pela ZapSign por WhatsApp' : via === 'zapsign_email' ? 'link enviado pela ZapSign por e-mail' : 'link disponível no lead';

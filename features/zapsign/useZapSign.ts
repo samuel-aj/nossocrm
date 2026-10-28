@@ -39,6 +39,28 @@ export function useZapSignTemplateVariables(token: string | null) {
   });
 }
 
+/**
+ * O que qualquer membro precisa saber da integração: conectada? (aba Contrato
+ * no lead) e quais etapas têm contrato ao entrar (o movimento do lead abre a
+ * conferência antes de enviar). Compartilhado por todas as telas.
+ */
+export type ZapSignOrgStatus = { connected: boolean; sandbox: boolean; rules: Array<{ stage_id: string; template_name: string | null }> };
+export const ZAPSIGN_ORG_STATUS_KEY = ['zapsign', 'status'] as const;
+export const zapSignOrgStatusQuery = () => ({
+  queryKey: ZAPSIGN_ORG_STATUS_KEY,
+  queryFn: () => getJson<ZapSignOrgStatus>('/api/integrations/zapsign/status'),
+  staleTime: 60_000,
+  retry: false,
+});
+export function useZapSignOrgStatus(enabled = true) {
+  return useQuery<ZapSignOrgStatus>({ ...zapSignOrgStatusQuery(), enabled });
+}
+/** Regra ligada de contrato ao entrar nesta etapa (null quando não há ou a ZapSign não está conectada). */
+export function signatureRuleFor(status: ZapSignOrgStatus | undefined, stageId: string | null | undefined) {
+  if (!status?.connected || !stageId) return null;
+  return status.rules.find((r) => r.stage_id === stageId) ?? null;
+}
+
 /** Origens disponíveis: fixas + campos personalizados da organização. */
 export function useVariableSources(): SourceOption[] {
   const { customFieldDefinitions } = useCRM();

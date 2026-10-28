@@ -39,7 +39,6 @@ import { LossDetailsBanner } from "@/features/deals/LossDetailsBanner";
 import { tagMarkerStyle } from "./tagMarkerStyle";
 import { DealStageControl } from "./DealStageControl";
 import { FollowupStatus } from "./FollowupStatus";
-import { SignatureStatus } from "./SignatureStatus";
 import { invalidateLeadHistory } from "./leadHistoryInvalidation";
 import { LeadContactEditor } from "./LeadContactEditor";
 import { queryKeys } from "@/lib/query/queryKeys";
@@ -858,7 +857,6 @@ export function LeadPropertiesPanel({
         {deal.status && (
           <FollowupStatus dealId={deal.id} stageId={deal.status} />
         )}
-        <SignatureStatus deal={deal} canEdit={canEdit} />
         {deal.inactiveAt && (
           <div className="rounded-xl border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm">
             <strong className="flex gap-1 items-center">

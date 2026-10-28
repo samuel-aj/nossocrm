@@ -44,7 +44,7 @@ vi.mock('@/lib/wa-agents/leadOps', () => ({
   loadCustomFieldDefs: async () => [{ key: 'cpf', label: 'CPF', type: 'text', options: [] }],
 }));
 
-import { createManualSignature, handleZapSignWebhook, sendSignature, type SignatureRow } from './signatures';
+import { createManualSignature, discardSignature, handleZapSignWebhook, sendSignature, type SignatureRow } from './signatures';
 import type { ZapSignClient } from './client';
 
 type Row = Record<string, unknown>;
@@ -360,5 +360,51 @@ describe('retorno da ZapSign (webhook)', () => {
   it('documento desconhecido (criado fora do CRM): ignora', async () => {
     const db = withPending();
     expect((await handleZapSignWebhook(db.admin, ORG, { event_type: 'doc_signed', token: 'outro', status: 'signed' })).action).toBe('ignored_unknown_doc');
+  });
+});
+
+describe('conferência antes de enviar (contrato preparado ao entrar na etapa)', () => {
+  const review = (): Row => ({ ...(queued() as unknown as Row), id: 'rev-1', status: 'review', attempts: 0, template_token: 'tpl-1', template_name: 'Contrato de honorários' });
+  const reviewedRequest = { template_token: 'tpl-1', template_name: 'Contrato de honorários', variables: { NOME: 'contato.nome', VALOR: 'negocio.valor' }, overrides: { VALOR: 'R$ 9.000,00' }, signer: { send: 'link' as const } };
+
+  it('o envio conferido aproveita a linha preparada pelo banco: mesma linha, valores conferidos, histórico registra', async () => {
+    const db = base();
+    db.tables.deal_signatures.push(review());
+    const { row, outcome } = await createManualSignature(db.admin, { organizationId: ORG, dealId: 'deal-1', userId: 'u1', ruleStageId: 'stage-1', request: reviewedRequest, deps: { client: fakeClient() } });
+    expect(outcome).toMatchObject({ status: 'pending', sent_via: 'link' });
+    expect(row.id).toBe('rev-1');
+    expect(row.origin).toBe('rule');
+    expect(row.status).toBe('pending');
+    expect(row.requested_by).toBe('u1');
+    expect(db.tables.deal_signatures).toHaveLength(1);
+    expect(h.created[0].data).toEqual(expect.arrayContaining([{ de: '{{NOME}}', para: 'Maria da Silva' }, { de: '{{VALOR}}', para: 'R$ 9.000,00' }]));
+    expect(db.tables.deal_events.map((e) => [e.kind, e.new_value])).toEqual([['signature', 'sent']]);
+  });
+
+  it('sem linha preparada (etapa já teve contrato), o envio conferido vira um envio manual', async () => {
+    const db = base();
+    const { row } = await createManualSignature(db.admin, { organizationId: ORG, dealId: 'deal-1', userId: 'u1', ruleStageId: 'stage-1', request: reviewedRequest, deps: { client: fakeClient() } });
+    expect(row.origin).toBe('manual');
+    expect(row.status).toBe('pending');
+    expect(db.tables.deal_signatures).toHaveLength(1);
+  });
+
+  it('linha de regra já conferida por uma pessoa envia mesmo se o lead mudou de etapa; sem conferência, cancela', async () => {
+    const db = base({ deals: [{ ...base().tables.deals[0], stage_id: 'outra' }] });
+    const reviewed: SignatureRow = { ...queued(), request: reviewedRequest };
+    db.tables.deal_signatures.push(reviewed as unknown as Row);
+    expect((await sendSignature(db.admin, reviewed, { client: fakeClient() })).status).toBe('pending');
+    expect((await sendSignature(db.admin, queued(), { client: fakeClient() })).status).toBe('cancelled');
+    expect(h.created).toHaveLength(1);
+  });
+
+  it('descartar só vale para o que ainda aguarda conferência e fica no histórico com o autor', async () => {
+    const db = base();
+    db.tables.deal_signatures.push(review(), { ...(queued() as unknown as Row), id: 'sent-1', status: 'pending' });
+    const gone = await discardSignature(db.admin, { organizationId: ORG, dealId: 'deal-1', signatureId: 'rev-1', userId: 'u1' });
+    expect(gone?.status).toBe('cancelled');
+    expect(await discardSignature(db.admin, { organizationId: ORG, dealId: 'deal-1', signatureId: 'sent-1', userId: 'u1' })).toBeNull();
+    expect(db.tables.deal_signatures.find((r) => r.id === 'sent-1')?.status).toBe('pending');
+    expect(db.tables.deal_events.map((e) => [e.kind, e.new_value, e.actor_kind, e.actor_id])).toEqual([['signature', 'discarded', 'user', 'u1']]);
   });
 });

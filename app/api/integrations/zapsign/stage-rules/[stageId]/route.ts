@@ -68,12 +68,13 @@ export async function GET(_req: Request, ctx: Ctx) {
     if (/stage_signature_rules/.test(error.message)) return json({ rule: null, stats: null, pendingMigration: true });
     return json({ error: error.message }, 500);
   }
-  const [{ count: pending }, { count: signed }, settings] = await Promise.all([
+  const [{ count: review }, { count: pending }, { count: signed }, settings] = await Promise.all([
+    auth.admin.from('deal_signatures').select('id', { count: 'exact', head: true }).eq('stage_id', stageId).eq('origin', 'rule').eq('status', 'review'),
     auth.admin.from('deal_signatures').select('id', { count: 'exact', head: true }).eq('stage_id', stageId).eq('origin', 'rule').in('status', ['queued', 'processing', 'pending']),
     auth.admin.from('deal_signatures').select('id', { count: 'exact', head: true }).eq('stage_id', stageId).eq('origin', 'rule').eq('status', 'signed'),
     loadZapSignSettings(auth.admin, orgId),
   ]);
-  return json({ rule: data ?? null, stats: { pending: pending ?? 0, signed: signed ?? 0 }, connected: !!settings });
+  return json({ rule: data ?? null, stats: { review: review ?? 0, pending: pending ?? 0, signed: signed ?? 0 }, connected: !!settings });
 }
 
 export async function PUT(req: Request, ctx: Ctx) {

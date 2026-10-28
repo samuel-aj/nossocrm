@@ -1,10 +1,12 @@
 'use client';
 
 /**
- * "Assinatura eletrônica" da etapa: ao entrar nela, o CRM cria o documento na
- * ZapSign a partir do modelo escolhido, com as variáveis preenchidas pelos
- * dados do lead, e manda o link. Salva direto no servidor (independe do
- * "Salvar" do funil). Uma vez por lead em cada etapa.
+ * "Assinatura eletrônica" da etapa: ao entrar nela, o CRM prepara o documento
+ * na ZapSign a partir do modelo escolhido, com as variáveis preenchidas pelos
+ * dados do lead, e pede conferência antes de enviar (modal ao mover pela
+ * tela; aba Contrato do lead quando o movimento vem de API ou robô). Salva
+ * direto no servidor (independe do "Salvar" do funil). Uma vez por lead em
+ * cada etapa.
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -14,7 +16,7 @@ import { useCRM } from '@/context/CRMContext';
 import { NativeSelect } from '@/components/ui/NativeSelect';
 import { useWaBotsList } from '@/features/wa-agents/useWaAgents';
 import { VariableMappingTable } from '@/features/zapsign/VariableMappingTable';
-import { AUTH_OPTIONS, DEFAULT_SIGN_MESSAGE, SEND_OPTIONS, useVariableSources, useZapSignTemplateVariables, useZapSignTemplates } from '@/features/zapsign/useZapSign';
+import { AUTH_OPTIONS, DEFAULT_SIGN_MESSAGE, SEND_OPTIONS, ZAPSIGN_ORG_STATUS_KEY, useVariableSources, useZapSignTemplateVariables, useZapSignTemplates } from '@/features/zapsign/useZapSign';
 
 type Actions = { stage_id?: string | null; tag?: string | null; bot_id?: string | null };
 type Rule = {
@@ -86,7 +88,7 @@ export function StageSignatureSection({ stageId, stageSaved }: { stageId: string
   const qc = useQueryClient();
   const { boards } = useCRM();
   const board = useMemo(() => boards.find((b) => b.stages.some((s) => s.id === stageId)) ?? null, [boards, stageId]);
-  const q = useQuery<{ rule: Rule | null; stats: { pending: number; signed: number } | null; connected?: boolean; pendingMigration?: boolean }>({
+  const q = useQuery<{ rule: Rule | null; stats: { review?: number; pending: number; signed: number } | null; connected?: boolean; pendingMigration?: boolean }>({
     queryKey: ['stageSignature', stageId],
     enabled: stageSaved,
     queryFn: async () => {
@@ -166,7 +168,8 @@ export function StageSignatureSection({ stageId, stageSaved }: { stageId: string
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error((body as { error?: string }).error || 'Falha ao salvar');
       await qc.invalidateQueries({ queryKey: ['stageSignature', stageId] });
-      addToast(draft.enabled ? 'Envio para assinatura salvo' : 'Envio para assinatura desligado', 'success');
+      await qc.invalidateQueries({ queryKey: ZAPSIGN_ORG_STATUS_KEY });
+      addToast(draft.enabled ? 'Contrato ao entrar na etapa salvo' : 'Contrato ao entrar na etapa desligado', 'success');
     } catch (e) {
       addToast(e instanceof Error ? e.message : 'Falha ao salvar', 'error');
     } finally {
@@ -188,8 +191,9 @@ export function StageSignatureSection({ stageId, stageSaved }: { stageId: string
             Assinatura eletrônica (ZapSign)
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Quando o lead entrar nesta etapa, o CRM monta o documento com os dados dele e manda o link para assinar. Uma vez por
-            lead nesta etapa.
+            Quando o lead entrar nesta etapa, o CRM prepara o documento com os dados dele e pede para conferir antes de enviar:
+            quem move pela tela vê a conferência na hora; movimentos por API ou robô deixam o contrato aguardando na aba Contrato
+            do lead. Nada sai sem confirmação. Uma vez por lead nesta etapa.
           </p>
         </div>
         {stageSaved && q.data && !q.data.pendingMigration && connected ? (
@@ -368,7 +372,7 @@ export function StageSignatureSection({ stageId, stageSaved }: { stageId: string
 
           {q.data?.rule?.enabled && q.data.stats ? (
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              {q.data.stats.pending} aguardando assinatura, {q.data.stats.signed} assinado(s) nesta etapa.
+              {q.data.stats.review ?? 0} aguardando conferência, {q.data.stats.pending} aguardando assinatura, {q.data.stats.signed} assinado(s) nesta etapa.
             </p>
           ) : null}
 

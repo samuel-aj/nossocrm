@@ -13,6 +13,8 @@ import { useLeadHistory } from './useLeadHistory';
 import { useLeadTimelineEntries } from './LeadTimeline';
 import { ActivityComposer, NoteComposer, EMPTY_ACTIVITY_DRAFT, draftFromActivity, type ActivityDraft } from './LeadComposers';
 import { PendingActivitiesStrip } from './PendingActivitiesStrip';
+import { ContractComposer } from './ContractComposer';
+import { useZapSignOrgStatus } from '@/features/zapsign/useZapSign';
 export type LeadConversationResult = { timeline: ChatTimelineProps; dialogs: React.ReactNode; openActivity: (activity: Activity) => void; startActivity: (draft: ActivityDraft) => void; refresh: () => Promise<unknown> };
 type Draft = { note: string; activity: ActivityDraft; mode: ComposerMode; noteRevision: number; activityRevision: number; noteSaving: boolean; activitySaving: boolean; noteError: string | null; activityError: string | null };
 const emptyDraft = (): Draft => ({ note: '', activity: { ...EMPTY_ACTIVITY_DRAFT }, mode: 'message', noteRevision: 0, activityRevision: 0, noteSaving: false, activitySaving: false, noteError: null, activityError: null });
@@ -24,6 +26,8 @@ export function useLeadConversation({ deal, enabled = true }: { deal: Deal | Dea
   const { data: members = [] } = useOrgMembers();
   const belongsToOrg = !deal?.organizationId || deal.organizationId === organizationId;
   const query = useLeadHistory(organizationId, deal?.id, enabled && belongsToOrg);
+  // Aba Contrato (ZapSign) só quando a organização tem a integração conectada
+  const zapsign = useZapSignOrgStatus(enabled && belongsToOrg && !!deal && !!organizationId);
   // QueryClient-scoped drafts survive panel unmounts and remain org+lead scoped.
   const draftKey = ['leadConversationDraft', organizationId ?? '', deal?.id ?? ''];
   const { data: draft } = useQuery<Draft>({ queryKey: draftKey, queryFn: emptyDraft, enabled: false, initialData: emptyDraft, gcTime: Infinity });
@@ -108,6 +112,7 @@ export function useLeadConversation({ deal, enabled = true }: { deal: Deal | Dea
       aboveComposer: <>{error && <p role="alert">{error}</p>}<PendingActivitiesStrip activities={crm.activities.filter(a => a.dealId === deal?.id)} canEdit={canEdit} onOpen={openActivity} onComplete={toggle} isPending={crm.isActivityPending} /></>,
       noteComposer: <NoteComposer key={`${identity}:note`} value={draft.note} clearOnSave={false} saveState={{ saving: draft.noteSaving, error: draft.noteError }} onChange={note => setDraft({ note })} onSave={saveNote} disabled={!canEdit} />,
       activityComposer: <ActivityComposer key={`${identity}:activity`} draft={draft.activity} saveState={{ saving: draft.activitySaving, error: draft.activityError }} onChange={activity => setDraft({ activity })} onSubmit={saveActivity} onCancelEdit={() => setDraft({ activity: { ...EMPTY_ACTIVITY_DRAFT } })} disabled={!canEdit} onComplete={async id => { try { await crm.updateActivity(id, { completed: true }, { throwOnError: true }); await refresh(); } catch (e) { if (currentIdentity.current === identity) setError((e as Error).message); } }} />,
+      contractComposer: zapsign.data?.connected === true && deal && belongsToOrg ? <ContractComposer key={`${identity}:contract`} deal={deal} canEdit={canEdit} /> : undefined,
     },
     dialogs: <ConfirmModal isOpen={canEdit && deleting?.key === identity} onClose={() => setDeleting(null)} title="Excluir nota" message="Excluir esta nota interna? A exclusão fica registrada no histórico do lead." confirmText="Excluir" variant="danger" onConfirm={() => {
       if (!canEdit || deleting?.key !== identity) return;

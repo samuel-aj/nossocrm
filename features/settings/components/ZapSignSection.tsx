@@ -101,7 +101,7 @@ export const ZapSignSection: React.FC = () => {
       const res = await fetch('/api/integrations/zapsign/settings', { method: 'DELETE', credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await qc.invalidateQueries({ queryKey: ['zapsign'] });
-      addToast('ZapSign desconectada. Os envios automáticos por etapa param de funcionar.', 'success');
+      addToast('ZapSign desconectada. Os contratos por etapa e a aba Contrato param de funcionar.', 'success');
     } catch (e) {
       addToast(e instanceof Error ? e.message : 'Falha ao desconectar', 'error');
     } finally {
@@ -234,8 +234,9 @@ export const ZapSignSection: React.FC = () => {
       <SettingsCard title="Como funciona" description="O que acontece do envio até o contrato assinado.">
         <ul className="list-disc pl-5 space-y-1 text-sm text-slate-600 dark:text-slate-300">
           <li>Na etapa do funil (modo Automatizar, bloco "Assinatura") você escolhe o modelo e liga cada variável a um dado do lead.</li>
-          <li>Quando o lead entra na etapa, o CRM cria o documento na ZapSign e manda o link pelo WhatsApp do CRM (sem custo) ou pela ZapSign.</li>
-          <li>Também dá para enviar na mão, pela tela do lead, conferindo os valores antes.</li>
+          <li>Quando o lead entra na etapa, o CRM prepara o contrato e pede para conferir os dados antes de enviar: quem move pela tela vê a conferência na hora; movimentos por API ou robô deixam o contrato aguardando na aba Contrato do lead. Nada sai sem confirmação.</li>
+          <li>Na aba Contrato do lead dá para enviar a qualquer momento, conferindo e ajustando cada valor do documento.</li>
+          <li>O link vai pelo WhatsApp do CRM (sem custo) ou pela ZapSign (WhatsApp ou e-mail), ou fica só o link no lead.</li>
           <li>Quando o cliente assina, o PDF entra nos anexos do lead, o histórico registra, e o lead pode mudar de etapa, ganhar etiqueta ou iniciar um robô.</li>
           <li>Cada documento criado conta na franquia do plano da ZapSign, mesmo que não seja assinado.</li>
         </ul>
