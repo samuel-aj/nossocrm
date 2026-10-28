@@ -1,4 +1,5 @@
 import type { Board, Deal } from '@/types';
+import { calendarWeekRange } from '@/lib/calendarWeek';
 import { compareHistoricalDates, dealAtEvent, matchesReportFilters, normalizeWonEpisodes, type LifecycleEvent, type PerformanceMode } from './performanceHistory';
 import { firstCustomerStage, isAutomaticWonStage, isLostBoardStage } from '@/lib/boards/boardOutcome';
 import { getDealLeadSource } from '@/lib/deals/leadSource';
@@ -52,6 +53,7 @@ export function getStageRules(board: Board) {
 /** Calendar periods compare equal elapsed portions, capped at the previous period's end. */
 export function performanceComparisonRange(range: PeriodRange, period: string): PeriodRange | undefined {
   if (period === 'all') return undefined;
+  if (period === 'this_week' || period === 'last_week') return calendarWeekRange(range.start, true);
   const months = period.includes('month') && !period.includes('days') ? 1 : period.includes('quarter') ? 3 : period.includes('year') ? 12 : 0;
   const previousEnd = new Date(range.start.getTime() - 1);
   const duration = range.end.getTime() - range.start.getTime();
