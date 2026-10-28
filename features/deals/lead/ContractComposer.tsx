@@ -5,9 +5,10 @@
  * Atividade; só aparece com a ZapSign conectada): o documento mais recente
  * (aguardando, assinado, recusado, com link e PDF), o contrato preparado ao
  * entrar na etapa aguardando conferência, e o formulário completo para
- * conferir o que vai no documento e enviar para assinatura.
+ * conferir o que vai no documento e enviar para assinatura. O botão de envio
+ * fica sempre à vista, fora da área que rola.
  */
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, Clock, Copy, Download, ExternalLink, FileSignature, Loader2, Lock, Send, Trash2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
@@ -41,15 +42,10 @@ export function ContractComposer({ deal, canEdit }: { deal: Deal | DealView; can
   if (!sig.data?.connected) return <p className="p-3 text-xs text-slate-500">A ZapSign não está conectada nesta organização.</p>;
 
   return (
-    <div className="flex max-h-[min(62vh,600px)] flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto scrollbar-custom px-3 pt-2 pb-3 space-y-3">
-        {latest ? <LatestDocument latest={latest} fileUrl={sig.data.file_signature_id === latest.id ? sig.data.file_url : null} older={documents.slice(1)} /> : null}
-        {review ? (
-          <ReviewBanner review={review} dealId={deal.id} stageLabel={stageLabel(review.stage_id)} canEdit={canEdit} />
-        ) : null}
-        <ContractForm key={review?.id ?? `stage:${deal.status}`} deal={deal} stageId={review?.stage_id ?? deal.status ?? null} ruleStageId={review?.stage_id ?? null} canEdit={canEdit} hasDocuments={documents.length > 0} />
-      </div>
-    </div>
+    <ContractForm key={review?.id ?? `stage:${deal.status}`} deal={deal} stageId={review?.stage_id ?? deal.status ?? null} ruleStageId={review?.stage_id ?? null} canEdit={canEdit} hasDocuments={documents.length > 0}>
+      {latest ? <LatestDocument latest={latest} fileUrl={sig.data.file_signature_id === latest.id ? sig.data.file_url : null} older={documents.slice(1)} /> : null}
+      {review ? <ReviewBanner review={review} dealId={deal.id} stageLabel={stageLabel(review.stage_id)} canEdit={canEdit} /> : null}
+    </ContractForm>
   );
 }
 
@@ -172,13 +168,29 @@ function ReviewBanner({ review, dealId, stageLabel, canEdit }: { review: Signatu
   );
 }
 
-function ContractForm({ deal, stageId, ruleStageId, canEdit, hasDocuments }: { deal: Deal | DealView; stageId: string | null; ruleStageId: string | null; canEdit: boolean; hasDocuments: boolean }) {
+function ContractForm({
+  deal,
+  stageId,
+  ruleStageId,
+  canEdit,
+  hasDocuments,
+  children,
+}: {
+  deal: Deal | DealView;
+  stageId: string | null;
+  ruleStageId: string | null;
+  canEdit: boolean;
+  hasDocuments: boolean;
+  /** faixas do topo (documento mais recente, conferência pendente) */
+  children?: React.ReactNode;
+}) {
   const { addToast } = useToast();
   const { organizationId } = useAuth();
   const qc = useQueryClient();
   const draft = useSignatureDraft({ dealId: deal.id, stageId });
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string; link?: string | null } | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const submit = async () => {
     if (!draft.ready || sending || !canEdit) return;
@@ -207,47 +219,55 @@ function ContractForm({ deal, stageId, ruleStageId, canEdit, hasDocuments }: { d
       setResult({ ok: false, text: e instanceof Error ? e.message : 'Falha ao enviar' });
     } finally {
       setSending(false);
+      // o resultado e o documento mais recente ficam no topo: leva a pessoa até lá
+      scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
 
   const idPrefix = `contract-${deal.id}`;
+  const emptyBlock = !draft.ready && draft.emptyVars.length > 0 && !draft.form.allowEmpty && !draft.blocked;
   return (
-    <div className="space-y-3">
-      {result ? (
-        <div role="status" className={`rounded-xl border p-3 text-xs ${result.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-900/20 dark:text-emerald-200' : 'border-red-200 bg-red-50 text-red-800 dark:border-red-500/30 dark:bg-red-900/20 dark:text-red-200'}`}>
-          <p className="flex items-start gap-2">
-            {result.ok ? <CheckCircle2 size={14} className="mt-0.5 shrink-0" aria-hidden="true" /> : <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />}
-            <span>{result.text}</span>
-          </p>
-          {result.link ? (
-            <p className="mt-1 break-all pl-6">
-              Link:{' '}
-              <a href={result.link} target="_blank" rel="noreferrer" className="underline">
-                {result.link}
-              </a>
+    <div className="flex max-h-[min(62vh,600px)] flex-col">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto scrollbar-custom px-3 pt-2 pb-3 space-y-3">
+        {children}
+        {result ? (
+          <div role="status" className={`rounded-xl border p-3 text-xs ${result.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-900/20 dark:text-emerald-200' : 'border-red-200 bg-red-50 text-red-800 dark:border-red-500/30 dark:bg-red-900/20 dark:text-red-200'}`}>
+            <p className="flex items-start gap-2">
+              {result.ok ? <CheckCircle2 size={14} className="mt-0.5 shrink-0" aria-hidden="true" /> : <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />}
+              <span>{result.text}</span>
             </p>
-          ) : null}
-        </div>
-      ) : null}
-      {!hasDocuments && !result ? (
-        <p className="text-[11px] text-slate-500 dark:text-slate-400">Nenhum contrato enviado para este lead ainda. Confira os dados abaixo e envie para assinatura.</p>
-      ) : null}
-      <SignatureFields draft={draft} idPrefix={idPrefix} disabled={!canEdit || sending} variablesMode="modal" />
-      <div className="flex items-center justify-between gap-2 pt-1">
-        <p className="flex items-center gap-1 text-[11px] text-slate-400">
-          {canEdit ? (
-            'O documento criado conta na franquia da ZapSign.'
-          ) : (
+            {result.link ? (
+              <p className="mt-1 break-all pl-6">
+                Link:{' '}
+                <a href={result.link} target="_blank" rel="noreferrer" className="underline">
+                  {result.link}
+                </a>
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+        {!hasDocuments && !result && !ruleStageId ? (
+          <p className="text-[11px] text-slate-500 dark:text-slate-400">Nenhum contrato enviado para este lead ainda. Confira os dados abaixo e envie para assinatura.</p>
+        ) : null}
+        <SignatureFields draft={draft} idPrefix={idPrefix} disabled={!canEdit || sending} variablesMode="modal" />
+      </div>
+      <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-100 dark:border-white/5 bg-white dark:bg-dark-card px-3 py-2">
+        <p className={`flex min-w-0 items-center gap-1 text-[11px] ${emptyBlock ? 'text-amber-700 dark:text-amber-300' : 'text-slate-400'}`}>
+          {!canEdit ? (
             <>
               <Lock size={10} aria-hidden="true" /> Sem permissão para editar este lead.
             </>
+          ) : emptyBlock ? (
+            <span className="line-clamp-2">Preencha ou confirme {draft.emptyVars.length === 1 ? 'o campo em branco' : `os ${draft.emptyVars.length} campos em branco`} em “O que vai no contrato”.</span>
+          ) : (
+            'O documento criado conta na franquia da ZapSign.'
           )}
         </p>
         <button
           type="button"
           onClick={() => void submit()}
           disabled={!canEdit || !draft.ready || sending}
-          title={!draft.ready && draft.emptyVars.length && !draft.form.allowEmpty ? 'Preencha os campos em branco ou marque para enviar assim mesmo' : undefined}
+          title={emptyBlock ? 'Preencha os campos em branco ou marque para enviar assim mesmo' : undefined}
           className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-sky-600 px-3 text-sm font-bold text-white transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {sending ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Send size={14} aria-hidden="true" />}

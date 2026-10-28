@@ -50,7 +50,7 @@ export function VariableMappingModal({
   const groups = Array.from(new Set(sources.map((s) => s.group)));
   const selectValue = (src: string) => (src.startsWith('texto:') ? 'texto:' : src);
   const summary = mappingSummary(variables, mapping);
-  const label = (value: string) => (value.startsWith('texto:') ? 'Texto fixo' : (sources.find((s) => s.value === value)?.label ?? 'Em branco'));
+  const groupOf = (value: string) => (value.startsWith('texto:') ? 'texto fixo' : (sources.find((s) => s.value === value)?.group.toLowerCase() ?? 'em branco'));
   return (
     <FillModal
       open={open}
@@ -94,7 +94,7 @@ export function VariableMappingModal({
                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${empty ? 'bg-amber-500' : 'bg-emerald-500'}`} aria-hidden="true" />
                     <span className="truncate">{name}</span>
                   </label>
-                  <span className="shrink-0 text-[11px] text-slate-400">{empty ? 'em branco' : label(src)}</span>
+                  <span className={`shrink-0 text-[11px] ${empty ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400'}`}>{empty ? 'em branco' : groupOf(src)}</span>
                 </div>
                 <NativeSelect
                   id={`${idPrefix}-${name}`}

@@ -21,6 +21,7 @@ Estado em 28/10/2026: branch `feat/zapsign` e preview `staging`. Não está em p
 - Servidor: `lib/zapsign/signatures.ts` (`createManualSignature` com `ruleStageId`, `discardSignature`), rotas `send` (GET com `stage_id`, `existing`, `review`, `whatsapp`; POST com `rule_stage_id`), `deal/[dealId]` (GET com `stage_id`; PATCH descartar), `status` (nova), `stage-rules` (estatística `review`).
 - Tela: `features/zapsign/useSignatureDraft.ts` (estado do envio), `SignatureFields.tsx` (campos), `SignatureReviewProvider.tsx` + `SignatureReviewContext.ts` (modal ao mover), `signatureTypes.ts`; `features/deals/lead/ContractComposer.tsx` (aba Contrato, ligada em `useLeadConversation` e `DealWhatsAppChat`); `lib/query/hooks/useMoveDeal.ts` (interceptação).
 - Testes: `lib/zapsign/signatures.test.ts` (15) e o roteiro PGlite do gatilho (scratchpad, 11 verificações).
+- Verificação visual (28/10/2026): os componentes reais (aba Contrato, modal de conferência, configuração da etapa e os modais de preenchimento) foram percorridos com Playwright num harness local com a API simulada nos formatos reais, em claro e escuro, desktop e 430 px: 36 prints, 6 fluxos, sem erro de console. Ajustes feitos a partir dos prints: botão de envio sempre visível fora da área rolável, dica de campos em branco no rodapé, resultado do envio levado ao topo, erro do movimento no rodapé do modal, grupo da origem no modal da etapa.
 
 ## Para produção
 

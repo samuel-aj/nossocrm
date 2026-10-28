@@ -205,6 +205,7 @@ function ReviewDialog({
   };
 
   const title = moved ? 'Conferir e enviar o contrato' : 'Conferir contrato antes de enviar';
+  const emptyBlock = !!draft.prep.data && !draft.ready && draft.emptyVars.length > 0 && !draft.form.allowEmpty && !draft.blocked;
   const footer = done ? (
     <div className="flex justify-end">
       <button type="button" onClick={close} className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-500">
@@ -212,8 +213,20 @@ function ReviewDialog({
       </button>
     </div>
   ) : (
+    <div className="space-y-2">
+      {error ? (
+        <p role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-500/30 dark:bg-red-900/15 dark:text-red-300">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden="true" /> {error}
+        </p>
+      ) : null}
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <p className="text-[11px] text-slate-500">O documento criado conta na franquia da ZapSign.</p>
+      {emptyBlock ? (
+        <p className="text-[11px] font-medium text-amber-700 dark:text-amber-300">
+          Preencha ou confirme {draft.emptyVars.length === 1 ? 'o campo em branco' : `os ${draft.emptyVars.length} campos em branco`} no fim da lista para enviar.
+        </p>
+      ) : (
+        <p className="text-[11px] text-slate-500">O documento criado conta na franquia da ZapSign.</p>
+      )}
       <div className="flex flex-wrap items-center justify-end gap-2">
         <button type="button" onClick={cancel} disabled={!!busy} className="px-3 py-2 text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 rounded-lg disabled:opacity-50">
           {moved ? 'Deixar para depois' : 'Cancelar'}
@@ -235,7 +248,7 @@ function ReviewDialog({
           type="button"
           onClick={() => void sendNow()}
           disabled={!!busy || !draft.ready}
-          title={!draft.ready && draft.emptyVars.length && !draft.form.allowEmpty ? 'Preencha os campos em branco ou marque para enviar assim mesmo' : undefined}
+          title={emptyBlock ? 'Preencha os campos em branco ou marque para enviar assim mesmo' : undefined}
           className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-bold disabled:opacity-50 ${
             existing && !moved ? 'border border-primary-300 dark:border-primary-500/40 text-primary-700 dark:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-500/10' : 'bg-primary-600 text-white hover:bg-primary-500'
           }`}
@@ -244,6 +257,7 @@ function ReviewDialog({
           {moved ? 'Enviar contrato' : existing ? 'Mover e enviar outro' : 'Mover e enviar contrato'}
         </button>
       </div>
+    </div>
     </div>
   );
 
@@ -290,11 +304,6 @@ function ReviewDialog({
           ) : (
             <>
               <SignatureFields draft={draft} idPrefix={`review-${pending.deal.id}`} disabled={!!busy} />
-              {error ? (
-                <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-                  {error}
-                </p>
-              ) : null}
             </>
           )}
         </div>

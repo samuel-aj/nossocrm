@@ -24,7 +24,7 @@ export function VariableValuesModal({ open, onClose, draft, idPrefix }: { open: 
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className={`text-xs font-semibold ${summary.empty && !draft.form.allowEmpty ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{summary.text}</p>
           <button type="button" onClick={onClose} className={FILL_PRIMARY_BTN} title={pending ? 'Ainda há campos em branco: preencha ou marque para enviar assim mesmo' : undefined}>
-            <Check size={14} aria-hidden="true" /> {pending ? 'Fechar por enquanto' : 'Concluir'}
+            <Check size={14} aria-hidden="true" /> Concluir
           </button>
         </div>
       }

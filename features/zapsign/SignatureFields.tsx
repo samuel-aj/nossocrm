@@ -143,7 +143,7 @@ export function SignatureFields({ draft, idPrefix, disabled, variablesMode = 'in
         <h4 id={id('doc-h')} className={SECTION}>
           Documento
         </h4>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className={`grid gap-3 ${variablesMode === 'modal' ? '' : 'sm:grid-cols-2'}`}>
           <div>
             <label htmlFor={id('name')} className={LABEL}>
               Nome do documento
