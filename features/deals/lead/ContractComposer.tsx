@@ -232,7 +232,7 @@ function ContractForm({ deal, stageId, ruleStageId, canEdit, hasDocuments }: { d
       {!hasDocuments && !result ? (
         <p className="text-[11px] text-slate-500 dark:text-slate-400">Nenhum contrato enviado para este lead ainda. Confira os dados abaixo e envie para assinatura.</p>
       ) : null}
-      <SignatureFields draft={draft} idPrefix={idPrefix} disabled={!canEdit || sending} />
+      <SignatureFields draft={draft} idPrefix={idPrefix} disabled={!canEdit || sending} variablesMode="modal" />
       <div className="flex items-center justify-between gap-2 pt-1">
         <p className="flex items-center gap-1 text-[11px] text-slate-400">
           {canEdit ? (
