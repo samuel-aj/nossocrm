@@ -34,6 +34,7 @@ import {
   bubbleOutputs,
   edgeIdFor,
   buttonHandleId,
+  branchHandleId,
   isLinearType,
   newConditionClause,
   newConditionRule,
@@ -171,6 +172,10 @@ export function createBlock(type: StepType, id: string = newId()): Block {
       return { id, type, data: { amount: 1, unit: 'h' } };
     case 'condition':
       return { id, type, data: { rules: [newConditionRule(newId())] } };
+    case 'split':
+      return { id, type, data: { mode: 'round_robin', branches: [
+        { id: newId(), label: 'A', weight: 50 }, { id: newId(), label: 'B', weight: 50 },
+      ] } };
     case 'move_stage':
       return { id, type, data: { stage_id: '', board_id: '', loss_reason: '', loss_category: '' } };
     case 'activate_alert':
@@ -223,6 +228,14 @@ function createTriggerNode(trigger: BotRow['trigger'] | null, position: XYPositi
  */
 export function cloneBlock(block: Block, handleMap?: Map<string, string>): Block {
   const id = newId();
+  if (block.type === 'split') {
+    const branches = block.data.branches.map(branch => {
+      const branchId = newId();
+      handleMap?.set(branchHandleId(branch.id), branchHandleId(branchId));
+      return { ...branch, id: branchId };
+    });
+    return { id, type: 'split', data: { ...block.data, branches } };
+  }
   if (block.type === 'condition') {
     const rules = block.data.rules.map((rule) => {
       const ruleId = newId();
@@ -258,6 +271,8 @@ function ruleToClauses(r: BotConditionRule): ConditionClauseDraft[] {
 function stepToBlock(step: BotStep): Block {
   const id = step.id;
   switch (step.type) {
+    case 'split':
+      return { id, type: 'split', data: { mode: step.mode, branches: step.branches.map(({ id, label, weight }) => ({ id, label, weight })) } };
     case 'send_text':
       return { id, type: 'send_text', data: { text: step.text, typing_seconds: step.typing_seconds ?? 0 } };
     case 'send_template':
@@ -421,6 +436,9 @@ export function botToFlow(bot: BotRow | null, fallbackSteps: BotStep[]): FlowGra
     const listNext = canvasMode ? null : (steps[index + 1]?.id ?? null);
     const next = canvasMode ? (step.next_step_id ?? null) : (step.next_step_id ?? listNext);
     switch (step.type) {
+      case 'split':
+        step.branches.forEach(branch => link(bubble.id, branchHandleId(branch.id), branch.goto_step_id));
+        break;
       case 'send_text':
       case 'wait':
       case 'typing':
@@ -507,6 +525,9 @@ export function orderBubbles(nodes: FlowNode[], edges: FlowEdge[], startBubbleId
 function blockToStep(block: Block, to: (handle: string) => string | null, ui: { x: number; y: number }): BotStep {
   const id = block.id;
   switch (block.type) {
+    case 'split':
+      return { id, type: 'split', mode: block.data.mode,
+        branches: block.data.branches.map(branch => ({ ...branch, label: branch.label.trim(), goto_step_id: to(branchHandleId(branch.id)) })), ui };
     case 'send_text':
       return {
         id,
@@ -916,6 +937,18 @@ export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowH
             else if (isLast && !to(bubble.id, ruleHandleId(rule.id))) fail(`ligue a regra ${i + 1} a um balão`);
           });
           break;
+        case 'split': {
+          const { branches, mode } = block.data;
+          if (branches.length < 2 || branches.length > 20) fail('configure de 2 a 20 saídas');
+          if (new Set(branches.map(branch => branch.id)).size !== branches.length) fail('as saídas precisam ter identificadores diferentes');
+          branches.forEach((branch, i) => {
+            if (!branch.label.trim() || branch.label.trim().length > 60) fail(`a saída ${i + 1} precisa de um nome de até 60 caracteres`);
+            if (!Number.isInteger(branch.weight) || branch.weight < 1 || branch.weight > 100) fail(`informe um peso inteiro de 1 a 100 para a saída ${i + 1}`);
+            if (header.enabled && isLast && !to(bubble.id, branchHandleId(branch.id))) fail(`ligue a saída ${branch.label.trim() || i + 1} a um balão`);
+          });
+          if (mode === 'random' && branches.reduce((sum, branch) => sum + branch.weight, 0) !== 100) fail('as porcentagens das saídas precisam somar 100%');
+          break;
+        }
         case 'move_stage':
           if (!block.data.stage_id) fail('escolha a etapa de destino');
           break;

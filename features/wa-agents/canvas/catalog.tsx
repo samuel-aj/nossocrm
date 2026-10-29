@@ -12,6 +12,7 @@ import {
   Clock,
   Flag,
   GitBranch,
+  Shuffle,
   Keyboard,
   MessageCircle,
   MessageSquareReply,
@@ -79,6 +80,13 @@ export const NODE_META: Record<StepType, NodeMeta> = {
     tone: 'purple',
     color: '#a855f7',
     hint: 'Escolhe o caminho pela resposta do lead',
+  },
+  split: {
+    label: STEP_LABELS.split,
+    icon: Shuffle,
+    tone: 'purple',
+    color: '#8b5cf6',
+    hint: 'Teste A/B/C: alterna entre caminhos ou sorteia por porcentagem',
   },
   move_stage: {
     label: STEP_LABELS.move_stage,

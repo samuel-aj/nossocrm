@@ -8,9 +8,12 @@
 import React, { useCallback } from 'react';
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, useReactFlow, type EdgeProps } from '@xyflow/react';
 import { X } from 'lucide-react';
+import { BotEdgeMetric } from '../analytics/BotAnalyticsContext';
 
 export function DisconnectableEdge({
   id,
+  source,
+  sourceHandleId,
   sourceX,
   sourceY,
   targetX,
@@ -36,6 +39,9 @@ export function DisconnectableEdge({
     <>
       <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} />
       <EdgeLabelRenderer>
+        <div className="absolute pointer-events-none" style={{ transform: `translate(-50%, -100%) translate(${labelX}px, ${labelY - 16}px)` }}>
+          <BotEdgeMetric sourceNodeId={source} sourceHandle={sourceHandleId} />
+        </div>
         <button
           type="button"
           className={`wa-edge-disconnect nodrag nopan${selected ? ' is-selected' : ''}`}
