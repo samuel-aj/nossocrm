@@ -1,6 +1,7 @@
 'use client';
 import { GroupLinksVariableField } from '@/features/group-links/GroupLinksVariableField';
 import { AlertEditor } from './AlertEditor';
+import { SplitEditor } from './SplitEditor';
 import { NativeSelect } from '@/components/ui/NativeSelect';
 
 /**
@@ -918,6 +919,8 @@ function BlockFields({ block, update }: { block: Block; update: (block: Block) =
       return <WaitReplyEditor block={block} update={update} />;
     case 'condition':
       return <ConditionEditor block={block} update={update} />;
+    case 'split':
+      return <SplitEditor block={block} update={update} />;
     case 'move_stage':
       return <MoveStageEditor block={block} update={update} />;
     case 'activate_alert':

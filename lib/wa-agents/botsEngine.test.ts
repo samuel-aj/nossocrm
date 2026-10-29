@@ -21,6 +21,10 @@ const h = vi.hoisted(() => ({
   lossHistory: 0,
   alertCalls: [] as Array<Record<string, unknown>>,
   linkFails: false,
+  events: [] as Array<Record<string, unknown>>,
+  telemetryFails: false,
+  branchFails: false,
+  webhookCalls: 0,
 }));
 
 vi.mock('@/lib/whatsapp', () => ({
@@ -84,10 +88,10 @@ vi.mock('./engine', () => ({ runAgentOnConversation: async () => ({ status: 'ok'
 vi.mock('./beta', () => ({ isAiAgentsApproved: async () => true }));
 vi.mock('./webhooks', () => ({
   dispatchAgentEvent: async () => [],
-  postWebhook: async () => ({ ok: false, error: 'HTTP 500' }),
+  postWebhook: async () => { h.webhookCalls++; return { ok: false, error: 'HTTP 500' }; },
 }));
 
-import { processBotRun, sendTemplateToConversation } from './bots';
+import { handleBotReply, processBotRun, processDueBotRuns, sendTemplateToConversation } from './bots';
 import type { BotRunRow } from './types';
 
 type Row = Record<string, unknown>;
@@ -122,6 +126,8 @@ function fakeDb(tables: Record<string, Row[]>) {
       eq: (c: string, v: unknown) => (filters.push(r => r[c] === v), b),
       neq: (c: string, v: unknown) => (filters.push(r => r[c] !== v), b),
       is: (c: string, v: unknown) => (filters.push(r => (r[c] ?? null) === v), b),
+      not: (c: string, _op: string, v: unknown) => (filters.push(r => (r[c] ?? null) !== v), b),
+      lte: (c: string, v: string) => (filters.push(r => String(r[c]) <= v), b),
       in: (c: string, vs: unknown[]) => (filters.push(r => vs.includes(r[c])), b),
       order: () => b,
       limit: (n: number) => ((limit = n), b),
@@ -131,7 +137,17 @@ function fakeDb(tables: Record<string, Row[]>) {
     };
     return b;
   };
-  return { from, rpc: async (name: string, args: Record<string, unknown>) => { if (name === 'activate_deal_alert_with_tone') h.alertCalls.push(args); return { data: true, error: null }; } } as never;
+  return { from, rpc: async (name: string, args: Record<string, unknown>) => {
+    if (name === 'activate_deal_alert_with_tone') h.alertCalls.push(args);
+    if (name === 'wa_bot_record_event') {
+      if (h.telemetryFails) return { data: null, error: { message: 'offline' } };
+      if (!h.events.some(e => e.p_run === args.p_run && e.p_step === args.p_step && e.p_kind === args.p_kind)) h.events.push(args);
+    }
+    if (name === 'wa_bot_allocate_branch') {
+      return h.branchFails ? { data: null, error: { message: 'allocator unavailable' } } : { data: { branch_id: 'b', target_step_id: 'b' }, error: null };
+    }
+    return { data: true, error: null };
+  } } as never;
 }
 
 const ORG = 'org-1';
@@ -194,6 +210,10 @@ beforeEach(() => {
   h.lossHistory = 0;
   h.alertCalls = [];
   h.linkFails = false;
+  h.events = [];
+  h.telemetryFails = false;
+  h.branchFails = false;
+  h.webhookCalls = 0;
   h.deal = { id: 'deal-1', contact_id: 'contact-1', title: 'Lead', stage_id: 's1', board_id: 'b1', tags: [], stage_label: 'Novo' };
 });
 
@@ -520,4 +540,107 @@ it('troca para protocolo pelo robô sem forçar ganho pela configuração antiga
   await processBotRun(fakeDb(tables), r);
   expect(tables.deals[0]).toMatchObject({ board_id: boardId, stage_id: stageId, is_won: false });
   expect(tables.deals[0]).not.toHaveProperty('closed_at');
+});
+
+describe('structured robot telemetry (offline)', () => {
+  const instrumented = (steps: Row[], extra: Partial<BotRunRow> = {}) => run({
+    analytics_version: 1, flow_revision: 'rev', flow_snapshot: bot(steps) as unknown as BotRunRow['flow_snapshot'], ...extra,
+  });
+  const events = (step: string, kind = 'exited') => h.events.filter(e => e.p_step === step && e.p_kind === kind);
+  it('follows only the allocated branch, records the stable output, and keeps the frozen graph', async () => {
+    const steps = [
+      { id: 'split', type: 'split', mode: 'round_robin', branches: ['a','b','c','d'].map(id => ({ id, label: id, weight: 25, goto_step_id: id })) },
+      ...['a','b','c','d'].map(id => ({ id, type: 'send_text', text: id, next_step_id: null })),
+    ];
+    const r = instrumented(steps);
+    const tables = db(bot([{ id: 'different', type: 'send_text', text: 'never' }]), [r]);
+    await processBotRun(fakeDb(tables), r);
+    expect(h.sent).toEqual(['b']);
+    expect(events('split')[0]).toMatchObject({ p_output: 'branch:b', p_target: 'b' });
+    expect(events('b', 'entered')).toHaveLength(1);
+    expect(events('a', 'entered')).toHaveLength(0);
+  });
+  it('does not perform a branch action if allocation is unavailable', async () => {
+    h.branchFails = true;
+    const steps = [{ id: 'split', type: 'split', mode: 'round_robin', branches: ['a','b'].map(id => ({ id, label: id, weight: 50, goto_step_id: id })) }, { id: 'a', type: 'send_text', text: 'A' }, { id: 'b', type: 'send_text', text: 'B' }];
+    const r = instrumented(steps); const tables = db(bot(steps), [r]);
+    await processBotRun(fakeDb(tables), r);
+    expect(h.sent).toEqual([]);
+    expect(tables.wa_bot_runs[0].status).toBe('error');
+    expect(events('split','failed')).toHaveLength(1);
+  });
+  it('stops before external effects when the entered event cannot be recorded', async () => {
+    h.telemetryFails = true;
+    const steps = [{ id: 'tx', type: 'send_text', text: 'never' }];
+    const r = instrumented(steps); const tables = db(bot(steps), [r]);
+    await processBotRun(fakeDb(tables), r);
+    expect(h.sent).toEqual([]);
+    expect(tables.wa_bot_runs[0].status).toBe('error');
+  });
+  it('separates CRM failure from continued advancement', async () => {
+    h.moveFails = true;
+    const steps = chain([{ id: 'mv', type: 'move_stage', stage_id: '00000000-0000-4000-8000-000000000001' }, { id: 'end', type: 'end' }]);
+    const r = instrumented(steps); const tables = db(bot(steps), [r]);
+    await processBotRun(fakeDb(tables), r);
+    expect(events('mv','entered')).toHaveLength(1);
+    expect(events('mv','failed')).toHaveLength(1);
+    expect(events('mv')[0]).toMatchObject({ p_output: 'next', p_target: 'end' });
+    expect(events('end')[0]).toMatchObject({ p_output: 'done', p_target: null });
+  });
+  it('does not count a scheduled wait as an exit until its deadline', async () => {
+    const steps = chain([{ id: 'wait', type: 'wait', seconds: 90 }, { id: 'end', type: 'end' }]);
+    const r = instrumented(steps); const tables = db(bot(steps), [r]);
+    await processBotRun(fakeDb(tables), r);
+    expect(events('wait','entered')).toHaveLength(1);
+    expect(events('wait')).toHaveLength(0);
+    const saved = tables.wa_bot_runs[0] as unknown as BotRunRow;
+    (saved.vars._pending_step_exit as { at: string }).at = new Date(Date.now()-1000).toISOString();
+    await processBotRun(fakeDb(tables), saved);
+    expect(events('wait')).toHaveLength(1);
+    expect(events('end','entered')).toHaveLength(1);
+  });
+  it('records reply and timeout separately even if both connect to the same block', async () => {
+    const steps = chain([{ id: 'wr', type: 'wait_reply', timeout_minutes: 1, on_timeout_step_id: 'end' }, { id: 'end', type: 'end' }]);
+    const r = instrumented(steps); const tables = db(bot(steps), [r]);
+    const admin = fakeDb(tables);
+    await processBotRun(admin, r);
+    expect(events('wr')).toHaveLength(0);
+    await handleBotReply(admin, { run: tables.wa_bot_runs[0] as unknown as BotRunRow, message: { id: 'reply', body: 'sim', transcription: null } });
+    expect(events('wr')[0]).toMatchObject({ p_output: 'next', p_target: 'end' });
+    h.events = [];
+    const second = instrumented(steps, { id: 'run-timeout' });
+    const timeoutTables = db(bot(steps), [second]); const timeoutAdmin = fakeDb(timeoutTables);
+    await processBotRun(timeoutAdmin, second);
+    timeoutTables.wa_bot_runs[0].wake_at = new Date(Date.now()-1000).toISOString();
+    await processDueBotRuns(timeoutAdmin);
+    expect(events('wr')[0]).toMatchObject({ p_output: 'timeout', p_target: 'end' });
+  });
+  it('legacy runs continue to work without inventing node analytics', async () => {
+    const steps = chain([{ id: 'tag', type: 'add_tag', tag: 'legacy' }]);
+    const r = run();
+    await processBotRun(fakeDb(db(bot(steps), [r])), r);
+    expect(h.tags).toHaveLength(1);
+    expect(h.events).toEqual([]);
+  });
+  it('does not send a rotated webhook credential to a destination from an old revision', async () => {
+    const frozen = chain([{ id: 'hook', type: 'webhook', url: 'https://old.example.test', secret: null }, { id: 'end', type: 'end' }]);
+    const r = instrumented(frozen);
+    const live = chain([{ id: 'hook', type: 'webhook', url: 'https://new.example.test', secret: 'new-secret' }, { id: 'end', type: 'end' }]);
+    const tables = db(bot(live), [r]);
+    await processBotRun(fakeDb(tables), r);
+    expect(h.webhookCalls).toBe(0);
+    expect(events('hook','failed')).toHaveLength(1);
+    expect(String(tables.wa_bot_runs[0].error)).toContain('Webhook alterado');
+  });
+  it('does not inflate first-reach counts when a loop resumes after a wait', async () => {
+    const steps = [{ id: 'tx', type: 'send_text', text: 'loop', next_step_id: 'wait' }, { id: 'wait', type: 'wait', seconds: 90, next_step_id: 'tx' }];
+    const r = instrumented(steps); const tables = db(bot(steps), [r]); const admin = fakeDb(tables);
+    await processBotRun(admin, r);
+    const saved = tables.wa_bot_runs[0] as unknown as BotRunRow;
+    (saved.vars._pending_step_exit as { at: string }).at = new Date(Date.now()-1000).toISOString();
+    await processBotRun(admin, saved);
+    expect(h.sent).toEqual(['loop','loop']);
+    expect(events('tx','entered')).toHaveLength(1);
+    expect(events('tx')).toHaveLength(1);
+  });
 });
