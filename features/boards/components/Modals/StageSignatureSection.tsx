@@ -16,6 +16,7 @@ import { useToast } from '@/context/ToastContext';
 import { useCRM } from '@/context/CRMContext';
 import { NativeSelect } from '@/components/ui/NativeSelect';
 import { useWaBotsList } from '@/features/wa-agents/useWaAgents';
+import { SignMessageField, sampleDocName } from '@/features/zapsign/SignMessageField';
 import { VariableMappingModal, mappingSummary } from '@/features/zapsign/VariableMappingModal';
 import { AUTH_OPTIONS, DEFAULT_SIGN_MESSAGE, SEND_OPTIONS, ZAPSIGN_ORG_STATUS_KEY, useVariableSources, useZapSignTemplateVariables, useZapSignTemplates } from '@/features/zapsign/useZapSign';
 
@@ -279,13 +280,14 @@ export function StageSignatureSection({ stageId, stageSaved }: { stageId: string
                 </div>
 
                 {draft.send === 'crm_whatsapp' ? (
-                  <div>
-                    <label htmlFor={`sig-msg-${stageId}`} className={LABEL}>
-                      Mensagem no WhatsApp
-                    </label>
-                    <textarea id={`sig-msg-${stageId}`} className={`${FIELD} resize-y`} rows={2} maxLength={1000} value={draft.message} onChange={(e) => set({ message: e.target.value })} />
-                    <p className="mt-1 text-[11px] text-slate-500">Variáveis: {'{{nome}}'}, {'{{primeiro_nome}}'}, {'{{documento}}'}, {'{{link}}'}. Na API oficial da Meta, só dentro de 24 h da última mensagem do lead.</p>
-                  </div>
+                  <SignMessageField
+                    id={`sig-msg-${stageId}`}
+                    value={draft.message}
+                    onChange={(message) => set({ message })}
+                    sample={{ nome: 'Maria Silva', documento: sampleDocName(draft.docName, draft.templateName, 'Maria Silva', 'Exemplo de lead'), titulo: 'Exemplo de lead' }}
+                    previewTitle="Exemplo de como o cliente recebe"
+                    note="Na API oficial da Meta, só dentro de 24 h da última mensagem do lead."
+                  />
                 ) : null}
 
                 <details className="rounded-lg border border-slate-200 dark:border-white/10 p-3">

@@ -85,4 +85,4 @@ export const AUTH_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'certificadoDigital', label: 'Certificado digital (ICP-Brasil)' },
 ];
 
-export const DEFAULT_SIGN_MESSAGE = 'Olá {{primeiro_nome}}, segue o documento "{{documento}}" para assinatura eletrônica: {{link}}';
+export { DEFAULT_SIGN_MESSAGE } from '@/lib/zapsign/message';

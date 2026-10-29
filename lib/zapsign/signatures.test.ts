@@ -234,6 +234,15 @@ describe('envio para assinatura (regra da etapa)', () => {
     expect(row.sign_url).toBe('https://app.zapsign.com.br/verificar/sig-1');
   });
 
+  it('mensagem da regra sem {{link}}: o link vai numa linha no final', async () => {
+    const db = base();
+    db.tables.stage_signature_rules[0] = { ...RULE, signer: { ...RULE.signer, message: 'Oi {{primeiro_nome}}, segue o contrato.' } } as unknown as Row;
+    db.tables.deal_signatures.push(queued() as unknown as Row);
+    const out = await sendSignature(db.admin, queued(), { client: fakeClient() });
+    expect(out).toMatchObject({ status: 'pending', sent_via: 'crm_whatsapp' });
+    expect(h.texts).toEqual(['Oi Maria, segue o contrato.\n\nhttps://app.zapsign.com.br/verificar/sig-1']);
+  });
+
   it('lead mudou de etapa, ganhou ou a regra foi desligada antes do envio: cancela sem criar documento', async () => {
     for (const over of [
       { deals: [{ ...base().tables.deals[0], stage_id: 'outra' }] },

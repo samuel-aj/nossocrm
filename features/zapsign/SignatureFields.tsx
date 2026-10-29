@@ -6,8 +6,8 @@
  * documento (nome e, por último, o modelo da ZapSign) e o que vai no
  * contrato.
  *
- * - `compact` (aba Contrato do lead): signatário numa linha, envio recolhido
- *   num resumo com "Ajustar", modelo por último e o cartão "O que vai no
+ * - `compact` (aba Contrato do lead): signatário numa linha, envio aberto
+ *   ("Ocultar" deixa só o resumo), modelo por último e o cartão "O que vai no
  *   contrato" abrindo o modal de preenchimento (variablesMode="modal").
  * - completo (modal de conferência ao mudar de etapa): seções abertas e os
  *   campos do contrato inline.
@@ -16,13 +16,13 @@ import React, { useEffect, useState } from 'react';
 import { AlertTriangle, Loader2, Mail, PenLine, Phone, UserRound } from 'lucide-react';
 import { NativeSelect } from '@/components/ui/NativeSelect';
 import { AUTH_OPTIONS, SEND_OPTIONS } from './useZapSign';
+import { SignMessageField, sampleDocName } from './SignMessageField';
+import { FIELD, LABEL } from './ui';
 import { VariableValueRows, fillSummary } from './VariableValueRows';
 import { VariableValuesModal } from './VariableValuesModal';
 import type { SignatureDraft } from './useSignatureDraft';
 
-export const FIELD =
-  'w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white placeholder:text-slate-400 focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 outline-none disabled:opacity-60';
-export const LABEL = 'block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1';
+export { FIELD, LABEL } from './ui';
 const SECTION = 'text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400';
 const WARN = 'flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-900/15 dark:text-amber-200';
 const BLOCK = 'flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-500/30 dark:bg-red-900/15 dark:text-red-300';
@@ -44,7 +44,7 @@ export function SignatureFields({ draft, idPrefix, disabled, variablesMode = 'in
   // Modo modal: escolher o modelo abre o preenchimento assim que o modelo é lido
   const [fillOpen, setFillOpen] = useState(false);
   const [pendingOpen, setPendingOpen] = useState<string | null>(null);
-  const [advanced, setAdvanced] = useState(false);
+  const [advanced, setAdvanced] = useState(true);
   useEffect(() => {
     if (!pendingOpen || pendingOpen !== form.templateToken || varsQ.isLoading || (!varsQ.data && !varsQ.error)) return;
     setPendingOpen(null);
@@ -117,15 +117,17 @@ export function SignatureFields({ draft, idPrefix, disabled, variablesMode = 'in
         </div>
       </div>
       {form.send === 'crm_whatsapp' ? (
-        <div>
-          <label htmlFor={id('msg')} className={LABEL}>
-            Mensagem no WhatsApp
-          </label>
-          <textarea id={id('msg')} className={`${FIELD} resize-y`} rows={2} maxLength={1000} value={form.message} onChange={(e) => set({ message: e.target.value })} />
-          <p className="mt-1 text-[11px] text-slate-500">
-            Variáveis: {'{{nome}}'}, {'{{primeiro_nome}}'}, {'{{documento}}'}, {'{{link}}'}.
-          </p>
-        </div>
+        <SignMessageField
+          id={id('msg')}
+          value={form.message}
+          onChange={(message) => set({ message })}
+          disabled={disabled}
+          sample={{
+            nome: contact.name || 'Cliente',
+            documento: sampleDocName(form.docName, templateName, contact.name || 'Cliente', data.preview['negocio.titulo']),
+            titulo: data.preview['negocio.titulo'],
+          }}
+        />
       ) : null}
     </>
   );
@@ -218,12 +220,12 @@ export function SignatureFields({ draft, idPrefix, disabled, variablesMode = 'in
           </p>
         ))}
 
-        {/* Envio: resumo recolhido; "Ajustar" abre as opções */}
+        {/* Envio: aberto por padrão; "Ocultar" deixa só o resumo */}
         <div className="rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50/70 dark:bg-white/[0.03]">
           <div className="flex items-center justify-between gap-2 px-3 py-2 text-xs text-slate-600 dark:text-slate-300">
             <span className="min-w-0 truncate">
-              <span className="font-semibold text-slate-700 dark:text-slate-200">Envio:</span> {sendLabel} · {authLabel}
-              {form.requireCpf ? ' · pede CPF' : ''}
+              <span className="font-semibold text-slate-700 dark:text-slate-200">{advanced ? 'Envio e assinatura' : 'Envio:'}</span>
+              {advanced ? '' : ` ${sendLabel} · ${authLabel}${form.requireCpf ? ' · pede CPF' : ''}`}
             </span>
             <button type="button" onClick={() => setAdvanced((v) => !v)} aria-expanded={advanced} className="shrink-0 font-semibold text-primary-600 dark:text-primary-400 hover:underline">
               {advanced ? 'Ocultar' : 'Ajustar'}

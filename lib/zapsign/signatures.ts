@@ -17,6 +17,7 @@ import { lastInboundAt, resolveDealConversation } from '@/lib/wa-agents/dealConv
 import { loadCustomFieldDefs } from '@/lib/wa-agents/leadOps';
 import { addDealTag } from '@/lib/wa-agents/actions';
 import { renderTemplate } from '@/lib/wa-agents/template';
+import { ensureSignLink } from './message';
 import { errorMessage } from '@/lib/wa-agents/errors';
 import { ZapSignClient, ZapSignError, signerLink, type ZapSignDoc, type ZapSignSigner } from './client';
 import { resolveVariables, splitPhone, type VariableContext, type VariableSource } from './variables';
@@ -123,8 +124,6 @@ export type SendOutcome =
   | { status: 'pending'; sent_via: SendChannel; note?: string }
   | { status: 'failed'; error: string; retry: boolean }
   | { status: 'cancelled'; reason: string };
-
-const DEFAULT_MESSAGE = 'Olá {{primeiro_nome}}, segue o documento "{{documento}}" para assinatura eletrônica: {{link}}';
 
 export const SIGNATURE_EVENT_KIND = 'signature';
 
@@ -407,7 +406,8 @@ async function sendLinkViaCrm(
     const lastIn = await lastInboundAt(admin, resolved.all.map((c) => c.id));
     if (!getServiceWindow(lastIn).open) return { ok: false, reason: 'janela de 24 h fechada na API oficial da Meta' };
   }
-  const text = renderTemplate((message ?? '').trim() || DEFAULT_MESSAGE, {
+  // sem {{link}} na mensagem, ensureSignLink põe o link no final; vazia, vai a padrão
+  const text = renderTemplate(ensureSignLink(message ?? ''), {
     nome: snap.contact.name,
     primeiro_nome: snap.contact.name.split(/\s+/)[0] ?? '',
     link: signUrl,
