@@ -157,7 +157,7 @@ function ReviewBanner({ review, dealId, stageLabel, canEdit }: { review: Signatu
     <section aria-label="Contrato aguardando conferência" className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-900/15 dark:text-amber-100">
       <Clock size={14} className="mt-[1px] shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
       <span className="min-w-0 flex-1">
-        <b>Contrato aguardando conferência</b>: preparado quando o lead entrou em <b>{stageLabel ?? 'uma etapa com contrato'}</b> ({DT.format(new Date(review.created_at))}). Nada foi enviado ainda. Confira abaixo e envie.
+        <b>Aguardando conferência</b> desde a entrada em <b>{stageLabel ?? 'etapa com contrato'}</b> ({DT.format(new Date(review.created_at))}). Nada foi enviado. Confira e envie.
       </span>
       {canEdit ? (
         <button type="button" onClick={() => void discard()} disabled={busy} className="inline-flex shrink-0 items-center gap-1 font-semibold text-amber-800 hover:underline dark:text-amber-200 disabled:opacity-50" title="Descartar sem enviar">
@@ -246,10 +246,7 @@ function ContractForm({
             ) : null}
           </div>
         ) : null}
-        {!hasDocuments && !result && !ruleStageId ? (
-          <p className="text-[11px] text-slate-500 dark:text-slate-400">Nenhum contrato enviado para este lead ainda. Confira os dados abaixo e envie para assinatura.</p>
-        ) : null}
-        <SignatureFields draft={draft} idPrefix={idPrefix} disabled={!canEdit || sending} variablesMode="modal" />
+        <SignatureFields draft={draft} idPrefix={idPrefix} disabled={!canEdit || sending} variablesMode="modal" compact />
       </div>
       <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-100 dark:border-white/5 bg-white dark:bg-dark-card px-3 py-2">
         <p className={`flex min-w-0 items-center gap-1 text-[11px] ${emptyBlock ? 'text-amber-700 dark:text-amber-300' : 'text-slate-400'}`}>
@@ -258,10 +255,8 @@ function ContractForm({
               <Lock size={10} aria-hidden="true" /> Sem permissão para editar este lead.
             </>
           ) : emptyBlock ? (
-            <span className="line-clamp-2">Preencha ou confirme {draft.emptyVars.length === 1 ? 'o campo em branco' : `os ${draft.emptyVars.length} campos em branco`} em “O que vai no contrato”.</span>
-          ) : (
-            'O documento criado conta na franquia da ZapSign.'
-          )}
+            <span className="line-clamp-2">{draft.emptyVars.length === 1 ? '1 campo em branco' : `${draft.emptyVars.length} campos em branco`}: preencha ou confirme.</span>
+          ) : null}
         </p>
         <button
           type="button"
