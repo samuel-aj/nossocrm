@@ -27,8 +27,8 @@ try {
   await sql('20261029143100_bot_analytics.sql');
   const revision=(await db.query(`SELECT wa_bot_flow_revision(to_jsonb(b)) rev FROM wa_bots b`)).rows[0].rev;
   const invoke=async(run,step,kind,output=null,target=null)=>db.query('SELECT wa_bot_record_event($1,$2,$3,$4,$5,$6)',[org,run,step,kind,output,target]);
-  const create=async(dealId=null,isTest=false)=> (await db.query(`INSERT INTO wa_bot_runs(organization_id,bot_id,deal_id,is_test)
-    VALUES($1,$2,COALESCE($3,gen_random_uuid()),$4) RETURNING id,deal_id`,[org,bot,dealId,isTest])).rows[0];
+  const create=async(dealId=null,isTest=false)=> (await db.query(`INSERT INTO wa_bot_runs(organization_id,bot_id,deal_id,is_test,analytics_version)
+    VALUES($1,$2,COALESCE($3,gen_random_uuid()),$4,1) RETURNING id,deal_id`,[org,bot,dealId,isTest])).rows[0];
   const allocate=async r=>{await invoke(r.id,'split','entered');return (await db.query('SELECT wa_bot_allocate_branch($1,$2,$3) v',[org,r.id,'split'])).rows[0].v;};
   const analytics=async(goal='goal',rev=null)=> (await db.query(`SELECT wa_bot_analytics($1,$2,'2000-01-01','2100-01-01',$3,$4) v`,[org,bot,rev,goal])).rows[0].v;
   let first;

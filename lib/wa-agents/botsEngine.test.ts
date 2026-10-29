@@ -91,7 +91,7 @@ vi.mock('./webhooks', () => ({
   postWebhook: async () => { h.webhookCalls++; return { ok: false, error: 'HTTP 500' }; },
 }));
 
-import { handleBotReply, processBotRun, processDueBotRuns, sendTemplateToConversation } from './bots';
+import { createBotRun, handleBotReply, processBotRun, processDueBotRuns, sendTemplateToConversation } from './bots';
 import type { BotRunRow } from './types';
 
 type Row = Record<string, unknown>;
@@ -111,6 +111,11 @@ function fakeDb(tables: Record<string, Row[]>) {
         return { data: null, error: { message: 'link indisponível' } };
       }
       let hit = rows().filter(r => filters.every(f => f(r)));
+      if (op === 'insert') {
+        const inserted = { id: 'inserted-run', ...patch };
+        rows().push(inserted);
+        hit = [inserted];
+      }
       if (op === 'update') hit.forEach(r => Object.assign(r, patch));
       if (limit !== null) hit = hit.slice(0, limit);
       const data = op === 'select' || returning ? hit.map(r => ({ ...r })) : null;
@@ -123,6 +128,7 @@ function fakeDb(tables: Record<string, Row[]>) {
         return b;
       },
       update: (p: Row) => ((op = 'update'), (patch = p), b),
+      insert: (p: Row) => ((op = 'insert'), (patch = p), b),
       eq: (c: string, v: unknown) => (filters.push(r => r[c] === v), b),
       neq: (c: string, v: unknown) => (filters.push(r => r[c] !== v), b),
       is: (c: string, v: unknown) => (filters.push(r => (r[c] ?? null) === v), b),
@@ -547,6 +553,14 @@ describe('structured robot telemetry (offline)', () => {
     analytics_version: 1, flow_revision: 'rev', flow_snapshot: bot(steps) as unknown as BotRunRow['flow_snapshot'], ...extra,
   });
   const events = (step: string, kind = 'exited') => h.events.filter(e => e.p_step === step && e.p_kind === kind);
+  it.each([false, true])('opts into the instrumented engine when creating a run (test=%s), without processing it', async (isTest) => {
+    const tables = db(bot([{ id: 'end', type: 'end' }]), []);
+    const created = await createBotRun(fakeDb(tables), { organizationId: ORG, botId: 'bot-1', phone: '+5511999999999', isTest });
+    expect(created.ok).toBe(true);
+    expect(tables.wa_bot_runs[0]).toMatchObject({ analytics_version: 1, is_test: isTest, status: 'running' });
+    expect(h.sent).toEqual([]);
+    expect(h.events).toEqual([]);
+  });
   it('follows only the allocated branch, records the stable output, and keeps the frozen graph', async () => {
     const steps = [
       { id: 'split', type: 'split', mode: 'round_robin', branches: ['a','b','c','d'].map(id => ({ id, label: id, weight: 25, goto_step_id: id })) },

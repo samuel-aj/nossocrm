@@ -18,9 +18,20 @@ Os scripts `scripts/test-bot-distribution-db.mjs` e `scripts/test-bot-analytics-
 
 ## Conferência visual
 Prévia temporária com os componentes reais e dados fictícios compilada em `tmp/bot-analytics-preview`. Captura automatizada pendente: o controle do navegador retornou timeout tanto na sessão principal quanto no subagente. A prévia não integra a publicação.
+O usuário conferiu a prévia e aprovou o formato; em seguida autorizou a publicação no CRM.
 
 ## Publicação futura
 Aplicar `20261029143000_bot_distribution.sql` antes de `20261029143100_bot_analytics.sql` e antes do código que consulta as novas colunas/RPCs. Ambas são aditivas; não reescrevem execuções anteriores, leads, conversas ou mensagens.
+
+A tabela interna `wa_bot_analytics_rollout` começa com `enabled=false`. O código novo envia `analytics_version=1` ao criar a execução; código antigo e produtores SQL que não indicam versão continuam como legado durante a troca. Depois de confirmar o novo deployment em produção e o domínio apontando para ele, aguardar cinco minutos para drenar requisições antigas (`ingest`/`tick` têm `maxDuration=300`; início manual60 e API pública120). Só então ativar os produtores SQL de etapa/lote com uma sessão administrativa:
+
+```sql
+UPDATE public.wa_bot_analytics_rollout
+SET enabled=true, updated_at=now()
+WHERE singleton;
+```
+
+Essa ativação só afeta inserções futuras. Nenhuma execução já criada é convertida ou regravada. Em rollback do aplicativo, desativar o gate antes da troca (`enabled=false`); isso evita que novas inserções do código antigo sejam apresentadas como instrumentadas. A tabela não possui permissões para `anon`/`authenticated` nem escrita por `service_role`.
 
 O botão existente Testar mantém seu comportamento de execução; a nova sinalização apenas exclui essas execuções dos indicadores e do rodízio de produção. As validações deste trabalho foram simuladas, sem usar esse botão com um número real.
 

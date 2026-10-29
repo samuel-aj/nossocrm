@@ -6,6 +6,19 @@ ALTER TABLE public.wa_bot_runs
   ADD COLUMN IF NOT EXISTS is_test boolean NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS split_subject_key text;
 
+-- Roll out before the new application without labeling old workers as measured.
+-- Direct SQL producers (stage triggers/batches) opt in only after the release is ready.
+CREATE TABLE IF NOT EXISTS public.wa_bot_analytics_rollout (
+  singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+  enabled boolean NOT NULL DEFAULT false,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO public.wa_bot_analytics_rollout(singleton,enabled) VALUES(true,false)
+  ON CONFLICT(singleton) DO NOTHING;
+ALTER TABLE public.wa_bot_analytics_rollout ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.wa_bot_analytics_rollout FROM PUBLIC,anon,authenticated,service_role;
+GRANT SELECT ON public.wa_bot_analytics_rollout TO service_role;
+
 CREATE OR REPLACE FUNCTION public.wa_bot_flow_revision(p_bot jsonb)
 RETURNS text LANGUAGE sql IMMUTABLE SET search_path = public AS $$
   SELECT md5(jsonb_build_object(
@@ -25,6 +38,9 @@ CREATE OR REPLACE FUNCTION public.wa_bot_snapshot_new_run()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE b public.wa_bots%ROWTYPE; snapshot jsonb;
 BEGIN
+  IF NEW.analytics_version IS DISTINCT FROM 1 AND NOT COALESCE(
+    (SELECT enabled FROM public.wa_bot_analytics_rollout WHERE singleton),false
+  ) THEN RETURN NEW; END IF;
   SELECT * INTO b FROM public.wa_bots WHERE id = NEW.bot_id AND organization_id = NEW.organization_id;
   IF NOT FOUND THEN RAISE EXCEPTION 'Bot not found in organization'; END IF;
   snapshot := jsonb_build_object('name',b.name,'enabled',b.enabled,'trigger',b.trigger,
@@ -60,7 +76,7 @@ CREATE INDEX IF NOT EXISTS wa_bot_events_org_bot_idx ON public.wa_bot_events(org
 CREATE INDEX IF NOT EXISTS wa_bot_runs_analytics_idx ON public.wa_bot_runs(organization_id,bot_id,created_at,flow_revision)
   WHERE analytics_version = 1 AND NOT is_test;
 ALTER TABLE public.wa_bot_events ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON public.wa_bot_events FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON public.wa_bot_events FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT ON public.wa_bot_events TO service_role;
 
 CREATE TABLE IF NOT EXISTS public.wa_bot_split_counters (
@@ -88,7 +104,7 @@ CREATE TABLE IF NOT EXISTS public.wa_bot_split_assignments (
 );
 ALTER TABLE public.wa_bot_split_counters ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.wa_bot_split_assignments ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON public.wa_bot_split_counters, public.wa_bot_split_assignments FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON public.wa_bot_split_counters, public.wa_bot_split_assignments FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT ON public.wa_bot_split_counters, public.wa_bot_split_assignments TO service_role;
 
 CREATE OR REPLACE FUNCTION public.wa_bot_record_event(

@@ -1582,6 +1582,8 @@ export async function createBotRun(
         conversation_id: conversationId,
         phone: phone || null,
         status: 'running',
+        // Only the instrumented application opts in before the DB rollout gate opens.
+        analytics_version: 1,
         is_test: input.isTest ?? false,
         wake_at: nowIso(),
         step_index: 0,

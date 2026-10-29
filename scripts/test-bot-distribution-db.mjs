@@ -20,18 +20,49 @@ await pg.query(`INSERT INTO wa_bots VALUES($1,$2,'Test',true,'{"type":"manual"}'
 const legacy=id();
 await pg.query('INSERT INTO wa_bot_runs(id,organization_id,bot_id) VALUES($1,$2,$3)',[legacy,org,bot]);
 const migration=await readFile(new URL('../supabase/migrations/20261029143000_bot_distribution.sql',import.meta.url),'utf8');
+await pg.exec('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO service_role');
 await pg.exec(migration);
+assert.equal((await pg.query("SELECT has_table_privilege('service_role','public.wa_bot_analytics_rollout','UPDATE') AS allowed")).rows[0].allowed,false);
+assert.equal((await pg.query("SELECT has_table_privilege('service_role','public.wa_bot_analytics_rollout','SELECT') AS allowed")).rows[0].allowed,true);
+for (const table of ['wa_bot_events','wa_bot_split_counters','wa_bot_split_assignments']) {
+  for (const privilege of ['INSERT','UPDATE','DELETE']) {
+    assert.equal((await pg.query('SELECT has_table_privilege($1,$2,$3) AS allowed',['service_role',`public.${table}`,privilege])).rows[0].allowed,false);
+  }
+}
 const newRun=async ({deal=id(),contact=null,test=false,organization=org,botId=bot}={})=>{
   const run=id();
-  await pg.query('INSERT INTO wa_bot_runs(id,organization_id,bot_id,deal_id,contact_id,is_test) VALUES($1,$2,$3,$4,$5,$6)',[run,organization,botId,deal,contact,test]);
+  await pg.query('INSERT INTO wa_bot_runs(id,organization_id,bot_id,deal_id,contact_id,is_test,analytics_version) VALUES($1,$2,$3,$4,$5,$6,1)',[run,organization,botId,deal,contact,test]);
   return run;
 };
 const allocate=async (run,organization=org)=> (await pg.query('SELECT wa_bot_allocate_branch($1,$2,\'split\') as choice',[organization,run])).rows[0].choice;
 const event=async(run,kind='entered',output=null,target=null)=>(await pg.query('SELECT wa_bot_record_event($1,$2,\'split\',$3,$4,$5)',[org,run,kind,output,target]));
 assert.equal((await pg.query('SELECT analytics_version FROM wa_bot_runs WHERE id=$1',[legacy])).rows[0].analytics_version,null);
+// Old application / existing SQL producers remain legacy until production is ready.
+const directRun=async()=>{
+  const run=id();
+  await pg.query('INSERT INTO wa_bot_runs(id,organization_id,bot_id) VALUES($1,$2,$3)',[run,org,bot]);
+  return (await pg.query('SELECT analytics_version,flow_snapshot FROM wa_bot_runs WHERE id=$1',[run])).rows[0];
+};
+assert.deepEqual(await directRun(),{analytics_version:null,flow_snapshot:null});
+const optedIn=await newRun();
+assert.equal((await pg.query('SELECT analytics_version FROM wa_bot_runs WHERE id=$1',[optedIn])).rows[0].analytics_version,1);
+await pg.exec('UPDATE wa_bot_analytics_rollout SET enabled=true WHERE singleton');
+const dbProducer=await directRun();
+assert.equal(dbProducer.analytics_version,1); assert.ok(dbProducer.flow_snapshot);
+await pg.exec('UPDATE wa_bot_analytics_rollout SET enabled=false WHERE singleton');
+assert.deepEqual(await directRun(),{analytics_version:null,flow_snapshot:null});
+assert.equal((await pg.query('SELECT analytics_version FROM wa_bot_runs WHERE id=$1',[optedIn])).rows[0].analytics_version,1);
+assert.equal((await pg.query('SELECT analytics_version FROM wa_bot_runs WHERE id=$1',[legacy])).rows[0].analytics_version,null);
 const runs=await Promise.all(Array.from({length:8},()=>newRun()));
 assert.deepEqual((await Promise.all(runs.map(run=>allocate(run)))).map(c=>c.branch_id),['a','b','c','d','a','b','c','d']);
 assert.deepEqual(await allocate(runs[0]),{branch_id:'a',target_step_id:'a'});
+await pg.exec('SET ROLE service_role');
+for (const table of ['wa_bot_events','wa_bot_split_counters','wa_bot_split_assignments']) {
+  await assert.rejects(()=>pg.exec(`INSERT INTO public.${table} SELECT * FROM public.${table} WHERE false`),/permission denied/);
+  await assert.rejects(()=>pg.exec(`UPDATE public.${table} SET organization_id=organization_id WHERE false`),/permission denied/);
+}
+assert.deepEqual(await allocate(runs[0]),{branch_id:'a',target_step_id:'a'});
+await pg.exec('RESET ROLE');
 assert.equal((await pg.query('SELECT step_index FROM wa_bot_runs WHERE id=$1',[runs[0]])).rows[0].step_index,1);
 const firstDeal=(await pg.query('SELECT deal_id FROM wa_bot_runs WHERE id=$1',[runs[0]])).rows[0].deal_id;
 assert.equal((await allocate(await newRun({deal:firstDeal}))).branch_id,'a');
@@ -61,6 +92,7 @@ await assert.rejects(()=>pg.query('SELECT wa_bot_record_event($1,$2,\'missing\',
 await assert.rejects(()=>newRun({organization:other}),/Bot not found/);
 await assert.rejects(()=>allocate(legacy),/New execution required/);
 await pg.exec('SET ROLE authenticated');
+await assert.rejects(()=>pg.query('UPDATE wa_bot_analytics_rollout SET enabled=true WHERE singleton'),/permission denied/);
 await assert.rejects(()=>pg.query('SELECT * FROM wa_bot_split_assignments'),/permission denied/);
 await assert.rejects(()=>allocate(runs[0]),/permission denied/);
 await pg.exec('RESET ROLE');
@@ -90,5 +122,5 @@ const webhookSteps=[{id:'webhook',type:'webhook',url:'https://example.test',secr
 await pg.query('UPDATE wa_bots SET steps=$1,start_step_id=\'webhook\' WHERE id=$2',[JSON.stringify(webhookSteps),bot]);
 const webhookRun=await newRun();
 assert.equal((await pg.query('SELECT flow_snapshot FROM wa_bot_runs WHERE id=$1',[webhookRun])).rows[0].flow_snapshot.steps[0].secret,undefined);
-console.log('PASS: snapshots, four-way round robin, retry, sticky lead, isolated tests, random persistence, rollback, RLS, tenant scope and event deduplication');
+console.log('PASS: rollout gate/opt-in, snapshots, four-way round robin, retry, sticky lead, isolated tests, random persistence, rollback, RLS, tenant scope and event deduplication');
 await pg.close();
