@@ -36,7 +36,8 @@ it('uses paged bodies, keeps API notes readonly and routes note create/edit/dele
  fireEvent.click(screen.getByLabelText('Excluir nota'));
  fireEvent.click(screen.getByRole('button', { name: 'Excluir' }));
  await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith('note', { throwOnError: true }));
- expect(vi.mocked(fetch).mock.calls.every(([url]) => String(url).includes('/timeline'))).toBe(true);
+ // notas nunca passam por API própria: só a linha do tempo e o status da ZapSign (aba Contrato) são consultados
+ expect(vi.mocked(fetch).mock.calls.every(([url]) => String(url).includes('/timeline') || String(url).includes('/api/integrations/zapsign/status'))).toBe(true);
  unmount(); client.clear();
 });
 it('retains failed note drafts across lead selection and panel remounts', async () => {

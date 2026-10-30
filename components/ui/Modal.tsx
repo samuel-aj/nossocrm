@@ -46,7 +46,7 @@ interface ModalProps {
   children: React.ReactNode;
   /** Actions kept visible outside the scrolling body. */
   footer?: React.ReactNode;
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl';
   /** Optional extra classes for the dialog container */
   className?: string;
   /** Optional extra classes for the body wrapper (useful for scroll/height) */
@@ -69,6 +69,8 @@ const sizeClasses = {
   md: 'max-w-md',
   lg: 'max-w-lg',
   xl: 'max-w-xl',
+  '2xl': 'max-w-2xl',
+  '3xl': 'max-w-3xl',
 };
 
 /**

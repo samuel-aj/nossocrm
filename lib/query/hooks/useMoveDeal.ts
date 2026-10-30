@@ -1,5 +1,7 @@
 import { getDealLeadSource } from '@/lib/deals/leadSource';
 import { useStageRequirements } from '@/features/boards/requirements/StageRequirementsContext';
+import { useSignatureReview } from '@/features/zapsign/SignatureReviewContext';
+import { signatureRuleFor, zapSignOrgStatusQuery, ZAPSIGN_ORG_STATUS_KEY, type ZapSignOrgStatus } from '@/features/zapsign/useZapSign';
 import { useLayoutEffect, useRef } from 'react';
 /**
  * Unified hook for moving deals between stages
@@ -43,6 +45,8 @@ interface MoveDealParams {
 interface MoveDealResult {
   cancelled?: boolean;
   completedWithRequirements?: boolean;
+  /** Moveu depois da conferência do contrato (ZapSign): o cache recebe o lead confirmado inteiro */
+  movedAfterDialog?: boolean;
   scopeChanged?: boolean;
   dealId: string;
   newStatus: string;
@@ -70,6 +74,11 @@ export const useMoveDeal = () => {
   const scope = useRef(organizationId);
   useLayoutEffect(() => { scope.current = organizationId; }, [organizationId]);
   const completeRequirements = useStageRequirements();
+  const requestSignatureReview = useSignatureReview();
+  const rollback = (dealId: string, context?: MoveDealContext) => {
+    if (context?.previousDeals) queryClient.setQueryData(DEALS_VIEW_KEY, context.previousDeals);
+    if (context?.previousDetail) queryClient.setQueryData(queryKeys.deals.detail(dealId), context.previousDetail);
+  };
   const autor = {
     name:
       profile?.nickname ||
@@ -103,8 +112,16 @@ export const useMoveDeal = () => {
         ...(!outcome.recoveringLegacyWin && { isWon, isLost }),
       };
 
+      // Contrato ao entrar (ZapSign): nada sai sem a pessoa conferir. Sem o
+      // status carregado (ou fora do ar), o banco prepara o contrato e ele
+      // fica aguardando conferência na aba Contrato do lead.
+      const signatureRule = changingStage && !isWon && !isLost
+        ? signatureRuleFor(await queryClient.ensureQueryData(zapSignOrgStatusQuery()).catch(() => undefined), targetStageId)
+        : null;
+
       // 1. Update the deal
       let confirmed: Partial<Deal> | undefined;
+      let movedAfterDialog = false;
       const completedWithRequirements = changingStage && !!targetStage.requiredFields?.length;
       if (completedWithRequirements) {
         if (!completeRequirements) throw new Error('Não foi possível abrir as pendências. Atualize a página.');
@@ -119,12 +136,32 @@ export const useMoveDeal = () => {
         } });
         if (!completed) return { dealId, newStatus: deal.status, cancelled: true };
         confirmed = completed;
+        if (signatureRule && requestSignatureReview) {
+          // o lead já está na etapa: a conferência abre em paralelo; deixar
+          // para depois mantém o contrato aguardando na aba Contrato
+          void requestSignatureReview({ deal: { ...fresh.data, ...completed }, stage: targetStage, board, templateName: signatureRule.template_name, moved: true }).catch(() => undefined);
+        }
+      } else if (signatureRule) {
+        if (!requestSignatureReview) throw new Error('Não foi possível abrir a conferência do contrato. Atualize a página.');
+        const fresh = await dealsService.getById(dealId);
+        if (fresh.error) throw fresh.error;
+        if (!fresh.data || fresh.data.boardId !== deal.boardId || fresh.data.status !== deal.status) throw new Error('O lead mudou. Atualize e tente novamente.');
+        if (scope.current !== initialScope) throw new Error('A organização mudou. Reabra o lead.');
+        const reviewed = await requestSignatureReview({ deal: fresh.data, stage: targetStage, board, templateName: signatureRule.template_name, moved: false, persistMove: async () => {
+          if (scope.current !== initialScope) throw new Error('A organização mudou. Reabra o lead.');
+          const response = await dealsService.update(dealId, updates);
+          if (response.error) throw response.error;
+          return response.data;
+        } });
+        if (reviewed.cancelled) return { dealId, newStatus: deal.status, cancelled: true };
+        confirmed = reviewed.confirmed;
+        movedAfterDialog = true;
       } else {
         const response = await dealsService.update(dealId, updates);
         if (response.error) throw response.error;
         confirmed = response.data;
       }
-      if (scope.current !== initialScope) return { dealId, newStatus: targetStageId, confirmed, completedWithRequirements, scopeChanged: true };
+      if (scope.current !== initialScope) return { dealId, newStatus: targetStageId, confirmed, completedWithRequirements, movedAfterDialog, scopeChanged: true };
 
       // 2. Create activity "Moveu para X" (fire and forget - don't block UI)
       const stageLabel = targetStage?.label || targetStageId;
@@ -226,7 +263,7 @@ export const useMoveDeal = () => {
         })();
       }
 
-      return { dealId, newStatus: targetStageId, isWon: confirmed?.isWon ?? isWon, isLost: confirmed?.isLost ?? isLost, confirmed, completedWithRequirements };
+      return { dealId, newStatus: targetStageId, isWon: confirmed?.isWon ?? isWon, isLost: confirmed?.isLost ?? isLost, confirmed, completedWithRequirements, movedAfterDialog };
     },
 
     // Optimistic update: update UI instantly before server responds
@@ -237,12 +274,16 @@ export const useMoveDeal = () => {
       // Snapshot previous state
       const previousDeals = queryClient.getQueryData<DealView[]>(DEALS_VIEW_KEY);
       const previousDetail = queryClient.getQueryData<Deal>(queryKeys.deals.detail(dealId));
-      if ((deal.boardId !== board.id || deal.status !== targetStageId) && board.stages.find(s => s.id === targetStageId)?.requiredFields?.length) {
-        return { previousDeals, previousDetail, deferred: true };
-      }
-
       // Determine new status
       const { isWon, isLost, closedAt } = resolveBoardMoveOutcome({ board, deal, targetStageId, explicitWin, explicitLost, explicitReopen });
+      // Um modal decide antes (pendências da etapa ou conferência do contrato):
+      // nada de otimismo até a pessoa confirmar
+      const changing = deal.boardId !== board.id || deal.status !== targetStageId;
+      const asksFirst = !!board.stages.find(s => s.id === targetStageId)?.requiredFields?.length
+        || (!isWon && !isLost && !!signatureRuleFor(queryClient.getQueryData<ZapSignOrgStatus>(ZAPSIGN_ORG_STATUS_KEY), targetStageId));
+      if (changing && asksFirst) {
+        return { previousDeals, previousDetail, deferred: true };
+      }
       const boardUpdate = board.id !== deal.boardId ? { boardId: board.id } : {};
       const stageDateUpdate = board.id !== deal.boardId || targetStageId !== deal.status
         ? { lastStageChangeDate: new Date().toISOString() }
@@ -293,9 +334,14 @@ export const useMoveDeal = () => {
       return { previousDeals, previousDetail };
     },
 
-    onSuccess: (result, variables) => {
-      if (!result.confirmed || result.cancelled || result.scopeChanged) return;
-      if (result.completedWithRequirements) {
+    onSuccess: (result, variables, context) => {
+      if (result.cancelled) {
+        // desistiu no modal: desfaz o otimismo que porventura tenha sido aplicado
+        if (!context?.deferred) rollback(variables.dealId, context);
+        return;
+      }
+      if (!result.confirmed || result.scopeChanged) return;
+      if (result.completedWithRequirements || result.movedAfterDialog) {
         const applyCompleted = <T extends Deal>(old: T): T => {
           if (result.confirmed?.updatedAt && old.updatedAt > result.confirmed.updatedAt) return old;
           return { ...old, ...result.confirmed, owner: result.confirmed?.ownerId === old.ownerId ? old.owner : result.confirmed?.owner ?? old.owner };
@@ -317,12 +363,7 @@ export const useMoveDeal = () => {
     // Rollback on error
     onError: (_err, variables, context) => {
       if (context?.deferred) return;
-      if (context?.previousDeals) {
-        queryClient.setQueryData(DEALS_VIEW_KEY, context.previousDeals);
-      }
-      if (context?.previousDetail) {
-        queryClient.setQueryData(queryKeys.deals.detail(variables.dealId), context.previousDetail);
-      }
+      rollback(variables.dealId, context);
     },
 
     // Only refetch deals on success (not contacts, not activities)

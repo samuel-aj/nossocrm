@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 
 import { CRMProvider } from '@/context/CRMContext'
 import { StageRequirementsProvider } from '@/features/boards/requirements/StageRequirementsProvider'
+import { SignatureReviewProvider } from '@/features/zapsign/SignatureReviewProvider'
 import { AIProvider } from '@/context/AIContext'
 import Layout from '@/components/Layout'
 import EntryRedirect from '@/components/EntryRedirect'
@@ -28,10 +29,12 @@ export default function ProtectedLayout({
     const content = (
         <CRMProvider>
           <StageRequirementsProvider>
-            <AIProvider>
-                <EntryRedirect />
-                {shouldUseAppShell ? <Layout>{children}</Layout> : children}
-            </AIProvider>
+            <SignatureReviewProvider>
+              <AIProvider>
+                  <EntryRedirect />
+                  {shouldUseAppShell ? <Layout>{children}</Layout> : children}
+              </AIProvider>
+            </SignatureReviewProvider>
           </StageRequirementsProvider>
         </CRMProvider>
     )

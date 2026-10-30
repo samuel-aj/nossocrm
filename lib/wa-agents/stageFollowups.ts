@@ -17,6 +17,7 @@ import { sendTemplateToConversation, sendTextToConversation, startBotRun } from 
 import { loadDealContext } from './context';
 import { errorMessage } from './errors';
 import { renderTemplate } from './template';
+import { lastInboundAt, resolveDealConversation, type DealConversation as Conv } from './dealConversation';
 
 export type FollowupSchedule = {
   deal_id: string;
@@ -48,29 +49,6 @@ type Outcome =
   | { status: 'cancelled'; reason: string }
   /** Lead respondeu depois de o item ser pego: o banco já reagendou, nada a gravar */
   | { status: 'superseded' };
-
-type Conv = {
-  id: string;
-  connection_id: string | null;
-  wa_phone: string | null;
-  deal_id: string | null;
-  contact_id: string | null;
-  last_message_at: string | null;
-};
-
-/** Mensagem recebida do lead mais recente nas conversas do negócio (ou do contato). */
-async function lastInboundAt(admin: SupabaseClient, convIds: string[]): Promise<string | null> {
-  if (convIds.length === 0) return null;
-  const { data } = await admin
-    .from('wa_messages')
-    .select('created_at')
-    .in('conversation_id', convIds)
-    .eq('direction', 'in')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  return (data as { created_at?: string } | null)?.created_at ?? null;
-}
 
 /**
  * Decide o que fazer com UM agendamento vencido. Separado da gravação para ser
@@ -115,39 +93,15 @@ export async function runStageFollowup(admin: SupabaseClient, s: FollowupSchedul
   if ((fired ?? []).length > 0) return { status: 'cancelled', reason: 'o follow-up desta etapa já foi executado para este lead' };
 
   // Conversas do negócio: as ligadas a ele; sem nenhuma, as do contato
-  let convQuery = admin
-    .from('wa_conversations')
-    .select('id, connection_id, wa_phone, deal_id, contact_id, last_message_at, is_group')
-    .eq('organization_id', orgId);
-  convQuery = deal.contact_id ? convQuery.or(`deal_id.eq.${deal.id},contact_id.eq.${deal.contact_id}`) : convQuery.eq('deal_id', deal.id);
-  const { data: convRows } = await convQuery;
-  const convs = ((convRows ?? []) as Array<Conv & { is_group?: boolean | null }>).filter((c) => !c.is_group);
+  const resolved = await resolveDealConversation(admin, orgId, deal);
 
   // Última palavra do lead: se ele escreveu depois do início da contagem, o
   // banco já reagendou; não age com a informação velha
-  const lastIn = await lastInboundAt(admin, convs.map((c) => c.id));
+  const lastIn = await lastInboundAt(admin, resolved.all.map((c) => c.id));
   if (lastIn && Date.parse(lastIn) > Date.parse(s.anchor_at) + 1) return { status: 'superseded' };
 
-  const newest = (list: Conv[]) =>
-    [...list].sort((a, b) => Date.parse(b.last_message_at ?? '0') - Date.parse(a.last_message_at ?? '0'))[0] ?? null;
-  const linked = convs.filter((c) => c.deal_id === deal.id);
-  let conv: Conv | null = newest(linked);
-  if (!conv && convs.length > 0) {
-    // Sem conversa ligada ao lead: só usa a do contato se ele não tiver OUTRO lead aberto
-    // (senão o follow-up de um lead cairia na conversa de outro)
-    const { count } = await admin
-      .from('deals')
-      .select('id', { count: 'exact', head: true })
-      .eq('organization_id', orgId)
-      .eq('contact_id', deal.contact_id as string)
-      .is('deleted_at', null)
-      .eq('is_won', false)
-      .eq('is_lost', false);
-    if ((count ?? 0) > 1) {
-      return { status: 'skipped', reason: 'o contato tem mais de um lead aberto e nenhuma conversa ligada a este lead' };
-    }
-    conv = newest(convs);
-  }
+  if (!resolved.ok) return { status: 'skipped', reason: resolved.reason };
+  const conv: Conv | null = resolved.conversation;
 
   if (rule.action_type === 'bot') {
     if (!rule.bot_id) return { status: 'failed', error: 'regra sem robô escolhido' };

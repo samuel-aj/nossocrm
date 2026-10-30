@@ -14,6 +14,7 @@ import { useSettingsController } from './hooks/useSettingsController';
 import { ApiKeysSection } from './components/ApiKeysSection';
 import { WebhooksSection } from './components/WebhooksSection';
 import { McpSection } from './components/McpSection';
+import { ZapSignSection } from './components/ZapSignSection';
 import { DataStorageSettings } from './components/DataStorageSettings';
 import AppearanceSettings from './components/AppearanceSettings';
 import { ProductsCatalogManager } from './components/ProductsCatalogManager';
@@ -38,6 +39,7 @@ import {
   Cable,
   Building2,
   Compass,
+  FileSignature,
 } from 'lucide-react';
 
 type SettingsTab = 'general' | 'crm' | 'distribution' | 'users' | 'products' | 'ai' | 'integrations' | 'data';
@@ -101,20 +103,23 @@ const ProductsSettings: React.FC = () => (
 
 // ---------------------------------------------------------------- Integrações
 
-type IntegrationsSubTab = 'webhooks' | 'api' | 'mcp';
+type IntegrationsSubTab = 'webhooks' | 'api' | 'mcp' | 'zapsign';
 
 const IntegrationsSettings: React.FC = () => {
   const [subTab, setSubTab] = useState<IntegrationsSubTab>('webhooks');
+  const { profile } = useAuth();
+  // ZapSign: por enquanto só o super admin conecta (liberação controlada por organização)
+  const canZapSign = profile?.role === UserRole.SUPER_ADMIN;
 
   useEffect(() => {
     const syncFromHash = () => {
       const h = (window.location.hash || '').replace('#', '');
-      if (h === 'webhooks' || h === 'api' || h === 'mcp') setSubTab(h);
+      if (h === 'webhooks' || h === 'api' || h === 'mcp' || (h === 'zapsign' && canZapSign)) setSubTab(h);
     };
     syncFromHash();
     window.addEventListener('hashchange', syncFromHash);
     return () => window.removeEventListener('hashchange', syncFromHash);
-  }, []);
+  }, [canZapSign]);
 
   const go = (t: IntegrationsSubTab) => {
     setSubTab(t);
@@ -125,7 +130,7 @@ const IntegrationsSettings: React.FC = () => {
 
   return (
     <div className="pb-10">
-      <SettingsHeader title="Integrações" description="Webhooks, chaves da API e MCP para ligar o CRM a outros sistemas." />
+      <SettingsHeader title="Integrações" description="Webhooks, chaves da API, MCP e ZapSign para ligar o CRM a outros sistemas." />
       <SubTabs
         ariaLabel="Seções de Integrações"
         value={subTab}
@@ -134,11 +139,13 @@ const IntegrationsSettings: React.FC = () => {
           { id: 'webhooks', label: 'Webhooks', icon: Webhook },
           { id: 'api', label: 'API e chaves', icon: KeyRound },
           { id: 'mcp', label: 'MCP', icon: Cable },
+          ...(canZapSign ? [{ id: 'zapsign' as const, label: 'ZapSign', icon: FileSignature }] : []),
         ]}
       />
       {subTab === 'webhooks' && <WebhooksSection />}
       {subTab === 'api' && <ApiKeysSection />}
       {subTab === 'mcp' && <McpSection />}
+      {subTab === 'zapsign' && canZapSign && <ZapSignSection />}
     </div>
   );
 };

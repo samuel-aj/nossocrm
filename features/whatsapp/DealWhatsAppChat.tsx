@@ -1043,7 +1043,7 @@ function fmtSeconds(s: number): string {
 /** Item do histórico do lead (nota, atividade, alteração) mostrado ENTRE as mensagens, na ordem do tempo. */
 export type ChatTimelineEntry = { id: string; at: string; node: React.ReactNode };
 
-export type ComposerMode = 'message' | 'note' | 'activity';
+export type ComposerMode = 'message' | 'note' | 'activity' | 'contract';
 
 /**
  * Tela do lead: a conversa vira a linha do tempo unificada. O chat recebe os
@@ -1064,6 +1064,8 @@ export type ChatTimelineProps = {
   onComposerModeChange: (mode: ComposerMode) => void;
   noteComposer: React.ReactNode;
   activityComposer: React.ReactNode;
+  /** Aba Contrato (ZapSign): só existe quando a organização tem a integração conectada */
+  contractComposer?: React.ReactNode;
   /** Sem permissão de editar o lead: modos Nota e Atividade ficam desabilitados */
   canWriteCrm?: boolean;
   /** Muda quando a própria pessoa salva nota/atividade: a conversa vai ao fim para mostrar */
@@ -1075,6 +1077,13 @@ const COMPOSER_MODES: Array<{ id: ComposerMode; label: string }> = [
   { id: 'note', label: 'Nota interna' },
   { id: 'activity', label: 'Atividade' },
 ];
+const CONTRACT_MODE: { id: ComposerMode; label: string } = { id: 'contract', label: 'Contrato' };
+const ACTIVE_TAB_CLASS: Record<ComposerMode, string> = {
+  message: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300',
+  note: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300',
+  activity: 'bg-primary-100 text-primary-700 dark:bg-primary-500/15 dark:text-primary-300',
+  contract: 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300',
+};
 
 interface Attachment {
   file: File;
@@ -1405,7 +1414,14 @@ function DealWhatsAppChatSession({
     !!data?.hasMore
   );
   const messages = older.messages;
-  const composerMode: ComposerMode = timeline?.composerMode ?? 'message';
+  // Aba Contrato só quando a tela do lead a oferece (ZapSign conectada); um
+  // modo 'contract' guardado de antes cai em Mensagem
+  const composerModes = timeline?.contractComposer ? [...COMPOSER_MODES, CONTRACT_MODE] : COMPOSER_MODES;
+  const composerMode: ComposerMode = timeline?.composerMode && composerModes.some(m => m.id === timeline.composerMode) ? timeline.composerMode : 'message';
+  const [contractMounted, setContractMounted] = useState(false);
+  useEffect(() => {
+    if (composerMode === 'contract') setContractMounted(true);
+  }, [composerMode]);
   // Mensagens + itens do histórico do lead, em ordem cronológica
   type ListItem = { kind: 'msg'; m: WaChatMessage; at: number } | { kind: 'entry'; e: ChatTimelineEntry; at: number };
   const listItems = useMemo<ListItem[]>(() => {
@@ -2430,7 +2446,7 @@ function DealWhatsAppChatSession({
         <div className="shrink-0 border-t border-slate-200 dark:border-white/10 bg-white dark:bg-dark-card">
           {timeline.aboveComposer}
           <div role="tablist" aria-label="O que escrever" className="flex items-center gap-1 px-3 pt-2">
-            {COMPOSER_MODES.map(mode => {
+            {composerModes.map(mode => {
               const active = composerMode === mode.id;
               const disabled = mode.id !== 'message' && timeline.canWriteCrm === false;
               return (
@@ -2445,21 +2461,17 @@ function DealWhatsAppChatSession({
                   onKeyDown={e => {
                     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
                     e.preventDefault();
-                    const idx = COMPOSER_MODES.findIndex(x => x.id === composerMode);
-                    const step = e.key === 'ArrowRight' ? 1 : COMPOSER_MODES.length - 1;
-                    const next = COMPOSER_MODES[(idx + step) % COMPOSER_MODES.length];
+                    const idx = composerModes.findIndex(x => x.id === composerMode);
+                    const step = e.key === 'ArrowRight' ? 1 : composerModes.length - 1;
+                    const next = composerModes[(idx + step) % composerModes.length];
                     timeline.onComposerModeChange(next.id);
                     const tabs = e.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
-                    tabs?.[COMPOSER_MODES.indexOf(next)]?.focus();
+                    tabs?.[composerModes.indexOf(next)]?.focus();
                   }}
                   title={disabled ? 'Sem permissão para editar este lead' : undefined}
                   className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                     active
-                      ? mode.id === 'note'
-                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300'
-                        : mode.id === 'activity'
-                          ? 'bg-primary-100 text-primary-700 dark:bg-primary-500/15 dark:text-primary-300'
-                          : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
+                      ? ACTIVE_TAB_CLASS[mode.id]
                       : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-white dark:hover:bg-white/10'
                   }`}
                 >
@@ -2470,6 +2482,10 @@ function DealWhatsAppChatSession({
           </div>
           <div className={composerMode === 'note' ? '' : 'hidden'}>{timeline.noteComposer}</div>
           <div className={composerMode === 'activity' ? '' : 'hidden'}>{timeline.activityComposer}</div>
+          {/* A aba Contrato só monta quando aberta pela primeira vez (consulta a ZapSign) e depois fica, para não perder o que foi conferido */}
+          {timeline.contractComposer && (contractMounted || composerMode === 'contract') ? (
+            <div className={composerMode === 'contract' ? '' : 'hidden'}>{timeline.contractComposer}</div>
+          ) : null}
         </div>
       )}
 

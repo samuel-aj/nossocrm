@@ -24,6 +24,7 @@ import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/context/ToastContext';
 import type { BoardStage, LifecycleStage } from '@/types';
 import { StageFollowupSection } from './StageFollowupSection';
+import { StageSignatureSection } from './StageSignatureSection';
 
 export const STAGE_COLORS = [
   'bg-blue-500',
@@ -231,6 +232,7 @@ export function BoardStagesEditor({
             ) : null}
           </div>
           <StageFollowupSection stageId={current.id} stageSaved={savedStageIds.has(current.id)} />
+          <StageSignatureSection stageId={current.id} stageSaved={savedStageIds.has(current.id)} />
           <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-100 dark:border-white/5">
             <div className="flex items-center gap-2">
               {showIds ? <CopyId value={current.id} label="ID da etapa" /> : null}

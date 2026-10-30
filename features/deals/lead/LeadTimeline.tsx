@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleDot,
+  FileSignature,
   Clock,
   Mail,
   Pencil,
@@ -89,7 +90,7 @@ export function DueBadge({ date, completed }: { date: string; completed: boolean
   );
 }
 
-function actorLabel(e: { actor_kind: string; actor_name: string | null; actor_id: string | null }): { text: string; icon: React.ReactNode } {
+function actorLabel(e: { actor_kind: string; actor_name: string | null; actor_id: string | null; detail?: Record<string, unknown> | null }): { text: string; icon: React.ReactNode } {
   switch (e.actor_kind) {
     case 'user':
       return { text: e.actor_name || 'Usuário', icon: <User size={11} aria-hidden="true" /> };
@@ -98,7 +99,7 @@ function actorLabel(e: { actor_kind: string; actor_name: string | null; actor_id
     case 'agent':
       return { text: e.actor_name ? `Agente de IA ${e.actor_name}` : 'Agente de IA', icon: <Sparkles size={11} aria-hidden="true" /> };
     case 'integration':
-      return { text: 'Integração (API)', icon: <Plug size={11} aria-hidden="true" /> };
+      return { text: e.detail && (e.detail as { provider?: string }).provider === 'zapsign' ? 'ZapSign' : 'Integração (API)', icon: <Plug size={11} aria-hidden="true" /> };
     default:
       return { text: 'Automático do CRM', icon: <Zap size={11} aria-hidden="true" /> };
   }
@@ -259,6 +260,27 @@ export function describeEvent(e: DealEvent, c: Ctx): { icon: React.ReactNode; te
       }
       if (status === 'failed') return { icon: <AlertTriangle size={13} />, tone: 'bad', text: <><b>Follow-up por inatividade falhou</b>{d.error ? `: ${String(d.error)}` : ''}</> };
       return { icon: <Clock size={13} />, tone: 'warn', text: <><b>Follow-up por inatividade não executado</b>{d.reason ? `: ${String(d.reason)}` : ''}</> };
+    }
+    case 'signature': {
+      const status = String(e.new_value ?? '');
+      const doc = e.field ? <b>{e.field}</b> : <b>documento</b>;
+      const label = (txt: React.ReactNode, tone?: 'good' | 'bad' | 'warn', icon: React.ReactNode = <FileSignature size={13} />) => ({ icon, text: txt, tone });
+      if (status === 'review') return label(<>Contrato {doc} preparado ao entrar na etapa. <b>Aguardando conferência</b> na aba Contrato antes do envio.</>, 'warn', <Clock size={13} />);
+      if (status === 'discarded') return label(<>Contrato {doc} descartado antes do envio</>);
+      if (status === 'sent') {
+        const via = String(d.sent_via ?? '');
+        const viaTxt = via === 'crm_whatsapp' ? 'link enviado pelo WhatsApp do CRM' : via === 'zapsign_whatsapp' ? 'link enviado pela ZapSign por WhatsApp' : via === 'zapsign_email' ? 'link enviado pela ZapSign por e-mail' : 'link disponível no lead';
+        return label(<>Enviado para assinatura: {doc} ({viaTxt}{d.note ? `; ${String(d.note)}` : ''})</>);
+      }
+      if (status === 'viewed') return label(<>{doc} aberto pelo signatário</>);
+      if (status === 'partial') return label(<>{doc}: {d.signer ? <>{String(d.signer)} assinou, faltam outros</> : 'uma das assinaturas feita'}</>);
+      if (status === 'signed') return label(<>{doc} <b>assinado</b>{Array.isArray(d.signers) && d.signers.length ? ` por ${(d.signers as string[]).join(', ')}` : ''}{d.file_id ? ' (PDF nos anexos)' : d.file_error ? ` (PDF não guardado: ${String(d.file_error)})` : ''}</>, 'good', <CheckCircle2 size={13} />);
+      if (status === 'refused') return label(<>{doc} <b>recusado</b>{d.reason ? `: ${String(d.reason)}` : ''}</>, 'bad', <AlertTriangle size={13} />);
+      if (status === 'failed') return label(<>Falha ao enviar {doc} para assinatura{d.error ? `: ${String(d.error)}` : ''}</>, 'bad', <AlertTriangle size={13} />);
+      if (status === 'actions_failed') return label(<>Assinatura: ações depois do retorno falharam{Array.isArray(d.problems) ? `: ${(d.problems as string[]).join('; ')}` : ''}</>, 'warn', <AlertTriangle size={13} />);
+      if (status === 'deleted') return label(<>{doc} excluído na ZapSign</>, 'warn');
+      if (status === 'expired') return label(<>{doc} expirou sem assinatura</>, 'warn');
+      return label(<>Assinatura: {status}</>);
     }
     default:
       return { icon: <CircleDot size={13} />, text: <>{e.kind}</> };

@@ -16,6 +16,7 @@ import { processDealStarts } from '@/lib/wa-agents/dealStarts';
 import { processDueBotRuns } from '@/lib/wa-agents/bots';
 import { processFollowups } from '@/lib/wa-agents/followups';
 import { processStageFollowups } from '@/lib/wa-agents/stageFollowups';
+import { processQueuedSignatures } from '@/lib/zapsign/signatures';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -53,6 +54,11 @@ async function handle(req: Request): Promise<Response> {
       await processStageFollowups(admin, { limit: 10, deadlineMs });
     } catch (err) {
       console.error('[wa-agents/tick] falha nos follow-ups por inatividade da etapa', err);
+    }
+    try {
+      await processQueuedSignatures(admin, { limit: 5, deadlineMs });
+    } catch (err) {
+      console.error('[wa-agents/tick] falha ao enviar documentos para assinatura', err);
     }
   });
 
