@@ -193,6 +193,9 @@ export function StageSignatureSection({ stageId, stageSaved }: { stageId: string
   const templates = templatesQ.data?.templates ?? [];
   const stageOptions = board?.stages.filter((s) => s.id !== stageId) ?? [];
 
+  // Só aparece com a ZapSign conectada na organização (nada de contrato antes disso)
+  if (!connected || q.data?.pendingMigration) return null;
+
   return (
     <section className="rounded-xl border border-slate-200 dark:border-white/10 p-3 space-y-3" aria-labelledby={`sig-${stageId}`}>
       <div className="flex items-start gap-2">

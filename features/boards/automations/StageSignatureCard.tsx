@@ -28,7 +28,8 @@ export function StageSignatureCard({ stageId, stageLabel }: { stageId: string; s
     staleTime: 30_000,
   });
   const rule = q.data?.rule ?? null;
-  if (q.data?.pendingMigration) return null;
+  // Só aparece com a ZapSign conectada na organização (nada de contrato antes disso)
+  if (!q.data?.connected || q.data.pendingMigration) return null;
 
   return (
     <div className="space-y-2 pt-2" aria-label="Assinatura eletrônica">

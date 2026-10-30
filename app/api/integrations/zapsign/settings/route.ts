@@ -1,5 +1,6 @@
 /**
- * /api/integrations/zapsign/settings  (admin da organização)
+ * /api/integrations/zapsign/settings  (admin da organização lê; só o SUPER
+ *   ADMIN conecta e desconecta, enquanto a liberação é controlada por organização)
  *   GET    -> { connected, sandbox, token_hint, template_count, verified_at, webhook_ok, last_error }
  *   PUT    -> { api_token, sandbox }  testa o token (lista os modelos), cria o
  *             webhook da conta na ZapSign apontando para este CRM e grava.
@@ -11,6 +12,10 @@ import { json } from '@/lib/whatsapp/api';
 import { guardRoute, readJsonBody, validationError, getErrorMessage } from '@/app/api/wa-agents/_shared';
 import { clientFor, loadZapSignSettings, newWebhookSecret } from '@/lib/zapsign/signatures';
 import { ZapSignError } from '@/lib/zapsign/client';
+import { UserRole } from '@/types/constants';
+
+// uma Response nova por pedido (o corpo só pode ser lido uma vez)
+const onlySuperAdmin = () => json({ error: 'Por enquanto só o super admin conecta a ZapSign', code: 'FORBIDDEN' }, 403);
 
 export const runtime = 'nodejs';
 
@@ -59,6 +64,7 @@ export async function GET() {
 export async function PUT(req: Request) {
   const auth = await guardRoute({ req, admin: true });
   if (!auth.ok) return auth.response;
+  if (auth.user.role !== UserRole.SUPER_ADMIN) return onlySuperAdmin();
   const parsed = Body.safeParse(await readJsonBody(req));
   if (!parsed.success) return validationError(parsed.error);
   const orgId = auth.user.organizationId;
@@ -136,6 +142,7 @@ export async function PUT(req: Request) {
 export async function DELETE(req: Request) {
   const auth = await guardRoute({ req, admin: true });
   if (!auth.ok) return auth.response;
+  if (auth.user.role !== UserRole.SUPER_ADMIN) return onlySuperAdmin();
   const orgId = auth.user.organizationId;
   const existing = await loadZapSignSettings(auth.admin, orgId);
   if (existing?.webhook_id) {

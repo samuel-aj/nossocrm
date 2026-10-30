@@ -27,3 +27,9 @@ Estado em 28/10/2026: branch `feat/zapsign` e preview `staging`. Não está em p
 ## Para produção
 
 Aplicar `20261027150000_zapsign_integration.sql` e `20261028150000_zapsign_review_before_send.sql` no banco de produção, fazer o merge de `feat/zapsign` em `main` e conectar a conta ZapSign real (plano com API) em Configurações > Integrações.
+
+## Produção (30/10/2026)
+
+- Publicado em produção com a ZapSign **desconectada em todas as organizações**: as tabelas existem, mas `zapsign_settings` está vazia. Enquanto uma organização não conecta, nada de contrato aparece para ela: nem a aba Contrato no lead, nem o card "Contrato ao entrar" no Automatizar, nem a seção na janela da etapa, e o trigger em `deals` sai no primeiro `IF` (sem regra na etapa, nada acontece).
+- **Quem conecta**: por enquanto só o **super admin** vê a aba ZapSign em Configurações > Integrações e consegue chamar `PUT`/`DELETE` em `/api/integrations/zapsign/settings` (o admin da organização recebe 403). Para liberar aos admins das organizações, basta trocar `canZapSign` em `features/settings/SettingsPage.tsx` e tirar a checagem `ONLY_SUPER_ADMIN` na rota.
+- **Voltar atrás**: código pela tag `prod-pre-zapsign` (Vercel > Deployments > Instant Rollback, ou `git revert -m 1` do merge); banco com `docs/zapsign-rollback.sql` (o passo 1, só o trigger, já desliga a integração sem perder nada).

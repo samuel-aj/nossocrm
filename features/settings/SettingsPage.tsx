@@ -107,16 +107,19 @@ type IntegrationsSubTab = 'webhooks' | 'api' | 'mcp' | 'zapsign';
 
 const IntegrationsSettings: React.FC = () => {
   const [subTab, setSubTab] = useState<IntegrationsSubTab>('webhooks');
+  const { profile } = useAuth();
+  // ZapSign: por enquanto só o super admin conecta (liberação controlada por organização)
+  const canZapSign = profile?.role === UserRole.SUPER_ADMIN;
 
   useEffect(() => {
     const syncFromHash = () => {
       const h = (window.location.hash || '').replace('#', '');
-      if (h === 'webhooks' || h === 'api' || h === 'mcp' || h === 'zapsign') setSubTab(h);
+      if (h === 'webhooks' || h === 'api' || h === 'mcp' || (h === 'zapsign' && canZapSign)) setSubTab(h);
     };
     syncFromHash();
     window.addEventListener('hashchange', syncFromHash);
     return () => window.removeEventListener('hashchange', syncFromHash);
-  }, []);
+  }, [canZapSign]);
 
   const go = (t: IntegrationsSubTab) => {
     setSubTab(t);
@@ -136,13 +139,13 @@ const IntegrationsSettings: React.FC = () => {
           { id: 'webhooks', label: 'Webhooks', icon: Webhook },
           { id: 'api', label: 'API e chaves', icon: KeyRound },
           { id: 'mcp', label: 'MCP', icon: Cable },
-          { id: 'zapsign', label: 'ZapSign', icon: FileSignature },
+          ...(canZapSign ? [{ id: 'zapsign' as const, label: 'ZapSign', icon: FileSignature }] : []),
         ]}
       />
       {subTab === 'webhooks' && <WebhooksSection />}
       {subTab === 'api' && <ApiKeysSection />}
       {subTab === 'mcp' && <McpSection />}
-      {subTab === 'zapsign' && <ZapSignSection />}
+      {subTab === 'zapsign' && canZapSign && <ZapSignSection />}
     </div>
   );
 };
