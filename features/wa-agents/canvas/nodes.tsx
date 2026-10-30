@@ -1,4 +1,5 @@
 'use client';
+import { BotGroupMetric, BotStepMetric } from '../analytics/BotAnalyticsContext';
 import { NativeSelect } from '@/components/ui/NativeSelect';
 
 /**
@@ -135,6 +136,8 @@ ${text}` : text;
       return `Digitando por ${block.data.seconds}s`;
     case 'start_bot':
       return block.data.bot_name.trim() || (block.data.bot_id ? 'Robô escolhido' : 'Escolha o robô');
+    case 'split':
+      return `${block.data.mode === 'round_robin' ? 'Alternado' : 'Aleatório'} · ${block.data.branches.length} saídas`;
     case 'condition': {
       const n = block.data.rules.length;
       return `${n} ${n === 1 ? 'caminho' : 'caminhos'} + Senão`;
@@ -531,6 +534,7 @@ function BlockRow({
           <IssueMark issue={issue} size={12} />
         </div>
         <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-3 whitespace-pre-line break-words">{summary}</p>
+        <BotStepMetric stepId={block.id} />
         {block.type === 'send_template' && isLast && block.data.buttons.length > 0 ? (
           <ul className="mt-1.5 space-y-1" aria-label="Botões do modelo (uma saída por botão)">
             {block.data.buttons.map((text, i) => {
@@ -826,6 +830,7 @@ function BubbleNodeView({ id, data, selected }: NodeProps<BubbleNode>) {
         </div>
       </div>
 
+      <BotGroupMetric groupId={id} />
       <ol ref={listRef} className="relative p-2 space-y-1.5" aria-label={`Blocos do balão ${title}`}>
         {drop !== null && dropProblem ? (
           <li className="wa-drop-hint -top-5" role="status">

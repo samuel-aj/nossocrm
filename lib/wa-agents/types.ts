@@ -638,6 +638,24 @@ export const BotConditionRuleSchema = z.object({
 export type BotConditionRule = z.infer<typeof BotConditionRuleSchema>;
 
 export const BotStepSchema = z.discriminatedUnion('type', [
+  z.object({
+    ...botStepBase,
+    type: z.literal('split'),
+    mode: z.enum(['round_robin', 'random']).default('round_robin'),
+    branches: z.array(z.object({
+      id: z.string().min(1).max(80).regex(/^[a-zA-Z0-9_-]+$/),
+      label: z.string().trim().min(1).max(60),
+      weight: z.number().int().min(1).max(100),
+      goto_step_id: z.string().min(1).nullable(),
+    })).min(2).max(20),
+  }).superRefine((step, ctx) => {
+    if (new Set(step.branches.map(b => b.id)).size !== step.branches.length) {
+      ctx.addIssue({ code: 'custom', path: ['branches'], message: 'Cada saída deve ter um ID diferente' });
+    }
+    if (step.mode === 'random' && step.branches.reduce((sum, b) => sum + b.weight, 0) !== 100) {
+      ctx.addIssue({ code: 'custom', path: ['branches'], message: 'As porcentagens das saídas devem somar 100%' });
+    }
+  }),
   /** typing_seconds: "digitando..." antes de enviar esta mensagem (0 = direto) */
   z.object({ ...botStepBase, type: z.literal('send_text'), text: z.string().min(1).max(4000), typing_seconds: z.number().int().min(0).max(60).optional() }),
   /**
@@ -827,6 +845,12 @@ export type BotRunRow = {
   error: string | null;
   created_at: string;
   updated_at: string;
+  /** Apenas execuções novas: definição fixada no início e revisão para métricas. */
+  flow_snapshot?: BotInput | null;
+  flow_revision?: string | null;
+  analytics_version?: number | null;
+  is_test?: boolean;
+  split_subject_key?: string | null;
 };
 /** Entrada do `log` de uma execução do robô */
 export type BotLogEntry = {

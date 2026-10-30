@@ -29,6 +29,7 @@ export const STEP_LABELS: Record<StepType, string> = {
   wait: 'Esperar',
   wait_reply: 'Esperar resposta',
   condition: 'Condição',
+  split: 'Distribuir caminhos',
   move_stage: 'Mover etapa',
   activate_alert: 'Ativar alerta',
   add_tag: 'Adicionar tag',
@@ -48,6 +49,7 @@ export const STEP_TYPES: StepType[] = [
   'typing',
   'wait_reply',
   'condition',
+  'split',
   'create_lead',
   'update_lead',
   'move_stage',
@@ -79,6 +81,7 @@ export const BLOCK_KIND: Record<StepType, BlockKind> = {
   typing: 'linear',
   wait_reply: 'branch',
   condition: 'branch',
+  split: 'branch',
   move_stage: 'linear',
   activate_alert: 'linear',
   add_tag: 'linear',
@@ -261,6 +264,8 @@ export function conditionRulePreview(rule: ConditionRuleDraft): string {
   return `${field} ${CONDITION_OP_LABELS[c.op]}${value}${more}`;
 }
 export type ConditionData = { rules: ConditionRuleDraft[] };
+export type SplitBranchDraft = { id: string; label: string; weight: number };
+export type SplitData = { mode: 'round_robin' | 'random'; branches: SplitBranchDraft[] };
 /** board_id: pipeline da etapa; loss_*: só valem quando a etapa marca o lead como perdido */
 export type MoveStageData = {
   stage_id: string;
@@ -316,6 +321,7 @@ export type Block =
   | { id: string; type: 'wait'; data: WaitData }
   | { id: string; type: 'wait_reply'; data: WaitReplyData }
   | { id: string; type: 'condition'; data: ConditionData }
+  | { id: string; type: 'split'; data: SplitData }
   | { id: string; type: 'move_stage'; data: MoveStageData }
   | { id: string; type: 'activate_alert'; data: { message: string; tone?: 'green' | 'red' } }
   | { id: string; type: 'add_tag'; data: TagData }
@@ -362,6 +368,11 @@ export const HANDLE_TIMEOUT = 'timeout';
 export const HANDLE_ELSE = 'else';
 const RULE_HANDLE_PREFIX = 'rule:';
 const BUTTON_HANDLE_PREFIX = 'btn:';
+
+/** Stable across branch renames and reordering. */
+export function branchHandleId(branchId: string): string {
+  return `branch:${branchId}`;
+}
 
 /** Saída de um botão de resposta rápida do Modelo de mensagem (pela posição do botão). */
 export function buttonHandleId(index: number): string {
@@ -442,6 +453,12 @@ export function blockOutputs(block: Block): BubbleOutput[] {
         }),
         { handleId: HANDLE_ELSE, label: 'Senão', tone: 'amber' },
       ];
+    case 'split':
+      return block.data.branches.map(branch => ({
+        handleId: branchHandleId(branch.id),
+        label: `${branch.label.trim() || 'Sem nome'}${block.data.mode === 'random' ? ` · ${branch.weight}%` : ''}`,
+        tone: 'slate',
+      }));
     case 'handoff_agent':
     case 'start_bot':
     case 'end':

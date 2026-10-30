@@ -38,6 +38,7 @@ function checkGraph(bot: BotInput) {
     if ('on_timeout_step_id' in s) refs.push(s.on_timeout_step_id);
     if (s.type === 'send_template') refs.push(...s.button_step_ids);
     if (s.type === 'condition') refs.push(s.else_step_id, ...s.rules.map(r => r.goto_step_id));
+    if (s.type === 'split') refs.push(...s.branches.map(branch => branch.goto_step_id));
   }
   const grouped = bot.layout.groups.flatMap(g => g.step_ids);
   if (new Set(grouped).size !== grouped.length || new Set(bot.layout.groups.map(g => g.id)).size !== bot.layout.groups.length) throw new Error('Balões repetidos ou passos em mais de um balão');

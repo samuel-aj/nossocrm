@@ -563,10 +563,11 @@ export function useWaBotRuns(botId?: string | null, limit?: number) {
 export function useStartWaBot() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: { id: string; dealId?: string; phone?: string }) => {
-      const body: { dealId?: string; phone?: string } = {};
+    mutationFn: async (vars: { id: string; dealId?: string; phone?: string; isTest?: boolean }) => {
+      const body: { dealId?: string; phone?: string; isTest?: boolean } = {};
       if (vars.dealId) body.dealId = vars.dealId;
       if (vars.phone) body.phone = vars.phone;
+      if (vars.isTest) body.isTest = true;
       return waAgentsFetch<{ ok: boolean; runId?: string; error?: string }>(`/api/wa-agents/bots/${vars.id}/start`, {
         method: 'POST',
         body,

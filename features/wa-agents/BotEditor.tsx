@@ -26,7 +26,11 @@ import {
   type NodeChange,
   type XYPosition,
 } from '@xyflow/react';
-import { ArrowLeft, Loader2, Play, Save } from 'lucide-react';
+import { ArrowLeft, BarChart3, Loader2, Play, Save } from 'lucide-react';
+import type { PeriodFilter } from '@/features/dashboard/hooks/useDashboardMetrics';
+import { useBotAnalytics } from './analytics/useBotAnalytics';
+import { BotAnalyticsPanel, BotAnalyticsToolbar } from './analytics/BotAnalyticsPanel';
+import { BotAnalyticsProvider, canOverlayBotAnalytics } from './analytics/BotAnalyticsContext';
 import ConfirmModal from '@/components/ConfirmModal';
 import { BotTemplateActions } from './templates/BotTemplateActions';
 import { pendingBotBindings } from '@/lib/wa-agents/botTemplates';
@@ -314,7 +318,8 @@ function carryEdges(
   });
 }
 
-const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({ bot, onClose }) => {
+type BotEditorProps = { bot: BotRow | null; onClose: () => void; initialAnalytics?: boolean };
+const BotEditorInner: React.FC<BotEditorProps> = ({ bot, onClose, initialAnalytics = false }) => {
   const { showToast } = useToast();
   const { darkMode } = useTheme();
   const optionsQ = useWaAgentOptions();
@@ -336,6 +341,12 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
   });
   const [botId, setBotId] = useState<string | null>(bot?.id ?? null);
   const [dirty, setDirty] = useState(false);
+  const [analyticsOpen, setAnalyticsOpen] = useState(initialAnalytics && !!bot);
+  const [analyticsPeriod, setAnalyticsPeriod] = useState<PeriodFilter>('this_month');
+  const [analyticsRevision, setAnalyticsRevision] = useState('');
+  const [analyticsGoal, setAnalyticsGoal] = useState('');
+  const [analyticsVersionKey, setAnalyticsVersionKey] = useState(bot?.updated_at ?? '');
+  const analytics = useBotAnalytics(botId, analyticsOpen, analyticsPeriod, analyticsRevision, analyticsGoal, analyticsVersionKey);
   // Conta cada alteração: salvar só limpa o "Não salvo" se nada mudou durante o envio
   const changeRef = useRef(0);
   const markDirty = useCallback(() => {
@@ -806,6 +817,8 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
     const changeAtSave = changeRef.current;
     try {
       const saved = await save.mutateAsync({ id: botId, input: payload });
+      // A saved edit can create a new flow revision. Never reuse the old overlay while refreshing.
+      setAnalyticsVersionKey(saved.updated_at);
       setBotId(saved.id);
       // Editou enquanto salvava: continua "Não salvo" (antes marcava como salvo e a edição se perdia)
       if (changeRef.current === changeAtSave) setDirty(false);
@@ -859,7 +872,7 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
       return;
     }
     try {
-      const result = await start.mutateAsync({ id: botId, phone });
+      const result = await start.mutateAsync({ id: botId, phone, isTest: true });
       if (result.ok === false) throw new Error(result.error || 'Falha ao iniciar o robô');
       showToast('Robô iniciado. Acompanhe em Execuções.', 'success');
       setTestOpen(false);
@@ -882,6 +895,7 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
   // montada embaixo, invisível). Cliques fora (ex.: fechar uma notificação) seguem valendo.
   return createPortal(
     <CanvasContext.Provider value={ctx}>
+      <BotAnalyticsProvider data={analytics.data} enabled={canOverlayBotAnalytics(analytics.data, analyticsOpen && !analytics.isError, dirty, analyticsVersionKey)} loadedBotUpdatedAt={analyticsVersionKey} nodes={nodes}>
       <FocusTrap active initialFocus={false} onEscape={keepTrapOnEscape} allowOutsideClick>
         <div
           ref={rootRef}
@@ -967,6 +981,11 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
                 <span className="hidden sm:inline text-xs text-slate-400">Salvo</span>
               ) : null}
               <BotTemplateActions getInput={() => flowToBot(nodes, edges, header)} />
+              <button type="button" className={BTN_SECONDARY} disabled={!botId} aria-pressed={analyticsOpen}
+                title={botId ? 'Estatísticas por bloco e caminho' : 'Salve o robô para consultar estatísticas'}
+                onClick={() => { setAnalyticsOpen(value => !value); setSelectedBlock(null); }}>
+                <BarChart3 size={16} aria-hidden="true" />Estatísticas
+              </button>
               <button type="button" className={BTN_SECONDARY} onClick={openTest} disabled={save.isPending}>
                 <Play size={16} aria-hidden="true" />
                 Testar
@@ -982,6 +1001,11 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
             </div>
           </header>
 
+          {analyticsOpen && <BotAnalyticsToolbar data={analytics.isError ? undefined : analytics.data} period={analyticsPeriod}
+            onPeriod={setAnalyticsPeriod} revision={analyticsRevision}
+            onRevision={revision => { setAnalyticsRevision(revision); setAnalyticsGoal(''); }}
+            loading={analytics.isFetching} onRefresh={() => void analytics.refetch()} />}
+
           {pendingBindings.length > 0 && <div className="shrink-0 px-3 pt-3"><Notice>Antes de ativar, configure: {pendingBindings.join('; ')}. Selecione os blocos indicados para concluir os vínculos.</Notice></div>}
           {optionsQ.error ? (
             <div className="shrink-0 px-3 pt-3">
@@ -989,13 +1013,13 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
             </div>
           ) : null}
 
-          <div className="relative flex-1 min-h-0 flex md:flex-row">
+          <div className="relative flex-1 min-h-0 flex flex-col md:flex-row">
             <div ref={canvasRef} className="relative flex-1 min-h-0">
-              <Palette
+              {!analyticsOpen && <Palette
                 onAdd={(type) => addStep(type)}
                 collapsed={paletteCollapsed}
                 onToggle={() => setPaletteCollapsed((v) => !v)}
-              />
+              />}
               <BotCanvas
                 nodes={nodes}
                 edges={edges}
@@ -1012,7 +1036,10 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
                 darkMode={darkMode}
               />
             </div>
-            {panelTarget ? (
+            {analyticsOpen ? <BotAnalyticsPanel data={analytics.data} loading={analytics.isFetching}
+              error={analytics.error ? errorMessage(analytics.error, 'Falha ao carregar as estatísticas') : null}
+              dirty={dirty} staleGraph={!!analytics.data && analytics.data.botUpdatedAt !== analyticsVersionKey}
+              goalStepId={analyticsGoal} onGoal={setAnalyticsGoal} onRetry={() => void analytics.refetch()} /> : panelTarget ? (
               <BlockPanel
                 bubble={panelTarget.bubble}
                 block={panelTarget.block}
@@ -1103,6 +1130,7 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
           </Modal>
         </div>
       </FocusTrap>
+      </BotAnalyticsProvider>
     </CanvasContext.Provider>,
     document.body
   );
@@ -1114,9 +1142,9 @@ const BotEditorInner: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({
  * lista de robôs (a lista continua embaixo e reaparece ao fechar).
  * @returns {Element} Retorna um valor do tipo `Element`.
  */
-export const BotEditor: React.FC<{ bot: BotRow | null; onClose: () => void }> = ({ bot, onClose }) => (
+export const BotEditor: React.FC<BotEditorProps> = ({ bot, onClose, initialAnalytics }) => (
   <ReactFlowProvider>
-    <BotEditorInner bot={bot} onClose={onClose} />
+    <BotEditorInner bot={bot} onClose={onClose} initialAnalytics={initialAnalytics} />
   </ReactFlowProvider>
 );
 

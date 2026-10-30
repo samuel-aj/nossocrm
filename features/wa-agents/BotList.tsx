@@ -8,7 +8,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { Workflow, Plus, Pencil, Trash2, Play, Phone, Zap, Loader2, CopyPlus } from 'lucide-react';
+import { Workflow, Plus, Pencil, Trash2, Play, Phone, Zap, Loader2, CopyPlus, BarChart3 } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
 import { BotTemplateLibrary } from './templates/BotTemplateLibrary';
 import { Modal } from '@/components/ui/Modal';
@@ -50,7 +50,7 @@ export const BotList: React.FC = () => {
   const start = useStartWaBot();
   const { showToast } = useToast();
   const [libraryOpen, setLibraryOpen] = useState(false);
-  const [editor, setEditor] = useState<{ bot: BotRow | null } | null>(null);
+  const [editor, setEditor] = useState<{ bot: BotRow | null; analytics?: boolean } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<BotRow | null>(null);
   const [testBot, setTestBot] = useState<BotRow | null>(null);
   const [testPhone, setTestPhone] = useState('');
@@ -134,7 +134,7 @@ export const BotList: React.FC = () => {
       return;
     }
     try {
-      const result = await start.mutateAsync({ id: testBot.id, phone });
+      const result = await start.mutateAsync({ id: testBot.id, phone, isTest: true });
       if (result.ok === false) throw new Error(result.error || 'Falha ao iniciar o robô');
       showToast('Robô iniciado. Acompanhe em Execuções.', 'success');
       setTestBot(null);
@@ -163,7 +163,7 @@ export const BotList: React.FC = () => {
       {libraryOpen && <BotTemplateLibrary onClose={() => setLibraryOpen(false)} onBlank={() => { setLibraryOpen(false); setEditor({ bot: null }); }} onCreated={bot => { setLibraryOpen(false); setEditor({ bot }); }} />}
 
       {/* Editor em tela cheia (portal): fica por cima da lista enquanto aberto */}
-      {editor ? <BotEditor bot={editor.bot} onClose={() => setEditor(null)} /> : null}
+      {editor ? <BotEditor bot={editor.bot} initialAnalytics={editor.analytics} onClose={() => setEditor(null)} /> : null}
 
       {listQ.isLoading ? (
         <Spinner label="Carregando robôs..." />
@@ -214,6 +214,10 @@ export const BotList: React.FC = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
+                  <button type="button" className={BTN_ICON} aria-label={`Estatísticas do robô ${bot.name}`} title="Estatísticas"
+                    onClick={() => setEditor({ bot, analytics: true })}>
+                    <BarChart3 size={16} aria-hidden="true" />
+                  </button>
                   <Toggle
                     checked={bot.enabled}
                     disabled={togglingId === bot.id}

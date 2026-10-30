@@ -21,6 +21,7 @@ export const maxDuration = 60;
 const BodySchema = z.object({
   dealId: z.string().uuid().optional(),
   phone: z.string().trim().max(32).optional(),
+  isTest: z.boolean().default(false),
 });
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -72,7 +73,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   }
 
   try {
-    const created = await createBotRun(auth.admin, { organizationId: orgId, botId: id, dealId, contactId, phone });
+    const created = await createBotRun(auth.admin, { organizationId: orgId, botId: id, dealId, contactId, phone, isTest: parsed.data.isTest });
     if (!created.ok || !created.run) return json({ ok: false, error: created.error ?? 'Falha ao iniciar o robô' }, 400);
     const run = created.run;
     after(async () => {

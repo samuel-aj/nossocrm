@@ -1,4 +1,5 @@
 import React from 'react';
+import { calendarWeekRange } from '@/lib/calendarWeek';
 import { useDeals } from '@/lib/query/hooks/useDealsQuery';
 import { useContacts } from '@/lib/query/hooks/useContactsQuery';
 import { useBoards, useDefaultBoard } from '@/lib/query/hooks/useBoardsQuery';
@@ -7,6 +8,8 @@ export type PeriodFilter =
   | 'all'
   | 'today'
   | 'yesterday'
+  | 'this_week'
+  | 'last_week'
   | 'last_7_days'
   | 'last_30_days'
   | 'this_month'
@@ -20,6 +23,8 @@ export const PERIOD_LABELS: Record<PeriodFilter, string> = {
   all: 'Todo o Período',
   today: 'Hoje',
   yesterday: 'Ontem',
+  this_week: 'Esta semana',
+  last_week: 'Semana passada',
   last_7_days: 'Últimos 7 dias',
   last_30_days: 'Últimos 30 dias',
   this_month: 'Este Mês',
@@ -37,6 +42,8 @@ export const COMPARISON_LABELS: Record<PeriodFilter, string> = {
   all: 'total',
   today: 'vs ontem',
   yesterday: 'vs anteontem',
+  this_week: 'vs semana passada',
+  last_week: 'vs semana anterior',
   last_7_days: 'vs 7 dias anteriores',
   last_30_days: 'vs 30 dias anteriores',
   this_month: 'vs mês passado',
@@ -74,6 +81,10 @@ export function getDateRange(period: PeriodFilter): DateRange {
       const endOfYesterday = new Date(today.getTime() - 1);
       return { start: yesterday, end: endOfYesterday };
     }
+
+    case 'this_week':
+    case 'last_week':
+      return calendarWeekRange(now, period === 'last_week');
 
     case 'last_7_days': {
       const start = new Date(today);
@@ -141,6 +152,7 @@ export function getDateRange(period: PeriodFilter): DateRange {
  */
 function getPreviousDateRange(period: PeriodFilter): DateRange {
   const current = getDateRange(period);
+  if (period === 'this_week' || period === 'last_week') return calendarWeekRange(current.start, true);
   const duration = current.end.getTime() - current.start.getTime();
 
   return {

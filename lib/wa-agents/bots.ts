@@ -36,6 +36,7 @@ import {
 import { dispatchAgentEvent, postWebhook } from './webhooks';
 import { withActor } from '@/lib/supabase/actorClient';
 import { linkRunConversation } from './linkRunConversation';
+import { allocateBotBranch, BotTelemetryError, executionBot, recordBotEvent } from './botTelemetry';
 
 export { normalizeKeyword };
 
@@ -44,6 +45,9 @@ const MAX_STEPS_PER_RUN = 50;
 const MAX_STEPS_TOTAL = 500;
 const BOT_LOCK_SECONDS = 120;
 const TIMEOUT_STEP_VAR = '_timeout_step_id';
+const WAITING_STEP_VAR = '_waiting_step_id';
+const WAIT_RESOLUTION_VAR = '_wait_resolution';
+const PENDING_EXIT_VAR = '_pending_step_exit';
 const STEPS_TOTAL_VAR = '_steps_total';
 /** Execução parada num Modelo de mensagem esperando a resposta: ao voltar, o passo roteia (botão/outra resposta) em vez de reenviar */
 const TEMPLATE_ROUTE_VAR = '_template_route_step_id';
@@ -161,6 +165,7 @@ type RunState = {
   steps?: BotStep[];
   /** Última falha ou ação pulada: fica em `error` mesmo com a execução concluída */
   failure?: string | null;
+  stepResult?: 'failed' | 'skipped';
 };
 
 /**
@@ -203,6 +208,7 @@ async function saveRun(
 }
 
 function note(st: RunState, step: BotStep | null, text: string, status?: BotLogEntry['status'], error?: string): void {
+  if (status === 'failed' || status === 'skipped') st.stepResult = status;
   st.log.push({
     at: nowIso(),
     step_id: step?.id ?? null,
@@ -215,6 +221,7 @@ function note(st: RunState, step: BotStep | null, text: string, status?: BotLogE
 
 /** Rótulo curto do passo para o histórico e o campo de erro ("Mover etapa (abc123)") */
 const STEP_LABEL: Partial<Record<BotStep['type'], string>> = {
+  split: 'Distribuir caminhos',
   send_text: 'Mensagem',
   send_template: 'Modelo de mensagem',
   typing: 'Digitando',
@@ -629,7 +636,8 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
     // Robô roda para QUALQUER organização (saiu da beta). Só o passo
     // "entregar a agente" depende da liberação do agente de IA, conferida
     // adiante, no próprio passo.
-    const bot = await loadBot(admin, orgId, run.bot_id);
+    const currentBot = await loadBot(admin, orgId, run.bot_id);
+    const bot = currentBot ? executionBot(currentBot, run) : null;
     if (!bot || !bot.enabled) {
       note(st, null, bot ? 'robô desligado' : 'robô não encontrado');
       await saveRun(admin, st, { status: 'cancelled' }, { release: true });
@@ -905,6 +913,26 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
       idx = startIdx;
     }
     const next = (step: BotStep): number => nextStepIndex(steps, idx, step, canvas);
+    const completeStep = async (step: BotStep, output: string, target: number) => {
+      if (st.stepResult) await recordBotEvent(admin, st.run, step.id, st.stepResult);
+      await recordBotEvent(admin, st.run, step.id, 'exited', output, steps[target]?.id ?? null);
+    };
+    // Scheduled waits exit only when their timer expires, not when scheduled.
+    const pending = st.vars[PENDING_EXIT_VAR] as { step_id: string; target: string | null; at: string } | undefined;
+    if (pending) {
+      if (new Date(pending.at).getTime() > Date.now()) {
+        await saveRun(admin, st, { status: 'running', wake_at: pending.at }, { release: true });
+        return;
+      }
+      await recordBotEvent(admin, st.run, pending.step_id, 'exited', 'next', pending.target);
+      delete st.vars[PENDING_EXIT_VAR];
+    }
+    // A tick may resume the reply if the reply handler did not acquire the lock.
+    if (st.vars[WAIT_RESOLUTION_VAR] === 'next' && typeof st.vars[WAITING_STEP_VAR] === 'string') {
+      await recordBotEvent(admin, st.run, st.vars[WAITING_STEP_VAR] as string, 'exited', 'next', steps[idx]?.id ?? null);
+      delete st.vars[WAIT_RESOLUTION_VAR];
+      delete st.vars[WAITING_STEP_VAR];
+    }
     // Passos já visitados neste processamento (wait/wait_reply encerram o processamento):
     // voltar a um deles sem espera no meio é laço, e mandaria mensagens em rajada
     const visited = new Set<number>();
@@ -928,6 +956,8 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
         return;
       }
       visited.add(idx);
+      st.stepResult = undefined;
+      let outputId = 'next';
 
       // Contador persistente (sobrevive a wait/wait_reply): laço infinito vira erro
       const prevTotal = Number(st.vars[STEPS_TOTAL_VAR]);
@@ -948,8 +978,17 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
       // no meio, a retomada não reenvia o que já foi enviado
       if (guard > 0) await saveRun(admin, st, { step_index: idx }, { renewLock: true });
 
+      await recordBotEvent(admin, st.run, step.id, 'entered');
       try {
       switch (step.type) {
+        case 'split': {
+          const branch = await allocateBotBranch(admin, st.run, step);
+          outputId = `branch:${branch.id}`;
+          idx = stepIndexById(steps, branch.goto_step_id);
+          if (idx < 0) throw new Error('Saída de distribuição não conectada');
+          note(st, step, `caminho ${branch.label}`, 'ok');
+          break;
+        }
         case 'send_text': {
           if ((step.typing_seconds ?? 0) > 0 && st.vars[TYPED_STEP_VAR] !== step.id) {
             const wakeAt = await showTyping(step, step.typing_seconds ?? 0);
@@ -975,6 +1014,7 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
           if (st.vars[TEMPLATE_ROUTE_VAR] === step.id) {
             // Voltou com a resposta do lead: botão de resposta rápida → saída do botão; outra resposta → "Outra resposta"
             delete st.vars[TEMPLATE_ROUTE_VAR];
+            delete st.vars[WAITING_STEP_VAR];
             const reply = normalizeKeyword(String(st.vars.last_reply ?? ''));
             let hit = reply ? step.buttons.findIndex(b => normalizeKeyword(b) === reply) : -1;
             if (hit < 0 && reply) {
@@ -984,6 +1024,7 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
               });
             }
             const targetId = hit >= 0 ? (step.button_step_ids[hit] ?? null) : (step.next_step_id ?? null);
+            outputId = hit >= 0 ? `button:${hit}` : 'next';
             note(st, step, hit >= 0 ? `respondeu pelo botão "${step.buttons[hit]}"` : 'outra resposta');
             idx = stepIndexById(steps, targetId);
             if (idx < 0) {
@@ -1008,6 +1049,7 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
           const wakeAt = new Date(Date.now() + tplSeconds * 1000).toISOString();
           st.vars[TIMEOUT_STEP_VAR] = step.on_timeout_step_id ?? null;
           st.vars[TEMPLATE_ROUTE_VAR] = step.id;
+          st.vars[WAITING_STEP_VAR] = step.id;
           await saveRun(admin, st, { status: 'waiting_reply', step_index: idx, wake_at: wakeAt }, { release: true });
           return;
         }
@@ -1021,6 +1063,7 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
           }
           const wakeAt = new Date(Date.now() + step.seconds * 1000).toISOString();
           note(st, step, `esperando ${step.seconds}s`);
+          st.vars[PENDING_EXIT_VAR] = { step_id: step.id, target: steps[next(step)]?.id ?? null, at: wakeAt };
           await saveRun(admin, st, { status: 'running', step_index: next(step), wake_at: wakeAt }, { release: true });
           return;
         }
@@ -1029,6 +1072,7 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
           // (antes somava as duas coisas e 3 s viravam uns 7 s). Tempo longo vira espera agendada.
           const wakeAt = await showTyping(step, step.seconds);
           if (wakeAt) {
+            st.vars[PENDING_EXIT_VAR] = { step_id: step.id, target: steps[next(step)]?.id ?? null, at: wakeAt };
             await saveRun(admin, st, { status: 'running', step_index: next(step), wake_at: wakeAt }, { release: true });
             return;
           }
@@ -1047,14 +1091,17 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
             phone,
             context: st.vars.contexto_extra ? String(st.vars.contexto_extra) : null,
             chainDepth: depth + 1,
+            isTest: st.run.is_test,
           });
           if (!created.ok || !created.run) throw new Error(`não iniciou o outro robô: ${created.error || 'erro'}`);
           note(st, step, `encerrado; robô "${step.bot_name || step.bot_id}" iniciado`);
+          await completeStep(step, 'done', -1);
           await saveRun(admin, st, { status: 'done', step_index: idx + 1, wake_at: null }, { release: true });
           await runBotRunNow(admin, created.run);
           return;
         }
         case 'wait_reply': {
+          st.vars[WAITING_STEP_VAR] = step.id;
           const replySeconds = step.timeout_seconds ?? step.timeout_minutes * 60;
           const wakeAt = new Date(Date.now() + replySeconds * 1000).toISOString();
           st.vars[TIMEOUT_STEP_VAR] = step.on_timeout_step_id ?? null;
@@ -1082,10 +1129,12 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
             contextoExtra: String(st.vars.contexto_extra ?? ''),
           };
           let target = -1;
+          outputId = 'else';
           let matched: string | null = null;
           for (const [i, rule] of step.rules.entries()) {
             if (evalConditionRule(rule, env)) {
               matched = rule.label?.trim() || `caminho ${i + 1}`;
+              outputId = `rule:${i}`;
               target = stepIndexById(steps, rule.goto_step_id);
               break;
             }
@@ -1221,6 +1270,12 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
           break;
         }
         case 'webhook': {
+          if (run.analytics_version === 1) {
+            const live = currentBot?.steps.find(s => s.id === step.id && s.type === 'webhook');
+            if (live?.type !== 'webhook' || live.url !== step.url) {
+              throw new Error('Webhook alterado após o início: inicie uma nova execução para usar o novo destino');
+            }
+          }
           // Mesmo POST dos webhooks do agente; falha não derruba o robô (fica no log)
           const r = await postWebhook({
             admin,
@@ -1295,6 +1350,7 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
             .eq('organization_id', orgId);
           if (error) throw new Error(error.message);
           note(st, step, `entregue ao agente ${agent.name}`);
+          await completeStep(step, 'done', -1);
           await saveRun(admin, st, { status: 'done', step_index: idx + 1, wake_at: null }, { release: true });
           try {
             const ctx = await loadConversationContext(admin, orgId, conversationId);
@@ -1317,6 +1373,7 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
           // (antes só esta terminava e uma cópia paralela seguia mandando follow-up)
           const cancelled = conversationId ? await cancelOtherRunsInConversation(admin, orgId, conversationId, st.run.id) : 0;
           note(st, step, cancelled > 0 ? `encerrado; ${cancelled} outra(s) execução(ões) cancelada(s)` : 'encerrado', 'ok');
+          await completeStep(step, 'done', -1);
           await saveRun(admin, st, { status: 'done', step_index: idx, wake_at: null }, { release: true });
           return;
         }
@@ -1325,11 +1382,13 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
           idx = next(step);
         }
       }
+      await completeStep(step, outputId, idx);
       } catch (stepError) {
         // Ação de CRM que falha não derruba o resto do balão: registra e segue
-        if (CONTINUE_ON_FAILURE.has(step.type)) {
+        if (CONTINUE_ON_FAILURE.has(step.type) && !(stepError instanceof BotTelemetryError)) {
           failNote(st, step, errorMessage(stepError));
           idx = next(step);
+          await completeStep(step, outputId, idx);
           continue;
         }
         throw stepError;
@@ -1342,6 +1401,10 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
     console.error('[wa-agents] robô falhou:', msg);
     // Qual passo falhou e por quê (antes o erro ficava sem o passo)
     note(st, currentStep, `erro: ${msg}`, 'failed', msg);
+    if (currentStep) {
+      try { await recordBotEvent(admin, st.run, currentStep.id, 'failed'); }
+      catch (telemetryError) { console.error('[wa-agents] erro ao registrar falha do robô:', errorMessage(telemetryError)); }
+    }
     await saveRun(admin, st, { status: 'error', error: `${stepRef(currentStep)}: ${msg}`, wake_at: null }, { release: true });
   }
 }
@@ -1357,6 +1420,7 @@ export async function handleBotReply(
     const vars: Record<string, unknown> = { ...((run.vars ?? {}) as Record<string, unknown>), last_reply: lastReply, last_reply_message_id: message.id };
     // Respondeu: o destino de "sem resposta" não vale mais
     delete vars[TIMEOUT_STEP_VAR];
+    if (vars[WAITING_STEP_VAR] && !vars[TEMPLATE_ROUTE_VAR]) vars[WAIT_RESOLUTION_VAR] = 'next';
     // Primeiro o update condicional; a trava só depois (não fica presa se outra instância já cuidou)
     const { data } = await admin
       .from('wa_bot_runs')
@@ -1393,7 +1457,8 @@ async function handleBotTimeout(admin: SupabaseClient, run: BotRunRow): Promise<
     .select('id')
     .maybeSingle();
   if (!claimed) return;
-  const bot = await loadBot(admin, run.organization_id, run.bot_id);
+  const currentBot = await loadBot(admin, run.organization_id, run.bot_id);
+  const bot = currentBot ? executionBot(currentBot, run) : null;
   const steps = bot ? parseSteps(bot.steps) : [];
   st.steps = steps;
   let timeoutStepId = (st.vars[TIMEOUT_STEP_VAR] as string | null | undefined) ?? null;
@@ -1403,6 +1468,10 @@ async function handleBotTimeout(admin: SupabaseClient, run: BotRunRow): Promise<
     if (prev && prev.type === 'wait_reply') timeoutStepId = prev.on_timeout_step_id ?? null;
   }
   const target = stepIndexById(steps, timeoutStepId);
+  const waitingId = st.vars[WAITING_STEP_VAR];
+  if (typeof waitingId === 'string') await recordBotEvent(admin, run, waitingId, 'exited', 'timeout', steps[target]?.id ?? null);
+  delete st.vars[WAITING_STEP_VAR];
+  delete st.vars[WAIT_RESOLUTION_VAR];
   if (target >= 0) {
     note(st, null, `sem resposta, indo para o passo ${steps[target].id}`);
     delete st.vars[TIMEOUT_STEP_VAR];
@@ -1467,6 +1536,8 @@ export type StartBotRunInput = {
   context?: string | null;
   /** Iniciado por outro robô: profundidade da cadeia (limite MAX_CHAIN_DEPTH) */
   chainDepth?: number;
+  /** Excluded from production analytics and the production round-robin sequence. */
+  isTest?: boolean;
 };
 
 /** Só cria a execução (status 'running', wake_at agora), sem processar. */
@@ -1511,6 +1582,9 @@ export async function createBotRun(
         conversation_id: conversationId,
         phone: phone || null,
         status: 'running',
+        // Only the instrumented application opts in before the DB rollout gate opens.
+        analytics_version: 1,
+        is_test: input.isTest ?? false,
         wake_at: nowIso(),
         step_index: 0,
         vars: {

@@ -26,7 +26,7 @@ export async function GET(req: Request) {
 
   let query = auth.admin
     .from('wa_bot_runs')
-    .select('*')
+    .select('id, organization_id, bot_id, deal_id, contact_id, conversation_id, phone, step_index, status, wake_at, lock_until, vars, log, error, created_at, updated_at, is_test, flow_revision, analytics_version')
     .eq('organization_id', orgId)
     .order('created_at', { ascending: false })
     .limit(limit);

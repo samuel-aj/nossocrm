@@ -391,6 +391,11 @@ function botStepReferences(step: BotStep): Array<{ field: string; id: string }> 
     });
     if (step.else_step_id) refs.push({ field: 'else_step_id', id: step.else_step_id });
   }
+  if (step.type === 'split') {
+    step.branches.forEach((branch, index) => {
+      if (branch.goto_step_id) refs.push({ field: `branches.${index}.goto_step_id`, id: branch.goto_step_id });
+    });
+  }
   if (step.type === 'wait_reply' && step.on_timeout_step_id) {
     refs.push({ field: 'on_timeout_step_id', id: step.on_timeout_step_id });
   }
@@ -411,6 +416,7 @@ const BOT_STEP_LABELS: Record<BotStep['type'], string> = {
   wait: 'Esperar',
   wait_reply: 'Esperar resposta',
   condition: 'Condição',
+  split: 'Distribuir caminhos',
   move_stage: 'Mover etapa',
   activate_alert: 'Ativar alerta',
   add_tag: 'Adicionar tag',
@@ -461,6 +467,11 @@ export function validateBotSteps(
     return validationMessage('O passo inicial do quadro não existe na lista de passos', 'start_step_id');
   }
   for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    if (enabled && step.type === 'split') {
+      const missing = step.branches.findIndex(branch => !branch.goto_step_id);
+      if (missing >= 0) return validationMessage('Ligue todas as saídas de Distribuir caminhos antes de ativar o robô', `steps.${i}.branches.${missing}.goto_step_id`);
+    }
     for (const ref of botStepReferences(steps[i])) {
       if (!ids.has(ref.id)) {
         return validationMessage(
