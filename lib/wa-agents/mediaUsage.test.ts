@@ -43,6 +43,19 @@ describe('media goes through the same budget before payment', () => {
     expect(h.settle.mock.calls[0][2]).toMatchObject({ status: 'completed', actualAmount: 1 });
   });
 
+  it('asks Whisper for the duration and, when it still does not come, settles with the locally measured duration', async () => {
+    const f = fixture(wav());
+    h.transcribe.mockResolvedValueOnce({ text: 'Texto fictício' });
+    await runWithUsageContext(f.usage, async () => {
+      const rows = await understandMedia(f.admin, { organizationId: org, agent: agent(), messages: [message('audio')] });
+      expect(rows[0].transcription).toBe('Texto fictício');
+      expect(() => assertUsageHealthy()).not.toThrow();
+    });
+    expect(h.transcribe.mock.calls[0][0].providerOptions).toEqual({ openai: {} });
+    expect(h.settle.mock.calls[0][2]).toMatchObject({ status: 'completed', actualAmount: 2 });
+    expect(h.block).not.toHaveBeenCalled();
+  });
+
   it('stops unsupported protected audio without calling the provider or saving a fake transcript', async () => {
     const f = fixture(Buffer.from('unsupported mp3'));
     await runWithUsageContext(f.usage, async () => {

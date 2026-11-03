@@ -117,8 +117,12 @@ async function transcribeAudio(
     const result = await meteredOperation({
       operation: 'audio_transcription', provider: 'openai', model: 'whisper-1', unit: 'seconds', bound: seconds ?? 21600,
       metadata: { boundVersion: seconds ? 'local-audio-frames-v1' : 'unprotected-unknown-duration' },
-      execute: () => transcribe({ model: openai.transcription('whisper-1'), audio: new Uint8Array(bytes), maxRetries: 0 }),
-      usage: result => result.durationInSeconds ?? null,
+      // providerOptions.openai faz o SDK pedir verbose_json, que traz a duração;
+      // sem ele a resposta vem sem duração e o consumo ficava "desconhecido",
+      // pausando a IA da conversa. Se ainda assim não vier, vale a duração
+      // medida aqui nos quadros do próprio áudio (a mesma usada na reserva).
+      execute: () => transcribe({ model: openai.transcription('whisper-1'), audio: new Uint8Array(bytes), maxRetries: 0, providerOptions: { openai: {} } }),
+      usage: result => result.durationInSeconds ?? seconds ?? null,
     });
     return (result.text || '').trim() || null;
   }
