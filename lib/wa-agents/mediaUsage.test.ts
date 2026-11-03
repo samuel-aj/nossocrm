@@ -83,6 +83,35 @@ describe('media goes through the same budget before payment', () => {
     expect(recorded).not.toContain('private caption'); expect(recorded).not.toContain('fake-secret');
   });
 
+  it('an animated sticker goes as its first frame and never pauses the conversation', async () => {
+    const sharp = (await import('sharp')).default;
+    const frame = (r: number) => sharp({ create: { width: 64, height: 64, channels: 4, background: { r, g: 0, b: 0, alpha: 1 } } }).png().toBuffer();
+    const animated = await sharp([await frame(255), await frame(0)], { join: { animated: true } }).webp().toBuffer();
+    expect((await sharp(animated, { animated: true }).metadata()).pages).toBe(2);
+    const f = fixture(animated);
+    await runWithUsageContext(f.usage, async () => {
+      const rows = await understandMedia(f.admin, { organizationId: org, agent: agent(), messages: [{ ...message('sticker'), media_mime: 'image/webp' }] });
+      expect(rows[0].transcription).toBe('[figurinha] Descrição fictícia');
+      expect(() => assertUsageHealthy()).not.toThrow();
+    });
+    expect(h.block).not.toHaveBeenCalled();
+    expect(h.generate).toHaveBeenCalledTimes(1);
+    const file = h.generate.mock.calls[0][0].prompt[0].content.find((p: { type: string }) => p.type === 'file');
+    expect(file.mediaType).toBe('image/png');
+    expect((await sharp(file.data, { animated: true }).metadata()).pages ?? 1).toBe(1);
+  });
+
+  it('an image the meter cannot read is skipped without calling the provider or pausing', async () => {
+    const f = fixture(Buffer.from('not an image at all'));
+    const events: string[] = [];
+    await runWithUsageContext(f.usage, async () => {
+      await understandMedia(f.admin, { organizationId: org, agent: agent(), messages: [message('sticker')], onEvent: type => events.push(type) });
+      expect(() => assertUsageHealthy()).not.toThrow();
+    });
+    expect(events).toEqual(['media_skipped']);
+    expect(h.generate).not.toHaveBeenCalled(); expect(h.reserve).not.toHaveBeenCalled(); expect(h.block).not.toHaveBeenCalled();
+  });
+
   it('a media quota denial remains sticky despite the media error fallback', async () => {
     const f = fixture(wav()); h.reserve.mockResolvedValueOnce({ allowed: false, replay: false, reason: 'limit' });
     await runWithUsageContext(f.usage, async () => {

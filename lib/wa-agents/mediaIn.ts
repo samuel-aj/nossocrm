@@ -143,12 +143,41 @@ async function transcribeAudio(
   return (result.text || '').trim() || null;
 }
 
+/** O mesmo teto de pixels que o medidor de consumo usa para estimar a imagem. */
+const MAX_IMAGE_PIXELS = 40_000_000;
+
+/**
+ * Deixa a imagem num formato que o medidor de consumo sabe estimar, ANTES de
+ * chamar a IA. O medidor recusa imagem com vários quadros (figurinha animada,
+ * GIF) e a recusa pausava a IA da conversa. Animada vira o primeiro quadro em
+ * PNG; o que não dá para ler devolve null e a mídia é pulada (a mensagem segue
+ * como "[figurinha]" ou "[imagem]"), sem pausar nada.
+ */
+export async function prepareImage(bytes: Uint8Array): Promise<{ bytes: Uint8Array; mime: string | null } | null> {
+  try {
+    const sharp = (await import('sharp')).default;
+    const measurable = async (data: Uint8Array) => {
+      // Mesma leitura que o medidor faz (imageBound em lib/ai-usage/meteredModel.ts)
+      const info = await sharp(data, { limitInputPixels: MAX_IMAGE_PIXELS, animated: true }).metadata();
+      return { ok: Boolean(info.width && info.height), frames: info.pages ?? 1 };
+    };
+    const first = await measurable(bytes);
+    if (!first.ok) return null;
+    if (first.frames === 1) return { bytes, mime: null };
+    const frame = new Uint8Array(await sharp(bytes, { limitInputPixels: MAX_IMAGE_PIXELS, animated: false }).png().toBuffer());
+    const again = await measurable(frame);
+    return again.ok && again.frames === 1 ? { bytes: frame, mime: 'image/png' } : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Imagem/figurinha -> descrição, com o modelo do próprio agente (os três provedores enxergam imagem). */
 async function describeImage(
   provider: AgentRow['provider'],
   apiKey: string,
   modelId: string,
-  bytes: ArrayBuffer,
+  bytes: Uint8Array,
   mime: string,
   sticker: boolean,
   caption: string
@@ -163,7 +192,7 @@ async function describeImage(
       {
         role: 'user',
         content: [
-          { type: 'image', image: new Uint8Array(bytes), mediaType: mime || 'image/jpeg' },
+          { type: 'image', image: bytes, mediaType: mime || 'image/jpeg' },
           { type: 'text', text: texto },
         ],
       },
@@ -250,7 +279,12 @@ export async function understandMedia(
         texto = await transcribeAudio(planoAudio, agent.model, baixado.bytes, mime);
       } else if (kind === 'image' || kind === 'sticker') {
         if (tamanho > MAX_IMAGE_BYTES) throw new Error('imagem grande demais');
-        texto = await describeImage(agent.provider, apiKey, agent.model, baixado.bytes, mime, kind === 'sticker', caption);
+        const imagem = await prepareImage(new Uint8Array(baixado.bytes));
+        if (!imagem) {
+          onEvent?.('media_skipped', { id: msg.id, tipo: kind, motivo: 'imagem em formato que a IA não consegue medir' });
+          continue;
+        }
+        texto = await describeImage(agent.provider, apiKey, agent.model, imagem.bytes, imagem.mime ?? mime, kind === 'sticker', caption);
       } else if (kind === 'document') {
         if (tamanho > MAX_DOC_BYTES) throw new Error('documento grande demais');
         const bruto = await extractDocumentText(Buffer.from(baixado.bytes), mime, fileName(msg.media_url as string));
