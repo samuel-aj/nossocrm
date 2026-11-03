@@ -1,6 +1,6 @@
 import { wrapLanguageModel, wrapEmbeddingModel, type LanguageModel, type EmbeddingModel } from 'ai';
 import type { LanguageModelV3CallOptions } from '@ai-sdk/provider';
-import { blockConversationBudget, dispatchUsage, reserveUsage, settleUsage } from './budget';
+import { blockConversationBudget, checkConversationBudget, dispatchUsage, reserveUsage, settleUsage } from './budget';
 import { AiUsageError, failUsage, nextUsageOperationId, requireUsageContext } from './context';
 import { normalizeEmbeddingUsage, normalizeLanguageUsage, type NormalizedUsage } from './normalize';
 import { estimateOperationCost } from './pricing';
@@ -73,6 +73,29 @@ async function languageInputBound(params: LanguageModelV3CallOptions, provider: 
   return textInputBound({ prompt, tools: params.tools, responseFormat: params.responseFormat }) + mediaTokens;
 }
 
+/**
+ * A reserva de tokens é um teto de pior caso (bytes x 2 + saída), em geral ~10x
+ * o gasto real. Reservar o teto inteiro fazia a conversa pausar com uns 200 mil
+ * de um limite de 300 mil, porque a "próxima resposta" não cabia no saldo.
+ * Quando há saldo mas a reserva não cabe, reserva só o saldo que falta: a
+ * conversa usa o limite até o fim e, se a resposta passar dele, pausa com o
+ * motivo de limite (no máximo uma resposta além do teto). Sem saldo, ou se a
+ * consulta falhar, fica a reserva cheia de antes (a negativa segue igual).
+ */
+async function conversationReservation(context: UsageContext, bound: number, unit: 'tokens' | 'seconds'): Promise<{ amount: number; capped: boolean }> {
+  if (!context.policyEnabled || !context.conversationId || unit !== 'tokens') return { amount: bound, capped: false };
+  try {
+    const b = await checkConversationBudget(context.admin, context.organizationId, context.conversationId);
+    const limit = Number(b?.policy?.conversation_tokens);
+    if (!b?.policy?.enabled || b.blocked_at || !Number.isFinite(limit) || limit <= 0) return { amount: bound, capped: false };
+    const remaining = Math.floor(limit + Number(b.tokens_granted ?? 0) - Number(b.tokens_used ?? 0) - Number(b.tokens_reserved ?? 0));
+    if (!Number.isSafeInteger(remaining) || remaining < 1 || remaining >= bound) return { amount: bound, capped: false };
+    return { amount: remaining, capped: true };
+  } catch {
+    return { amount: bound, capped: false };
+  }
+}
+
 /** Every dispatch gets its own id, including SDK tool steps; unresolved requests never release quota. */
 export async function meteredOperation<T>(input: {
   operation: string; provider: string; model: string; unit?: 'tokens' | 'seconds'; bound: number; agentId?: string;
@@ -85,10 +108,11 @@ export async function meteredOperation<T>(input: {
   let settled = false;
   try {
     if (!Number.isSafeInteger(input.bound) || input.bound <= 0) return unsupported(context);
+    const reserve = await conversationReservation(context, input.bound, input.unit ?? 'tokens');
     const reservation = await reserveUsage(input.agentId ? { ...context, agentId: input.agentId } : context, {
       idempotencyKey: nextUsageOperationId(), operation: input.operation, provider: input.provider, model: input.model,
-      unit: input.unit ?? 'tokens', reservedAmount: input.bound,
-      metadata: { ...input.metadata, enforcementChecked: context.policyEnabled },
+      unit: input.unit ?? 'tokens', reservedAmount: reserve.amount,
+      metadata: { ...input.metadata, enforcementChecked: context.policyEnabled, ...(reserve.capped ? { reservationCappedTo: reserve.amount, fullBound: input.bound } : {}) },
     });
     if (!reservation.allowed || reservation.replay || !reservation.attempt_id) throw new AiUsageError('AI_USAGE_LIMIT', reservation.reason ?? undefined);
     attemptId = reservation.attempt_id;
@@ -101,6 +125,12 @@ export async function meteredOperation<T>(input: {
       await settleUsage(context, attemptId, { status: 'unknown', metadata: { reason: 'missing_provider_usage' } });
       settled = true;
       throw new AiUsageError('AI_USAGE_UNKNOWN', 'O consumo da última operação aguarda confirmação. A IA permanece pausada.');
+    }
+    // Reserva reduzida ao saldo e a resposta passou dele: a conversa chegou ao
+    // teto. Pausa com esse motivo antes de liquidar (o banco guarda o primeiro).
+    // A resposta já paga segue normalmente.
+    if (reserve.capped && amount > reserve.amount) {
+      try { await blockConversationBudget(context, 'conversation_token_limit'); } catch { /* a liquidação pausa de qualquer jeito */ }
     }
     await settleUsage(context, attemptId, {
       status: 'completed', actualAmount: amount,

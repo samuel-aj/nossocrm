@@ -9,8 +9,9 @@ import { normalizeLanguageUsage, normalizeEmbeddingUsage } from './normalize';
 import { estimateTokenCost } from './pricing';
 import type { UsageContext } from './types';
 
-const h = vi.hoisted(() => ({ reserve: vi.fn(), dispatch: vi.fn(), settle: vi.fn(), block: vi.fn() }));
-vi.mock('./budget', () => ({ reserveUsage: h.reserve, dispatchUsage: h.dispatch, settleUsage: h.settle, blockConversationBudget: h.block }));
+const h = vi.hoisted(() => ({ reserve: vi.fn(), dispatch: vi.fn(), settle: vi.fn(), block: vi.fn(), budget: vi.fn() }));
+vi.mock('./budget', () => ({ reserveUsage: h.reserve, dispatchUsage: h.dispatch, settleUsage: h.settle, blockConversationBudget: h.block, checkConversationBudget: h.budget }));
+const budget = (used: number, reserved = 0, granted = 0, limit = 300000) => ({ account_id: 'account', blocked_at: null, blocked_reason: null, tokens_used: used, tokens_reserved: reserved, tokens_granted: granted, seconds_used: 0, seconds_reserved: 0, seconds_granted: 0, policy: { enabled: true, conversation_tokens: limit } });
 const context = (org = 'org-a'): UsageContext => ({ admin: {} as never, organizationId: org, conversationId: 'conversation', accountId: 'account', agentId: 'agent', runId: null, dealId: null, scope: 'conversation', policyEnabled: true });
 const usage = { inputTokens: { total: 20, noCache: 12, cacheRead: 8, cacheWrite: 0 }, outputTokens: { total: 10, text: 7, reasoning: 3 } };
 const reply = (): LanguageModelV3GenerateResult => ({ content: [{ type: 'text', text: 'Resposta fictícia' }], finishReason: { unified: 'stop', raw: 'stop' }, usage, warnings: [] });
@@ -22,6 +23,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   h.reserve.mockImplementation(async (_ctx, input) => ({ allowed: true, replay: false, attempt_id: input.idempotencyKey, status: 'reserved' }));
   h.dispatch.mockResolvedValue(true); h.settle.mockResolvedValue(undefined); h.block.mockResolvedValue(undefined);
+  h.budget.mockResolvedValue(budget(0));
 });
 
 describe('provider-call metering (all providers mocked)', () => {
@@ -40,6 +42,31 @@ describe('provider-call metering (all providers mocked)', () => {
     expect(h.settle.mock.calls[0][2]).toMatchObject({ status: 'completed', actualAmount: 30, totalTokens: 30, cachedInputTokens: 8, reasoningTokens: 3 });
     expect(h.settle.mock.calls[0][2].estimatedCostUsd).toBeCloseTo(0.0000216, 10);
     expect(provider.mock.invocationCallOrder[0]).toBeGreaterThan(h.dispatch.mock.invocationCallOrder[0]);
+  });
+
+  it('uses the conversation limit to the end: with balance left, reserves only the remaining instead of pausing at ~200k', async () => {
+    const provider = vi.fn(async () => reply());
+    h.budget.mockResolvedValueOnce(budget(299980));
+    await runWithUsageContext(context(), () => generateText({ model: metered(model(provider)), prompt: 'test', maxRetries: 0, maxOutputTokens: 60 }));
+    expect(h.reserve.mock.calls[0][1]).toMatchObject({ reservedAmount: 20, metadata: { reservationCappedTo: 20 } });
+    expect(provider).toHaveBeenCalledTimes(1);
+    // gastou 30 > 20 de saldo: chegou ao teto, pausa com o motivo de limite antes de liquidar
+    expect(h.block).toHaveBeenCalledWith(expect.anything(), 'conversation_token_limit');
+    expect(h.block.mock.invocationCallOrder[0]).toBeLessThan(h.settle.mock.invocationCallOrder[0]);
+    expect(h.settle.mock.calls[0][2]).toMatchObject({ status: 'completed', actualAmount: 30 });
+  });
+
+  it('keeps the full reservation when it fits, when there is no balance, or when the balance lookup fails', async () => {
+    const provider = vi.fn(async () => reply());
+    const run = () => runWithUsageContext(context(), () => generateText({ model: metered(model(provider)), prompt: 'test', maxRetries: 0, maxOutputTokens: 60 }));
+    await run();
+    const full = h.reserve.mock.calls[0][1].reservedAmount;
+    expect(h.reserve.mock.calls[0][1].metadata.reservationCappedTo).toBeUndefined();
+    h.budget.mockResolvedValueOnce(budget(300000)); await run();
+    expect(h.reserve.mock.calls[1][1].reservedAmount).toBe(full);
+    h.budget.mockRejectedValueOnce(new Error('db down')); await run();
+    expect(h.reserve.mock.calls[2][1].reservedAmount).toBe(full);
+    expect(h.block).not.toHaveBeenCalled();
   });
 
   it('denied reservations and DB outages never call the paid provider', async () => {
