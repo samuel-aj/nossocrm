@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { SipPhone, friendlyCause, type SipPhoneDeps } from './sipPhone';
+import { SipPhone, browserInstanceId, friendlyCause, type SipPhoneDeps } from './sipPhone';
 
 type Handler = (e?: unknown) => void;
 
@@ -59,8 +59,14 @@ class FakeUa extends FakeEmitter {
   }
   stop() {
     this.stopped = true;
+    this.log?.push('stop');
   }
-  unregister() {}
+  log: string[] | null = null;
+  unregister() {
+    this.log?.push('unregister');
+    // A central confirma a saída um pouco depois
+    queueMicrotask(() => this.emit('unregistered', {}));
+  }
   ring(integrated: boolean) {
     const session = new FakeSession();
     this.emit('newRTCSession', {
@@ -303,6 +309,39 @@ describe('SipPhone', () => {
     const d = phone.takeDiag();
     expect(d?.events[0]).toMatchObject({ e: 'invite', d: 'proto=UDP/TLS/RTP/SAVPF dtls=1 ice=1 mux=0 bundle=0 codecs=PCMU' });
     expect(friendlyCause('Incompatible SDP')).toContain('combinar o áudio');
+  });
+
+  it('refazer o registro: o antigo sai do ramal (com confirmação) ANTES de o novo entrar', async () => {
+    const log: string[] = [];
+    const first = new FakeUa();
+    const second = new FakeUa();
+    first.log = log;
+    const { phone, deps } = setup();
+    deps.createUa = vi.fn(async () => {
+      log.push('create');
+      return deps.createUa === undefined ? first : (vi.mocked(deps.createUa).mock.calls.length === 1 ? first : second);
+    });
+    await phone.connect();
+    expect(phone.info().registeredAt).not.toBeNull();
+    await phone.reconnect();
+    expect(log).toEqual(['create', 'unregister', 'stop', 'create']);
+    expect(phone.getSnapshot().status).toBe('online');
+  });
+
+  it('não refaz o registro no meio de uma ligação', async () => {
+    const { phone, ua } = setup();
+    await phone.connect();
+    ua.ring(true).emit('confirmed');
+    await expect(phone.reconnect()).rejects.toThrow('ligação em andamento');
+  });
+
+  it('o id do aparelho é um por aba (sessionStorage), não um por navegador', () => {
+    sessionStorage.clear();
+    localStorage.clear();
+    const a = browserInstanceId();
+    expect(browserInstanceId()).toBe(a);
+    expect(sessionStorage.getItem('api4com-phone:instance')).toBe(a);
+    expect(localStorage.getItem('api4com-phone:instance')).toBeNull();
   });
 
   it('causas da central viram frases para a pessoa', () => {

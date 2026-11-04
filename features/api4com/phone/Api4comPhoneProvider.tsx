@@ -339,8 +339,43 @@ export function Api4comPhoneProvider({ children }: { children: React.ReactNode }
       }
       if (cancelledRef.current.has(key)) return;
       patchCall(key, { stage: 'dialing' });
+      /**
+       * Pede a ligação. Se a central responder que o telefone não está no
+       * ramal (424) SEM ter tocado aqui, o registro se perdeu: refaz a entrada
+       * no ramal e tenta mais uma vez, sozinho. O resumo da falha vai para a
+       * linha da tentativa que falhou.
+       */
+      const dial = async () => {
+        const askedAt = Date.now();
+        try {
+          return await startApi4comCall({ phone: input.phone, dealId: input.dealId, contactId: input.contactId });
+        } catch (err) {
+          const info = phone.info();
+          const noRing = err instanceof Api4comRequestError && err.status === 424 && (info.lastInviteAt ?? 0) < askedAt;
+          if (!noRing) throw err;
+          const failedRow = typeof err.body.call_id === 'string' ? err.body.call_id : null;
+          const report = (retried: boolean) =>
+            failedRow
+              ? void sendApi4comCallDiag(failedRow, {
+                  noInvite: true,
+                  retried,
+                  phoneStatus: info.status,
+                  registeredAgoMs: info.registeredAt ? askedAt - info.registeredAt : null,
+                  lastInviteAgoMs: info.lastInviteAt ? askedAt - info.lastInviteAt : null,
+                }).catch(() => undefined)
+              : undefined;
+          if (cancelledRef.current.has(key)) {
+            report(false);
+            throw err;
+          }
+          report(true);
+          await phone.reconnect();
+          if (cancelledRef.current.has(key)) throw err;
+          return await startApi4comCall({ phone: input.phone, dealId: input.dealId, contactId: input.contactId });
+        }
+      };
       try {
-        const { call: row } = await startApi4comCall({ phone: input.phone, dealId: input.dealId, contactId: input.contactId });
+        const { call: row } = await dial();
         if (cancelledRef.current.has(key)) {
           // Encerrou enquanto a central atendia o pedido: manda desligar já
           if (ACTIVE.has(row.status)) void hangupApi4comCall(row.id).catch(() => undefined);

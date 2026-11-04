@@ -159,6 +159,8 @@ export class SipPhone {
   private diag: CallDiag | null = null;
   private diagStart = 0;
   private finishedDiag: CallDiag | null = null;
+  private registeredAt: number | null = null;
+  private lastInviteAt: number | null = null;
   private statsTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(deps: SipPhoneDeps) {
@@ -207,7 +209,8 @@ export class SipPhone {
       // Nunca dois telefones no mesmo ramal: o antigo (ex.: caído e
       // reconectando) sai antes de o novo entrar. Senão a central toca nos
       // dois e o antigo, que a tela não escuta mais, pode recusar a ligação.
-      this.teardownUa();
+      await this.teardownUa(true);
+      if (gen !== this.generation) throw new Error('cancelado');
       const ua = await this.deps.createUa({ ...creds, instanceId: this.deps.instanceId() });
       if (gen !== this.generation) {
         ua.stop();
@@ -224,23 +227,26 @@ export class SipPhone {
           else resolve();
         };
         const timer = setTimeout(() => done(new Error('A central da API4com não respondeu. Tente de novo em alguns segundos.')), this.deps.registerTimeoutMs ?? 15_000);
+        // Avisos de um telefone já retirado do ramal não mexem na tela
+        const stale = () => gen !== this.generation || this.ua !== ua;
         ua.on('registered', () => {
-          if (gen !== this.generation) return;
+          if (stale()) return;
+          this.registeredAt = this.now();
           this.set({ status: 'online', error: null });
           done();
         });
         ua.on('registrationFailed', ((e: { cause?: string }) => {
-          if (gen !== this.generation) return;
+          if (stale()) return;
           const msg = friendlyCause(e?.cause);
           this.set({ status: 'error', error: msg });
           done(new Error(msg));
         }) as Handler);
         ua.on('unregistered', () => {
-          if (gen !== this.generation || this.snap.status === 'off') return;
+          if (stale() || this.snap.status === 'off') return;
           this.set({ status: 'reconnecting' });
         });
         ua.on('disconnected', () => {
-          if (gen !== this.generation || this.snap.status === 'off') return;
+          if (stale() || this.snap.status === 'off') return;
           // O JsSIP reconecta sozinho (2 a 30 s); a tela mostra "reconectando"
           if (this.snap.status === 'online') this.set({ status: 'reconnecting' });
         });
@@ -277,20 +283,66 @@ export class SipPhone {
     this.set({ status: 'off', error: null, session: null });
   }
 
-  private teardownUa() {
+  /**
+   * Tira o telefone atual do ramal. Com `wait`, espera a central confirmar a
+   * saída (até 1,5 s) antes de devolver: assim a saída do antigo nunca chega
+   * DEPOIS da entrada do novo e apaga o registro dele.
+   */
+  private teardownUa(wait = false): Promise<void> {
     const ua = this.ua;
     this.ua = null;
-    if (!ua) return;
-    try {
-      ua.unregister({ all: false });
-    } catch {
-      /* já caiu */
+    if (!ua) return Promise.resolve();
+    const stop = () => {
+      try {
+        ua.stop();
+      } catch {
+        /* já parou */
+      }
+    };
+    if (!wait) {
+      try {
+        ua.unregister({ all: false });
+      } catch {
+        /* já caiu */
+      }
+      stop();
+      return Promise.resolve();
     }
-    try {
-      ua.stop();
-    } catch {
-      /* já parou */
-    }
+    return new Promise<void>((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        stop();
+        resolve();
+      };
+      const timer = setTimeout(finish, 1500);
+      try {
+        ua.on('unregistered', finish);
+        ua.on('registrationFailed', finish);
+        ua.unregister({ all: false });
+      } catch {
+        finish();
+      }
+    });
+  }
+
+  /** Quando o telefone entrou no ramal e quando chegou o último toque da central. */
+  info() {
+    return { status: this.snap.status, registeredAt: this.registeredAt, lastInviteAt: this.lastInviteAt };
+  }
+
+  /**
+   * Refaz o registro no ramal do zero (telefone "online" que a central não
+   * enxerga). Não mexe se houver ligação em curso.
+   */
+  reconnect(): Promise<void> {
+    if (this.session && !this.session.isEnded()) return Promise.reject(new Error('Há uma ligação em andamento.'));
+    this.generation++;
+    this.connecting = null;
+    this.set({ status: 'connecting', error: null });
+    return this.connect();
   }
 
   private mark(e: string, d?: string) {
@@ -306,6 +358,7 @@ export class SipPhone {
   }
 
   private onIncoming(session: SipSessionLike, request?: { getHeader?: (n: string) => string | undefined }) {
+    this.lastInviteAt = this.now();
     if (this.session && !this.session.isEnded()) {
       if (this.diag) {
         this.diag.extraInvites++;
@@ -566,14 +619,19 @@ export async function ensureMicrophone(): Promise<void> {
   }
 }
 
-/** Um id fixo por navegador (a central usa para reconhecer o aparelho). */
+/**
+ * Id do aparelho para a central, um POR ABA (fica igual ao recarregar a mesma
+ * aba). Antes era um por navegador: quando uma aba saía do ramal, a central
+ * apagava também o registro da aba que tinha acabado de entrar (mesmo
+ * aparelho para ela), e a ligação falhava com "não estava conectado".
+ */
 export function browserInstanceId(): string {
   const key = 'api4com-phone:instance';
   try {
-    const saved = localStorage.getItem(key);
+    const saved = sessionStorage.getItem(key);
     if (saved && /^[0-9a-f-]{36}$/i.test(saved)) return saved;
     const id = crypto.randomUUID();
-    localStorage.setItem(key, id);
+    sessionStorage.setItem(key, id);
     return id;
   } catch {
     return crypto.randomUUID();

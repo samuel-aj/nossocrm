@@ -37,11 +37,15 @@ class FakeSession extends Emitter {
   }
 }
 class FakeUa extends Emitter {
+  starts = 0;
   start() {
+    this.starts++;
     queueMicrotask(() => this.emit('registered', {}));
   }
   stop() {}
-  unregister() {}
+  unregister() {
+    queueMicrotask(() => this.emit('unregistered', {}));
+  }
 }
 
 const h = vi.hoisted(() => ({ ua: null as unknown, mic: vi.fn(async () => undefined) }));
@@ -191,6 +195,35 @@ describe('Ligar pelo telefone do CRM', () => {
     await waitFor(() => expect(diags).toHaveLength(1));
     expect(diags[0].url).toBe('/api/integrations/api4com/calls/row-9/diag');
     expect(diags[0].body).toMatchObject({ diag: { integrated: true, endedCause: 'Incompatible SDP' } });
+  });
+
+  it('central diz que o telefone não está no ramal e não tocou aqui: refaz o registro e liga de novo sozinho', async () => {
+    const ua = h.ua as FakeUa;
+    const posts: string[] = [];
+    const diags: Array<{ url: string; body: unknown }> = [];
+    setup((url, init) => {
+      if (url.endsWith('/me')) return { body: ME };
+      if (url.endsWith('/sip')) return { body: CREDS };
+      if (url.endsWith('/calls') && init?.method === 'POST') {
+        posts.push(url);
+        if (posts.length === 1) return { status: 424, body: { error: 'O telefone do CRM não estava conectado ao ramal.', call_id: 'row-perdida' } };
+        ua.emit('newRTCSession', { originator: 'remote', session: new FakeSession(), request: { getHeader: () => 'true' } });
+        return { body: { call: row({}) } };
+      }
+      if (url.endsWith('/diag')) {
+        diags.push({ url, body: JSON.parse(String(init?.body)) });
+        return { body: { ok: true } };
+      }
+      if (url.includes('/calls/row-1')) return { body: { call: row({}) } };
+      return { status: 404, body: {} };
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /Ligar/ }));
+    expect(await screen.findByText('Tocando no celular do cliente', {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(posts).toHaveLength(2);
+    expect(ua.starts).toBe(2);
+    expect(screen.queryByText(/não estava conectado/)).toBeNull();
+    await waitFor(() => expect(diags).toHaveLength(1));
+    expect(diags[0]).toMatchObject({ url: '/api/integrations/api4com/calls/row-perdida/diag', body: { diag: { noInvite: true, retried: true, phoneStatus: 'online' } } });
   });
 
   it('mostra o motivo quando a API4com recusa a ligação', async () => {
