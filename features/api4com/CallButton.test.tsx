@@ -121,6 +121,9 @@ describe('Ligar pelo telefone do CRM', () => {
       return { status: 404, body: {} };
     });
     fireEvent.click(await screen.findByRole('button', { name: /Ligar/ }));
+    // A janela da ligação aparece no clique, antes de o cliente atender
+    expect(screen.getByRole('region', { name: 'Ligação' })).toBeInTheDocument();
+    expect(screen.getByText('Preparando a ligação')).toBeInTheDocument();
     await waitFor(() => expect(h.mic).toHaveBeenCalled());
     // Desligar no topo da conversa e Encerrar na janela da ligação
     expect(await screen.findByRole('button', { name: /Desligar/ }, { timeout: 3000 })).toBeInTheDocument();
@@ -154,7 +157,7 @@ describe('Ligar pelo telefone do CRM', () => {
     });
     fireEvent.click(await screen.findByRole('button', { name: /Ligar/ }));
     const encerrar = await screen.findByRole('button', { name: /Encerrar/ }, { timeout: 3000 });
-    await screen.findByText('Chamando o cliente');
+    await screen.findByText('Tocando no celular do cliente');
     fireEvent.click(encerrar);
     // Na hora, sem esperar o aviso da central
     expect(screen.getByText('Ligação encerrada')).toBeInTheDocument();

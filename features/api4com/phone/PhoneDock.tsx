@@ -7,7 +7,8 @@
  * ligando para o ramal (atender ou recusar) e, no fim, o resultado.
  *
  * Computador: canto inferior esquerdo (não cobre o cabeçalho da conversa).
- * Celular: topo da tela.
+ * Celular: topo da tela. Fica ACIMA da tela do lead (z 9999) e dos menus,
+ * abaixo das listas de seleção (10050) e dos avisos do CRM (11000).
  */
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -30,7 +31,7 @@ function initials(name: string): string {
 }
 
 const SHELL =
-  'fixed z-[70] left-1/2 top-3 -translate-x-1/2 w-[min(360px,calc(100vw-24px))] sm:left-4 sm:top-auto sm:bottom-4 sm:translate-x-0 ' +
+  'fixed z-[10040] left-1/2 top-3 -translate-x-1/2 w-[min(360px,calc(100vw-24px))] sm:left-4 sm:top-auto sm:bottom-4 sm:translate-x-0 ' +
   'rounded-2xl border border-slate-200 bg-white/95 shadow-2xl shadow-slate-900/20 backdrop-blur dark:border-dark-border dark:bg-dark-card/95 dark:shadow-black/50 ' +
   'animate-in fade-in slide-in-from-bottom-2 duration-200';
 
@@ -160,22 +161,26 @@ function describe(call: ActiveCall | null, session: { phase: string; startedAt: 
   let title = '';
   let tone: Tone = 'wait';
   let spinner = false;
+  /** Ainda tocando no cliente: ondas em volta do contato. */
+  let ringing = false;
   let detail: string | null = null;
   if (call?.stage === 'connecting') {
-    title = 'Ligando o telefone do CRM';
-    detail = 'Se o navegador pedir, libere o microfone.';
-    spinner = true;
+    title = 'Preparando a ligação';
+    detail = 'Libere o microfone se o navegador pedir';
+    ringing = true;
   } else if (call?.stage === 'dialing') {
-    title = 'Chamando';
-    spinner = true;
+    title = `Chamando · ${clock(call.createdAt, now)}`;
+    detail = 'Discando para o cliente';
+    ringing = true;
   } else if (call?.stage === 'live') {
     if (row?.status === 'answered') {
       const from = row.answered_at ? Date.parse(row.answered_at) : session?.startedAt ?? null;
       title = `Em ligação · ${clock(from, now)}`;
       tone = 'live';
     } else {
-      title = 'Chamando o cliente';
-      detail = 'Você ouve o toque. Fale quando atenderem.';
+      title = `Chamando · ${clock(call.createdAt, now)}`;
+      detail = 'Tocando no celular do cliente';
+      ringing = true;
     }
   } else if (call?.stage === 'ending') {
     title = 'Ligação encerrada';
@@ -195,7 +200,7 @@ function describe(call: ActiveCall | null, session: { phase: string; startedAt: 
     tone = session.phase === 'in_call' ? 'live' : 'wait';
     spinner = session.phase !== 'in_call';
   }
-  return { title, tone, spinner, detail };
+  return { title, tone, spinner, ringing, detail };
 }
 
 export function PhoneDock() {
@@ -205,7 +210,7 @@ export function PhoneDock() {
   const [panel, setPanel] = useState<'none' | 'keypad' | 'audio'>('none');
   const session = ctx?.phone.session ?? null;
   const call = ctx?.call ?? null;
-  const ticking = !!session || call?.stage === 'live';
+  const ticking = !!session || call?.stage === 'live' || call?.stage === 'dialing' || call?.stage === 'connecting';
 
   useEffect(() => {
     if (!ticking) return;
@@ -241,7 +246,7 @@ export function PhoneDock() {
 
   if (!call && !session) return null;
 
-  const { title, tone, spinner, detail } = describe(call, session, now);
+  const { title, tone, spinner, ringing, detail } = describe(call, session, now);
   const name = call ? call.label : session?.remote ? formatPhone(session.remote) : 'Ligação';
   const number = call && call.label !== call.phone ? formatPhone(call.phone) : null;
   const ini = initials(name);
@@ -262,14 +267,29 @@ export function PhoneDock() {
           } ${tone === 'live' ? 'ring-4 ring-emerald-500/25' : ''}`}
           aria-hidden="true"
         >
-          {spinner ? <Loader2 size={18} className="animate-spin" /> : ini || <Phone size={18} />}
+          {ringing ? (
+            <>
+              <span className="absolute inset-0 rounded-full bg-primary-500/30 animate-ping" />
+              <span className="absolute -inset-1.5 rounded-full border-2 border-primary-400/40 animate-pulse" />
+            </>
+          ) : null}
+          <span className="relative">{spinner ? <Loader2 size={18} className="animate-spin" /> : ini || <Phone size={18} />}</span>
           <span className={`absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white dark:border-dark-card ${DOT[tone]}`} />
         </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-bold text-slate-900 dark:text-white" title={number ? `${name} · ${number}` : name}>
             {name}
           </p>
-          <p role="status" className={`text-xs tabular-nums ${tone === 'bad' ? 'font-semibold leading-snug text-red-700 dark:text-red-300' : 'truncate text-slate-600 dark:text-slate-300'}`}>
+          <p
+            role="status"
+            className={`text-xs tabular-nums ${
+              tone === 'bad'
+                ? 'font-semibold leading-snug text-red-700 dark:text-red-300'
+                : ringing
+                  ? 'truncate font-semibold text-primary-700 dark:text-primary-300'
+                  : 'truncate text-slate-600 dark:text-slate-300'
+            }`}
+          >
             {title}
           </p>
           {detail || number ? <p className="truncate text-[11px] text-slate-400 dark:text-slate-500">{detail || number}</p> : null}
