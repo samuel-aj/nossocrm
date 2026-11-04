@@ -10,10 +10,11 @@
  */
 import React, { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, CheckCircle2, ExternalLink, Loader2, Phone, Unplug, Users } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ExternalLink, Loader2, Phone, PhoneOff, Unplug, Users } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 import ConfirmModal from '@/components/ConfirmModal';
 import { API4COM_ME_KEY, API4COM_TEAM_KEY, connectApi4com, disconnectApi4com, useApi4comMe, useApi4comTeam } from '@/features/api4com/useApi4com';
+import { useApi4comPhone } from '@/features/api4com/phone/Api4comPhoneProvider';
 import { SETTINGS_BTN_PRIMARY, SETTINGS_BTN_SECONDARY, SETTINGS_INPUT_CLASS, SettingsCard, SettingsEmpty, SettingsRow } from './SettingsUi';
 
 const DT = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
@@ -36,7 +37,7 @@ export const Api4comPersonalCard: React.FC = () => {
       qc.setQueryData(API4COM_ME_KEY, body);
       void qc.invalidateQueries({ queryKey: API4COM_TEAM_KEY });
       const ok = body.connected && body.webhook_ok;
-      addToast(ok ? 'API4com conectada. O botão Ligar já aparece nos leads.' : 'API4com conectada, mas o retorno das ligações não foi cadastrado. Veja o aviso.', ok ? 'success' : 'warning');
+      addToast(ok ? 'API4com conectada. O botão Ligar já aparece no topo da conversa do lead.' : 'API4com conectada, mas o retorno das ligações não foi cadastrado. Veja o aviso.', ok ? 'success' : 'warning');
     } catch (e) {
       addToast(e instanceof Error ? e.message : 'Falha ao conectar', 'error');
     } finally {
@@ -100,10 +101,7 @@ export const Api4comPersonalCard: React.FC = () => {
           >
             {s.last_error ? <p className="text-xs text-amber-700 dark:text-amber-300">{s.last_error}</p> : null}
           </SettingsRow>
-          <SettingsRow
-            title="Para ligar"
-            description="Deixe o Webphone da API4com aberto no Chrome, entrando com o seu usuário. Ao clicar em Ligar no lead, ele toca primeiro para você; quando atende, o CRM disca para o cliente."
-          />
+          <PhoneStatusRow />
         </div>
       ) : (
         <div className="space-y-4">
@@ -116,7 +114,7 @@ export const Api4comPersonalCard: React.FC = () => {
               com o <strong>seu</strong> usuário e abra <strong>Tokens de acesso</strong>.
             </li>
             <li>Crie um token <strong>sem expiração</strong>, copie e cole abaixo.</li>
-            <li>Instale o Webphone da API4com no Chrome e entre nele com o mesmo usuário. É por ele que você fala.</li>
+            <li>Pronto: você liga pelo botão Ligar do lead e fala pelo microfone do computador, sem instalar nada.</li>
           </ol>
           <div>
             <label htmlFor="api4com-token" className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
@@ -157,6 +155,63 @@ export const Api4comPersonalCard: React.FC = () => {
         variant="danger"
       />
     </SettingsCard>
+  );
+};
+
+/** Estado do telefone embutido e o botão para ligar/desligar. */
+const PhoneStatusRow: React.FC = () => {
+  const { addToast } = useToast();
+  const phone = useApi4comPhone();
+  const [busy, setBusy] = useState(false);
+  if (!phone) return null;
+  const st = phone.phone.status;
+  const on = st === 'online' || st === 'reconnecting';
+  const inCall = !!phone.phone.session;
+  const description = phone.otherTab
+    ? 'O telefone está ligado em outra aba do CRM. Ao clicar em Ligar aqui, ele passa para esta aba.'
+    : st === 'online'
+      ? 'Ligado nesta aba. As ligações saem pelo microfone e pelo fone ou caixa de som deste computador.'
+      : st === 'reconnecting'
+        ? 'A conexão com a central caiu. Reconectando sozinho...'
+        : st === 'connecting'
+          ? 'Conectando ao seu ramal...'
+          : st === 'error'
+            ? phone.phone.error || 'Não foi possível ligar o telefone.'
+            : 'Desligado. Ele liga sozinho quando você clica em Ligar no lead. Se o Webphone da API4com estiver aberto em algum lugar, feche: os dois no mesmo ramal se atrapalham.';
+
+  const turnOn = async () => {
+    setBusy(true);
+    try {
+      await phone.goOnline();
+      addToast('Telefone do CRM ligado.', 'success');
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : 'Não foi possível ligar o telefone.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <SettingsRow
+      title="Telefone do CRM"
+      description={description}
+      control={
+        on ? (
+          <button type="button" onClick={phone.goOffline} disabled={inCall} className={SETTINGS_BTN_SECONDARY} title={inCall ? 'Termine a ligação antes' : undefined}>
+            <PhoneOff size={14} aria-hidden="true" /> Desligar telefone
+          </button>
+        ) : (
+          <button type="button" onClick={() => void turnOn()} disabled={busy || st === 'connecting'} className={SETTINGS_BTN_PRIMARY}>
+            {busy || st === 'connecting' ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Phone size={14} aria-hidden="true" />} Ligar telefone
+          </button>
+        )
+      }
+    >
+      <p className={`inline-flex items-center gap-1.5 text-xs font-semibold ${st === 'online' ? 'text-emerald-700 dark:text-emerald-300' : st === 'error' ? 'text-red-600 dark:text-red-400' : 'text-slate-500 dark:text-slate-400'}`}>
+        <span className={`h-2 w-2 rounded-full ${st === 'online' ? 'bg-emerald-500' : st === 'error' ? 'bg-red-500' : st === 'off' ? 'bg-slate-300 dark:bg-slate-600' : 'bg-amber-400 animate-pulse'}`} aria-hidden="true" />
+        {phone.otherTab ? 'Em outra aba' : st === 'online' ? 'Ligado' : st === 'reconnecting' ? 'Reconectando' : st === 'connecting' ? 'Conectando' : st === 'error' ? 'Com erro' : 'Desligado'}
+      </p>
+    </SettingsRow>
   );
 };
 
@@ -203,8 +258,9 @@ export const Api4comSection: React.FC = () => {
       <SettingsCard title="Como funciona" description="Do clique até o histórico do lead.">
         <ul className="list-disc pl-5 space-y-1 text-sm text-slate-600 dark:text-slate-300">
           <li>A conta da API4com do escritório precisa ter um usuário com plano (e ramal) para cada pessoa que vai ligar.</li>
-          <li>Cada pessoa conecta o próprio token em Configurações &gt; Geral. O botão Ligar aparece ao lado do telefone do contato no lead.</li>
-          <li>Ao clicar, a API4com toca primeiro no Webphone de quem ligou; quando a pessoa atende, ela disca para o cliente.</li>
+          <li>Cada pessoa conecta o próprio token em Configurações &gt; Geral. O botão Ligar aparece no topo da conversa do lead, ao lado de IA Insights.</li>
+          <li>O telefone fica dentro do CRM: a pessoa fala pelo microfone e ouve pelo fone ou caixa de som do computador, sem Webphone nem extensão.</li>
+          <li>Navegar pelo CRM não derruba a ligação. Recarregar a página derruba. O telefone fica em uma aba só.</li>
           <li>Quando a ligação termina, o histórico do lead registra quem ligou, o resultado (atendida, não atendida, ocupado, caixa postal), a duração e o link da gravação.</li>
           <li>Só as ligações feitas pelo CRM entram no histórico. As feitas direto no Webphone continuam só na API4com.</li>
         </ul>

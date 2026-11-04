@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it } from 'vitest';
 import { Api4comError, type Api4comClient } from './client';
-import { connectUser, disconnectUser, friendlyCallError, handleApi4comWebhook, normalizeCalled, startCall, webhookDedupeKey } from './calls';
+import { connectUser, disconnectUser, friendlyCallError, handleApi4comWebhook, normalizeCalled, sipCredentials, startCall, webhookDedupeKey } from './calls';
 import { formatDuration, resultFor } from './shared';
 
 type Row = Record<string, unknown>;
@@ -175,6 +175,30 @@ describe('ligar pelo CRM', () => {
     await expect(startCall(db.admin, { orgId: ORG, userId: USER, phone: '+5511987654321' }, { client: fake.client, now: () => NOW })).rejects.toThrow('Webphone');
     expect(db.tables.api4com_calls[0]).toMatchObject({ status: 'failed', result: 'failed' });
     expect(String(db.tables.api4com_calls[0].error)).toContain('Webphone');
+  });
+});
+
+describe('telefone embutido (dados do ramal)', () => {
+  const sip = (metadata: Row) => fakeClient({ findIntegrations: async () => [{ id: 1, gateway: 'sippulse', metadata }] });
+
+  it('lê ramal, senha e domínio na hora e monta o endereço wss na porta 6443', async () => {
+    const db = connected({ domain: 'empresa.api4com.com' });
+    const creds = await sipCredentials(db.admin, { orgId: ORG, userId: USER }, { client: sip({ username: '1012', password: 's3nh@', domain: 'Empresa.API4com.com' }).client });
+    expect(creds).toEqual({ wsUrl: 'wss://empresa.api4com.com:6443', uri: 'sip:1012@empresa.api4com.com', username: '1012', password: 's3nh@', realm: 'empresa.api4com.com' });
+    expect(JSON.stringify(db.tables.api4com_user_settings)).not.toContain('s3nh@');
+  });
+
+  it('ramal trocado na API4com: guarda o novo para a ligação sair pelo ramal certo', async () => {
+    const db = connected({ domain: 'empresa.api4com.com' });
+    await sipCredentials(db.admin, { orgId: ORG, userId: USER }, { client: sip({ username: '1044', password: 'x', domain: 'empresa.api4com.com' }).client, now: () => NOW });
+    expect(db.tables.api4com_user_settings[0]).toMatchObject({ extension: '1044' });
+  });
+
+  it('recusa domínio estranho e falta de senha, e exige a conexão', async () => {
+    await expect(sipCredentials(connected().admin, { orgId: ORG, userId: USER }, { client: sip({ username: '1012', password: 'x', domain: 'evil.com/path' }).client })).rejects.toMatchObject({ code: 'NO_SIP_CREDENTIALS' });
+    await expect(sipCredentials(connected().admin, { orgId: ORG, userId: USER }, { client: sip({ username: '1012', domain: 'empresa.api4com.com' }).client })).rejects.toMatchObject({ code: 'NO_SIP_CREDENTIALS' });
+    await expect(sipCredentials(connected().admin, { orgId: ORG, userId: USER }, { client: sip({}).client })).rejects.toMatchObject({ code: 'NO_EXTENSION' });
+    await expect(sipCredentials(fakeDb({ api4com_user_settings: [] }).admin, { orgId: ORG, userId: USER }, { client: sip({}).client })).rejects.toMatchObject({ code: 'NOT_CONNECTED' });
   });
 });
 

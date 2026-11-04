@@ -15,7 +15,9 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { randomBytes } from 'node:crypto';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { Api4comError, clientFor, type Api4comClient } from './client';
-import { resultFor, type CallResult, type CallRow } from './shared';
+import { resultFor, type CallResult, type CallRow, type SipCredentials } from './shared';
+
+export type { SipCredentials } from './shared';
 
 export const API4COM_GATEWAY = 'nossocrm';
 export const CALL_EVENT_KIND = 'call';
@@ -126,13 +128,13 @@ export function friendlyCallError(err: unknown): string {
     case 422:
       return 'A API4com não aceitou o número do contato.';
     case 424:
-      return 'O Webphone da API4com não atendeu. Abra a extensão do Webphone no Chrome, entre com o seu usuário e tente de novo.';
+      return 'O telefone do CRM não estava conectado ao ramal. Clique em Ligar de novo; se repetir, feche o Webphone da API4com, se estiver aberto em outro lugar.';
     case 429:
       return 'Muitas ligações em um minuto. Aguarde um pouco e tente de novo.';
     case 503:
       return 'A API4com está indisponível no momento. Tente em alguns segundos.';
     default:
-      if (err.code === 'TIMEOUT') return 'A API4com não respondeu a tempo. A ligação pode ter saído: veja o Webphone.';
+      if (err.code === 'TIMEOUT') return 'A API4com não respondeu a tempo. A ligação pode ter saído: confira o histórico do lead antes de ligar de novo.';
       return err.message;
   }
 }
@@ -206,6 +208,40 @@ export async function connectUser(
 }
 
 /** Desconecta: apaga o webhook na API4com (se der) e o token no CRM. */
+const SIP_HOST_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
+const SIP_USER_RE = /^[A-Za-z0-9._-]{1,64}$/;
+
+/**
+ * Ramal, senha e domínio do usuário, lidos NA HORA na API4com com o token dele
+ * (a senha não é guardada no CRM). Vai só para o navegador do próprio dono, que
+ * usa para registrar o telefone embutido em wss://<domínio>:6443, como manda a
+ * documentação "Integração utilizando Webphone próprio".
+ */
+export async function sipCredentials(admin: SupabaseClient, input: { orgId: string; userId: string }, deps: Deps = {}): Promise<SipCredentials> {
+  const settings = await loadUserSettings(admin, input.orgId, input.userId);
+  if (!settings) throw new Api4comError('Conecte a API4com em Configurações > Geral para ligar pelo CRM.', 409, 'NOT_CONNECTED');
+  const sip = await (deps.client ?? clientFor)(settings.api_token).findIntegrations('sippulse');
+  const meta = (sip[0]?.metadata ?? {}) as { username?: unknown; password?: unknown; domain?: unknown };
+  const username = meta.username != null ? String(meta.username).trim() : '';
+  const password = typeof meta.password === 'string' ? meta.password : meta.password != null ? String(meta.password) : '';
+  const domain = (typeof meta.domain === 'string' ? meta.domain : settings.domain ?? '').trim().toLowerCase();
+  if (!username || !SIP_USER_RE.test(username)) {
+    throw new Api4comError('Este usuário ainda não tem ramal na API4com. O administrador da conta API4com precisa liberar um plano com ramal para ele.', 404, 'NO_EXTENSION');
+  }
+  if (!password || !domain || !SIP_HOST_RE.test(domain)) {
+    throw new Api4comError('A API4com não informou a senha ou o domínio do ramal.', 502, 'NO_SIP_CREDENTIALS');
+  }
+  // Ramal mudou desde a conexão: guarda o novo para o POST /calls usar o certo
+  if (settings.extension !== username || settings.domain !== domain) {
+    await admin
+      .from('api4com_user_settings')
+      .update({ extension: username, domain, updated_at: (deps.now?.() ?? new Date()).toISOString() })
+      .eq('organization_id', input.orgId)
+      .eq('user_id', input.userId);
+  }
+  return { wsUrl: `wss://${domain}:6443`, uri: `sip:${username}@${domain}`, username, password, realm: domain };
+}
+
 export async function disconnectUser(admin: SupabaseClient, input: { orgId: string; userId: string }, deps: Deps = {}): Promise<void> {
   const existing = await loadUserSettings(admin, input.orgId, input.userId);
   if (!existing) return;

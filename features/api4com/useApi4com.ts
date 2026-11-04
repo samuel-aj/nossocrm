@@ -5,7 +5,7 @@
  * da equipe (admin) e as chamadas de ligar, consultar e desligar.
  */
 import { useQuery } from '@tanstack/react-query';
-import type { CallRow } from '@/lib/api4com/shared';
+import type { CallRow, SipCredentials } from '@/lib/api4com/shared';
 
 export type Api4comMe =
   | { connected: false }
@@ -78,5 +78,7 @@ export const startApi4comCall = (input: { phone: string; dealId?: string | null;
     method: 'POST',
     body: JSON.stringify({ phone: input.phone, deal_id: input.dealId ?? null, contact_id: input.contactId ?? null }),
   });
+/** Ramal, senha e domínio do próprio usuário, para o telefone embutido. */
+export const fetchSipCredentials = () => call<SipCredentials>('/api/integrations/api4com/sip', { method: 'POST', body: '{}', cache: 'no-store' });
 export const getApi4comCall = (id: string) => call<{ call: CallRow }>(`/api/integrations/api4com/calls/${id}`);
 export const hangupApi4comCall = (id: string) => call<{ call: CallRow }>(`/api/integrations/api4com/calls/${id}/hangup`, { method: 'POST', body: '{}' });

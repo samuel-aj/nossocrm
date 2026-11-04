@@ -2,7 +2,6 @@
 import { NativeSelect } from '@/components/ui/NativeSelect';
 
 import { RelatedGroups } from "@/features/group-links/RelatedGroups";
-import { CallButton } from "@/features/api4com/CallButton";
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -1062,7 +1061,7 @@ export function LeadPropertiesPanel({
                 <User size={14} /> {contact.name} <ExternalLink size={12} />
               </a>
               {contact.phone && (
-                <div className="flex flex-wrap gap-2 items-center">
+                <div className="flex gap-2 items-center">
                   <Phone size={13} /> {contact.phone}
                   <button
                     type="button"
@@ -1074,7 +1073,6 @@ export function LeadPropertiesPanel({
                   >
                     <Copy size={13} />
                   </button>
-                  <CallButton key={`call-${deal.id}`} dealId={deal.id} contactId={contact.id} phone={contact.phone} />
                 </div>
               )}
               {contact.email && (
