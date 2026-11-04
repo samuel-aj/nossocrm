@@ -282,6 +282,33 @@ export function describeEvent(e: DealEvent, c: Ctx): { icon: React.ReactNode; te
       if (status === 'expired') return label(<>{doc} expirou sem assinatura</>, 'warn');
       return label(<>Assinatura: {status}</>);
     }
+    case 'call': {
+      // Ligação feita pelo CRM (API4com): quem ligou é o autor do evento
+      const result = String(e.new_value ?? d.result ?? '');
+      const labels: Record<string, string> = { answered: 'atendida', no_answer: 'não atendida', busy: 'ocupado', voicemail: 'caixa postal', invalid: 'número inválido', cancelled: 'cancelada', failed: 'falhou' };
+      const secs = Math.max(0, Math.round(Number(d.duration ?? 0)));
+      const dur = secs >= 60 ? `${Math.floor(secs / 60)} min${secs % 60 ? ` ${secs % 60} s` : ''}` : `${secs} s`;
+      const to = typeof e.field === 'string' && e.field ? e.field : typeof d.called === 'string' ? d.called : '';
+      const rec = typeof d.record_url === 'string' && /^https:\/\//.test(d.record_url) ? d.record_url : null;
+      return {
+        icon: <Phone size={13} />,
+        tone: result === 'answered' ? 'good' : result === 'failed' || result === 'invalid' ? 'bad' : 'warn',
+        text: (
+          <>
+            Ligação{to ? ` para ${to}` : ''}: <b>{labels[result] ?? result}</b>
+            {result === 'answered' && secs > 0 ? `, ${dur}` : ''}
+            {rec ? (
+              <>
+                {' · '}
+                <a href={rec} target="_blank" rel="noreferrer" className="font-semibold text-primary-600 dark:text-primary-400 hover:underline">
+                  Ouvir gravação
+                </a>
+              </>
+            ) : null}
+          </>
+        ),
+      };
+    }
     default:
       return { icon: <CircleDot size={13} />, text: <>{e.kind}</> };
   }

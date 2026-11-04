@@ -18,6 +18,7 @@ import {
   generateObjectionResponse,
 } from "@/lib/ai/tasksClient";
 import { BrainCircuit, Mail, X, Bot, Sword } from "lucide-react";
+import { CallButton } from "@/features/api4com/CallButton";
 
 interface DealDetailModalProps {
   dealId: string | null;
@@ -360,6 +361,13 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
             timeline={{
               ...conversation.timeline,
               headerExtra: (
+                <>
+                <CallButton
+                  dealId={deal.id}
+                  contactId={contact?.id ?? null}
+                  phone={contact?.phone ?? null}
+                  label={contact?.name || deal.title}
+                />
                 <button
                   type="button"
                   onClick={() => setAiOpen((open) => !open)}
@@ -369,6 +377,7 @@ export const DealDetailModal: React.FC<DealDetailModalProps> = ({
                 >
                   <BrainCircuit size={14} /> IA Insights
                 </button>
+                </>
               ),
               headerEnd: !isMobile ? (
                 <button

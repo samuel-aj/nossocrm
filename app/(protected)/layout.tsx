@@ -6,6 +6,7 @@ import { CRMProvider } from '@/context/CRMContext'
 import { StageRequirementsProvider } from '@/features/boards/requirements/StageRequirementsProvider'
 import { SignatureReviewProvider } from '@/features/zapsign/SignatureReviewProvider'
 import { AIProvider } from '@/context/AIContext'
+import { Api4comPhoneProvider } from '@/features/api4com/phone/Api4comPhoneProvider'
 import Layout from '@/components/Layout'
 import EntryRedirect from '@/components/EntryRedirect'
 import SessionGate from '@/components/SessionGate'
@@ -31,8 +32,10 @@ export default function ProtectedLayout({
           <StageRequirementsProvider>
             <SignatureReviewProvider>
               <AIProvider>
+                <Api4comPhoneProvider>
                   <EntryRedirect />
                   {shouldUseAppShell ? <Layout>{children}</Layout> : children}
+                </Api4comPhoneProvider>
               </AIProvider>
             </SignatureReviewProvider>
           </StageRequirementsProvider>
