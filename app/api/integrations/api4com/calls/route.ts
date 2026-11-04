@@ -42,7 +42,7 @@ export async function POST(req: Request) {
     if (err instanceof Api4comError) {
       // 401 da API4com não é "sem sessão no CRM": vira 409 para a tela mostrar a mensagem
       const status = err.code === 'NOT_CONNECTED' || err.status === 401 ? 409 : err.status >= 400 && err.status < 600 ? err.status : 502;
-      return json({ error: err.message, code: err.code }, status);
+      return json({ error: err.message, code: err.code, call_id: err.rowId }, status);
     }
     return json({ error: getErrorMessage(err, 'Falha ao ligar') }, 500);
   }

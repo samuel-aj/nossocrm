@@ -168,6 +168,31 @@ describe('Ligar pelo telefone do CRM', () => {
     await waitFor(() => expect(hangups).toEqual(['/api/integrations/api4com/calls/row-1/hangup']));
   });
 
+  it('telefone do CRM recusou o toque (424): mostra o motivo real e guarda o resumo técnico', async () => {
+    const ua = h.ua as FakeUa;
+    const diags: Array<{ url: string; body: unknown }> = [];
+    setup((url, init) => {
+      if (url.endsWith('/me')) return { body: ME };
+      if (url.endsWith('/sip')) return { body: CREDS };
+      if (url.endsWith('/calls') && init?.method === 'POST') {
+        const session = new FakeSession();
+        session.answer = vi.fn(() => queueMicrotask(() => session.emit('failed', { cause: 'Incompatible SDP', originator: 'local' })));
+        ua.emit('newRTCSession', { originator: 'remote', session, request: { getHeader: () => 'true' } });
+        return { status: 424, body: { error: 'O telefone do CRM não estava conectado ao ramal.', call_id: 'row-9' } };
+      }
+      if (url.endsWith('/diag')) {
+        diags.push({ url, body: JSON.parse(String(init?.body)) });
+        return { body: { ok: true } };
+      }
+      return { status: 404, body: {} };
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /Ligar/ }));
+    expect(await screen.findByText(/não conseguiu combinar o áudio/)).toBeInTheDocument();
+    await waitFor(() => expect(diags).toHaveLength(1));
+    expect(diags[0].url).toBe('/api/integrations/api4com/calls/row-9/diag');
+    expect(diags[0].body).toMatchObject({ diag: { integrated: true, endedCause: 'Incompatible SDP' } });
+  });
+
   it('mostra o motivo quando a API4com recusa a ligação', async () => {
     setup((url, init) => {
       if (url.endsWith('/me')) return { body: ME };

@@ -309,7 +309,9 @@ export async function startCall(
     const message = friendlyCallError(err);
     const now = (deps.now?.() ?? new Date()).toISOString();
     await admin.from('api4com_calls').update({ status: 'failed', result: 'failed', error: message, ended_at: now, updated_at: now }).eq('id', row.id);
-    throw new Api4comError(message, err instanceof Api4comError ? err.status : 502, err instanceof Api4comError ? err.code : null);
+    const failure = new Api4comError(message, err instanceof Api4comError ? err.status : 502, err instanceof Api4comError ? err.code : null);
+    failure.rowId = row.id;
+    throw failure;
   }
   return (await loadCall(admin, input.orgId, row.id)) ?? row;
 }

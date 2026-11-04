@@ -272,6 +272,39 @@ describe('SipPhone', () => {
     expect(phone.takeDiag()).toBeNull();
   });
 
+  it('reconectar troca o telefone: o antigo sai do ramal antes de o novo entrar', async () => {
+    const first = new FakeUa();
+    const second = new FakeUa();
+    const { phone, deps } = setup();
+    deps.createUa = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    await phone.connect();
+    first.emit('disconnected');
+    expect(phone.getSnapshot().status).toBe('reconnecting');
+    await phone.connect();
+    expect(first.stopped).toBe(true);
+    expect(second.started).toBe(true);
+    expect(phone.getSnapshot().status).toBe('online');
+  });
+
+  it('recusa local guarda o motivo e o resumo da oferta da central', async () => {
+    const { phone, ua } = setup();
+    await phone.connect();
+    const s = new FakeSession();
+    ua.emit('newRTCSession', {
+      originator: 'remote',
+      session: s,
+      request: {
+        getHeader: () => 'true',
+        body: ['v=0', 'm=audio 4000 UDP/TLS/RTP/SAVPF 0', 'a=rtpmap:0 PCMU/8000', 'a=fingerprint:sha-256 AA', 'a=ice-ufrag:x', ''].join('\r\n'),
+      },
+    });
+    s.emit('failed', { cause: 'Incompatible SDP', originator: 'local' });
+    expect(phone.getSnapshot().lastEnded).toMatchObject({ cause: 'Incompatible SDP', originator: 'local', answered: false });
+    const d = phone.takeDiag();
+    expect(d?.events[0]).toMatchObject({ e: 'invite', d: 'proto=UDP/TLS/RTP/SAVPF dtls=1 ice=1 mux=0 bundle=0 codecs=PCMU' });
+    expect(friendlyCause('Incompatible SDP')).toContain('combinar o áudio');
+  });
+
   it('causas da central viram frases para a pessoa', () => {
     expect(friendlyCause('Authentication Error')).toContain('senha do ramal');
     expect(friendlyCause('User Denied Media Access')).toContain('microfone');

@@ -20,7 +20,8 @@ import { useAuth } from '@/context/AuthContext';
 import { invalidateLeadHistory } from '@/features/deals/lead/leadHistoryInvalidation';
 import type { CallRow } from '@/lib/api4com/shared';
 import { fetchSipCredentials, getApi4comCall, hangupApi4comCall, sendApi4comCallDiag, startApi4comCall, useApi4comMe } from '../useApi4com';
-import { SipPhone, browserInstanceId, createJsSipUa, createRemoteAudio, ensureMicrophone, type CallDiag, type PhoneSnapshot } from './sipPhone';
+import { SipPhone, browserInstanceId, createJsSipUa, createRemoteAudio, ensureMicrophone, friendlyCause, type CallDiag, type PhoneSnapshot } from './sipPhone';
+import { Api4comRequestError } from '../useApi4com';
 import { PhoneDock } from './PhoneDock';
 
 /** connecting: ligando o telefone; dialing: pedindo a ligação à central;
@@ -354,7 +355,15 @@ export function Api4comPhoneProvider({ children }: { children: React.ReactNode }
         patchCall(key, { row, stage: gone ? 'ending' : 'live', endedAt: gone ? Date.now() : null });
       } catch (err) {
         if (cancelledRef.current.has(key)) return;
-        patchCall(key, { stage: 'error', error: err instanceof Error ? err.message : 'Não foi possível ligar.' });
+        let message = err instanceof Error ? err.message : 'Não foi possível ligar.';
+        // A central tocou aqui e o telefone do CRM recusou: mostra o motivo real
+        const last = phone.getSnapshot().lastEnded;
+        if (err instanceof Api4comRequestError && err.status === 424 && last && last.at >= startedAt && !last.answered && last.originator === 'local' && last.cause) {
+          message = friendlyCause(last.cause);
+        }
+        const rowId = err instanceof Api4comRequestError && typeof err.body.call_id === 'string' ? err.body.call_id : null;
+        const row = rowId ? ({ id: rowId, status: 'failed', result: 'failed', answered_at: null, duration: null, error: message } as unknown as CallRow) : null;
+        patchCall(key, { stage: 'error', error: message, ...(row ? { row } : {}) });
       }
     },
     [connectPhone, patchCall, phone]

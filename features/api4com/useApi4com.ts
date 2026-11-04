@@ -37,16 +37,18 @@ export const API4COM_TEAM_KEY = ['api4com', 'team'] as const;
 
 export class Api4comRequestError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  body: Record<string, unknown>;
+  constructor(message: string, status: number, body: Record<string, unknown> = {}) {
     super(message);
     this.status = status;
+    this.body = body;
   }
 }
 
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { credentials: 'include', ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } });
-  const body = (await res.json().catch(() => ({}))) as { error?: string };
-  if (!res.ok) throw new Api4comRequestError(body.error || `HTTP ${res.status}`, res.status);
+  const body = (await res.json().catch(() => ({}))) as { error?: string } & Record<string, unknown>;
+  if (!res.ok) throw new Api4comRequestError(body.error || `HTTP ${res.status}`, res.status, body);
   return body as T;
 }
 

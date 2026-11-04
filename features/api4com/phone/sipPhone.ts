@@ -30,8 +30,8 @@ export type PhoneSnapshot = {
   status: PhoneStatus;
   error: string | null;
   session: PhoneSession | null;
-  /** Último encerramento de sessão (para a tela saber que caiu). */
-  lastEnded: { at: number; cause: string | null } | null;
+  /** Último encerramento de sessão (para a tela saber que caiu e por quê). */
+  lastEnded: { at: number; cause: string | null; originator?: string | null; answered?: boolean } | null;
 };
 
 /* ---------- O mínimo do JsSIP que usamos (facilita testar com um falso) ---------- */
@@ -81,10 +81,7 @@ const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 function answerOptions(inputDeviceId: string | null) {
   // "ideal": se o microfone escolhido sumiu (fone desconectado), usa o padrão
   const audio: boolean | MediaTrackConstraints = inputDeviceId ? { deviceId: { ideal: inputDeviceId } } : true;
-  return {
-    mediaConstraints: { audio, video: false },
-    pcConfig: { iceServers: ICE_SERVERS, bundlePolicy: 'max-bundle' as RTCBundlePolicy, rtcpMuxPolicy: 'require' as RTCRtcpMuxPolicy },
-  };
+  return { mediaConstraints: { audio, video: false }, pcConfig: { iceServers: ICE_SERVERS } };
 }
 
 /**
@@ -115,6 +112,15 @@ function audioSenders(pc: RTCPeerConnection | null | undefined): RTCRtpSender[] 
   return pc.getSenders().filter((s) => !s.track || s.track.kind === 'audio');
 }
 
+/** O que a central ofereceu na chamada (sem dado pessoal): ajuda a achar incompatibilidade. */
+export function offerSummary(sdp: string | undefined | null): string {
+  if (!sdp) return 'sem-sdp';
+  const has = (re: RegExp) => (re.test(sdp) ? 1 : 0);
+  const codecs = Array.from(sdp.matchAll(/a=rtpmap:\d+ ([\w-]+)\//g)).map((m) => m[1]).slice(0, 8).join(',');
+  const proto = /m=audio \d+ ([\w/]+)/.exec(sdp)?.[1] ?? '?';
+  return `proto=${proto} dtls=${has(/a=fingerprint/)} ice=${has(/a=ice-ufrag/)} mux=${has(/a=rtcp-mux/)} bundle=${has(/a=group:BUNDLE/)} codecs=${codecs}`;
+}
+
 /** Causa do JsSIP -> frase para a pessoa. */
 export function friendlyCause(cause: string | null | undefined): string {
   switch (cause) {
@@ -127,6 +133,12 @@ export function friendlyCause(cause: string | null | undefined): string {
       return 'O navegador bloqueou o microfone. Libere o microfone para o CRM no cadeado ao lado do endereço.';
     case 'Busy':
       return 'Ocupado.';
+    case 'Incompatible SDP':
+    case 'Bad Media Description':
+      return 'O telefone do CRM não conseguiu combinar o áudio com a central da API4com.';
+    case 'WebRTC Error':
+    case 'Internal Error':
+      return 'O navegador não conseguiu abrir o áudio da ligação. Feche outras abas que usem o microfone e tente de novo.';
     default:
       return cause ? `A ligação caiu (${cause}).` : 'A ligação caiu.';
   }
@@ -192,6 +204,10 @@ export class SipPhone {
       await this.deps.ensureMicrophone();
       const creds = await this.deps.fetchCredentials();
       if (gen !== this.generation) throw new Error('cancelado');
+      // Nunca dois telefones no mesmo ramal: o antigo (ex.: caído e
+      // reconectando) sai antes de o novo entrar. Senão a central toca nos
+      // dois e o antigo, que a tela não escuta mais, pode recusar a ligação.
+      this.teardownUa();
       const ua = await this.deps.createUa({ ...creds, instanceId: this.deps.instanceId() });
       if (gen !== this.generation) {
         ua.stop();
@@ -307,7 +323,7 @@ export class SipPhone {
     this.session = session;
     this.diagStart = this.now();
     this.diag = { integrated, events: [], extraInvites: 0, ice: { firstCandidateMs: null, readyMs: null, readyBy: null, types: [] }, stats: [], endedCause: null };
-    this.mark('invite');
+    this.mark('invite', offerSummary((request as { body?: string } | undefined)?.body));
     this.setSession({ phase: integrated ? 'answering' : 'incoming', integrated, remote, startedAt: null, muted: false });
 
     // Atende sem esperar o navegador testar todos os caminhos de rede
@@ -352,13 +368,19 @@ export class SipPhone {
       this.startStats(session);
     });
     session.on('reinvite', () => this.mark('reinvite'));
+    session.on('getusermediafailed', ((e: { name?: string; message?: string }) => this.mark('gum_failed', `${e?.name ?? ''} ${e?.message ?? ''}`.trim())) as Handler);
+    session.on('peerconnection:setremotedescriptionfailed', ((e: { name?: string; message?: string }) => this.mark('remote_sdp_failed', `${e?.name ?? ''} ${e?.message ?? ''}`.trim())) as Handler);
+    session.on('peerconnection:createanswerfailed', ((e: { name?: string; message?: string }) => this.mark('answer_failed', `${e?.name ?? ''} ${e?.message ?? ''}`.trim())) as Handler);
+    session.on('peerconnection:setlocaldescriptionfailed', ((e: { name?: string; message?: string }) => this.mark('local_sdp_failed', `${e?.name ?? ''} ${e?.message ?? ''}`.trim())) as Handler);
     session.on('hold', () => this.mark('hold'));
     session.on('unhold', () => this.mark('unhold'));
-    const ended = ((e: { cause?: string }) => {
+    let answered = false;
+    session.on('confirmed', () => void (answered = true));
+    const ended = ((e: { cause?: string; originator?: string; message?: { status_code?: number } }) => {
       if (this.session !== session) return;
       if (iceTimer) clearTimeout(iceTimer);
       this.stopStats();
-      this.mark('ended', e?.cause);
+      this.mark('ended', [e?.cause, e?.originator, e?.message?.status_code].filter(Boolean).join(' | '));
       if (this.diag) {
         this.diag.endedCause = e?.cause ?? null;
         this.finishedDiag = this.diag;
@@ -366,7 +388,7 @@ export class SipPhone {
       this.diag = null;
       this.session = null;
       this.deps.playRemote(null);
-      this.set({ session: null, lastEnded: { at: this.now(), cause: e?.cause ?? null } });
+      this.set({ session: null, lastEnded: { at: this.now(), cause: e?.cause ?? null, originator: e?.originator ?? null, answered } });
     }) as Handler;
     session.on('ended', ended);
     session.on('failed', ended);

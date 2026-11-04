@@ -13,6 +13,8 @@ export const API4COM_BASE = 'https://api.api4com.com/api/v1';
 export class Api4comError extends Error {
   status: number;
   code: string | null;
+  /** Linha em api4com_calls da ligação que falhou (quando já existe). */
+  rowId: string | null = null;
   constructor(message: string, status: number, code: string | null = null) {
     super(message);
     this.name = 'Api4comError';
