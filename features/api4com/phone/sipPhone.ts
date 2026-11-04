@@ -81,8 +81,33 @@ const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 function answerOptions(inputDeviceId: string | null) {
   // "ideal": se o microfone escolhido sumiu (fone desconectado), usa o padrão
   const audio: boolean | MediaTrackConstraints = inputDeviceId ? { deviceId: { ideal: inputDeviceId } } : true;
-  return { mediaConstraints: { audio, video: false }, pcConfig: { iceServers: ICE_SERVERS } };
+  return {
+    mediaConstraints: { audio, video: false },
+    pcConfig: { iceServers: ICE_SERVERS, bundlePolicy: 'max-bundle' as RTCBundlePolicy, rtcpMuxPolicy: 'require' as RTCRtcpMuxPolicy },
+  };
 }
+
+/**
+ * Quanto esperar pelos caminhos de rede antes de atender. O JsSIP espera o
+ * navegador testar TODOS (VPN, IPv6, várias placas), o que levava ~10 s para
+ * a central começar a chamar o cliente. Com o caminho público (srflx) em
+ * mãos, atende quase na hora; sem ele, no máximo neste prazo.
+ */
+export const ICE_SRFLX_GRACE_MS = 150;
+export const ICE_MAX_WAIT_MS = 1200;
+
+/** Resumo técnico de uma ligação (para achar a causa de áudio ruim). */
+export type CallDiag = {
+  integrated: boolean;
+  /** ms desde o toque da central em cada passo. */
+  events: Array<{ t: number; e: string; d?: string }>;
+  /** Toques que chegaram com a ligação em curso (recusados com 486). */
+  extraInvites: number;
+  ice: { firstCandidateMs: number | null; readyMs: number | null; readyBy: string | null; types: string[] };
+  /** Amostras da qualidade do áudio recebido (a cada 4 s). */
+  stats: Array<Record<string, number | string | null>>;
+  endedCause: string | null;
+};
 
 /** Faixas de áudio que este navegador está enviando na ligação. */
 function audioSenders(pc: RTCPeerConnection | null | undefined): RTCRtpSender[] {
@@ -118,6 +143,11 @@ export class SipPhone {
   private generation = 0;
   /** Microfone escolhido nas configurações da ligação (null = padrão). */
   private inputDeviceId: string | null = null;
+  /** Resumo técnico da ligação em curso e o da última que terminou. */
+  private diag: CallDiag | null = null;
+  private diagStart = 0;
+  private finishedDiag: CallDiag | null = null;
+  private statsTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(deps: SipPhoneDeps) {
     this.deps = deps;
@@ -223,6 +253,7 @@ export class SipPhone {
 
   /** Desliga o telefone (sai do ramal). Encerra a ligação, se houver. */
   disconnect() {
+    this.stopStats();
     this.generation++;
     this.connecting = null;
     this.hangup();
@@ -246,8 +277,24 @@ export class SipPhone {
     }
   }
 
+  private mark(e: string, d?: string) {
+    if (!this.diag || this.diag.events.length >= 40) return;
+    this.diag.events.push({ t: this.now() - this.diagStart, e, ...(d ? { d } : {}) });
+  }
+
+  /** Entrega (uma vez) o resumo técnico da última ligação encerrada. */
+  takeDiag(): CallDiag | null {
+    const d = this.finishedDiag;
+    this.finishedDiag = null;
+    return d;
+  }
+
   private onIncoming(session: SipSessionLike, request?: { getHeader?: (n: string) => string | undefined }) {
     if (this.session && !this.session.isEnded()) {
+      if (this.diag) {
+        this.diag.extraInvites++;
+        this.mark('extra_invite', String(request?.getHeader?.('X-Api4comintegratedcall') ?? ''));
+      }
       try {
         session.terminate({ status_code: 486, reason_phrase: 'Busy Here' });
       } catch {
@@ -258,20 +305,65 @@ export class SipPhone {
     const integrated = String(request?.getHeader?.('X-Api4comintegratedcall') ?? '').trim().toLowerCase() === 'true';
     const remote = session.remote_identity?.display_name || session.remote_identity?.uri?.user || '';
     this.session = session;
+    this.diagStart = this.now();
+    this.diag = { integrated, events: [], extraInvites: 0, ice: { firstCandidateMs: null, readyMs: null, readyBy: null, types: [] }, stats: [], endedCause: null };
+    this.mark('invite');
     this.setSession({ phase: integrated ? 'answering' : 'incoming', integrated, remote, startedAt: null, muted: false });
 
+    // Atende sem esperar o navegador testar todos os caminhos de rede
+    let iceTimer: ReturnType<typeof setTimeout> | null = null;
+    let iceDone = false;
+    const iceReady = (ready: () => void, by: string) => {
+      if (iceDone) return;
+      iceDone = true;
+      if (iceTimer) clearTimeout(iceTimer);
+      if (this.diag) this.diag.ice = { ...this.diag.ice, readyMs: this.now() - this.diagStart, readyBy: by };
+      ready();
+    };
+    session.on('icecandidate', ((e: { candidate: RTCIceCandidate | null; ready: () => void }) => {
+      if (iceDone) return;
+      const type = (e.candidate?.type as string | undefined) ?? /typ (\w+)/.exec(e.candidate?.candidate ?? '')?.[1] ?? 'unknown';
+      if (this.diag) {
+        if (this.diag.ice.firstCandidateMs === null) this.diag.ice.firstCandidateMs = this.now() - this.diagStart;
+        if (this.diag.ice.types.length < 12) this.diag.ice.types.push(type);
+      }
+      if (!iceTimer) iceTimer = setTimeout(() => iceReady(e.ready, 'timeout'), ICE_MAX_WAIT_MS);
+      if (type === 'srflx' || type === 'relay') {
+        clearTimeout(iceTimer);
+        iceTimer = setTimeout(() => iceReady(e.ready, type), ICE_SRFLX_GRACE_MS);
+      }
+    }) as Handler);
+
     session.on('peerconnection', ((e: { peerconnection: RTCPeerConnection }) => {
-      e.peerconnection.addEventListener('track', (ev: RTCTrackEvent) => {
+      const pc = e.peerconnection;
+      pc.addEventListener('track', (ev: RTCTrackEvent) => {
+        this.mark('track');
         if (this.session === session) this.deps.playRemote(ev.streams[0] ?? new MediaStream([ev.track]));
       });
+      pc.addEventListener('iceconnectionstatechange', () => this.mark('ice', pc.iceConnectionState));
+      pc.addEventListener('connectionstatechange', () => this.mark('pc', pc.connectionState));
     }) as Handler);
+    session.on('accepted', () => this.mark('accepted'));
     session.on('confirmed', () => {
       if (this.session !== session) return;
+      this.mark('confirmed');
       this.attachRemote(session);
       this.setSession({ phase: 'in_call', startedAt: this.now() });
+      this.startStats(session);
     });
+    session.on('reinvite', () => this.mark('reinvite'));
+    session.on('hold', () => this.mark('hold'));
+    session.on('unhold', () => this.mark('unhold'));
     const ended = ((e: { cause?: string }) => {
       if (this.session !== session) return;
+      if (iceTimer) clearTimeout(iceTimer);
+      this.stopStats();
+      this.mark('ended', e?.cause);
+      if (this.diag) {
+        this.diag.endedCause = e?.cause ?? null;
+        this.finishedDiag = this.diag;
+      }
+      this.diag = null;
       this.session = null;
       this.deps.playRemote(null);
       this.set({ session: null, lastEnded: { at: this.now(), cause: e?.cause ?? null } });
@@ -280,6 +372,47 @@ export class SipPhone {
     session.on('failed', ended);
 
     if (integrated) this.answer();
+  }
+
+  /** Amostra a qualidade do áudio recebido enquanto a ligação dura. */
+  private startStats(session: SipSessionLike) {
+    this.stopStats();
+    const pc = session.connection;
+    if (!pc || typeof pc.getStats !== 'function') return;
+    const sample = async () => {
+      if (this.session !== session || !this.diag || this.diag.stats.length >= 30) return;
+      try {
+        const report = await pc.getStats();
+        const out: Record<string, number | string | null> = { t: this.now() - this.diagStart };
+        const byId = new Map<string, Record<string, unknown>>();
+        report.forEach((v: Record<string, unknown>) => byId.set(String(v.id), v));
+        report.forEach((v: Record<string, unknown>) => {
+          if (v.type === 'inbound-rtp' && v.kind === 'audio') {
+            for (const k of ['packetsReceived', 'packetsLost', 'jitter', 'jitterBufferDelay', 'jitterBufferEmittedCount', 'concealedSamples', 'totalSamplesReceived', 'insertedSamplesForDeceleration', 'removedSamplesForAcceleration']) {
+              out[k] = typeof v[k] === 'number' ? (v[k] as number) : null;
+            }
+            const codec = byId.get(String(v.codecId));
+            out.codec = codec ? String(codec.mimeType ?? '') : null;
+          }
+          if (v.type === 'candidate-pair' && v.nominated && v.state === 'succeeded') {
+            out.rtt = typeof v.currentRoundTripTime === 'number' ? (v.currentRoundTripTime as number) : null;
+            out.local = String(byId.get(String(v.localCandidateId))?.candidateType ?? '');
+            out.remote = String(byId.get(String(v.remoteCandidateId))?.candidateType ?? '');
+            out.proto = String(byId.get(String(v.localCandidateId))?.protocol ?? '');
+          }
+        });
+        this.diag.stats.push(out);
+      } catch {
+        /* sem estatística nesta amostra */
+      }
+    };
+    void sample();
+    this.statsTimer = setInterval(() => void sample(), 4000);
+  }
+
+  private stopStats() {
+    if (this.statsTimer) clearInterval(this.statsTimer);
+    this.statsTimer = null;
   }
 
   /** Garante o áudio mesmo se o evento 'track' veio antes de assinarmos. */
@@ -456,6 +589,10 @@ export function createRemoteAudio(): RemoteAudio {
     play(stream) {
       const a = element();
       if (!a) return;
+      const cur = a.srcObject as MediaStream | null;
+      const ids = (m: MediaStream | null) => (m ? m.getAudioTracks().map((t) => t.id).sort().join(',') : '');
+      // Mesmo áudio de antes: não reinicia (cada troca zera o buffer e dá picote)
+      if (stream && cur && ids(cur) === ids(stream)) return;
       a.srcObject = stream;
       if (stream) void a.play().catch(() => undefined);
     },

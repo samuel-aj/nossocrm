@@ -19,8 +19,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import { invalidateLeadHistory } from '@/features/deals/lead/leadHistoryInvalidation';
 import type { CallRow } from '@/lib/api4com/shared';
-import { fetchSipCredentials, getApi4comCall, hangupApi4comCall, startApi4comCall, useApi4comMe } from '../useApi4com';
-import { SipPhone, browserInstanceId, createJsSipUa, createRemoteAudio, ensureMicrophone, type PhoneSnapshot } from './sipPhone';
+import { fetchSipCredentials, getApi4comCall, hangupApi4comCall, sendApi4comCallDiag, startApi4comCall, useApi4comMe } from '../useApi4com';
+import { SipPhone, browserInstanceId, createJsSipUa, createRemoteAudio, ensureMicrophone, type CallDiag, type PhoneSnapshot } from './sipPhone';
 import { PhoneDock } from './PhoneDock';
 
 /** connecting: ligando o telefone; dialing: pedindo a ligação à central;
@@ -373,6 +373,18 @@ export function Api4comPhoneProvider({ children }: { children: React.ReactNode }
     },
     [phone, placeCall]
   );
+
+  // Resumo técnico da ligação que terminou vai para a linha dela (uma vez)
+  const pendingDiagRef = useRef<CallDiag | null>(null);
+  const diagRowId = call?.row?.id ?? null;
+  useEffect(() => {
+    const d = phone.takeDiag();
+    if (d) pendingDiagRef.current = d;
+    const pending = pendingDiagRef.current;
+    if (!pending || !diagRowId) return;
+    pendingDiagRef.current = null;
+    void sendApi4comCallDiag(diagRowId, pending).catch(() => undefined);
+  }, [snap.lastEnded, diagRowId, phone]);
 
   // O outro lado desligou (o áudio caiu): a tela mostra "encerrada" na hora
   const liveKeyForAudio = call?.stage === 'live' ? call.key : null;

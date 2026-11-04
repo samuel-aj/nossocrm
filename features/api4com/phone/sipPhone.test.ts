@@ -211,6 +211,67 @@ describe('SipPhone', () => {
     expect(createUa).toHaveBeenCalledTimes(1);
   });
 
+  describe('atender sem esperar todos os caminhos de rede', () => {
+    const cand = (type: string) => ({ candidate: { type, candidate: `candidate:1 1 udp 1 1.2.3.4 5 typ ${type}` } });
+
+    it('com o caminho público (srflx) atende em ~150 ms', async () => {
+      const { phone, ua } = setup();
+      await phone.connect();
+      vi.useFakeTimers();
+      try {
+        const s = ua.ring(true);
+        const ready = vi.fn();
+        s.emit('icecandidate', { ...cand('host'), ready });
+        vi.advanceTimersByTime(100);
+        expect(ready).not.toHaveBeenCalled();
+        s.emit('icecandidate', { ...cand('srflx'), ready });
+        vi.advanceTimersByTime(149);
+        expect(ready).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(2);
+        expect(ready).toHaveBeenCalledTimes(1);
+        // Candidatos que chegam depois não chamam de novo
+        s.emit('icecandidate', { ...cand('srflx'), ready });
+        vi.advanceTimersByTime(2000);
+        expect(ready).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('só com caminhos locais atende no máximo em 1,2 s', async () => {
+      const { phone, ua } = setup();
+      await phone.connect();
+      vi.useFakeTimers();
+      try {
+        const s = ua.ring(true);
+        const ready = vi.fn();
+        s.emit('icecandidate', { ...cand('host'), ready });
+        vi.advanceTimersByTime(1199);
+        expect(ready).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(2);
+        expect(ready).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  it('resumo técnico: conta toques extras durante a ligação e sai uma vez só no fim', async () => {
+    const { phone, ua } = setup();
+    await phone.connect();
+    const s = ua.ring(true);
+    s.emit('icecandidate', { candidate: { type: 'srflx', candidate: '' }, ready: () => undefined });
+    s.emit('confirmed');
+    ua.ring(true);
+    ua.ring(true);
+    expect(phone.takeDiag()).toBeNull();
+    phone.hangup();
+    const d = phone.takeDiag();
+    expect(d).toMatchObject({ integrated: true, extraInvites: 2, endedCause: 'Terminated', ice: { types: ['srflx'] } });
+    expect(d?.events.map((e) => e.e)).toEqual(expect.arrayContaining(['invite', 'confirmed', 'extra_invite', 'ended']));
+    expect(phone.takeDiag()).toBeNull();
+  });
+
   it('causas da central viram frases para a pessoa', () => {
     expect(friendlyCause('Authentication Error')).toContain('senha do ramal');
     expect(friendlyCause('User Denied Media Access')).toContain('microfone');

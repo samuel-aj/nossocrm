@@ -80,5 +80,8 @@ export const startApi4comCall = (input: { phone: string; dealId?: string | null;
   });
 /** Ramal, senha e domínio do próprio usuário, para o telefone embutido. */
 export const fetchSipCredentials = () => call<SipCredentials>('/api/integrations/api4com/sip', { method: 'POST', body: '{}', cache: 'no-store' });
+/** Resumo técnico da ligação (tempos, rede, perda de pacotes) para investigar áudio ruim. */
+export const sendApi4comCallDiag = (id: string, diag: unknown) =>
+  call<{ ok: true }>(`/api/integrations/api4com/calls/${id}/diag`, { method: 'POST', body: JSON.stringify({ diag }) });
 export const getApi4comCall = (id: string) => call<{ call: CallRow }>(`/api/integrations/api4com/calls/${id}`);
 export const hangupApi4comCall = (id: string) => call<{ call: CallRow }>(`/api/integrations/api4com/calls/${id}/hangup`, { method: 'POST', body: '{}' });

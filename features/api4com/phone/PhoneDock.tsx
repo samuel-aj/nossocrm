@@ -6,7 +6,8 @@
  * ligação (mudo, teclado, áudio e abrir o lead). Também mostra quem está
  * ligando para o ramal (atender ou recusar) e, no fim, o resultado.
  *
- * Computador: canto inferior esquerdo (não cobre o cabeçalho da conversa).
+ * Computador: lado direito, um pouco acima do rodapé (não cobre o campo de
+ * mensagem nem o botão de enviar da conversa).
  * Celular: topo da tela. Fica ACIMA da tela do lead (z 9999) e dos menus,
  * abaixo das listas de seleção (10050) e dos avisos do CRM (11000).
  */
@@ -31,7 +32,7 @@ function initials(name: string): string {
 }
 
 const SHELL =
-  'fixed z-[10040] left-1/2 top-3 -translate-x-1/2 w-[min(360px,calc(100vw-24px))] sm:left-4 sm:top-auto sm:bottom-4 sm:translate-x-0 ' +
+  'fixed z-[10040] left-1/2 top-3 -translate-x-1/2 w-[min(360px,calc(100vw-24px))] sm:left-auto sm:right-4 sm:top-auto sm:bottom-24 sm:translate-x-0 ' +
   'rounded-2xl border border-slate-200 bg-white/95 shadow-2xl shadow-slate-900/20 backdrop-blur dark:border-dark-border dark:bg-dark-card/95 dark:shadow-black/50 ' +
   'animate-in fade-in slide-in-from-bottom-2 duration-200';
 
