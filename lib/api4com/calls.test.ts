@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it } from 'vitest';
 import { Api4comError, type Api4comClient } from './client';
-import { connectUser, disconnectUser, friendlyCallError, handleApi4comWebhook, normalizeCalled, sipCredentials, startCall, webhookDedupeKey } from './calls';
+import { connectUser, disconnectUser, friendlyCallError, handleApi4comWebhook, normalizeCalled, redactWebhookPayload, sipCredentials, startCall, webhookDedupeKey } from './calls';
 import { formatDuration, resultFor } from './shared';
 
 type Row = Record<string, unknown>;
@@ -238,6 +238,16 @@ describe('retorno da API4com (webhook)', () => {
     const { db } = await dialed();
     expect((await handleApi4comWebhook(db.admin, ORG, { eventType: 'channel-hangup', id: 'api4-call-1', duration: 12, hangupCause: 'NORMAL_CLEARING' })).action).toBe('ended:answered');
     expect((await handleApi4comWebhook(db.admin, ORG, { eventType: 'channel-hangup', id: 'outra' })).action).toBe('ignored:unknown-call');
+  });
+});
+
+describe('cópia guardada do aviso', () => {
+  it('tira o token de acesso que a API4com devolve em metadata', () => {
+    const p = { id: 'x', eventType: 'channel-hangup', metadata: { gateway: 'nossocrm', call: 'c', api4comAccessToken: 'tok-secreto' } };
+    const out = redactWebhookPayload(p);
+    expect(out.metadata).toEqual({ gateway: 'nossocrm', call: 'c' });
+    expect(p.metadata.api4comAccessToken).toBe('tok-secreto');
+    expect(redactWebhookPayload({ id: 'y' }).metadata).toBeNull();
   });
 });
 

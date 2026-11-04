@@ -332,6 +332,18 @@ export async function hangupCall(admin: SupabaseClient, input: { orgId: string; 
   return row;
 }
 
+/**
+ * Cópia do aviso para guardar: a API4com devolve o token de acesso da pessoa
+ * dentro de metadata (api4comAccessToken). Ele não pode ficar no histórico.
+ */
+export function redactWebhookPayload(p: WebhookPayload): WebhookPayload {
+  const meta = p.metadata && typeof p.metadata === 'object' ? { ...p.metadata } : p.metadata;
+  if (meta && typeof meta === 'object') {
+    for (const k of Object.keys(meta)) if (/token|secret|password|senha/i.test(k)) delete (meta as Record<string, unknown>)[k];
+  }
+  return { ...p, metadata: meta ?? null };
+}
+
 export function webhookDedupeKey(p: WebhookPayload): string {
   return `${p.id ?? 'sem-id'}:${p.eventType ?? 'sem-tipo'}`;
 }

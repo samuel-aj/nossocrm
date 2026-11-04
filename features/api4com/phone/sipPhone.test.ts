@@ -169,6 +169,30 @@ describe('SipPhone', () => {
     expect(playRemote).toHaveBeenLastCalledWith(null);
   });
 
+  it('trocar o microfone no meio da ligação substitui o áudio enviado, mantendo o mudo', async () => {
+    const oldTrack = { kind: 'audio', enabled: true, stop: vi.fn() };
+    const newTrack = { kind: 'audio', enabled: true, stop: vi.fn() };
+    const sender = { track: oldTrack as unknown, replaceTrack: vi.fn(async (t: unknown) => void (sender.track = t)) };
+    const gum = vi.fn(async () => ({ getAudioTracks: () => [newTrack] }) as unknown as MediaStream);
+    const { phone, ua, deps } = setup();
+    deps.getUserMedia = gum;
+    await phone.connect();
+    const s = ua.ring(true);
+    (s as unknown as { connection: unknown }).connection = { getSenders: () => [sender] };
+    s.emit('confirmed');
+    phone.toggleMute();
+    expect(oldTrack.enabled).toBe(false);
+    await phone.setInputDevice('mic-2');
+    expect(gum).toHaveBeenCalledWith({ audio: { deviceId: { exact: 'mic-2' } }, video: false });
+    expect(sender.replaceTrack).toHaveBeenCalledWith(newTrack);
+    expect(oldTrack.stop).toHaveBeenCalled();
+    expect(newTrack.enabled).toBe(false);
+    // A próxima ligação já atende com o microfone escolhido
+    phone.hangup();
+    const next = ua.ring(true);
+    expect(next.answer).toHaveBeenCalledWith(expect.objectContaining({ mediaConstraints: { audio: { deviceId: { ideal: 'mic-2' } }, video: false } }));
+  });
+
   it('desligar o telefone encerra a ligação e sai do ramal', async () => {
     const { phone, ua } = setup();
     await phone.connect();

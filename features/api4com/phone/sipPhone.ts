@@ -71,12 +71,24 @@ export type SipPhoneDeps = {
   instanceId: () => string;
   /** Toca o áudio do outro lado. */
   playRemote: (stream: MediaStream | null) => void;
+  /** Microfone escolhido (troca no meio da ligação). Padrão: o do navegador. */
+  getUserMedia?: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
   now?: () => number;
   registerTimeoutMs?: number;
 };
 
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
-const ANSWER_OPTIONS = { mediaConstraints: { audio: true, video: false }, pcConfig: { iceServers: ICE_SERVERS } };
+function answerOptions(inputDeviceId: string | null) {
+  // "ideal": se o microfone escolhido sumiu (fone desconectado), usa o padrão
+  const audio: boolean | MediaTrackConstraints = inputDeviceId ? { deviceId: { ideal: inputDeviceId } } : true;
+  return { mediaConstraints: { audio, video: false }, pcConfig: { iceServers: ICE_SERVERS } };
+}
+
+/** Faixas de áudio que este navegador está enviando na ligação. */
+function audioSenders(pc: RTCPeerConnection | null | undefined): RTCRtpSender[] {
+  if (!pc || typeof pc.getSenders !== 'function') return [];
+  return pc.getSenders().filter((s) => !s.track || s.track.kind === 'audio');
+}
 
 /** Causa do JsSIP -> frase para a pessoa. */
 export function friendlyCause(cause: string | null | undefined): string {
@@ -104,6 +116,8 @@ export class SipPhone {
   private connecting: Promise<void> | null = null;
   /** Geração da conexão: eventos de um UA antigo são ignorados. */
   private generation = 0;
+  /** Microfone escolhido nas configurações da ligação (null = padrão). */
+  private inputDeviceId: string | null = null;
 
   constructor(deps: SipPhoneDeps) {
     this.deps = deps;
@@ -281,7 +295,7 @@ export class SipPhone {
     if (!s) return;
     this.setSession({ phase: 'answering' });
     try {
-      s.answer(ANSWER_OPTIONS);
+      s.answer(answerOptions(this.inputDeviceId));
     } catch (err) {
       this.set({ error: err instanceof Error ? err.message : 'Não foi possível atender.' });
     }
@@ -302,9 +316,40 @@ export class SipPhone {
     const s = this.session;
     const cur = this.snap.session;
     if (!s || !cur || cur.phase !== 'in_call') return;
-    if (cur.muted) s.unmute({ audio: true });
-    else s.mute({ audio: true });
-    this.setSession({ muted: !cur.muted });
+    const muted = !cur.muted;
+    try {
+      if (muted) s.mute({ audio: true });
+      else s.unmute({ audio: true });
+    } catch {
+      /* segue pelo envio abaixo */
+    }
+    // Também direto no que está sendo enviado (vale depois de trocar o microfone)
+    for (const sender of audioSenders(s.connection)) if (sender.track) sender.track.enabled = !muted;
+    this.setSession({ muted });
+  }
+
+  /**
+   * Troca o microfone. Fora da ligação, vale para a próxima; durante a
+   * ligação, troca na hora sem derrubar (substitui a faixa enviada).
+   */
+  async setInputDevice(deviceId: string | null): Promise<void> {
+    this.inputDeviceId = deviceId || null;
+    const s = this.session;
+    if (!s || this.snap.session?.phase !== 'in_call') return;
+    const sender = audioSenders(s.connection)[0];
+    if (!sender) return;
+    const gum = this.deps.getUserMedia ?? ((c: MediaStreamConstraints) => navigator.mediaDevices.getUserMedia(c));
+    const stream = await gum({ audio: deviceId ? { deviceId: { exact: deviceId } } : true, video: false });
+    const track = stream.getAudioTracks()[0];
+    if (!track) return;
+    if (this.session !== s) {
+      track.stop();
+      return;
+    }
+    track.enabled = !this.snap.session?.muted;
+    const old = sender.track;
+    await sender.replaceTrack(track);
+    old?.stop();
   }
 
   /** Tecla do teclado (menu de URA do outro lado). */
@@ -380,19 +425,58 @@ export function browserInstanceId(): string {
   }
 }
 
-/** Saída do áudio do outro lado. */
-export function createRemoteAudio(): (stream: MediaStream | null) => void {
+export type RemoteAudio = {
+  play: (stream: MediaStream | null) => void;
+  /** Alto-falante/fone de saída. false se o navegador não deixa escolher. */
+  setOutput: (deviceId: string | null) => Promise<boolean>;
+  /** Volume de 0 a 1. */
+  setVolume: (volume: number) => void;
+  canChooseOutput: () => boolean;
+};
+
+/** Saída do áudio do outro lado (um elemento <audio> escondido). */
+export function createRemoteAudio(): RemoteAudio {
   let el: HTMLAudioElement | null = null;
-  return (stream) => {
-    if (typeof document === 'undefined') return;
+  let sink: string | null = null;
+  let volume = 1;
+  const element = () => {
+    if (typeof document === 'undefined') return null;
     if (!el) {
       el = document.createElement('audio');
       el.autoplay = true;
       el.setAttribute('data-api4com-audio', '');
       el.style.display = 'none';
+      el.volume = volume;
       document.body.appendChild(el);
     }
-    el.srcObject = stream;
-    if (stream) void el.play().catch(() => undefined);
+    return el;
+  };
+  type SinkAudio = HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> };
+  return {
+    play(stream) {
+      const a = element();
+      if (!a) return;
+      a.srcObject = stream;
+      if (stream) void a.play().catch(() => undefined);
+    },
+    async setOutput(deviceId) {
+      sink = deviceId || null;
+      const a = element() as SinkAudio | null;
+      if (!a?.setSinkId) return false;
+      try {
+        await a.setSinkId(sink ?? '');
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    setVolume(v) {
+      volume = Math.min(1, Math.max(0, v));
+      const a = element();
+      if (a) a.volume = volume;
+    },
+    canChooseOutput() {
+      return typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
+    },
   };
 }

@@ -9,7 +9,7 @@ import { after } from 'next/server';
 import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { createStaticAdminClient } from '@/lib/supabase/staticAdminClient';
-import { handleApi4comWebhook, webhookDedupeKey, type WebhookPayload } from '@/lib/api4com/calls';
+import { handleApi4comWebhook, redactWebhookPayload, webhookDedupeKey, type WebhookPayload } from '@/lib/api4com/calls';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -35,7 +35,7 @@ export async function POST(req: Request, ctx: Ctx) {
   const dedupe = webhookDedupeKey(payload);
   const { data: inserted } = await admin
     .from('api4com_webhook_events')
-    .insert({ organization_id: orgId, dedupe_key: dedupe, event_type: payload.eventType ?? null, call_id: payload.id ?? null, payload })
+    .insert({ organization_id: orgId, dedupe_key: dedupe, event_type: payload.eventType ?? null, call_id: payload.id ?? null, payload: redactWebhookPayload(payload) })
     .select('id')
     .maybeSingle();
   if (!inserted) {

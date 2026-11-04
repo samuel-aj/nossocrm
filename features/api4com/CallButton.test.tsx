@@ -6,6 +6,7 @@ import { CallButton } from './CallButton';
 import { Api4comPhoneProvider } from './phone/Api4comPhoneProvider';
 
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ organizationId: 'org-1', user: { id: 'user-1' } }) }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/features/deals/lead/leadHistoryInvalidation', () => ({ invalidateLeadHistory: vi.fn(async () => undefined) }));
 
 type Handler = (e?: unknown) => void;
@@ -51,7 +52,7 @@ vi.mock('./phone/sipPhone', async (original) => {
     createJsSipUa: async () => h.ua,
     ensureMicrophone: h.mic,
     browserInstanceId: () => '11111111-1111-4111-8111-111111111111',
-    createRemoteAudio: () => () => undefined,
+    createRemoteAudio: () => ({ play: () => undefined, setOutput: async () => true, setVolume: () => undefined, canChooseOutput: () => true }),
   };
 });
 
@@ -121,13 +122,48 @@ describe('Ligar pelo telefone do CRM', () => {
     });
     fireEvent.click(await screen.findByRole('button', { name: /Ligar/ }));
     await waitFor(() => expect(h.mic).toHaveBeenCalled());
-    // Desligar no topo da conversa e na janela da ligação
-    expect(await screen.findAllByRole('button', { name: /Desligar/ }, { timeout: 3000 })).toHaveLength(2);
+    // Desligar no topo da conversa e Encerrar na janela da ligação
+    expect(await screen.findByRole('button', { name: /Desligar/ }, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Encerrar/ })).toBeInTheDocument();
     expect(await screen.findByText(/Em ligação/, {}, { timeout: 5000 })).toBeInTheDocument();
-    expect(screen.getByLabelText('Silenciar o microfone')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Microfone/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Lead/ })).toBeInTheDocument();
     expect(await screen.findByText(/Atendida · 1 min 5 s/, {}, { timeout: 6000 })).toBeInTheDocument();
     expect(screen.getByText('Registrada no histórico do lead.')).toBeInTheDocument();
   }, 15000);
+
+  it('Encerrar vale com um clique: some da tela na hora e manda a central desligar', async () => {
+    const ua = h.ua as FakeUa;
+    let session: FakeSession | null = null;
+    const hangups: string[] = [];
+    setup((url, init) => {
+      if (url.endsWith('/me')) return { body: ME };
+      if (url.endsWith('/sip')) return { body: CREDS };
+      if (url.endsWith('/calls') && init?.method === 'POST') {
+        session = new FakeSession();
+        ua.emit('newRTCSession', { originator: 'remote', session, request: { getHeader: () => 'true' } });
+        return { body: { call: row({}) } };
+      }
+      if (url.endsWith('/hangup')) {
+        hangups.push(url);
+        return { body: { call: row({}) } };
+      }
+      // A central ainda não avisou o fim: a linha continua "chamando"
+      if (url.includes('/calls/row-1')) return { body: { call: row({}) } };
+      return { status: 404, body: {} };
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /Ligar/ }));
+    const encerrar = await screen.findByRole('button', { name: /Encerrar/ }, { timeout: 3000 });
+    await screen.findByText('Chamando o cliente');
+    fireEvent.click(encerrar);
+    // Na hora, sem esperar o aviso da central
+    expect(screen.getByText('Ligação encerrada')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Encerrar/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Desligar/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /Ligar/ })).toBeEnabled();
+    expect((session as unknown as FakeSession).terminate).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(hangups).toEqual(['/api/integrations/api4com/calls/row-1/hangup']));
+  });
 
   it('mostra o motivo quando a API4com recusa a ligação', async () => {
     setup((url, init) => {

@@ -23,7 +23,10 @@ import { fetchSipCredentials, getApi4comCall, hangupApi4comCall, startApi4comCal
 import { SipPhone, browserInstanceId, createJsSipUa, createRemoteAudio, ensureMicrophone, type PhoneSnapshot } from './sipPhone';
 import { PhoneDock } from './PhoneDock';
 
-export type CallStage = 'connecting' | 'dialing' | 'live' | 'done' | 'error';
+/** connecting: ligando o telefone; dialing: pedindo a ligação à central;
+ *  live: em andamento; ending: a pessoa (ou o outro lado) desligou e o
+ *  resultado está chegando; done/error: fim. */
+export type CallStage = 'connecting' | 'dialing' | 'live' | 'ending' | 'done' | 'error';
 
 export type ActiveCall = {
   key: string;
@@ -35,7 +38,12 @@ export type ActiveCall = {
   row: CallRow | null;
   error: string | null;
   createdAt: number;
+  /** Quando a pessoa clicou em Encerrar (ou a ligação caiu). */
+  endedAt: number | null;
 };
+
+/** Microfone, saída de som e volume escolhidos na janela da ligação. */
+export type AudioSettings = { inputId: string | null; outputId: string | null; volume: number; canChooseOutput: boolean };
 
 export type StartCallInput = { phone: string; label?: string | null; dealId?: string | null; contactId?: string | null };
 
@@ -54,6 +62,10 @@ export type PhoneContextValue = {
   toggleMute: () => void;
   dtmf: (tone: string) => void;
   dismiss: () => void;
+  audio: AudioSettings;
+  setInputDevice: (id: string | null) => Promise<void>;
+  setOutputDevice: (id: string | null) => Promise<void>;
+  setVolume: (volume: number) => void;
 };
 
 const PhoneContext = createContext<PhoneContextValue | null>(null);
@@ -62,10 +74,34 @@ export const Api4comPhoneContext = PhoneContext;
 
 const ACTIVE = new Set(['dialing', 'ringing', 'answered']);
 const POLL_MS = 2500;
+/** Depois de encerrar, consulta mais rápido para o resultado aparecer logo. */
+const ENDING_POLL_MS = 1200;
 const POLL_LIMIT_MS = 2 * 60 * 60 * 1000;
-/** Depois que o áudio caiu, quanto esperar o resultado da central. */
-const AFTER_END_WAIT_MS = 90_000;
+/** Depois de encerrar, quanto esperar o resultado da central antes de fechar. */
+const ENDING_WAIT_MS = 20_000;
 const BUSY_STAGES: CallStage[] = ['connecting', 'dialing', 'live'];
+const PREFS_KEY = 'api4com-phone:audio';
+
+type StoredAudio = { inputId: string | null; outputId: string | null; volume: number };
+function readAudioPrefs(): StoredAudio {
+  try {
+    const v = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') as Partial<StoredAudio>;
+    return {
+      inputId: typeof v.inputId === 'string' ? v.inputId : null,
+      outputId: typeof v.outputId === 'string' ? v.outputId : null,
+      volume: typeof v.volume === 'number' && v.volume >= 0 && v.volume <= 1 ? v.volume : 1,
+    };
+  } catch {
+    return { inputId: null, outputId: null, volume: 1 };
+  }
+}
+function writeAudioPrefs(v: StoredAudio) {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(v));
+  } catch {
+    /* só não lembra na próxima vez */
+  }
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -111,6 +147,7 @@ export function Api4comPhoneProvider({ children }: { children: React.ReactNode }
   const available = !!scope && !!me.data?.connected;
   const qc = useQueryClient();
 
+  const [remoteAudio] = useState(createRemoteAudio);
   const [phone] = useState(
     () =>
       new SipPhone({
@@ -118,9 +155,18 @@ export function Api4comPhoneProvider({ children }: { children: React.ReactNode }
         fetchCredentials: fetchSipCredentials,
         ensureMicrophone,
         instanceId: browserInstanceId,
-        playRemote: createRemoteAudio(),
+        playRemote: remoteAudio.play,
       })
   );
+  const [audioPrefs, setAudioPrefs] = useState<StoredAudio>({ inputId: null, outputId: null, volume: 1 });
+  // Aplica o que a pessoa escolheu da última vez (microfone, saída, volume)
+  useEffect(() => {
+    const prefs = readAudioPrefs();
+    setAudioPrefs(prefs);
+    void phone.setInputDevice(prefs.inputId).catch(() => undefined);
+    void remoteAudio.setOutput(prefs.outputId);
+    remoteAudio.setVolume(prefs.volume);
+  }, [phone, remoteAudio]);
   const snap = useSyncExternalStore(phone.subscribe, phone.getSnapshot, phone.getSnapshot);
 
   const [otherTab, setOtherTab] = useState(false);
@@ -264,9 +310,13 @@ export function Api4comPhoneProvider({ children }: { children: React.ReactNode }
     setCall((cur) => (cur && cur.key === key ? { ...cur, ...patch } : cur));
   }, []);
 
+  /** Ligações que a pessoa encerrou antes de a central responder o pedido. */
+  const cancelledRef = useRef(new Set<string>());
+
   const placeCall = useCallback(
     async (input: StartCallInput) => {
       const key = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+      const startedAt = Date.now();
       setCall({
         key,
         phone: input.phone,
@@ -276,23 +326,38 @@ export function Api4comPhoneProvider({ children }: { children: React.ReactNode }
         stage: 'connecting',
         row: null,
         error: null,
-        createdAt: Date.now(),
+        createdAt: startedAt,
+        endedAt: null,
       });
       try {
         await connectPhone(true);
       } catch (err) {
+        if (cancelledRef.current.has(key)) return;
         patchCall(key, { stage: 'error', error: err instanceof Error ? err.message : 'Não foi possível ligar o telefone do CRM.' });
         return;
       }
+      if (cancelledRef.current.has(key)) return;
       patchCall(key, { stage: 'dialing' });
       try {
         const { call: row } = await startApi4comCall({ phone: input.phone, dealId: input.dealId, contactId: input.contactId });
-        patchCall(key, { row, stage: ACTIVE.has(row.status) ? 'live' : row.status === 'failed' ? 'error' : 'done', error: row.status === 'failed' ? row.error : null });
+        if (cancelledRef.current.has(key)) {
+          // Encerrou enquanto a central atendia o pedido: manda desligar já
+          if (ACTIVE.has(row.status)) void hangupApi4comCall(row.id).catch(() => undefined);
+          patchCall(key, { row });
+          return;
+        }
+        if (row.status === 'failed') return patchCall(key, { row, stage: 'error', error: row.error });
+        if (!ACTIVE.has(row.status)) return patchCall(key, { row, stage: 'done' });
+        // A sessão de áudio já pode ter caído enquanto a resposta vinha
+        const last = phone.getSnapshot().lastEnded;
+        const gone = !phone.getSnapshot().session && !!last && last.at >= startedAt;
+        patchCall(key, { row, stage: gone ? 'ending' : 'live', endedAt: gone ? Date.now() : null });
       } catch (err) {
+        if (cancelledRef.current.has(key)) return;
         patchCall(key, { stage: 'error', error: err instanceof Error ? err.message : 'Não foi possível ligar.' });
       }
     },
-    [connectPhone, patchCall]
+    [connectPhone, patchCall, phone]
   );
 
   const startCall = useCallback(
@@ -309,52 +374,103 @@ export function Api4comPhoneProvider({ children }: { children: React.ReactNode }
     [phone, placeCall]
   );
 
-  // Acompanha a ligação até o resultado (atendida, duração, gravação) chegar
-  const liveKey = call?.stage === 'live' && call.row ? call.key : null;
-  const liveRowId = call?.stage === 'live' ? call.row?.id ?? null : null;
-  const liveDealId = call?.dealId ?? null;
+  // O outro lado desligou (o áudio caiu): a tela mostra "encerrada" na hora
+  const liveKeyForAudio = call?.stage === 'live' ? call.key : null;
+  const liveCreatedAt = call?.createdAt ?? 0;
   useEffect(() => {
-    if (!liveKey || !liveRowId) return;
+    if (!liveKeyForAudio || snap.session || !snap.lastEnded || snap.lastEnded.at < liveCreatedAt) return;
+    patchCall(liveKeyForAudio, { stage: 'ending', endedAt: Date.now() });
+  }, [liveKeyForAudio, liveCreatedAt, snap.session, snap.lastEnded, patchCall]);
+
+  // Acompanha a ligação até o resultado (atendida, duração, gravação) chegar
+  const watchKey = (call?.stage === 'live' || call?.stage === 'ending') && call.row ? call.key : null;
+  const watchRowId = watchKey ? call?.row?.id ?? null : null;
+  const watchEnding = call?.stage === 'ending';
+  const watchEndedAt = call?.endedAt ?? null;
+  const watchDealId = call?.dealId ?? null;
+  useEffect(() => {
+    if (!watchKey || !watchRowId) return;
     const startedAt = Date.now();
     let stop = false;
     const finish = (row: CallRow) => {
-      patchCall(liveKey, { row, stage: 'done' });
-      if (liveDealId) void invalidateLeadHistory(qc, organizationId, liveDealId);
+      patchCall(watchKey, { row, stage: 'done' });
+      if (watchDealId) void invalidateLeadHistory(qc, organizationId, watchDealId);
     };
     const tick = async () => {
       if (stop) return;
       try {
-        const { call: row } = await getApi4comCall(liveRowId);
+        const { call: row } = await getApi4comCall(watchRowId);
         if (stop) return;
         if (!ACTIVE.has(row.status)) return finish(row);
-        const ended = phone.getSnapshot().lastEnded;
-        const audioGoneFor = ended && ended.at >= startedAt && !phone.getSnapshot().session ? Date.now() - ended.at : 0;
-        if (audioGoneFor > AFTER_END_WAIT_MS || Date.now() - startedAt > POLL_LIMIT_MS) return finish(row);
-        patchCall(liveKey, { row });
+        const waited = watchEnding && watchEndedAt ? Date.now() - watchEndedAt : 0;
+        if (waited > ENDING_WAIT_MS || Date.now() - startedAt > POLL_LIMIT_MS) return finish(row);
+        patchCall(watchKey, { row });
       } catch {
         /* rede oscilou: tenta no próximo ciclo */
       }
     };
-    const timer = setInterval(() => void tick(), POLL_MS);
+    if (watchEnding) void tick();
+    const timer = setInterval(() => void tick(), watchEnding ? ENDING_POLL_MS : POLL_MS);
     return () => {
       stop = true;
       clearInterval(timer);
     };
-  }, [liveKey, liveRowId, liveDealId, organizationId, qc, phone, patchCall]);
+  }, [watchKey, watchRowId, watchEnding, watchEndedAt, watchDealId, organizationId, qc, patchCall]);
 
   // O resultado fica à vista um pouco e some sozinho
   useEffect(() => {
     if (!call || (call.stage !== 'done' && call.stage !== 'error')) return;
     const key = call.key;
-    const t = setTimeout(() => setCall((cur) => (cur?.key === key ? null : cur)), call.stage === 'done' ? 10_000 : 15_000);
+    const t = setTimeout(() => setCall((cur) => (cur?.key === key ? null : cur)), call.stage === 'done' ? 8_000 : 15_000);
     return () => clearTimeout(t);
   }, [call]);
 
+  /**
+   * Encerrar: vale na hora na tela. Pede à central para derrubar a ligação
+   * inteira (a do cliente também) e encerra o áudio aqui. Um clique basta.
+   */
   const hangup = useCallback(() => {
-    phone.hangup();
-    const row = callRef.current?.row;
+    const cur = callRef.current;
+    const row = cur?.row;
     if (row && ACTIVE.has(row.status)) void hangupApi4comCall(row.id).catch(() => undefined);
-  }, [phone]);
+    phone.hangup();
+    if (!cur) return;
+    if (cur.stage === 'connecting' || cur.stage === 'dialing') {
+      cancelledRef.current.add(cur.key);
+      setCall((c) => (c?.key === cur.key ? { ...c, stage: row ? 'ending' : 'done', endedAt: Date.now() } : c));
+      return;
+    }
+    if (cur.stage === 'live') patchCall(cur.key, { stage: 'ending', endedAt: Date.now() });
+  }, [phone, patchCall]);
+
+  const saveAudio = useCallback((patch: Partial<StoredAudio>) => {
+    setAudioPrefs((p) => {
+      const next = { ...p, ...patch };
+      writeAudioPrefs(next);
+      return next;
+    });
+  }, []);
+  const setInputDevice = useCallback(
+    async (id: string | null) => {
+      saveAudio({ inputId: id });
+      await phone.setInputDevice(id);
+    },
+    [phone, saveAudio]
+  );
+  const setOutputDevice = useCallback(
+    async (id: string | null) => {
+      saveAudio({ outputId: id });
+      await remoteAudio.setOutput(id);
+    },
+    [remoteAudio, saveAudio]
+  );
+  const setVolume = useCallback(
+    (v: number) => {
+      remoteAudio.setVolume(v);
+      saveAudio({ volume: v });
+    },
+    [remoteAudio, saveAudio]
+  );
 
   const value = useMemo<PhoneContextValue>(
     () => ({
@@ -370,8 +486,12 @@ export function Api4comPhoneProvider({ children }: { children: React.ReactNode }
       toggleMute: () => phone.toggleMute(),
       dtmf: (tone: string) => phone.dtmf(tone),
       dismiss: () => setCall((cur) => (cur && !BUSY_STAGES.includes(cur.stage) ? null : cur)),
+      audio: { ...audioPrefs, canChooseOutput: remoteAudio.canChooseOutput() },
+      setInputDevice,
+      setOutputDevice,
+      setVolume,
     }),
-    [available, snap, otherTab, call, goOnline, goOffline, startCall, hangup, phone]
+    [available, snap, otherTab, call, goOnline, goOffline, startCall, hangup, phone, audioPrefs, remoteAudio, setInputDevice, setOutputDevice, setVolume]
   );
 
   return (
