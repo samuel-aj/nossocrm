@@ -25,6 +25,10 @@ const h = vi.hoisted(() => ({
   telemetryFails: false,
   branchFails: false,
   webhookCalls: 0,
+  agent: null as null | Record<string, unknown>,
+  agentCalls: [] as Array<Record<string, unknown>>,
+  budgetBlocked: false,
+  beginAllowed: true,
 }));
 
 vi.mock('@/lib/whatsapp', () => ({
@@ -62,7 +66,7 @@ vi.mock('./actions', () => ({
 vi.mock('./context', () => ({
   loadDealContext: async (_a: unknown, _o: string, input: { dealId?: string | null; contactId?: string | null }) =>
     h.deal && (input.dealId === h.deal.id || input.contactId === h.deal.contact_id) ? { ...h.deal } : null,
-  loadAgent: async () => null,
+  loadAgent: async () => h.agent,
   loadConversationContext: async () => null,
   loadLastInboundProviderId: async () => null,
 }));
@@ -84,7 +88,7 @@ vi.mock('./leadOps', () => ({
     h.lossHistory++;
   },
 }));
-vi.mock('./engine', () => ({ runAgentOnConversation: async () => ({ status: 'ok' }) }));
+vi.mock('./engine', () => ({ runAgentOnConversation: async (input: Record<string, unknown>) => { h.agentCalls.push(input); return { status: 'ok' }; } }));
 vi.mock('./beta', () => ({ isAiAgentsApproved: async () => true }));
 vi.mock('./webhooks', () => ({
   dispatchAgentEvent: async () => [],
@@ -144,6 +148,16 @@ function fakeDb(tables: Record<string, Row[]>) {
     return b;
   };
   return { from, rpc: async (name: string, args: Record<string, unknown>) => {
+    if (name === 'ai_usage_budget') return { data: { blocked_at: h.budgetBlocked ? '2026-11-01T00:00:00Z' : null }, error: null };
+    if (name === 'begin_scheduled_robot_return') {
+      const r = tables.wa_bot_runs.find(row => row.id === args.p_run && row.organization_id === args.p_org);
+      if (!h.beginAllowed || !r) return { data: false, error: null };
+      if (!r.scheduled_started_at) {
+        r.scheduled_started_at = new Date().toISOString();
+        r.vars = { ...(r.vars as Row), __proactive_followup: { anchor: r.scheduled_anchor ?? null, scheduledReturnId: r.id } };
+      }
+      return { data: true, error: null };
+    }
     if (name === 'activate_deal_alert_with_tone') h.alertCalls.push(args);
     if (name === 'wa_bot_record_event') {
       if (h.telemetryFails) return { data: null, error: { message: 'offline' } };
@@ -220,11 +234,73 @@ beforeEach(() => {
   h.telemetryFails = false;
   h.branchFails = false;
   h.webhookCalls = 0;
+  h.agent = null; h.agentCalls = []; h.budgetBlocked = false; h.beginAllowed = true;
   h.deal = { id: 'deal-1', contact_id: 'contact-1', title: 'Lead', stage_id: 's1', board_id: 'b1', tags: [], stage_label: 'Novo' };
 });
 
 const chain = (steps: Row[]) =>
   steps.map((s, i) => ({ next_step_id: steps[i + 1]?.id ?? null, ...s }));
+
+describe('robô de retorno combinado (provedores falsos)', () => {
+  const due = '2026-11-07T18:00:00.000Z'; // sábado às 14h em Manaus
+  const anchor = '2026-11-06T10:00:00Z';
+  const agentId = '11111111-1111-4111-8111-111111111111';
+  function setup() {
+    const r = run({ scheduled_for: due, scheduled_anchor: anchor, scheduled_started_at: null, vars: { contexto_extra: 'Retomar proposta sábado às 14h' } });
+    const tables = db(bot([{ id: 'handoff', type: 'handoff_agent', agent_id: agentId }]), [r], { ai_status: 'active', ai_agent_id: agentId, ai_state: { memoria: 'preservar' } });
+    tables.wa_bot_runs[0].scheduled_connection_id = 'conn-a';
+    tables.followup_calendars = [{ organization_id: ORG, enabled: true, timezone: 'America/Manaus', slots: [{ day: 1, start: '09:00', end: '18:00' }] }];
+    h.agent = { id: agentId, name: 'Qualificação', enabled: true };
+    return { r, tables };
+  }
+  it('não inicia antes, entrega ao agente no sábado combinado e preserva memória', async () => {
+    vi.useFakeTimers();
+    try {
+      const { r, tables } = setup();
+      vi.setSystemTime(new Date('2026-11-07T17:59:00Z'));
+      await processBotRun(fakeDb(tables), r);
+      expect(h.agentCalls).toHaveLength(0); expect(h.sent).toEqual([]);
+      expect(tables.wa_bot_runs[0]).toMatchObject({ status: 'running', wake_at: due, scheduled_started_at: null });
+      vi.setSystemTime(new Date(due));
+      await processBotRun(fakeDb(tables), tables.wa_bot_runs[0] as BotRunRow);
+      expect(h.agentCalls).toHaveLength(1);
+      expect(h.agentCalls[0]).toMatchObject({ agentId, trigger: 'bot', proactive: { anchor, scheduledReturnId: r.id } });
+      expect(h.agentCalls[0]).toMatchObject({ followup: { instruction: 'Retome o atendimento combinado com o cliente. Contexto do retorno: Retomar proposta sábado às 14h' } });
+      expect(tables.wa_bot_runs[0].status).toBe('done');
+      expect(tables.wa_conversations[0].ai_state).toEqual({ memoria: 'preservar' });
+    } finally { vi.useRealTimers(); }
+  });
+  it('não reativa uma conversa bloqueada por consumo', async () => {
+    const { r, tables } = setup(); r.scheduled_for = '2020-01-01T00:00:00Z'; h.budgetBlocked = true;
+    await processBotRun(fakeDb(tables), r);
+    expect(h.agentCalls).toEqual([]); expect(h.sent).toEqual([]);
+    expect(tables.wa_bot_runs[0].status).toBe('cancelled');
+  });
+  it('não prossegue se a reserva atômica detectar cancelamento ou troca de agente', async () => {
+    const { r, tables } = setup(); r.scheduled_for = '2020-01-01T00:00:00Z'; h.beginAllowed = false;
+    await processBotRun(fakeDb(tables), r);
+    expect(h.agentCalls).toEqual([]); expect(h.sent).toEqual([]);
+  });
+  it('retomada após resposta não recria a restrição proativa antiga', async () => {
+    const r = run({ status: 'waiting_reply', scheduled_for: due, scheduled_started_at: due, scheduled_anchor: anchor,
+      vars: { __proactive_followup: { anchor, scheduledReturnId: 'run-1' } } });
+    const tables = db(bot([{ id: 'tx', type: 'send_text', text: 'Recebi sua resposta' }]), [r]);
+    tables.wa_messages = [{ organization_id: ORG, conversation_id: 'conv-1', direction: 'in', created_at: '2026-11-08T10:00:00Z' }];
+    tables.followup_calendars = [{ organization_id: ORG, enabled: true, timezone: 'America/Manaus', slots: [] }];
+    await handleBotReply(fakeDb(tables), { run: r, message: { id: 'reply', body: 'Sim', transcription: null } });
+    expect(h.sent).toEqual(['Recebi sua resposta']);
+    expect((tables.wa_bot_runs[0].vars as Row).__proactive_followup).toBeUndefined();
+  });
+  it.each(['paused', 'stopped', 'awaiting_approval'])('resposta ao retorno não remove estado %s', async ai_status => {
+    const { r, tables } = setup();
+    Object.assign(r, { status: 'waiting_reply', scheduled_started_at: due });
+    tables.wa_conversations[0].ai_status = ai_status;
+    await handleBotReply(fakeDb(tables), { run: r, message: { id: 'reply', body: 'Voltei', transcription: null } });
+    expect(h.agentCalls).toEqual([]); expect(h.sent).toEqual([]);
+    expect(tables.wa_conversations[0].ai_status).toBe(ai_status);
+    expect(tables.wa_bot_runs[0].status).toBe('cancelled');
+  });
+});
 
 describe('calendário de robôs proativos', () => {
   it('preserva o contexto proativo no robô filho', async () => {

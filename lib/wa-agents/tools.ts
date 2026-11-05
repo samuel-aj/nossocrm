@@ -1,3 +1,4 @@
+import { ReturnTimeSchema, type ReturnTimeInput } from './scheduledReturnTime';
 /**
  * Ferramentas do modelo (AI SDK v6): encerrar_atendimento, salvar_dados,
  * executar_acao e, quando o agente tem os recursos, consultar_documentos,
@@ -19,6 +20,11 @@ import type { AgentDocumentRow, AgentMediaRow, AgentRow, KnowledgeHit } from './
 export type MediaSendResult = { ok: boolean; error?: string; note?: string };
 
 export type AgentToolRuntime = {
+  scheduledReturn?: {
+    inspect: () => Promise<unknown>;
+    schedule: (input: ReturnTimeInput) => Promise<unknown>;
+    cancel: () => Promise<unknown>;
+  };
   /** Documentos prontos: liga consultar_documentos */
   documents?: AgentDocumentRow[];
   /** Mídias do agente: liga enviar_midia */
@@ -152,6 +158,17 @@ export function buildAgentTools(agent: AgentRow, runtime: AgentToolRuntime = {})
     });
   }
 
+  if (agent.tools?.scheduled_return_bot_id && runtime.scheduledReturn) {
+    const service = runtime.scheduledReturn;
+    const safe = async (call: () => Promise<unknown>) => { try { return await call(); } catch (error) { return { ok: false, error: errorMessage(error) }; } };
+    tools.consultar_retorno = tool({ description: 'Consulta a data/hora atual, fuso do escritório e retorno pendente. Consulte antes de interpretar amanhã ou outro prazo relativo. Se o cliente estiver em outro fuso, confirme o fuso dele.', inputSchema: z.object({}), execute: async () => safe(service.inspect) });
+    tools.agendar_retorno = tool({
+      description: 'Agenda ou remarca o robô configurado para esta conversa. Use SOMENTE após o cliente pedir ou confirmar claramente data e horário; resolva ambiguidades de dia, hora e fuso perguntando. confirmed=true significa que o cliente confirmou, nunca assuma. O horário combinado pode ser exceção ao calendário. Não encerre o agente nem use outra ação de transferência ao agendar. Só diga que está agendado se ok=true; repita a data e o fuso devolvidos. O robô pode reativar o agente com Entregar a agente.',
+      inputSchema: ReturnTimeSchema,
+      execute: async input => safe(() => service.schedule(input)),
+    });
+    tools.cancelar_retorno = tool({ description: 'Cancela o retorno ainda não iniciado quando o cliente pedir. Não encerra o atendimento.', inputSchema: z.object({}), execute: async () => safe(service.cancel) });
+  }
   Object.assign(tools, buildUtilityTools(agent, runtime));
 
   const media = uniqueNames(runtime.media ?? []);

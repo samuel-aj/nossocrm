@@ -1,6 +1,7 @@
 import { checkProactiveFollowup, PROACTIVE_VAR, type ProactiveFollowup } from './proactiveFollowup';
 import { resolveTemplateComponents } from '@/lib/whatsapp/templateMedia';
 import { checkConversationBudget } from '@/lib/ai-usage/budget';
+import { loadLastInboundAt } from './lastInbound';
 /**
  * Robôs de mensagens predefinidas (sem IA): execução passo a passo com
  * esperas, espera de resposta, condições por palavra-chave e entrega a um
@@ -635,6 +636,18 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
   let currentStep: BotStep | null = null;
   const permitProactive = async (index: number) => {
     const context = st.vars[PROACTIVE_VAR] as ProactiveFollowup | undefined;
+    if (st.run.scheduled_for && !context && st.run.conversation_id) {
+      // A customer's reply removes the calendar restriction, not a human
+      // pause or the consumption lock on this scheduled execution.
+      const { data: conversation, error } = await admin.from('wa_conversations')
+        .select('ai_status, ai_approval').eq('organization_id', orgId).eq('id', st.run.conversation_id).maybeSingle();
+      if (error) throw new Error(error.message);
+      const budget = await checkConversationBudget(admin, orgId, st.run.conversation_id);
+      if (!conversation || ['paused', 'stopped', 'awaiting_approval'].includes(conversation.ai_status) || conversation.ai_approval || budget.blocked_at) {
+        await saveRun(admin, st, { status: 'cancelled', wake_at: null, error: 'Retorno interrompido: atendimento pausado, indisponível ou com limite de consumo' }, { release: true });
+        return false;
+      }
+    }
     if (!context) return true;
     const decision = await checkProactiveFollowup(admin, orgId, st.run.conversation_id, context);
     if (decision.kind === 'allowed') return true;
@@ -647,6 +660,32 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
 
 
   try {
+    if (run.scheduled_for && !run.scheduled_started_at) {
+      if (Date.parse(run.scheduled_for) > Date.now()) {
+        await saveRun(admin, st, { wake_at: run.scheduled_for }, { release: true });
+        return;
+      }
+      if (!run.conversation_id) throw new Error('Retorno sem conversa vinculada');
+      const budget = await checkConversationBudget(admin, orgId, run.conversation_id);
+      if (budget.blocked_at) {
+        await saveRun(admin, st, { status: 'cancelled', wake_at: null, error: 'Limite de consumo exige liberação manual' }, { release: true });
+        return;
+      }
+      const { data: started, error } = await admin.rpc('begin_scheduled_robot_return', { p_org: orgId, p_run: run.id });
+      if (error) throw new Error(error.message);
+      if (!started) {
+        await admin.from('wa_bot_runs').update({ lock_until: null }).eq('organization_id', orgId).eq('id', run.id);
+        return;
+      }
+      // The RPC persists the marker atomically. Read it back so a restarted
+      // worker cannot reintroduce a marker cleared by a customer's reply.
+      const { data: saved, error: readError } = await admin.from('wa_bot_runs').select('*')
+        .eq('organization_id', orgId).eq('id', run.id).maybeSingle();
+      if (readError) throw new Error(readError.message);
+      if (!saved || saved.status !== 'running') return;
+      st.run = saved as BotRunRow;
+      st.vars = { ...((saved.vars ?? {}) as Record<string, unknown>) };
+    }
     if (!(await permitProactive(run.step_index))) return;
     // Robô roda para QUALQUER organização (saiu da beta). Só o passo
     // "entregar a agente" depende da liberação do agente de IA, conferida
@@ -1347,7 +1386,7 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
           const currentAgentId = (convRow as { ai_agent_id?: string | null } | null)?.ai_agent_id ?? null;
           const currentState = ((convRow as { ai_state?: Record<string, unknown> | null } | null)?.ai_state ?? {}) as Record<string, unknown>;
           const proactive = st.vars[PROACTIVE_VAR] as ProactiveFollowup | undefined;
-          if (proactive) {
+          if (proactive || st.run.scheduled_for) {
             const budget = await checkConversationBudget(admin, orgId, conversationId);
             if (budget.blocked_at) {
               note(st, step, 'IA pausada por limite; liberação manual necessária');
@@ -1355,7 +1394,8 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
               return;
             }
             const { data: activated, error } = await admin.rpc('activate_stage_followup_agent', {
-              p_org: orgId, p_conversation: conversationId, p_agent: agent.id, p_anchor: proactive.anchor, p_run: st.run.id,
+              p_org: orgId, p_conversation: conversationId, p_agent: agent.id,
+              p_anchor: proactive ? proactive.anchor : await loadLastInboundAt(admin, orgId, conversationId), p_run: st.run.id,
             });
             if (error) throw new Error(error.message);
             if (!activated) {
@@ -1398,6 +1438,12 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
             conversationId,
             trigger: 'bot',
             proactive: st.vars[PROACTIVE_VAR] as ProactiveFollowup | undefined,
+            ...(proactive?.scheduledReturnId && st.vars.contexto_extra ? {
+              followup: {
+                instruction: `Retome o atendimento combinado com o cliente. Contexto do retorno: ${String(st.vars.contexto_extra)}`,
+                silentFor: 'até o horário combinado',
+              },
+            } : {}),
             agentId: agent.id,
             forceReply: true,
             skipBuffer: true,

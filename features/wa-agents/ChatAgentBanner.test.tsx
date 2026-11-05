@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ChatAgentBanner, formatResumeAt } from './ChatAgentBanner';
+import { ChatAgentBanner, formatResumeAt, formatScheduledReturn } from './ChatAgentBanner';
 import type { ConversationAiInfo, ConversationBotInfo } from '@/lib/wa-agents/types';
 
 function info(partial: Partial<ConversationAiInfo>): ConversationAiInfo {
@@ -24,6 +24,20 @@ describe('formatResumeAt', () => {
 
   it('devolve vazio para data inválida', () => {
     expect(formatResumeAt('nada')).toBe('');
+  });
+});
+
+describe('formatScheduledReturn', () => {
+  it('mantém data, hora e fuso combinados, mesmo com o navegador em outro fuso', () => {
+    expect(formatScheduledReturn('2026-11-07T18:00:00Z', 'America/Manaus'))
+      .toBe('07/11/2026, 14:00 (America/Manaus)');
+    expect(formatScheduledReturn('2026-11-07T18:00:00Z', 'America/Sao_Paulo'))
+      .toBe('07/11/2026, 15:00 (America/Sao_Paulo)');
+  });
+
+  it('não derruba a conversa se um retorno vier com data ou fuso inválido', () => {
+    expect(formatScheduledReturn('inválido', 'America/Manaus')).toBe('horário indisponível');
+    expect(formatScheduledReturn('2026-11-07T18:00:00Z', 'fuso/inválido')).toBe('horário indisponível');
   });
 });
 
@@ -123,6 +137,44 @@ describe('ChatAgentBanner', () => {
     expect(screen.getByText('Robô Boas-vindas aguardando resposta do contato')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Cancelar robô/ }));
     expect(onAction).toHaveBeenCalledWith('cancel_bot');
+  });
+
+  it('retorno agendado: mostra o horário combinado e cancela sem parar o agente', async () => {
+    const user = userEvent.setup();
+    const bot: ConversationBotInfo = {
+      runId: 'r1', botId: 'b1', name: 'Retomada', status: 'running',
+      scheduledAt: '2026-11-07T18:00:00Z', scheduledTimezone: 'America/Manaus',
+    };
+    render(<ChatAgentBanner ai={info({ status: 'active' })} bot={bot} busy={false} onAction={onAction} />);
+    expect(screen.getByText('Retorno agendado com Retomada: 07/11/2026, 14:00 (America/Manaus)')).toBeInTheDocument();
+    expect(screen.getByText('Agente Ana ativo nesta conversa')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cancelar robô' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Cancelar retorno' }));
+    expect(onAction).toHaveBeenCalledExactlyOnceWith('cancel_bot');
+  });
+
+  it('retorno já iniciado volta a mostrar o andamento normal do robô', () => {
+    const bot: ConversationBotInfo = {
+      runId: 'r1', botId: 'b1', name: 'Retomada', status: 'running',
+      scheduledAt: null, scheduledTimezone: 'America/Manaus',
+    };
+    render(<ChatAgentBanner ai={null} bot={bot} busy={false} onAction={onAction} />);
+    expect(screen.getByText('Robô Retomada em andamento')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancelar robô' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cancelar retorno' })).not.toBeInTheDocument();
+  });
+
+  it('retorno agendado ocupado: bloqueia clique duplicado de cancelamento', async () => {
+    const user = userEvent.setup();
+    const bot: ConversationBotInfo = {
+      runId: 'r1', botId: 'b1', name: 'Retomada', status: 'running',
+      scheduledAt: '2026-11-07T18:00:00Z', scheduledTimezone: 'America/Manaus',
+    };
+    render(<ChatAgentBanner ai={null} bot={bot} busy onAction={onAction} />);
+    const cancel = screen.getByRole('button', { name: 'Cancelar retorno' });
+    expect(cancel).toBeDisabled();
+    await user.click(cancel);
+    expect(onAction).not.toHaveBeenCalled();
   });
 
   it('busy: botões desabilitados e sem chamar onAction', async () => {

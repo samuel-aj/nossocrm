@@ -16,7 +16,7 @@ function db(enabled = true) {
   };
   return { rpc: h.claim, from: (table: string) => {
     let single = false; let inbound = false;
-    const q = { select: () => q, eq: (key: string, value: string) => { if (key === 'direction' && value === 'in') inbound = true; return q; }, gt: () => q, limit: () => q, order: () => q,
+    const q = { not: () => q, is: () => q, select: () => q, eq: (key: string, value: string) => { if (key === 'direction' && value === 'in') inbound = true; return q; }, gt: () => q, limit: () => q, order: () => q,
       maybeSingle: () => { single = true; return q; },
       then: (resolve: (r: unknown) => void) => resolve({ data: single ? (inbound ? { created_at: cycle } : rows[table]?.[0]) ?? null : rows[table] ?? [], error: null }) };
     return q;

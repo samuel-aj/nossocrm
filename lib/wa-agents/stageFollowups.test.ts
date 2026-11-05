@@ -44,11 +44,18 @@ function fakeDb(tables: Record<string, Row[]>) {
     let orderCol: string | null = null;
     let asc = true;
     let patch: Row | null = null;
+    let inserted: Row[] | null = null;
     const b: Record<string, unknown> = {
       update: (value: Row) => { patch = value; return b; },
+      insert: (value: Row | Row[]) => { inserted = Array.isArray(value) ? value : [value]; return b; },
       select: (_c?: string, opts?: { head?: boolean }) => ((head = !!opts?.head), b),
       eq: (c: string, v: unknown) => (filters.push((r) => r[c] === v), b),
       is: (c: string, v: unknown) => (filters.push((r) => (r[c] ?? null) === v), b),
+      not: (c: string, operator: string, v: unknown) => {
+        if (operator !== 'is') throw new Error(`Unsupported fake operator: ${operator}`);
+        filters.push(r => (r[c] ?? null) !== v);
+        return b;
+      },
       in: (c: string, vs: unknown[]) => (filters.push((r) => vs.includes(r[c])), b),
       or: (expr: string) => {
         const parts = expr.split(',').map((p) => p.split('.eq.'));
@@ -59,6 +66,7 @@ function fakeDb(tables: Record<string, Row[]>) {
       limit: (n: number) => ((limit = n), b),
       maybeSingle: () => ((single = true), b),
       then: (resolve: (v: unknown) => void) => {
+        if (inserted) (tables[table] ??= []).push(...inserted);
         let rows = (tables[table] ?? []).filter((r) => filters.every((f) => f(r)));
         if (patch) rows.forEach(row => Object.assign(row, patch));
         if (orderCol) rows = [...rows].sort((x, y) => (String(x[orderCol!]) < String(y[orderCol!]) ? -1 : 1) * (asc ? 1 : -1));
