@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const h = vi.hoisted(() => ({
   guard: vi.fn(), access: vi.fn(), load: vi.fn(), client: vi.fn(), from: vi.fn(),
@@ -17,6 +17,7 @@ vi.mock('@/lib/zapsign/signatures', () => ({
   loadZapSignSettings: h.load, clientFor: h.client, newWebhookSecret: () => 'test-webhook-secret',
 }));
 import { GET, PUT, DELETE } from './route';
+import { ZapSignError } from '@/lib/zapsign/client';
 
 const admin = { from: h.from };
 const user = { id: 'master-a', organizationId: 'org-a', role: 'admin' };
@@ -43,6 +44,68 @@ beforeEach(() => {
   h.client.mockReturnValue({ listTemplates: h.templates, createWebhook: h.webhook, deleteWebhook: h.deleteWebhook });
   h.templates.mockResolvedValue([{ name: 'Modelo de teste' }]);
   h.webhook.mockResolvedValue({ id: 'webhook-test' });
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+});
+afterEach(() => vi.restoreAllMocks());
+
+describe('ZapSign connection failure diagnostics', () => {
+  it.each([
+    ['authorization', h.guard], ['client', h.client],
+    ['settings', h.load], ['persist', h.upsert],
+  ] as const)('captures unexpected %s failure and returns a support reference', async (stage, operation) => {
+    const failure = new Error('internal fake-test-token-1234 must not leak');
+    if (stage === 'client') operation.mockImplementation(() => { throw failure; });
+    else operation.mockRejectedValue(failure);
+    const res = await PUT(request('PUT'));
+    const body = await res.json();
+    expect(res.status).toBe(500);
+    expect(body.reference).toMatch(/^[0-9a-f-]{36}$/);
+    expect(body.error).toContain(body.reference);
+    expect(body.error).not.toContain('fake-test-token');
+    expect(console.error).toHaveBeenCalledWith('[zapsign.connect]', expect.objectContaining({ reference: body.reference, stage }));
+    if (stage !== 'persist') expect(h.upsert).not.toHaveBeenCalled();
+    if (stage === 'authorization') expect(h.templates).not.toHaveBeenCalled();
+  });
+
+  it('returns a useful error even when persistence has no message', async () => {
+    h.upsert.mockResolvedValue({ error: { code: 'XX000' } });
+    const res = await PUT(request('PUT'));
+    const body = await res.json();
+    expect(res.status).toBe(500);
+    expect(body.error).toContain('salvar a conexão');
+    expect(body.reference).toBeTruthy();
+    expect(console.error).toHaveBeenCalledWith('[zapsign.connect]', expect.objectContaining({ stage: 'persist', code: 'XX000' }));
+  });
+
+  it.each([401, 403, 500, 0])('preserves provider failure %s without writing a connection', async status => {
+    h.templates.mockRejectedValue(new ZapSignError('Provider unavailable', status));
+    const res = await PUT(request('PUT'));
+    expect(res.status).toBe([401, 403].includes(status) ? 400 : 502);
+    expect((await res.json()).error).toContain('Não foi possível conectar');
+    expect(h.load).not.toHaveBeenCalled();
+    expect(h.webhook).not.toHaveBeenCalled();
+    expect(h.upsert).not.toHaveBeenCalled();
+  });
+
+  it('keeps webhook failure as a connection warning and logs its stage', async () => {
+    h.webhook.mockRejectedValue(new ZapSignError('Webhook unavailable', 503));
+    const res = await PUT(request('PUT'));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ connected: true, webhook_ok: false, last_error: 'Webhook unavailable' });
+    expect(h.upsert).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledWith('[zapsign.connect]', expect.objectContaining({ stage: 'webhook', status: 503 }));
+  });
+
+  it('never exposes DB error details or the token in the response', async () => {
+    h.upsert.mockResolvedValue({ error: { code: '23514', message: 'Invalid fake-test-token-1234', details: 'private row' } });
+    const res = await PUT(request('PUT'));
+    const body = await res.text();
+    expect(res.status).toBe(500);
+    expect(body).not.toContain('fake-test-token-1234');
+    expect(body).not.toContain('private row');
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain('fake-test-token-1234');
+  });
 });
 
 describe.each(operations)('ZapSign settings %s', (method, run) => {
