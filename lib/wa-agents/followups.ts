@@ -1,3 +1,4 @@
+import { loadLastInboundAt } from './lastInbound';
 /**
  * Follow-ups do agente por tempo sem resposta do lead (régua em wa_ai_agents.followups).
  *
@@ -107,7 +108,7 @@ export async function processFollowups(
 
       const { data: convsRaw } = await admin
         .from('wa_conversations')
-        .select('id, organization_id, ai_agent_id, connection_id, last_inbound_at, ai_state, ai_status_changed_at')
+        .select('id, organization_id, ai_agent_id, connection_id, ai_state, ai_status_changed_at')
         .eq('organization_id', a.organization_id)
         .eq('ai_agent_id', a.id)
         .eq('ai_status', 'active')
@@ -117,6 +118,7 @@ export async function processFollowups(
         if (result.fired >= limit) break;
         result.checked++;
         try {
+          conv.last_inbound_at = await loadLastInboundAt(admin, conv.organization_id, conv.id);
           const state = (conv.ai_state ?? {}) as ConversationAiState;
           const cycle = conv.last_inbound_at ?? null;
           const done = state.followups && state.followups.cycle === cycle ? [...state.followups.done] : [];

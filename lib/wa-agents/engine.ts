@@ -1,3 +1,4 @@
+import { loadLastInboundAt } from './lastInbound';
 import { checkProactiveFollowup, type ProactiveFollowup } from './proactiveFollowup';
 import { getServiceWindow } from '@/lib/whatsapp/serviceWindow';
 /**
@@ -452,7 +453,7 @@ export async function runAgentOnConversation(input: RunAgentInput): Promise<RunR
     const budget = await checkConversationBudget(admin, input.organizationId, input.conversationId);
     if (budget.blocked_at) return { status: 'skipped', reason: 'IA pausada pelo limite de consumo; liberação manual necessária' };
     const conversation = await loadConversationContext(admin, input.organizationId, input.conversationId);
-    if (input.proactive && conversation.connection?.provider === 'meta_cloud' && !getServiceWindow(conversation.conversation.last_inbound_at).open) {
+    if (input.proactive && conversation.connection?.provider === 'meta_cloud' && !getServiceWindow(await loadLastInboundAt(admin, input.organizationId, input.conversationId, conversation.connection.id)).open) {
       return { status: 'skipped', reason: 'Janela do WhatsApp fechada; use um robô com modelo aprovado' };
     }
     const usageContext = await createUsageContext(admin, {

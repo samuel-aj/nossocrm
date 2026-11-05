@@ -1,3 +1,4 @@
+import { loadLastInboundAt } from './lastInbound';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { followupAllowedAt } from './followupCalendarStore';
 
@@ -10,10 +11,11 @@ export async function checkProactiveFollowup(admin: SupabaseClient, orgId: strin
   context: ProactiveFollowup, now = new Date()): Promise<ProactiveDecision> {
   if (!conversationId) return { kind: 'cancel', reason: 'follow-up sem conversa vinculada' };
   const { data: conv, error } = await admin.from('wa_conversations')
-    .select('last_inbound_at, ai_status, ai_approval').eq('organization_id', orgId).eq('id', conversationId).maybeSingle();
+    .select('ai_status, ai_approval').eq('organization_id', orgId).eq('id', conversationId).maybeSingle();
   if (error) throw new Error(error.message);
   if (!conv) return { kind: 'cancel', reason: 'conversa não encontrada' };
-  if (conv.last_inbound_at && (!context.anchor || Date.parse(conv.last_inbound_at) > Date.parse(context.anchor)))
+  const lastInbound = await loadLastInboundAt(admin, orgId, conversationId);
+  if (lastInbound && (!context.anchor || Date.parse(lastInbound) > Date.parse(context.anchor)))
     return { kind: 'cancel', reason: 'cliente respondeu após o agendamento' };
   if (['paused', 'stopped', 'awaiting_approval'].includes(conv.ai_status) || conv.ai_approval)
     return { kind: 'cancel', reason: 'atendimento pausado, encerrado ou aguardando aprovação' };

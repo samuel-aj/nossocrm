@@ -32,3 +32,6 @@ Quando houver adiamento, a tentativa não é concluída nem contada como falha. 
 - Se o horário terminar após uma parte da resposta já ter sido enviada, o restante é interrompido sem repetir o trecho na abertura seguinte. Se nenhum envio ocorreu, a tentativa volta a aguardar.
 - SQL validado sobre estrutura mínima local; revisar estado da migração no banco antes de qualquer publicação.
 - Retorno agendado, CTWA, ZapSign autônoma e voz continuam no roteiro das próximas entregas.
+## Revisão de publicação em 05/11/2026
+
+A conferência do schema real identificou que wa_conversations não possui last_inbound_at. A leitura e as guardas SQL agora usam wa_messages (direction=in), com escopo de organização/conversa; a janela Meta também considera a conexão. Não foi criada coluna nem reescrito histórico. Os testes SQL locais reproduzem essa estrutura. Migração followup_calendar aplicada no projeto mggvzlmquzqcloprxmoe; RLS e funções restritas confirmadas, sem ativar configurações ou atendimentos. Testes com IDs inexistentes retornaram false, sem alteração de cadastros.

@@ -4,7 +4,7 @@ import { loadFollowupCalendar } from './followupCalendarStore';
 
 function db(rows: Record<string, unknown>, fail?: string) {
   return { from: (table: string) => {
-    const q = { select: vi.fn(() => q), eq: vi.fn(() => q), maybeSingle: async () => ({ data: rows[table] ?? null, error: fail === table ? { message: 'offline' } : null }) };
+    const q = { order: () => q, limit: () => q, select: vi.fn(() => q), eq: vi.fn(() => q), maybeSingle: async () => ({ data: (table === 'wa_messages' ? { created_at: (rows.wa_conversations as typeof conv)?.last_inbound_at } : rows[table]) ?? null, error: fail === table ? { message: 'offline' } : null }) };
     return q;
   } } as never;
 }

@@ -15,10 +15,10 @@ function db(enabled = true) {
     wa_messages: [{ created_at: '2026-11-06T10:01:00Z' }],
   };
   return { rpc: h.claim, from: (table: string) => {
-    let single = false;
-    const q = { select: () => q, eq: () => q, gt: () => q, limit: () => q, order: () => q,
+    let single = false; let inbound = false;
+    const q = { select: () => q, eq: (key: string, value: string) => { if (key === 'direction' && value === 'in') inbound = true; return q; }, gt: () => q, limit: () => q, order: () => q,
       maybeSingle: () => { single = true; return q; },
-      then: (resolve: (r: unknown) => void) => resolve({ data: single ? rows[table]?.[0] ?? null : rows[table] ?? [], error: null }) };
+      then: (resolve: (r: unknown) => void) => resolve({ data: single ? (inbound ? { created_at: cycle } : rows[table]?.[0]) ?? null : rows[table] ?? [], error: null }) };
     return q;
   } } as never;
 }

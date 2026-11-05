@@ -30,7 +30,7 @@ begin
   set ai_state = jsonb_set(coalesce(ai_state, '{}'::jsonb), '{followups}',
     jsonb_build_object('cycle', p_cycle, 'done', p_done))
   where id = p_conversation and organization_id = p_org and ai_agent_id = p_agent
-    and ai_status = 'active' and last_inbound_at is not distinct from p_cycle::timestamptz
+    and ai_status = 'active' and (select max(m.created_at) from public.wa_messages m where m.organization_id = p_org and m.conversation_id = p_conversation and m.direction = 'in') is not distinct from p_cycle::timestamptz
     and (ai_lock_until is null or ai_lock_until < now())
     and (ai_state -> 'followups') is not distinct from p_expected;
   get diagnostics changed = row_count;
@@ -54,7 +54,7 @@ begin
     and (c.ai_status is null or c.ai_status = 'active')
     and c.ai_approval is null
     and (c.ai_lock_until is null or c.ai_lock_until < now())
-    and (c.last_inbound_at is null or c.last_inbound_at <= p_anchor)
+    and not exists (select 1 from public.wa_messages m where m.organization_id = p_org and m.conversation_id = p_conversation and m.direction = 'in' and (p_anchor is null or m.created_at > p_anchor))
     and exists (select 1 from public.wa_ai_agents a where a.id = p_agent and a.organization_id = p_org and a.enabled)
     and not exists (select 1 from public.wa_bot_runs b where b.organization_id = p_org
       and b.conversation_id = p_conversation and b.status in ('running', 'waiting_reply') and b.id is distinct from p_run);

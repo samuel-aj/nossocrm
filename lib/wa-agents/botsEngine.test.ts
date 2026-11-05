@@ -252,7 +252,8 @@ describe('calendário de robôs proativos', () => {
   });
   it('cancela quando o lead respondeu durante uma espera', async () => {
     const r = run({ vars: { __proactive_followup: { anchor: '2026-11-06T10:00:00Z' } } });
-    const tables = db(bot([{ id: 'tx', type: 'send_text', text: 'Não enviar' }]), [r], { last_inbound_at: '2026-11-07T10:00:00Z' });
+    const tables = db(bot([{ id: 'tx', type: 'send_text', text: 'Não enviar' }]), [r]);
+    tables.wa_messages = [{ organization_id: ORG, conversation_id: 'conv-1', direction: 'in', created_at: '2026-11-07T10:00:00Z' }];
     await processBotRun(fakeDb(tables), r);
     expect(h.sent).toEqual([]); expect(tables.wa_bot_runs[0].status).toBe('cancelled');
   });
