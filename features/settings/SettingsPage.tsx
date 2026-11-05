@@ -21,6 +21,7 @@ import AppearanceSettings from './components/AppearanceSettings';
 import { ProductsCatalogManager } from './components/ProductsCatalogManager';
 import { UserRole } from '@/types/constants';
 import { UsersPage } from './UsersPage';
+import { useTeamConfig } from './TeamRoles';
 import { LeadDistributionSettings } from './LeadDistributionSettings';
 import { CrmSettings } from './CrmSettings';
 import { AiAutomationsSettings, type AiSubTab } from './AiAutomationsSettings';
@@ -110,14 +111,18 @@ type IntegrationsSubTab = 'webhooks' | 'api' | 'mcp' | 'api4com' | 'zapsign';
 
 const IntegrationsSettings: React.FC = () => {
   const [subTab, setSubTab] = useState<IntegrationsSubTab>('webhooks');
-  const { profile } = useAuth();
-  // ZapSign: por enquanto só o super admin conecta (liberação controlada por organização)
-  const canZapSign = profile?.role === UserRole.SUPER_ADMIN;
+  const { profile, user } = useAuth();
+  const { data: teamConfig, isError: teamError } = useTeamConfig();
+  // Administradores comuns não gerenciam a conexão da organização.
+  const canZapSign = profile?.role === UserRole.SUPER_ADMIN || (
+    profile?.role === UserRole.ADMIN && !!user?.id && !teamError && teamConfig?.masterUserId === user.id
+  );
 
   useEffect(() => {
     const syncFromHash = () => {
       const h = (window.location.hash || '').replace('#', '');
-      if (h === 'webhooks' || h === 'api' || h === 'mcp' || h === 'api4com' || (h === 'zapsign' && canZapSign)) setSubTab(h);
+      if (h === 'zapsign') setSubTab(canZapSign ? 'zapsign' : 'webhooks');
+      else if (h === 'webhooks' || h === 'api' || h === 'mcp' || h === 'api4com') setSubTab(h);
     };
     syncFromHash();
     window.addEventListener('hashchange', syncFromHash);

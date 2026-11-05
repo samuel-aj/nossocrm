@@ -31,5 +31,12 @@ Aplicar `20261027150000_zapsign_integration.sql` e `20261028150000_zapsign_revie
 ## Produção (30/10/2026)
 
 - Publicado em produção com a ZapSign **desconectada em todas as organizações**: as tabelas existem, mas `zapsign_settings` está vazia. Enquanto uma organização não conecta, nada de contrato aparece para ela: nem a aba Contrato no lead, nem o card "Contrato ao entrar" no Automatizar, nem a seção na janela da etapa, e o trigger em `deals` sai no primeiro `IF` (sem regra na etapa, nada acontece).
-- **Quem conecta**: por enquanto só o **super admin** vê a aba ZapSign em Configurações > Integrações e consegue chamar `PUT`/`DELETE` em `/api/integrations/zapsign/settings` (o admin da organização recebe 403). Para liberar aos admins das organizações, basta trocar `canZapSign` em `features/settings/SettingsPage.tsx` e tirar a checagem `ONLY_SUPER_ADMIN` na rota.
+- **Quem conectava nessa publicação**: somente o **super admin** via a aba ZapSign e podia conectar/desconectar. Ver alteração de acesso abaixo.
 - **Voltar atrás**: código pela tag `prod-pre-zapsign` (Vercel > Deployments > Instant Rollback, ou `git revert -m 1` do merge); banco com `docs/zapsign-rollback.sql` (o passo 1, só o trigger, já desliga a integração sem perder nada).
+
+## Configuração pelo Administrador Mestre (05/11/2026 — alteração local)
+
+- Aba ZapSign e GET/PUT/DELETE de settings autorizam o Administrador Mestre da organização da sessão, identificado por `masterUserId` nas permissões de equipe. O acesso do superadministrador é preservado.
+- Administradores comuns e vendedores não recebem acesso à configuração da integração. A API verifica a permissão a cada chamada; falha na consulta bloqueia, sem ler token ou chamar a ZapSign.
+- O Mestre é definido em Configurações > Equipe pelo superadministrador. Não se deve promover um usuário a superadministrador para conectar a ZapSign.
+- Sem migração ou mudança de cargos. Uso operacional dos contratos no lead permanece igual. Testes de autorização usam banco e provedor simulados.
