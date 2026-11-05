@@ -9,6 +9,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
+import { isAiAgentsApproved } from '@/lib/wa-agents/beta';
 import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { getErrorMessage, guardRoute, readJsonBody, validationError } from '../../_shared';
@@ -21,7 +22,9 @@ const RuleSchema = z
   .object({
     enabled: z.boolean(),
     delay_seconds: z.number().int().min(60).max(2592000),
-    action_type: z.enum(['bot', 'message']),
+    action_type: z.enum(['bot', 'message', 'agent']),
+    agent_id: z.string().uuid().nullable().optional(),
+    agent_instruction: z.string().max(2000).optional(),
     bot_id: z.string().uuid().nullable().optional(),
     message: z
       .object({
@@ -33,6 +36,7 @@ const RuleSchema = z
   })
   .superRefine((v, ctx) => {
     if (!v.enabled) return;
+    if (v.action_type === 'agent' && !v.agent_id) ctx.addIssue({ code: 'custom', path: ['agent_id'], message: 'Escolha o agente de IA' });
     if (v.action_type === 'bot' && !v.bot_id) ctx.addIssue({ code: 'custom', path: ['bot_id'], message: 'Escolha o robô' });
     if (v.action_type === 'message') {
       if (!v.message) ctx.addIssue({ code: 'custom', path: ['message'], message: 'Configure a mensagem' });
@@ -86,6 +90,11 @@ export async function PUT(req: Request, ctx: Ctx) {
 
   try {
     if (!(await loadStage(auth.admin, orgId, stageId))) return json({ error: 'Etapa não encontrada' }, 404);
+    if (input.action_type === 'agent' && input.agent_id) {
+      if (!(await isAiAgentsApproved(auth.admin, orgId))) return json({ error: 'IA não liberada nesta organização' }, 403);
+      const { data: agent } = await auth.admin.from('wa_ai_agents').select('id').eq('id', input.agent_id).eq('organization_id', orgId).eq('enabled', true).maybeSingle();
+      if (!agent) return json({ error: 'Agente não encontrado ou desligado' }, 400);
+    }
     if (input.action_type === 'bot' && input.bot_id) {
       const { data: bot } = await auth.admin.from('wa_bots').select('id').eq('id', input.bot_id).eq('organization_id', orgId).maybeSingle();
       if (!bot) return json({ error: 'Robô não encontrado nesta organização' }, 400);
@@ -106,6 +115,8 @@ export async function PUT(req: Request, ctx: Ctx) {
       enabled: input.enabled,
       delay_seconds: input.delay_seconds,
       action_type: input.action_type,
+      agent_id: input.action_type === 'agent' ? input.agent_id ?? null : null,
+      agent_instruction: input.action_type === 'agent' ? input.agent_instruction?.trim() ?? '' : '',
       bot_id: input.action_type === 'bot' ? input.bot_id ?? null : null,
       message:
         input.action_type === 'message' && input.message

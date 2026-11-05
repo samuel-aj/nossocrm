@@ -8,7 +8,8 @@
  * /settings/agentes abre em Agentes, /settings/ai abre na Central.
  */
 import React, { useEffect, useState } from 'react';
-import { Bot, History, Sparkles, Workflow, Lock, Gauge } from 'lucide-react';
+import { Bot, History, Sparkles, Workflow, Lock, Gauge, Clock } from 'lucide-react';
+import { FollowupCalendarSettings } from './FollowupCalendarSettings';
 import { ConsumptionDashboard } from '@/features/ai-usage/ConsumptionDashboard';
 import { useWaAgentsAccess } from '@/hooks/useWaAgentsAccess';
 import { Spinner } from '@/features/wa-agents/ui';
@@ -16,10 +17,10 @@ import { WaAgentsSettings } from '@/features/wa-agents/WaAgentsSettings';
 import { AICenterSettings } from './AICenterSettings';
 import { SettingsHeader, SubTabs } from './components/SettingsUi';
 
-export type AiSubTab = 'agentes' | 'robos' | 'execucoes' | 'central' | 'consumo';
+export type AiSubTab = 'agentes' | 'robos' | 'execucoes' | 'central' | 'consumo' | 'horarios-followup';
 
 function isAiSubTab(v: string): v is AiSubTab {
-  return v === 'agentes' || v === 'robos' || v === 'execucoes' || v === 'central' || v === 'consumo';
+  return v === 'agentes' || v === 'robos' || v === 'execucoes' || v === 'central' || v === 'consumo' || v === 'horarios-followup';
 }
 
 export const AiAutomationsSettings: React.FC<{ initialSub?: AiSubTab }> = ({ initialSub = 'agentes' }) => {
@@ -58,6 +59,7 @@ export const AiAutomationsSettings: React.FC<{ initialSub?: AiSubTab }> = ({ ini
           },
           { id: 'robos' as const, label: 'Robôs', icon: Workflow },
           { id: 'execucoes' as const, label: 'Execuções', icon: History },
+          { id: 'horarios-followup' as const, label: 'Horários de follow-up', icon: Clock },
           { id: 'consumo' as const, label: 'Consumo e limites', icon: Gauge },
         ]
       : []),
@@ -80,7 +82,7 @@ export const AiAutomationsSettings: React.FC<{ initialSub?: AiSubTab }> = ({ ini
       ) : (
         <>
           <SubTabs tabs={tabs} value={effective} onChange={go} ariaLabel="Seções de IA e Automações" />
-          {effective === 'central' ? <AICenterSettings embedded /> : effective === 'consumo' ? <ConsumptionDashboard /> : <WaAgentsSettings embedded tab={effective} />}
+          {effective === 'horarios-followup' ? <FollowupCalendarSettings /> : effective === 'central' ? <AICenterSettings embedded /> : effective === 'consumo' ? <ConsumptionDashboard /> : <WaAgentsSettings embedded tab={effective} />}
         </>
       )}
     </div>

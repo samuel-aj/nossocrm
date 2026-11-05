@@ -30,7 +30,8 @@ vi.mock('@/lib/whatsapp/service', () => ({
 }));
 vi.mock('./context', () => ({ loadDealContext: async () => ({ title: 'Lead Maria', stage_label: 'Em qualificação' }) }));
 
-import { runStageFollowup, type FollowupSchedule } from './stageFollowups';
+import { processStageFollowups, runStageFollowup, type FollowupSchedule } from './stageFollowups';
+vi.mock('./stageFollowupAgent', () => ({ startStageFollowupAgent: async () => ({ ok: true }) }));
 
 type Row = Record<string, unknown>;
 
@@ -42,7 +43,9 @@ function fakeDb(tables: Record<string, Row[]>) {
     let limit: number | null = null;
     let orderCol: string | null = null;
     let asc = true;
+    let patch: Row | null = null;
     const b: Record<string, unknown> = {
+      update: (value: Row) => { patch = value; return b; },
       select: (_c?: string, opts?: { head?: boolean }) => ((head = !!opts?.head), b),
       eq: (c: string, v: unknown) => (filters.push((r) => r[c] === v), b),
       is: (c: string, v: unknown) => (filters.push((r) => (r[c] ?? null) === v), b),
@@ -57,6 +60,7 @@ function fakeDb(tables: Record<string, Row[]>) {
       maybeSingle: () => ((single = true), b),
       then: (resolve: (v: unknown) => void) => {
         let rows = (tables[table] ?? []).filter((r) => filters.every((f) => f(r)));
+        if (patch) rows.forEach(row => Object.assign(row, patch));
         if (orderCol) rows = [...rows].sort((x, y) => (String(x[orderCol!]) < String(y[orderCol!]) ? -1 : 1) * (asc ? 1 : -1));
         if (limit !== null) rows = rows.slice(0, limit);
         if (head) return resolve({ count: rows.length, data: null, error: null });
@@ -65,7 +69,7 @@ function fakeDb(tables: Record<string, Row[]>) {
     };
     return b;
   };
-  return { from } as never;
+  return { from, rpc: async () => ({ data: (tables.deal_followup_schedules ?? []).map(row => ({ ...row })), error: null }) } as never;
 }
 
 const ORG = 'org';
@@ -106,6 +110,36 @@ beforeEach(() => {
 });
 
 describe('follow-up por inatividade: execução', () => {
+  it('o worker devolve o item à fila sem consumir tentativa ou marcar como enviado', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-07T16:00:00Z'));
+    try {
+      const t = base({
+        deal_followup_schedules: [{ ...sched }],
+        followup_calendars: [{ organization_id: ORG, enabled: true, timezone: 'America/Manaus', slots: [{ day: 1, start: '09:00', end: '18:00' }] }],
+      });
+      await processStageFollowups(fakeDb(t));
+      expect(t.deal_followup_schedules[0]).toMatchObject({ status: 'scheduled', attempts: 0, due_at: '2026-11-09T13:00:00.000Z', lock_until: null });
+      expect(t.deal_followup_schedules[0].fired_at).toBeUndefined();
+      expect(h.texts).toEqual([]);
+    } finally { vi.useRealTimers(); }
+  });
+  it('adia sem enviar nem iniciar robô quando o calendário está fechado', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-07T16:00:00Z'));
+    try {
+      const t = base({ followup_calendars: [{ organization_id: ORG, enabled: true, timezone: 'America/Manaus', slots: [{ day: 1, start: '09:00', end: '18:00' }] }] });
+      expect(await runStageFollowup(fakeDb(t), sched)).toMatchObject({ status: 'deferred', until: '2026-11-09T13:00:00.000Z' });
+      expect(h.texts).toEqual([]); expect(h.started).toEqual([]);
+    } finally { vi.useRealTimers(); }
+  });
+  it('invalida agendamento de uma versão anterior da regra', async () => {
+    expect((await runStageFollowup(fakeDb(base()), { ...sched, rule_version: 0 })).status).toBe('superseded');
+    expect(h.texts).toEqual([]);
+  });
+  it('aceita o agente como ação direta', async () => {
+    const t = base({ stage_followup_rules: [{ ...base().stage_followup_rules[0], action_type: 'agent', agent_id: 'agent' }] });
+    expect(await runStageFollowup(fakeDb(t), sched)).toMatchObject({ status: 'done', result: { kind: 'agent_started' } });
+    expect(h.texts).toEqual([]); expect(h.started).toEqual([]);
+  });
   it('envia a mensagem na conversa do lead, com as variáveis preenchidas', async () => {
     const r = await runStageFollowup(fakeDb(base()), sched);
     expect(r.status).toBe('done');

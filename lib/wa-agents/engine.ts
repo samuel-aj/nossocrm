@@ -1,3 +1,6 @@
+import { loadLastInboundAt } from './lastInbound';
+import { checkProactiveFollowup, type ProactiveFollowup } from './proactiveFollowup';
+import { getServiceWindow } from '@/lib/whatsapp/serviceWindow';
 /**
  * Motor dos agentes de IA nativos: recebe a mensagem, decide qual agente
  * responde, gera a resposta com o modelo, envia pelo WhatsApp e aplica a
@@ -59,7 +62,12 @@ import type {
 } from './types';
 import { dispatchAgentEvent } from './webhooks';
 
+class ProactiveInterrupted extends Error {
+  constructor(message: string, readonly until?: string) { super(message); }
+}
+
 export type RunResult = {
+  deferredUntil?: string;
   status: RunStatus;
   reason?: string;
   runId?: string | null;
@@ -77,6 +85,7 @@ export type RunAgentInput = {
   triggerMessageId?: string;
   depth?: number;
   /** Follow-up por tempo sem resposta (trigger 'followup'): instrução da equipe e há quanto tempo o lead está calado */
+  proactive?: ProactiveFollowup;
   followup?: { instruction: string; silentFor: string };
 };
 
@@ -339,8 +348,9 @@ async function sendLines(
   ctx: ConversationContext,
   agent: AgentRow,
   lines: string[],
-  opts: { renewLock?: () => Promise<void> } = {}
+  opts: { renewLock?: () => Promise<void>; beforeSend?: () => Promise<void>; onSent?: () => void } = {}
 ): Promise<void> {
+  await opts.beforeSend?.();
   const conn = ctx.connection;
   if (!conn) throw new WaAgentError('NO_CONNECTION', 'Conversa sem número vinculado');
   if (conn.status !== 'connected') throw new WaAgentError('DISCONNECTED', 'número desconectado');
@@ -383,6 +393,7 @@ async function sendLines(
       await sleep(typingMs);
       if (opts.renewLock) await opts.renewLock();
     }
+    await opts.beforeSend?.();
     let result: SendResult;
     try {
       result = await provider.sendText({ to, text });
@@ -416,6 +427,7 @@ async function sendLines(
     if (!result.ok) {
       throw new WaAgentError('SEND_FAILED', `Envio falhou na linha ${i + 1}: ${result.error || 'erro desconhecido'}`);
     }
+    opts.onSent?.();
     if (opts.renewLock) await opts.renewLock();
     // Com "digitando" ligado, a pausa entre linhas já é o tempo de digitação da
     // próxima: somar o intervalo fixo deixaria o atendimento arrastado
@@ -431,12 +443,19 @@ async function sendLines(
 export async function runAgentOnConversation(input: RunAgentInput): Promise<RunResult> {
   const admin = withActor(createStaticAdminClient(), { kind: 'agent', id: input.agentId ?? null });
   try {
+    if (input.proactive) {
+      const decision = await checkProactiveFollowup(admin, input.organizationId, input.conversationId, input.proactive);
+      if (decision.kind !== 'allowed') return { status: 'skipped', reason: decision.kind === 'cancel' ? decision.reason : 'aguardando horário de follow-up', ...(decision.kind === 'defer' ? { deferredUntil: decision.until } : {}) };
+    }
     if (!(await isAiAgentsApproved(admin, input.organizationId))) {
       return { status: 'skipped', reason: 'agente de IA não liberado para esta organização' };
     }
     const budget = await checkConversationBudget(admin, input.organizationId, input.conversationId);
     if (budget.blocked_at) return { status: 'skipped', reason: 'IA pausada pelo limite de consumo; liberação manual necessária' };
     const conversation = await loadConversationContext(admin, input.organizationId, input.conversationId);
+    if (input.proactive && conversation.connection?.provider === 'meta_cloud' && !getServiceWindow(await loadLastInboundAt(admin, input.organizationId, input.conversationId, conversation.connection.id)).open) {
+      return { status: 'skipped', reason: 'Janela do WhatsApp fechada; use um robô com modelo aprovado' };
+    }
     const usageContext = await createUsageContext(admin, {
       organizationId: input.organizationId, conversationId: input.conversationId,
       agentId: input.agentId ?? conversation.conversation.ai_agent_id,
@@ -458,6 +477,13 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
   // o que o agente altera no lead entra no histórico como "agente de IA"
   const { organizationId, conversationId, trigger } = input;
   const depth = input.depth ?? 0;
+  let proactiveSent = false;
+  const onSent = () => { proactiveSent = true; };
+  const beforeProactiveSend = async () => {
+    if (!input.proactive) return;
+    const decision = await checkProactiveFollowup(admin, organizationId, conversationId, input.proactive);
+    if (decision.kind !== 'allowed') throw new ProactiveInterrupted(decision.kind === 'cancel' ? decision.reason : 'aguardando horário de follow-up', decision.kind === 'defer' ? decision.until : undefined);
+  };
   const startedAt = Date.now();
   const events: AgentRunEvent[] = [];
   const toolCalls: CollectedToolCall[] = [];
@@ -741,7 +767,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
         if (!t) continue;
         const segLines = splitLines(t);
         if (lines.length > 0 && agent.line_delay_ms > 0) await sleep(agent.line_delay_ms);
-        await sendLines(admin, ctx, agent, segLines, { renewLock: renew });
+        await sendLines(admin, ctx, agent, segLines, { renewLock: renew, beforeSend: beforeProactiveSend, onSent });
         lines.push(...segLines);
         continue;
       }
@@ -758,11 +784,12 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       if (captionAsText) {
         const capLines = splitLines(captionText);
         if ((lines.length > 0 || mediaSent.length > 0) && agent.line_delay_ms > 0) await sleep(agent.line_delay_ms);
-        await sendLines(admin, ctx, agent, capLines, { renewLock: renew });
+        await sendLines(admin, ctx, agent, capLines, { renewLock: renew, beforeSend: beforeProactiveSend, onSent });
         lines.push(...capLines);
       }
       if ((lines.length > 0 || mediaSent.length > 0) && agent.line_delay_ms > 0) await sleep(agent.line_delay_ms);
       await renew();
+      await beforeProactiveSend();
       const sent = await sendAgentMedia(admin, {
         organizationId,
         agent,
@@ -772,6 +799,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       });
       await renew();
       if (sent.ok) {
+        onSent();
         mediaSent.push(media.name);
         pushEvent('media_sent', { nome: media.name, kind: media.kind, message_id: sent.messageId });
       } else {
@@ -973,6 +1001,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
         forceReply: true,
         skipBuffer: true,
         depth: depth + 1,
+        proactive: input.proactive,
       });
     }
     // Transferência para robô: o agente já parou; o robô assume a conversa
@@ -981,6 +1010,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       const bot = await startBotRun(admin, {
         organizationId,
         botId: pendingStartBotId,
+        proactive: input.proactive,
         conversationId,
       });
       if (!bot.ok) console.error('[wa-agents] transferência para robô falhou:', bot.error);
@@ -988,6 +1018,10 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     return res;
   } catch (e) {
     const msg = errorMessage(e);
+    if (e instanceof ProactiveInterrupted) return {
+      ...await finish('skipped', { reason: msg }),
+      ...(!proactiveSent && e.until ? { deferredUntil: e.until } : {}),
+    };
     if (e instanceof AiUsageError || getUsageFailure()) {
       const usageContext = getUsageContext();
       try {
