@@ -82,6 +82,15 @@ function setup(routes: (url: string, init?: RequestInit) => { status?: number; b
   );
 }
 
+/** Botão do topo da conversa (o do balão é "Ligar para ..."). */
+const HEADER = { name: /^Ligar \(/ };
+
+/** Clica em Ligar e confirma o número no balão. */
+async function ligar(confirm: RegExp = /^Ligar para/) {
+  fireEvent.click(await screen.findByRole('button', HEADER));
+  fireEvent.click(await screen.findByRole('button', { name: confirm }));
+}
+
 beforeEach(() => {
   h.ua = new FakeUa();
   h.mic.mockReset();
@@ -97,11 +106,64 @@ describe('Ligar pelo telefone do CRM', () => {
     expect(screen.queryByRole('button', { name: /Ligar/ })).toBeNull();
   });
 
-  it('contato sem telefone: botão aparece desabilitado com o motivo', async () => {
+  it('confirma o número antes de ligar; Cancelar não liga', async () => {
+    const calls: string[] = [];
+    setup((url, init) => {
+      calls.push(`${init?.method ?? 'GET'} ${url}`);
+      return url.endsWith('/me') ? { body: ME } : { status: 404, body: {} };
+    });
+    fireEvent.click(await screen.findByRole('button', HEADER));
+    const dialog = screen.getByRole('dialog', { name: 'Confirmar o número da ligação' });
+    expect(dialog).toHaveTextContent('Telefone do cadastro');
+    expect(dialog).toHaveTextContent('(11) 98765-4321');
+    const confirm = screen.getByRole('button', { name: 'Ligar para (11) 98765-4321' });
+    await waitFor(() => expect(confirm).toHaveFocus());
+    // Nada sai antes de confirmar
+    expect(h.mic).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(h.mic).not.toHaveBeenCalled();
+    expect(calls.some((c) => c.includes('/calls'))).toBe(false);
+  });
+
+  it('liga para outro número digitado na hora, sem mudar o cadastro', async () => {
+    const ua = h.ua as FakeUa;
+    const bodies: unknown[] = [];
+    setup((url, init) => {
+      if (url.endsWith('/me')) return { body: ME };
+      if (url.endsWith('/sip')) return { body: CREDS };
+      if (url.endsWith('/calls') && init?.method === 'POST') {
+        bodies.push(JSON.parse(String(init.body)));
+        ua.emit('newRTCSession', { originator: 'remote', session: new FakeSession(), request: { getHeader: () => 'true' } });
+        return { body: { call: row({}) } };
+      }
+      if (url.includes('/calls/row-1')) return { body: { call: row({}) } };
+      return { status: 404, body: {} };
+    });
+    fireEvent.click(await screen.findByRole('button', HEADER));
+    const field = screen.getByRole('textbox', { name: 'Digite outro número' });
+    fireEvent.change(field, { target: { value: '(21) 9888' } });
+    // Número incompleto: avisa e não deixa ligar
+    expect(screen.getByText('Confira o DDD e o número.')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Outro número' })).toBeChecked();
+    expect(screen.getByRole('button', { name: 'Ligar' })).toBeDisabled();
+    fireEvent.change(field, { target: { value: '(21) 98888-7777' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Ligar para (21) 98888-7777' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(await screen.findByText('Tocando no celular do cliente', {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(bodies).toEqual([expect.objectContaining({ phone: '+5521988887777', deal_id: '00000000-0000-4000-8000-000000000001' })]);
+    expect(screen.getByText('(21) 98888-7777')).toBeInTheDocument();
+  });
+
+  it('contato sem telefone: o balão abre direto no campo de outro número', async () => {
     setup((url) => (url.endsWith('/me') ? { body: ME } : { status: 404, body: {} }), null);
-    const btn = await screen.findByRole('button', { name: /Ligar/ });
-    expect(btn).toBeDisabled();
-    expect(btn).toHaveAttribute('title', 'O contato não tem telefone cadastrado');
+    const btn = await screen.findByRole('button', HEADER);
+    expect(btn).toBeEnabled();
+    fireEvent.click(btn);
+    expect(screen.getByRole('dialog')).toHaveTextContent('Sem telefone cadastrado');
+    expect(screen.getByRole('radio', { name: /Telefone do cadastro/ })).toBeDisabled();
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Digite outro número' })).toHaveFocus());
+    expect(screen.getByRole('button', { name: 'Ligar' })).toBeDisabled();
   });
 
   it('liga o telefone, atende sozinho o toque da central e acompanha até o resultado', async () => {
@@ -124,7 +186,7 @@ describe('Ligar pelo telefone do CRM', () => {
       }
       return { status: 404, body: {} };
     });
-    fireEvent.click(await screen.findByRole('button', { name: /Ligar/ }));
+    await ligar();
     // A janela da ligação aparece no clique, antes de o cliente atender
     expect(screen.getByRole('region', { name: 'Ligação' })).toBeInTheDocument();
     expect(screen.getByText('Preparando a ligação')).toBeInTheDocument();
@@ -135,6 +197,8 @@ describe('Ligar pelo telefone do CRM', () => {
     expect(await screen.findByText(/Em ligação/, {}, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Microfone/ })).toBeEnabled();
     expect(screen.getByRole('button', { name: /Lead/ })).toBeInTheDocument();
+    // Sem teclado na janela da ligação
+    expect(screen.queryByRole('button', { name: /Teclado/ })).toBeNull();
     expect(await screen.findByText(/Atendida · 1 min 5 s/, {}, { timeout: 6000 })).toBeInTheDocument();
     expect(screen.getByText('Registrada no histórico do lead.')).toBeInTheDocument();
   }, 15000);
@@ -159,7 +223,7 @@ describe('Ligar pelo telefone do CRM', () => {
       if (url.includes('/calls/row-1')) return { body: { call: row({}) } };
       return { status: 404, body: {} };
     });
-    fireEvent.click(await screen.findByRole('button', { name: /Ligar/ }));
+    await ligar();
     const encerrar = await screen.findByRole('button', { name: /Encerrar/ }, { timeout: 3000 });
     await screen.findByText('Tocando no celular do cliente');
     fireEvent.click(encerrar);
@@ -167,7 +231,7 @@ describe('Ligar pelo telefone do CRM', () => {
     expect(screen.getByText('Ligação encerrada')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Encerrar/ })).toBeNull();
     expect(screen.queryByRole('button', { name: /Desligar/ })).toBeNull();
-    expect(screen.getByRole('button', { name: /Ligar/ })).toBeEnabled();
+    expect(screen.getByRole('button', HEADER)).toBeEnabled();
     expect((session as unknown as FakeSession).terminate).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(hangups).toEqual(['/api/integrations/api4com/calls/row-1/hangup']));
   });
@@ -190,7 +254,7 @@ describe('Ligar pelo telefone do CRM', () => {
       }
       return { status: 404, body: {} };
     });
-    fireEvent.click(await screen.findByRole('button', { name: /Ligar/ }));
+    await ligar();
     expect(await screen.findByText(/não conseguiu combinar o áudio/)).toBeInTheDocument();
     await waitFor(() => expect(diags).toHaveLength(1));
     expect(diags[0].url).toBe('/api/integrations/api4com/calls/row-9/diag');
@@ -217,7 +281,7 @@ describe('Ligar pelo telefone do CRM', () => {
       if (url.includes('/calls/row-1')) return { body: { call: row({}) } };
       return { status: 404, body: {} };
     });
-    fireEvent.click(await screen.findByRole('button', { name: /Ligar/ }));
+    await ligar();
     expect(await screen.findByText('Tocando no celular do cliente', {}, { timeout: 4000 })).toBeInTheDocument();
     expect(posts).toHaveLength(2);
     expect(ua.starts).toBe(2);
@@ -233,7 +297,7 @@ describe('Ligar pelo telefone do CRM', () => {
       if (init?.method === 'POST' && url.endsWith('/calls')) return { status: 422, body: { error: 'A API4com não aceitou o número do contato.' } };
       return { status: 404, body: {} };
     });
-    fireEvent.click(await screen.findByRole('button', { name: /Ligar/ }));
+    await ligar();
     expect(await screen.findByText('A API4com não aceitou o número do contato.')).toBeInTheDocument();
   });
 
@@ -246,7 +310,7 @@ describe('Ligar pelo telefone do CRM', () => {
       return { status: 404, body: {} };
     });
     await act(async () => {
-      fireEvent.click(await screen.findByRole('button', { name: /Ligar/ }));
+      await ligar();
     });
     expect(await screen.findByText('O navegador bloqueou o microfone.')).toBeInTheDocument();
     expect(calls.some((c) => c.includes('/calls'))).toBe(false);

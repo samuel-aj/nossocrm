@@ -13,11 +13,10 @@
  */
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Grid3x3, Loader2, Mic, MicOff, Phone, PhoneIncoming, PhoneOff, SlidersHorizontal, SquareArrowOutUpRight, X } from 'lucide-react';
+import { Loader2, Mic, MicOff, Phone, PhoneIncoming, PhoneOff, SlidersHorizontal, SquareArrowOutUpRight, X } from 'lucide-react';
 import { RESULT_LABEL, formatDuration, formatPhone } from '@/lib/api4com/shared';
 import { useApi4comPhone, type ActiveCall } from './Api4comPhoneProvider';
 
-const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'];
 
 function clock(fromMs: number | null, now: number): string {
   if (!fromMs) return '0:00';
@@ -208,7 +207,7 @@ export function PhoneDock() {
   const ctx = useApi4comPhone();
   const router = useRouter();
   const [now, setNow] = useState(() => Date.now());
-  const [panel, setPanel] = useState<'none' | 'keypad' | 'audio'>('none');
+  const [panel, setPanel] = useState<'none' | 'audio'>('none');
   const session = ctx?.phone.session ?? null;
   const call = ctx?.call ?? null;
   const ticking = !!session || call?.stage === 'live' || call?.stage === 'dialing' || call?.stage === 'connecting';
@@ -254,8 +253,6 @@ export function PhoneDock() {
   const inCall = session?.phase === 'in_call';
   const finished = call?.stage === 'done' || call?.stage === 'error' || call?.stage === 'ending';
   const canEnd = !finished && (!!session || call?.stage === 'live' || call?.stage === 'dialing' || call?.stage === 'connecting');
-  // Teclado só existe durante a ligação
-  const openPanel = panel === 'keypad' && !inCall ? 'none' : panel;
 
   return (
     <section aria-label="Ligação" className={`${SHELL} ${tone === 'bad' ? 'border-red-300 dark:border-red-500/40' : ''}`}>
@@ -281,6 +278,7 @@ export function PhoneDock() {
           <p className="truncate text-sm font-bold text-slate-900 dark:text-white" title={number ? `${name} · ${number}` : name}>
             {name}
           </p>
+          {number ? <p className="truncate text-[11px] font-semibold tabular-nums text-slate-500 dark:text-slate-400">{number}</p> : null}
           <p
             role="status"
             className={`text-xs tabular-nums ${
@@ -293,7 +291,7 @@ export function PhoneDock() {
           >
             {title}
           </p>
-          {detail || number ? <p className="truncate text-[11px] text-slate-400 dark:text-slate-500">{detail || number}</p> : null}
+          {detail ? <p className="truncate text-[11px] text-slate-400 dark:text-slate-500">{detail}</p> : null}
         </div>
         {canEnd ? (
           <button
@@ -321,10 +319,7 @@ export function PhoneDock() {
           <Control label={session?.muted ? 'Mudo' : 'Microfone'} onClick={ctx.toggleMute} disabled={!inCall} active={!!session?.muted} pressed={!!session?.muted}>
             {session?.muted ? <MicOff size={17} aria-hidden="true" /> : <Mic size={17} aria-hidden="true" />}
           </Control>
-          <Control label="Teclado" onClick={() => setPanel((p) => (p === 'keypad' ? 'none' : 'keypad'))} disabled={!inCall} active={openPanel === 'keypad'} expanded={openPanel === 'keypad'}>
-            <Grid3x3 size={17} aria-hidden="true" />
-          </Control>
-          <Control label="Áudio" onClick={() => setPanel((p) => (p === 'audio' ? 'none' : 'audio'))} active={openPanel === 'audio'} expanded={openPanel === 'audio'}>
+          <Control label="Áudio" onClick={() => setPanel((p) => (p === 'audio' ? 'none' : 'audio'))} active={panel === 'audio'} expanded={panel === 'audio'}>
             <SlidersHorizontal size={17} aria-hidden="true" />
           </Control>
           {call?.dealId ? (
@@ -335,21 +330,7 @@ export function PhoneDock() {
         </div>
       ) : null}
 
-      {!finished && openPanel === 'keypad' ? (
-        <div className="grid grid-cols-3 gap-1.5 px-3.5 pb-3.5 pt-1" role="group" aria-label="Teclado">
-          {KEYS.map((k) => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => ctx.dtmf(k)}
-              className="h-10 rounded-xl bg-slate-100 text-base font-bold text-slate-800 transition hover:bg-slate-200 active:scale-95 dark:bg-white/10 dark:text-white dark:hover:bg-white/15 focus-visible-ring"
-            >
-              {k}
-            </button>
-          ))}
-        </div>
-      ) : null}
-      {!finished && openPanel === 'audio' ? <AudioPanel /> : null}
+      {!finished && panel === 'audio' ? <AudioPanel /> : null}
     </section>
   );
 }

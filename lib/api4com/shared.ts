@@ -73,7 +73,7 @@ export function formatDuration(seconds: number | null | undefined): string {
 export function formatPhone(e164: string): string {
   // A central às vezes manda o número sem o "+" (5511987654321)
   const m = /^\+?55(\d{2})(\d{4,5})(\d{4})$/.exec(e164);
-  if (m) return `+55 ${m[1]} ${m[2]}-${m[3]}`;
+  if (m) return `(${m[1]}) ${m[2]}-${m[3]}`;
   return e164;
 }
 

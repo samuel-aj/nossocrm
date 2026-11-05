@@ -61,7 +61,6 @@ export type PhoneContextValue = {
   hangup: () => void;
   answer: () => void;
   toggleMute: () => void;
-  dtmf: (tone: string) => void;
   dismiss: () => void;
   audio: AudioSettings;
   setInputDevice: (id: string | null) => Promise<void>;
@@ -540,7 +539,6 @@ export function Api4comPhoneProvider({ children }: { children: React.ReactNode }
       hangup,
       answer: () => phone.answer(),
       toggleMute: () => phone.toggleMute(),
-      dtmf: (tone: string) => phone.dtmf(tone),
       dismiss: () => setCall((cur) => (cur && !BUSY_STAGES.includes(cur.stage) ? null : cur)),
       audio: { ...audioPrefs, canChooseOutput: remoteAudio.canChooseOutput() },
       setInputDevice,

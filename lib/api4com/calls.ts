@@ -275,7 +275,7 @@ export async function startCall(
   if (!settings) throw new Api4comError('Conecte a API4com em Configurações > Geral para ligar pelo CRM.', 409, 'NOT_CONNECTED');
   if (!settings.extension) throw new Api4comError('O seu usuário da API4com não tem ramal. Conecte de novo em Configurações > Geral.', 409, 'NO_EXTENSION');
   const called = normalizeCalled(input.phone);
-  if (!called) throw new Api4comError('O telefone do contato não está num formato válido para ligar.', 422, 'INVALID_PHONE');
+  if (!called) throw new Api4comError('O número não está num formato válido para ligar. Confira o DDD e o número.', 422, 'INVALID_PHONE');
 
   const { data: created, error: insErr } = await admin
     .from('api4com_calls')
