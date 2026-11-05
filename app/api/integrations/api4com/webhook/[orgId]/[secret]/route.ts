@@ -4,16 +4,19 @@
  * A API4com não manda cabeçalho próprio, então o segredo (um por usuário
  * conectado) vai na URL. Guarda o evento (dedupe: id da chamada + tipo),
  * responde 200 na hora e processa em seguida (estado da ligação, histórico).
+ * Ligação que teve conversa e gravação é transcrita em seguida (o texto
+ * alimenta a IA que preenche o contrato).
  */
 import { after } from 'next/server';
 import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { createStaticAdminClient } from '@/lib/supabase/staticAdminClient';
 import { handleApi4comWebhook, redactWebhookPayload, webhookDedupeKey, type WebhookPayload } from '@/lib/api4com/calls';
+import { transcribeAfterHangup } from '@/lib/api4com/transcript';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 type Ctx = { params: Promise<{ orgId: string; secret: string }> };
 
@@ -48,6 +51,7 @@ export async function POST(req: Request, ctx: Ctx) {
     try {
       const result = await handleApi4comWebhook(admin, orgId, payload);
       if (eventId) await admin.from('api4com_webhook_events').update({ processed: true, error: result.action }).eq('id', eventId);
+      if (payload.eventType === 'channel-hangup' && Number(payload.duration ?? 0) > 0 && payload.recordUrl) await transcribeAfterHangup(admin, orgId, payload);
     } catch (err) {
       console.error('[api4com/webhook] falha ao processar', err);
       if (eventId) await admin.from('api4com_webhook_events').update({ processed: false, error: (err as Error).message }).eq('id', eventId);

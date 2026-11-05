@@ -13,7 +13,7 @@
  *   campos do contrato inline.
  */
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, Loader2, Mail, PenLine, Phone, UserRound } from 'lucide-react';
+import { AlertTriangle, Loader2, Mail, PenLine, Phone, Sparkles, UserRound } from 'lucide-react';
 import { NativeSelect } from '@/components/ui/NativeSelect';
 import { AUTH_OPTIONS, SEND_OPTIONS } from './useZapSign';
 import { SignMessageField, sampleDocName } from './SignMessageField';
@@ -172,6 +172,15 @@ export function SignatureFields({ draft, idPrefix, disabled, variablesMode = 'in
               {summary.empty ? ` (${draft.emptyVars.join(', ')})` : ''}
               {summary.empty && form.allowEmpty ? ' · vai assim mesmo' : ''}
             </span>
+            {draft.ai.status === 'running' ? (
+              <span className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-semibold text-primary-600 dark:text-primary-300">
+                <Loader2 size={10} className="animate-spin" aria-hidden="true" /> A IA está preenchendo pela conversa...
+              </span>
+            ) : Object.keys(draft.ai.applied).length ? (
+              <span className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-semibold text-primary-600 dark:text-primary-300">
+                <Sparkles size={10} aria-hidden="true" /> {Object.keys(draft.ai.applied).length === 1 ? '1 campo preenchido pela IA' : `${Object.keys(draft.ai.applied).length} campos preenchidos pela IA`}
+              </span>
+            ) : null}
           </span>
           <span className="shrink-0 text-xs font-semibold text-primary-600 dark:text-primary-400">{summary.empty && !form.allowEmpty ? 'Preencher' : 'Conferir'}</span>
         </button>

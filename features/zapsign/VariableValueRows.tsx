@@ -5,18 +5,20 @@
  * valor que vai para o documento (editável) e, discreto ao lado, de onde ele
  * vem no CRM. Campos em branco ficam marcados e pedem confirmação para enviar.
  * Usado inline (modal de conferência ao mudar de etapa) e dentro do modal de
- * preenchimento da aba Contrato.
+ * preenchimento da aba Contrato. O que a IA preencheu vem marcado com "IA" e o
+ * trecho de onde veio; "Restaurar" volta ao valor do CRM.
  */
 import React from 'react';
-import { Loader2, RotateCcw } from 'lucide-react';
+import { Loader2, RotateCcw, Sparkles } from 'lucide-react';
 import { NativeSelect } from '@/components/ui/NativeSelect';
+import { AiFillBar, AI_ORIGIN_LABEL } from './AiFillBar';
 import type { SignatureDraft } from './useSignatureDraft';
 
 const FIELD =
   'w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white placeholder:text-slate-400 focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 outline-none disabled:opacity-60';
 
 export function VariableValueRows({ draft, idPrefix, autoFocusFirst }: { draft: SignatureDraft; idPrefix: string; autoFocusFirst?: boolean }) {
-  const { prep, varsQ, form, set, setSource, setValue, variables, values, emptyVars } = draft;
+  const { prep, varsQ, form, set, setSource, setValue, variables, values, emptyVars, ai } = draft;
   const data = prep.data;
   if (!data) return null;
   const id = (s: string) => `${idPrefix}-${s}`;
@@ -38,18 +40,25 @@ export function VariableValueRows({ draft, idPrefix, autoFocusFirst }: { draft: 
 
   return (
     <div className="space-y-2">
+      <AiFillBar draft={draft} />
       <ul className="divide-y divide-slate-100 dark:divide-white/5 rounded-xl border border-slate-200 dark:border-white/10 px-3">
         {variables.map((name, index) => {
           const src = form.mapping[name] ?? '';
           const value = values[name] ?? '';
           const empty = !value.trim();
           const overridden = name in form.overrides;
+          const fromAi = ai.applied[name];
           return (
             <li key={name} className="py-2.5 space-y-1">
               <div className="flex items-center justify-between gap-2">
                 <label htmlFor={id(`v-${name}`)} className="inline-flex min-w-0 items-center gap-1.5 font-mono text-[11px] font-semibold text-slate-700 dark:text-slate-200">
                   <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${empty ? 'bg-amber-500' : 'bg-emerald-500'}`} aria-hidden="true" />
                   <span className="truncate">{name}</span>
+                  {fromAi ? (
+                    <span className="inline-flex shrink-0 items-center gap-0.5 rounded bg-primary-100 px-1 py-px font-sans text-[10px] font-bold text-primary-700 dark:bg-primary-500/20 dark:text-primary-200" title="Preenchido pela IA">
+                      <Sparkles size={9} aria-hidden="true" /> IA
+                    </span>
+                  ) : null}
                 </label>
                 <span className="flex shrink-0 items-center gap-1.5">
                   {overridden ? (
@@ -100,6 +109,12 @@ export function VariableValueRows({ draft, idPrefix, autoFocusFirst }: { draft: 
                   onChange={(e) => setValue(name, e.target.value)}
                 />
               )}
+              {fromAi ? (
+                <p className="line-clamp-2 text-[11px] text-slate-500 dark:text-slate-400">
+                  {AI_ORIGIN_LABEL[fromAi.origin] ?? 'Da IA'}
+                  {fromAi.evidence ? `: “${fromAi.evidence}”` : ''}
+                </p>
+              ) : null}
             </li>
           );
         })}

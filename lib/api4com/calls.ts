@@ -350,7 +350,7 @@ export function webhookDedupeKey(p: WebhookPayload): string {
   return `${p.id ?? 'sem-id'}:${p.eventType ?? 'sem-tipo'}`;
 }
 
-async function findCallForPayload(admin: SupabaseClient, orgId: string, p: WebhookPayload): Promise<CallRow | null> {
+export async function findCallForPayload(admin: SupabaseClient, orgId: string, p: WebhookPayload): Promise<CallRow | null> {
   const ref = (p.metadata as { call?: unknown } | null)?.call;
   if (typeof ref === 'string' && UUID_RE.test(ref)) {
     const row = await loadCall(admin, orgId, ref);
