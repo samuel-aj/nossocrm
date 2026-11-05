@@ -182,6 +182,7 @@ export const DEFAULT_AGENT_TRIGGERS: AgentTriggers = {
 export const AgentToolsSchema = z.object({
   /** Ferramenta calcular (avaliador seguro de expressões) */
   calculator: z.boolean().default(true),
+  scheduled_return_bot_id: z.string().uuid().nullable().optional(),
 });
 export type AgentTools = z.infer<typeof AgentToolsSchema>;
 export const DEFAULT_AGENT_TOOLS: AgentTools = { calculator: true };
@@ -836,6 +837,10 @@ export type BotRunRow = {
   contact_id: string | null;
   conversation_id: string | null;
   phone: string | null;
+  scheduled_for?: string | null;
+  scheduled_timezone?: string | null;
+  scheduled_anchor?: string | null;
+  scheduled_started_at?: string | null;
   step_index: number;
   status: BotRunStatus;
   wake_at: string | null;
@@ -902,6 +907,8 @@ export type ConversationBotInfo = {
   botId: string;
   name: string;
   status: 'running' | 'waiting_reply';
+  scheduledAt?: string | null;
+  scheduledTimezone?: string | null;
 };
 
 /** Conteúdo de `wa_conversations.ai_approval` */

@@ -4,7 +4,7 @@ import type { AgentRow } from './types';
 import type { ConversationContext } from './context';
 import type { SupabaseClient } from '@supabase/supabase-js';
 const h = vi.hoisted(() => ({
-  generate: vi.fn(), send: vi.fn(), action: vi.fn(), outcome: vi.fn(), events: vi.fn(), log: vi.fn(),
+  generate: vi.fn(), history: vi.fn(), send: vi.fn(), action: vi.fn(), outcome: vi.fn(), events: vi.fn(), log: vi.fn(),
   calendar: null as Record<string, unknown> | null,
   budget: vi.fn(), block: vi.fn(), reserve: vi.fn(), dispatch: vi.fn(), settle: vi.fn(), policyEnabled: false,
   ctx: null as ConversationContext | null, agent: null as AgentRow | null,
@@ -25,7 +25,7 @@ vi.mock('./context', async original => ({
   ...await original<typeof import('./context')>(),
   loadConversationContext: async () => structuredClone(h.ctx), loadAgent: async () => h.agent,
   buildSystemPrompt: () => 'Converse com o cliente.',
-  buildHistoryMessages: async () => [{ role: 'user', content: 'Sim' }], loadLastInboundProviderId: async () => null,
+  buildHistoryMessages: h.history, loadLastInboundProviderId: async () => null,
 }));
 vi.mock('./model', async original => ({ ...await original<typeof import('./model')>(), resolveAgentModel: async () => ({ model: {}, modelId: 'fake' }) }));
 vi.mock('./beta', () => ({ isAiAgentsApproved: async () => true }));
@@ -46,8 +46,13 @@ const at = '2026-10-01T12:00:00.000Z';
 const incoming = { id: 'message', organization_id: org, conversation_id: 'conv', direction: 'in', source: 'inbound', created_at: at, body: 'Sim' };
 function fakeDb() {
   return {
-    rpc: async (name: string) => {
+    rpc: async (name: string, args?: Record<string, unknown>) => {
       if (name === 'wa_ai_claim_lock') { h.ctx!.conversation.ai_lock_until = new Date(Date.now() + 90_000).toISOString(); return { data: true }; }
+      if (name === 'schedule_robot_return') {
+        return args?.p_anchor === incoming.created_at
+          ? { data: 'scheduled-return', error: null }
+          : { data: null, error: { message: 'Cliente respondeu; confirme novamente' } };
+      }
       return { data: 0 };
     },
     from: (table: string) => {
@@ -58,6 +63,7 @@ function fakeDb() {
         select: () => q,
         update: (p: Record<string, unknown>) => { patch = p; return q; },
         eq: (k: string, v: unknown) => { rows = rows.filter(r => r[k] === v); return q; },
+        in: (k: string, values: unknown[]) => { rows = rows.filter(r => values.includes(r[k])); return q; },
         gt: () => q, lte: () => q, not: () => q, order: () => q, limit: () => q,
         maybeSingle: () => { single = true; return q; },
         then: (resolve: (r: unknown) => unknown) => {
@@ -75,6 +81,8 @@ function draft(text: string, withAction = true) {
 }
 beforeEach(() => {
   vi.clearAllMocks(); h.generate.mockReset();
+  h.history.mockReset().mockResolvedValue([{ role: 'user', content: 'Sim' }]);
+  incoming.created_at = at;
   h.calendar = null;
   h.policyEnabled = false;
   h.budget.mockReset().mockResolvedValue({ blocked_at: null, policy: { enabled: false } }); h.block.mockResolvedValue(undefined);
@@ -93,6 +101,26 @@ beforeEach(() => {
 const run = () => runAgentOnConversation({ organizationId: org, conversationId: 'conv', trigger: 'inbound', skipBuffer: true });
 
 describe('validação no envio real e no simulador', () => {
+  it('retorno permanece vinculado à mensagem anterior quando cliente escreve durante montagem do histórico', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-05T12:00:00Z'));
+    try {
+      h.agent!.tools = { ...h.agent!.tools, scheduled_return_bot_id: '11111111-1111-4111-8111-111111111111' };
+      const newerAt = '2026-11-05T12:00:01.000Z';
+      h.history.mockImplementation(async () => {
+        incoming.created_at = newerAt;
+        return [{ role: 'user', content: 'Retorne sábado às 14h.' }];
+      });
+      const rpc = vi.spyOn(h.db, 'rpc');
+      h.generate.mockImplementation(async ({ tools }) => {
+        const result = await tools.agendar_retorno.execute({ local: '2026-11-07T14:00', timezone: 'America/Manaus', context: 'Retorno solicitado', confirmed: true }, {});
+        expect(result).toEqual({ ok: false, error: 'Cliente respondeu; confirme novamente' });
+        return draft('Preciso confirmar o horário novamente.', false);
+      });
+      await run();
+      expect(rpc).toHaveBeenCalledWith('schedule_robot_return', expect.objectContaining({ p_anchor: at }));
+      expect(rpc).not.toHaveBeenCalledWith('schedule_robot_return', expect.objectContaining({ p_anchor: newerAt }));
+    } finally { incoming.created_at = at; vi.useRealTimers(); }
+  });
   it('follow-up fechado não chama modelo nem envia, mas uma mensagem recebida continua atendida', async () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-07T16:00:00Z'));
     try {
@@ -226,5 +254,26 @@ describe('validação no envio real e no simulador', () => {
     expect(h.log).toHaveBeenCalledTimes(1);
     expect(h.log.mock.calls[0][1]).toMatchObject({ status: 'error', events: [expect.objectContaining({ type: 'output_checked', status: 'blocked' })] });
     expect(h.send).not.toHaveBeenCalled(); expect(h.action).not.toHaveBeenCalled();
+  });
+  it('simulador consulta, remarca e cancela retorno apenas em memória, sem executar robô', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-05T12:00:00Z'));
+    try {
+      h.agent!.tools = { ...h.agent!.tools, scheduled_return_bot_id: '11111111-1111-4111-8111-111111111111' };
+      const rpc = vi.spyOn(h.db, 'rpc');
+      h.generate.mockImplementation(async ({ tools }) => {
+        const input = { local: '2026-11-07T14:00', timezone: 'America/Manaus', context: 'Retorno solicitado', confirmed: true };
+        expect(await tools.consultar_retorno.execute({}, {})).toMatchObject({ simulated: true, pending: null });
+        expect(await tools.agendar_retorno.execute(input, {})).toMatchObject({ simulated: true, scheduledAt: '2026-11-07T18:00:00.000Z' });
+        expect(await tools.consultar_retorno.execute({}, {})).toMatchObject({ pending: { scheduled_for: '2026-11-07T18:00:00.000Z' } });
+        await tools.agendar_retorno.execute({ ...input, local: '2026-11-08T14:00' }, {});
+        expect(await tools.consultar_retorno.execute({}, {})).toMatchObject({ pending: { scheduled_for: '2026-11-08T18:00:00.000Z' } });
+        expect(await tools.cancelar_retorno.execute({}, {})).toMatchObject({ simulated: true, cancelled: 1 });
+        expect(await tools.consultar_retorno.execute({}, {})).toMatchObject({ pending: null });
+        return draft('Teste de retorno concluído.', false);
+      });
+      await testAgentReply(h.db, { organizationId: org, agent: h.agent!, messages: [{ role: 'user', text: 'Retorne sábado às 14h.' }] });
+      expect(rpc).not.toHaveBeenCalled();
+      expect(h.send).not.toHaveBeenCalled(); expect(h.action).not.toHaveBeenCalled(); expect(h.events).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
   });
 });

@@ -1,3 +1,4 @@
+import { pendingRobotReturn } from './scheduledReturns';
 import { loadLastInboundAt } from './lastInbound';
 /**
  * Follow-ups do agente por tempo sem resposta do lead (régua em wa_ai_agents.followups).
@@ -119,6 +120,7 @@ export async function processFollowups(
         result.checked++;
         try {
           conv.last_inbound_at = await loadLastInboundAt(admin, conv.organization_id, conv.id);
+          if (await pendingRobotReturn(admin, conv.organization_id, conv.id)) continue;
           const state = (conv.ai_state ?? {}) as ConversationAiState;
           const cycle = conv.last_inbound_at ?? null;
           const done = state.followups && state.followups.cycle === cycle ? [...state.followups.done] : [];

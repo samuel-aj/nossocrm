@@ -1,3 +1,4 @@
+import { scheduledReturnRuntime } from './scheduledReturns';
 import { loadLastInboundAt } from './lastInbound';
 import { checkProactiveFollowup, type ProactiveFollowup } from './proactiveFollowup';
 import { getServiceWindow } from '@/lib/whatsapp/serviceWindow';
@@ -616,6 +617,10 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     const memoriaDesde = ((conv.ai_state ?? {}) as ConversationAiState).memoria_desde ?? null;
     const since = [conv.ai_last_processed_at, memoriaDesde].filter((v): v is string => !!v).sort().pop() ??
       '1970-01-01T00:00:00.000Z';
+    // Bind scheduling to the input snapshot, not to a newer message that
+    // might arrive while history/media/model preparation is underway.
+    const returnAnchor = agent.tools?.scheduled_return_bot_id
+      ? await loadLastInboundAt(admin, organizationId, conversationId) : null;
     let pending = await getPendingInbound(admin, ctx, since);
     // Áudio, imagem, figurinha e documento que o lead mandou viram TEXTO aqui,
     // com a IA do próprio agente, antes de o prompt ser montado (o resultado fica
@@ -698,6 +703,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     let helperCalls = 0;
     let knowledgeCalls = 0;
     const runtime: AgentToolRuntime = {
+      ...(agent.tools?.scheduled_return_bot_id ? { scheduledReturn: scheduledReturnRuntime(admin, organizationId, conversationId, agent, returnAnchor) } : {}),
       documents: resources.documents,
       media: resources.media,
       helpers: resources.helpers,

@@ -126,7 +126,7 @@ export async function getConversationBotInfo(
   const { organizationId, conversationId } = input;
   const { data: run, error } = await admin
     .from('wa_bot_runs')
-    .select('id, bot_id, status')
+    .select('id, bot_id, status, scheduled_for, scheduled_timezone, scheduled_started_at')
     .eq('organization_id', organizationId)
     .eq('conversation_id', conversationId)
     .in('status', [...ACTIVE_BOT_RUN_STATUSES])
@@ -138,7 +138,7 @@ export async function getConversationBotInfo(
     return null;
   }
   if (!run) return null;
-  const row = run as { id: string; bot_id: string; status: ConversationBotInfo['status'] };
+  const row = run as { id: string; bot_id: string; status: ConversationBotInfo['status']; scheduled_for?: string; scheduled_timezone?: string; scheduled_started_at?: string };
   const { data: bot } = await admin
     .from('wa_bots')
     .select('id, name')
@@ -150,6 +150,8 @@ export async function getConversationBotInfo(
     botId: row.bot_id,
     name: (bot as { name?: string } | null)?.name ?? 'Robô',
     status: row.status,
+    scheduledAt: row.scheduled_started_at ? null : row.scheduled_for,
+    scheduledTimezone: row.scheduled_timezone,
   };
 }
 
