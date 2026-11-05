@@ -1,6 +1,6 @@
 /**
- * /api/integrations/zapsign/settings  (admin da organização lê; só o SUPER
- *   ADMIN conecta e desconecta, enquanto a liberação é controlada por organização)
+ * /api/integrations/zapsign/settings (Administrador Mestre da organização ou
+ *   superadministrador lê, conecta e desconecta)
  *   GET    -> { connected, sandbox, token_hint, template_count, verified_at, webhook_ok, last_error }
  *   PUT    -> { api_token, sandbox }  testa o token (lista os modelos), cria o
  *             webhook da conta na ZapSign apontando para este CRM e grava.
@@ -9,13 +9,24 @@
  */
 import { z } from 'zod';
 import { json } from '@/lib/whatsapp/api';
-import { guardRoute, readJsonBody, validationError, getErrorMessage } from '@/app/api/wa-agents/_shared';
+import { guardRoute, readJsonBody, validationError, getErrorMessage, type GuardResult } from '@/app/api/wa-agents/_shared';
 import { clientFor, loadZapSignSettings, newWebhookSecret } from '@/lib/zapsign/signatures';
 import { ZapSignError } from '@/lib/zapsign/client';
 import { UserRole } from '@/types/constants';
+import { getTeamAccess } from '@/lib/permissions/teamAccessServer';
 
-// uma Response nova por pedido (o corpo só pode ser lido uma vez)
-const onlySuperAdmin = () => json({ error: 'Por enquanto só o super admin conecta a ZapSign', code: 'FORBIDDEN' }, 403);
+/** Revalida o Mestre na organização da sessão em cada pedido, inclusive após transferência. */
+async function guardSettings(req?: Request): Promise<GuardResult> {
+  const auth = await guardRoute({ req, admin: true });
+  if (!auth.ok || auth.user.role === UserRole.SUPER_ADMIN) return auth;
+  try {
+    const access = await getTeamAccess(auth.admin, auth.user.organizationId, auth.user.id);
+    if (access.masterUserId === auth.user.id) return auth;
+    return { ok: false, response: json({ error: 'Somente o Administrador Mestre pode configurar a ZapSign', code: 'FORBIDDEN' }, 403) };
+  } catch {
+    return { ok: false, response: json({ error: 'Não foi possível verificar a permissão do Administrador Mestre. Tente novamente.' }, 503) };
+  }
+}
 
 export const runtime = 'nodejs';
 
@@ -41,7 +52,7 @@ function webhookUrlFor(req: Request, orgId: string): string {
 }
 
 export async function GET() {
-  const auth = await guardRoute({ admin: true });
+  const auth = await guardSettings();
   if (!auth.ok) return auth.response;
   try {
     const s = await loadZapSignSettings(auth.admin, auth.user.organizationId);
@@ -62,9 +73,8 @@ export async function GET() {
 }
 
 export async function PUT(req: Request) {
-  const auth = await guardRoute({ req, admin: true });
+  const auth = await guardSettings(req);
   if (!auth.ok) return auth.response;
-  if (auth.user.role !== UserRole.SUPER_ADMIN) return onlySuperAdmin();
   const parsed = Body.safeParse(await readJsonBody(req));
   if (!parsed.success) return validationError(parsed.error);
   const orgId = auth.user.organizationId;
@@ -140,9 +150,8 @@ export async function PUT(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const auth = await guardRoute({ req, admin: true });
+  const auth = await guardSettings(req);
   if (!auth.ok) return auth.response;
-  if (auth.user.role !== UserRole.SUPER_ADMIN) return onlySuperAdmin();
   const orgId = auth.user.organizationId;
   const existing = await loadZapSignSettings(auth.admin, orgId);
   if (existing?.webhook_id) {
