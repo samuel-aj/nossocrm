@@ -5,6 +5,7 @@ import type { ConversationContext } from './context';
 import type { SupabaseClient } from '@supabase/supabase-js';
 const h = vi.hoisted(() => ({
   generate: vi.fn(), send: vi.fn(), action: vi.fn(), outcome: vi.fn(), events: vi.fn(), log: vi.fn(),
+  calendar: null as Record<string, unknown> | null,
   budget: vi.fn(), block: vi.fn(), reserve: vi.fn(), dispatch: vi.fn(), settle: vi.fn(), policyEnabled: false,
   ctx: null as ConversationContext | null, agent: null as AgentRow | null,
   db: null as unknown as SupabaseClient,
@@ -50,7 +51,7 @@ function fakeDb() {
       return { data: 0 };
     },
     from: (table: string) => {
-      let rows = table === 'wa_conversations' ? [h.ctx!.conversation as unknown as Record<string, unknown>] : table === 'wa_messages' ? [incoming as Record<string, unknown>] : [];
+      let rows = table === 'followup_calendars' && h.calendar ? [h.calendar] : table === 'wa_conversations' ? [h.ctx!.conversation as unknown as Record<string, unknown>] : table === 'wa_messages' ? [incoming as Record<string, unknown>] : [];
       let patch: Record<string, unknown> | undefined;
       let single = false;
       const q = {
@@ -74,6 +75,7 @@ function draft(text: string, withAction = true) {
 }
 beforeEach(() => {
   vi.clearAllMocks(); h.generate.mockReset();
+  h.calendar = null;
   h.policyEnabled = false;
   h.budget.mockReset().mockResolvedValue({ blocked_at: null, policy: { enabled: false } }); h.block.mockResolvedValue(undefined);
   h.reserve.mockResolvedValue({ allowed: true, replay: false, attempt_id: 'attempt' });
@@ -91,6 +93,18 @@ beforeEach(() => {
 const run = () => runAgentOnConversation({ organizationId: org, conversationId: 'conv', trigger: 'inbound', skipBuffer: true });
 
 describe('validação no envio real e no simulador', () => {
+  it('follow-up fechado não chama modelo nem envia, mas uma mensagem recebida continua atendida', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-07T16:00:00Z'));
+    try {
+      h.calendar = { organization_id: org, enabled: true, timezone: 'America/Manaus', slots: [{ day: 1, start: '09:00', end: '18:00' }] };
+      const result = await runAgentOnConversation({ organizationId: org, conversationId: 'conv', trigger: 'followup', proactive: { anchor: at }, forceReply: true, skipBuffer: true });
+      expect(result).toMatchObject({ status: 'skipped', deferredUntil: '2026-11-09T13:00:00.000Z' });
+      expect(h.generate).not.toHaveBeenCalled(); expect(h.send).not.toHaveBeenCalled();
+      h.generate.mockResolvedValue(draft('Olá, posso ajudar?', false));
+      expect((await run()).status).toBe('ok');
+      expect(h.send).toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
   it('nova mensagem não reabre orçamento nem emite webhook em conversa bloqueada', async () => {
     h.budget.mockResolvedValue({ blocked_at: at });
     const result = await handleInboundMessage({ organizationId: org, conversationId: 'conv', messageId: 'message' });

@@ -11,7 +11,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Clock, Loader2 } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
-import { useWaBotsList } from '@/features/wa-agents/useWaAgents';
+import { useWaBotsList, useWaAgentsList } from '@/features/wa-agents/useWaAgents';
 import { useMessageTemplates } from '@/features/wa-agents/canvas/templatePreview';
 
 type Unit = 'min' | 'h' | 'd';
@@ -21,7 +21,9 @@ const UNIT_LABEL: Record<Unit, string> = { min: 'minutos', h: 'horas', d: 'dias'
 type Rule = {
   enabled: boolean;
   delay_seconds: number;
-  action_type: 'bot' | 'message';
+  action_type: 'bot' | 'message' | 'agent';
+  agent_id?: string | null;
+  agent_instruction?: string;
   bot_id: string | null;
   message: { kind?: 'text' | 'template'; text?: string; template_id?: string } | null;
 };
@@ -30,7 +32,9 @@ type Draft = {
   enabled: boolean;
   amount: number;
   unit: Unit;
-  action: 'bot' | 'message';
+  action: 'bot' | 'message' | 'agent';
+  agentId: string;
+  agentInstruction: string;
   botId: string;
   kind: 'text' | 'template';
   text: string;
@@ -46,6 +50,8 @@ function toDraft(rule: Rule | null): Draft {
     unit,
     action: rule?.action_type ?? 'message',
     botId: rule?.bot_id ?? '',
+    agentId: rule?.agent_id ?? '',
+    agentInstruction: rule?.agent_instruction ?? '',
     kind: rule?.message?.kind ?? 'text',
     text: rule?.message?.text ?? '',
     templateId: rule?.message?.template_id ?? '',
@@ -73,6 +79,7 @@ export function StageFollowupSection({ stageId, stageSaved }: { stageId: string;
     retry: false,
   });
   const botsQ = useWaBotsList();
+  const agentsQ = useWaAgentsList();
   const templatesQ = useMessageTemplates();
   const [draft, setDraft] = useState<Draft>(() => toDraft(null));
   const [saving, setSaving] = useState(false);
@@ -89,6 +96,7 @@ export function StageFollowupSection({ stageId, stageSaved }: { stageId: string;
     ? null
     : !(draft.amount >= 1) || seconds < 60 || seconds > 2592000
       ? 'O tempo vai de 1 minuto a 30 dias'
+      : draft.action === 'agent' && !draft.agentId ? 'Escolha o agente de IA'
       : draft.action === 'bot' && !draft.botId
         ? 'Escolha o robô'
         : draft.action === 'message' && draft.kind === 'text' && !draft.text.trim()
@@ -109,6 +117,8 @@ export function StageFollowupSection({ stageId, stageSaved }: { stageId: string;
           enabled: draft.enabled,
           delay_seconds: seconds,
           action_type: draft.action,
+          agent_id: draft.action === 'agent' ? draft.agentId || null : null,
+          agent_instruction: draft.action === 'agent' ? draft.agentInstruction : undefined,
           bot_id: draft.action === 'bot' ? draft.botId || null : null,
           message:
             draft.action === 'message'
@@ -204,6 +214,7 @@ export function StageFollowupSection({ stageId, stageSaved }: { stageId: string;
                     [
                       ['message', 'Enviar uma mensagem'],
                       ['bot', 'Executar um robô'],
+                      ['agent', 'Ativar agente de IA'],
                     ] as const
                   ).map(([value, label]) => (
                     <button
@@ -224,7 +235,17 @@ export function StageFollowupSection({ stageId, stageSaved }: { stageId: string;
                 </div>
               </div>
 
-              {draft.action === 'bot' ? (
+              {draft.action === 'agent' ? (
+                <div className="space-y-2">
+                  <label className="block text-xs" htmlFor={`fu-agent-${stageId}`}>Agente de IA</label>
+                  <NativeSelect id={`fu-agent-${stageId}`} className={FIELD} value={draft.agentId} onChange={e => set({ agentId: e.target.value })}>
+                    <option value="">Escolha o agente</option>
+                    {(agentsQ.data ?? []).map(a => <option key={a.id} value={a.id} disabled={!a.enabled}>{a.name}{a.enabled ? '' : ' (desligado)'}</option>)}
+                  </NativeSelect>
+                  <textarea className={FIELD} rows={3} maxLength={2000} aria-label="Orientação do follow-up" placeholder="Ex.: retome a proposta e pergunte se ficou alguma dúvida." value={draft.agentInstruction} onChange={e => set({ agentInstruction: e.target.value })} />
+                  <p className="text-xs text-slate-500">Respeita os horários de follow-up, a janela do WhatsApp e as pausas do atendimento. O limite de consumo exige liberação manual.</p>
+                </div>
+              ) : draft.action === 'bot' ? (
                 <div>
                   <label htmlFor={`fu-bot-${stageId}`} className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
                     Robô
@@ -297,7 +318,7 @@ export function StageFollowupSection({ stageId, stageSaved }: { stageId: string;
                 </div>
               )}
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Dispara uma única vez por lead nesta etapa: depois de executar, não repete, nem se o lead responder ou voltar
+                Respeita os Horários de follow-up em IA e Automações. Dispara uma única vez por lead nesta etapa: depois de executar, não repete, nem se o lead responder ou voltar
                 para a etapa. Mensagens da equipe e de robôs não reiniciam a contagem. Ao ligar, os leads que já estão na
                 etapa começam a contar agora.
               </p>

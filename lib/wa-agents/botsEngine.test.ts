@@ -226,6 +226,46 @@ beforeEach(() => {
 const chain = (steps: Row[]) =>
   steps.map((s, i) => ({ next_step_id: steps[i + 1]?.id ?? null, ...s }));
 
+describe('calendário de robôs proativos', () => {
+  it('preserva o contexto proativo no robô filho', async () => {
+    const context = { anchor: null };
+    const childId = '11111111-1111-4111-8111-111111111112';
+    const r = run({ vars: { __proactive_followup: context } });
+    const tables = db(bot([{ id: 'child', type: 'start_bot', bot_id: childId }]), [r]);
+    tables.wa_bots.push(bot([{ id: 'wait', type: 'wait', seconds: 3600 }], { id: childId }));
+    await processBotRun(fakeDb(tables), r);
+    const child = tables.wa_bot_runs.find(item => item.bot_id === childId);
+    expect(child).toBeDefined();
+    expect((child!.vars as Row).__proactive_followup).toEqual(context);
+    expect(h.sent).toEqual([]);
+  });
+  it('adia sem enviar e preserva o passo para a próxima abertura', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-07T16:00:00Z'));
+    try {
+      const r = run({ vars: { __proactive_followup: { anchor: '2026-11-06T10:00:00Z' } } });
+      const tables = db(bot([{ id: 'tx', type: 'send_text', text: 'Follow-up' }]), [r]);
+      tables.followup_calendars = [{ organization_id: ORG, enabled: true, timezone: 'America/Manaus', slots: [{ day: 1, start: '09:00', end: '18:00' }] }];
+      await processBotRun(fakeDb(tables), r);
+      expect(h.sent).toEqual([]);
+      expect(tables.wa_bot_runs[0]).toMatchObject({ status: 'running', step_index: 0, wake_at: '2026-11-09T13:00:00.000Z' });
+    } finally { vi.useRealTimers(); }
+  });
+  it('cancela quando o lead respondeu durante uma espera', async () => {
+    const r = run({ vars: { __proactive_followup: { anchor: '2026-11-06T10:00:00Z' } } });
+    const tables = db(bot([{ id: 'tx', type: 'send_text', text: 'Não enviar' }]), [r], { last_inbound_at: '2026-11-07T10:00:00Z' });
+    await processBotRun(fakeDb(tables), r);
+    expect(h.sent).toEqual([]); expect(tables.wa_bot_runs[0].status).toBe('cancelled');
+  });
+  it('resposta esperada libera a continuação receptiva fora do calendário', async () => {
+    const r = run({ status: 'waiting_reply', vars: { __proactive_followup: { anchor: '2026-11-06T10:00:00Z' } } });
+    const tables = db(bot([{ id: 'tx', type: 'send_text', text: 'Recebi sua resposta' }]), [r]);
+    tables.followup_calendars = [{ organization_id: ORG, enabled: true, timezone: 'America/Manaus', slots: [] }];
+    await handleBotReply(fakeDb(tables), { run: r, message: { id: 'reply', body: 'Sim', transcription: null } });
+    expect(h.sent).toEqual(['Recebi sua resposta']);
+    expect((tables.wa_bot_runs[0].vars as Row).__proactive_followup).toBeUndefined();
+  });
+});
+
 describe('motor dos robôs', () => {
   const initialRun = () => run({ conversation_id: null, deal_id: 'deal-1', contact_id: 'contact-1', phone: '+5511988887777' });
   const initialTables = (r: BotRunRow) => db(
