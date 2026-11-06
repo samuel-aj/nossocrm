@@ -673,7 +673,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     const repliesSoFar = Number(priorState.respostas ?? 0) || 0;
     const mustClose = agent.max_replies > 0 && repliesSoFar + 1 >= agent.max_replies;
     // Instrução de apresentação só no primeiro contato pelo pipeline (não nas rodadas seguintes nem após passagem)
-    const system = buildSystemPrompt({
+    let system = buildSystemPrompt({
       agent,
       ctx,
       firstContact: input.trigger === 'deal',
@@ -682,6 +682,11 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       mustClose,
       followup: input.followup ?? null,
     });
+    if (agent.tools?.zapsign_template_token && conv.deal_id && conv.contact_id) {
+      const { agentContractFact } = await import('@/lib/zapsign/agentContractFact');
+      const fact = await agentContractFact(admin,organizationId,conversationId,agent.id,conv.deal_id,conv.contact_id);
+      if (fact) system += '\n\n' + fact;
+    }
     const messages = await buildHistoryMessages(admin, ctx, agent.history_limit);
     if (input.forceReply && (messages.length === 0 || messages[messages.length - 1].role === 'assistant')) {
       messages.push({
@@ -901,7 +906,9 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     }
 
     // 9b. Encerramento (encerrar_atendimento)
-    const end = gen.toolCalls.find(t => t.tool === 'encerrar_atendimento');
+    const waitingForContract = gen.toolCalls.some(t => t.tool === 'contrato_zapsign' &&
+      (t.output as {criado?: boolean} | undefined)?.criado === true);
+    const end = !waitingForContract && gen.toolCalls.find(t => t.tool === 'encerrar_atendimento');
     if (end) {
       const args = (end.input ?? {}) as { resultado?: unknown; resumo?: unknown };
       const resultado = String(args.resultado ?? '').trim();

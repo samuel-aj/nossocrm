@@ -133,9 +133,10 @@ export function toModelMessages(messages: TestMessage[]): ModelMessage[] {
   return out.map(m => ({ role: m.role, content: m.content }) as ModelMessage);
 }
 
+type TestInput = { organizationId: string; agent: AgentRow; messages: TestMessage[]; state?: Record<string, unknown>; signatureEvent?: 'signed'; contractState?: 'invited'|'signed' };
 export async function testAgentReply(
   admin: SupabaseClient,
-  input: { organizationId: string; agent: AgentRow; messages: TestMessage[]; state?: Record<string, unknown> }
+  input: TestInput
 ): Promise<TestAgentReplyResult> {
   const usage = await createUsageContext(admin, { organizationId: input.organizationId, agentId: input.agent.id, scope: 'test' });
   return runWithUsageContext(usage, () => testAgentReplyWithUsage(admin, input));
@@ -143,7 +144,7 @@ export async function testAgentReply(
 
 async function testAgentReplyWithUsage(
   admin: SupabaseClient,
-  input: { organizationId: string; agent: AgentRow; messages: TestMessage[]; state?: Record<string, unknown> }
+  input: TestInput
 ): Promise<TestAgentReplyResult> {
   const startedAt = Date.now();
   const { organizationId, agent } = input;
@@ -159,6 +160,11 @@ async function testAgentReplyWithUsage(
     state: input.state,
   });
 
+  if (input.signatureEvent === 'signed' && agent.tools.zapsign_template_token) {
+    const { composeSignedReply } = await import('@/lib/zapsign/agentSignedReply');
+    const text = await composeSignedReply(admin, agent, ctx, input.messages.map(m=>({role:m.role,content:m.text})), true);
+    return { text, lines:[text], toolCalls:[], usage:null, segments:[{kind:'text',text}], media:[] };
+  }
   const resolved = await resolveAgentModel(admin, organizationId, agent);
   const resources = await loadAgentResources(admin, organizationId, agent);
   const lastUser = [...input.messages].reverse().find(m => m.role === 'user')?.text ?? null;
@@ -168,7 +174,9 @@ async function testAgentReplyWithUsage(
   if (resources.documents.length > 0 && lastUser) {
     knowledge = await searchKnowledge(admin, { organizationId, agent, query: lastUser, limit: AUTO_KNOWLEDGE_LIMIT });
   }
-  const system = buildSystemPrompt({ agent, ctx, resources, knowledge });
+  const system = buildSystemPrompt({ agent, ctx, resources, knowledge }) +
+    (input.contractState === 'signed' ? '\nZapSign simulada: cliente assinou e recebeu o acompanhamento.' :
+      input.contractState === 'invited' ? '\nZapSign simulada: o link foi entregue. Aguardando assinatura.' : '');
   const messages = toModelMessages(input.messages);
 
   // Mesmos tetos por resposta da conversa real (consultas à base e a auxiliares)
@@ -180,6 +188,7 @@ async function testAgentReplyWithUsage(
   const runtime: AgentToolRuntime = {
     ...(agent.tools?.zapsign_template_token ? {
       contract: async (args: Parameters<NonNullable<AgentToolRuntime['contract']>>[0]) => {
+        if (input.contractState) return { ok: true, existente: true, simulado: true, estado: input.contractState === 'signed' ? 'assinado' : 'aguardando assinatura' };
         const { simulateAgentContract } = await import('@/lib/zapsign/agentSimulation');
         return simulateAgentContract(admin, organizationId, agent.tools.zapsign_template_token!, input.messages, args, agent.tools.zapsign_variables);
       },

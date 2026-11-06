@@ -5,13 +5,15 @@
 O recurso fica **desativado** até o escritório escolher um modelo para aquele agente. Ele não altera a conexão da ZapSign; o acesso à configuração da integração continua reservado ao Mestre/superadministrador.
 
 1. Abra **Configurações → IA e Automações → Agentes de IA**, edite o agente e acesse **Ações e recursos → Recursos → Modelo de contrato da ZapSign**.
-2. Escolha um modelo ativo da conta do escritório. Em **Configurar campos do modelo**, associe cada variável a um dado do CRM (inclusive um campo personalizado) ou a um texto fixo do escritório. Salve o agente.
+2. Escolha um modelo ativo da conta do escritório. Em **Configurar campos do modelo**, associe cada variável a um campo do CRM, a um texto fixo ou à opção **Perguntar ao cliente na conversa**. Para valores e condições comerciais, use os dados do escritório. Salve o agente.
 3. No atendimento, a IA pede os dados pessoais que faltarem, apresenta o resumo e pede a confirmação. Uma resposta como “sim” ou “pode criar”, diretamente a esse resumo, autoriza a criação. Se os termos ou o modelo mudarem, apresenta outro resumo. Valores e condições comerciais vêm do cadastro ou do mapeamento do escritório. O atendimento precisa estar ativo e a conversa vinculada ao lead certo.
-4. Depois da criação, o documento aparece em **Lead → Contrato**, aguardando assinatura. O link fica ali: criar não envia convite e não marca como assinado. Quando já existe uma conferência humana pendente para o mesmo modelo, o agente aponta para a aba Contrato. Um timeout não gera outra tentativa automática; o webhook autenticado pode recuperar a referência se a ZapSign informar o ID externo.
+4. Após a criação, o CRM envia o link pelo WhatsApp do atendimento. Em **Lead → Contrato**, a equipe vê se o envio está pendente, confirmado ou precisa de conferência.
+5. Quando a ZapSign confirma a assinatura do cliente, o agente lê a conversa, parabeniza e orienta sobre o próximo passo previsto pelo escritório. Se outra pessoa ainda precisa assinar, o contrato continua aguardando as demais assinaturas. O acompanhamento respeita a pausa do agente, o limite de consumo e os horários de follow-up do escritório.
+6. Para retomar pela API oficial com a janela de 24 horas fechada, selecione em **Confirmação de assinatura fora da janela do WhatsApp** uma mensagem aprovada para aquele número, com texto fixo. Sem esse modelo, o envio aguarda uma nova mensagem do cliente. Se o WhatsApp deixar o resultado de um envio incerto, a equipe pode conferir a conversa na aba Contrato.
 
-**Roteiro sugerido para o campo de instruções do agente:** “Quando o cliente quiser contratar, prepare o contrato do modelo do escritório. Peça só os dados que faltam e apresente o resumo para confirmação. Se faltar uma condição comercial, encaminhe à equipe. Após o aceite, crie o contrato e informe apenas o resultado confirmado. Não envie o link.”
+**Roteiro sugerido para o agente:** “Peça os dados que faltam, apresente as condições do escritório e aguarde o aceite. Crie o contrato e avise que o link chegará nesta conversa. Mantenha o atendimento disponível. Quando receber a confirmação da ZapSign, parabenize o cliente e explique o próximo passo previsto no nosso roteiro.”
 
-**Homologação:** use **Testar** no editor. O painel pode ler o modelo escolhido, mas usa um lead fictício e simula a criação sem gravar assinatura nem enviar mensagem. Para conferir a configuração de um escritório específico, teste ali com os nomes reais das variáveis e dados fictícios.
+**Teste no editor:** abra **Testar**, converse como um cliente fictício e confirme o resumo. O painel mostra o link de teste. Clique em **Simular assinatura do cliente** para receber a resposta do agente no simulador. A criação e a entrega são simuladas.
 
 Estado em 28/10/2026: branch `feat/zapsign` e preview `staging`. Não está em produção.
 

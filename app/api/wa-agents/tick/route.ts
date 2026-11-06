@@ -17,6 +17,7 @@ import { processDueBotRuns } from '@/lib/wa-agents/bots';
 import { processFollowups } from '@/lib/wa-agents/followups';
 import { processStageFollowups } from '@/lib/wa-agents/stageFollowups';
 import { processQueuedSignatures } from '@/lib/zapsign/signatures';
+import { processAgentNotices } from '@/lib/zapsign/agentNotices';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -30,6 +31,11 @@ async function handle(req: Request): Promise<Response> {
     const admin = createStaticAdminClient();
     // O cron roda a cada 30 s: poucos itens por tick e um orçamento de tempo abaixo do maxDuration
     const deadlineMs = Date.now() + TICK_BUDGET_MS;
+    try {
+      await processAgentNotices(admin, deadlineMs);
+    } catch (err) {
+      console.error('[wa-agents/tick] falha no acompanhamento da ZapSign', err);
+    }
     try {
       await resumeDueConversations(admin, { limit: 5, deadlineMs });
     } catch (err) {

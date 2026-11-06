@@ -32,6 +32,8 @@ export const runtime = 'nodejs';
 export const maxDuration = 120;
 
 const BodySchema = z.object({
+  signatureEvent: z.literal('signed').optional(),
+  contractState: z.enum(['invited','signed']).optional(),
   messages: z
     .array(z.object({ role: z.enum(['user', 'assistant']), text: z.string().max(8000) }))
     .max(200)
@@ -74,6 +76,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       agent,
       messages: parsed.data.messages,
       state: parsed.data.state,
+      signatureEvent: parsed.data.signatureEvent,
+      contractState: parsed.data.contractState,
     });
     return json(result);
   } catch (err) {

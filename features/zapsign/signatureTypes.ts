@@ -24,6 +24,7 @@ export type Signature = {
   file_id: string | null;
   last_error: string | null;
   signers: SignerLite[];
+  notices?: Array<{kind:'invite'|'signed'; state:string; note:string | null}>;
   created_at: string;
 };
 
@@ -70,7 +71,8 @@ export function useDealSignatures(dealId: string, enabled = true) {
     staleTime: 10_000,
     refetchInterval: (query) => {
       const list = query.state.data?.signatures ?? [];
-      return list.some((s) => LIVE_STATUSES.includes(s.status)) ? 15_000 : false;
+      return list.some((s) => LIVE_STATUSES.includes(s.status) ||
+        s.notices?.some(n => ['pending','working','dispatching'].includes(n.state))) ? 15_000 : false;
     },
   });
 }

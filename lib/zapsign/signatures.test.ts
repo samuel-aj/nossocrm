@@ -414,7 +414,7 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
     return { ...db, post, accept };
   }
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-  it('cria uma vez após aceite, usa somente o modelo autorizado, e não dispara convite', async () => {
+  it('cria uma vez após aceite e vincula a entrega à conversa e ao número autorizados', async () => {
     const db = setup(), approved = await db.accept();
     const results = await Promise.all([1, 2].map(() => runAgentContract(db.admin, approved, create)));
     expect(results.some(r => 'criado' in r && r.criado)).toBe(true);
@@ -423,6 +423,7 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
       send_automatic_email: false, send_automatic_whatsapp: false, data: expect.arrayContaining([{ de: '{{ENDEREÇO}}', para: 'Rua das Flores' }]) });
     expect(db.tables.deal_signatures).toHaveLength(1);
     expect(db.tables.deal_signatures[0]).toMatchObject({ origin: 'agent', status: 'pending', sign_url: 'https://assinatura.invalid/s1' });
+    expect(db.tables.deal_signatures[0].request).toMatchObject({ agent_delivery:'conversation',conversation_id:'conv-1', connection_id:'conn-qr',recipient:'+5511988887777' });
     expect(db.tables.deal_events[0]).toMatchObject({ new_value: 'created' });
     expect(h.texts).toEqual([]); expect(fetch).not.toHaveBeenCalled();
   });
@@ -438,6 +439,20 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
     expect(await runAgentContract(db.admin, approved, { ...create, dados: { ENDEREÇO: 'Outro endereço' } })).toMatchObject({ perguntar_ao_cliente: ['ENDEREÇO'] });
     expect(db.post).not.toHaveBeenCalled();
   });
+  it('envia somente a URL do cliente mesmo se o escritório for o primeiro signatário', async () => {
+    const db=setup(), approved=await db.accept('Sim, pode enviar');
+    db.post.mockResolvedValue({token:'doc',name:'Contrato',status:'pending',signers:[
+      {token:'office',name:'Escritório',status:'new',sign_url:'https://teste.invalid/escritorio'},
+      {token:'client',name:'Maria da Silva',status:'new',sign_url:'https://teste.invalid/cliente'},
+    ]});
+    await runAgentContract(db.admin,approved,create);
+    expect(db.tables.deal_signatures[0]).toMatchObject({sign_url:'https://teste.invalid/cliente',signers:[
+      {role:'extra'},{role:'contact'}]});
+    await handleZapSignWebhook(db.admin,ORG,{token:'doc',event_type:'doc_signed',status:'pending',
+      signer_who_signed:{token:'client',name:'Maria da Silva',status:'signed'}});
+    expect(db.tables.deal_signatures[0]).toMatchObject({status:'pending',signers:[
+      {role:'extra',status:'new'},{role:'contact',status:'signed'}]});
+  });
   it('usa o texto fixo do escritório e exige novo aceite se as condições mudarem', async () => {
     const db = setup();
     const tools = { zapsign_template_token: 'tpl-1', zapsign_variables: { FORO: 'texto:Manaus' } };
@@ -447,6 +462,15 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
     expect(db.tables.wa_messages[1].body).toContain('FORO: Manaus');
     tools.zapsign_variables.FORO = 'texto:Recife';
     expect(await runAgentContract(db.admin, approved, create)).toMatchObject({ criado: false, solicitar_confirmacao: expect.stringContaining('FORO: Recife') });
+    expect(db.post).not.toHaveBeenCalled();
+  });
+  it('coleta um campo definido pelo escritório a partir da fala do cliente', async () => {
+    const db = setup();
+    db.tables.wa_ai_agents[0].tools = {zapsign_template_token:'tpl-1',zapsign_variables:{REFERÊNCIA:'cliente:perguntar'}};
+    vi.mocked(files.readContractTemplate).mockResolvedValue({revision:'r1',names:['REFERÊNCIA']});
+    expect(await runAgentContract(db.admin,scope,{...prepare,dados:{}})).toMatchObject({perguntar_ao_cliente:['REFERÊNCIA']});
+    expect(await runAgentContract(db.admin,scope,{...prepare,dados:{REFERÊNCIA:'Rua das Flores'}})).toMatchObject({
+      solicitar_confirmacao:expect.stringContaining('REFERÊNCIA: Rua das Flores')});
     expect(db.post).not.toHaveBeenCalled();
   });
   it('recusa modelo de outra conta, conversa trocada e pausa por consumo', async () => {

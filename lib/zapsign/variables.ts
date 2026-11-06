@@ -80,6 +80,11 @@ export function normalizeVarName(name: string): string {
     .replace(/[^a-z0-9]+/g, '');
 }
 
+/** The office can explicitly delegate a template field to the client, except for its own commercial terms. */
+export function canCollectContractField(name: string) {
+  return !/(?:valor|honorario|pagamento|preco|desconto|multa|juros|parcela|foro|comissao|remuneracao|percentual|custas)/.test(normalizeVarName(name));
+}
+
 const AUTO_MATCH: Array<[RegExp, string]> = [
   [/^(nome(completo)?|nomedocliente|cliente|contratante|nomecontratante|outorgante)$/, 'contato.nome'],
   [/^primeironome$/, 'contato.primeiro_nome'],

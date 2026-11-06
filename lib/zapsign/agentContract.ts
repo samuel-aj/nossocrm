@@ -4,7 +4,7 @@ import { AgentToolsSchema } from '@/lib/wa-agents/types';
 import { checkConversationBudget } from '@/lib/ai-usage/budget';
 import { loadCustomFieldDefs } from '@/lib/wa-agents/leadOps';
 import { readContractTemplate } from './templateFile';
-import { clientFor, loadLeadSnapshot, loadZapSignSettings, recordEvent, toStoredSigner, type SignatureRow } from './signatures';
+import { agentContactToken, clientFor, loadLeadSnapshot, loadZapSignSettings, recordEvent, toStoredSigner, type SignatureRow } from './signatures';
 import { hasContractConsent, prepareAgentDraft, type AgentContractInput, type ContractTurn } from './agentDraft';
 import { splitPhone } from './variables';
 import type { ZapSignDoc } from './client';
@@ -14,7 +14,7 @@ type ResultRow = Pick<SignatureRow, 'id' | 'status' | 'doc_token' | 'sign_url' |
 const columns = 'id,status,doc_token,sign_url,origin,contact_id';
 
 function existing(r: ResultRow) {
-  if (r.doc_token && ['signed', 'pending'].includes(r.status)) return { ok: true, existente: true, estado: r.status === 'signed' ? 'assinado' : 'aguardando assinatura', id_documento: r.doc_token, link: r.sign_url };
+  if (r.doc_token && ['signed', 'pending'].includes(r.status)) return { ok: true, existente: true, estado: r.status === 'signed' ? 'assinado' : 'aguardando assinatura', id_documento: r.doc_token };
   return { ok: false, erro: r.status === 'review' ? 'Este contrato já aguarda conferência humana na aba Contrato.' :
     'Já há uma tentativa deste modelo para o lead. Confira a aba Contrato e a ZapSign antes de qualquer nova criação.' };
 }
@@ -24,15 +24,16 @@ export async function runAgentContract(admin: SupabaseClient, scope: Scope, inpu
   if (!deal || !scope.inboundId) throw new Error('A criação precisa de uma conversa recebida e vinculada a um lead.');
   async function checkBinding() {
     const [conv, config, budget] = await Promise.all([
-      admin.from('wa_conversations').select('deal_id, contact_id').eq('organization_id', org).eq('id', conversation)
+      admin.from('wa_conversations').select('deal_id, contact_id, connection_id, wa_phone').eq('organization_id', org).eq('id', conversation)
         .eq('ai_status', 'active').eq('is_group', false).eq('ai_agent_id', agent).eq('deal_id', deal).maybeSingle(),
       admin.from('wa_ai_agents').select('tools').eq('organization_id', org).eq('id', agent).eq('enabled', true).maybeSingle(),
       checkConversationBudget(admin, org, conversation),
     ]);
     const tools = AgentToolsSchema.safeParse(config.data?.tools);
-    if (conv.error || config.error || !conv.data?.contact_id || !tools.success || tools.data.zapsign_template_token !== template || budget.blocked_at)
+    if (conv.error || config.error || !conv.data?.contact_id || !conv.data.connection_id || !conv.data.wa_phone || !tools.success || tools.data.zapsign_template_token !== template || budget.blocked_at)
       throw new Error('A conversa, o agente, o limite ou o modelo não permitem criar este contrato.');
-    return { contact: conv.data.contact_id as string, mapping: tools.data.zapsign_variables ?? {} };
+    return { contact: conv.data.contact_id as string, connection: conv.data.connection_id as string,
+      phone: conv.data.wa_phone as string, mapping: tools.data.zapsign_variables ?? {} };
   }
   const binding = await checkBinding();
   const { contact, mapping } = binding;
@@ -82,11 +83,13 @@ export async function runAgentContract(admin: SupabaseClient, scope: Scope, inpu
       !isDeepStrictEqual(freshSnap, snap))
     throw new Error('Os dados do atendimento mudaram. Prepare o contrato novamente.');
 
+  const signerIdentity = {name:draft.signer, email:snap.contact.email, phone:snap.contact.phone};
   const { data: row, error } = await admin.from('deal_signatures').insert({
     organization_id: org, deal_id: deal, contact_id: contact, stage_id: snap.deal.stage_id, origin: 'agent',
     status: 'processing', lock_until: null, attempts: 1, template_token: template, template_name: tpl.name,
     request: { template_token: template, template_name: tpl.name, variables: {}, signer: { send: 'link' },
-      agent_id: agent, conversation_id: conversation, confirmation_message_id: scope.inboundId, values: draft.data },
+      agent_id: agent, conversation_id: conversation, connection_id: binding.connection, recipient: binding.phone,
+      agent_delivery: 'conversation', agent_signer:signerIdentity, confirmation_message_id: scope.inboundId, values: draft.data },
   }).select('id').single();
   if (error?.code === '23505') {
     const other = await findExisting(); if (other) return existing(other);
@@ -107,20 +110,25 @@ export async function runAgentContract(admin: SupabaseClient, scope: Scope, inpu
       .eq('organization_id', org).eq('id', row.id).eq('status', 'processing');
     throw new Error('Criação não confirmada. Peça à equipe para conferir na ZapSign; não repita o pedido.');
   }
-  const signers = (doc.signers ?? []).map((s, i) => toStoredSigner(s, i ? 'extra' : 'contact'));
-  const signUrl = signers[0]?.sign_url ?? null;
+  const clientToken = agentContactToken(doc.signers ?? [],signerIdentity);
+  const signers = (doc.signers ?? []).map(s => toStoredSigner(s, s.token === clientToken ? 'contact' : 'extra'));
+  const contactSigner = signers.find(s=>s.role==='contact');
+  const signUrl = contactSigner?.sign_url ?? null;
   const { data: saved, error: saveError } = await admin.from('deal_signatures').update({
-    doc_token: doc.token, doc_name: name, status: 'pending', sign_url: signUrl, signers, sent_via: 'link', updated_at: new Date().toISOString(),
+    doc_token: doc.token, doc_name: name, status: 'pending', sign_url: signUrl, signers, sent_via: 'link',
+    last_error:signUrl ? null : 'Aguardando identificação do signatário do lead na ZapSign.', updated_at: new Date().toISOString(),
   }).eq('organization_id', org).eq('id', row.id).eq('status', 'processing').select(columns).maybeSingle();
   if (saveError) throw new Error('Confira o registro da ZapSign. Não repita a criação.');
   if (!saved) {
     // The webhook may have claimed the token before our response. Fill a missing link
     // without changing its (possibly already signed) status or newer signer records.
-    if (signUrl) await admin.from('deal_signatures').update({ sign_url: signUrl })
-      .eq('organization_id', org).eq('id', row.id).eq('doc_token', doc.token).is('sign_url', null);
+    if (contactSigner) {
+      const bound = await admin.rpc('bind_agent_contract_signer',{p_org:org,p_id:row.id,p_doc:doc.token,p_signer:contactSigner});
+      if (bound.error) throw new Error('Confira o vínculo do signatário na aba Contrato. Não repita a criação.');
+    }
     const other = await findExisting(); if (other) return existing(other);
     throw new Error('Confira a aba Contrato.');
   }
   await recordEvent(admin, { id: row.id, organization_id: org, deal_id: deal, doc_name: name, doc_token: doc.token }, 'created', { origin: 'agent', agent_id: agent });
-  return { ok: true, criado: true, id_documento: doc.token, link: signUrl, estado: 'aguardando assinatura', convite_enviado: false };
+  return { ok: true, criado: true, id_documento: doc.token, estado: 'aguardando assinatura', envio_do_link: signUrl ? 'programado na conversa' : 'aguardando link da ZapSign' };
 }

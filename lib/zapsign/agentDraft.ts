@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { autoMatchVariable, normalizeVarName, resolveSource, type VariableContext } from './variables';
+import { autoMatchVariable, canCollectContractField, normalizeVarName, resolveSource, type VariableContext } from './variables';
 
 export type ContractTurn = { direction: 'in' | 'out'; text: string; agent: boolean; ok: boolean; at: string };
 export type ContractFields = Record<string, string>;
@@ -30,7 +30,8 @@ export function prepareAgentDraft(input: {
     if (/^negocio\.valor/.test(source) && !(Number(input.ctx.deal.value) > 0)) value = '';
     if (!value) {
       const candidate = Object.hasOwn(input.supplied, name) ? plain(input.supplied[name]) : '';
-      const fromClient = personal.test(normalizeVarName(name)) && !source.startsWith('texto:') && !source.startsWith('negocio.') &&
+      const fromClient = (personal.test(normalizeVarName(name)) || (source === 'cliente:perguntar' && canCollectContractField(name))) &&
+        !source.startsWith('texto:') && !source.startsWith('negocio.') &&
         !(source.startsWith('campo:') && input.ctx.customFieldTypes?.[source.slice(6)] === 'currency');
       if (fromClient && candidate && evidenced(candidate)) value = candidate;
       else (fromClient ? missing : office).push(name);
@@ -40,7 +41,7 @@ export function prepareAgentDraft(input: {
   const ref = createHash('sha256').update(JSON.stringify([input.scope, input.template.revision, signer, data])).digest('hex').slice(0, 12);
   const fields = data.map(({ de, para }) => de.slice(2, -2) + ': ' + para).join('; ');
   const question = 'Contrato: ' + plain(input.template.name) + '. Signatário: ' + signer +
-    '. ' + (fields ? fields + '. ' : '') + 'Referência ' + ref + '. Posso criar o contrato com esses dados?';
+    '. ' + (fields ? fields + '. ' : '') + 'Referência ' + ref + '. Posso criar o contrato e enviar o link por aqui?';
   return { data, missing, office, question, signer };
 }
 
@@ -48,7 +49,7 @@ export function hasContractConsent(turns: ContractTurn[], question: string, now 
   const reply = turns.at(-1);
   if (!reply || reply.direction !== 'in' || !reply.ok) return false;
   const affirmative = norm(reply.text).replace(/[.,!]+$/g, '').trim();
-  if (!/^(sim|confirmo|confirmado|de acordo|autorizo|pode (?:criar|gerar|preparar)(?: o (?:contrato|documento))?|sim[, ]+pode (?:criar|gerar)(?: o contrato)?)$/.test(affirmative)) return false;
+  if (!/^(?:sim|confirmo|confirmado|de acordo|autorizo|pode sim|(?:sim[, ]+)?pode(?: (?:criar|gerar|preparar|enviar|mandar)(?: o (?:contrato|documento|link))?)?)$/.test(affirmative)) return false;
   const previous: string[] = [];
   for (let i = turns.length - 2; i >= 0; i--) {
     const t = turns[i];

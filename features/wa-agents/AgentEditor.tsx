@@ -1308,6 +1308,8 @@ export const AgentEditor: React.FC<{
         <Panel title="Recursos" icon={<Calculator size={16} />}>
           <div className={ROW_DIVIDER_CLASS}>
             {tab === 'acoes' && <AgentContractSetting value={form.tools.zapsign_template_token} mapping={form.tools.zapsign_variables ?? {}}
+              signedMessage={form.tools.zapsign_signed_message_template} connectionIds={form.connection_ids}
+              onSignedMessage={id => patch({ tools: { ...form.tools, zapsign_signed_message_template:id } })}
               onChange={(token, variables) => patch({ tools: { ...form.tools, zapsign_template_token: token, zapsign_variables: variables } })} />}
             <SettingRow
               title="Calculadora"

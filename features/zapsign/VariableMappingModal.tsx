@@ -10,6 +10,7 @@ import React from 'react';
 import { Check, FileSignature, Loader2 } from 'lucide-react';
 import { NativeSelect } from '@/components/ui/NativeSelect';
 import type { SourceOption } from '@/lib/zapsign/variables';
+import { canCollectContractField } from '@/lib/zapsign/variables';
 import { FillModal, FILL_PRIMARY_BTN } from './FillModal';
 
 const FIELD = 'w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white placeholder:text-slate-400 focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 outline-none';
@@ -52,7 +53,7 @@ export function VariableMappingModal({
   const groups = Array.from(new Set(sources.map((s) => s.group)));
   const selectValue = (src: string) => (src.startsWith('texto:') ? 'texto:' : src);
   const summary = mappingSummary(variables, mapping);
-  const groupOf = (value: string) => (value.startsWith('texto:') ? 'texto fixo' : (sources.find((s) => s.value === value)?.group.toLowerCase() ?? 'em branco'));
+  const groupOf = (value: string) => (value === 'cliente:perguntar' ? 'conversa' : value.startsWith('texto:') ? 'texto fixo' : (sources.find((s) => s.value === value)?.group.toLowerCase() ?? 'em branco'));
   return (
     <FillModal
       open={open}
@@ -108,6 +109,7 @@ export function VariableMappingModal({
                 >
                   <option value="">{forAgent ? 'Sem fonte no CRM' : 'Deixar em branco (preencher na hora do envio)'}</option>
                   <option value="texto:">Texto fixo</option>
+                  {forAgent && canCollectContractField(name) && <option value="cliente:perguntar">Perguntar ao cliente na conversa</option>}
                   {groups.map((g) => (
                     <optgroup key={g} label={g}>
                       {sources

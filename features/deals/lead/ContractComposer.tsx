@@ -95,6 +95,10 @@ function LatestDocument({ latest, fileUrl, older }: { latest: Signature; fileUrl
           {detail}
         </span>
       </p>
+      {latest.notices?.map(n => <p key={n.kind} className="mt-1 pl-6">
+        <b>{n.kind === 'invite' ? 'Link de assinatura' : 'Acompanhamento da assinatura'}</b>
+        {' · '}{n.note || (n.state === 'sent' ? 'Enviado na conversa' : 'Aguardando envio')}
+      </p>)}
       <div className="mt-1.5 flex flex-wrap items-center gap-3 pl-6">
         {latest.status === 'pending' && latest.sign_url ? (
           <>

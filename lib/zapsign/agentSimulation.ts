@@ -27,5 +27,5 @@ export async function simulateAgentContract(admin: SupabaseClient, org: string, 
     return { ok: false, simulado: true, perguntar_ao_cliente: draft.missing, preencher_no_crm: draft.office };
   if (input.modo !== 'criar' || !hasContractConsent(turns, draft.question))
     return { ok: true, simulado: true, criado: false, solicitar_confirmacao: draft.question };
-  return { ok: true, simulado: true, criado: true, aviso: 'Criação simulada. Nenhum contrato ou link real foi gerado.' };
+  return { ok: true, simulado: true, criado: true, envio_do_link: 'simulado na conversa' };
 }
