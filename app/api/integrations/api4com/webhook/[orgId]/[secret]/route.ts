@@ -5,7 +5,8 @@
  * conectado) vai na URL. Guarda o evento (dedupe: id da chamada + tipo),
  * responde 200 na hora e processa em seguida (estado da ligação, histórico).
  * Ligação que teve conversa e gravação é transcrita em seguida (o texto
- * alimenta a IA que preenche o contrato).
+ * alimenta a IA que preenche o contrato), só nas organizações com a ZapSign
+ * conectada, que são as que usam o texto.
  */
 import { after } from 'next/server';
 import { json } from '@/lib/whatsapp/api';
@@ -51,7 +52,10 @@ export async function POST(req: Request, ctx: Ctx) {
     try {
       const result = await handleApi4comWebhook(admin, orgId, payload);
       if (eventId) await admin.from('api4com_webhook_events').update({ processed: true, error: result.action }).eq('id', eventId);
-      if (payload.eventType === 'channel-hangup' && Number(payload.duration ?? 0) > 0 && payload.recordUrl) await transcribeAfterHangup(admin, orgId, payload);
+      if (payload.eventType === 'channel-hangup' && Number(payload.duration ?? 0) > 0 && payload.recordUrl) {
+        const { data: zapsign } = await admin.from('zapsign_settings').select('organization_id').eq('organization_id', orgId).maybeSingle();
+        if (zapsign) await transcribeAfterHangup(admin, orgId, payload);
+      }
     } catch (err) {
       console.error('[api4com/webhook] falha ao processar', err);
       if (eventId) await admin.from('api4com_webhook_events').update({ processed: false, error: (err as Error).message }).eq('id', eventId);
