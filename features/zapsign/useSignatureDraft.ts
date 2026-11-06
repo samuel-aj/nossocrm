@@ -7,9 +7,14 @@
  * e com os dados do lead já resolvidos; a pessoa confere e ajusta antes de
  * enviar. Usado pela aba Contrato e pelo modal de conferência ao mudar de
  * etapa. Puro estado + consultas; a apresentação fica em SignatureFields.
+ *
+ * IA: com o modelo escolhido, a IA da organização lê a conversa, as ligações
+ * e as notas do lead e preenche as variáveis sozinha (uma vez por modelo; o
+ * resultado fica 10 min em cache). O que ela mudou fica marcado com a origem;
+ * o que a pessoa digitar depois ganha da IA.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { SourceOption } from '@/lib/zapsign/variables';
 import { DEFAULT_SIGN_MESSAGE, useZapSignTemplateVariables, useZapSignTemplates } from './useZapSign';
 
@@ -52,6 +57,40 @@ export type DraftForm = {
 
 export type DraftIssue = { kind: 'block' | 'warn'; text: string };
 
+export type AiFillField = { name: string; value: string; origin: 'conversa' | 'ligacao' | 'lead'; evidence: string; changed: boolean };
+export type AiFillResponse = { fields: AiFillField[]; used: { messages: number; audios: number; calls: number; notes: number }; notes: string[]; model: string };
+export type AiFillState = {
+  status: 'idle' | 'running' | 'done' | 'error';
+  /** Modelo para o qual a IA rodou (ou está rodando). */
+  token: string;
+  error: string | null;
+  code: string | null;
+  result: AiFillResponse | null;
+  /** Variáveis que a IA preencheu e ainda estão como ela deixou. */
+  applied: Record<string, AiFillField>;
+};
+
+const AI_IDLE: AiFillState = { status: 'idle', token: '', error: null, code: null, result: null, applied: {} };
+const AI_CACHE_MS = 10 * 60_000;
+
+export const aiFillKey = (dealId: string, templateToken: string) => ['zapsign', 'ai-fill', dealId, templateToken] as const;
+
+async function postAiFill(body: unknown): Promise<AiFillResponse> {
+  const res = await fetch('/api/integrations/zapsign/ai-fill', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string } & Partial<AiFillResponse>;
+  if (!res.ok) {
+    const err = new Error(data.error || `HTTP ${res.status}`) as Error & { code?: string };
+    err.code = data.code;
+    throw err;
+  }
+  return data as AiFillResponse;
+}
+
 const EMPTY: DraftForm = {
   templateToken: '',
   docName: '',
@@ -66,7 +105,8 @@ const EMPTY: DraftForm = {
 
 export const sendPrepKey = (dealId: string, stageId: string | null | undefined) => ['zapsign', 'send-prep', dealId, stageId ?? ''] as const;
 
-export function useSignatureDraft({ dealId, stageId, enabled = true }: { dealId: string; stageId?: string | null; enabled?: boolean }) {
+export function useSignatureDraft({ dealId, stageId, enabled = true, autoAi = true }: { dealId: string; stageId?: string | null; enabled?: boolean; autoAi?: boolean }) {
+  const qc = useQueryClient();
   const prep = useQuery<SendPrep>({
     queryKey: sendPrepKey(dealId, stageId),
     enabled,
@@ -84,6 +124,9 @@ export function useSignatureDraft({ dealId, stageId, enabled = true }: { dealId:
   const templatesQ = useZapSignTemplates(enabled);
   const [form, setForm] = useState<DraftForm>(EMPTY);
   const [seeded, setSeeded] = useState(false);
+  const [ai, setAi] = useState<AiFillState>(AI_IDLE);
+  const tokenRef = useRef('');
+  tokenRef.current = form.templateToken;
   const varsQ = useZapSignTemplateVariables(enabled && form.templateToken ? form.templateToken : null);
 
   // Padrão: a regra da etapa (uma vez, quando os dados chegam)
@@ -123,21 +166,38 @@ export function useSignatureDraft({ dealId, stageId, enabled = true }: { dealId:
   }, [varsQ.data]);
 
   const set = useCallback((patch: Partial<DraftForm>) => setForm((f) => ({ ...f, ...patch })), []);
-  const setSource = useCallback((name: string, source: string) => {
-    setForm((f) => {
-      const overrides = { ...f.overrides };
-      delete overrides[name];
-      return { ...f, mapping: { ...f.mapping, [name]: source }, overrides };
+  /** A pessoa mexeu na variável: o valor deixa de ser "da IA". */
+  const forgetAi = useCallback((name: string) => {
+    setAi((a) => {
+      if (!(name in a.applied)) return a;
+      const applied = { ...a.applied };
+      delete applied[name];
+      return { ...a, applied };
     });
   }, []);
-  const setValue = useCallback((name: string, value: string | null) => {
-    setForm((f) => {
-      const overrides = { ...f.overrides };
-      if (value === null) delete overrides[name];
-      else overrides[name] = value;
-      return { ...f, overrides };
-    });
-  }, []);
+  const setSource = useCallback(
+    (name: string, source: string) => {
+      forgetAi(name);
+      setForm((f) => {
+        const overrides = { ...f.overrides };
+        delete overrides[name];
+        return { ...f, mapping: { ...f.mapping, [name]: source }, overrides };
+      });
+    },
+    [forgetAi]
+  );
+  const setValue = useCallback(
+    (name: string, value: string | null) => {
+      forgetAi(name);
+      setForm((f) => {
+        const overrides = { ...f.overrides };
+        if (value === null) delete overrides[name];
+        else overrides[name] = value;
+        return { ...f, overrides };
+      });
+    },
+    [forgetAi]
+  );
   const chooseTemplate = useCallback(
     (token: string) => {
       const rule = prep.data?.rule;
@@ -148,6 +208,7 @@ export function useSignatureDraft({ dealId, stageId, enabled = true }: { dealId:
         overrides: {},
         allowEmpty: false,
       }));
+      setAi(AI_IDLE);
     },
     [prep.data]
   );
@@ -170,6 +231,72 @@ export function useSignatureDraft({ dealId, stageId, enabled = true }: { dealId:
     return out;
   }, [variables, form.mapping, form.overrides, prep.data]);
   const emptyVars = useMemo(() => variables.filter((v) => !(values[v] ?? '').trim()), [variables, values]);
+
+  /**
+   * Roda a IA para o modelo atual. `force` ignora o cache (botão "Preencher de
+   * novo"). O valor de partida de cada variável é o que a tela mostra sem as
+   * sugestões anteriores da IA; o que a pessoa digitou conta como valor atual
+   * e não é trocado.
+   */
+  const runAi = useCallback(
+    async (force = false) => {
+      const token = form.templateToken;
+      const data = prep.data;
+      if (!token || !data || variables.length === 0) return;
+      const labels = new Map(data.sources.map((s) => [s.value, s.label]));
+      const typed = new Set(Object.keys(form.overrides).filter((n) => !(n in ai.applied)));
+      const payloadVars = variables.map((name) => {
+        const src = form.mapping[name] ?? '';
+        const crm = src.startsWith('texto:') ? src.slice(6) : (data.preview[src] ?? '');
+        return {
+          name,
+          current: typed.has(name) ? form.overrides[name] : crm,
+          source: typed.has(name) ? 'digitado na tela' : src.startsWith('texto:') ? 'texto fixo' : src ? (labels.get(src) ?? src) : '',
+        };
+      });
+      setAi((a) => ({ ...a, status: 'running', token, error: null, code: null }));
+      const key = aiFillKey(dealId, token);
+      if (force) qc.removeQueries({ queryKey: key, exact: true });
+      try {
+        const res = await qc.fetchQuery({
+          queryKey: key,
+          queryFn: () => postAiFill({ deal_id: dealId, template_name: templateName || null, variables: payloadVars }),
+          staleTime: AI_CACHE_MS,
+          gcTime: AI_CACHE_MS,
+          retry: false,
+        });
+        if (tokenRef.current !== token) return;
+        const applied: Record<string, AiFillField> = {};
+        const patch: Record<string, string> = {};
+        for (const f of res.fields) {
+          // Texto fixo do modelo e o que a pessoa digitou não mudam
+          if ((form.mapping[f.name] ?? '').startsWith('texto:') || typed.has(f.name) || !f.changed) continue;
+          patch[f.name] = f.value;
+          applied[f.name] = f;
+        }
+        // O que a IA tinha posto antes e agora não pôs volta ao valor do CRM
+        const previous = Object.keys(ai.applied);
+        setForm((f) => {
+          const overrides = { ...f.overrides };
+          for (const n of previous) if (!(n in patch)) delete overrides[n];
+          return { ...f, overrides: { ...overrides, ...patch } };
+        });
+        setAi({ status: 'done', token, error: null, code: null, result: res, applied });
+      } catch (err) {
+        if (tokenRef.current !== token) return;
+        setAi((a) => ({ ...a, status: 'error', token, error: err instanceof Error ? err.message : 'A IA não conseguiu preencher.', code: (err as { code?: string }).code ?? null }));
+      }
+    },
+    [form.templateToken, form.mapping, form.overrides, prep.data, variables, ai.applied, dealId, templateName, qc]
+  );
+
+  // Sozinha, uma vez por modelo, quando o modelo e as variáveis já chegaram
+  const mappingReady = variables.length > 0 && variables.every((n) => n in form.mapping);
+  useEffect(() => {
+    if (!enabled || !autoAi || !prep.data?.connected || !form.templateToken || !mappingReady) return;
+    if (ai.token === form.templateToken) return;
+    void runAi(false);
+  }, [enabled, autoAi, prep.data, form.templateToken, mappingReady, ai.token, runAi]);
 
   const contact = prep.data?.contact;
   const issues = useMemo<DraftIssue[]>(() => {
@@ -208,9 +335,10 @@ export function useSignatureDraft({ dealId, stageId, enabled = true }: { dealId:
   const reset = useCallback(() => {
     setForm(EMPTY);
     setSeeded(false);
+    setAi(AI_IDLE);
   }, []);
 
-  return { prep, templatesQ, varsQ, templates, templateName, form, set, setSource, setValue, chooseTemplate, variables, values, emptyVars, issues, blocked, ready, payload, reset };
+  return { prep, templatesQ, varsQ, templates, templateName, form, set, setSource, setValue, chooseTemplate, variables, values, emptyVars, issues, blocked, ready, payload, reset, ai, runAi };
 }
 
 export type SignatureDraft = ReturnType<typeof useSignatureDraft>;
