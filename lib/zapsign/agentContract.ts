@@ -4,6 +4,7 @@ import { AgentToolsSchema } from '@/lib/wa-agents/types';
 import { checkConversationBudget } from '@/lib/ai-usage/budget';
 import { loadCustomFieldDefs } from '@/lib/wa-agents/leadOps';
 import { readContractTemplate } from './templateFile';
+import { createTemplatePackage, officeTemplates, PackageError } from './templatePackage';
 import { agentContactToken, clientFor, loadLeadSnapshot, loadZapSignSettings, recordEvent, toStoredSigner, type SignatureRow } from './signatures';
 import { hasContractConsent, prepareAgentDraft, type AgentContractInput, type ContractTurn } from './agentDraft';
 import { splitPhone } from './variables';
@@ -54,10 +55,11 @@ export async function runAgentContract(admin: SupabaseClient, scope: Scope, inpu
     client.listTemplates().catch(() => { throw new Error('Não foi possível consultar os modelos na conta ZapSign do escritório.'); }),
     loadLeadSnapshot(admin, org, deal), loadCustomFieldDefs(admin, org),
   ]);
-  const tpl = models.find(t => t.token === template && t.active !== false);
+  const tpl = officeTemplates(models).find(t => t.token === template);
   if (!tpl || !snap || snap.deal.deleted_at || snap.deal.is_lost || snap.contact.id !== contact)
     throw new Error('Verifique o modelo ativo na conta ZapSign e o contato vinculado ao lead.');
   const file = await readContractTemplate(client, tpl).catch(() => { throw new Error('Não foi possível ler os campos do modelo DOCX do escritório.'); });
+  if (file.planNotice) throw new Error(file.planNotice);
   const history = async () => {
     const { data, error } = await admin.from('wa_messages').select('id,direction,source,status,body,transcription,created_at')
       .eq('organization_id', org).eq('conversation_id', conversation).gte('created_at', scope.since)
@@ -89,7 +91,8 @@ export async function runAgentContract(admin: SupabaseClient, scope: Scope, inpu
     status: 'processing', lock_until: null, attempts: 1, template_token: template, template_name: tpl.name,
     request: { template_token: template, template_name: tpl.name, variables: {}, signer: { send: 'link' },
       agent_id: agent, conversation_id: conversation, connection_id: binding.connection, recipient: binding.phone,
-      agent_delivery: 'conversation', agent_signer:signerIdentity, confirmation_message_id: scope.inboundId, values: draft.data },
+      agent_delivery: 'conversation', agent_signer:signerIdentity, confirmation_message_id: scope.inboundId, values: draft.data,
+      ...(tpl.extra_templates?.length ? { package_expected: tpl.extra_templates.length } : {}) },
   }).select('id').single();
   if (error?.code === '23505') {
     const other = await findExisting(); if (other) return existing(other);
@@ -99,15 +102,17 @@ export async function runAgentContract(admin: SupabaseClient, scope: Scope, inpu
   const name = (tpl.name + ' - ' + draft.signer).slice(0, 255);
   let doc: ZapSignDoc;
   try {
-    doc = await client.createDocFromTemplate({ template_id: template, name, signer_name: draft.signer,
+    doc = await createTemplatePackage(client, tpl, { template_id: template, name, signer_name: draft.signer,
       signer_email: snap.contact.email || undefined, signer_phone_country: phone.country || undefined,
       signer_phone_number: phone.number || undefined, data: draft.data, lang: 'pt-br', external_id: row.id,
       send_automatic_email: false, send_automatic_whatsapp: false, signer_has_incomplete_fields: false });
     if (!doc?.token) throw new Error('Sem identificador do provedor.');
-  } catch {
+  } catch (error) {
     // The provider might already have created it. Neither the agent nor the worker retries this row.
-    await admin.from('deal_signatures').update({ status: 'failed', last_error: 'Criação não confirmada. Conferir na ZapSign antes de nova tentativa.' })
+    await admin.from('deal_signatures').update({ status: 'failed', ...(error instanceof PackageError ? {doc_token:error.docToken} : {}),
+      last_error: error instanceof PackageError ? error.message : 'Criação não confirmada. Conferir na ZapSign antes de nova tentativa.' })
       .eq('organization_id', org).eq('id', row.id).eq('status', 'processing');
+    if (error instanceof PackageError) throw error;
     throw new Error('Criação não confirmada. Peça à equipe para conferir na ZapSign; não repita o pedido.');
   }
   const clientToken = agentContactToken(doc.signers ?? [],signerIdentity);

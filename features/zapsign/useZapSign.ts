@@ -5,7 +5,11 @@ import { useQuery } from '@tanstack/react-query';
 import { useCRM } from '@/context/CRMContext';
 import { SOURCE_CATALOG, type SourceOption } from '@/lib/zapsign/variables';
 
-export type ZapSignTemplateItem = { token: string; name: string; lang: string | null; folder_path: string | null };
+export type ZapSignTemplateItem = { token: string; name: string; lang: string | null; folder_path: string | null; attachments?: string[] };
+
+export function templateLabel(t: Pick<ZapSignTemplateItem, 'name' | 'attachments'>) {
+  return t.attachments?.length ? `${t.name} · ${t.attachments.length + 1} documentos` : t.name;
+}
 
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url, { credentials: 'include' });

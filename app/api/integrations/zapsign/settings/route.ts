@@ -12,6 +12,7 @@ import { json } from '@/lib/whatsapp/api';
 import { guardRoute, readJsonBody, validationError, getErrorMessage, type GuardResult } from '@/app/api/wa-agents/_shared';
 import { clientFor, loadZapSignSettings, newWebhookSecret } from '@/lib/zapsign/signatures';
 import { ZapSignError } from '@/lib/zapsign/client';
+import { officeTemplates } from '@/lib/zapsign/templatePackage';
 import { UserRole } from '@/types/constants';
 import { getTeamAccess } from '@/lib/permissions/teamAccessServer';
 import { randomUUID } from 'node:crypto';
@@ -93,7 +94,7 @@ export async function PUT(req: Request) {
     let templateCount = 0;
     stage = 'templates';
     try {
-      templateCount = (await client.listTemplates()).length;
+      templateCount = officeTemplates(await client.listTemplates()).length;
     } catch (err) {
       logConnectionFailure(stage, reference, err, secrets);
       const e = err as ZapSignError;

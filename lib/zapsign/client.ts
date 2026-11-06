@@ -8,6 +8,7 @@
 export const ZAPSIGN_PROD_BASE = 'https://api.zapsign.com.br/api/v1';
 export const ZAPSIGN_SANDBOX_BASE = 'https://sandbox.api.zapsign.com.br/api/v1';
 export const ZAPSIGN_SIGN_URL = 'https://app.zapsign.com.br/verificar/';
+export const ZAPSIGN_PLAN_NOTICE = 'A ZapSign exige um plano de API ativo nesta conta para criar contratos em produção.';
 
 const TIMEOUT_MS = 25_000;
 
@@ -32,6 +33,8 @@ export type ZapSignTemplate = {
   last_update_at?: string;
   lang?: string | null;
   folder_path?: string | null;
+  extra_templates?: ZapSignTemplate[];
+  inputs?: Array<{ variable?: string }>;
 };
 
 export type ZapSignSigner = {
@@ -49,6 +52,7 @@ export type ZapSignSigner = {
 };
 
 export type ZapSignDoc = {
+  extra_docs?: Array<{ token: string; name: string; template?: { token?: string } | string | null }>;
   token: string;
   open_id?: number;
   name: string;
@@ -161,6 +165,7 @@ export class ZapSignClient {
       const res = await this.request<{ results?: ZapSignTemplate[]; next?: string | null }>('GET', `/templates/?page=${page}`);
       out.push(...(res.results ?? []));
       if (!res.next) break;
+      if (page === maxPages) throw new ZapSignError('Não foi possível carregar o catálogo completo de modelos.', 0);
     }
     return out;
   }
@@ -169,8 +174,23 @@ export class ZapSignClient {
     return this.request<ZapSignDoc>('POST', '/models/create-doc/', input);
   }
 
+  async getTemplate(token: string): Promise<ZapSignTemplate> {
+    return this.request('GET', `/templates/${encodeURIComponent(token)}/`);
+  }
+
   async addSigner(docToken: string, signer: ZapSignSignerInput): Promise<ZapSignSigner> {
     return this.request<ZapSignSigner>('POST', `/docs/${encodeURIComponent(docToken)}/add-signer/`, signer);
+  }
+
+  async attachTemplate(docToken: string, template: ZapSignTemplate, data: CreateDocFromTemplateInput['data']) {
+    if (template.template_type?.toLowerCase() === 'pdf') {
+      if (!template.template_file) throw new Error('A ZapSign não devolveu o arquivo do anexo.');
+      const { bytes } = await this.download(template.template_file, 10 * 1024 * 1024);
+      return this.request<{ token: string }>('POST', `/docs/${encodeURIComponent(docToken)}/upload-extra-doc/`,
+        { name: template.name, base64_pdf: Buffer.from(bytes).toString('base64') });
+    }
+    return this.request<{ token: string }>('POST', `/models/${encodeURIComponent(docToken)}/upload-extra-doc/`,
+      { template_id: template.token, data });
   }
 
   /** Ajusta um signatário que ainda não assinou (autenticação, CPF, envio). */

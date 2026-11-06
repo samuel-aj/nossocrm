@@ -15,7 +15,7 @@
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle, Loader2, Mail, PenLine, Phone, Sparkles, UserRound } from 'lucide-react';
 import { NativeSelect } from '@/components/ui/NativeSelect';
-import { AUTH_OPTIONS, SEND_OPTIONS } from './useZapSign';
+import { AUTH_OPTIONS, SEND_OPTIONS, templateLabel } from './useZapSign';
 import { SignMessageField, sampleDocName } from './SignMessageField';
 import { FIELD, LABEL } from './ui';
 import { VariableValueRows, fillSummary } from './VariableValueRows';
@@ -78,7 +78,7 @@ export function SignatureFields({ draft, idPrefix, disabled, variablesMode = 'in
       <option value="">{templatesQ.isLoading ? 'Carregando...' : 'Escolha o modelo'}</option>
       {templates.map((t) => (
         <option key={t.token} value={t.token}>
-          {t.name}
+          {templateLabel(t)}
         </option>
       ))}
     </NativeSelect>
