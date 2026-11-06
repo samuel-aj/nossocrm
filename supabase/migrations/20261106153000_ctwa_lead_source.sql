@@ -16,16 +16,52 @@ CREATE INDEX wa_ctwa_pending ON crm_internal.wa_ctwa_referrals (conversation_id)
 -- valid link even when the lead already has a source. Relinking cannot recycle it.
 CREATE FUNCTION crm_internal.claim_wa_ctwa(p_org uuid, p_conv uuid, p_deal uuid)
 RETURNS void LANGUAGE plpgsql SET search_path = '' AS $$
+DECLARE
+  lead public.deals;
+  fields jsonb;
+  notes text;
+  origin text;
+  ref jsonb;
+  param record;
+  id_line text;
 BEGIN
   IF p_deal IS NULL THEN RETURN; END IF;
-  UPDATE crm_internal.wa_ctwa_referrals r SET attributed_deal_id=p_deal
-  WHERE r.organization_id=p_org AND r.conversation_id=p_conv AND r.attributed_deal_id IS NULL
-    AND EXISTS (SELECT 1 FROM public.deals d WHERE d.organization_id=p_org AND d.id=p_deal AND d.deleted_at IS NULL);
-  IF FOUND THEN
-    UPDATE public.deals d SET lead_source='Meta Ads'
-    WHERE d.organization_id=p_org AND d.id=p_deal AND d.deleted_at IS NULL
-      AND crm_internal.read_deal_lead_source(d) IS NULL
-      AND NOT EXISTS (SELECT 1 FROM public.deal_events e WHERE e.organization_id=p_org AND e.deal_id=p_deal AND e.kind='lead_source' AND e.new_value IS NULL);
+  IF NOT EXISTS (SELECT FROM crm_internal.wa_ctwa_referrals WHERE organization_id=p_org
+    AND conversation_id=p_conv AND attributed_deal_id IS NULL) THEN RETURN; END IF;
+  SELECT * INTO lead FROM public.deals WHERE id=p_deal AND organization_id=p_org AND deleted_at IS NULL FOR UPDATE;
+  IF NOT FOUND THEN RETURN; END IF;
+  fields := lead.custom_fields;
+  notes := lead.description;
+  origin := crm_internal.read_deal_lead_source(lead);
+  IF origin IS NULL AND NOT EXISTS (SELECT FROM public.deal_events e WHERE e.organization_id=p_org
+    AND e.deal_id=p_deal AND e.kind='lead_source' AND e.new_value IS NULL) THEN
+    origin := 'Meta Ads';
+  END IF;
+  FOR ref IN
+    WITH claimed AS (
+      UPDATE crm_internal.wa_ctwa_referrals SET attributed_deal_id=p_deal
+      WHERE organization_id=p_org AND conversation_id=p_conv AND attributed_deal_id IS NULL
+      RETURNING reference, observed_at, message_id
+    ) SELECT reference FROM claimed ORDER BY observed_at,message_id
+  LOOP
+    IF coalesce(ref->'utms','{}'::jsonb) <> '{}'::jsonb THEN
+      FOR param IN SELECT key,value FROM jsonb_each_text(ref->'utms')
+        WHERE key IN ('utm_source','utm_medium','utm_campaign','utm_content','utm_term')
+      LOOP
+        IF (fields IS NULL OR jsonb_typeof(fields) IN ('null','object')) AND nullif(btrim(fields->>param.key),'') IS NULL THEN
+          fields := jsonb_set(coalesce(nullif(fields,'null'::jsonb),'{}'::jsonb),ARRAY[param.key],to_jsonb(param.value));
+        END IF;
+      END LOOP;
+    ELSE
+      id_line := coalesce('ID do anúncio Meta: ' || (ref->>'ad_id'), 'ID do clique WhatsApp: ' || (ref->>'click_id'));
+      IF id_line IS NOT NULL AND NOT (id_line = ANY(string_to_array(replace(coalesce(notes,''), E'\r\n', E'\n'), E'\n'))) THEN
+        notes := concat_ws(E'\n', nullif(notes,''), id_line);
+      END IF;
+    END IF;
+  END LOOP;
+  IF fields IS DISTINCT FROM lead.custom_fields OR notes IS DISTINCT FROM lead.description
+    OR origin IS DISTINCT FROM crm_internal.read_deal_lead_source(lead) THEN
+    UPDATE public.deals SET lead_source=origin,custom_fields=fields,description=notes WHERE id=p_deal AND organization_id=p_org;
   END IF;
 END $$;
 REVOKE ALL ON FUNCTION crm_internal.claim_wa_ctwa(uuid,uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;

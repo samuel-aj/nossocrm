@@ -6,18 +6,34 @@ const field = (value: unknown, limit = 512) =>
 
 export function metaCtwa(message: unknown) {
   const ref = object(object(message).referral);
-  return referral(ref.source_type, ref.source_id, ref.ctwa_clid, ref.headline, ref.source_url);
+  return referral(ref.source_type, ref.source_id, ref.ctwa_clid, ref.headline, ref.source_url, ref);
 }
 
-function referral(kind: unknown, id: unknown, click: unknown, title: unknown, url: unknown) {
+const utmKeys = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'] as const;
+function campaignParameters(url: URL | null, ...records: Fields[]) {
+  const result: Record<string, string> = {};
+  for (const key of utmKeys) {
+    const suffix = key.slice(4);
+    const camel = 'utm' + suffix[0].toUpperCase() + suffix.slice(1);
+    const value = records.flatMap(record => [record[key], record[camel]])
+      .concat(url?.searchParams.getAll(key) ?? []).map(value => field(value)).find(Boolean);
+    if (value) result[key] = value;
+  }
+  return result;
+}
+
+function referral(kind: unknown, id: unknown, click: unknown, title: unknown, url: unknown, ...metadata: Fields[]) {
   const source = field(kind)?.toLowerCase();
   const adId = field(id);
   const clickId = field(click);
-  const sourceUrl = field(url, 2048);
-  const validUrl = sourceUrl && URL.canParse(sourceUrl) && /^https?:\/\//i.test(sourceUrl) ? sourceUrl : null;
+  const rawUrl = typeof url === 'string' ? url.trim() : '';
+  const parsed = /^https?:\/\//i.test(rawUrl) && URL.canParse(rawUrl) ? new URL(rawUrl) : null;
+  const validUrl = parsed ? field(rawUrl, 2048) : null;
   if (source && source !== 'ad') return null;
   if (!clickId && !(source === 'ad' && (adId || validUrl))) return null;
-  return { ad_id: adId, click_id: clickId, headline: field(title), source_url: validUrl };
+  const utms = campaignParameters(parsed, ...metadata);
+  return { ad_id: adId, click_id: clickId, headline: field(title), source_url: validUrl,
+    ...(Object.keys(utms).length ? { utms } : {}) };
 }
 
 // Look only at the delivered message's own context (never the content of a quote).
@@ -37,7 +53,7 @@ export function evolutionCtwa(record: unknown) {
   for (const context of contexts) {
     if (context.isForwarded === true || Number(context.forwardingScore) > 0) continue;
     const ad = object(context.externalAdReply);
-    const result = referral(ad.sourceType, ad.sourceId, ad.ctwaClid, ad.title, ad.sourceUrl);
+    const result = referral(ad.sourceType, ad.sourceId, ad.ctwaClid, ad.title, ad.sourceUrl, object(context.utm), ad);
     if (result) return result;
   }
   return null;

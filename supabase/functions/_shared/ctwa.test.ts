@@ -23,6 +23,14 @@ describe('CTWA informado pelo provedor', () => {
     expect(evolutionCtwa({ message: { ephemeralMessage: { message: msg } } })).toEqual(expected);
     expect(evolutionCtwa({ contextInfo: { externalAdReply: ad } })).toEqual(expected);
   });
+  it('extrai as UTMs fornecidas, decodifica o link e ignora outros parâmetros', () => {
+    const url = reference.source_url + '?utm_campaign=BPC+Sul&utm_medium=cpc&utm_term=a%26b&utm_content=&token=private';
+    expect(metaCtwa({referral:{...reference,utm_source:'instagram',source_url:url}})?.utms)
+      .toEqual({utm_source:'instagram',utm_campaign:'BPC Sul',utm_medium:'cpc',utm_term:'a&b'});
+    expect(evolutionCtwa({contextInfo:{utm:{utmSource:'facebook',utmCampaign:'Da campanha'},externalAdReply:{...ad,sourceUrl:url}}})?.utms)
+      .toEqual({utm_source:'facebook',utm_campaign:'Da campanha',utm_medium:'cpc',utm_term:'a&b'});
+    expect(metaCtwa({referral:{source_type:'post',source_url:url}})).toBeNull();
+  });
   it('ignora anúncios citados, encaminhados e prévias genéricas no QR', () => {
     const qr = (contextInfo: unknown) => evolutionCtwa({ message: { imageMessage: { contextInfo } } });
     expect(qr({ quotedMessage: msg })).toBeNull();

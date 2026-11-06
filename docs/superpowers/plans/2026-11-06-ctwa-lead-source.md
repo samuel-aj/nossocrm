@@ -1,5 +1,7 @@
 # Origem CTWA no lead
 
+As referências de anúncio preenchem os campos UTM vazios do lead (source, medium, campaign, content e term). Quando não há UTMs, a descrição recebe uma linha com o ID do anúncio ou, se houver apenas um identificador de clique, com o ID do clique. O texto anterior e os campos já preenchidos são preservados.
+
 O primeiro vínculo válido de uma conversa com um lead recebe a referência paga fornecida pela API oficial ou pelo QR. Se a origem do lead está vazia, o CRM grava **Meta Ads**. Origens nativas ou legadas já preenchidas têm prioridade. O histórico do campo também protege a remoção explícita de uma origem anterior.
 
 1. Normalizar apenas o contexto da mensagem direta recebida. Uma publicação orgânica, um anúncio citado ou encaminhado, um eco e um grupo ficam fora. Na integração QR, os campos dependem do que o provedor efetivamente entregar.

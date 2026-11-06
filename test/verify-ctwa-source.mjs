@@ -26,7 +26,7 @@ try {
     create schema crm_internal;
     create role anon; create role authenticated; create role service_role;
     create table wa_conversations(id uuid primary key,organization_id uuid,connection_id uuid,is_group boolean not null default false,deal_id uuid);
-    create table deals(id uuid primary key,organization_id uuid,deleted_at timestamptz,custom_fields jsonb);
+    create table deals(id uuid primary key,organization_id uuid,deleted_at timestamptz,custom_fields jsonb,description text);
     create table organization_settings(organization_id uuid primary key);
     create table custom_field_definitions(organization_id uuid,options text[], key text, entity_type text);
     create table deal_events(organization_id uuid,deal_id uuid,kind text,field text,old_value jsonb,new_value jsonb,actor_kind text,actor_id uuid);
@@ -44,9 +44,12 @@ try {
   await save('m1'); await save('m1');
   assert.equal(await count(),1);
   assert.equal((await one('select attributed_deal_id from crm_internal.wa_ctwa_referrals')).attributed_deal_id,null);
-  await query('insert into deals(id,organization_id) values($1,$2)',[lead,org]);
+  await query("insert into deals(id,organization_id,description) values($1,$2,'Observação da equipe.')",[lead,org]);
   await link(lead);
   assert.equal(await source(lead),'Meta Ads');
+  const details = async key => one('select custom_fields,description from deals where id=$1',[key]);
+  const note = 'Observação da equipe.\nID do anúncio Meta: test-ad';
+  assert.equal((await details(lead)).description,note);
   const stored = await one('select reference,attributed_deal_id from crm_internal.wa_ctwa_referrals');
   assert.equal(stored.reference.click_id,'test-click'); assert.equal(stored.attributed_deal_id,lead);
   assert.equal(Number((await one("select count(*) n from deal_events where kind='lead_source'")).n),1);
@@ -54,6 +57,7 @@ try {
   await query("update deals set lead_source='Google Ads' where id=$1",[lead]);
   await save('m1'); await save('m2','evolution');
   assert.equal(await source(lead),'Google Ads');
+  assert.equal((await details(lead)).description,note);
   // Explicit clear with audited previous value also wins.
   await query('update deals set lead_source=null where id=$1',[lead]);
   await save('m3');
@@ -67,6 +71,21 @@ try {
   assert.equal(await source(next),null);
   await save('new-qr','evolution');
   assert.equal(await source(next),'Meta Ads');
+  // Rich referrals that arrive before a link fill only missing campaign fields.
+  await link(null);
+  const richLead = id(8);
+  const rich = metaCtwa({referral:{source_type:'ad',source_id:'rich-id',
+    source_url:'https://example.test/?utm_medium=cpc&utm_campaign=BPC+Sul&utm_term=a%26b&utm_content=video&utm_source=meta'}});
+  const richCtx = { organizationId:org,connectionId:conn,conversationId:conv,messageId:'rich',timestamp:'2026-11-06T13:01:00Z' };
+  await recordCtwa(client,richCtx,'meta',rich);
+  await query("insert into deals(id,organization_id,description,lead_source,custom_fields) values($1,$2,'Texto manual','Google Ads',$3)",
+    [richLead,org,{utm_source:'google',utm_term:'',extra:'manter'}]);
+  await link(richLead);
+  assert.deepEqual(await details(richLead),{description:'Texto manual',custom_fields:{
+    utm_source:'google',utm_medium:'cpc',utm_campaign:'BPC Sul',utm_content:'video',utm_term:'a&b',extra:'manter'}});
+  assert.equal(await source(richLead),'Google Ads');
+  await recordCtwa(client,{...richCtx,messageId:'click-only'},'meta',metaCtwa({referral:{ctwa_clid:'only-click'}}));
+  assert.equal((await details(richLead)).description,'Texto manual\nID do clique WhatsApp: only-click');
   const sig = 'public.record_wa_ctwa(uuid,uuid,uuid,text,timestamptz,text,jsonb)';
   for (const role of ['anon','authenticated','service_role']) {
     assert.equal((await one("select has_function_privilege($1,$2,'EXECUTE') ok",[role,sig])).ok,role==='service_role');
