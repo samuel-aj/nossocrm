@@ -1,4 +1,5 @@
 import { ReturnTimeSchema, type ReturnTimeInput } from './scheduledReturnTime';
+import type { AgentContractInput } from '@/lib/zapsign/agentDraft';
 /**
  * Ferramentas do modelo (AI SDK v6): encerrar_atendimento, salvar_dados,
  * executar_acao e, quando o agente tem os recursos, consultar_documentos,
@@ -20,6 +21,7 @@ import type { AgentDocumentRow, AgentMediaRow, AgentRow, KnowledgeHit } from './
 export type MediaSendResult = { ok: boolean; error?: string; note?: string };
 
 export type AgentToolRuntime = {
+  contract?: (input: AgentContractInput) => Promise<unknown>;
   scheduledReturn?: {
     inspect: () => Promise<unknown>;
     schedule: (input: ReturnTimeInput) => Promise<unknown>;
@@ -168,6 +170,14 @@ export function buildAgentTools(agent: AgentRow, runtime: AgentToolRuntime = {})
       execute: async input => safe(() => service.schedule(input)),
     });
     tools.cancelar_retorno = tool({ description: 'Cancela o retorno ainda não iniciado quando o cliente pedir. Não encerra o atendimento.', inputSchema: z.object({}), execute: async () => safe(service.cancel) });
+  }
+  if (agent.tools?.zapsign_template_token && runtime.contract) {
+    const contract = runtime.contract;
+    tools.contrato_zapsign = tool({
+      description: 'Prepara ou cria o contrato do modelo autorizado pelo escritório. Comece em preparar. Em dados, use os nomes exatos das variáveis pessoais e só valores informados pelo cliente, incluindo nome_signatario se necessário. Peça os campos pessoais faltantes; se faltar um dado do CRM, chame a equipe. Quando receber solicitar_confirmacao, responda com essa frase exata e aguarde o cliente. Após o aceite, chame em modo criar com os mesmos dados. Só diga que foi criado quando a ferramenta confirmar. Não envie o link nem diga que foi enviado ou assinado.',
+      inputSchema: z.object({ modo: z.enum(['preparar', 'criar']), dados: z.record(z.string().min(1).max(160), z.string().trim().min(1).max(500)) }),
+      execute: async input => { try { return await contract(input); } catch (e) { return { ok: false, erro: errorMessage(e) }; } },
+    });
   }
   Object.assign(tools, buildUtilityTools(agent, runtime));
 

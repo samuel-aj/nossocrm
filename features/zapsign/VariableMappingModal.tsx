@@ -34,6 +34,7 @@ export function VariableMappingModal({
   error,
   note,
   idPrefix,
+  forAgent = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -46,6 +47,7 @@ export function VariableMappingModal({
   error?: string | null;
   note?: string | null;
   idPrefix: string;
+  forAgent?: boolean;
 }) {
   const groups = Array.from(new Set(sources.map((s) => s.group)));
   const selectValue = (src: string) => (src.startsWith('texto:') ? 'texto:' : src);
@@ -71,7 +73,7 @@ export function VariableMappingModal({
         </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{templateName || 'Modelo da ZapSign'}</p>
-          <p className="mt-0.5 text-xs text-primary-800 dark:text-primary-200">Diga de onde vem cada variável do documento. O CRM já sugeriu o que reconheceu pelo nome; o que ficar em branco pode ser preenchido na hora do envio.</p>
+          <p className="mt-0.5 text-xs text-primary-800 dark:text-primary-200">{forAgent ? 'A IA pode pedir dados pessoais ao cliente. Para valores e condições do escritório, escolha um campo do CRM ou um texto fixo. O contrato só será criado com todas as variáveis preenchidas.' : 'Diga de onde vem cada variável do documento. O CRM já sugeriu o que reconheceu pelo nome; o que ficar em branco pode ser preenchido na hora do envio.'}</p>
         </div>
       </div>
       {loading ? (
@@ -104,7 +106,7 @@ export function VariableMappingModal({
                   value={selectValue(src)}
                   onChange={(e) => onChange({ ...mapping, [name]: e.target.value === 'texto:' ? 'texto:' : e.target.value })}
                 >
-                  <option value="">Deixar em branco (preencher na hora do envio)</option>
+                  <option value="">{forAgent ? 'Sem fonte no CRM' : 'Deixar em branco (preencher na hora do envio)'}</option>
                   <option value="texto:">Texto fixo</option>
                   {groups.map((g) => (
                     <optgroup key={g} label={g}>

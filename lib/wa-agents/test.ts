@@ -178,6 +178,12 @@ async function testAgentReplyWithUsage(
   // Local to this simulation: tool calls can inspect/reschedule/cancel without reserving a real run.
   let simulatedReturn: { id: string; scheduled_for: string; scheduled_timezone: string; bot_id: string } | null = null;
   const runtime: AgentToolRuntime = {
+    ...(agent.tools?.zapsign_template_token ? {
+      contract: async (args: Parameters<NonNullable<AgentToolRuntime['contract']>>[0]) => {
+        const { simulateAgentContract } = await import('@/lib/zapsign/agentSimulation');
+        return simulateAgentContract(admin, organizationId, agent.tools.zapsign_template_token!, input.messages, args, agent.tools.zapsign_variables);
+      },
+    } : {}),
     scheduledReturn: {
       inspect: async () => ({ now: new Date().toISOString(), timezone: 'America/Sao_Paulo', pending: simulatedReturn, simulated: true }),
       schedule: async input => {

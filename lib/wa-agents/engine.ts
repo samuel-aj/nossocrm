@@ -703,6 +703,19 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     let helperCalls = 0;
     let knowledgeCalls = 0;
     const runtime: AgentToolRuntime = {
+      ...(agent.tools?.zapsign_template_token && !input.forceReply && !input.proactive && pending.length ? {
+        contract: async (args: Parameters<NonNullable<AgentToolRuntime['contract']>>[0]) => {
+          assertUsageHealthy();
+          await renew();
+          const { runAgentContract } = await import('@/lib/zapsign/agentContract');
+          return runAgentContract(admin, { org: organizationId, agent: runAgent.id, conversation: conversationId,
+            deal: runCtx.deal?.id ?? '', template: runAgent.tools.zapsign_template_token!,
+            inboundId: pending[pending.length - 1].id,
+            // An auto-lead can be created *after* the inbound message that opened it.
+            since: [memoriaDesde, [runCtx.deal?.created_at, pending[pending.length - 1].created_at]
+              .filter((v): v is string => !!v).sort()[0]].filter((v): v is string => !!v).sort().pop() ?? since }, args);
+        },
+      } : {}),
       ...(agent.tools?.scheduled_return_bot_id ? { scheduledReturn: scheduledReturnRuntime(admin, organizationId, conversationId, agent, returnAnchor) } : {}),
       documents: resources.documents,
       media: resources.media,

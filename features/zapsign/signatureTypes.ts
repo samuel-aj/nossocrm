@@ -10,7 +10,7 @@ export type SignerLite = { name: string; status: string; signed_at: string | nul
 
 export type Signature = {
   id: string;
-  origin: 'rule' | 'manual';
+  origin: 'rule' | 'manual' | 'agent';
   status: string;
   stage_id: string | null;
   template_name: string | null;

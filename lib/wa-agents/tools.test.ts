@@ -63,6 +63,14 @@ const media: AgentMediaRow = {
 };
 
 describe('buildAgentTools', () => {
+  it('só expõe criação ao agente com modelo e executor, nunca a agentes auxiliares', () => {
+    const withModel = agent({ tools: { calculator: true, zapsign_template_token: 'tpl' } });
+    const runtime = { contract: async () => ({ ok: true }) };
+    expect(buildAgentTools(withModel, runtime)).toHaveProperty('contrato_zapsign');
+    expect(buildAgentTools(agent(), runtime)).not.toHaveProperty('contrato_zapsign');
+    expect(buildAgentTools(withModel)).not.toHaveProperty('contrato_zapsign');
+    expect(buildUtilityTools(withModel, runtime)).not.toHaveProperty('contrato_zapsign');
+  });
   it('sem recursos só tem encerrar_atendimento, salvar_dados e calcular', () => {
     const tools = buildAgentTools(agent());
     expect(Object.keys(tools).sort()).toEqual(['calcular', 'encerrar_atendimento', 'salvar_dados']);

@@ -1107,6 +1107,9 @@ export function buildSystemPrompt(input: {
       '- Agentes auxiliares: para dúvidas do assunto deles, chame consultar_agente com o nome exato e uma pergunta objetiva com o contexto do caso; use a resposta para orientar o cliente com suas palavras, sem citar o auxiliar nem repassar a resposta inteira.'
     );
   }
+  if (agent.tools?.zapsign_template_token) {
+    lines.push('- Contrato: quando o cliente quiser contratar e a ferramenta contrato_zapsign estiver disponível, prepare o modelo do escritório. Pergunte o que faltar, reproduza a pergunta de confirmação devolvida e aguarde a resposta. Depois do aceite, use criar com os mesmos dados pessoais. Sem confirmação de criação não anuncie contrato criado. O convite e a assinatura são etapas separadas.');
+  }
   if (agent.tools?.calculator !== false) {
     lines.push('- Contas (percentuais, prazos, valores): chame a ferramenta calcular com a expressão em vez de calcular de cabeça.');
   }

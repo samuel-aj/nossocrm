@@ -87,7 +87,7 @@ export type SignatureRow = {
   deal_id: string;
   contact_id: string | null;
   stage_id: string | null;
-  origin: 'rule' | 'manual';
+  origin: 'rule' | 'manual' | 'agent';
   requested_by: string | null;
   template_token: string | null;
   template_name: string | null;
@@ -193,7 +193,7 @@ export async function loadLeadSnapshot(admin: SupabaseClient, orgId: string, dea
     loadDealContext(admin, orgId, { dealId }),
     loadCustomFieldDefs(admin, orgId).catch(() => []),
     admin.from('organizations').select('name').eq('id', orgId).maybeSingle(),
-    d.contact_id ? admin.from('contacts').select('id, name, email, phone, company_name').eq('id', d.contact_id).maybeSingle() : Promise.resolve({ data: null }),
+    d.contact_id ? admin.from('contacts').select('id, name, email, phone, company_name').eq('organization_id', orgId).eq('id', d.contact_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   const c = (contactRow.data ?? null) as { id: string; name: string | null; email: string | null; phone: string | null; company_name: string | null } | null;
   const contact = {
@@ -370,7 +370,7 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
   return { status: 'pending', sent_via: sentVia, note };
 }
 
-function toStoredSigner(s: ZapSignSigner, role: StoredSigner['role']): StoredSigner {
+export function toStoredSigner(s: ZapSignSigner, role: StoredSigner['role']): StoredSigner {
   return {
     token: s.token,
     name: s.name,
@@ -449,7 +449,7 @@ export async function finishSend(admin: SupabaseClient, row: SignatureRow, outco
   if (giveUp) await recordEvent(admin, row, 'failed', { error: outcome.error });
 }
 
-async function recordEvent(
+export async function recordEvent(
   admin: SupabaseClient,
   row: Pick<SignatureRow, 'organization_id' | 'deal_id' | 'id' | 'doc_name' | 'doc_token'> & { template_name?: string | null },
   status: string,
@@ -627,7 +627,25 @@ export async function handleZapSignWebhook(
   const docToken = (payload.token ?? '').trim();
   if (!docToken) return { action: 'ignored_no_token' };
   const { data: found } = await admin.from('deal_signatures').select('*').eq('organization_id', orgId).eq('doc_token', docToken).maybeSingle();
-  const row = found as SignatureRow | null;
+  let row = found as SignatureRow | null;
+  // A verified provider event can arrive before the HTTP response, or after a timeout.
+  // Only attach an unclaimed agent reservation in the webhook's own organization.
+  if (!row && payload.external_id && /^[a-f\d]{8}(-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(payload.external_id)) {
+    const incoming = (payload.signers ?? []).map((s, i) => toStoredSigner(s, i ? 'extra' : 'contact'));
+    const { data, error } = await admin.from('deal_signatures').update({ doc_token: docToken, status: 'pending',
+      doc_name: payload.name ?? null, signers: incoming, sign_url: incoming[0]?.sign_url ?? null,
+      sent_via: 'link', last_error: null, updated_at: nowIso() })
+      .eq('organization_id', orgId).eq('origin', 'agent').eq('id', payload.external_id).is('doc_token', null)
+      .in('status', ['processing', 'failed']).select('*').maybeSingle();
+    if (error) throw new Error(error.message);
+    row = data as SignatureRow | null;
+    if (row) await recordEvent(admin, row, 'created', { origin: 'agent' });
+    else {
+      const reread = await admin.from('deal_signatures').select('*').eq('organization_id', orgId).eq('doc_token', docToken).maybeSingle();
+      if (reread.error) throw new Error(reread.error.message);
+      row = reread.data as SignatureRow | null;
+    }
+  }
   if (!row) return { action: 'ignored_unknown_doc' };
   const now = nowIso();
   const event = payload.event_type ?? '';
@@ -639,9 +657,10 @@ export async function handleZapSignWebhook(
     const u = incoming.find((i) => i.token === s.token);
     return u ? { ...s, status: u.status, signed_at: u.signed_at ?? s.signed_at, sign_url: u.sign_url ?? s.sign_url } : s;
   });
-  for (const i of incoming) if (!signers.some((s) => s.token === i.token)) signers.push(toStoredSigner(i, 'extra'));
+  for (const i of incoming) if (!signers.some((s) => s.token === i.token)) signers.push(toStoredSigner(i, row.origin === 'agent' && !signers.length ? 'contact' : 'extra'));
 
   const base: Record<string, unknown> = { signers, last_event_at: now, updated_at: now };
+  if (row.origin === 'agent' && !row.sign_url && signers[0]?.sign_url) base.sign_url = signers[0].sign_url;
 
   if (event === 'doc_refused' || docStatus === 'refused' || docStatus === 'recusado') {
     if (row.status === 'refused') return { action: 'already_refused', signatureId: row.id };
