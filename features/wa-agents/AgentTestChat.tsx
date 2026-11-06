@@ -18,6 +18,7 @@ import { useTestWaAgent, type WaTestMessage } from './useWaAgents';
 import { BTN_PRIMARY, BTN_SMALL, INPUT_CLASS, Notice, Toggle, errorMessage, newId } from './ui';
 
 type Entry = {
+  contractReviewKey?: string;
   id: string;
   role: 'user' | 'assistant';
   text: string;
@@ -127,7 +128,9 @@ export const AgentTestChat: React.FC<{
     const value = text.trim();
     if ((!signed && !value) || busy) return;
     const userEntry: Entry = { id: newId(), role: 'user', text: value, lines: [value], toolCalls: [], usage: null };
-    const history: WaTestMessage[] = (signed ? entries : [...entries, userEntry]).map((e) => ({ role: e.role, text: e.text }));
+    const history: WaTestMessage[] = (signed ? entries : [...entries, userEntry]).map((e) => ({
+      role: e.role, text: e.text, contractReviewKey: e.contractReviewKey,
+    }));
     if (!signed) {
       setEntries((prev) => [...prev, userEntry]);
       setText('');
@@ -157,6 +160,7 @@ export const AgentTestChat: React.FC<{
         {
           id: entryId,
           role: 'assistant',
+          contractReviewKey: result.contractReviewKey,
           text: lines.join('\n'),
           lines: simulate ? [] : lines,
           toolCalls: result.toolCalls,

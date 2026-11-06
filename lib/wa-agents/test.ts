@@ -31,7 +31,7 @@ import { normalizeKeyword } from './text';
 import type { AgentToolRuntime } from './tools';
 import type { AgentRow, KnowledgeHit } from './types';
 
-export type TestMessage = { role: 'user' | 'assistant'; text: string };
+export type TestMessage = { role: 'user' | 'assistant'; text: string; contractReviewKey?: string };
 
 /**
  * Agente salvo + a configuração que está na TELA do editor (rascunho), para o
@@ -61,6 +61,7 @@ export function agentWithDraft(
 }
 
 export type TestAgentReplyResult = {
+  contractReviewKey?: string;
   text: string;
   lines: string[];
   toolCalls: unknown[];
@@ -185,12 +186,14 @@ async function testAgentReplyWithUsage(
   let knowledgeCalls = 0;
   // Local to this simulation: tool calls can inspect/reschedule/cancel without reserving a real run.
   let simulatedReturn: { id: string; scheduled_for: string; scheduled_timezone: string; bot_id: string } | null = null;
+  let contractReviewKey: string | undefined;
   const runtime: AgentToolRuntime = {
     ...(agent.tools?.zapsign_template_token ? {
       contract: async (args: Parameters<NonNullable<AgentToolRuntime['contract']>>[0]) => {
         if (input.contractState) return { ok: true, existente: true, simulado: true, estado: input.contractState === 'signed' ? 'assinado' : 'aguardando assinatura' };
         const { simulateAgentContract } = await import('@/lib/zapsign/agentSimulation');
-        return simulateAgentContract(admin, organizationId, agent.tools.zapsign_template_token!, input.messages, args, agent.tools.zapsign_variables);
+        return simulateAgentContract(admin, organizationId, agent.tools.zapsign_template_token!, input.messages, args, agent.tools.zapsign_variables,
+          key => { contractReviewKey = key; });
       },
     } : {}),
     scheduledReturn: {
@@ -254,7 +257,7 @@ async function testAgentReplyWithUsage(
       model: resolved.modelId,
       duration_ms: Date.now() - startedAt,
     });
-    return { text: gen.text, lines, toolCalls: gen.toolCalls, usage: gen.usage, segments: gen.segments, media };
+    return { text: gen.text, lines, toolCalls: gen.toolCalls, usage: gen.usage, segments: gen.segments, media, contractReviewKey };
   } catch (e) {
     const msg = errorMessage(e);
     await logRun(admin, {
