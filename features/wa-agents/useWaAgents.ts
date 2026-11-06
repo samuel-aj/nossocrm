@@ -260,6 +260,8 @@ export function useTestWaAgent(id: string | null | undefined) {
   return useMutation({
     mutationFn: async (vars: {
       messages: WaTestMessage[];
+      signatureEvent?: 'signed';
+      contractState?: 'invited'|'signed';
       state?: Record<string, unknown>;
       draft?: Partial<AgentInput>;
     }): Promise<WaTestResult> => {

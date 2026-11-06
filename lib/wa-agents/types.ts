@@ -183,6 +183,9 @@ export const AgentToolsSchema = z.object({
   /** Ferramenta calcular (avaliador seguro de expressões) */
   calculator: z.boolean().default(true),
   scheduled_return_bot_id: z.string().uuid().nullable().optional(),
+  zapsign_template_token: z.string().trim().min(1).max(160).nullable().optional(),
+  zapsign_variables: z.record(z.string().min(1).max(160), z.string().max(1000)).optional(),
+  zapsign_signed_message_template: z.string().uuid().nullable().optional(),
 });
 export type AgentTools = z.infer<typeof AgentToolsSchema>;
 export const DEFAULT_AGENT_TOOLS: AgentTools = { calculator: true };

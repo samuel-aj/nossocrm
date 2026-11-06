@@ -3,7 +3,7 @@
  * FALSOS: nada sai de verdade. Confere as rechecagens, o que é gravado no lead
  * e a idempotência do webhook.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const h = vi.hoisted(() => ({
   texts: [] as string[],
@@ -45,7 +45,11 @@ vi.mock('@/lib/wa-agents/leadOps', () => ({
 }));
 
 import { createManualSignature, discardSignature, handleZapSignWebhook, sendSignature, type SignatureRow } from './signatures';
-import type { ZapSignClient } from './client';
+import { ZapSignClient } from './client';
+import { runAgentContract } from './agentContract';
+import { simulateAgentContract } from './agentSimulation';
+import * as files from './templateFile';
+import * as budgets from '@/lib/ai-usage/budget';
 
 type Row = Record<string, unknown>;
 
@@ -57,20 +61,26 @@ function fakeDb(tables: Record<string, Row[]>) {
     let single = false;
     let head = false;
     let limit: number | null = null;
-    let order: { col: string; asc: boolean } | null = null;
+    const orders: { col: string; asc: boolean }[] = [];
     let op: 'select' | 'update' | 'insert' = 'select';
     let payload: Row | Row[] | null = null;
     const b: Record<string, unknown> = {
       select: (_c?: string, opts?: { head?: boolean }) => ((head = !!opts?.head), b),
       eq: (c: string, v: unknown) => (filters.push((r) => r[c] === v), b),
+      gte: (c: string, v: string) => (filters.push(r => String(r[c]) >= v), b),
       is: (c: string, v: unknown) => (filters.push((r) => (r[c] ?? null) === v), b),
       in: (c: string, vs: unknown[]) => (filters.push((r) => vs.includes(r[c])), b),
       or: (expr: string) => {
+        if (expr.startsWith('origin.eq.agent,status.in.')) {
+          const states = expr.slice(expr.indexOf('(') + 1, -1).split(',');
+          filters.push(r => r.origin === 'agent' || states.includes(String(r.status)));
+          return b;
+        }
         const parts = expr.split(',').map((p) => p.split('.eq.'));
         filters.push((r) => parts.some(([c, v]) => String(r[c]) === v));
         return b;
       },
-      order: (c: string, o?: { ascending?: boolean }) => ((order = { col: c, asc: o?.ascending !== false }), b),
+      order: (c: string, o?: { ascending?: boolean }) => (orders.push({ col: c, asc: o?.ascending !== false }), b),
       limit: (n: number) => ((limit = n), b),
       maybeSingle: () => ((single = true), b),
       single: () => ((single = true), b),
@@ -81,6 +91,9 @@ function fakeDb(tables: Record<string, Row[]>) {
         if (op === 'insert') {
           const list = Array.isArray(payload) ? payload : [payload as Row];
           const inserted = list.map((p) => ({ id: `${table}-${tables[table].length + 1}`, created_at: new Date().toISOString(), ...p }));
+          if (table === 'deal_signatures' && list.some(p => p.origin === 'agent' && tables[table].some(r =>
+            r.origin === 'agent' && r.organization_id === p.organization_id && r.deal_id === p.deal_id && r.template_token === p.template_token)))
+            return resolve({ data: null, error: { code: '23505' } });
           tables[table].push(...inserted);
           return resolve({ data: single ? inserted[0] : inserted, error: null });
         }
@@ -89,7 +102,7 @@ function fakeDb(tables: Record<string, Row[]>) {
           for (const r of rows) Object.assign(r, payload);
           return resolve({ data: single ? rows[0] ?? null : rows, error: null });
         }
-        if (order) rows = [...rows].sort((x, y) => (String(x[order!.col]) < String(y[order!.col]) ? -1 : 1) * (order!.asc ? 1 : -1));
+        for (const order of [...orders].reverse()) rows = [...rows].sort((x, y) => String(x[order.col]).localeCompare(String(y[order.col])) * (order.asc ? 1 : -1));
         if (limit !== null) rows = rows.slice(0, limit);
         if (head) return resolve({ count: rows.length, data: null, error: null });
         resolve({ data: single ? rows[0] ?? null : rows, error: null });
@@ -153,7 +166,7 @@ function base(over: Partial<Record<string, Row[]>> = {}) {
     zapsign_settings: [{ organization_id: ORG, api_token: 'tok', sandbox: true, webhook_secret: 'zs_x', webhook_id: '1' }],
     stage_signature_rules: [RULE],
     deals: [{ id: 'deal-1', organization_id: ORG, title: 'Aposentadoria', stage_id: 'stage-1', contact_id: 'c1', is_won: false, is_lost: false, deleted_at: null, tags: [] }],
-    contacts: [{ id: 'c1', name: 'Maria da Silva', email: 'maria@exemplo.com', phone: '+5511988887777', company_name: null }],
+    contacts: [{ id: 'c1', organization_id: ORG, name: 'Maria da Silva', email: 'maria@exemplo.com', phone: '+5511988887777', company_name: null }],
     organizations: [{ id: ORG, name: 'Escritório Teste' }],
     wa_conversations: [{ id: 'conv-1', organization_id: ORG, connection_id: 'conn-qr', wa_phone: '+5511988887777', deal_id: 'deal-1', contact_id: 'c1', last_message_at: '2026-10-27T10:00:00Z', is_group: false }],
     wa_messages: [{ conversation_id: 'conv-1', direction: 'in', created_at: '2026-10-27T10:00:00Z' }],
@@ -369,6 +382,140 @@ describe('retorno da ZapSign (webhook)', () => {
   it('documento desconhecido (criado fora do CRM): ignora', async () => {
     const db = withPending();
     expect((await handleZapSignWebhook(db.admin, ORG, { event_type: 'doc_signed', token: 'outro', status: 'signed' })).action).toBe('ignored_unknown_doc');
+  });
+});
+
+describe('criação pelo agente com ZapSign e conversa simuladas', () => {
+  const scope = { org: ORG, agent: 'agent', conversation: 'conv-1', deal: 'deal-1',
+    template: 'tpl-1', inboundId: '1', since: '2000-01-01T00:00:00Z' };
+  const prepare = { modo: 'preparar' as const, dados: { ENDEREÇO: 'Rua das Flores' } };
+  const create = { ...prepare, modo: 'criar' as const };
+  const msg = (id: string, direction: string, body: string, sec: number, status = 'sent') => ({
+    organization_id: ORG, conversation_id: scope.conversation, id, direction, body, source: direction === 'out' ? 'agent' : 'customer', status,
+    created_at: new Date(Date.now() - 5000 + sec * 1000).toISOString(),
+  });
+  function setup() {
+    const db = base({ wa_messages: [msg('1', 'in', 'Meu endereço é Rua das Flores', 0)],
+      wa_ai_agents: [{ id: scope.agent, organization_id: ORG, enabled: true, tools: { zapsign_template_token: 'tpl-1' } }] });
+    Object.assign(db.tables.wa_conversations[0], { ai_status: 'active', ai_agent_id: scope.agent });
+    vi.stubGlobal('fetch', vi.fn(() => { throw new Error('Rede proibida'); }));
+    vi.spyOn(files, 'readContractTemplate').mockResolvedValue({ revision: 'r1', names: ['NOME', 'VALOR', 'ENDEREÇO'] });
+    vi.spyOn(budgets, 'checkConversationBudget').mockResolvedValue({ blocked_at: null } as never);
+    vi.spyOn(ZapSignClient.prototype, 'listTemplates').mockResolvedValue([{ token: 'tpl-1', name: 'Honorários', active: true }]);
+    const post = vi.spyOn(ZapSignClient.prototype, 'createDocFromTemplate').mockResolvedValue({
+      token: 'doc-agente', status: 'pending', name: 'Honorários', signers: [{ name: 'Maria da Silva', token: 's1', status: 'new', sign_url: 'https://assinatura.invalid/s1' }],
+    });
+    async function accept(answer = 'Sim', sent = 'sent') {
+      const draft = await runAgentContract(db.admin, scope, prepare);
+      if (!('solicitar_confirmacao' in draft) || !draft.solicitar_confirmacao) throw new Error(JSON.stringify(draft));
+      db.tables.wa_messages.push(msg('2', 'out', draft.solicitar_confirmacao, 1, sent), msg('3', 'in', answer, 2));
+      return { ...scope, inboundId: '3' };
+    }
+    return { ...db, post, accept };
+  }
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  it('cria uma vez após aceite e vincula a entrega à conversa e ao número autorizados', async () => {
+    const db = setup(), approved = await db.accept();
+    const results = await Promise.all([1, 2].map(() => runAgentContract(db.admin, approved, create)));
+    expect(results.some(r => 'criado' in r && r.criado)).toBe(true);
+    expect(db.post).toHaveBeenCalledTimes(1);
+    expect(db.post.mock.calls[0][0]).toMatchObject({ template_id: 'tpl-1', signer_name: 'Maria da Silva', external_id: db.tables.deal_signatures[0].id,
+      send_automatic_email: false, send_automatic_whatsapp: false, data: expect.arrayContaining([{ de: '{{ENDEREÇO}}', para: 'Rua das Flores' }]) });
+    expect(db.tables.deal_signatures).toHaveLength(1);
+    expect(db.tables.deal_signatures[0]).toMatchObject({ origin: 'agent', status: 'pending', sign_url: 'https://assinatura.invalid/s1' });
+    expect(db.tables.deal_signatures[0].request).toMatchObject({ agent_delivery:'conversation',conversation_id:'conv-1', connection_id:'conn-qr',recipient:'+5511988887777' });
+    expect(db.tables.deal_events[0]).toMatchObject({ new_value: 'created' });
+    expect(h.texts).toEqual([]); expect(fetch).not.toHaveBeenCalled();
+  });
+  it.each([['não', 'sent'], ['sim, mas troque o valor', 'sent'], ['sim', 'failed']])('não cria com resposta %s e resumo %s', async (answer, sent) => {
+    const db = setup(), approved = await db.accept(answer, sent);
+    expect(await runAgentContract(db.admin, approved, create)).toMatchObject({ criado: false });
+    expect(db.post).not.toHaveBeenCalled();
+  });
+  it('não aceita modelo alterado depois da confirmação nem valor pessoal inventado', async () => {
+    const db = setup(), approved = await db.accept();
+    vi.mocked(files.readContractTemplate).mockResolvedValue({ names: ['NOME', 'VALOR', 'ENDEREÇO'], revision: 'r2' });
+    expect(await runAgentContract(db.admin, approved, create)).toMatchObject({ criado: false });
+    expect(await runAgentContract(db.admin, approved, { ...create, dados: { ENDEREÇO: 'Outro endereço' } })).toMatchObject({ perguntar_ao_cliente: ['ENDEREÇO'] });
+    expect(db.post).not.toHaveBeenCalled();
+  });
+  it('envia somente a URL do cliente mesmo se o escritório for o primeiro signatário', async () => {
+    const db=setup(), approved=await db.accept('Sim, pode enviar');
+    db.post.mockResolvedValue({token:'doc',name:'Contrato',status:'pending',signers:[
+      {token:'office',name:'Escritório',status:'new',sign_url:'https://teste.invalid/escritorio'},
+      {token:'client',name:'Maria da Silva',status:'new',sign_url:'https://teste.invalid/cliente'},
+    ]});
+    await runAgentContract(db.admin,approved,create);
+    expect(db.tables.deal_signatures[0]).toMatchObject({sign_url:'https://teste.invalid/cliente',signers:[
+      {role:'extra'},{role:'contact'}]});
+    await handleZapSignWebhook(db.admin,ORG,{token:'doc',event_type:'doc_signed',status:'pending',
+      signer_who_signed:{token:'client',name:'Maria da Silva',status:'signed'}});
+    expect(db.tables.deal_signatures[0]).toMatchObject({status:'pending',signers:[
+      {role:'extra',status:'new'},{role:'contact',status:'signed'}]});
+  });
+  it('usa o texto fixo do escritório e exige novo aceite se as condições mudarem', async () => {
+    const db = setup();
+    const tools = { zapsign_template_token: 'tpl-1', zapsign_variables: { FORO: 'texto:Manaus' } };
+    db.tables.wa_ai_agents[0].tools = tools;
+    vi.mocked(files.readContractTemplate).mockResolvedValue({ revision: 'r1', names: ['FORO', 'VALOR'] });
+    const approved = await db.accept();
+    expect(db.tables.wa_messages[1].body).toContain('FORO: Manaus');
+    tools.zapsign_variables.FORO = 'texto:Recife';
+    expect(await runAgentContract(db.admin, approved, create)).toMatchObject({ criado: false, solicitar_confirmacao: expect.stringContaining('FORO: Recife') });
+    expect(db.post).not.toHaveBeenCalled();
+  });
+  it('coleta um campo definido pelo escritório a partir da fala do cliente', async () => {
+    const db = setup();
+    db.tables.wa_ai_agents[0].tools = {zapsign_template_token:'tpl-1',zapsign_variables:{REFERÊNCIA:'cliente:perguntar'}};
+    vi.mocked(files.readContractTemplate).mockResolvedValue({revision:'r1',names:['REFERÊNCIA']});
+    expect(await runAgentContract(db.admin,scope,{...prepare,dados:{}})).toMatchObject({perguntar_ao_cliente:['REFERÊNCIA']});
+    expect(await runAgentContract(db.admin,scope,{...prepare,dados:{REFERÊNCIA:'Rua das Flores'}})).toMatchObject({
+      solicitar_confirmacao:expect.stringContaining('REFERÊNCIA: Rua das Flores')});
+    expect(db.post).not.toHaveBeenCalled();
+  });
+  it('recusa modelo de outra conta, conversa trocada e pausa por consumo', async () => {
+    const db = setup();
+    vi.mocked(ZapSignClient.prototype.listTemplates).mockResolvedValue([{ token: 'outro', name: 'Outro' }]);
+    await expect(runAgentContract(db.admin, scope, create)).rejects.toThrow(/modelo ativo/);
+    await expect(runAgentContract(db.admin, { ...scope, org: 'outro' }, create)).rejects.toThrow(/não permitem/);
+    vi.mocked(budgets.checkConversationBudget).mockResolvedValue({ blocked_at: 'agora' } as never);
+    await expect(runAgentContract(db.admin, scope, create)).rejects.toThrow(/limite/);
+    expect(db.post).not.toHaveBeenCalled();
+  });
+  it('não cria de novo após timeout; webhook autenticado recompõe o vínculo na própria organização', async () => {
+    const db = setup(), approved = await db.accept();
+    db.post.mockRejectedValue(new Error('timeout'));
+    await expect(runAgentContract(db.admin, approved, create)).rejects.toThrow(/não repita/);
+    expect(await runAgentContract(db.admin, approved, create)).toMatchObject({ ok: false });
+    expect(db.post).toHaveBeenCalledTimes(1);
+    const row = db.tables.deal_signatures[0];
+    row.id = '11111111-1111-4111-8111-111111111111'; // DB normally generates a UUID.
+    const event = { external_id: row.id as string, token: 'doc', event_type: 'doc_created', status: 'pending',
+      signers: [{ name: 'Maria da Silva', token: 's1', status: 'new', sign_url: 'https://assinatura.invalid/s1' }] };
+    expect((await handleZapSignWebhook(db.admin, 'outro', event)).action).toBe('ignored_unknown_doc');
+    await handleZapSignWebhook(db.admin, ORG, event);
+    await handleZapSignWebhook(db.admin, ORG, event);
+    expect(row).toMatchObject({ status: 'pending', doc_token: 'doc', sign_url: event.signers[0].sign_url });
+    expect(db.tables.deal_events.filter(e => e.new_value === 'created')).toHaveLength(1);
+  });
+  it('preserva uma conferência humana já pendente e bloqueia condições não cadastradas no CRM', async () => {
+    const db = setup();
+    vi.mocked(files.readContractTemplate).mockResolvedValue({ revision: 'r1', names: ['MULTA'] });
+    expect(await runAgentContract(db.admin, scope, { ...create, dados: { MULTA: '10%' } })).toMatchObject({ preencher_no_crm: ['MULTA'] });
+    db.tables.deal_signatures.push({ ...queued(), origin: 'rule', status: 'review', template_token: 'tpl-1', doc_token: null });
+    expect(await runAgentContract(db.admin, scope, create)).toMatchObject({ ok: false, erro: expect.stringContaining('conferência humana') });
+    expect(db.post).not.toHaveBeenCalled();
+  });
+  it('o painel Testar valida o modelo e o aceite sem chamar criação nem gravar no CRM', async () => {
+    const db = setup();
+    const chat = [{ role: 'user' as const, text: 'Rua das Flores' }];
+    const r = await simulateAgentContract(db.admin, ORG, 'tpl-1', chat, prepare);
+    if (!r.solicitar_confirmacao) throw new Error('Prévia esperada');
+    expect(await simulateAgentContract(db.admin, ORG, 'tpl-1',
+      [...chat, { role: 'assistant', text: r.solicitar_confirmacao }, { role: 'user', text: 'Confirmo' }], create))
+      .toMatchObject({ simulado: true, criado: true });
+    expect(db.post).not.toHaveBeenCalled(); expect(db.tables.deal_signatures).toHaveLength(0);
+    expect(fetch).not.toHaveBeenCalled(); expect(h.texts).toEqual([]);
   });
 });
 

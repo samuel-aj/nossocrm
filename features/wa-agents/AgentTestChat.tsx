@@ -105,6 +105,7 @@ export const AgentTestChat: React.FC<{
   /** Ritmo real (digitando + intervalo entre linhas); desligue para ver a resposta de uma vez */
   const [simulate, setSimulate] = useState(true);
   const [typingNow, setTypingNow] = useState(false);
+  const [contractState, setContractState] = useState<'none'|'invited'|'signed'>('none');
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   /** Cada envio recebe um número; revelação de envio antigo para sozinha */
@@ -122,30 +123,41 @@ export const AgentTestChat: React.FC<{
     onMessagesChange?.(entries.map((e) => ({ role: e.role, text: e.text })));
   }, [entries]);
 
-  const send = async () => {
+  const send = async (signed = false) => {
     const value = text.trim();
-    if (!value || busy) return;
+    if ((!signed && !value) || busy) return;
     const userEntry: Entry = { id: newId(), role: 'user', text: value, lines: [value], toolCalls: [], usage: null };
-    const history: WaTestMessage[] = [...entries, userEntry].map((e) => ({ role: e.role, text: e.text }));
-    setEntries((prev) => [...prev, userEntry]);
-    setText('');
+    const history: WaTestMessage[] = (signed ? entries : [...entries, userEntry]).map((e) => ({ role: e.role, text: e.text }));
+    if (!signed) {
+      setEntries((prev) => [...prev, userEntry]);
+      setText('');
+    }
     setError(null);
     const run = ++runRef.current;
     try {
       const result = await test.mutateAsync({
         messages: history,
+        ...(contractState !== 'none' ? {contractState} : {}),
+        ...(signed ? {signatureEvent:'signed' as const} : {}),
         state: Object.keys(state).length ? state : undefined,
         draft: draftRef.current,
       });
       if (runRef.current !== run) return;
-      const lines = result.lines.length > 0 ? result.lines : result.text ? [result.text] : [];
+      const lines = [...(result.lines.length > 0 ? result.lines : result.text ? [result.text] : [])];
+      const created = result.toolCalls.some(call => toolName(call) === 'contrato_zapsign' &&
+        (call as {output?:{criado?:boolean;simulado?:boolean}}).output?.criado && (call as {output?:{simulado?:boolean}}).output?.simulado);
+      if (created && contractState === 'none') {
+        lines.push('Segue o link do seu contrato (simulação): https://assinatura.invalid/contrato-de-teste');
+        setContractState('invited');
+      }
+      if (signed) setContractState('signed');
       const entryId = newId();
       setEntries((prev) => [
         ...prev,
         {
           id: entryId,
           role: 'assistant',
-          text: result.text,
+          text: lines.join('\n'),
           lines: simulate ? [] : lines,
           toolCalls: result.toolCalls,
           usage: result.usage,
@@ -195,6 +207,7 @@ export const AgentTestChat: React.FC<{
     runRef.current++; // interrompe uma revelação em andamento
     setEntries([]);
     setState({});
+    setContractState('none');
     setText('');
     setError(null);
     setTypingNow(false);
@@ -209,6 +222,8 @@ export const AgentTestChat: React.FC<{
           WhatsApp e nenhuma ação é executada.
         </p>
         <div className="flex items-center gap-2 shrink-0">
+          {contractState === 'invited' && <button type="button" className={BTN_SMALL} disabled={busy}
+            onClick={() => void send(true)}>Simular assinatura do cliente</button>}
           <span
             className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400"
             title="Espera o tempo de digitação e o intervalo entre linhas configurados"

@@ -88,6 +88,7 @@ import { HighlightedScript } from './HighlightedScript';
 import type { KnownTokens } from './tokens';
 import { FollowupsEditor } from './FollowupsEditor';
 import { KnowledgePanel } from './KnowledgePanel';
+import { AgentContractSetting } from './AgentContractSetting';
 import { AgentTestDrawer } from './AgentTestDrawer';
 import {
   BTN_PRIMARY,
@@ -119,7 +120,7 @@ type InboundMode = AgentTriggers['inbound']['mode'];
 type DealEvent = AgentTriggers['deal']['event'];
 
 /** Ferramentas extras do agente (espelha AgentToolsSchema). */
-type AgentToolsState = { calculator: boolean; scheduled_return_bot_id?: string | null };
+type AgentToolsState = AgentInput['tools'];
 
 type AgentFormState = {
   name: string;
@@ -296,7 +297,7 @@ function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInpu
     triggers: normalizeTriggers(src.triggers),
     webhooks: src.webhooks ?? [],
     helper_agent_ids: src.helper_agent_ids ?? [],
-    tools: { calculator: src.tools?.calculator ?? true, scheduled_return_bot_id: src.tools?.scheduled_return_bot_id ?? null },
+    tools: { ...src.tools, calculator: src.tools?.calculator ?? true, scheduled_return_bot_id: src.tools?.scheduled_return_bot_id ?? null },
     typing: (({ ms_per_char, min_ms, max_ms }) => ({ ms_per_char, min_ms, max_ms }))(normalizeTyping(src.typing)),
     media_understanding: { ...DEFAULT_AGENT_MEDIA_UNDERSTANDING, ...(src.media_understanding ?? {}) },
     auto_lead: { ...DEFAULT_AGENT_AUTO_LEAD, ...(src.auto_lead ?? {}) },
@@ -341,7 +342,7 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
     },
     webhooks: form.webhooks,
     helper_agent_ids: form.helper_agent_ids,
-    tools: { calculator: form.tools.calculator, scheduled_return_bot_id: form.tools.scheduled_return_bot_id ?? null },
+    tools: { ...form.tools, scheduled_return_bot_id: form.tools.scheduled_return_bot_id ?? null },
     typing: fixedTyping(form.typing),
     lead_context: { ...FIXED_LEAD_CONTEXT },
     media_understanding: form.media_understanding,
@@ -1306,6 +1307,10 @@ export const AgentEditor: React.FC<{
 
         <Panel title="Recursos" icon={<Calculator size={16} />}>
           <div className={ROW_DIVIDER_CLASS}>
+            {tab === 'acoes' && <AgentContractSetting value={form.tools.zapsign_template_token} mapping={form.tools.zapsign_variables ?? {}}
+              signedMessage={form.tools.zapsign_signed_message_template} connectionIds={form.connection_ids}
+              onSignedMessage={id => patch({ tools: { ...form.tools, zapsign_signed_message_template:id } })}
+              onChange={(token, variables) => patch({ tools: { ...form.tools, zapsign_template_token: token, zapsign_variables: variables } })} />}
             <SettingRow
               title="Calculadora"
               tip="Ferramenta calcular: contas de parcelas, prazos e percentuais sem o modelo chutar números."

@@ -101,6 +101,15 @@ beforeEach(() => {
 const run = () => runAgentOnConversation({ organizationId: org, conversationId: 'conv', trigger: 'inbound', skipBuffer: true });
 
 describe('validação no envio real e no simulador', () => {
+  it('evento do simulador de assinatura gera a resposta do agente sem transporte nem ferramentas', async () => {
+    h.agent!.tools = { ...h.agent!.tools, zapsign_template_token:'modelo' };
+    h.generate.mockResolvedValue({text:'Parabéns pela assinatura! Posso ajudar com os próximos passos?'});
+    const r = await testAgentReply(h.db, {organizationId:org, agent:h.agent!, contractState:'invited',
+      signatureEvent:'signed', messages:[{role:'user',text:'Sim'},{role:'assistant',text:'Segue o link simulado.'}]});
+    expect(r.text).toContain('Parabéns'); expect(r.toolCalls).toEqual([]);
+    expect(h.generate).toHaveBeenCalledWith(expect.objectContaining({system:expect.stringContaining('assinatura completa')}));
+    expect(h.send).not.toHaveBeenCalled(); expect(h.action).not.toHaveBeenCalled();
+  });
   it('retorno permanece vinculado à mensagem anterior quando cliente escreve durante montagem do histórico', async () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-05T12:00:00Z'));
     try {

@@ -6,12 +6,12 @@
  *   lê o DOCX do modelo e extrai as {{variáveis}}, com uma sugestão de origem
  *   para cada uma (campos fixos do CRM ou campo personalizado de mesmo nome).
  */
-import mammoth from 'mammoth';
+import { readContractTemplate } from '@/lib/zapsign/templateFile';
 import { json } from '@/lib/whatsapp/api';
 import { guardRoute, getErrorMessage } from '@/app/api/wa-agents/_shared';
 import { clientFor, loadZapSignSettings } from '@/lib/zapsign/signatures';
 import { loadCustomFieldDefs } from '@/lib/wa-agents/leadOps';
-import { autoMatchVariable, extractTemplateVariables } from '@/lib/zapsign/variables';
+import { autoMatchVariable } from '@/lib/zapsign/variables';
 
 export const runtime = 'nodejs';
 
@@ -40,15 +40,12 @@ export async function GET(req: Request) {
     const tpl = templates.find((t) => t.token === token);
     if (!tpl) return json({ error: 'Modelo não encontrado na conta ZapSign' }, 404);
     if (!tpl.template_file) return json({ variables: [], suggestions: {}, note: 'A ZapSign não devolveu o arquivo deste modelo.' });
-    const { bytes } = await client.download(tpl.template_file, 12 * 1024 * 1024);
-    let text = '';
+    let variables: string[];
     try {
-      const r = await mammoth.extractRawText({ buffer: Buffer.from(bytes) });
-      text = r.value;
+      variables = (await readContractTemplate(client, tpl)).names;
     } catch (err) {
       return json({ variables: [], suggestions: {}, note: `Não foi possível ler o DOCX do modelo: ${getErrorMessage(err, 'arquivo inválido')}` });
     }
-    const variables = extractTemplateVariables(text);
     const defs = await loadCustomFieldDefs(auth.admin, orgId).catch(() => []);
     const suggestions: Record<string, string> = {};
     const fields = defs.map((f) => ({ key: f.key, label: f.label ?? f.key }));
