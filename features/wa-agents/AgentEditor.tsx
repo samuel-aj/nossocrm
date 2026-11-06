@@ -1305,15 +1305,6 @@ export const AgentEditor: React.FC<{
         </Panel>
 
         <Panel title="Recursos" icon={<Calculator size={16} />}>
-          <div className="mb-4 space-y-2">
-            <label className="block text-sm font-semibold" htmlFor="scheduled-return-bot">Robô para retorno combinado</label>
-            <select id="scheduled-return-bot" className="w-full rounded-lg border border-slate-200 bg-transparent p-2 text-sm dark:border-slate-700" value={form.tools.scheduled_return_bot_id ?? ''} onChange={event => patch({ tools: { ...form.tools, scheduled_return_bot_id: event.target.value || null } })}>
-              <option value="">Desativado</option>
-              {botsMinimal.map(bot => <option key={bot.id} value={bot.id} disabled={!bot.enabled}>{bot.name}{bot.enabled ? '' : ' (desligado)'}</option>)}
-            </select>
-            <p className="text-xs text-slate-500">A IA pode agendar este robô após combinar data, horário e fuso com o cliente, inclusive fora dos horários de follow-up. No robô, use Entregar a agente para reativar a IA. Na API oficial, retornos fora da janela de 24h precisam de modelo aprovado.</p>
-            <p className="text-xs text-slate-500">O robô precisa estar ligado e configurado para o mesmo número da conversa.</p>
-          </div>
           <div className={ROW_DIVIDER_CLASS}>
             <SettingRow
               title="Calculadora"
@@ -1503,6 +1494,30 @@ export const AgentEditor: React.FC<{
           icon={<AlarmClock size={16} />}
         >
           <FollowupsEditor value={form.followups} onChange={(followups) => patch({ followups })} bots={botsQ.data ?? []} />
+        </Panel>
+
+        <Panel
+          title="Retorno combinado com o cliente"
+          description="Se o cliente pedir “me chama daqui a 13 horas”, a IA combina o horário e agenda o robô para aquele momento, inclusive fora dos horários de follow-up."
+          icon={<AlarmClock size={16} />}
+        >
+          <Field label="Robô para retorno combinado" htmlFor="scheduled-return-bot">
+            <NativeSelect
+              id="scheduled-return-bot"
+              className={INPUT_CLASS}
+              value={form.tools.scheduled_return_bot_id ?? ''}
+              onChange={(event) => patch({ tools: { ...form.tools, scheduled_return_bot_id: event.target.value || null } })}
+            >
+              <option value="">Desativado</option>
+              {botsMinimal.map((bot) => (
+                <option key={bot.id} value={bot.id} disabled={!bot.enabled}>
+                  {bot.name}{bot.enabled ? '' : ' (desligado)'}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
+          <p className="mt-2 text-xs text-slate-500">Escolha um robô ligado ao mesmo número da conversa. Use o bloco <strong>Entregar a agente</strong> para a IA retomar o atendimento.</p>
+          <p className="mt-1 text-xs text-slate-500">Na API oficial do WhatsApp, retornos fora da janela de 24 horas precisam de um modelo aprovado.</p>
         </Panel>
       </TabPanel>
 
