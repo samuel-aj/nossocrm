@@ -22,6 +22,7 @@
  */
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { enrichMissingQuote, resolveQuoteWhenPresent, type QuoteSnapshot } from "../_shared/quotes.ts";
+import { metaCtwa, recordCtwa } from "../_shared/ctwa.ts";
 
 const GRAPH_VERSION = Deno.env.get("META_GRAPH_VERSION") ?? "v21.0";
 
@@ -386,7 +387,8 @@ async function buscarGrupoMeta(
  * statuses e mídia, cada um no chat da org dona da conexão.
  */
 // deno-lint-ignore no-explicit-any
-async function processarEventos(supabase: any, conn: ConnRow, payload: any): Promise<void> {
+async function processarEventos(supabase: any, conn: ConnRow, payload: any): Promise<boolean> {
+  let referralsSaved = true;
   const orgId = conn.organization_id as string;
   const token = String(conn.instance_token ?? "");
 
@@ -672,7 +674,16 @@ async function processarEventos(supabase: any, conn: ConnRow, payload: any): Pro
             }
           }
         }
-        if (!convId) continue;
+        const adReferral = !isGroup && !isEcho && !forwarded ? metaCtwa(m) : null;
+        if (!convId) {
+          if (adReferral) referralsSaved = false;
+          continue;
+        }
+        if (adReferral) {
+          const saved = await recordCtwa(supabase, { organizationId: orgId, connectionId: conn.id, conversationId: convId,
+            messageId: providerId, timestamp: waTs }, "meta", adReferral);
+          if (!saved) referralsSaved = false;
+        }
 
         // Idempotência: se já temos essa mensagem (reentrega da Meta), pula —
         // MAS reentrega com TEXTO DIFERENTE é EDIÇÃO: a Cloud API reenvia a
@@ -820,6 +831,7 @@ async function processarEventos(supabase: any, conn: ConnRow, payload: any): Pro
       }
     }
   }
+  return referralsSaved;
 }
 
 Deno.serve(async (req) => {
@@ -937,13 +949,14 @@ Deno.serve(async (req) => {
     .eq("status", "connected")
     .neq("id", conn.id);
   const alvos: ConnRow[] = [conn, ...(irmas ?? []).filter((c: ConnRow) => c.instance_token)];
+  let referralsSaved = true;
   for (const alvo of alvos) {
     try {
-      await processarEventos(supabase, alvo, payload);
+      if (!await processarEventos(supabase, alvo, payload)) referralsSaved = false;
     } catch (e) {
       console.error(`[wa-webhook-meta] processar conn=${alvo.id}:`, e);
     }
   }
 
-  return json(200, { ok: true });
+  return referralsSaved ? json(200, { ok: true }) : json(503, { error: "Falha ao registrar origem do anúncio" });
 });
