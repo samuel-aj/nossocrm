@@ -68,6 +68,7 @@ export type WaConversationFull = {
   wa_phone: string;
   wa_name: string | null;
   last_message_at: string | null;
+  last_inbound_at?: string | null;
   last_message_preview?: string | null;
   unread_count?: number;
   assigned_owner_id: string | null;

@@ -91,6 +91,15 @@ vi.mock('./components/McpSection', () => ({
   ),
 }))
 
+vi.mock('./TeamRoles', () => ({ useTeamConfig: vi.fn() }))
+vi.mock('./components/ZapSignSection', () => ({
+  ZapSignSection: () => <h3>Configuração ZapSign</h3>,
+}))
+vi.mock('./components/Api4comSection', () => ({
+  Api4comSection: () => null,
+  Api4comPersonalCard: () => null,
+}))
+
 // Acesso às automações: o hook usa react-query (sem provider no teste). A aba
 // "IA e Automações" aparece para qualquer papel; as sub-abas de agentes/robôs
 // só para admin, e o agente de IA fica bloqueado até o super admin liberar.
@@ -103,12 +112,46 @@ vi.mock('@/features/wa-agents/WaAgentsSettings', () => ({
 
 import SettingsPage from './SettingsPage'
 import { useAuth } from '@/context/AuthContext'
+import { useTeamConfig } from './TeamRoles'
 
 const useAuthMock = vi.mocked(useAuth)
 
 describe('SettingsPage RBAC', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    window.location.hash = ''
+    vi.mocked(useTeamConfig).mockReturnValue({ data: undefined, isError: false } as ReturnType<typeof useTeamConfig>)
+  })
+
+  it.each([
+    ['admin', 'user-1', false, true],
+    ['admin', 'other-master', false, false],
+    ['admin', null, false, false],
+    ['admin', 'user-1', true, false],
+    ['super_admin', null, false, true],
+  ])('ZapSign: role=%s mestre=%s erro=%s acesso=%s', (role, masterUserId, isError, allowed) => {
+    useAuthMock.mockReturnValue({ profile: { role }, user: { id: 'user-1' } } as ReturnType<typeof useAuth>)
+    vi.mocked(useTeamConfig).mockReturnValue({ data: { masterUserId }, isError } as ReturnType<typeof useTeamConfig>)
+    window.location.hash = '#zapsign'
+    render(<QueryClientProvider client={new QueryClient()}><SettingsPage /></QueryClientProvider>)
+    fireEvent.click(screen.getByRole('tab', { name: /^Integrações$/i }))
+    expect(!!screen.queryByRole('tab', { name: /^ZapSign$/i })).toBe(allowed)
+    expect(!!screen.queryByRole('heading', { name: 'Configuração ZapSign' })).toBe(allowed)
+  })
+
+  it('remove a configuração aberta quando a função Mestre é transferida', () => {
+    useAuthMock.mockReturnValue({ profile: { role: 'admin' }, user: { id: 'user-1' } } as ReturnType<typeof useAuth>)
+    vi.mocked(useTeamConfig).mockReturnValue({ data: { masterUserId: 'user-1' }, isError: false } as ReturnType<typeof useTeamConfig>)
+    window.location.hash = '#zapsign'
+    const client = new QueryClient()
+    const view = render(<QueryClientProvider client={client}><SettingsPage /></QueryClientProvider>)
+    fireEvent.click(screen.getByRole('tab', { name: /^Integrações$/i }))
+    expect(screen.getByRole('heading', { name: 'Configuração ZapSign' })).toBeInTheDocument()
+    vi.mocked(useTeamConfig).mockReturnValue({ data: { masterUserId: 'other-master' }, isError: false } as ReturnType<typeof useTeamConfig>)
+    view.rerender(<QueryClientProvider client={client}><SettingsPage /></QueryClientProvider>)
+    expect(screen.queryByRole('tab', { name: /^ZapSign$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Configuração ZapSign' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Webhooks (Integrações)' })).toBeInTheDocument()
   })
 
   it('vendedor não vê seções de configuração do sistema', () => {

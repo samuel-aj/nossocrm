@@ -11,7 +11,7 @@
  */
 
 import React, { useState } from 'react';
-import { Bot, Check, ChevronDown, Loader2, Pause, Play, Square, Workflow, X } from 'lucide-react';
+import { Bot, Check, ChevronDown, Clock, Loader2, Pause, Play, Square, Workflow, X } from 'lucide-react';
 import type { ConversationAiAction, ConversationAiInfo, ConversationBotInfo } from '@/lib/wa-agents/types';
 
 const RESUME_FMT = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -21,6 +21,19 @@ export function formatResumeAt(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   return RESUME_FMT.format(d);
+}
+
+/** Usa o fuso combinado, independentemente do fuso do navegador. */
+export function formatScheduledReturn(iso: string, timezone = 'America/Sao_Paulo'): string {
+  try {
+    const date = new Date(iso);
+    const formatted = new Intl.DateTimeFormat('pt-BR', {
+      dateStyle: 'short', timeStyle: 'short', timeZone: timezone,
+    }).format(date);
+    return `${formatted} (${timezone})`;
+  } catch {
+    return 'horário indisponível';
+  }
 }
 
 export type ChatAgentBannerProps = {
@@ -148,9 +161,11 @@ export function ChatAgentBanner({ ai, bot, busy, onAction }: ChatAgentBannerProp
   const botLine = bot ? (
     <BannerLine
       tone="emerald"
-      icon={<Workflow size={13} className="shrink-0" />}
+      icon={bot.scheduledAt ? <Clock size={13} className="shrink-0" /> : <Workflow size={13} className="shrink-0" />}
       text={
-        bot.status === 'waiting_reply'
+        bot.scheduledAt
+          ? `Retorno agendado com ${bot.name}: ${formatScheduledReturn(bot.scheduledAt, bot.scheduledTimezone || undefined)}`
+          : bot.status === 'waiting_reply'
           ? `Robô ${bot.name} aguardando resposta do contato`
           : `Robô ${bot.name} em andamento`
       }
@@ -158,8 +173,8 @@ export function ChatAgentBanner({ ai, bot, busy, onAction }: ChatAgentBannerProp
         <ActionButton
           tone="emerald"
           icon={<Square size={12} />}
-          label="Cancelar robô"
-          title="Cancelar o robô nesta conversa: ele para de executar os passos"
+          label={bot.scheduledAt ? "Cancelar retorno" : "Cancelar robô"}
+          title={bot.scheduledAt ? 'Cancelar o retorno combinado nesta conversa' : 'Cancelar o robô nesta conversa: ele para de executar os passos'}
           busy={busy}
           spinning={spinning('cancel_bot')}
           onClick={() => act('cancel_bot')}

@@ -119,7 +119,7 @@ type InboundMode = AgentTriggers['inbound']['mode'];
 type DealEvent = AgentTriggers['deal']['event'];
 
 /** Ferramentas extras do agente (espelha AgentToolsSchema). */
-type AgentToolsState = { calculator: boolean };
+type AgentToolsState = { calculator: boolean; scheduled_return_bot_id?: string | null };
 
 type AgentFormState = {
   name: string;
@@ -296,7 +296,7 @@ function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInpu
     triggers: normalizeTriggers(src.triggers),
     webhooks: src.webhooks ?? [],
     helper_agent_ids: src.helper_agent_ids ?? [],
-    tools: { calculator: src.tools?.calculator ?? true },
+    tools: { calculator: src.tools?.calculator ?? true, scheduled_return_bot_id: src.tools?.scheduled_return_bot_id ?? null },
     typing: (({ ms_per_char, min_ms, max_ms }) => ({ ms_per_char, min_ms, max_ms }))(normalizeTyping(src.typing)),
     media_understanding: { ...DEFAULT_AGENT_MEDIA_UNDERSTANDING, ...(src.media_understanding ?? {}) },
     auto_lead: { ...DEFAULT_AGENT_AUTO_LEAD, ...(src.auto_lead ?? {}) },
@@ -341,7 +341,7 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
     },
     webhooks: form.webhooks,
     helper_agent_ids: form.helper_agent_ids,
-    tools: { calculator: form.tools.calculator },
+    tools: { calculator: form.tools.calculator, scheduled_return_bot_id: form.tools.scheduled_return_bot_id ?? null },
     typing: fixedTyping(form.typing),
     lead_context: { ...FIXED_LEAD_CONTEXT },
     media_understanding: form.media_understanding,
@@ -1305,6 +1305,15 @@ export const AgentEditor: React.FC<{
         </Panel>
 
         <Panel title="Recursos" icon={<Calculator size={16} />}>
+          <div className="mb-4 space-y-2">
+            <label className="block text-sm font-semibold" htmlFor="scheduled-return-bot">Robô para retorno combinado</label>
+            <select id="scheduled-return-bot" className="w-full rounded-lg border border-slate-200 bg-transparent p-2 text-sm dark:border-slate-700" value={form.tools.scheduled_return_bot_id ?? ''} onChange={event => patch({ tools: { ...form.tools, scheduled_return_bot_id: event.target.value || null } })}>
+              <option value="">Desativado</option>
+              {botsMinimal.map(bot => <option key={bot.id} value={bot.id} disabled={!bot.enabled}>{bot.name}{bot.enabled ? '' : ' (desligado)'}</option>)}
+            </select>
+            <p className="text-xs text-slate-500">A IA pode agendar este robô após combinar data, horário e fuso com o cliente, inclusive fora dos horários de follow-up. No robô, use Entregar a agente para reativar a IA. Na API oficial, retornos fora da janela de 24h precisam de modelo aprovado.</p>
+            <p className="text-xs text-slate-500">O robô precisa estar ligado e configurado para o mesmo número da conversa.</p>
+          </div>
           <div className={ROW_DIVIDER_CLASS}>
             <SettingRow
               title="Calculadora"

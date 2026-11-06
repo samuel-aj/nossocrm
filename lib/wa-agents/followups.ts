@@ -1,3 +1,5 @@
+import { pendingRobotReturn } from './scheduledReturns';
+import { loadLastInboundAt } from './lastInbound';
 /**
  * Follow-ups do agente por tempo sem resposta do lead (régua em wa_ai_agents.followups).
  *
@@ -12,6 +14,8 @@
  * parar o agente: a resposta do lead volta para o agente.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { loadFollowupCalendar } from './followupCalendarStore';
+import { nextFollowupWindow } from './followupCalendar';
 import { getServiceWindow } from '@/lib/whatsapp/serviceWindow';
 import { isAiAgentsApproved } from './beta';
 import { createBotRun, runBotRunNow } from './bots';
@@ -96,13 +100,16 @@ export async function processFollowups(
         betaByOrg.set(a.organization_id, beta);
       }
       if (!beta) continue;
+      const now = new Date();
+      const calendar = await loadFollowupCalendar(admin, a.organization_id);
+      if (nextFollowupWindow(calendar, now) > now) continue;
       const agent = await loadAgent(admin, a.organization_id, a.id);
       if (!agent || agent.followups.length === 0) continue;
       const rules = [...agent.followups].sort((x, y) => x.after_minutes - y.after_minutes);
 
       const { data: convsRaw } = await admin
         .from('wa_conversations')
-        .select('id, organization_id, ai_agent_id, connection_id, last_inbound_at, ai_state, ai_status_changed_at')
+        .select('id, organization_id, ai_agent_id, connection_id, ai_state, ai_status_changed_at')
         .eq('organization_id', a.organization_id)
         .eq('ai_agent_id', a.id)
         .eq('ai_status', 'active')
@@ -112,6 +119,8 @@ export async function processFollowups(
         if (result.fired >= limit) break;
         result.checked++;
         try {
+          conv.last_inbound_at = await loadLastInboundAt(admin, conv.organization_id, conv.id);
+          if (await pendingRobotReturn(admin, conv.organization_id, conv.id)) continue;
           const state = (conv.ai_state ?? {}) as ConversationAiState;
           const cycle = conv.last_inbound_at ?? null;
           const done = state.followups && state.followups.cycle === cycle ? [...state.followups.done] : [];
@@ -120,23 +129,29 @@ export async function processFollowups(
           const startedAt = await silenceStartedAt(admin, conv);
           if (startedAt === null) continue; // o agente ainda não respondeu: não é silêncio do lead
           const elapsed = Date.now() - startedAt;
-          const rule = pending.find(r => r.after_minutes * 60_000 <= elapsed);
+          const due = pending.filter(r => r.after_minutes * 60_000 <= elapsed);
+          const rule = calendar.enabled ? due.at(-1) : due[0];
           if (!rule) continue;
+          const consumed = calendar.enabled ? due : [rule];
 
-          // Marca a regra como feita ANTES de disparar (o próximo tick não repete)
-          const nextState: ConversationAiState = { ...state, followups: { cycle, done: [...done, rule.id] } };
-          const { data: upd } = await admin
-            .from('wa_conversations')
-            .update({ ai_state: nextState })
-            .eq('id', conv.id)
-            .eq('organization_id', conv.organization_id)
-            .eq('ai_status', 'active')
-            .select('id')
-            .maybeSingle();
-          if (!upd) continue;
+          // Atomic compare-and-swap merges only this key, preserving memory and manual pauses.
+          const { data: claimed, error: claimError } = await admin.rpc('claim_agent_followup', {
+            p_org: conv.organization_id, p_conversation: conv.id, p_agent: conv.ai_agent_id,
+            p_cycle: cycle, p_expected: state.followups ?? null,
+            p_done: [...done, ...consumed.map(item => item.id)],
+          });
+          if (claimError) throw new Error(claimError.message);
+          if (!claimed) continue;
 
           const fired = await fireRule(admin, conv, rule, elapsed);
-          if (fired) result.fired++;
+          if (typeof fired === 'string') {
+            // Window closed while preparing the response, before any outbound: keep it pending.
+            const { error } = await admin.rpc('claim_agent_followup', {
+              p_org: conv.organization_id, p_conversation: conv.id, p_agent: conv.ai_agent_id,
+              p_cycle: cycle, p_expected: { cycle, done: [...done, ...consumed.map(item => item.id)] }, p_done: done,
+            });
+            if (error) throw new Error(error.message);
+          } else if (fired) result.fired++;
           else result.skipped++;
         } catch (e) {
           console.error('[wa-agents] follow-up falhou:', errorMessage(e));
@@ -149,13 +164,14 @@ export async function processFollowups(
   return result;
 }
 
-async function fireRule(admin: SupabaseClient, conv: ConvRow, rule: AgentFollowup, elapsedMs: number): Promise<boolean> {
+async function fireRule(admin: SupabaseClient, conv: ConvRow, rule: AgentFollowup, elapsedMs: number): Promise<boolean | string> {
   if (rule.kind === 'bot') {
     if (!rule.bot_id) return false;
     const created = await createBotRun(admin, {
       organizationId: conv.organization_id,
       botId: rule.bot_id,
       conversationId: conv.id,
+      proactive: { anchor: conv.last_inbound_at },
     });
     if (!created.ok || !created.run) {
       console.error('[wa-agents] follow-up: robô não iniciou:', created.error);
@@ -172,10 +188,11 @@ async function fireRule(admin: SupabaseClient, conv: ConvRow, rule: AgentFollowu
     organizationId: conv.organization_id,
     conversationId: conv.id,
     trigger: 'followup',
+    proactive: { anchor: conv.last_inbound_at },
     agentId: conv.ai_agent_id,
     forceReply: true,
     skipBuffer: true,
     followup: { instruction: rule.instruction.trim(), silentFor: formatSilence(elapsedMs) },
   });
-  return run.status !== 'error';
+  return run.deferredUntil ?? (run.status === 'ok');
 }

@@ -10,6 +10,8 @@
  * (robô iniciado, mensagem enviada, pulado ou falhou), nunca "enviado" só
  * porque entrou na fila. SERVER.
  */
+import { checkProactiveFollowup } from './proactiveFollowup';
+import { startStageFollowupAgent } from './stageFollowupAgent';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getServiceWindow } from '@/lib/whatsapp/serviceWindow';
 import { getConnectionByIdForOrg, type WaConnectionRow } from '@/lib/whatsapp/service';
@@ -36,13 +38,16 @@ export type FollowupRule = {
   organization_id: string;
   enabled: boolean;
   delay_seconds: number;
-  action_type: 'bot' | 'message';
+  action_type: 'bot' | 'message' | 'agent';
+  agent_id?: string | null;
+  agent_instruction?: string;
   bot_id: string | null;
   message: { kind?: 'text' | 'template'; text?: string; template_id?: string } | null;
   version: number;
 };
 
 type Outcome =
+  | { status: 'deferred'; until: string; reason: string }
   | { status: 'done'; result: Record<string, unknown> }
   | { status: 'skipped'; reason: string }
   | { status: 'failed'; error: string }
@@ -59,11 +64,13 @@ export async function runStageFollowup(admin: SupabaseClient, s: FollowupSchedul
 
   const { data: ruleRow } = await admin
     .from('stage_followup_rules')
-    .select('stage_id, organization_id, enabled, delay_seconds, action_type, bot_id, message, version')
+    .select('stage_id, organization_id, enabled, delay_seconds, action_type, bot_id, agent_id, agent_instruction, message, version')
     .eq('stage_id', s.stage_id)
     .maybeSingle();
   const rule = ruleRow as FollowupRule | null;
-  if (!rule || !rule.enabled) return { status: 'cancelled', reason: 'regra desligada ou apagada' };
+  if (!rule || !rule.enabled || rule.organization_id !== orgId) return { status: 'cancelled', reason: 'regra desligada ou apagada' };
+
+  if (rule.version !== s.rule_version) return { status: 'superseded' };
 
   const { data: dealRow } = await admin
     .from('deals')
@@ -103,6 +110,19 @@ export async function runStageFollowup(admin: SupabaseClient, s: FollowupSchedul
   if (!resolved.ok) return { status: 'skipped', reason: resolved.reason };
   const conv: Conv | null = resolved.conversation;
 
+  const proactive = { anchor: s.anchor_at, dealId: deal.id, stageId: s.stage_id, ruleVersion: s.rule_version };
+  const decision = await checkProactiveFollowup(admin, orgId, conv?.id ?? null, proactive);
+  if (decision.kind === 'defer') return { status: 'deferred', until: decision.until, reason: 'aguardando horário de follow-up' };
+  if (decision.kind === 'cancel') return { status: 'cancelled', reason: decision.reason };
+  if (rule.action_type === 'agent') {
+    if (!conv || !rule.agent_id) return { status: 'failed', error: 'Escolha um agente e uma conversa válidos' };
+    const result = await startStageFollowupAgent(admin, { organizationId: orgId, conversationId: conv.id,
+      agentId: rule.agent_id, instruction: rule.agent_instruction ?? '', proactive });
+    if (!result.ok && result.deferredUntil) return { status: 'deferred', until: result.deferredUntil, reason: result.reason };
+    return result.ok ? { status: 'done', result: { kind: 'agent_started', agent_id: rule.agent_id } }
+      : { status: 'skipped', reason: result.reason };
+  }
+
   if (rule.action_type === 'bot') {
     if (!rule.bot_id) return { status: 'failed', error: 'regra sem robô escolhido' };
     // Mesmo robô já rodando neste lead/conversa: não abre outra instância
@@ -121,6 +141,7 @@ export async function runStageFollowup(admin: SupabaseClient, s: FollowupSchedul
       dealId: deal.id,
       contactId: deal.contact_id,
       conversationId: conv?.id ?? null,
+      proactive,
     });
     if (!started.ok || !started.runId) return { status: 'failed', error: started.error || 'o robô não iniciou' };
     return { status: 'done', result: { kind: 'bot_started', bot_id: rule.bot_id, run_id: started.runId } };
@@ -189,7 +210,8 @@ async function finish(admin: SupabaseClient, s: FollowupSchedule, outcome: Outco
   const { data } = await admin
     .from('deal_followup_schedules')
     .update({
-      status: outcome.status,
+      status: outcome.status === 'deferred' ? 'scheduled' : outcome.status,
+      ...(outcome.status === 'deferred' ? { due_at: outcome.until, attempts: Math.max(0, s.attempts - 1) } : {}),
       lock_until: null,
       last_result: result,
       ...(outcome.status === 'done' || outcome.status === 'failed' ? { fired_at: now } : {}),
@@ -198,9 +220,11 @@ async function finish(admin: SupabaseClient, s: FollowupSchedule, outcome: Outco
     .eq('deal_id', s.deal_id)
     .eq('status', 'processing')
     .eq('anchor_at', s.anchor_at)
+    .eq('stage_id', s.stage_id)
+    .eq('rule_version', s.rule_version)
     .select('deal_id');
   // Cancelado por mudança de etapa/regra não vai ao histórico (a própria mudança já aparece lá)
-  if ((data ?? []).length === 0 || outcome.status === 'cancelled') return;
+  if ((data ?? []).length === 0 || outcome.status === 'cancelled' || outcome.status === 'deferred') return;
   await admin.from('deal_events').insert({
     organization_id: s.organization_id,
     deal_id: s.deal_id,

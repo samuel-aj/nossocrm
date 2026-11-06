@@ -1,0 +1,30 @@
+import { afterEach, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+vi.mock('@/context/ToastContext', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
+import { FollowupCalendarSettings } from './FollowupCalendarSettings';
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+it('loads saved hours, allows adding a day and saves the explicit calendar', async () => {
+  const calendar = { enabled: false, timezone: 'America/Manaus', slots: [{ day: 1, start: '09:00', end: '18:00' }] };
+  const request = vi.fn(async (_url: string, options?: RequestInit) => Response.json({ calendar: options?.body ? JSON.parse(String(options.body)) : calendar }));
+  vi.stubGlobal('fetch', request);
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={qc}><FollowupCalendarSettings /></QueryClientProvider>);
+  await screen.findByLabelText('Fuso horário');
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByLabelText('Adicionar horário de Terça-feira'));
+  fireEvent.click(screen.getByRole('button', { name: 'Salvar horários' }));
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+  const body = JSON.parse(String(request.mock.calls[1][1]?.body));
+  expect(body).toMatchObject({ enabled: true, timezone: 'America/Manaus' });
+  expect(body.slots).toHaveLength(2);
+  expect(body.slots[1]).toEqual({ day: 2, start: '09:00', end: '18:00' });
+});
+it('does not allow enabling an empty schedule', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ calendar: { enabled: false, timezone: 'America/Manaus', slots: [] } })));
+  render(<QueryClientProvider client={new QueryClient()}><FollowupCalendarSettings /></QueryClientProvider>);
+  await screen.findByLabelText('Fuso horário');
+  fireEvent.click(screen.getByRole('checkbox'));
+  expect(screen.getByRole('alert').textContent).toContain('Escolha pelo menos um horário');
+  expect((screen.getByRole('button', { name: 'Salvar horários' }) as HTMLButtonElement).disabled).toBe(true);
+});

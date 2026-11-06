@@ -1,6 +1,6 @@
 /**
- * /api/integrations/zapsign/settings  (admin da organização lê; só o SUPER
- *   ADMIN conecta e desconecta, enquanto a liberação é controlada por organização)
+ * /api/integrations/zapsign/settings (Administrador Mestre da organização ou
+ *   superadministrador lê, conecta e desconecta)
  *   GET    -> { connected, sandbox, token_hint, template_count, verified_at, webhook_ok, last_error }
  *   PUT    -> { api_token, sandbox }  testa o token (lista os modelos), cria o
  *             webhook da conta na ZapSign apontando para este CRM e grava.
@@ -9,13 +9,26 @@
  */
 import { z } from 'zod';
 import { json } from '@/lib/whatsapp/api';
-import { guardRoute, readJsonBody, validationError, getErrorMessage } from '@/app/api/wa-agents/_shared';
+import { guardRoute, readJsonBody, validationError, getErrorMessage, type GuardResult } from '@/app/api/wa-agents/_shared';
 import { clientFor, loadZapSignSettings, newWebhookSecret } from '@/lib/zapsign/signatures';
 import { ZapSignError } from '@/lib/zapsign/client';
 import { UserRole } from '@/types/constants';
+import { getTeamAccess } from '@/lib/permissions/teamAccessServer';
+import { randomUUID } from 'node:crypto';
+import { connectionFailureMessage, logConnectionFailure, type ConnectionStage } from '@/lib/zapsign/connectionDiagnostics';
 
-// uma Response nova por pedido (o corpo só pode ser lido uma vez)
-const onlySuperAdmin = () => json({ error: 'Por enquanto só o super admin conecta a ZapSign', code: 'FORBIDDEN' }, 403);
+/** Revalida o Mestre na organização da sessão em cada pedido, inclusive após transferência. */
+async function guardSettings(req?: Request): Promise<GuardResult> {
+  const auth = await guardRoute({ req, admin: true });
+  if (!auth.ok || auth.user.role === UserRole.SUPER_ADMIN) return auth;
+  try {
+    const access = await getTeamAccess(auth.admin, auth.user.organizationId, auth.user.id);
+    if (access.masterUserId === auth.user.id) return auth;
+    return { ok: false, response: json({ error: 'Somente o Administrador Mestre pode configurar a ZapSign', code: 'FORBIDDEN' }, 403) };
+  } catch {
+    return { ok: false, response: json({ error: 'Não foi possível verificar a permissão do Administrador Mestre. Tente novamente.' }, 503) };
+  }
+}
 
 export const runtime = 'nodejs';
 
@@ -41,7 +54,7 @@ function webhookUrlFor(req: Request, orgId: string): string {
 }
 
 export async function GET() {
-  const auth = await guardRoute({ admin: true });
+  const auth = await guardSettings();
   if (!auth.ok) return auth.response;
   try {
     const s = await loadZapSignSettings(auth.admin, auth.user.organizationId);
@@ -62,87 +75,107 @@ export async function GET() {
 }
 
 export async function PUT(req: Request) {
-  const auth = await guardRoute({ req, admin: true });
-  if (!auth.ok) return auth.response;
-  if (auth.user.role !== UserRole.SUPER_ADMIN) return onlySuperAdmin();
-  const parsed = Body.safeParse(await readJsonBody(req));
-  if (!parsed.success) return validationError(parsed.error);
-  const orgId = auth.user.organizationId;
-  const input = parsed.data;
-
-  const client = clientFor({ api_token: input.api_token, sandbox: input.sandbox });
-  let templateCount = 0;
+  const reference = randomUUID();
+  let stage: ConnectionStage = 'authorization';
+  const secrets: string[] = [];
   try {
-    templateCount = (await client.listTemplates()).length;
-  } catch (err) {
-    const e = err as ZapSignError;
-    return json({ error: `Não foi possível conectar: ${e.message}` }, e instanceof ZapSignError && (e.status === 401 || e.status === 403) ? 400 : 502);
-  }
+    const auth = await guardSettings(req);
+    if (!auth.ok) return auth.response;
+    stage = 'validation';
+    const parsed = Body.safeParse(await readJsonBody(req));
+    if (!parsed.success) return validationError(parsed.error);
+    const orgId = auth.user.organizationId;
+    const input = parsed.data;
+    secrets.push(input.api_token);
 
-  const existing = await loadZapSignSettings(auth.admin, orgId);
-  // Reaproveita o segredo quando o token é o mesmo (webhook já cadastrado continua válido)
-  const sameAccount = existing && existing.api_token === input.api_token && existing.sandbox === input.sandbox;
-  const secret = sameAccount ? existing.webhook_secret : newWebhookSecret();
-  const url = webhookUrlFor(req, orgId);
+    stage = 'client';
+    const client = clientFor({ api_token: input.api_token, sandbox: input.sandbox });
+    let templateCount = 0;
+    stage = 'templates';
+    try {
+      templateCount = (await client.listTemplates()).length;
+    } catch (err) {
+      logConnectionFailure(stage, reference, err, secrets);
+      const e = err as ZapSignError;
+      return json({ error: `Não foi possível conectar: ${e.message}` }, e instanceof ZapSignError && (e.status === 401 || e.status === 403) ? 400 : 502);
+    }
 
-  let webhookId: string | null = sameAccount && existing.webhook_url === url ? existing.webhook_id : null;
-  let webhookError: string | null = null;
-  if (!webhookId) {
-    // conta trocou ou URL mudou: apaga o antigo (se der) e cria um novo
-    if (existing?.webhook_id && sameAccount) {
+    stage = 'settings';
+    const existing = await loadZapSignSettings(auth.admin, orgId);
+    if (existing) secrets.push(existing.api_token, existing.webhook_secret);
+    // Reaproveita o segredo quando o token é o mesmo (webhook já cadastrado continua válido)
+    const sameAccount = existing && existing.api_token === input.api_token && existing.sandbox === input.sandbox;
+    stage = 'webhook_secret';
+    const secret = sameAccount ? existing.webhook_secret : newWebhookSecret();
+    secrets.push(secret);
+    const url = webhookUrlFor(req, orgId);
+
+    let webhookId: string | null = sameAccount && existing.webhook_url === url ? existing.webhook_id : null;
+    let webhookError: string | null = null;
+    stage = 'webhook';
+    if (!webhookId) {
+      // conta trocou ou URL mudou: apaga o antigo (se der) e cria um novo
+      if (existing?.webhook_id && sameAccount) {
+        try {
+          await client.deleteWebhook(existing.webhook_id);
+        } catch {
+          /* pode já não existir */
+        }
+      }
+      const headers = [{ name: 'X-Webhook-Secret', value: secret }];
+      // Prévia da Vercel com proteção: o cabeçalho de bypass deixa a ZapSign entrar
+      const bypass = (process.env.VERCEL_AUTOMATION_BYPASS_SECRET || '').trim();
+      if (bypass) secrets.push(bypass);
+      if (bypass) headers.push({ name: 'x-vercel-protection-bypass', value: bypass });
       try {
-        await client.deleteWebhook(existing.webhook_id);
-      } catch {
-        /* pode já não existir */
+        const wh = await client.createWebhook({ url, type: '', headers });
+        webhookId = wh?.id != null ? String(wh.id) : null;
+        if (!webhookId) webhookError = 'a ZapSign não devolveu o id do webhook';
+      } catch (err) {
+        logConnectionFailure(stage, reference, err, secrets);
+        webhookError = (err as Error).message;
       }
     }
-    const headers = [{ name: 'X-Webhook-Secret', value: secret }];
-    // Prévia da Vercel com proteção: o cabeçalho de bypass deixa a ZapSign entrar
-    const bypass = (process.env.VERCEL_AUTOMATION_BYPASS_SECRET || '').trim();
-    if (bypass) headers.push({ name: 'x-vercel-protection-bypass', value: bypass });
-    try {
-      const wh = await client.createWebhook({ url, type: '', headers });
-      webhookId = wh?.id != null ? String(wh.id) : null;
-      if (!webhookId) webhookError = 'a ZapSign não devolveu o id do webhook';
-    } catch (err) {
-      webhookError = (err as Error).message;
-    }
-  }
 
-  const row = {
-    organization_id: orgId,
-    api_token: input.api_token,
-    sandbox: input.sandbox,
-    webhook_id: webhookId,
-    webhook_url: url,
-    webhook_secret: secret,
-    template_count: templateCount,
-    verified_at: new Date().toISOString(),
-    last_error: webhookError,
-    created_by: auth.user.id,
-    updated_at: new Date().toISOString(),
-  };
-  const { error } = await auth.admin.from('zapsign_settings').upsert(row, { onConflict: 'organization_id' });
-  if (error) {
-    if (/zapsign_settings/.test(error.message)) return json({ error: 'A integração com a ZapSign ainda não foi instalada no banco. Fale com o suporte.' }, 503);
-    return json({ error: error.message }, 500);
+    const row = {
+      organization_id: orgId,
+      api_token: input.api_token,
+      sandbox: input.sandbox,
+      webhook_id: webhookId,
+      webhook_url: url,
+      webhook_secret: secret,
+      template_count: templateCount,
+      verified_at: new Date().toISOString(),
+      last_error: webhookError,
+      created_by: auth.user.id,
+      updated_at: new Date().toISOString(),
+    };
+    stage = 'persist';
+    const { error } = await auth.admin.from('zapsign_settings').upsert(row, { onConflict: 'organization_id' });
+    if (error) {
+      logConnectionFailure(stage, reference, error, secrets);
+      if (/zapsign_settings/.test(error.message)) return json({ error: 'A integração com a ZapSign ainda não foi instalada no banco. Fale com o suporte.' }, 503);
+      return json({ error: connectionFailureMessage(stage, reference), reference }, 500);
+    }
+    return json({
+      connected: true,
+      sandbox: input.sandbox,
+      token_hint: hint(input.api_token),
+      template_count: templateCount,
+      verified_at: row.verified_at,
+      webhook_ok: !!webhookId,
+      webhook_url: url,
+      last_error: webhookError,
+    });
+  } catch (err) {
+    logConnectionFailure(stage, reference, err, secrets);
+    return json({ error: connectionFailureMessage(stage, reference), reference }, 500);
   }
-  return json({
-    connected: true,
-    sandbox: input.sandbox,
-    token_hint: hint(input.api_token),
-    template_count: templateCount,
-    verified_at: row.verified_at,
-    webhook_ok: !!webhookId,
-    webhook_url: url,
-    last_error: webhookError,
-  });
 }
 
 export async function DELETE(req: Request) {
-  const auth = await guardRoute({ req, admin: true });
+  const auth = await guardSettings(req);
   if (!auth.ok) return auth.response;
-  if (auth.user.role !== UserRole.SUPER_ADMIN) return onlySuperAdmin();
   const orgId = auth.user.organizationId;
   const existing = await loadZapSignSettings(auth.admin, orgId);
   if (existing?.webhook_id) {

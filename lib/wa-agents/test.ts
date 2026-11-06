@@ -1,3 +1,4 @@
+import { resolveReturnTime } from './scheduledReturnTime';
 /**
  * Teste de um agente no painel: mesma montagem de prompt e ferramentas, com
  * contexto fictício, sem enviar nada e sem executar ações. As ferramentas
@@ -174,7 +175,22 @@ async function testAgentReplyWithUsage(
   const mediaQueued = new Set<string>();
   let helperCalls = 0;
   let knowledgeCalls = 0;
+  // Local to this simulation: tool calls can inspect/reschedule/cancel without reserving a real run.
+  let simulatedReturn: { id: string; scheduled_for: string; scheduled_timezone: string; bot_id: string } | null = null;
   const runtime: AgentToolRuntime = {
+    scheduledReturn: {
+      inspect: async () => ({ now: new Date().toISOString(), timezone: 'America/Sao_Paulo', pending: simulatedReturn, simulated: true }),
+      schedule: async input => {
+        const at = resolveReturnTime(input);
+        simulatedReturn = { id: 'simulated-return', scheduled_for: at, scheduled_timezone: input.timezone, bot_id: agent.tools?.scheduled_return_bot_id ?? '' };
+        return { ok: true, simulated: true, id: simulatedReturn.id, scheduledAt: at, timezone: input.timezone, local: input.local, calendarException: true };
+      },
+      cancel: async () => {
+        const cancelled = simulatedReturn ? 1 : 0;
+        simulatedReturn = null;
+        return { ok: true, simulated: true, cancelled };
+      },
+    },
     documents: resources.documents,
     media: resources.media,
     helpers: resources.helpers,
