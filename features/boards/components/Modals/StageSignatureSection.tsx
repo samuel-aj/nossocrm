@@ -18,7 +18,7 @@ import { NativeSelect } from '@/components/ui/NativeSelect';
 import { useWaBotsList } from '@/features/wa-agents/useWaAgents';
 import { SignMessageField, sampleDocName } from '@/features/zapsign/SignMessageField';
 import { VariableMappingModal, mappingSummary } from '@/features/zapsign/VariableMappingModal';
-import { AUTH_OPTIONS, DEFAULT_SIGN_MESSAGE, SEND_OPTIONS, ZAPSIGN_ORG_STATUS_KEY, useVariableSources, useZapSignTemplateVariables, useZapSignTemplates } from '@/features/zapsign/useZapSign';
+import { AUTH_OPTIONS, DEFAULT_SIGN_MESSAGE, SEND_OPTIONS, ZAPSIGN_ORG_STATUS_KEY, useVariableSources, useZapSignTemplateVariables, useZapSignTemplates, templateLabel } from '@/features/zapsign/useZapSign';
 
 type Actions = { stage_id?: string | null; tag?: string | null; bot_id?: string | null };
 type Rule = {
@@ -376,7 +376,7 @@ export function StageSignatureSection({ stageId, stageSaved }: { stageId: string
                       <option value="">{templatesQ.isLoading ? 'Carregando...' : 'Escolha o modelo'}</option>
                       {templates.map((t) => (
                         <option key={t.token} value={t.token}>
-                          {t.name}
+                          {templateLabel(t)}
                         </option>
                       ))}
                     </NativeSelect>

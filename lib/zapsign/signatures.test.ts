@@ -126,6 +126,7 @@ function fakeDb(tables: Record<string, Row[]>) {
 
 function fakeClient(): ZapSignClient {
   return {
+    listTemplates: async () => [{ token: 'tpl-1', name: 'Honorários' }],
     createDocFromTemplate: async (input: Record<string, unknown>) => {
       h.created.push(input);
       if (h.failCreate) {
@@ -254,6 +255,19 @@ describe('envio para assinatura (regra da etapa)', () => {
     const out = await sendSignature(db.admin, queued(), { client: fakeClient() });
     expect(out).toMatchObject({ status: 'pending', sent_via: 'crm_whatsapp' });
     expect(h.texts).toEqual(['Oi Maria, segue o contrato.\n\nhttps://app.zapsign.com.br/verificar/sig-1']);
+  });
+  it('um modelo composto só libera o convite da ZapSign depois de confirmar os anexos', async () => {
+    const db = base(), client = fakeClient();
+    db.tables.stage_signature_rules[0] = {...RULE,signer:{send:'zapsign_email'},extra_signers:[]} as unknown as Row;
+    db.tables.deal_signatures.push(queued() as unknown as Row);
+    client.listTemplates = async () => [{token:'tpl-1',name:'Contrato',extra_templates:[{token:'child',name:'Procuração.docx'}]}];
+    client.getDoc = vi.fn().mockResolvedValue({token:'doc-1',name:'Contrato',status:'pending',extra_docs:[{token:'extra',name:'Procuração.pdf'}],
+      signers:[{token:'office',name:'Testemunha',status:'new'},{token:'sig-1',name:'Maria da Silva',status:'new'}]});
+    expect(await sendSignature(db.admin,queued(),{client})).toMatchObject({status:'pending',sent_via:'zapsign_email'});
+    expect(h.created).toHaveLength(1);
+    expect(h.created[0]).toMatchObject({send_automatic_email:false,send_automatic_whatsapp:false});
+    expect(h.signerPatches).toEqual([{send_automatic_email:true,send_automatic_whatsapp:false}]);
+    expect(db.tables.deal_signatures[0].sign_url).toBe('https://app.zapsign.com.br/verificar/sig-1');
   });
 
   it('lead mudou de etapa, ganhou ou a regra foi desligada antes do envio: cancela sem criar documento', async () => {
@@ -481,6 +495,46 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
     vi.mocked(budgets.checkConversationBudget).mockResolvedValue({ blocked_at: 'agora' } as never);
     await expect(runAgentContract(db.admin, scope, create)).rejects.toThrow(/limite/);
     expect(db.post).not.toHaveBeenCalled();
+  });
+  it('não usa uma procuração vinculada como modelo do agente, nem mesmo no simulador', async () => {
+    const db = setup();
+    const child = {token:'tpl-1',name:'Procuração.docx'};
+    vi.mocked(ZapSignClient.prototype.listTemplates).mockResolvedValue([child, {token:'pai',name:'Contrato',extra_templates:[child]}]);
+    await expect(runAgentContract(db.admin,scope,create)).rejects.toThrow(/modelo ativo/);
+    await expect(simulateAgentContract(db.admin,ORG,scope.template,[],prepare)).rejects.toThrow(/não disponível/);
+    expect(db.post).not.toHaveBeenCalled();
+  });
+  it('não reserva nem cria um documento se a conta só permite listar modelos', async () => {
+    const db=setup();
+    vi.mocked(files.readContractTemplate).mockResolvedValue({revision:'r1',names:['NOME'],planNotice:'É necessário um plano de API.'});
+    await expect(runAgentContract(db.admin,scope,create)).rejects.toThrow(/plano de API/);
+    expect(db.post).not.toHaveBeenCalled(); expect(db.tables.deal_signatures).toHaveLength(0);
+  });
+  it('não libera link nem recria o contrato quando o anexo falha; o webhook não contorna a barreira', async () => {
+    const db = setup();
+    vi.mocked(ZapSignClient.prototype.listTemplates).mockResolvedValue([{token:'tpl-1',name:'Contrato',
+      extra_templates:[{token:'child',name:'Procuração'}]}]);
+    const approved = await db.accept();
+    vi.spyOn(ZapSignClient.prototype,'getDoc').mockResolvedValue({name:'Contrato',token:'doc-agente',status:'pending',signers:[],extra_docs:[]});
+    const add = vi.spyOn(ZapSignClient.prototype,'attachTemplate').mockRejectedValue(new Error('Timeout'));
+    await expect(runAgentContract(db.admin,approved,create)).rejects.toThrow(/pacote completo/);
+    expect(db.tables.deal_signatures[0]).toMatchObject({doc_token:'doc-agente',status:'failed'});
+    expect(db.tables.deal_signatures[0].sign_url).toBeFalsy();
+    await expect(handleZapSignWebhook(db.admin,ORG,{token:'doc-agente',event_type:'doc_created',signers:[]}))
+      .resolves.toMatchObject({action:'package_requires_review'});
+    expect(await runAgentContract(db.admin,approved,create)).toMatchObject({ok:false});
+    expect(db.post).toHaveBeenCalledTimes(1); expect(add).toHaveBeenCalledTimes(1);
+    expect(h.texts).toEqual([]);
+  });
+  it('não associa o primeiro webhook do principal nem o do anexo ao link do cliente durante a montagem', async () => {
+    const db = setup();
+    const id = 'cccccccc-aaaa-1111-bbbb-aaaaaaaaaaaa';
+    db.tables.deal_signatures.push({id,organization_id:ORG,origin:'agent',status:'processing',doc_token:null,request:{package_expected:3}});
+    const created = {token:'doc',external_id:id,event_type:'doc_created',signers:[]};
+    expect(await handleZapSignWebhook(db.admin,ORG,created)).toMatchObject({action:'awaiting_package'});
+    expect(await handleZapSignWebhook(db.admin,ORG,{...created,token:'extra',parent_doc_token:'doc'})).toMatchObject({action:'ignored_attachment'});
+    expect(db.tables.deal_signatures[0]).toMatchObject({status:'processing',doc_token:null});
+    expect(db.tables.deal_signatures[0].sign_url).toBeFalsy();
   });
   it('não cria de novo após timeout; webhook autenticado recompõe o vínculo na própria organização', async () => {
     const db = setup(), approved = await db.accept();

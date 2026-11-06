@@ -18,6 +18,7 @@ import { loadCustomFieldDefs } from '@/lib/wa-agents/leadOps';
 import { addDealTag } from '@/lib/wa-agents/actions';
 import { renderTemplate } from '@/lib/wa-agents/template';
 import { ensureSignLink } from './message';
+import { officeTemplates, createTemplatePackage, PackageError } from './templatePackage';
 import { errorMessage } from '@/lib/wa-agents/errors';
 import { ZapSignClient, ZapSignError, signerLink, type ZapSignDoc, type ZapSignSigner } from './client';
 import { resolveVariables, splitPhone, type VariableContext, type VariableSource } from './variables';
@@ -70,6 +71,8 @@ export type SignatureRule = {
 
 /** O que o envio manual escolheu na hora (fica gravado na linha). */
 export type SignatureRequest = {
+  package_expected?: number;
+  package_unverified?: boolean;
   agent_delivery?: 'conversation';
   agent_id?: string;
   conversation_id?: string;
@@ -283,8 +286,12 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
   }).slice(0, 255);
 
   let doc: ZapSignDoc;
+  let isPackage = false;
   try {
-    doc = await client.createDocFromTemplate({
+    const tpl = officeTemplates(await client.listTemplates()).find(t => t.token === spec.template_token);
+    if (!tpl) return { status: 'failed', error: 'Selecione um modelo principal ativo na conta ZapSign.', retry: false };
+    isPackage = !!tpl.extra_templates?.length;
+    doc = await createTemplatePackage(client, tpl, {
       template_id: spec.template_token,
       name: docName,
       signer_name: snap.contact.name,
@@ -303,14 +310,20 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
       ],
     });
   } catch (err) {
+    if (err instanceof PackageError) {
+      if (err.docToken) await admin.from('deal_signatures').update({doc_token:err.docToken,
+        request:{ ...spec, package_unverified:true }}).eq('id',row.id).eq('organization_id',orgId);
+      return { status: 'failed', error: err.message, retry: false };
+    }
     const e = err as ZapSignError;
     // token recusado, modelo inexistente ou dado inválido: não adianta tentar de novo
     const retry = !(e instanceof ZapSignError) || e.status === 0 || e.status === 429 || e.status >= 500;
     return { status: 'failed', error: errorMessage(err), retry };
   }
 
-  const signers: StoredSigner[] = (doc.signers ?? []).map((s, i) => toStoredSigner(s, i === 0 ? 'contact' : 'extra'));
-  const main = signers[0] ?? null;
+  const clientToken = isPackage ? agentContactToken(doc.signers ?? [], snap.contact) : doc.signers?.[0]?.token;
+  const signers: StoredSigner[] = (doc.signers ?? []).map(s => toStoredSigner(s, s.token === clientToken ? 'contact' : 'extra'));
+  const main = signers.find(s => s.role === 'contact') ?? null;
 
   // autenticação e exigências do signatário principal (não dá para passar na criação por modelo)
   if (main) {
@@ -367,6 +380,15 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
   // Link pelo WhatsApp do CRM (fica na conversa, sem custo na ZapSign)
   let sentVia: SendChannel = send;
   let note: string | undefined;
+  if (isPackage && (send === 'zapsign_email' || send === 'zapsign_whatsapp')) {
+    try {
+      if (!main) throw new Error('Signatário do cliente não identificado.');
+      await client.updateSigner(main.token, { send_automatic_email: send === 'zapsign_email', send_automatic_whatsapp: send === 'zapsign_whatsapp' });
+    } catch {
+      sentVia = 'link';
+      note = 'Pacote pronto. A ZapSign não confirmou o convite ao cliente; confira o envio antes de repetir.';
+    }
+  }
   if (send === 'crm_whatsapp') {
     const r = await sendLinkViaCrm(admin, orgId, snap, signUrl, docName, spec.signer.message);
     if (!r.ok) {
@@ -614,6 +636,7 @@ export async function discardSignature(
 // ---------------------------------------------------------------- webhook da ZapSign
 
 export type WebhookPayload = {
+  parent_doc_token?: string | null;
   event_type?: string;
   token?: string;
   status?: string;
@@ -647,6 +670,7 @@ export async function handleZapSignWebhook(
 ): Promise<WebhookResult> {
   const docToken = (payload.token ?? '').trim();
   if (!docToken) return { action: 'ignored_no_token' };
+  if (payload.parent_doc_token) return { action: 'ignored_attachment' };
   const { data: found, error: readError } = await admin.from('deal_signatures').select('*').eq('organization_id', orgId).eq('doc_token', docToken).maybeSingle();
   if (readError) throw new Error(readError.message);
   let row = found as SignatureRow | null;
@@ -656,6 +680,12 @@ export async function handleZapSignWebhook(
     const reservation = await admin.from('deal_signatures').select('request').eq('organization_id',orgId)
       .eq('origin','agent').eq('id',payload.external_id).maybeSingle();
     if (reservation.error) throw new Error(reservation.error.message);
+    // Only our completed assembly may make a package pending and release its URL.
+    // A doc_created callback can race the POST for the principal or an attachment.
+    if (reservation.data?.request?.package_expected) {
+      if (payload.event_type === 'doc_created' || payload.event_type === 'created_signer') return { action: 'awaiting_package' };
+      throw new Error('Pacote em montagem. Reprocessar após a conferência dos anexos.');
+    }
     const contactToken = agentContactToken(payload.signers ?? [],reservation.data?.request?.agent_signer);
     const incoming = (payload.signers ?? []).map(s => toStoredSigner(s, s.token === contactToken ? 'contact' : 'extra'));
     const { data, error } = await admin.from('deal_signatures').update({ doc_token: docToken, status: 'pending',
@@ -673,6 +703,7 @@ export async function handleZapSignWebhook(
     }
   }
   if (!row) return { action: 'ignored_unknown_doc' };
+  if (row.request?.package_unverified || (row.status === 'failed' && row.request?.package_expected)) return { action: 'package_requires_review' };
   const now = nowIso();
   const event = payload.event_type ?? '';
   const docStatus = (payload.status ?? '').toLowerCase();

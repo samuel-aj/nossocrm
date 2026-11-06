@@ -7,6 +7,7 @@
  *   para cada uma (campos fixos do CRM ou campo personalizado de mesmo nome).
  */
 import { readContractTemplate } from '@/lib/zapsign/templateFile';
+import { officeTemplates } from '@/lib/zapsign/templatePackage';
 import { json } from '@/lib/whatsapp/api';
 import { guardRoute, getErrorMessage } from '@/app/api/wa-agents/_shared';
 import { clientFor, loadZapSignSettings } from '@/lib/zapsign/signatures';
@@ -27,30 +28,33 @@ export async function GET(req: Request) {
     const settings = await loadZapSignSettings(auth.admin, orgId);
     if (!settings) return json({ error: 'A ZapSign não está conectada. Configure em Configurações > Integrações > ZapSign.', code: 'NOT_CONNECTED' }, 409);
     const client = clientFor(settings);
-    const templates = await client.listTemplates();
+    const templates = officeTemplates(await client.listTemplates());
 
     if (!wantVars) {
       return json({
         templates: templates
           .filter((t) => t.active !== false)
-          .map((t) => ({ token: t.token, name: t.name, lang: t.lang ?? null, folder_path: t.folder_path ?? null, type: t.template_type ?? null })),
+          .map((t) => ({ token: t.token, name: t.name, lang: t.lang ?? null, folder_path: t.folder_path ?? null, type: t.template_type ?? null,
+            attachments: (t.extra_templates ?? []).map(extra => extra.name) })),
       });
     }
 
     const tpl = templates.find((t) => t.token === token);
     if (!tpl) return json({ error: 'Modelo não encontrado na conta ZapSign' }, 404);
-    if (!tpl.template_file) return json({ variables: [], suggestions: {}, note: 'A ZapSign não devolveu o arquivo deste modelo.' });
     let variables: string[];
+    let planNotice: string | undefined;
     try {
-      variables = (await readContractTemplate(client, tpl)).names;
+      const file = await readContractTemplate(client, tpl);
+      variables = file.names;
+      planNotice = file.planNotice;
     } catch (err) {
-      return json({ variables: [], suggestions: {}, note: `Não foi possível ler o DOCX do modelo: ${getErrorMessage(err, 'arquivo inválido')}` });
+      return json({ error: `Não foi possível ler todos os documentos do modelo: ${getErrorMessage(err, 'arquivo inválido')}` }, 422);
     }
     const defs = await loadCustomFieldDefs(auth.admin, orgId).catch(() => []);
     const suggestions: Record<string, string> = {};
     const fields = defs.map((f) => ({ key: f.key, label: f.label ?? f.key }));
     for (const v of variables) suggestions[v] = autoMatchVariable(v, fields);
-    return json({ variables, suggestions, template: { token: tpl.token, name: tpl.name } });
+    return json({ variables, suggestions, note: planNotice, template: { token: tpl.token, name: tpl.name } });
   } catch (err) {
     return json({ error: getErrorMessage(err, 'Falha ao consultar a ZapSign') }, 502);
   }

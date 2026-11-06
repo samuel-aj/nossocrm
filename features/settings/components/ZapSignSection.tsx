@@ -9,6 +9,7 @@ import React, { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, ExternalLink, FileSignature, Loader2, RefreshCw, Unplug } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
+import { templateLabel, type ZapSignTemplateItem } from '@/features/zapsign/useZapSign';
 import ConfirmModal from '@/components/ConfirmModal';
 import { SETTINGS_BTN_PRIMARY, SETTINGS_BTN_SECONDARY, SETTINGS_INPUT_CLASS, SettingsCard, SettingsRow } from './SettingsUi';
 
@@ -23,7 +24,7 @@ type Status = {
   last_error?: string | null;
 };
 
-type Template = { token: string; name: string; lang: string | null; folder_path: string | null };
+type Template = ZapSignTemplateItem;
 
 export const ZAPSIGN_STATUS_KEY = ['zapsign', 'settings'] as const;
 
@@ -182,7 +183,7 @@ export const ZapSignSection: React.FC = () => {
                     <ul className="divide-y divide-slate-100 dark:divide-white/5 rounded-lg border border-slate-200 dark:border-white/10">
                       {templates.data?.templates.map((t) => (
                         <li key={t.token} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                          <span className="min-w-0 truncate text-slate-800 dark:text-slate-100">{t.name}</span>
+                          <span className="min-w-0 truncate text-slate-800 dark:text-slate-100">{templateLabel(t)}</span>
                           <span className="shrink-0 text-[11px] text-slate-400 font-mono">{t.token.slice(0, 8)}…</span>
                         </li>
                       ))}

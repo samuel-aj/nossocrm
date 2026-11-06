@@ -15,6 +15,10 @@ O recurso fica **desativado** até o escritório escolher um modelo para aquele 
 
 **Teste no editor:** abra **Testar**, converse como um cliente fictício e confirme o resumo. O painel mostra o link de teste. Clique em **Simular assinatura do cliente** para receber a resposta do agente no simulador. A criação e a entrega são simuladas.
 
+**Modelos com anexos:** no agente, selecione o modelo principal. A quantidade ao lado do nome inclui o documento principal e os anexos que a ZapSign vinculou a ele. O CRM reúne os campos desses documentos, apresenta um único resumo e libera o link do cliente quando confirma que o envelope contém todos os documentos. Se a ZapSign não confirmar um anexo, confira o envelope antes de repetir o pedido. Para escolher um modelo avulso legítimo, use **Mostrar também modelos de um documento**. Seleções antigas não são trocadas automaticamente.
+
+Listar os modelos não comprova que a conta permite criar documentos pela API em produção. Se a ZapSign exigir um plano de API, o editor informa a limitação e o agente não cria o contrato.
+
 Estado em 28/10/2026: branch `feat/zapsign` e preview `staging`. Não está em produção.
 
 ## O que a pessoa vê
