@@ -118,7 +118,9 @@ export async function POST(req: Request) {
       countOrgMembers(admin, scoped.organization_id),
     ]);
     let alreadyCounted = false;
-    const existingAuthUser = await findAuthUserByEmail(admin, email);
+    let existingAuthUser;
+    try { existingAuthUser = await findAuthUserByEmail(email); }
+    catch { return json({ error: 'Não foi possível verificar o e-mail. Tente novamente.' }, 503); }
     if (existingAuthUser) {
       const { data: existingProfile, error: profileError } = await admin
         .from('profiles')

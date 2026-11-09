@@ -91,7 +91,7 @@ export async function POST(req: Request) {
   };
 
   try {
-    const existing = await findAuthUserByEmail(admin, email);
+    const existing = await findAuthUserByEmail(email);
     const linkMember = (userId: string) => admin.from('user_organizations').upsert({
       user_id: userId, organization_id: invite.organization_id, role: invite.role,
     }, { onConflict: 'user_id,organization_id', ignoreDuplicates: true });
