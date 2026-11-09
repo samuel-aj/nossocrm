@@ -315,24 +315,19 @@ export const UsersPage: React.FC = () => {
 
             const data = await res.json().catch(() => null);
             if (!res.ok) {
+                if (data?.code === 'existing_login') {
+                    setNewLoginPassword('');
+                    setInviteMode('email');
+                }
                 throw new Error(data?.error || `Erro ao criar login (HTTP ${res.status})`);
             }
 
-            if (data?.existing) {
-                addToast(
-                    data?.emailSent
-                        ? `${email} já tinha conta no CRM: foi adicionado à organização com a senha que já usava e avisado por email.`
-                        : `${email} já tinha conta no CRM e foi adicionado à organização com a senha que já usava (a senha digitada foi ignorada).`,
-                    'success'
-                );
-            } else {
-                addToast(
-                    data?.emailSent
-                        ? `Login criado e o acesso (email e senha) foi enviado por email para ${email}.`
-                        : `Login criado para ${email}, mas o email não foi enviado. Passe o email e a senha pra pessoa.`,
-                    'success'
-                );
-            }
+            addToast(
+                data?.emailSent
+                    ? `Login criado. As credenciais foram enviadas para ${email}.`
+                    : `Login criado para ${email}, mas o email não foi enviado. Passe o acesso à pessoa.`,
+                'success'
+            );
             setInviteEmail('');
             setNewLoginPassword('');
             await fetchUsers();
@@ -747,8 +742,8 @@ export const UsersPage: React.FC = () => {
                                     </div>
                                     <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                                         {inviteMode === 'link' && 'Gera um link de acesso pra você copiar e enviar como quiser.'}
-                                        {inviteMode === 'email' && 'A pessoa recebe um email com o link do convite e define a própria senha. Email que já tem conta no CRM entra direto na organização, sem email.'}
-                                        {inviteMode === 'login' && 'A conta já nasce pronta: você escolhe o email e a senha, e o acesso completo (com a senha) vai por email pra pessoa. Email que já tem conta entra na organização com a senha que já usa.'}
+                                        {inviteMode === 'email' && 'A pessoa recebe um email com o link do convite e define a própria senha. Quem já tem conta mantém a senha e recebe um aviso ao ser adicionado.'}
+                                        {inviteMode === 'login' && 'A conta já nasce pronta: você escolhe o email e a senha, e o acesso completo (com a senha) vai por email pra pessoa. Se a pessoa já tem conta, adicione-a em “Por email”. A senha atual é preservada.'}
                                     </p>
                                 </div>
 
