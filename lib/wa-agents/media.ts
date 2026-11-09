@@ -119,13 +119,26 @@ export async function sendAgentMedia(admin: SupabaseClient, input: SendAgentMedi
   if (orgId !== input.organizationId || media.organization_id !== orgId) return { ok: false, error: 'mídia de outra organização' };
   if (!conn) return { ok: false, error: 'conversa sem número vinculado' };
   if (conn.status !== 'connected') return { ok: false, error: 'número desconectado' };
-  const to = ctx.conversation.wa_phone;
-  const caption = (input.caption ?? '').trim();
+  try {
+    const mediaPath = await ensureAgentMediaOutbox(admin, orgId, media);
+    return await sendOutboxMedia(admin, ctx, { mediaPath, kind: media.kind, mime: media.mime, caption: input.caption,
+      fileName: originalFileName(media.storage_path, media.name) });
+  } catch (e) {
+    return { ok: false, error: errorMessage(e) };
+  }
+}
 
-  let mediaPath: string;
+export async function sendOutboxMedia(admin: SupabaseClient, ctx: ConversationContext, file: {
+  mediaPath: string; kind: OutboundMediaKind; mime: string | null; fileName: string; caption?: string; transcript?: string;
+}): Promise<SendAgentMediaResult> {
+  const { mediaPath, kind, fileName } = file;
+  const orgId = ctx.conversation.organization_id;
+  const conn = ctx.connection;
+  if (!conn || conn.status !== 'connected' || !mediaPath.startsWith(orgId + '/out/')) return { ok: false, error: 'Conexão ou caminho de mídia inválido.' };
+  const to = ctx.conversation.wa_phone;
+  const caption = (file.caption ?? '').trim();
   let signedUrl: string;
   try {
-    mediaPath = await ensureAgentMediaOutbox(admin, orgId, media);
     const { data: signed, error: signErr } = await admin.storage
       .from(WA_MEDIA_BUCKET)
       .createSignedUrl(mediaPath, SIGNED_URL_SECONDS);
@@ -135,15 +148,13 @@ export async function sendAgentMedia(admin: SupabaseClient, input: SendAgentMedi
     return { ok: false, error: errorMessage(e) };
   }
 
-  const kind = media.kind as OutboundMediaKind;
-  const fileName = originalFileName(media.storage_path, media.name);
   let result: SendResult;
   try {
     result = await getProvider(conn).sendMedia({
       to,
       media: signedUrl,
       kind,
-      mimeType: media.mime || undefined,
+      mimeType: file.mime || undefined,
       fileName,
       caption: caption || undefined,
     });
@@ -166,7 +177,8 @@ export async function sendAgentMedia(admin: SupabaseClient, input: SendAgentMedi
       error: result.ok ? null : result.error || 'falha no envio',
       mediaType: kind,
       mediaUrl: mediaPath,
-      mediaMime: media.mime ?? null,
+      mediaMime: file.mime ?? null,
+      transcription: file.transcript,
     });
     messageId = msg?.id ?? null;
     if (result.ok) {

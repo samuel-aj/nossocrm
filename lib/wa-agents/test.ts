@@ -20,6 +20,7 @@ import {
 } from './engine';
 import { errorMessage } from './errors';
 import { agentHistoryText } from './replyOutput';
+import { voiceDelivery, VOICE_NOTICE } from './voiceDelivery';
 import { consultHelperAgent } from './helpers';
 import { searchKnowledge } from './knowledge';
 import { resolveAgentModel } from './model';
@@ -31,7 +32,7 @@ import { normalizeKeyword } from './text';
 import type { AgentToolRuntime } from './tools';
 import type { AgentRow, KnowledgeHit } from './types';
 
-export type TestMessage = { role: 'user' | 'assistant'; text: string; contractReviewKey?: string };
+export type TestMessage = { role: 'user' | 'assistant'; text: string; audio?: boolean; contractReviewKey?: string };
 
 /**
  * Agente salvo + a configuração que está na TELA do editor (rascunho), para o
@@ -61,6 +62,7 @@ export function agentWithDraft(
 }
 
 export type TestAgentReplyResult = {
+  voiceLines?: number[];
   contractReviewKey?: string;
   text: string;
   lines: string[];
@@ -241,7 +243,20 @@ async function testAgentReplyWithUsage(
     assertUsageHealthy();
     generated = gen;
     if (gen.outputSafety.status === 'blocked') throw new Error('Resposta da IA bloqueada por conter dados internos. Revise o roteiro e tente novamente.');
-    const lines = gen.text && gen.text !== NO_REPLY_TOKEN ? splitLines(gen.text) : [];
+    const lastMessage = input.messages.at(-1);
+    const mirror = !!agent.media_understanding?.reply_to_audio && lastMessage?.role === 'user' && !!lastMessage.audio;
+    const segments = voiceDelivery(gen.segments, mirror);
+    const lines: string[] = [];
+    const voiceLines: number[] = [];
+    let introduced = input.messages.some(m => m.role === 'assistant' && m.text.split('\n').includes(VOICE_NOTICE));
+    for (const seg of segments) {
+      if (seg.kind !== 'text' || !seg.text || seg.text === NO_REPLY_TOKEN) continue;
+      if (seg.voice) {
+        if (!introduced) { lines.push(VOICE_NOTICE); introduced = true; }
+        voiceLines.push(lines.length);
+        lines.push(seg.text);
+      } else lines.push(...splitLines(seg.text));
+    }
     const media = gen.segments.filter(s => s.kind === 'media').map(s => (s.kind === 'media' ? s.name : ''));
     await logRun(admin, {
       organization_id: organizationId,
@@ -257,7 +272,7 @@ async function testAgentReplyWithUsage(
       model: resolved.modelId,
       duration_ms: Date.now() - startedAt,
     });
-    return { text: gen.text, lines, toolCalls: gen.toolCalls, usage: gen.usage, segments: gen.segments, media, contractReviewKey };
+    return { text: gen.text, lines, voiceLines, toolCalls: gen.toolCalls, usage: gen.usage, segments, media, contractReviewKey };
   } catch (e) {
     const msg = errorMessage(e);
     await logRun(admin, {

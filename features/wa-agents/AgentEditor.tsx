@@ -134,7 +134,7 @@ type AgentFormState = {
   api_key: string;
   /** Remover a chave própria ao salvar */
   clear_api_key: boolean;
-  /** Chave da OpenAI só para transcrever áudio, digitada agora ('' = não mexe) */
+  /** Chave da OpenAI para transcrição e síntese, digitada agora ('' = não mexe) */
   audio_api_key: string;
   /** Remover a chave de áudio ao salvar */
   clear_audio_api_key: boolean;
@@ -921,7 +921,7 @@ export const AgentEditor: React.FC<{
   const [hasAudioApiKey, setHasAudioApiKey] = useState<boolean>(agent?.has_audio_api_key ?? false);
   // Valores antigos dos comportamentos fixos: vão junto no primeiro PATCH (ver legacyDefaultsPatch).
   const [legacyPatch, setLegacyPatch] = useState<Partial<AgentInput>>(() => legacyDefaultsPatch(agent));
-  /** Terá chave para transcrever áudio depois de salvar (digitada agora ou já salva). */
+  /** Terá chave auxiliar de áudio depois de salvar (digitada agora ou já salva). */
   const temChaveDeAudio = form.clear_audio_api_key ? false : hasAudioApiKey || !!form.audio_api_key.trim();
   const [tab, setTabState] = useState<EditorTab>('roteiro');
   const [testOpen, setTestOpen] = useState(false);
@@ -1654,7 +1654,7 @@ export const AgentEditor: React.FC<{
             <Field
               label="Chave auxiliar da OpenAI (áudio)"
               htmlFor="agent-audio-api-key"
-              tip="Só para transcrever os áudios do lead (whisper-1) quando o provedor do agente não é a OpenAI. Vazio: o Google transcreve com a chave do próprio agente e a Anthropic usa a chave da OpenAI da organização (Central de I.A.)."
+              tip="Chave OpenAI dedicada para transcrever e gerar voz. Sem ela, a geração de voz usa a chave OpenAI do agente ou da organização."
               help={
                 form.clear_audio_api_key
                   ? 'A chave de áudio será removida ao salvar.'
@@ -1809,14 +1809,14 @@ export const AgentEditor: React.FC<{
         </Panel>
 
         <Panel
-          title="Mídias recebidas no atendimento"
-          description="Arquivos que o lead manda na conversa viram texto para o agente. Não tem relação com a base de conhecimento."
+          title="Mídias no atendimento"
           icon={<Paperclip size={16} />}
         >
           <div className={ROW_DIVIDER_CLASS}>
             {(
               [
                 ['audio', 'Ouvir áudios', 'Transcreve o que o lead falou. A transcrição também aparece no chat.'],
+                ['reply_to_audio', 'Responder em áudio quando o cliente enviar áudio', 'Responde por voz à última mensagem de áudio do cliente. Links seguem por escrito. A geração usa a chave da OpenAI configurada para o agente ou para a organização.'],
                 ['image', 'Ver imagens', 'Descreve fotos e figurinhas e lê o texto de prints, boletos e documentos fotografados.'],
                 ['document', 'Ler documentos', 'Extrai o texto de PDF, DOCX e arquivos de texto.'],
               ] as Array<[keyof AgentMediaUnderstanding, string, string]>
@@ -1827,8 +1827,12 @@ export const AgentEditor: React.FC<{
                 tip={ajuda}
                 control={
                   <Toggle
-                    checked={form.media_understanding[campo]}
-                    onChange={(v) => patch({ media_understanding: { ...form.media_understanding, [campo]: v } })}
+                    checked={!!form.media_understanding[campo]}
+                    onChange={(v) => patch({ media_understanding: {
+                      ...form.media_understanding, [campo]: v,
+                      ...(campo === 'reply_to_audio' && v ? { audio: true } : {}),
+                      ...(campo === 'audio' && !v ? { reply_to_audio: false } : {}),
+                    } })}
                     label={titulo}
                   />
                 }

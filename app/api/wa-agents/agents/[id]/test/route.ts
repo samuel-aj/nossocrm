@@ -11,6 +11,9 @@
  * salva continuam vindo do banco.
  */
 import { z } from 'zod';
+import { createUsageContext } from '@/lib/ai-usage/budget';
+import { runWithUsageContext } from '@/lib/ai-usage/context';
+import { synthesizeVoice } from '@/lib/wa-agents/voice';
 import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { loadAgent } from '@/lib/wa-agents/context';
@@ -32,10 +35,11 @@ export const runtime = 'nodejs';
 export const maxDuration = 120;
 
 const BodySchema = z.object({
+  previewVoice: z.string().trim().min(1).max(8000).optional(),
   signatureEvent: z.literal('signed').optional(),
   contractState: z.enum(['invited','signed']).optional(),
   messages: z
-    .array(z.object({ role: z.enum(['user', 'assistant']), text: z.string().max(8000), contractReviewKey: z.string().regex(/^[a-f0-9]{64}$/).optional() }))
+    .array(z.object({ role: z.enum(['user', 'assistant']), text: z.string().max(8000), audio: z.boolean().optional(), contractReviewKey: z.string().regex(/^[a-f0-9]{64}$/).optional() }))
     .max(200)
     .default([]),
   state: z.record(z.string(), z.unknown()).optional(),
@@ -71,6 +75,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const agent = withDraft(saved, rawBody, parsed.data.draft as Partial<AgentRow> | undefined);
 
   try {
+    if (parsed.data.previewVoice) {
+      const text = parsed.data.previewVoice;
+      const scope = await createUsageContext(auth.admin, { organizationId: orgId, agentId: id, scope: 'test' });
+      const audio = await runWithUsageContext(scope, () => synthesizeVoice(auth.admin, agent, text));
+      if (!audio.bytes) return json({ error: audio.reason }, 422);
+      return Response.json({ audio: audio.bytes.toString('base64') }, { headers: { 'Cache-Control': 'no-store' } });
+    }
     const result = await testAgentReply(auth.admin, {
       organizationId: orgId,
       agent,

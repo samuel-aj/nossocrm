@@ -34,7 +34,9 @@ import {
 import { errorMessage, WaAgentError } from './errors';
 import { consultHelperAgent } from './helpers';
 import { searchKnowledge } from './knowledge';
-import { sendAgentMedia } from './media';
+import { sendAgentMedia, sendOutboxMedia } from './media';
+import { prepareVoiceFile } from './voice';
+import { voiceDelivery, VOICE_NOTICE } from './voiceDelivery';
 import { resolveAgentModel } from './model';
 import { generateAgentReply, type CollectedToolCall } from './replyGeneration';
 import { segmentText } from './replyOutput';
@@ -786,11 +788,44 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     // 7. Envio na ordem dos segmentos: linhas de texto e mídias no ponto em que foram pedidas
     const lines: string[] = [];
     const mediaSent: string[] = [];
-    for (const seg of gen.segments) {
+    const mirrorAudio = !!agent.media_understanding?.reply_to_audio && !input.forceReply && !input.proactive &&
+      pending.at(-1)?.media_type === 'audio';
+    let voiceIntroduced = !!priorState.voice_introduced;
+    for (const seg of voiceDelivery(gen.segments, mirrorAudio)) {
       assertUsageHealthy();
       if (seg.kind === 'text') {
         const t = segmentText(seg);
         if (!t) continue;
+        if (seg.voice) {
+          await renew();
+          await beforeProactiveSend();
+          const file = await prepareVoiceFile(admin, agent, t);
+          assertUsageHealthy();
+          // A human may have paused the AI or taken over while the voice was being generated.
+          const { data: stillActive, error: stateError } = await admin.from('wa_conversations').select('id')
+            .eq('id', conversationId).eq('organization_id', organizationId)
+            .eq('ai_agent_id', agent.id).eq('ai_status', 'active').eq('ai_lock_until', lockValue).maybeSingle();
+          if (stateError) throw new WaAgentError('DB_ERROR', stateError.message);
+          if (!stillActive) return await finish('skipped', { reason: 'Atendimento alterado durante a geração de voz.' });
+          if (file.path) {
+            await renew();
+            await beforeProactiveSend();
+            if (!voiceIntroduced) {
+              await sendLines(admin, ctx, agent, [VOICE_NOTICE], { renewLock: renew, beforeSend: beforeProactiveSend, onSent });
+              voiceIntroduced = true;
+            }
+            await beforeProactiveSend();
+            const sent = await sendOutboxMedia(admin, ctx, {
+              mediaPath: file.path, kind: 'audio', mime: 'audio/mpeg', fileName: 'voz.mp3', transcript: t,
+            });
+            if (!sent.ok) throw new WaAgentError('SEND_FAILED', sent.error);
+            onSent();
+            lines.push(t);
+            pushEvent('voice_sent', { message_id: sent.messageId });
+            continue;
+          }
+          pushEvent('voice_fallback_text', { reason: file.reason });
+        }
         const segLines = splitLines(t);
         if (lines.length > 0 && agent.line_delay_ms > 0) await sleep(agent.line_delay_ms);
         await sendLines(admin, ctx, agent, segLines, { renewLock: renew, beforeSend: beforeProactiveSend, onSent });
@@ -838,6 +873,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     const lastIn = pending.length > 0 ? pending[pending.length - 1] : await getLastMessage(admin, ctx, 'in');
     const saved = mergeSavedData(gen.toolCalls);
     const state: ConversationAiState = { ...priorState };
+    if (voiceIntroduced) state.voice_introduced = true;
     if (contractReviewKey && lines.length) state.zapsign_review = contractReviewKey;
     if (saved) state.dados = mergeSavedDataInto(state.dados, saved);
     if (mediaSent.length > 0) {

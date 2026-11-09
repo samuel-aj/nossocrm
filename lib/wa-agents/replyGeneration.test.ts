@@ -14,6 +14,15 @@ const result = (steps: ReturnType<typeof step>[]) => ({ steps, text: steps.at(-1
 beforeEach(() => h.generate.mockReset());
 
 describe('preparação da resposta dos agentes', () => {
+  it('preserva o formato de uma fala literal do roteiro mesmo se o modelo a escrever sem acionar a ferramenta', async () => {
+    const clip = 'Vou te enviar o link.';
+    h.generate.mockResolvedValueOnce(result([step(clip + ' https://exemplo.invalid/assinar')]));
+    const reply = await generateAgentReply({ ...input, agent: { ...agent, system_prompt: '[audio]' + clip + '[/audio]' } });
+    expect(reply.segments).toEqual([
+      { kind: 'text', text: clip, voice: true, step: 0 },
+      { kind: 'text', text: 'https://exemplo.invalid/assinar', step: 0 },
+    ]);
+  });
   it('envia uma única cópia da pergunta repetida antes e depois de salvar dados', async () => {
     const text = 'Preciso fazer algumas perguntas rápidas.\nPosso continuar?';
     h.generate.mockResolvedValueOnce(result([step(text, [saved]), step(text)]));

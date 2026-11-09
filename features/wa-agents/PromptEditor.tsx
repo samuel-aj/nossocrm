@@ -13,6 +13,7 @@ import React from 'react';
 import { Braces, ListChecks, Paperclip, Image as ImageIcon, Film, Music, FileText, Info, AlertTriangle } from 'lucide-react';
 import { PROMPT_VARIABLES, PROMPT_VARIABLE_NAMES, promptVariableName } from '@/lib/wa-agents/catalog';
 import { HighlightedScript } from './HighlightedScript';
+import { readVoiceScript, wrapVoiceSelection } from '@/lib/wa-agents/voiceScript';
 import { TOKEN_KIND_LABEL, orphanTokens, type KnownTokens, type TokenKind } from './tokens';
 import { HELP_CLASS, Notice, TokenChip } from './ui';
 
@@ -149,12 +150,27 @@ export const PromptEditor: React.FC<{
     mediaLoaded,
   };
   const orphans = orphanTokens(value, known);
+  const voiceError = readVoiceScript(value).error;
+  function markVoice() {
+    const field = textareaRef.current;
+    if (!field) return;
+    const selected = wrapVoiceSelection(value, field.selectionStart, field.selectionEnd);
+    onChange(selected.value);
+    requestAnimationFrame(() => { field.focus(); field.setSelectionRange(selected.start, selected.end); });
+  }
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_272px] gap-4">
       {/* Paleta: acima em telas pequenas, à direita nas grandes */}
       <aside className="lg:order-2 space-y-4 lg:sticky lg:top-4 self-start" aria-label="Paleta do roteiro">
         <p className={HELP_CLASS}>Clique para inserir no cursor ou arraste até o ponto certo do texto.</p>
+        <PaletteGroup icon={<Music size={14} />} title="Resposta em áudio"
+          help="Selecione a frase que o agente deve falar exatamente como está no roteiro.">
+          <button type="button" onMouseDown={e => e.preventDefault()} onClick={markVoice}
+            className="rounded-md border px-2 py-1 text-xs font-medium text-purple-700 dark:text-purple-300">
+            Marcar trecho como áudio
+          </button>
+        </PaletteGroup>
 
         <PaletteGroup
           icon={<Braces size={14} aria-hidden="true" />}
@@ -232,6 +248,7 @@ export const PromptEditor: React.FC<{
         />
 
         <TokenLegend orphans={orphans} />
+        {voiceError && <p className="text-sm text-red-600" role="alert">{voiceError}</p>}
 
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className={HELP_CLASS}>

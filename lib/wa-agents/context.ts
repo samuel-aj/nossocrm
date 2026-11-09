@@ -1,4 +1,5 @@
 import { readDbLeadSource } from '@/lib/deals/leadSource';
+import { readVoiceScript } from './voiceScript';
 /**
  * Contexto de uma conversa para o agente: conversa, número, contato, negócio
  * e organização; histórico como mensagens do modelo; prompt de sistema.
@@ -952,6 +953,7 @@ export function buildKnowledgeBlock(
 export function buildSystemPrompt(input: {
   agent: AgentRow;
   ctx: ConversationContext;
+  textOnly?: boolean;
   now?: Date;
   /** Primeiro contato iniciado pelo sistema (gatilho por pipeline): o lead ainda não recebeu mensagem */
   firstContact?: boolean;
@@ -966,7 +968,7 @@ export function buildSystemPrompt(input: {
 }): string {
   const { agent, ctx } = input;
   const vars = buildPromptVars(input);
-  const rawScript = agent.system_prompt || '';
+  const rawScript = readVoiceScript(agent.system_prompt || '', input.textOnly).prompt;
   const rawStopRules = (agent.stop_rules || '').trim();
   const markers = hasScriptMarkers(rawScript) || hasScriptMarkers(rawStopRules);
   const script = replaceScriptMarkers(

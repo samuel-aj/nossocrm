@@ -518,6 +518,7 @@ export async function recordOutboundMessage(
     mediaType?: string | null;
     mediaUrl?: string | null;
     mediaMime?: string | null;
+    transcription?: string;
     /** Responder: id (no CRM) da mensagem citada + retrato dela; Encaminhar: marca */
     quotedMessageId?: string | null;
     quoted?: QuotedSnapshot | null;
@@ -527,6 +528,7 @@ export async function recordOutboundMessage(
   // Só grava as colunas de responder/encaminhar quando usadas (compatível com
   // um banco que ainda não tenha a migração, no envio comum).
   const replyCols = {
+    ...(input.transcription !== undefined ? { transcription: input.transcription, media_url: input.mediaUrl, media_type: input.mediaType, media_mime: input.mediaMime } : {}),
     ...(input.quotedMessageId !== undefined ? { quoted_message_id: input.quotedMessageId } : {}),
     ...(input.quoted !== undefined ? { quoted: input.quoted } : {}),
     ...(input.forwarded ? { forwarded: true } : {}),
