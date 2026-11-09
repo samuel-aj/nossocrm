@@ -705,6 +705,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     const runAgent = agent;
     const mediaSentBefore = new Set((priorState.midias_enviadas ?? []).map(normalizeKeyword));
     const mediaQueued = new Set<string>();
+    let contractReviewKey: string | undefined;
     let helperCalls = 0;
     let knowledgeCalls = 0;
     const runtime: AgentToolRuntime = {
@@ -718,7 +719,8 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
             inboundId: pending[pending.length - 1].id,
             // An auto-lead can be created *after* the inbound message that opened it.
             since: [memoriaDesde, [runCtx.deal?.created_at, pending[pending.length - 1].created_at]
-              .filter((v): v is string => !!v).sort()[0]].filter((v): v is string => !!v).sort().pop() ?? since }, args);
+              .filter((v): v is string => !!v).sort()[0]].filter((v): v is string => !!v).sort().pop() ?? since }, args,
+            key => { contractReviewKey = key; });
         },
       } : {}),
       ...(agent.tools?.scheduled_return_bot_id ? { scheduledReturn: scheduledReturnRuntime(admin, organizationId, conversationId, agent, returnAnchor) } : {}),
@@ -836,6 +838,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     const lastIn = pending.length > 0 ? pending[pending.length - 1] : await getLastMessage(admin, ctx, 'in');
     const saved = mergeSavedData(gen.toolCalls);
     const state: ConversationAiState = { ...priorState };
+    if (contractReviewKey && lines.length) state.zapsign_review = contractReviewKey;
     if (saved) state.dados = mergeSavedDataInto(state.dados, saved);
     if (mediaSent.length > 0) {
       state.midias_enviadas = Array.from(new Set([...(state.midias_enviadas ?? []), ...mediaSent]));

@@ -35,7 +35,7 @@ const BodySchema = z.object({
   signatureEvent: z.literal('signed').optional(),
   contractState: z.enum(['invited','signed']).optional(),
   messages: z
-    .array(z.object({ role: z.enum(['user', 'assistant']), text: z.string().max(8000) }))
+    .array(z.object({ role: z.enum(['user', 'assistant']), text: z.string().max(8000), contractReviewKey: z.string().regex(/^[a-f0-9]{64}$/).optional() }))
     .max(200)
     .default([]),
   state: z.record(z.string(), z.unknown()).optional(),

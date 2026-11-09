@@ -174,8 +174,8 @@ export function buildAgentTools(agent: AgentRow, runtime: AgentToolRuntime = {})
   if (agent.tools?.zapsign_template_token && runtime.contract) {
     const contract = runtime.contract;
     tools.contrato_zapsign = tool({
-      description: 'Prepara ou cria o contrato do modelo autorizado pelo escritório. Comece em preparar. Em dados, use os nomes exatos das variáveis pessoais e só valores informados pelo cliente, incluindo nome_signatario se necessário. Peça os campos pessoais faltantes; se faltar um dado do CRM, chame a equipe. Quando receber solicitar_confirmacao, responda com essa frase exata e aguarde o cliente. Após o aceite, chame em modo criar com os mesmos dados. A integração entrega o link nesta conversa e avisa quando o cliente assina. Só anuncie a criação após confirmação da ferramenta. Se o envio está programado, diga que o link chegará por aqui. Mantenha o atendimento aberto.',
-      inputSchema: z.object({ modo: z.enum(['preparar', 'criar']), dados: z.record(z.string().min(1).max(160), z.string().trim().min(1).max(500)) }),
+      description: 'Antes de apresentar a ficha para confirmação, use preparar. Em dados, use os nomes exatos das variáveis e os dados pessoais informados pelo cliente, inclusive nome_signatario se necessário. Omita o e-mail se não foi informado; não invente endereço nem insista. Peça os outros campos pessoais que a ferramenta indicar. Para pendência do escritório, chame a equipe. Use solicitar_confirmacao como a própria ficha, numa única mensagem ao cliente. Após o aceite, use criar com os mesmos dados. Se preparar devolver ficha_confirmada, passe direto a criar. Só anuncie a criação quando a ferramenta confirmar. O CRM entrega o link nesta conversa e avisa quando o cliente assina. Mantenha o atendimento aberto.',
+      inputSchema: z.object({ modo: z.enum(['preparar', 'criar']), dados: z.record(z.string().min(1).max(160), z.string().max(500)) }),
       execute: async input => { try { return await contract(input); } catch (e) { return { ok: false, erro: errorMessage(e) }; } },
     });
   }

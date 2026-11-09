@@ -54,8 +54,8 @@ export type WaRunsFilters = {
 export type WaRunsResult = { runs: RunRow[]; agents: Record<string, string> };
 export type WaBotRunsResult = { runs: BotRunRow[]; bots: Record<string, string> };
 
-export type WaTestMessage = { role: 'user' | 'assistant'; text: string };
-export type WaTestResult = { text: string; lines: string[]; toolCalls: unknown[]; usage: unknown };
+export type WaTestMessage = { role: 'user' | 'assistant'; text: string; contractReviewKey?: string };
+export type WaTestResult = { text: string; lines: string[]; toolCalls: unknown[]; usage: unknown; contractReviewKey?: string };
 
 /** IA na configuração: gerar do zero, melhorar o roteiro atual ou aplicar um ajuste pedido. */
 export type WaAssistMode = 'generate' | 'improve' | 'adjust';
@@ -274,6 +274,7 @@ export function useTestWaAgent(id: string | null | undefined) {
         text: json.text ?? '',
         lines: json.lines ?? [],
         toolCalls: json.toolCalls ?? [],
+        contractReviewKey: json.contractReviewKey,
         usage: json.usage ?? null,
       };
     },

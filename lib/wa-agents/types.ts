@@ -924,6 +924,8 @@ export type ConversationApproval = {
 
 /** Conteúdo de `wa_conversations.ai_state` */
 export type ConversationAiState = {
+  /** Comprovante interno da ficha apresentada nesta conversa. */
+  zapsign_review?: string;
   /** dados salvos pela ferramenta salvar_dados */
   dados?: Record<string, unknown>;
   /** passagem de bastão vinda de outro agente */

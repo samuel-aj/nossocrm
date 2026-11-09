@@ -1108,7 +1108,7 @@ export function buildSystemPrompt(input: {
     );
   }
   if (agent.tools?.zapsign_template_token) {
-    lines.push('- Contrato: quando o cliente quiser contratar, use contrato_zapsign. Pergunte o que faltar, reproduza o resumo da ferramenta e aguarde o aceite antes de criar. O CRM envia o link na conversa e aciona o acompanhamento quando o cliente assinar. Mantenha o atendimento disponível. Só confirme assinatura com informação da ZapSign.');
+    lines.push('- Contrato: quando o cliente quiser contratar, use contrato_zapsign antes de pedir confirmação da ficha. Use a ficha devolvida pela ferramenta como a única conferência dos dados e autorização para gerar o contrato. Com o aceite, chame criar. Aproveite o e-mail que o cliente informou. Se ele não tiver, preferir não informar ou seguir sem responder esse campo, omita o e-mail e prossiga com os outros dados. Nunca invente um endereço. O CRM entrega o link na conversa e aciona o acompanhamento quando o cliente assinar. Mantenha o atendimento disponível. Só confirme assinatura com informação da ZapSign.');
   }
   if (agent.tools?.calculator !== false) {
     lines.push('- Contas (percentuais, prazos, valores): chame a ferramenta calcular com a expressão em vez de calcular de cabeça.');

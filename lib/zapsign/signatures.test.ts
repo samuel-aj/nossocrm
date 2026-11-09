@@ -420,7 +420,9 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
       token: 'doc-agente', status: 'pending', name: 'Honorários', signers: [{ name: 'Maria da Silva', token: 's1', status: 'new', sign_url: 'https://assinatura.invalid/s1' }],
     });
     async function accept(answer = 'Sim', sent = 'sent') {
-      const draft = await runAgentContract(db.admin, scope, prepare);
+      const draft = await runAgentContract(db.admin, scope, prepare, key => {
+        db.tables.wa_conversations[0].ai_state = { zapsign_review: key };
+      });
       if (!('solicitar_confirmacao' in draft) || !draft.solicitar_confirmacao) throw new Error(JSON.stringify(draft));
       db.tables.wa_messages.push(msg('2', 'out', draft.solicitar_confirmacao, 1, sent), msg('3', 'in', answer, 2));
       return { ...scope, inboundId: '3' };
@@ -445,6 +447,69 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
     const db = setup(), approved = await db.accept(answer, sent);
     expect(await runAgentContract(db.admin, approved, create)).toMatchObject({ criado: false });
     expect(db.post).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['Não tenho e-mail', 'sem@email.com', ' '],
+    ['Prefiro continuar sem informar', '', ' '],
+    ['Meu endereço é Rua das Flores', ' ', ' '],
+    ['Meu e-mail é maria@teste.invalid', 'maria@teste.invalid', 'maria@teste.invalid'],
+    ['Meu e-mail é maria@teste.invalid', '', 'maria@teste.invalid'],
+  ])('preenche o e-mail do documento conforme a conversa: %s', async (body, supplied, expected) => {
+    const db = setup();
+    db.tables.contacts[0].email = null;
+    db.tables.wa_messages[0].body = body;
+    db.tables.wa_ai_agents[0].tools = { zapsign_template_token: scope.template, zapsign_variables: { 'E-MAIL': 'cliente:perguntar' } };
+    vi.mocked(files.readContractTemplate).mockResolvedValue({ revision: 'r1', names: ['E-MAIL'] });
+    const dados = { 'E-MAIL': supplied };
+    const draft = await runAgentContract(db.admin, scope, { modo: 'preparar', dados }, key => {
+      db.tables.wa_conversations[0].ai_state = { zapsign_review: key };
+    });
+    if (!('solicitar_confirmacao' in draft) || !draft.solicitar_confirmacao) throw new Error('Faltou a ficha');
+    expect(draft.solicitar_confirmacao).not.toMatch(/Honorários|Referência|sem@email/);
+    db.tables.wa_messages.push(msg('2', 'out', draft.solicitar_confirmacao, 1), msg('3', 'in', 'Confirmo', 2));
+    const next = { ...scope, inboundId: '3' };
+    expect(await runAgentContract(db.admin, next, { modo: 'preparar', dados })).toMatchObject({ ficha_confirmada: true });
+    expect(await runAgentContract(db.admin, next, { modo: 'criar', dados })).toMatchObject({ criado: true });
+    expect(db.post.mock.calls[0][0]).toMatchObject({ data: [{ de: '{{E-MAIL}}', para: expected }], signer_email: undefined });
+    expect(db.tables.contacts[0].email).toBeNull();
+  });
+  it('aceita a ficha do agente em linguagem natural e não aceita um sim a outra pergunta', async () => {
+    const db = setup(), approved = await db.accept('Sim');
+    const summary = 'Ficha de Maria da Silva. ENDEREÇO: Rua das Flores. VALOR: R$ 4.500,00.';
+    db.tables.wa_messages[1].body = summary + ' Você tem alguma dúvida?';
+    expect(await runAgentContract(db.admin, approved, create)).toMatchObject({ criado: false });
+    expect(db.post).not.toHaveBeenCalled();
+    db.tables.wa_messages[1].body = summary + ' Posso gerar o contrato?';
+    expect(await runAgentContract(db.admin, approved, create)).toMatchObject({ criado: true });
+  });
+  it('não reutiliza o aceite se a ficha foi apresentada antes em outro turno', async () => {
+    const db = setup(), approved = await db.accept();
+    const question = String(db.tables.wa_messages[1].body);
+    db.tables.wa_messages.push(msg('4', 'out', question, 3), msg('5', 'in', 'Confirmo', 4));
+    expect(await runAgentContract(db.admin, { ...approved, inboundId: '5' }, create)).toMatchObject({ criado: false });
+    expect(db.post).not.toHaveBeenCalled();
+  });
+  it('dispensa somente o e-mail pessoal e ainda exige o documento do cliente e o valor do escritório', async () => {
+    const db = setup();
+    db.tables.contacts[0].email = null;
+    vi.mocked(files.readContractTemplate).mockResolvedValue({ revision: 'r1', names: ['E-MAIL', 'RG', 'MULTA'] });
+    expect(await runAgentContract(db.admin, scope, { modo: 'criar', dados: {} })).toMatchObject({
+      perguntar_ao_cliente: ['RG'], preencher_no_crm: ['MULTA'],
+    });
+    expect(db.post).not.toHaveBeenCalled();
+  });
+  it('aproveita os dados de uma ficha anterior e pede apenas autorização para gerar o contrato', async () => {
+    const db = setup();
+    db.tables.wa_messages.push(msg('2', 'out', 'Ficha de Maria da Silva. Rua das Flores. R$ 4.500,00. Confere os dados?', 1),
+      msg('3', 'in', 'Sim', 2));
+    const next = { ...scope, inboundId: '3' };
+    const draft = await runAgentContract(db.admin, next, prepare, key => {
+      db.tables.wa_conversations[0].ai_state = { zapsign_review: key };
+    });
+    if (!('solicitar_confirmacao' in draft) || !draft.solicitar_confirmacao) throw new Error('Faltou o pedido de emissão');
+    expect(draft.solicitar_confirmacao).toBe('Posso gerar o contrato com os dados que você confirmou e enviar o link por aqui?');
+    db.tables.wa_messages.push(msg('4', 'out', draft.solicitar_confirmacao, 3), msg('5', 'in', 'Pode gerar', 4));
+    expect(await runAgentContract(db.admin, { ...scope, inboundId: '5' }, create)).toMatchObject({ criado: true });
   });
   it('não aceita modelo alterado depois da confirmação nem valor pessoal inventado', async () => {
     const db = setup(), approved = await db.accept();
@@ -563,10 +628,11 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
   it('o painel Testar valida o modelo e o aceite sem chamar criação nem gravar no CRM', async () => {
     const db = setup();
     const chat = [{ role: 'user' as const, text: 'Rua das Flores' }];
-    const r = await simulateAgentContract(db.admin, ORG, 'tpl-1', chat, prepare);
+    let key: string | undefined;
+    const r = await simulateAgentContract(db.admin, ORG, 'tpl-1', chat, prepare, undefined, k => { key = k; });
     if (!r.solicitar_confirmacao) throw new Error('Prévia esperada');
     expect(await simulateAgentContract(db.admin, ORG, 'tpl-1',
-      [...chat, { role: 'assistant', text: r.solicitar_confirmacao }, { role: 'user', text: 'Confirmo' }], create))
+      [...chat, { role: 'assistant', text: r.solicitar_confirmacao, contractReviewKey: key }, { role: 'user', text: 'Confirmo' }], create))
       .toMatchObject({ simulado: true, criado: true });
     expect(db.post).not.toHaveBeenCalled(); expect(db.tables.deal_signatures).toHaveLength(0);
     expect(fetch).not.toHaveBeenCalled(); expect(h.texts).toEqual([]);

@@ -6,7 +6,7 @@ import { loadCustomFieldDefs } from '@/lib/wa-agents/leadOps';
 import { readContractTemplate } from './templateFile';
 import { createTemplatePackage, officeTemplates, PackageError } from './templatePackage';
 import { agentContactToken, clientFor, loadLeadSnapshot, loadZapSignSettings, recordEvent, toStoredSigner, type SignatureRow } from './signatures';
-import { hasContractConsent, prepareAgentDraft, type AgentContractInput, type ContractTurn } from './agentDraft';
+import { contractReview, prepareAgentDraft, type AgentContractInput, type ContractTurn } from './agentDraft';
 import { splitPhone } from './variables';
 import type { ZapSignDoc } from './client';
 
@@ -20,12 +20,12 @@ function existing(r: ResultRow) {
     'Já há uma tentativa deste modelo para o lead. Confira a aba Contrato e a ZapSign antes de qualquer nova criação.' };
 }
 
-export async function runAgentContract(admin: SupabaseClient, scope: Scope, input: AgentContractInput) {
+export async function runAgentContract(admin: SupabaseClient, scope: Scope, input: AgentContractInput, rememberReview?: (key: string) => void) {
   const { org, agent, conversation, deal, template } = scope;
   if (!deal || !scope.inboundId) throw new Error('A criação precisa de uma conversa recebida e vinculada a um lead.');
   async function checkBinding() {
     const [conv, config, budget] = await Promise.all([
-      admin.from('wa_conversations').select('deal_id, contact_id, connection_id, wa_phone').eq('organization_id', org).eq('id', conversation)
+      admin.from('wa_conversations').select('deal_id, contact_id, connection_id, wa_phone, ai_state').eq('organization_id', org).eq('id', conversation)
         .eq('ai_status', 'active').eq('is_group', false).eq('ai_agent_id', agent).eq('deal_id', deal).maybeSingle(),
       admin.from('wa_ai_agents').select('tools').eq('organization_id', org).eq('id', agent).eq('enabled', true).maybeSingle(),
       checkConversationBudget(admin, org, conversation),
@@ -34,7 +34,8 @@ export async function runAgentContract(admin: SupabaseClient, scope: Scope, inpu
     if (conv.error || config.error || !conv.data?.contact_id || !conv.data.connection_id || !conv.data.wa_phone || !tools.success || tools.data.zapsign_template_token !== template || budget.blocked_at)
       throw new Error('A conversa, o agente, o limite ou o modelo não permitem criar este contrato.');
     return { contact: conv.data.contact_id as string, connection: conv.data.connection_id as string,
-      phone: conv.data.wa_phone as string, mapping: tools.data.zapsign_variables ?? {} };
+      phone: conv.data.wa_phone as string, mapping: tools.data.zapsign_variables ?? {},
+      reviewKey: conv.data.ai_state?.zapsign_review as string | undefined };
   }
   const binding = await checkBinding();
   const { contact, mapping } = binding;
@@ -66,7 +67,7 @@ export async function runAgentContract(admin: SupabaseClient, scope: Scope, inpu
       .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(100);
     if (error || data?.[0]?.id !== scope.inboundId) throw new Error('O atendimento mudou. Reavalie a mensagem mais recente.');
     return data.slice().reverse().map((m): ContractTurn => ({
-      direction: m.direction, agent: m.source === 'agent', text: m.transcription || m.body || '',
+      id: m.id, direction: m.direction, agent: m.source === 'agent', text: m.transcription || m.body || '',
       ok: m.direction === 'in' || ['sent', 'delivered', 'read'].includes(m.status), at: m.created_at,
     }));
   };
@@ -75,12 +76,16 @@ export async function runAgentContract(admin: SupabaseClient, scope: Scope, inpu
     ctx: snap.ctx, signer: snap.contact.name, fields: defs.map(f => ({ key: f.key, label: f.label || f.key })), turns, supplied: input.dados, mapping });
   if (draft.missing.length || draft.office.length)
     return { ok: false, perguntar_ao_cliente: draft.missing, preencher_no_crm: draft.office };
-  if (input.modo === 'preparar' || !hasContractConsent(turns, draft.question))
-    return { ok: true, criado: false, solicitar_confirmacao: draft.question };
+  const review = contractReview(turns, draft, binding.reviewKey);
+  if (!review.confirmed) {
+    if (review.key) rememberReview?.(review.key);
+    return { ok: true, criado: false, solicitar_confirmacao: review.question };
+  }
+  if (input.modo === 'preparar') return { ok: true, criado: false, ficha_confirmada: true, proximo_passo: 'criar' };
   const [freshBinding, latest, freshSettings, freshSnap] = await Promise.all([
     checkBinding(), history(), loadZapSignSettings(admin, org), loadLeadSnapshot(admin, org, deal),
   ]);
-  if (!isDeepStrictEqual(freshBinding, binding) || !hasContractConsent(latest, draft.question) ||
+  if (!isDeepStrictEqual(freshBinding, binding) || !contractReview(latest, draft, freshBinding.reviewKey).confirmed ||
       !freshSettings || freshSettings.sandbox !== settings.sandbox || freshSettings.api_token !== settings.api_token ||
       !isDeepStrictEqual(freshSnap, snap))
     throw new Error('Os dados do atendimento mudaram. Prepare o contrato novamente.');
