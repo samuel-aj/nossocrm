@@ -2,7 +2,6 @@ import { canManageTeam } from '@/lib/permissions/teamAccessServer';
 import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
-import { findAuthUserByEmail } from '@/lib/supabase/authUsers';
 import { countOrgMembers } from '@/lib/supabase/orgMembers';
 import { sendOrgAddedEmail } from '@/lib/email/orgAddedEmail';
 import { UserRole } from '@/types/constants';
@@ -130,7 +129,7 @@ const CreateUserSchema = z
  * POST /api/admin/users — Criação direta de usuário pelo admin da org:
  * email + senha prontos, sem convite (o admin passa o login pra pessoa).
  * Email com conta ativa em outra org NÃO é aceito aqui (senha de terceiros
- * nunca é alterada); nesse caso o caminho é o convite por link.
+ * nunca é alterada); nesse caso o caminho é o convite por email.
  */
 export async function POST(req: Request) {
   if (!isAllowedOrigin(req)) return json({ error: 'Forbidden' }, 403);
@@ -187,76 +186,17 @@ export async function POST(req: Request) {
 
   const userMetadata = { name: displayName, organization_id: scoped.organization_id, role };
 
-  let userId: string;
-  const existingAuthUser = await findAuthUserByEmail(admin, email);
-
-  if (existingAuthUser) {
-    const { data: existingProfile } = await admin
-      .from('profiles')
-      .select('id, organization_id')
-      .eq('id', existingAuthUser.id)
-      .maybeSingle();
-
-    // Convite pendente DESTA org (nunca logou): pode receber a senha nova.
-    const isPendingHere = Boolean(
-      existingAuthUser.invited_at &&
-        !existingAuthUser.last_sign_in_at &&
-        existingProfile?.organization_id === scoped.organization_id
-    );
-
-    if (existingProfile && !isPendingHere) {
-      // Conta já existente: adiciona à organização SEM tocar na senha (a
-      // informada é ignorada; a atual continua valendo) — um email pode
-      // estar em várias orgs. A org nova aparece no seletor da pessoa.
-      const { data: existingLink } = await admin
-        .from('user_organizations')
-        .select('user_id')
-        .eq('user_id', existingAuthUser.id)
-        .eq('organization_id', scoped.organization_id)
-        .maybeSingle();
-      if (existingLink || existingProfile.organization_id === scoped.organization_id) {
-        return json({ error: 'Este email já é membro desta organização.' }, 400);
-      }
-      const { error: linkError } = await admin.from('user_organizations').upsert(
-        { user_id: existingAuthUser.id, organization_id: scoped.organization_id, role },
-        { onConflict: 'user_id,organization_id' }
-      );
-      if (linkError) return json({ error: linkError.message }, 400);
-      // Avisa por email (via n8n): "você foi adicionado à org X" + acesso.
-      const { data: orgRow } = await admin
-        .from('organizations')
-        .select('name')
-        .eq('id', scoped.organization_id)
-        .single();
-      const origin = req.headers.get('origin') || new URL(req.url).origin;
-      const emailSent = await sendOrgAddedEmail({
-        email,
-        orgName: orgRow?.name || 'sua nova organização',
-        role,
-        appUrl: origin,
-      });
-      return json({ ok: true, existing: true, emailSent, user: { id: existingAuthUser.id, email, role } }, 201);
+  // Só anuncia login pronto quando o Auth realmente gravou a senha.
+  const { data: authData, error: createError } = await admin.auth.admin.createUser({
+    email, password, email_confirm: true, user_metadata: userMetadata,
+  });
+  if (createError) {
+    if (['email_exists', 'user_already_exists'].includes(createError.code ?? '') || /already.*registered/i.test(createError.message)) {
+      return json({ code: 'existing_login', error: 'Este e-mail já tem login. A senha digitada não foi aplicada. Use “Por email” para adicionar a pessoa com a senha atual.' }, 409);
     }
-
-    // Login órfão (sobra de exclusão) ou convite pendente desta org:
-    // reaproveita com a senha nova.
-    const { error: updateError } = await admin.auth.admin.updateUserById(existingAuthUser.id, {
-      password,
-      email_confirm: true,
-      user_metadata: userMetadata,
-    });
-    if (updateError) return json({ error: updateError.message }, 400);
-    userId = existingAuthUser.id;
-  } else {
-    const { data: authData, error: createError } = await admin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: userMetadata,
-    });
-    if (createError) return json({ error: createError.message }, 400);
-    userId = authData.user.id;
+    return json({ error: createError.message }, 400);
   }
+  const userId = authData.user.id;
 
   const { error: profileError } = await admin.from('profiles').upsert(
     {
@@ -273,13 +213,11 @@ export async function POST(req: Request) {
 
   if (profileError) {
     // Rollback apenas da conta que ESTE fluxo criou.
-    if (!existingAuthUser) {
-      await admin.auth.admin.deleteUser(userId);
-    }
+    await admin.auth.admin.deleteUser(userId);
     return json({ error: profileError.message }, 400);
   }
 
-  await admin.from('user_organizations').upsert(
+  const { error: linkError } = await admin.from('user_organizations').upsert(
     {
       user_id: userId,
       organization_id: scoped.organization_id,
@@ -287,6 +225,11 @@ export async function POST(req: Request) {
     },
     { onConflict: 'user_id,organization_id' }
   );
+
+  if (linkError) {
+    await admin.auth.admin.deleteUser(userId);
+    return json({ error: 'Não foi possível vincular a conta à equipe. Tente novamente.' }, 503);
+  }
 
   // Login pronto: envia o acesso por email COM a senha (aqui ela é conhecida,
   // foi o admin quem definiu). Falha de email não desfaz a criação.

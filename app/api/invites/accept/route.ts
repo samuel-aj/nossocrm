@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { createStaticAdminClient } from '@/lib/supabase/server';
+import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { findAuthUserByEmail } from '@/lib/supabase/authUsers';
 import { countOrgMembers } from '@/lib/supabase/orgMembers';
@@ -14,7 +14,7 @@ function json<T>(body: T, status = 200): Response {
 const AcceptInviteSchema = z
   .object({
     token: z.string().min(1),
-    email: z.string().email(),
+    email: z.string().trim().email().toLowerCase(),
     password: z.string().min(6),
     name: z.string().min(1).max(200).optional(),
   })
@@ -80,130 +80,68 @@ export async function POST(req: Request) {
     role: invite.role,
   };
 
-  // Limite de usuários da organização (checado aqui porque é o convite que
-  // materializa a conta; links podem ter sido gerados antes do limite lotar).
-  // Conta membros = perfis ativos aqui + vínculos multi-org (igual à lista).
-  const [{ data: orgLimits }, memberCount] = await Promise.all([
-    admin.from('organizations').select('max_users').eq('id', invite.organization_id).single(),
-    countOrgMembers(admin, invite.organization_id),
-  ]);
-
-  // Um usuário removido da equipe fica com a conta de login órfã (o perfil
-  // some, o email continua registrado no auth). Criar de novo falharia com
-  // "email já registrado", então: órfã = reaproveita a conta com a senha
-  // nova; com perfil ativo = conflito real, mensagem clara. Exceção: conta
-  // criada pelo convite POR EMAIL desta mesma org (inviteUserByEmail, nunca
-  // logou; o trigger já criou o perfil na org) também é reaproveitada.
-  let userId: string;
-  let profileAlreadyInOrg = false;
-  const existingAuthUser = await findAuthUserByEmail(admin, email);
-
-  if (existingAuthUser) {
-    const { data: existingProfile } = await admin
-      .from('profiles')
-      .select('id, organization_id')
-      .eq('id', existingAuthUser.id)
-      .maybeSingle();
-
-    const isPendingInviteHere = Boolean(
-      existingAuthUser.invited_at &&
-        !existingAuthUser.last_sign_in_at &&
-        existingProfile?.organization_id === invite.organization_id
-    );
-
-    if (existingProfile && !isPendingInviteHere) {
-      await releaseInvite();
-      return json(
-        { error: 'Este email já está em uso por uma conta ativa. Entre com esse email ou use outro.' },
-        400
-      );
-    }
-
-    profileAlreadyInOrg = isPendingInviteHere;
-
-    // Convite pendente já tem perfil contado no limite; os demais casos
-    // adicionam +1 pessoa à org.
-    if (!profileAlreadyInOrg && orgLimits?.max_users && (memberCount ?? 0) >= orgLimits.max_users) {
-      await releaseInvite();
-      return json(
-        { error: `A organização atingiu o limite de ${orgLimits.max_users} usuário(s). Fale com quem te convidou.` },
-        400
-      );
-    }
-
-    const { error: updateError } = await admin.auth.admin.updateUserById(existingAuthUser.id, {
-      password,
-      email_confirm: true,
-      user_metadata: userMetadata,
-    });
-
-    if (updateError) {
-      await releaseInvite();
-      return json({ error: updateError.message }, 400);
-    }
-
-    userId = existingAuthUser.id;
-  } else {
-    if (orgLimits?.max_users && (memberCount ?? 0) >= orgLimits.max_users) {
-      await releaseInvite();
-      return json(
-        { error: `A organização atingiu o limite de ${orgLimits.max_users} usuário(s). Fale com quem te convidou.` },
-        400
-      );
-    }
-
-    const { data: authData, error: createError } = await admin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: userMetadata,
-    });
-
-    if (createError) {
-      await releaseInvite();
-      return json({ error: createError.message }, 400);
-    }
-
-    userId = authData.user.id;
-  }
-
-  const { error: profileError } = await admin
-    .from('profiles')
-    .upsert(
-      {
-        id: userId,
-        email,
-        name: displayName,
-        first_name: displayName,
-        organization_id: invite.organization_id,
-        role: invite.role,
-        updated_at: nowIso,
-      },
-      { onConflict: 'id' }
-    );
-
-  if (profileError) {
-    // Rollback apenas da conta que ESTE fluxo criou; conta reaproveitada
-    // (órfã pré-existente) fica como estava. Libera o convite pra nova tentativa.
-    if (!existingAuthUser) {
-      await admin.auth.admin.deleteUser(userId);
+  let createdId: string | undefined;
+  const fail = async (message: string, status: number, code?: string) => {
+    if (createdId) {
+      const { error } = await admin.auth.admin.deleteUser(createdId);
+      if (error) return json({ error: 'Não foi possível concluir a criação. Fale com o suporte.' }, 500);
     }
     await releaseInvite();
-    return json({ error: profileError.message }, 400);
+    return json({ error: message, code }, status);
+  };
+
+  try {
+    const existing = await findAuthUserByEmail(admin, email);
+    const linkMember = (userId: string) => admin.from('user_organizations').upsert({
+      user_id: userId, organization_id: invite.organization_id, role: invite.role,
+    }, { onConflict: 'user_id,organization_id', ignoreDuplicates: true });
+    let userId: string;
+    if (existing) {
+      const { data: profile, error } = await admin.from('profiles')
+        .select('organization_id, role').eq('id', existing.id).maybeSingle();
+      if (error) return await fail('Não foi possível verificar a equipe. Tente novamente.', 503);
+      if (!invite.email || !existing.invited_at || profile?.organization_id !== invite.organization_id || profile?.role !== invite.role) {
+        return await fail('Este e-mail já tem conta. Entre com a senha atual ou peça ao administrador para usar “Por email”.', 409);
+      }
+
+      // O clique no e-mail já abre uma sessão, antes da primeira senha.
+      // Para uma identidade confirmada, só o próprio destinatário pode defini-la.
+      const client = await createClient();
+      const { data: { user }, error: sessionError } = await client.auth.getUser();
+      if (sessionError || !user || user.id !== existing.id || user.email?.toLowerCase() !== email) {
+        return await fail('Para definir a senha, confirme o e-mail desta conta. Se já definiu a senha, entre pelo login.', 403, 'confirm_email');
+      }
+      userId = existing.id;
+      const { data: updated, error: profileError } = await admin.from('profiles')
+        .update({ name: displayName, first_name: displayName }).eq('id', userId)
+        .eq('organization_id', invite.organization_id).eq('role', invite.role).select('id').single();
+      if (profileError || !updated) return await fail('Não foi possível confirmar o perfil na equipe.', 503);
+      const { error: linkError } = await linkMember(userId);
+      if (linkError) return await fail('Não foi possível concluir o vínculo com a equipe. Tente novamente.', 503);
+
+      const { error: passwordError } = await client.auth.updateUser({ password });
+      if (passwordError && passwordError.code !== 'same_password') return await fail(passwordError.message, 400);
+    } else {
+      const { data: org, error: limitError } = await admin.from('organizations')
+        .select('max_users').eq('id', invite.organization_id).single();
+      if (limitError || !org) return await fail('Não foi possível verificar o limite da equipe.', 503);
+      if (org.max_users && await countOrgMembers(admin, invite.organization_id) >= org.max_users) {
+        return await fail(`A organização atingiu o limite de ${org.max_users} usuário(s).`, 400);
+      }
+      const { data, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: userMetadata });
+      if (error) return await fail(error.message, 400);
+      userId = data.user.id;
+      createdId = userId;
+      const { error: profileError } = await admin.from('profiles').upsert({
+        id: userId, email, name: displayName, first_name: displayName,
+        organization_id: invite.organization_id, role: invite.role, updated_at: nowIso,
+      }, { onConflict: 'id' });
+      if (profileError) return await fail('Não foi possível criar o perfil da equipe.', 503);
+      const { error: linkError } = await linkMember(userId);
+      if (linkError) return await fail('Não foi possível concluir o vínculo com a equipe. Tente novamente.', 503);
+    }
+    return json({ ok: true, user: { id: userId, email } });
+  } catch {
+    return await fail('Não foi possível concluir o convite. Tente novamente.', 503);
   }
-
-  // Add to user_organizations junction table
-  await admin
-    .from('user_organizations')
-    .upsert(
-      {
-        user_id: userId,
-        organization_id: invite.organization_id,
-        role: invite.role,
-      },
-      { onConflict: 'user_id,organization_id' }
-    );
-
-  // O convite já foi consumido atomicamente lá no começo (used_at = nowIso).
-  return json({ ok: true, user: { id: userId, email } });
 }

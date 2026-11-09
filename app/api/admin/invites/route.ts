@@ -109,7 +109,6 @@ export async function POST(req: Request) {
   // Envio por email: valida ANTES de criar o convite. Email com conta ativa
   // não recebe o email do Supabase (a conta já existe) — mensagem clara.
   const admin = sendEmail ? createStaticAdminClient() : null;
-  let staleAuthUserId: string | null = null;
   if (admin && email) {
     // Limite de usuários da org: o modo email materializa uma conta, então
     // conta pra vaga igual ao "login pronto" e ao convite por link no aceite.
@@ -118,35 +117,27 @@ export async function POST(req: Request) {
       admin.from('organizations').select('max_users').eq('id', scoped.organization_id).single(),
       countOrgMembers(admin, scoped.organization_id),
     ]);
-    if (orgLimits?.max_users && memberCount >= orgLimits.max_users) {
-      return json(
-        { error: `Limite de ${orgLimits.max_users} usuário(s) da organização atingido. Fale com o suporte pra aumentar.` },
-        400
-      );
-    }
-
+    let alreadyCounted = false;
     const existingAuthUser = await findAuthUserByEmail(admin, email);
     if (existingAuthUser) {
-      const { data: existingProfile } = await admin
+      const { data: existingProfile, error: profileError } = await admin
         .from('profiles')
         .select('id, organization_id, role')
         .eq('id', existingAuthUser.id)
         .maybeSingle();
-      // Só é reaproveitável (descartar + reenviar) quando: (a) é órfã (login
-      // sem perfil, sobra de exclusão) OU (b) é um convite pendente DESTA
-      // MESMA org (invited_at, nunca logou, perfil aponta pra cá). Conta com
-      // perfil em QUALQUER outra situação — inclusive pendente de OUTRA org —
-      // não pode ser tocada: apagá-la roubaria/quebraria o cadastro alheio.
+      if (profileError || !existingProfile) {
+        return json({ error: 'Não foi possível confirmar o perfil deste login. Fale com o suporte.' }, 409);
+      }
       const isPendingHere = Boolean(
         existingAuthUser.invited_at &&
-          !existingAuthUser.last_sign_in_at &&
+          !existingAuthUser.last_sign_in_at && !existingAuthUser.email_confirmed_at &&
           existingProfile?.organization_id === scoped.organization_id
       );
-      if (existingProfile && !isPendingHere) {
+      alreadyCounted = isPendingHere;
+      if (!isPendingHere) {
         // Conta já existente: em vez de bloquear, ADICIONA a conta a esta
         // organização — um email pode estar em várias orgs (mesmo comportamento
-        // da criação de org pelo superadmin). Não vai email: a pessoa já tem
-        // login e senha; a org nova aparece no seletor de organizações dela.
+        // da criação de org pelo superadmin). A pessoa recebe um aviso e usa a senha atual.
         const { data: existingLink } = await admin
           .from('user_organizations')
           .select('user_id')
@@ -159,6 +150,12 @@ export async function POST(req: Request) {
         const isSuperAdmin = existingProfile.role === UserRole.SUPER_ADMIN;
         if (existingLink || (!isSuperAdmin && existingProfile.organization_id === scoped.organization_id)) {
           return json({ error: 'Este email já é membro desta organização.' }, 400);
+        }
+        if (orgLimits?.max_users && memberCount >= orgLimits.max_users) {
+          return json(
+            { error: `Limite de ${orgLimits.max_users} usuário(s) da organização atingido. Fale com o suporte pra aumentar.` },
+            400
+          );
         }
         const { error: linkError } = await admin.from('user_organizations').upsert(
           {
@@ -184,7 +181,15 @@ export async function POST(req: Request) {
         });
         return json({ addedExisting: true, emailSent, member: { id: existingAuthUser.id, email } }, 201);
       }
-      staleAuthUserId = existingAuthUser.id;
+      if (existingProfile.role !== parsed.data.role) {
+        return json({ error: 'Já há um convite para esta pessoa com outro cargo. Conclua o primeiro acesso e ajuste a função na equipe.' }, 409);
+      }
+    }
+    if (!alreadyCounted && orgLimits?.max_users && memberCount >= orgLimits.max_users) {
+      return json(
+        { error: `Limite de ${orgLimits.max_users} usuário(s) da organização atingido. Fale com o suporte pra aumentar.` },
+        400
+      );
     }
   }
 
@@ -208,34 +213,26 @@ export async function POST(req: Request) {
   let emailSent = false;
   let emailError: string | null = null;
   if (admin && email) {
-    if (staleAuthUserId) {
-      const { error: delError } = await admin.auth.admin.deleteUser(staleAuthUserId);
-      if (delError) {
-        emailError = `Não deu pra preparar o email (${delError.message}). Use o link do convite.`;
-      }
-    }
-    if (!emailError) {
-      // O email do Supabase leva a pessoa direto pra página do convite
-      // (/join?token=...), onde ela define nome e senha. O `data` vira
-      // raw_user_meta_data: o trigger handle_new_user cria o perfil já na
-      // org certa (sem isso ele cairia no fallback = org mais antiga).
-      const origin = req.headers.get('origin') || new URL(req.url).origin;
-      const { error: inviteEmailError } = await admin.auth.admin.inviteUserByEmail(email, {
-        redirectTo: `${origin}/join?token=${invite.token}`,
-        data: {
-          name: email.split('@')[0],
-          organization_id: scoped.organization_id,
-          role: parsed.data.role,
-        },
-      });
-      if (inviteEmailError) {
-        emailError = `Convite criado, mas o email não foi enviado (${inviteEmailError.message}). Copie o link e envie direto.`;
-      } else {
-        emailSent = true;
-      }
+    // O email do Supabase leva a pessoa direto pra página do convite
+    // (/join?token=...), onde ela define nome e senha. O `data` vira
+    // raw_user_meta_data: o trigger handle_new_user cria o perfil já na
+    // org certa (sem isso ele cairia no fallback = org mais antiga).
+    const origin = req.headers.get('origin') || new URL(req.url).origin;
+    const { error: inviteEmailError } = await admin.auth.admin.inviteUserByEmail(email, {
+      redirectTo: `${origin}/join?token=${invite.token}`,
+      data: {
+        name: email.split('@')[0],
+        organization_id: scoped.organization_id,
+        role: parsed.data.role,
+      },
+    });
+    if (inviteEmailError) {
+      emailError = `Convite criado, mas o email não foi enviado (${inviteEmailError.message}). Copie o link e envie direto.`;
+    } else {
+      emailSent = true;
     }
   }
 
-  console.log('[admin/invites POST] Created invite:', { id: invite?.id, token: invite?.token, expires_at: invite?.expires_at, emailSent });
+  console.log('[admin/invites POST] Created invite:', { id: invite?.id, expires_at: invite?.expires_at, emailSent });
   return json({ invite, emailSent, emailError }, 201);
 }

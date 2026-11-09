@@ -22,6 +22,10 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
   const [loading, setLoading] = useState(false)
   const [validating, setValidating] = useState(true)
   const [inviteData, setInviteData] = useState<any>(null)
+  const [validationError, setValidationError] = useState<string | null>(null)
+  const [needsEmail, setNeedsEmail] = useState(false)
+  const [emailSent, setEmailSent] = useState(false)
+  const [accepted, setAccepted] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const [formData, setFormData] = useState({
@@ -34,7 +38,7 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
   useEffect(() => {
     const validateToken = async () => {
       if (!token) {
-        setError('Link de convite inválido ou ausente.')
+        setValidationError('Link de convite inválido ou ausente.')
         setValidating(false)
         return
       }
@@ -47,17 +51,26 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
 
         const payload = await res.json().catch(() => null)
         
-        // Log para debug
-        console.log('[JoinClient] Validation response:', { 
-          ok: res.ok, 
-          status: res.status, 
-          payload 
-        })
-        
         if (!res.ok || !payload?.valid) {
           const errorMsg = payload?.error || 'Este convite não existe ou já foi utilizado.'
           console.error('[JoinClient] Validation failed:', errorMsg)
           throw new Error(errorMsg)
+        }
+
+        // Convites criados pela API admin chegam como sessão no fragmento.
+        // O cliente padrão usa PKCE; importe a sessão antes de habilitar o aceite.
+        const fragment = new URLSearchParams(window.location.hash.slice(1))
+        if (fragment.get('type') === 'invite') {
+          const access = fragment.get('access_token')
+          const refresh = fragment.get('refresh_token')
+          if (!access || !refresh) throw new Error('Abra o link completo enviado por e-mail.')
+          const { data: { user }, error: identityError } = await supabase.auth.getUser(access)
+          if (identityError || !payload.invite?.email || user?.email?.toLowerCase() !== payload.invite.email.toLowerCase()) {
+            throw new Error('O e-mail confirmado não corresponde a este convite. Abra o link enviado ao destinatário.')
+          }
+          const { error: sessionError } = await supabase.auth.setSession({ access_token: access, refresh_token: refresh })
+          if (sessionError) throw sessionError
+          window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
         }
 
         setInviteData(payload.invite)
@@ -66,7 +79,7 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
         }
       } catch (err: any) {
         console.error('[JoinClient] Error validating token:', err)
-        setError(getErrorMessage(err))
+        setValidationError(getErrorMessage(err))
       } finally {
         setValidating(false)
       }
@@ -74,6 +87,26 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
 
     validateToken()
   }, [token])
+
+  const confirmByEmail = async () => {
+    if (!inviteData?.email || !token || loading) return
+    setLoading(true)
+    try {
+      const url = new URL('/join', window.location.origin)
+      url.searchParams.set('token', token)
+      const { error: sendError } = await supabase.auth.signInWithOtp({
+        email: inviteData.email,
+        options: { shouldCreateUser: false, emailRedirectTo: url.toString() },
+      })
+      if (sendError) throw sendError
+      setEmailSent(true)
+      setError('Enviamos um link ao e-mail do convite. Abra-o neste navegador para continuar.')
+    } catch (err) {
+      setError(getErrorMessage(err))
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -100,16 +133,20 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
       })
 
       const data = await res.json().catch(() => null)
-      if (!res.ok) throw new Error(data?.error || `Erro ao aceitar convite (HTTP ${res.status})`)
+      if (!res.ok) {
+        setNeedsEmail(data?.code === 'confirm_email')
+        throw new Error(data?.error || `Erro ao aceitar convite (HTTP ${res.status})`)
+      }
 
+      setAccepted(true)
       const { error: signInError } = await supabase.auth.signInWithPassword({
         email: formData.email,
         password: formData.password,
       })
 
-      if (signInError) throw signInError
+      if (signInError) throw new Error('Seu cadastro está pronto. Entre com o e-mail e a senha que acabou de definir.')
 
-      router.push('/dashboard')
+      router.replace('/select-org')
     } catch (err: any) {
       console.error(err)
       setError(getErrorMessage(err))
@@ -126,15 +163,15 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
     )
   }
 
-  if (error) {
+  if (validationError || accepted) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-dark-bg p-4">
         <div className="max-w-md w-full bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-2xl p-8 text-center shadow-xl">
           <div className="h-16 w-16 bg-red-100 dark:bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
             <AlertCircle className="h-8 w-8 text-red-500" />
           </div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Convite Inválido</h2>
-          <p className="text-slate-500 dark:text-slate-400 mb-6">{error}</p>
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">{accepted ? 'Cadastro concluído' : 'Convite indisponível'}</h2>
+          <p className="text-slate-500 dark:text-slate-400 mb-6">{validationError || error || 'Entrando no CRM…'}</p>
           <button
             onClick={() => router.push('/login')}
             className="w-full py-3 px-4 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-medium hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
@@ -262,13 +299,20 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
             {error && (
               <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-500/20 rounded-xl">
                 <AlertCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
-                <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+                <p className="text-sm text-red-600 dark:text-red-400">{error} <a className="underline" href="/login">Ir para o login</a></p>
               </div>
+            )}
+
+            {needsEmail && !emailSent && (
+              <button type="button" disabled={loading} onClick={confirmByEmail}
+                className="w-full py-2 text-primary-600 underline">
+                Enviar novo link de confirmação
+              </button>
             )}
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || emailSent}
               className="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-xl shadow-lg shadow-primary-500/20 text-sm font-bold text-white bg-primary-600 hover:bg-primary-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-[0.98] mt-6"
             >
               {loading ? (
