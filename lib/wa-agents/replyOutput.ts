@@ -7,15 +7,17 @@ export type ReplySegment =
   | { kind: 'media'; name: string; caption?: string; step?: number };
 export type OutputIssue = { segment: number; step?: number; field: 'text' | 'caption'; reason: string };
 
-/** Reserved internal envelopes, not arbitrary JSON or ordinary words such as "dados". */
+/** Customer-facing text must never contain bracketed instructions or a serialized tool call. */
 export function internalOutputReason(raw: string): string | null {
-  if (/\[\/?audio\]|\bfalar_trecho\b/i.test(raw)) return 'voice_marker';
-  const text = raw.replace(/\\(["'])/g, '$1');
+  const text = raw.normalize('NFKC').replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\\(["'])/g, '$1');
+  if (text.includes('[')) return 'internal_marker';
+  if (/\b(?:salvar_dados|encerrar_atendimento|executar_acao|enviar_midia|consultar_agente|consultar_documentos|consultar_retorno|agendar_retorno|cancelar_retorno|contrato_zapsign|falar_trecho|nome_signatario|telefone_signatario|email_signatario)\b/iu.test(text) ||
+      /\bcalcular\s*\(|(?:^|\s)(?:functions|tools)\.[\w-]+|(?:^|\s)to=(?:functions|tools)\.|<\/?(?:tool_call|tool_use|function_call|invoke|function)(?:\s|[=>/])/iu.test(text)) return 'tool_call';
   if (/\{\s*["'“”]?dados["'“”]?\s*:/iu.test(text) || /,\s*["'“”]dados["'“”]\s*:/iu.test(text) ||
       /["'](?:proxima_pergunta|apresentacao_enviada|memoria_desde)["']\s*:/iu.test(text)) return 'internal_data';
-  if (/["'](?:tool_calls?|tool_results?|function_call|replacements)["']\s*:/iu.test(text) ||
-      /\b(?:salvar_dados|encerrar_atendimento|executar_acao|enviar_midia|consultar_agente|consultar_documentos)\s*\(/iu.test(text) ||
-      /["'](?:name|tool|toolName)["']\s*:\s*["'](?:salvar_dados|encerrar_atendimento|executar_acao|enviar_midia|calcular|consultar_agente|consultar_documentos)["']/iu.test(text)) return 'tool_call';
+  if (/["'](?:tool_calls?|tool_results?|toolName|function_call|replacements)["']\s*:/iu.test(text) ||
+      /["'](?:name|tool)["']\s*:\s*["']calcular["']/iu.test(text) ||
+      (/["']name["']\s*:/iu.test(text) && /["'](?:arguments|parameters)["']\s*:/iu.test(text))) return 'tool_call';
   if (/<<<\s*(?:dados|fim(?: dos dados)?)\s*>>>|<\/?(?:tool_call|tool_result|function_call)>|(?:^|\n)\s*#{0,3}\s*INSTRUÇÕES DO SISTEMA\b/iu.test(text)) return 'internal_marker';
   return null;
 }
@@ -37,7 +39,7 @@ export function prepareReplyOutput(input: readonly ReplySegment[], configuredCli
   const issues: OutputIssue[] = [];
   input.forEach((s, segment) => {
     const field = s.kind === 'text' ? 'text' : 'caption';
-    const reason = internalOutputReason(s.kind === 'text' ? s.text : s.caption ?? '');
+    const reason = internalOutputReason(cleanText(s.kind === 'text' ? s.text : s.caption ?? ''));
     if (reason) issues.push({ segment, step: s.step, field, reason });
   });
   // Validate the entire draft before allowing even its first otherwise-valid line out.

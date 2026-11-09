@@ -34,6 +34,7 @@ import {
 import { errorMessage, WaAgentError } from './errors';
 import { consultHelperAgent } from './helpers';
 import { searchKnowledge } from './knowledge';
+import { internalOutputReason } from './replyOutput';
 import { sendAgentMedia, sendOutboxMedia } from './media';
 import { prepareVoiceFile } from './voice';
 import { voiceDelivery, VOICE_NOTICE } from './voiceDelivery';
@@ -353,6 +354,7 @@ async function sendLines(
   lines: string[],
   opts: { renewLock?: () => Promise<void>; beforeSend?: () => Promise<void>; onSent?: () => void } = {}
 ): Promise<void> {
+  if (lines.some(line => internalOutputReason(line))) throw new WaAgentError('SEND_FAILED', 'Resposta bloqueada por conter instrução interna.');
   await opts.beforeSend?.();
   const conn = ctx.connection;
   if (!conn) throw new WaAgentError('NO_CONNECTION', 'Conversa sem número vinculado');

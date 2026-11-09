@@ -12,6 +12,7 @@ import { getProvider, type OutboundMediaKind, type SendResult } from '@/lib/what
 import { recordOutboundMessage, replicateOutboundToSiblings } from '@/lib/whatsapp/service';
 import type { ConversationContext } from './context';
 import { errorMessage } from './errors';
+import { internalOutputReason } from './replyOutput';
 import { originalFileName, sanitizeStorageFileName } from './files';
 import { WA_AGENT_FILES_BUCKET, type AgentMediaRow, type AgentRow } from './types';
 
@@ -132,6 +133,9 @@ export async function sendOutboxMedia(admin: SupabaseClient, ctx: ConversationCo
   mediaPath: string; kind: OutboundMediaKind; mime: string | null; fileName: string; caption?: string; transcript?: string;
 }): Promise<SendAgentMediaResult> {
   const { mediaPath, kind, fileName } = file;
+  if ([file.caption, file.transcript].some(value => value && internalOutputReason(value))) {
+    return { ok: false, error: 'Mídia bloqueada por conter instrução interna.' };
+  }
   const orgId = ctx.conversation.organization_id;
   const conn = ctx.connection;
   if (!conn || conn.status !== 'connected' || !mediaPath.startsWith(orgId + '/out/')) return { ok: false, error: 'Conexão ou caminho de mídia inválido.' };

@@ -90,7 +90,7 @@ export async function runAgentContract(admin: SupabaseClient, scope: Scope, inpu
       !isDeepStrictEqual(freshSnap, snap))
     throw new Error('Os dados do atendimento mudaram. Prepare o contrato novamente.');
 
-  const signerIdentity = {name:draft.signer, email:snap.contact.email, phone:snap.contact.phone};
+  const signerIdentity = draft.identity;
   const { data: row, error } = await admin.from('deal_signatures').insert({
     organization_id: org, deal_id: deal, contact_id: contact, stage_id: snap.deal.stage_id, origin: 'agent',
     status: 'processing', lock_until: null, attempts: 1, template_token: template, template_name: tpl.name,
@@ -103,12 +103,12 @@ export async function runAgentContract(admin: SupabaseClient, scope: Scope, inpu
     const other = await findExisting(); if (other) return existing(other);
   }
   if (error || !row) throw new Error('Não foi possível reservar a criação. Nenhum pedido enviado.');
-  const phone = splitPhone(snap.contact.phone);
+  const phone = splitPhone(signerIdentity.phone);
   const name = (tpl.name + ' - ' + draft.signer).slice(0, 255);
   let doc: ZapSignDoc;
   try {
     doc = await createTemplatePackage(client, tpl, { template_id: template, name, signer_name: draft.signer,
-      signer_email: snap.contact.email || undefined, signer_phone_country: phone.country || undefined,
+      ...(signerIdentity.email ? { signer_email: signerIdentity.email } : {}), signer_phone_country: phone.country || undefined,
       signer_phone_number: phone.number || undefined, data: draft.data, lang: 'pt-br', external_id: row.id,
       send_automatic_email: false, send_automatic_whatsapp: false, signer_has_incomplete_fields: false });
     if (!doc?.token) throw new Error('Sem identificador do provedor.');
