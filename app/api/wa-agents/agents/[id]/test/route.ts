@@ -35,7 +35,8 @@ export const runtime = 'nodejs';
 export const maxDuration = 120;
 
 const BodySchema = z.object({
-  previewVoice: z.string().trim().min(1).max(8000).optional(),
+  // true requests the editor's fixed voice sample; a string previews the exact simulator line.
+  previewVoice: z.union([z.literal(true), z.string().trim().min(1).max(8000)]).optional(),
   signatureEvent: z.literal('signed').optional(),
   contractState: z.enum(['invited','signed']).optional(),
   messages: z
@@ -78,9 +79,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   try {
     if (parsed.data.previewVoice) {
-      const text = parsed.data.previewVoice;
+      const script = parsed.data.previewVoice === true ? null : parsed.data.previewVoice;
       const scope = await createUsageContext(auth.admin, { organizationId: orgId, agentId: newAgent ? null : id, scope: 'test' });
-      const audio = await runWithUsageContext(scope, () => synthesizeVoice(auth.admin, agent, text));
+      const audio = await runWithUsageContext(scope, () => synthesizeVoice(auth.admin, agent, script));
       if (!audio.bytes) return json({ error: audio.reason }, 422);
       return Response.json({ audio: audio.bytes.toString('base64') }, { headers: { 'Cache-Control': 'no-store' } });
     }

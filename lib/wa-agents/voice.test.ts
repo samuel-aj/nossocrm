@@ -54,6 +54,14 @@ describe('síntese com provedor simulado', () => {
     expect(verifiedAudio(audio('Já enviei o link.'), phrase)).toBeNull();
     expect(verifiedAudio({ choices: [{ ...audio(phrase).choices[0], finish_reason: 'length' }] }, phrase)).toBeNull();
   });
+  it('permite ouvir uma amostra completa mesmo se a transcrição variar ou faltar', () => {
+    const result = audio('Olá! Esta é a minha voz.');
+    expect(verifiedAudio(result, phrase)).toBeNull();
+    expect(verifiedAudio(result, null)?.toString('base64')).toBe('SUQz');
+    expect(verifiedAudio(audio(''), null)?.toString('base64')).toBe('SUQz');
+    expect(verifiedAudio({ choices: [{ ...result.choices[0], finish_reason: 'length' }] }, null)).toBeNull();
+    expect(verifiedAudio({ choices: [{ finish_reason: 'stop', message: {} }] }, null)).toBeNull();
+  });
   it.each([[undefined, 'alloy'], ['coral', 'coral']] as const)('gera a prévia em memória com a voz %s', async (voice, expectedVoice) => {
     const fetchAudio = vi.fn().mockResolvedValue(Response.json(audio(phrase)));
     vi.stubGlobal('fetch', fetchAudio);

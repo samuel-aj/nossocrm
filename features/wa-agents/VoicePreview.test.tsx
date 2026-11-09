@@ -10,7 +10,7 @@ it('permite ouvir outra voz antes de salvar e repetir uma prévia que falhou', a
   const fetch = vi.mocked(waAgentsFetch);
   fetch.mockResolvedValueOnce({ audio: 'AQI=' }).mockRejectedValueOnce(new Error('Falha temporária.')).mockResolvedValueOnce({ audio: 'AwQ=' });
   function sample(voice: 'alloy' | 'coral') {
-    return <VoicePreview key={voice} agentId={null} text="Olá." draft={{
+    return <VoicePreview key={voice} agentId={null} draft={{
       name: '', media_understanding: { ...DEFAULT_AGENT_MEDIA_UNDERSTANDING, voice },
     }} />;
   }
@@ -25,6 +25,6 @@ it('permite ouvir outra voz antes de salvar e repetir uma prévia que falhou', a
   fireEvent.click(screen.getByRole('button', { name: 'Ouvir prévia' }));
   expect((await screen.findByLabelText('Prévia da voz selecionada')).getAttribute('src')).toBe('data:audio/mpeg;base64,AwQ=');
   expect(fetch).toHaveBeenLastCalledWith('/api/wa-agents/agents/new/test', expect.objectContaining({
-    body: expect.objectContaining({ draft: expect.objectContaining({ media_understanding: expect.objectContaining({ voice: 'coral' }) }) }),
+    body: expect.objectContaining({ previewVoice: true, draft: expect.objectContaining({ media_understanding: expect.objectContaining({ voice: 'coral' }) }) }),
   }));
 });

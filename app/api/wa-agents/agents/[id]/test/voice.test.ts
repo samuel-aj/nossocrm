@@ -22,8 +22,8 @@ vi.mock('@/lib/ai-usage/budget', () => ({ createUsageContext: mocks.usage }));
 const id = '10000000-0000-4000-8000-000000000001';
 const saved = normalizeAgentRow({ id, organization_id: 'office', media_understanding: { voice: 'sage', audio: false } });
 const audio = { bytes: Buffer.from([1, 2]) };
-function preview(agentId: string, voice: string) {
-  const body = { previewVoice: 'Olá.', draft: { media_understanding: { voice } } };
+function preview(agentId: string, voice: string, previewVoice: string | true = true) {
+  const body = { previewVoice, draft: { media_understanding: { voice } } };
   return POST(new Request('http://localhost/test', { method: 'POST', body: JSON.stringify(body) }), {
     params: Promise.resolve({ id: agentId }),
   });
@@ -43,11 +43,17 @@ describe('escolha da voz de um agente', () => {
     expect(await response.json()).toEqual({ audio: audio.bytes.toString('base64') });
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(mocks.synthesize.mock.calls[0][1].media_understanding.voice).toBe('coral');
+    expect(mocks.synthesize.mock.calls[0][2]).toBeNull();
     expect(saved.media_understanding.voice).toBe('sage');
     expect(mocks.load).toHaveBeenCalledTimes(agentId === 'new' ? 0 : 1);
     expect(mocks.usage).toHaveBeenCalledWith(expect.anything(), { organizationId: 'office', agentId: agentId === 'new' ? null : id, scope: 'test' });
     expect(mocks.from).not.toHaveBeenCalled();
     expect(mocks.chat).not.toHaveBeenCalled();
+  });
+  it('mantém o texto obrigatório na prévia de uma fala do simulador', async () => {
+    mocks.load.mockResolvedValue(saved);
+    expect((await preview(id, 'sage', 'A proposta vale até sexta.')).status).toBe(200);
+    expect(mocks.synthesize.mock.calls[0][2]).toBe('A proposta vale até sexta.');
   });
   it('recusa voz inválida ou agente indisponível no escritório', async () => {
     expect((await preview('new', 'voz-inexistente')).status).toBe(400);
