@@ -4,6 +4,7 @@ import type { AgentRow } from './types';
 import type { ConversationContext } from './context';
 import type { SupabaseClient } from '@supabase/supabase-js';
 const h = vi.hoisted(() => ({
+  voiceFile: vi.fn(), sendVoice: vi.fn(),
   generate: vi.fn(), history: vi.fn(), send: vi.fn(), action: vi.fn(), outcome: vi.fn(), events: vi.fn(), log: vi.fn(),
   calendar: null as Record<string, unknown> | null,
   budget: vi.fn(), block: vi.fn(), reserve: vi.fn(), dispatch: vi.fn(), settle: vi.fn(), policyEnabled: false,
@@ -11,6 +12,8 @@ const h = vi.hoisted(() => ({
   db: null as unknown as SupabaseClient,
 }));
 vi.mock('server-only', () => ({}));
+vi.mock('./voice', () => ({ prepareVoiceFile: h.voiceFile }));
+vi.mock('./media', async original => ({ ...await original<typeof import('./media')>(), sendOutboxMedia: h.sendVoice }));
 vi.mock('@/lib/ai-usage/budget', () => ({
   checkConversationBudget: h.budget, blockConversationBudget: h.block,
   reserveUsage: h.reserve, dispatchUsage: h.dispatch, settleUsage: h.settle,
@@ -37,6 +40,7 @@ vi.mock('./runs', () => ({ logRun: h.log }));
 
 import { handleInboundMessage, resumeDueConversations, runAgentOnConversation } from './engine';
 import { AiUsageError, failUsage } from '@/lib/ai-usage/context';
+import { VOICE_NOTICE } from './voiceDelivery';
 import { meteredOperation } from '@/lib/ai-usage/meteredModel';
 import { normalizeAgentRow } from './context';
 import { buildTestContext, testAgentReply } from './test';
@@ -101,6 +105,40 @@ beforeEach(() => {
 const run = () => runAgentOnConversation({ organizationId: org, conversationId: 'conv', trigger: 'inbound', skipBuffer: true });
 
 describe('validação no envio real e no simulador', () => {
+  it('entrega a fala do roteiro uma vez e depois o link mesmo quando a entrada também é áudio', async () => {
+    const phrase = 'Vou enviar o link por aqui.';
+    const link = 'https://assinatura.invalid/teste';
+    const audioCall = { toolName: 'falar_trecho', toolCallId: 'voice', input: { trecho: 1 } };
+    h.agent!.system_prompt = 'Ao pedir assinatura: [audio]' + phrase + '[/audio]. Depois envie o link.';
+    h.agent!.media_understanding.reply_to_audio = true;
+    h.voiceFile.mockResolvedValue({ path: org + '/out/teste.mp3' });
+    h.sendVoice.mockResolvedValue({ ok: true, messageId: 'simulado' });
+    h.generate.mockResolvedValue({
+      ...draft(link, false),
+      steps: [{ text: '', toolCalls: [audioCall], toolResults: [{ toolCallId: 'voice', output: { ok: true } }] }, ...draft(link, false).steps],
+    });
+    const simulated = await testAgentReply(h.db, { organizationId: org, agent: h.agent!, messages: [{ role: 'user', text: 'Como assino?', audio: true }] });
+    expect(simulated.lines).toEqual([VOICE_NOTICE, phrase, link]);
+    expect(simulated.voiceLines).toEqual([1]);
+    expect(h.voiceFile).not.toHaveBeenCalled(); expect(h.send).not.toHaveBeenCalled(); expect(h.sendVoice).not.toHaveBeenCalled();
+    Object.assign(incoming, { media_type: 'audio' });
+    try {
+      const result = await run();
+      expect(result.status).toBe('ok');
+      expect(h.sendVoice).toHaveBeenCalledExactlyOnceWith(h.db, expect.anything(), expect.objectContaining({ transcript: phrase }));
+      expect(h.send.mock.calls.map(([entry]) => entry.text)).toEqual([VOICE_NOTICE, link]);
+      expect(h.sendVoice.mock.invocationCallOrder[0]).toBeLessThan(h.send.mock.invocationCallOrder[1]);
+    } finally { Reflect.deleteProperty(incoming, 'media_type'); }
+  });
+  it('no simulador alterna áudio e texto pela última entrada, sem chamar síntese nem transporte', async () => {
+    h.agent!.media_understanding.reply_to_audio = true;
+    h.generate.mockResolvedValue(draft('Vamos conversar.', false));
+    const first = { role: 'user' as const, text: 'Oi', audio: true };
+    const simulate = (messages: Parameters<typeof testAgentReply>[1]['messages']) => testAgentReply(h.db, { organizationId: org, agent: h.agent!, messages });
+    expect((await simulate([first])).voiceLines).toEqual([1]);
+    expect((await simulate([first, { role: 'user', text: 'Tudo bem?' }])).voiceLines).toEqual([]);
+    expect(h.voiceFile).not.toHaveBeenCalled(); expect(h.send).not.toHaveBeenCalled(); expect(h.sendVoice).not.toHaveBeenCalled();
+  });
   it('evento do simulador de assinatura gera a resposta do agente sem transporte nem ferramentas', async () => {
     h.agent!.tools = { ...h.agent!.tools, zapsign_template_token:'modelo' };
     h.generate.mockResolvedValue({text:'Parabéns pela assinatura! Posso ajudar com os próximos passos?'});

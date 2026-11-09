@@ -5,6 +5,7 @@
  */
 import { z } from 'zod';
 import { isPublicHttpUrl } from './url';
+import { readVoiceScript } from './voiceScript';
 
 export const WA_AGENTS_BETA_FLAG = 'wa_agents_beta';
 /**
@@ -221,6 +222,7 @@ export type AgentLeadContext = z.infer<typeof AgentLeadContextSchema>;
 // Mídia recebida: áudio, imagem, figurinha e documento viram texto pela IA do agente
 // ---------------------------------------------------------------------------
 export const AgentMediaUnderstandingSchema = z.object({
+  reply_to_audio: z.boolean().optional(),
   /** Áudio do lead transcrito (OpenAI whisper / Google; Anthropic não transcreve) */
   audio: z.boolean().default(true),
   /** Imagem e figurinha descritas pelo modelo do agente */
@@ -298,7 +300,10 @@ export const AgentInputSchema = z.object({
   api_key: z.string().max(500).nullable().optional(),
   /** Chave da OpenAI usada SÓ para transcrever áudio (provedor que não ouve); mesma regra de undefined/null */
   audio_api_key: z.string().max(500).nullable().optional(),
-  system_prompt: z.string().max(60000).default(''),
+  system_prompt: z.string().max(60000).superRefine((script, ctx) => {
+    const { error } = readVoiceScript(script);
+    if (error) ctx.addIssue({ code: 'custom', message: error });
+  }).default(''),
   buffer_seconds: z.number().int().min(0).max(60).default(10),
   history_limit: z.number().int().min(5).max(200).default(40),
   line_delay_ms: z.number().int().min(0).max(10000).default(0),
@@ -936,6 +941,7 @@ export type ConversationAiState = {
   deal_id?: string | null;
   /** nomes das mídias já enviadas neste atendimento (enviar_midia não repete) */
   midias_enviadas?: string[];
+  voice_introduced?: boolean;
   /** respostas já enviadas pelo agente neste atendimento (teto max_replies) */
   respostas?: number;
   /** "Limpar memória": o agente só enxerga mensagens a partir desta data (ISO) */

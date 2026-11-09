@@ -5,6 +5,7 @@ import { supportsTemperature } from './model';
 import { prepareReplyOutput, segmentText, type ReplySegment } from './replyOutput';
 import { buildAgentTools, type AgentToolRuntime } from './tools';
 import type { AgentRow } from './types';
+import { readVoiceScript } from './voiceScript';
 
 export type CollectedToolCall = { tool: string; input: unknown; output?: unknown };
 export type OutputSafety = {
@@ -36,6 +37,7 @@ export async function generateAgentReply(input: {
   runtime?: AgentToolRuntime;
 }): Promise<GeneratedReply> {
   const finals = transitionActionKeys(input.agent);
+  const voiceClips = readVoiceScript(input.agent.system_prompt ?? '').clips;
   const hasTransitionAction: StopCondition<ReturnType<typeof buildAgentTools>> = ({ steps }) => {
     const last = steps.at(-1);
     return !!last?.toolCalls.some(call => call.toolName === 'executar_acao' && finals.has(String((call.input as { acao?: unknown } | undefined)?.acao ?? '')));
@@ -47,7 +49,7 @@ export async function generateAgentReply(input: {
     system: input.system,
     messages: input.messages,
     temperature: supportsTemperature(input.agent) ? input.agent.temperature : undefined,
-    tools: buildAgentTools(input.agent, input.runtime),
+    tools: buildAgentTools(input.agent, { ...input.runtime, voiceClips }),
     stopWhen: [stepCountIs(MAX_STEPS), hasToolCall('encerrar_atendimento'), hasTransitionAction],
   });
   const toolCalls: CollectedToolCall[] = [];
@@ -57,6 +59,11 @@ export async function generateAgentReply(input: {
     for (const call of step.toolCalls) {
       const output = step.toolResults.find(r => r.toolCallId === call.toolCallId)?.output;
       toolCalls.push({ tool: call.toolName, input: call.input, output });
+      if (call.toolName === 'falar_trecho' && (output as { ok?: boolean } | undefined)?.ok) {
+        const index = (call.input as { trecho: number }).trecho;
+        const text = voiceClips[index - 1];
+        if (text) segments.push({ kind: 'text', text, voice: true, step: stepIndex });
+      }
       if (call.toolName === 'enviar_midia') {
         const sent = output as { ok?: boolean; midia?: string } | undefined;
         const args = call.input as { nome?: string; legenda?: string } | undefined;
@@ -70,7 +77,7 @@ export async function generateAgentReply(input: {
     outputTokens: result.totalUsage?.outputTokens ?? null,
     totalTokens: result.totalUsage?.totalTokens ?? null,
   };
-  let prepared = prepareReplyOutput(segments);
+  let prepared = prepareReplyOutput(segments, voiceClips);
   const outputSafety: OutputSafety = {
     status: 'passed', issues: prepared.issues, duplicatesRemoved: prepared.duplicatesRemoved, recoveryAttempted: false,
     steps: result.steps.map((s, step) => ({ step, textChars: s.text?.length ?? 0, tools: s.toolCalls.map(c => c.toolName) })),
@@ -114,7 +121,7 @@ export async function generateAgentReply(input: {
         if (!segmentText({ kind: 'text', text }) || (slot.kind === 'media' && text.length > 1000)) throw new Error('empty_or_long_repair');
       }
       segments = segments.map((s, i) => !byId.has(i) ? s : s.kind === 'text' ? { ...s, text: byId.get(i)! } : { ...s, caption: byId.get(i)! });
-      prepared = prepareReplyOutput(segments);
+      prepared = prepareReplyOutput(segments, voiceClips);
       if (prepared.issues.length > 0) throw new Error('internal_content_in_repair');
       outputSafety.status = 'repaired';
       outputSafety.duplicatesRemoved = prepared.duplicatesRemoved;

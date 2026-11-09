@@ -14,10 +14,12 @@ import { Send, Loader2, Eraser, Wrench, Timer } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 import { DEFAULT_AGENT_TYPING, type AgentInput } from '@/lib/wa-agents/types';
 import { typingDelayMs } from '@/lib/wa-agents/typing';
-import { useTestWaAgent, type WaTestMessage } from './useWaAgents';
+import { useTestWaAgent, waAgentsFetch, type WaTestMessage } from './useWaAgents';
 import { BTN_PRIMARY, BTN_SMALL, INPUT_CLASS, Notice, Toggle, errorMessage, newId } from './ui';
 
 type Entry = {
+  audio?: boolean;
+  voiceLines?: number[];
   contractReviewKey?: string;
   id: string;
   role: 'user' | 'assistant';
@@ -28,6 +30,31 @@ type Entry = {
   /** true enquanto as linhas ainda estão sendo reveladas (não mostrar "sem resposta") */
   revealing?: boolean;
 };
+
+function VoicePreview({ agentId, text, draft }: { agentId: string; text: string; draft?: Partial<AgentInput> }) {
+  const [audio, setAudio] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  async function listen() {
+    setBusy(true);
+    setError('');
+    try {
+      const result = await waAgentsFetch<{ audio: string }>(`/api/wa-agents/agents/${agentId}/test`, {
+        method: 'POST', body: { previewVoice: text, draft },
+      });
+      setAudio('data:audio/mpeg;base64,' + result.audio);
+    } catch (err) {
+      setError(errorMessage(err, 'Não foi possível gerar a prévia da voz.'));
+    } finally { setBusy(false); }
+  }
+  return <div className="mt-1">
+    {audio ? <audio controls preload="metadata" src={audio} aria-label="Prévia da resposta em áudio" /> :
+      <button className={BTN_SMALL} type="button" disabled={busy} onClick={() => void listen()}>
+        {busy ? 'Gerando áudio…' : 'Ouvir prévia'}
+      </button>}
+    {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
+  </div>;
+}
 
 function sleep(ms: number): Promise<void> {
   if (ms <= 0) return Promise.resolve();
@@ -101,6 +128,7 @@ export const AgentTestChat: React.FC<{
   const [entries, setEntries] = useState<Entry[]>([]);
   const [state, setState] = useState<Record<string, unknown>>({});
   const [text, setText] = useState('');
+  const [audio, setAudio] = useState(false);
   // Último erro também aqui no painel: o toast, no canto da tela, pode passar despercebido.
   const [error, setError] = useState<string | null>(null);
   /** Ritmo real (digitando + intervalo entre linhas); desligue para ver a resposta de uma vez */
@@ -127,9 +155,9 @@ export const AgentTestChat: React.FC<{
   const send = async (signed = false) => {
     const value = text.trim();
     if ((!signed && !value) || busy) return;
-    const userEntry: Entry = { id: newId(), role: 'user', text: value, lines: [value], toolCalls: [], usage: null };
+    const userEntry: Entry = { id: newId(), role: 'user', text: value, audio, lines: [value], toolCalls: [], usage: null };
     const history: WaTestMessage[] = (signed ? entries : [...entries, userEntry]).map((e) => ({
-      role: e.role, text: e.text, contractReviewKey: e.contractReviewKey,
+      role: e.role, text: e.text, audio: e.audio, contractReviewKey: e.contractReviewKey,
     }));
     if (!signed) {
       setEntries((prev) => [...prev, userEntry]);
@@ -160,6 +188,7 @@ export const AgentTestChat: React.FC<{
         {
           id: entryId,
           role: 'assistant',
+          voiceLines: result.voiceLines,
           contractReviewKey: result.contractReviewKey,
           text: lines.join('\n'),
           lines: simulate ? [] : lines,
@@ -212,6 +241,7 @@ export const AgentTestChat: React.FC<{
     setEntries([]);
     setState({});
     setContractState('none');
+    setAudio(false);
     setText('');
     setError(null);
     setTypingNow(false);
@@ -253,7 +283,7 @@ export const AgentTestChat: React.FC<{
           entry.role === 'user' ? (
             <div key={entry.id} className="flex justify-end">
               <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-green-500 text-white px-3 py-2 text-sm whitespace-pre-wrap">
-                {entry.text}
+                {entry.audio && <small className="block font-semibold">Áudio simulado</small>}{entry.text}
               </div>
             </div>
           ) : (
@@ -270,7 +300,8 @@ export const AgentTestChat: React.FC<{
                 entry.lines.map((line, i) => (
                   <div key={`${entry.id}-${i}`} className="flex justify-start">
                     <div className="max-w-[80%] rounded-2xl rounded-bl-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 px-3 py-2 text-sm text-slate-900 dark:text-white whitespace-pre-wrap">
-                      {line}
+                      {entry.voiceLines?.includes(i) && <small className="block font-semibold">Áudio simulado</small>}{line}
+                      {agentId && entry.voiceLines?.includes(i) && <VoicePreview agentId={agentId} text={line} draft={draft} />}
                     </div>
                   </div>
                 ))
@@ -328,6 +359,10 @@ export const AgentTestChat: React.FC<{
         </div>
       ) : null}
 
+      <label className="flex items-center gap-2 text-xs pb-1">
+        <input type="checkbox" checked={audio} onChange={e => setAudio(e.target.checked)} disabled={busy} />
+        Simular áudio do cliente
+      </label>
       <div className="flex items-end gap-2 pt-2 border-t border-slate-200 dark:border-white/10">
         <textarea
           ref={inputRef}
@@ -341,7 +376,7 @@ export const AgentTestChat: React.FC<{
               void send();
             }
           }}
-          placeholder="Escreva como o lead (Enter envia, Shift+Enter quebra linha)"
+          placeholder={audio ? 'Digite o que o cliente diria no áudio' : 'Escreva como o lead (Enter envia, Shift+Enter quebra linha)'}
           aria-label="Mensagem de teste"
           disabled={busy}
         />

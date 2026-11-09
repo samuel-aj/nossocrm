@@ -3,12 +3,13 @@ import { NO_REPLY_TOKEN } from './savedData';
 import { normalizeKeyword } from './text';
 
 export type ReplySegment =
-  | { kind: 'text'; text: string; step?: number }
+  | { kind: 'text'; text: string; voice?: true; step?: number }
   | { kind: 'media'; name: string; caption?: string; step?: number };
 export type OutputIssue = { segment: number; step?: number; field: 'text' | 'caption'; reason: string };
 
 /** Reserved internal envelopes, not arbitrary JSON or ordinary words such as "dados". */
 export function internalOutputReason(raw: string): string | null {
+  if (/\[\/?audio\]|\bfalar_trecho\b/i.test(raw)) return 'voice_marker';
   const text = raw.replace(/\\(["'])/g, '$1');
   if (/\{\s*["'“”]?dados["'“”]?\s*:/iu.test(text) || /,\s*["'“”]dados["'“”]\s*:/iu.test(text) ||
       /["'](?:proxima_pergunta|apresentacao_enviada|memoria_desde)["']\s*:/iu.test(text)) return 'internal_data';
@@ -32,7 +33,7 @@ export function agentHistoryText(text: string): string {
   return internalOutputReason(text) ? '' : cleanText(text);
 }
 
-export function prepareReplyOutput(input: readonly ReplySegment[]) {
+export function prepareReplyOutput(input: readonly ReplySegment[], configuredClips: readonly string[] = []) {
   const issues: OutputIssue[] = [];
   input.forEach((s, segment) => {
     const field = s.kind === 'text' ? 'text' : 'caption';
@@ -43,15 +44,37 @@ export function prepareReplyOutput(input: readonly ReplySegment[]) {
   if (issues.length > 0) return { segments: [] as ReplySegment[], text: '', issues, duplicatesRemoved: 0 };
 
   const captions = new Set(input.flatMap(s => s.kind === 'media' && s.caption ? [normalizeKeyword(cleanText(s.caption))] : []));
+  const called = new Set(input.flatMap(s => s.kind === 'text' && s.voice ? [s.text] : []));
+  const scripts = [...new Set([...called, ...configuredClips])].sort((a, b) => b.length - a.length);
+  const phrases = scripts.map(script => script.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const literal = phrases.length ? new RegExp('(?<!\\S)(' + phrases.join('|') + ')(?!\\S)', 'gu') : null;
+  const spoken = new Set<string>();
   const seen = new Set<string>();
   const segments: ReplySegment[] = [];
   let duplicatesRemoved = 0;
-  for (const segment of input) {
+  // If the model writes a marked phrase verbatim, preserve its position and deliver it as audio.
+  // An explicit tool call already supplies the clip at its intended position.
+  const ordered = literal ? input.flatMap((segment): ReplySegment[] => {
+    if (segment.kind !== 'text' || segment.voice) return [segment];
+    return segment.text.split(literal).flatMap((piece, i): ReplySegment[] => {
+      if (!piece.trim()) return [];
+      if (i % 2 === 0) return [{ ...segment, text: piece }];
+      if (called.has(piece)) { duplicatesRemoved++; return []; }
+      return [{ ...segment, text: piece, voice: true }];
+    });
+  }) : input;
+  for (const segment of ordered) {
     if (segment.kind === 'media') {
       segments.push({ ...segment, caption: segment.caption ? cleanText(segment.caption) : undefined });
       continue;
     }
     const kept: string[] = [];
+    if (segment.voice) {
+      if (spoken.has(segment.text)) { duplicatesRemoved++; continue; }
+      spoken.add(segment.text);
+      segments.push(segment);
+      continue;
+    }
     for (const raw of cleanText(segment.text).replace(/\r\n?/g, '\n').split('\n')) {
       const line = raw.trim();
       if (!line) continue;
@@ -67,7 +90,7 @@ export function prepareReplyOutput(input: readonly ReplySegment[]) {
     if (kept.length === 0) continue;
     const text = kept.join('\n');
     const previous = segments.at(-1);
-    if (previous?.kind === 'text') previous.text += '\n' + text;
+    if (previous?.kind === 'text' && !previous.voice) previous.text += '\n' + text;
     else segments.push({ kind: 'text', text, step: segment.step });
   }
   return { segments, text: segments.map(segmentText).filter(Boolean).join('\n'), issues, duplicatesRemoved };

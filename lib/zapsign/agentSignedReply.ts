@@ -12,7 +12,7 @@ export async function composeSignedReply(db: SupabaseClient, agent: AgentRow, ct
   const fact = allSigned ? 'A ZapSign confirmou a assinatura completa do documento.' :
     'A ZapSign confirmou a assinatura do cliente. Ainda há outros signatários pendentes.';
   const result = await generateText({ model: model.model, maxRetries: 0, maxOutputTokens: 260, abortSignal: AbortSignal.timeout(30_000),
-    system: buildSystemPrompt({ agent, ctx }) + '\nEvento confirmado da ZapSign: ' + fact +
+    system: buildSystemPrompt({ agent, ctx, textOnly: true }) + '\nEvento confirmado da ZapSign: ' + fact +
       ' Escreva apenas uma mensagem curta ao cliente na voz deste agente. Parabenize pela assinatura e acompanhe o cliente. Oriente o próximo passo apenas se consta do roteiro ou da conversa. Não prometa prazos, não solicite nova assinatura nem inclua links.',
     messages: [...history, { role:'user',content:'[Evento interno do CRM: a ZapSign confirmou a assinatura do cliente. Redija o acompanhamento.]' }],
   });

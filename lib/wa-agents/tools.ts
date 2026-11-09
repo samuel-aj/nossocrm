@@ -21,6 +21,7 @@ import type { AgentDocumentRow, AgentMediaRow, AgentRow, KnowledgeHit } from './
 export type MediaSendResult = { ok: boolean; error?: string; note?: string };
 
 export type AgentToolRuntime = {
+  voiceClips?: readonly string[];
   contract?: (input: AgentContractInput) => Promise<unknown>;
   scheduledReturn?: {
     inspect: () => Promise<unknown>;
@@ -180,6 +181,14 @@ export function buildAgentTools(agent: AgentRow, runtime: AgentToolRuntime = {})
     });
   }
   Object.assign(tools, buildUtilityTools(agent, runtime));
+  const clips = runtime.voiceClips;
+  if (clips?.length) {
+    tools.falar_trecho = tool({
+      description: 'No momento indicado no roteiro, enfileira a fala cadastrada pelo número do trecho. O CRM usa o texto original. Não repita a fala na resposta.',
+      inputSchema: z.object({ trecho: z.number().int().min(1).max(clips.length) }),
+      execute: async ({ trecho }) => ({ ok: !!clips[trecho - 1], trecho, fala: clips[trecho - 1] }),
+    });
+  }
 
   const media = uniqueNames(runtime.media ?? []);
   if (media.length > 0 && runtime.sendMedia) {
