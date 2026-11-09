@@ -120,7 +120,8 @@ export async function POST(req: Request) {
   // usável, então é tratado como órfã: a senha informada é aplicada.
   let isActiveAccount = false;
   if (adminEmail) {
-    existingAuthUser = await findAuthUserByEmail(admin, adminEmail);
+    try { existingAuthUser = await findAuthUserByEmail(adminEmail); }
+    catch { return json({ error: 'Não foi possível verificar o e-mail. Tente novamente.' }, 503); }
     if (existingAuthUser) {
       const { data: existingProfile } = await admin
         .from('profiles')
