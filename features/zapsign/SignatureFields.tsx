@@ -13,7 +13,7 @@
  *   campos do contrato inline.
  */
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, Loader2, Mail, PenLine, Phone, Sparkles, UserRound } from 'lucide-react';
+import { AlertTriangle, Loader2, PenLine, Sparkles } from 'lucide-react';
 import { NativeSelect } from '@/components/ui/NativeSelect';
 import { AUTH_OPTIONS, SEND_OPTIONS, templateLabel } from './useZapSign';
 import { SignMessageField, sampleDocName } from './SignMessageField';
@@ -66,7 +66,20 @@ export function SignatureFields({ draft, idPrefix, disabled, variablesMode = 'in
     return <p className="text-sm text-red-600 dark:text-red-400">{(prep.error as Error | null)?.message ?? 'Não foi possível carregar os dados do lead.'}</p>;
   }
 
-  const contact = data.contact;
+  const contact = draft.identity;
+  const signerFields = (
+    <fieldset aria-label="Signatário" className="space-y-2">
+      <legend className={SECTION}>Quem assina {data.sandbox && '· Testes'}</legend>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {([['name', 'Nome completo', 'text'], ['phone', 'Telefone com DDD', 'tel'], ['email', 'E-mail (opcional)', 'email']] as const).map(([key, label, type]) => (
+          <label key={key} className={LABEL}>
+            {label}
+            <input className={FIELD} type={type} disabled={disabled} value={contact[key]} onChange={e => draft.editIdentity(key, e.target.value)} />
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
   const summary = fillSummary(draft);
   const blocks = issues.filter((i) => i.kind === 'block');
   const warns = issues.filter((i) => i.kind === 'warn');
@@ -204,24 +217,7 @@ export function SignatureFields({ draft, idPrefix, disabled, variablesMode = 'in
   if (compact) {
     return (
       <fieldset disabled={disabled} className="space-y-3 min-w-0">
-        {/* Quem assina, numa linha */}
-        <p aria-label="Signatário" className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-600 dark:text-slate-300">
-          <UserRound size={13} className="shrink-0 text-slate-400" aria-hidden="true" />
-          <span className="font-semibold text-slate-900 dark:text-white">{contact.name || <span className="text-red-600 dark:text-red-400">Contato sem nome</span>}</span>
-          <span className="text-slate-300 dark:text-slate-600" aria-hidden="true">
-            ·
-          </span>
-          <span>{contact.phone || <span className="text-amber-600 dark:text-amber-400">sem telefone</span>}</span>
-          <span className="text-slate-300 dark:text-slate-600" aria-hidden="true">
-            ·
-          </span>
-          <span>{contact.email || <span className="text-slate-400">sem e-mail</span>}</span>
-          {data.sandbox ? (
-            <span className="ml-auto rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800 dark:bg-amber-500/15 dark:text-amber-300" title="Ambiente de testes da ZapSign: documento sem validade jurídica">
-              Testes
-            </span>
-          ) : null}
-        </p>
+        {signerFields}
 
         {blocks.map((i) => (
           <p key={i.text} role="alert" className={BLOCK}>
@@ -267,31 +263,10 @@ export function SignatureFields({ draft, idPrefix, disabled, variablesMode = 'in
     );
   }
 
-  const initial = (contact.name.trim()[0] ?? '?').toUpperCase();
+
   return (
     <fieldset disabled={disabled} className="space-y-5 min-w-0">
-      {/* Quem assina */}
-      <section aria-label="Signatário" className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50/70 dark:bg-white/[0.03] px-3 py-2.5">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-100 text-primary-700 dark:bg-primary-500/20 dark:text-primary-300 text-sm font-bold" aria-hidden="true">
-          {contact.name ? initial : <UserRound size={16} />}
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{contact.name || <span className="text-red-600 dark:text-red-400">Contato sem nome</span>}</p>
-          <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-            <span className="inline-flex items-center gap-1">
-              <Phone size={10} aria-hidden="true" /> {contact.phone || <span className="text-amber-600 dark:text-amber-400">sem telefone</span>}
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <Mail size={10} aria-hidden="true" /> {contact.email || <span className="text-slate-400">sem e-mail</span>}
-            </span>
-          </p>
-        </div>
-        {data.sandbox ? (
-          <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800 dark:bg-amber-500/15 dark:text-amber-300" title="Ambiente de testes da ZapSign: documento sem validade jurídica">
-            Testes
-          </span>
-        ) : null}
-      </section>
+      {signerFields}
 
       {blocks.map((i) => (
         <p key={i.text} role="alert" className={BLOCK}>

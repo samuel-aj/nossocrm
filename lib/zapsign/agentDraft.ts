@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { fullSignerName, signerEmail, signerField, signerPhone, type SignerIdentity } from './signerIdentity';
 import { autoMatchVariable, canCollectContractField, normalizeVarName, resolveSource, type VariableContext } from './variables';
 
 export type ContractTurn = { id: string; direction: 'in' | 'out'; text: string; agent: boolean; ok: boolean; at: string };
@@ -9,23 +10,27 @@ const norm = (s: string) => plain(s).toLocaleLowerCase('pt-BR');
 // Only identification data can come from client messages. Prices, products,
 // deadlines and any other office-defined terms must have a source in the CRM.
 const personal = /^(?:(?:nome(?:completo)?|cpf|cnpj|rg|email|telefone|celular|whatsapp|endereco|logradouro|bairro|cep|numero|complemento|cidade|estado|uf|nacionalidade|estadocivil|profissao|datanascimento|datadenascimento)(?:(?:do|da)?(?:cliente|contratante|signatario|outorgante))?)$/;
-const customerEmail = /^email(?:(?:do|da)?(?:cliente|contratante|signatario|outorgante|titular|contato))?$/;
-const emailValue = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const reviewQuestion = 'Você confirma os dados da ficha para eu gerar o contrato e enviar o link por aqui?';
 const shortQuestion = 'Posso gerar o contrato com os dados que você confirmou e enviar o link por aqui?';
 
-function customerDocumentEmail(turns: ContractTurn[], supplied: string) {
+function containsPhone(text: string, number: string) {
+  return !!number && (text.match(/\+?\d[\d\s().-]{6,}\d/g) ?? []).some(part => signerPhone(part) === number);
+}
+
+function customerEmail(turns: ContractTurn[], supplied: string, registered: string) {
   for (let i = turns.length - 1; i >= 0; i--) {
     const turn = turns[i];
     if (!turn.ok || turn.direction !== 'in') continue;
     const message = plain(turn.text);
-    if (/\b(?:não (?:tenho|possuo)(?: um)? e-?mail|prefiro não informar (?:o |meu )?e-?mail|sem e-?mail)\b/iu.test(message)) break;
+    if (/^(?:n[aã]o(?: tenho| possuo)?|prefiro n[aã]o informar)[.!]?$/iu.test(message) &&
+        turns[i - 1]?.direction === 'out' && /e[\s-]?mail[^?]*\?\s*$/iu.test(turns[i - 1].text)) return '';
+    if (/\b(?:n[aã]o (?:tenho|possuo|uso)(?: (?:um|nenhum))? e[\s-]?mail|prefiro (?:continuar sem informar|n[aã]o informar)(?: (?:o |meu )?e[\s-]?mail)?|sem e[\s-]?mail)\b/iu.test(message)) return '';
     const addresses = message.match(/[\p{L}\d.!#$%&'*+/=?^_\x60{|}~-]+@[\p{L}\d.-]+\.[\p{L}]{2,}/gu) ?? [];
-    if (supplied && emailValue.test(supplied) && addresses.some(email => norm(email) === norm(supplied))) return supplied;
+    if (supplied && addresses.some(email => norm(email) === norm(supplied))) return signerEmail(supplied);
     // Recover a directly stated personal address if the tool omits it on a later turn.
-    if (addresses.length === 1 && (message === addresses[0] || /^meu e-?mail (?:é|eh) /iu.test(message))) return addresses[0];
+    if (addresses.length === 1 && (message === addresses[0] || /^meu e-?mail (?:é|eh) /iu.test(message))) return signerEmail(addresses[0]);
   }
-  return ' ';
+  return supplied.trim() && !signerEmail(supplied) ? '' : signerEmail(registered);
 }
 
 export function prepareAgentDraft(input: {
@@ -36,39 +41,62 @@ export function prepareAgentDraft(input: {
   const data: { de: string; para: string }[] = [];
   const missing: string[] = [], office: string[] = [];
   const evidenced = (s: string) => input.turns.some(t => t.direction === 'in' && t.ok && norm(t.text).includes(norm(s)));
-  const providedName = plain(input.supplied.nome_signatario || '');
-  const registered = plain(input.signer);
-  const signer = registered.split(' ').length < 2 && providedName.split(' ').length >= 2 &&
-    evidenced(providedName) ? providedName : registered;
-  if (signer.split(' ').length < 2) missing.push('nome_signatario');
+  const sources = Object.fromEntries(input.template.names.map(name => [name,
+    input.mapping?.[name] ?? autoMatchVariable(name, input.fields)]));
+  const identity: SignerIdentity = { name: plain(input.signer), phone: input.ctx.contact.phone, email: input.ctx.contact.email };
+  const suppliedIdentity: Partial<SignerIdentity> = {};
+  for (const [label, source] of Object.entries(sources)) {
+    const field = signerField(label, source);
+    if (!field) continue;
+    const saved = plain(resolveSource(source, input.ctx));
+    if (saved) identity[field] = saved;
+    if (input.supplied[label]?.trim()) suppliedIdentity[field] = plain(input.supplied[label]);
+  }
+  // A model may omit the signer inputs on the second call. Recover the exact
+  // identity displayed in our review. Issuance still requires its stored hash.
+  const accepted = acceptedFicha(input.turns);
+  const proposedName = plain(input.supplied.nome_signatario || suppliedIdentity.name || accepted?.name || '');
+  const proposedPhone = plain(input.supplied.telefone_signatario || suppliedIdentity.phone || accepted?.phone || '');
+  if (proposedName && norm(proposedName) !== norm(identity.name)) {
+    identity.name = evidenced(proposedName) || norm(accepted?.name ?? '') === norm(proposedName) ? proposedName : '';
+  }
+  if (proposedPhone && signerPhone(proposedPhone) !== signerPhone(identity.phone)) {
+    const number = signerPhone(proposedPhone);
+    const attested = input.turns.some(t => t.ok && t.direction === 'in' && containsPhone(t.text, number));
+    identity.phone = attested || number === accepted?.phone ? number : '';
+  }
+  identity.phone = signerPhone(identity.phone);
+  identity.email = customerEmail(input.turns, input.supplied.email_signatario || suppliedIdentity.email || '', accepted?.email ?? identity.email);
+  const signer = identity.name;
+  if (!fullSignerName(signer)) missing.push('Nome completo de quem vai assinar');
+  if (!identity.phone) missing.push('Telefone com DDD de quem vai assinar');
   for (const name of input.template.names) {
-    const source = input.mapping && Object.hasOwn(input.mapping, name) ? input.mapping[name] : autoMatchVariable(name, input.fields);
+    const source = sources[name];
+    const identityField = signerField(name, source);
+    if (identityField) {
+      data.push({ de: '{{' + name + '}}', para: identity[identityField] || (identityField === 'email' ? ' ' : '') });
+      continue;
+    }
     let value = plain(resolveSource(source, input.ctx));
-    if (source === 'contato.nome') value = signer;
     if (/^negocio\.valor/.test(source) && !(Number(input.ctx.deal.value) > 0)) value = '';
     if (!value) {
       const candidate = Object.hasOwn(input.supplied, name) ? plain(input.supplied[name]) : '';
       const fromClient = (personal.test(normalizeVarName(name)) || (source === 'cliente:perguntar' && canCollectContractField(name))) &&
         !source.startsWith('texto:') && !source.startsWith('negocio.') &&
         !(source.startsWith('campo:') && input.ctx.customFieldTypes?.[source.slice(6)] === 'currency');
-      const optionalEmail = source === 'contato.email' || (customerEmail.test(normalizeVarName(name)) && fromClient);
-      if (optionalEmail) {
-        // The placeholder belongs only to the document variables, never to the signer or contact.
-        value = customerDocumentEmail(input.turns, candidate);
-      } else if (fromClient && candidate && evidenced(candidate)) value = candidate;
+      if (fromClient && candidate && evidenced(candidate)) value = candidate;
       else (fromClient ? missing : office).push(name);
     }
     data.push({ de: '{{' + name + '}}', para: value });
   }
-  const fingerprint = createHash('sha256').update(JSON.stringify([input.scope, input.template.revision, signer, data])).digest('hex');
-  const fields = data.map(({ de, para }) => de.slice(2, -2) + ': ' + para).join('; ');
-  // Continue honoring a question already delivered by the previous version.
-  const legacyQuestion = 'Contrato: ' + plain(input.template.name) + '. Signatário: ' + signer +
-    '. ' + (fields ? fields + '. ' : '') + 'Referência ' + fingerprint.slice(0, 12) + '. Posso criar o contrato e enviar o link por aqui?';
-  const lines = data.filter(({para}) => para.trim() && para !== signer).map(({ de, para }) => de.slice(2, -2) + ': ' + para);
-  const summary = ['Nome: ' + signer, ...lines].join(' · ');
+  const fingerprint = createHash('sha256').update(JSON.stringify([input.scope, input.template.revision, identity, data])).digest('hex');
+  const lines = data.flatMap(({ de, para }) => {
+    const label = de.slice(2, -2);
+    return para.trim() && !signerField(label, sources[label]) ? [label + ': ' + para] : [];
+  });
+  const summary = ['Nome: ' + signer, 'Telefone: ' + identity.phone, 'E-mail: ' + (identity.email || 'não informado'), ...lines].join(' · ');
   const question = summary + '\n\n' + reviewQuestion;
-  return { data, missing, office, question, signer, fingerprint, legacyQuestion };
+  return { data, missing, office, question, signer, identity, fingerprint };
 }
 
 type Draft = ReturnType<typeof prepareAgentDraft>;
@@ -85,27 +113,54 @@ function answeredQuestion(turns: ContractTurn[], now: number) {
   const previous: string[] = [];
   for (let i = turns.length - 2; i >= 0; i--) {
     const t = turns[i];
-    if (t.direction === 'in' && previous.length) return { text: norm(previous.join(' ')), inboundId: t.id };
+    if (t.direction === 'in' && previous.length) {
+      const raw = previous.join('\n').trim();
+      return { text: norm(raw), raw, inboundId: t.id };
+    }
     if (t.direction !== 'out' || !t.ok || !t.agent || !Number.isFinite(Date.parse(t.at)) ||
         now - Date.parse(t.at) > 86_400_000 || Date.parse(t.at) > Date.parse(reply.at)) return;
     previous.unshift(t.text);
   }
 }
 
-export function contractReview(turns: ContractTurn[], draft: Draft, savedKey?: string, now = Date.now()) {
-  const answer = answeredQuestion(turns, now);
-  const reviewedFields = !!answer && /\b(?:ficha|dados)\b/.test(answer.text) &&
-    [draft.signer, ...draft.data.map(d => d.para.trim()).filter(Boolean)].every(value => answer.text.includes(norm(value)));
-  const finalQuestion = answer?.text.split(/[.!?\n]/).map(s => s.trim()).filter(Boolean).at(-1) ?? '';
+function questionIntent(text: string) {
+  const finalQuestion = text.split(/[.!?\n]/).map(norm).filter(Boolean).at(-1) ?? '';
   const coreQuestion = finalQuestion.replace(/ e (?:te )?(?:enviar|mandar) o link(?: por aqui)?$/, '');
   const asksForContract = /^(?:com (?:esses|estes) dados,? )?posso (?:gerar|criar|preparar|enviar) o contrato$/.test(coreQuestion) ||
     /^(?:você )?confirma (?:os dados(?: da ficha)?|a ficha) para (?:eu |a gente )?(?:gerar|criar|preparar) o contrato$/.test(coreQuestion);
   const confirmsFicha = /^(?:(?:você )?(?:confirma|confere)(?: (?:os dados(?: da ficha)?|a ficha))?|(?:os dados |os dados da ficha )?estão (?:todos )?(?:certos|corretos)|(?:está |tá )?tudo (?:certo|correto))$/.test(finalQuestion);
+  return { asksForContract, confirmsFicha };
+}
+
+/** Only an affirmative reply to the actual ficha can attest data read from an attachment. */
+function acceptedFicha(turns: ContractTurn[]) {
+  const now = Date.now();
+  let answer = answeredQuestion(turns, now);
+  if (answer?.text === norm(shortQuestion)) {
+    const index = turns.findIndex(t => t.id === answer?.inboundId);
+    answer = answeredQuestion(turns.slice(0, index + 1), now);
+  }
+  if (!answer || !answer.text.endsWith('?') || !/\b(?:ficha|dados)\b/.test(answer.text)) return;
+  const { asksForContract, confirmsFicha } = questionIntent(answer.raw);
+  if (!asksForContract && !confirmsFicha) return;
+  const name = answer.raw.match(/(?:^|[\n·;])\s*Nome(?: completo)?\s*:\s*([^·;\n]+)/iu)?.[1]?.trim();
+  const phone = answer.raw.match(/\b(?:Telefone(?: com DDD)?|Celular)\s*:\s*([+()\d][\d ()-]+)/iu)?.[1];
+  const email = answer.raw.match(/\bE-?mail\s*:\s*([^·;\n\s]+(?: informado)?)/iu)?.[1];
+  return { name: name && fullSignerName(name) ? name : undefined, phone: phone ? signerPhone(phone) : undefined,
+    email: email ? signerEmail(email.replace(/[.,!?]+$/u, '')) : undefined };
+}
+
+export function contractReview(turns: ContractTurn[], draft: Draft, savedKey?: string, now = Date.now()) {
+  const answer = answeredQuestion(turns, now);
+  const reviewedFields = !!answer && /\b(?:ficha|dados)\b/.test(answer.text) && containsPhone(answer.text, draft.identity.phone) &&
+    [draft.signer, draft.identity.email, ...draft.data.map(d => d.para.trim()).filter(v => v !== draft.identity.phone)]
+      .filter(Boolean).every(value => answer.text.includes(norm(value)));
+  const { asksForContract, confirmsFicha } = questionIntent(answer?.raw ?? '');
   const useShort = reviewedFields && (asksForContract || confirmsFicha) && answer.text.endsWith('?');
   const confirmsFull = !!answer && savedKey === reviewKey(draft, answer.inboundId, false) &&
     (answer.text.endsWith(norm(draft.question)) || (reviewedFields && asksForContract && answer.text.endsWith('?')));
   const confirmsShort = !!answer && savedKey === reviewKey(draft, answer.inboundId, true) && answer.text === norm(shortQuestion);
-  const confirmed = !!answer && (answer.text === norm(draft.legacyQuestion) || confirmsFull || confirmsShort);
+  const confirmed = !!answer && (confirmsFull || confirmsShort);
   // A ficha sent before the contract tool was called can already contain the full summary.
   // In that case only ask for issuance, without asking for the data again.
   const current = turns.at(-1);

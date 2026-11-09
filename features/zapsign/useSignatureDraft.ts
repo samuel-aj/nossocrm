@@ -1,5 +1,7 @@
 'use client';
 
+import { fullSignerName, identityFromForm, signerEmail, signerField, signerPhone, type SignerIdentity } from '@/lib/zapsign/signerIdentity';
+
 /**
  * Rascunho de um envio para assinatura: o que vai no documento (modelo, nome,
  * valor de cada variável), como o cliente recebe e como comprova quem é.
@@ -42,6 +44,7 @@ export type SendPrep = {
 };
 
 export type DraftForm = {
+  identityEdits: Partial<SignerIdentity>;
   templateToken: string;
   docName: string;
   /** variável -> origem ("contato.nome", "campo:cpf", "texto:...", "") */
@@ -92,6 +95,7 @@ async function postAiFill(body: unknown): Promise<AiFillResponse> {
 }
 
 const EMPTY: DraftForm = {
+  identityEdits: {},
   templateToken: '',
   docName: '',
   mapping: {},
@@ -125,6 +129,7 @@ export function useSignatureDraft({ dealId, stageId, enabled = true, autoAi = tr
   const [form, setForm] = useState<DraftForm>(EMPTY);
   const [seeded, setSeeded] = useState(false);
   const [ai, setAi] = useState<AiFillState>(AI_IDLE);
+  const editVersions = useRef(new Map<string, number>());
   const tokenRef = useRef('');
   tokenRef.current = form.templateToken;
   const varsQ = useZapSignTemplateVariables(enabled && form.templateToken ? form.templateToken : null);
@@ -168,6 +173,7 @@ export function useSignatureDraft({ dealId, stageId, enabled = true, autoAi = tr
   const set = useCallback((patch: Partial<DraftForm>) => setForm((f) => ({ ...f, ...patch })), []);
   /** A pessoa mexeu na variável: o valor deixa de ser "da IA". */
   const forgetAi = useCallback((name: string) => {
+    editVersions.current.set(name, (editVersions.current.get(name) ?? 0) + 1);
     setAi((a) => {
       if (!(name in a.applied)) return a;
       const applied = { ...a.applied };
@@ -206,6 +212,7 @@ export function useSignatureDraft({ dealId, stageId, enabled = true, autoAi = tr
         templateToken: token,
         mapping: token === rule?.template_token ? (rule?.variables ?? {}) : {},
         overrides: {},
+        identityEdits: {},
         allowEmpty: false,
       }));
       setAi(AI_IDLE);
@@ -230,7 +237,17 @@ export function useSignatureDraft({ dealId, stageId, enabled = true, autoAi = tr
     }
     return out;
   }, [variables, form.mapping, form.overrides, prep.data]);
-  const emptyVars = useMemo(() => variables.filter((v) => !(values[v] ?? '').trim()), [variables, values]);
+  const emptyVars = useMemo(() => variables.filter((v) => !values[v]?.trim() && signerField(v, form.mapping[v]) !== 'email'), [variables, values, form.mapping]);
+  const contact = prep.data?.contact;
+  const identity = useMemo(() => identityFromForm(values, form.mapping, {
+    name: contact?.name ?? '', phone: contact?.phone ?? '', email: signerEmail(contact?.email ?? ''), ...form.identityEdits,
+  }), [values, form.mapping, form.identityEdits, contact]);
+  const editIdentity = (field: keyof SignerIdentity, value: string) => {
+    const matching = variables.filter(name => signerField(name, form.mapping[name]) === field);
+    matching.forEach(forgetAi);
+    setForm(f => ({ ...f, identityEdits: { ...f.identityEdits, [field]: value },
+      overrides: { ...f.overrides, ...Object.fromEntries(matching.map(name => [name, value])) } }));
+  };
 
   /**
    * Roda a IA para o modelo atual. `force` ignora o cache (botão "Preencher de
@@ -245,6 +262,8 @@ export function useSignatureDraft({ dealId, stageId, enabled = true, autoAi = tr
       if (!token || !data || variables.length === 0) return;
       const labels = new Map(data.sources.map((s) => [s.value, s.label]));
       const typed = new Set(Object.keys(form.overrides).filter((n) => !(n in ai.applied)));
+      const versionsAtStart = new Map(editVersions.current);
+      const editedDuringRequest = (name: string) => versionsAtStart.get(name) !== editVersions.current.get(name);
       const payloadVars = variables.map((name) => {
         const src = form.mapping[name] ?? '';
         const crm = src.startsWith('texto:') ? src.slice(6) : (data.preview[src] ?? '');
@@ -270,7 +289,7 @@ export function useSignatureDraft({ dealId, stageId, enabled = true, autoAi = tr
         const patch: Record<string, string> = {};
         for (const f of res.fields) {
           // Texto fixo do modelo e o que a pessoa digitou não mudam
-          if ((form.mapping[f.name] ?? '').startsWith('texto:') || typed.has(f.name) || !f.changed) continue;
+          if ((form.mapping[f.name] ?? '').startsWith('texto:') || typed.has(f.name) || editedDuringRequest(f.name) || !f.changed) continue;
           patch[f.name] = f.value;
           applied[f.name] = f;
         }
@@ -278,7 +297,7 @@ export function useSignatureDraft({ dealId, stageId, enabled = true, autoAi = tr
         const previous = Object.keys(ai.applied);
         setForm((f) => {
           const overrides = { ...f.overrides };
-          for (const n of previous) if (!(n in patch)) delete overrides[n];
+          for (const n of previous) if (!(n in patch) && !editedDuringRequest(n)) delete overrides[n];
           return { ...f, overrides: { ...overrides, ...patch } };
         });
         setAi({ status: 'done', token, error: null, code: null, result: res, applied });
@@ -298,16 +317,17 @@ export function useSignatureDraft({ dealId, stageId, enabled = true, autoAi = tr
     void runAi(false);
   }, [enabled, autoAi, prep.data, form.templateToken, mappingReady, ai.token, runAi]);
 
-  const contact = prep.data?.contact;
   const issues = useMemo<DraftIssue[]>(() => {
     const list: DraftIssue[] = [];
-    if (prep.data && !contact?.name) list.push({ kind: 'block', text: 'O lead precisa de um contato com nome para assinar.' });
-    if (prep.data && form.send === 'zapsign_whatsapp' && !contact?.phone) list.push({ kind: 'block', text: 'O contato não tem telefone. Escolha outro jeito de enviar o link.' });
-    if (prep.data && form.send === 'zapsign_email' && !contact?.email) list.push({ kind: 'block', text: 'O contato não tem e-mail. Escolha outro jeito de enviar o link.' });
+    if (prep.data && !fullSignerName(identity.name)) list.push({ kind: 'block', text: 'Informe o nome completo de quem vai assinar.' });
+    const requiresPhone = form.send === 'zapsign_whatsapp' || ['tokenWhatsapp', 'tokenSms'].includes(form.authMode);
+    if (prep.data && (identity.phone || requiresPhone) && !signerPhone(identity.phone)) list.push({ kind: 'block', text: 'Confira o telefone com DDD de quem vai assinar.' });
+    if (prep.data && (form.send === 'zapsign_email' || form.authMode === 'tokenEmail') && !signerEmail(identity.email)) list.push({ kind: 'block', text: 'Para continuar sem e-mail, escolha outra forma de envio e de autenticação.' });
+    else if (prep.data && identity.email.trim() && !signerEmail(identity.email)) list.push({ kind: 'warn', text: 'Esse e-mail será omitido na assinatura. Você pode corrigi-lo aqui.' });
     if (prep.data && form.send === 'crm_whatsapp' && !prep.data.whatsapp.ok) list.push({ kind: 'warn', text: `O link não vai sair pelo WhatsApp do CRM (${prep.data.whatsapp.reason ?? 'sem conversa'}). O documento é criado e o link fica no lead.` });
     if (form.templateToken && !varsQ.isLoading && !varsQ.error && variables.length === 0 && varsQ.data?.note) list.push({ kind: 'warn', text: varsQ.data.note });
     return list;
-  }, [prep.data, contact, form.send, form.templateToken, varsQ.isLoading, varsQ.error, varsQ.data, variables.length]);
+  }, [prep.data, identity, form.authMode, form.send, form.templateToken, varsQ.isLoading, varsQ.error, varsQ.data, variables.length]);
 
   const blocked = issues.some((i) => i.kind === 'block');
   const ready = !!prep.data && !!form.templateToken && !varsQ.isLoading && !varsQ.error && !blocked && (emptyVars.length === 0 || form.allowEmpty);
@@ -320,6 +340,7 @@ export function useSignatureDraft({ dealId, stageId, enabled = true, autoAi = tr
     const overrides: Record<string, string> = {};
     for (const name of variables) if (name in form.overrides) overrides[name] = form.overrides[name];
     return {
+      confirmed_signer: { name: identity.name.trim(), phone: signerPhone(identity.phone), email: signerEmail(identity.email) },
       template_token: form.templateToken,
       template_name: templateName || null,
       doc_name: form.docName.trim() || null,
@@ -330,7 +351,7 @@ export function useSignatureDraft({ dealId, stageId, enabled = true, autoAi = tr
       on_signed: rule?.on_signed ?? {},
       on_refused: rule?.on_refused ?? {},
     };
-  }, [prep.data, variables, form, templateName]);
+  }, [prep.data, variables, form, templateName, identity]);
 
   const reset = useCallback(() => {
     setForm(EMPTY);
@@ -338,7 +359,7 @@ export function useSignatureDraft({ dealId, stageId, enabled = true, autoAi = tr
     setAi(AI_IDLE);
   }, []);
 
-  return { prep, templatesQ, varsQ, templates, templateName, form, set, setSource, setValue, chooseTemplate, variables, values, emptyVars, issues, blocked, ready, payload, reset, ai, runAi };
+  return { prep, templatesQ, varsQ, templates, templateName, form, set, setSource, setValue, chooseTemplate, variables, values, identity, editIdentity, emptyVars, issues, blocked, ready, payload, reset, ai, runAi };
 }
 
 export type SignatureDraft = ReturnType<typeof useSignatureDraft>;

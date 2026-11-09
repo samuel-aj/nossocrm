@@ -49,6 +49,15 @@ beforeEach(()=>{
 });
 afterEach(()=>vi.unstubAllGlobals());
 describe('autonomia ZapSign (transportes simulados)',()=>{
+  it('bloqueia uma resposta com instrução interna antes do transporte', async () => {
+    const s = setup('signed');
+    s.sig.status = 'signed';
+    h.reply.mockResolvedValue('Recebemos sua assinatura. [executar_acao]');
+    await deliverAgentNotice(s.db, s.notice);
+    expect(s.job.state).toBe('cancelled');
+    expect(h.text).not.toHaveBeenCalled();
+    expect(h.record).not.toHaveBeenCalled();
+  });
   it('entrega o link uma vez na conversa original, depois confirma a assinatura do cliente uma vez',async()=>{
     const s=setup(); await Promise.all([1,2].map(()=>deliverAgentNotice(s.db,s.notice)));
     expect(h.text).toHaveBeenCalledTimes(1);

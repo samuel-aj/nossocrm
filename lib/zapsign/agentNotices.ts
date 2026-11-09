@@ -9,6 +9,7 @@ import { buildHistoryMessages, loadAgent, loadConversationContext } from '@/lib/
 import { followupAllowedAt } from '@/lib/wa-agents/followupCalendarStore';
 import { loadLastInboundAt } from '@/lib/wa-agents/lastInbound';
 import { composeSignedReply } from './agentSignedReply';
+import { internalOutputReason } from '@/lib/wa-agents/replyOutput';
 import type { SignatureRow } from './signatures';
 import { clientHasSigned } from './agentContractFact';
 
@@ -98,6 +99,7 @@ export async function deliverAgentNotice(db: SupabaseClient, n: Notice) {
     const ready = await eligibility(db,n);
     if ('state' in ready) return await defer(db,n,ready);
     const text = await noticeText(db,n,ready);
+    if (internalOutputReason(text)) return await defer(db,n,cancel('Mensagem bloqueada por conter instrução interna.'));
     const fresh = await eligibility(db,n);
     if ('state' in fresh) return await defer(db,n,fresh);
     if (JSON.stringify(fresh.template) !== JSON.stringify(ready.template) || fresh.sig.sign_url !== ready.sig.sign_url ||

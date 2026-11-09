@@ -311,6 +311,33 @@ describe('envio para assinatura (regra da etapa)', () => {
 });
 
 describe('envio manual pela tela do lead', () => {
+  it('usa a identidade conferida na tela mesmo quando o perfil e o modelo trazem outros dados', async () => {
+    const db = base();
+    const { outcome } = await createManualSignature(db.admin, {
+      organizationId: ORG, dealId: 'deal-1', userId: 'u1', deps: { client: fakeClient() },
+      request: { template_token: 'tpl-1', signer: { send: 'link' },
+        confirmed_signer: { name: 'Felipe da Silva', phone: '(11) 98888-7777', email: '' },
+        variables: { NOME: 'contato.nome', CELULAR: 'contato.telefone', EMAIL: 'contato.email', 'NOME TESTEMUNHA': 'texto:Maria Testemunha' } },
+    });
+    expect(outcome.status).toBe('pending');
+    expect(h.created[0]).toMatchObject({ signer_name: 'Felipe da Silva', signer_phone_number: '11988887777',
+      data: [{ de: '{{NOME}}', para: 'Felipe da Silva' }, { de: '{{CELULAR}}', para: '+5511988887777' },
+        { de: '{{EMAIL}}', para: ' ' }, { de: '{{NOME TESTEMUNHA}}', para: 'Maria Testemunha' }] });
+    expect(h.created[0]).not.toHaveProperty('signer_email');
+    expect(h.texts).toEqual([]);
+  });
+  it.each(['tokenEmail', 'zapsign_email'])('impede criar com e-mail fictício se a opção %s exige e-mail', async option => {
+    const db = base();
+    const { outcome } = await createManualSignature(db.admin, {
+      organizationId: ORG, dealId: 'deal-1', userId: 'u1', deps: { client: fakeClient() },
+      request: { template_token: 'tpl-1', variables: {},
+        confirmed_signer: { name: 'Felipe da Silva', phone: '(11) 98888-7777', email: 'sem@email.com' },
+        signer: option === 'tokenEmail' ? { send: 'link', auth_mode: option } : { send: 'zapsign_email' } },
+    });
+    expect(outcome).toMatchObject({ status: 'failed', retry: false, error: expect.stringContaining('exige e-mail') });
+    expect(h.created).toHaveLength(0);
+    expect(h.texts).toHaveLength(0);
+  });
   it('grava a linha, cria o documento com os valores editados e registra no histórico', async () => {
     const db = base();
     const { row, outcome } = await createManualSignature(db.admin, {
@@ -430,6 +457,33 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
     return { ...db, post, accept };
   }
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  it('usa nome e telefone confirmados por áudio e omite e-mail mesmo com e-mail antigo no cadastro', async () => {
+    const db = setup();
+    Object.assign(db.tables.contacts[0], { name: 'Felipe4798', phone: '+551188887777', email: 'antigo@example.org' });
+    db.tables.wa_conversations[0].wa_phone = '+551188887777';
+    Object.assign(db.tables.wa_messages[0], { body: '[áudio]', transcription: 'Meu nome é Felipe da Silva. Meu telefone é (11) 98888-7777. Não tenho e-mail.' });
+    vi.mocked(files.readContractTemplate).mockResolvedValue({ revision: 'r1', names: ['NOME COMPLETO', 'TELEFONE', 'E-MAIL'] });
+    const dados = { nome_signatario: 'Felipe da Silva', telefone_signatario: '(11) 98888-7777' };
+    const prepared = await runAgentContract(db.admin, scope, { modo: 'preparar', dados }, key => {
+      db.tables.wa_conversations[0].ai_state = { zapsign_review: key };
+    });
+    if (!('solicitar_confirmacao' in prepared) || !prepared.solicitar_confirmacao) throw new Error('Faltou a ficha');
+    expect(prepared.solicitar_confirmacao).toContain('Felipe da Silva · Telefone: +5511988887777 · E-mail: não informado');
+    db.tables.wa_messages.push(msg('2', 'out', prepared.solicitar_confirmacao, 1), msg('3', 'in', 'Sim', 2));
+    const approved = { ...scope, inboundId: '3' };
+    expect(await runAgentContract(db.admin, approved, { modo: 'criar', dados: { telefone_signatario: '+551188887777' } })).toMatchObject({ criado: false });
+    expect(db.post).not.toHaveBeenCalled();
+    expect(await runAgentContract(db.admin, approved, { modo: 'criar', dados: {} })).toMatchObject({ criado: true });
+    const request = db.post.mock.calls[0][0];
+    expect(request).toMatchObject({ signer_name: 'Felipe da Silva', signer_phone_country: '55', signer_phone_number: '11988887777',
+      data: [{ de: '{{NOME COMPLETO}}', para: 'Felipe da Silva' }, { de: '{{TELEFONE}}', para: '+5511988887777' }, { de: '{{E-MAIL}}', para: ' ' }] });
+    expect(request).not.toHaveProperty('signer_email');
+    expect(db.tables.deal_signatures[0].request).toMatchObject({ recipient: '+551188887777',
+      agent_signer: { name: 'Felipe da Silva', phone: '+5511988887777', email: '' } });
+    expect(db.tables.contacts[0].email).toBe('antigo@example.org');
+    expect(fetch).not.toHaveBeenCalled();
+    expect(h.texts).toEqual([]);
+  });
   it('cria uma vez após aceite e vincula a entrega à conversa e ao número autorizados', async () => {
     const db = setup(), approved = await db.accept();
     const results = await Promise.all([1, 2].map(() => runAgentContract(db.admin, approved, create)));
@@ -470,12 +524,17 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
     const next = { ...scope, inboundId: '3' };
     expect(await runAgentContract(db.admin, next, { modo: 'preparar', dados })).toMatchObject({ ficha_confirmada: true });
     expect(await runAgentContract(db.admin, next, { modo: 'criar', dados })).toMatchObject({ criado: true });
-    expect(db.post.mock.calls[0][0]).toMatchObject({ data: [{ de: '{{E-MAIL}}', para: expected }], signer_email: undefined });
+    const request = db.post.mock.calls[0][0];
+    expect(request.data).toEqual([{ de: '{{E-MAIL}}', para: expected }]);
+    if (expected.trim()) expect(request.signer_email).toBe(expected);
+    else expect(request).not.toHaveProperty('signer_email');
     expect(db.tables.contacts[0].email).toBeNull();
   });
   it('aceita a ficha do agente em linguagem natural e não aceita um sim a outra pergunta', async () => {
     const db = setup(), approved = await db.accept('Sim');
-    const summary = 'Ficha de Maria da Silva. ENDEREÇO: Rua das Flores. VALOR: R$ 4.500,00.';
+    const summary = 'Ficha de Maria da Silva. Telefone: (11) 98888-7777. E-mail: maria@exemplo.com. ENDEREÇO: Rua das Flores. VALOR: R$ 4.500,00.';
+    db.tables.wa_messages[1].body = summary.replace('Telefone: (11) 98888-7777.', '') + ' Posso gerar o contrato?';
+    expect(await runAgentContract(db.admin, approved, create)).toMatchObject({ criado: false });
     db.tables.wa_messages[1].body = summary + ' Você tem alguma dúvida?';
     expect(await runAgentContract(db.admin, approved, create)).toMatchObject({ criado: false });
     expect(db.post).not.toHaveBeenCalled();
@@ -500,7 +559,7 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
   });
   it('aproveita os dados de uma ficha anterior e pede apenas autorização para gerar o contrato', async () => {
     const db = setup();
-    db.tables.wa_messages.push(msg('2', 'out', 'Ficha de Maria da Silva. Rua das Flores. R$ 4.500,00. Confere os dados?', 1),
+    db.tables.wa_messages.push(msg('2', 'out', 'Ficha de Maria da Silva. Telefone: +5511988887777. E-mail: maria@exemplo.com. Rua das Flores. R$ 4.500,00. Confere os dados?', 1),
       msg('3', 'in', 'Sim', 2));
     const next = { ...scope, inboundId: '3' };
     const draft = await runAgentContract(db.admin, next, prepare, key => {
@@ -625,11 +684,29 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
     expect(await runAgentContract(db.admin, scope, create)).toMatchObject({ ok: false, erro: expect.stringContaining('conferência humana') });
     expect(db.post).not.toHaveBeenCalled();
   });
+  it('usa os dados identificados na ficha confirmada após foto e conserva a mesma identidade no aceite de emissão', async () => {
+    const db = setup();
+    Object.assign(db.tables.contacts[0], { name: 'Perfil4798', phone: '+551188887777', email: 'antigo@example.org' });
+    vi.mocked(files.readContractTemplate).mockResolvedValue({ revision: 'r1', names: ['NOME COMPLETO'] });
+    db.tables.wa_messages[0].body = 'Segue meu documento.';
+    db.tables.wa_messages.push(msg('2', 'out', 'Ficha\nNome completo: Felipe da Silva\nTelefone: (11) 98888-7777\nE-mail: não informado\nConfere os dados?', 1),
+      msg('3', 'in', 'Sim', 2));
+    const prepared = await runAgentContract(db.admin, { ...scope, inboundId: '3' }, { modo: 'preparar', dados: {} }, key => {
+      db.tables.wa_conversations[0].ai_state = { zapsign_review: key };
+    });
+    if (!('solicitar_confirmacao' in prepared) || !prepared.solicitar_confirmacao) throw new Error('Faltou o pedido de emissão');
+    expect(prepared.solicitar_confirmacao).toMatch(/^Posso gerar/);
+    db.tables.wa_messages.push(msg('4', 'out', prepared.solicitar_confirmacao, 3), msg('5', 'in', 'Sim', 4));
+    expect(await runAgentContract(db.admin, { ...scope, inboundId: '5' }, { modo: 'criar', dados: {} })).toMatchObject({ criado: true });
+    expect(db.post.mock.calls[0][0]).toMatchObject({ signer_name: 'Felipe da Silva', signer_phone_number: '11988887777' });
+    expect(db.post.mock.calls[0][0]).not.toHaveProperty('signer_email');
+  });
   it('o painel Testar valida o modelo e o aceite sem chamar criação nem gravar no CRM', async () => {
     const db = setup();
-    const chat = [{ role: 'user' as const, text: 'Rua das Flores' }];
+    const chat = [{ role: 'user' as const, text: 'Rua das Flores. Meu telefone é (11) 98888-7777.' }];
     let key: string | undefined;
-    const r = await simulateAgentContract(db.admin, ORG, 'tpl-1', chat, prepare, undefined, k => { key = k; });
+    const r = await simulateAgentContract(db.admin, ORG, 'tpl-1', chat,
+      { ...prepare, dados: { ...prepare.dados, telefone_signatario: '(11) 98888-7777' } }, undefined, k => { key = k; });
     if (!r.solicitar_confirmacao) throw new Error('Prévia esperada');
     expect(await simulateAgentContract(db.admin, ORG, 'tpl-1',
       [...chat, { role: 'assistant', text: r.solicitar_confirmacao, contractReviewKey: key }, { role: 'user', text: 'Confirmo' }], create))

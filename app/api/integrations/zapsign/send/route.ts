@@ -27,6 +27,7 @@ import { getConnectionByIdForOrg, type WaConnectionRow } from '@/lib/whatsapp/se
 export const runtime = 'nodejs';
 
 const Body = z.object({
+  confirmed_signer: z.object({ name: z.string().trim().max(255), phone: z.string().trim().max(40), email: z.string().trim().max(254) }).optional(),
   deal_id: z.string().uuid(),
   template_token: z.string().trim().min(1).max(200),
   template_name: z.string().trim().max(255).nullable().optional(),
@@ -148,6 +149,7 @@ export async function POST(req: Request) {
       userId: auth.user.id,
       ruleStageId: input.rule_stage_id ?? null,
       request: {
+        confirmed_signer: input.confirmed_signer,
         template_token: input.template_token,
         template_name: input.template_name ?? null,
         doc_name: input.doc_name ?? null,

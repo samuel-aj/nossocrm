@@ -11,6 +11,7 @@ import { randomBytes } from 'node:crypto';
 import { getServiceWindow } from '@/lib/whatsapp/serviceWindow';
 import { getConnectionByIdForOrg, type WaConnectionRow } from '@/lib/whatsapp/service';
 import { normalizePhoneE164 } from '@/lib/phone';
+import { fullSignerName, identityFromForm, signerEmail, signerField, signerPhone, type SignerIdentity } from './signerIdentity';
 import { sendTextToConversation, startBotRun } from '@/lib/wa-agents/bots';
 import { loadDealContext } from '@/lib/wa-agents/context';
 import { lastInboundAt, resolveDealConversation } from '@/lib/wa-agents/dealConversation';
@@ -71,6 +72,7 @@ export type SignatureRule = {
 
 /** O que o envio manual escolheu na hora (fica gravado na linha). */
 export type SignatureRequest = {
+  confirmed_signer?: SignerIdentity;
   package_expected?: number;
   package_unverified?: boolean;
   agent_delivery?: 'conversation';
@@ -272,16 +274,28 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
     if (snap.deal.is_won || snap.deal.is_lost) return { status: 'cancelled', reason: 'lead ganho ou perdido' };
     if (snap.deal.stage_id !== row.stage_id) return { status: 'cancelled', reason: 'lead mudou de etapa antes do envio' };
   }
-  if (!snap.contact.name) return { status: 'failed', error: 'o lead não tem contato com nome para assinar', retry: false };
+  const data = resolveVariables(spec.variables, snap.ctx, spec.overrides);
+  const values = Object.fromEntries(data.map(v => [v.de.slice(2, -2), v.para]));
+  const identity = spec.confirmed_signer ?? identityFromForm(values, spec.variables, snap.contact);
+  const signer = { name: identity.name.trim(), email: signerEmail(identity.email), phone: signerPhone(identity.phone) };
+  if (!fullSignerName(signer.name)) return { status: 'failed', error: 'Confira o nome completo de quem vai assinar.', retry: false };
+  if (identity.phone && !signer.phone) return { status: 'failed', error: 'Confira o telefone com DDD de quem vai assinar.', retry: false };
+  for (const entry of data) {
+    const label = entry.de.slice(2, -2);
+    const field = signerField(label, spec.variables[label]);
+    if (field) entry.para = signer[field] || (field === 'email' ? ' ' : '');
+  }
 
   const send: SendChannel = spec.signer.send ?? 'crm_whatsapp';
-  const phone = splitPhone(snap.contact.phone);
-  if (send === 'zapsign_whatsapp' && !phone.number) return { status: 'failed', error: 'o contato não tem telefone para a ZapSign enviar', retry: false };
-  if (send === 'zapsign_email' && !snap.contact.email) return { status: 'failed', error: 'o contato não tem e-mail para a ZapSign enviar', retry: false };
+  const phone = splitPhone(signer.phone);
+  if ((send === 'zapsign_whatsapp' || ['tokenWhatsapp', 'tokenSms'].includes(spec.signer.auth_mode ?? '')) && !phone.number)
+    return { status: 'failed', error: 'O signatário precisa de telefone para a opção escolhida.', retry: false };
+  if ((send === 'zapsign_email' || spec.signer.auth_mode === 'tokenEmail') && !signer.email)
+    return { status: 'failed', error: 'A opção escolhida exige e-mail. Escolha outro modo de envio ou de autenticação.', retry: false };
 
   const client = deps.client ?? clientFor(settings, deps.fetchImpl);
   const docName = renderTemplate(spec.doc_name?.trim() || `${spec.template_name || 'Documento'} - {{contato.nome}}`, {
-    contato: { nome: snap.contact.name, primeiro_nome: snap.contact.name.split(/\s+/)[0] ?? '' },
+    contato: { nome: signer.name, primeiro_nome: signer.name.split(/\s+/)[0] ?? '' },
     negocio: { titulo: snap.ctx.deal.title },
   }).slice(0, 255);
 
@@ -294,11 +308,11 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
     doc = await createTemplatePackage(client, tpl, {
       template_id: spec.template_token,
       name: docName,
-      signer_name: snap.contact.name,
-      signer_email: snap.contact.email || undefined,
+      signer_name: signer.name,
+      ...(signer.email ? { signer_email: signer.email } : {}),
       signer_phone_country: phone.country || undefined,
       signer_phone_number: phone.number || undefined,
-      data: resolveVariables(spec.variables, snap.ctx, spec.overrides ?? {}),
+      data,
       lang: 'pt-br',
       external_id: row.id,
       send_automatic_email: send === 'zapsign_email',
@@ -321,7 +335,7 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
     return { status: 'failed', error: errorMessage(err), retry };
   }
 
-  const clientToken = isPackage ? agentContactToken(doc.signers ?? [], snap.contact) : doc.signers?.[0]?.token;
+  const clientToken = agentContactToken(doc.signers ?? [], signer);
   const signers: StoredSigner[] = (doc.signers ?? []).map(s => toStoredSigner(s, s.token === clientToken ? 'contact' : 'extra'));
   const main = signers.find(s => s.role === 'contact') ?? null;
 
@@ -390,7 +404,7 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
     }
   }
   if (send === 'crm_whatsapp') {
-    const r = await sendLinkViaCrm(admin, orgId, snap, signUrl, docName, spec.signer.message);
+    const r = await sendLinkViaCrm(admin, orgId, snap, signUrl, docName, signer.name, spec.signer.message);
     if (!r.ok) {
       sentVia = 'link';
       note = r.reason;
@@ -432,6 +446,7 @@ async function sendLinkViaCrm(
   snap: LeadSnapshot,
   signUrl: string | null,
   docName: string,
+  signerName: string,
   message: string | undefined
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   if (!signUrl) return { ok: false, reason: 'a ZapSign não devolveu o link de assinatura' };
@@ -451,8 +466,8 @@ async function sendLinkViaCrm(
   }
   // sem {{link}} na mensagem, ensureSignLink põe o link no final; vazia, vai a padrão
   const text = renderTemplate(ensureSignLink(message ?? ''), {
-    nome: snap.contact.name,
-    primeiro_nome: snap.contact.name.split(/\s+/)[0] ?? '',
+    nome: signerName,
+    primeiro_nome: signerName.split(/\s+/)[0] ?? '',
     link: signUrl,
     documento: docName,
     negocio: { titulo: snap.ctx.deal.title },
