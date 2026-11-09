@@ -8,7 +8,7 @@ import { BTN_SMALL, errorMessage } from './ui';
 
 type Props = {
   agentId: string | null;
-  text: string;
+  text?: string;
   draft?: Partial<AgentInput>;
 };
 
@@ -23,7 +23,7 @@ export function VoicePreview({ agentId, text, draft }: Props) {
       const result = await waAgentsFetch<{ audio: string }>(`/api/wa-agents/agents/${agentId ?? 'new'}/test`, {
         method: 'POST',
         body: {
-          previewVoice: text,
+          previewVoice: text ?? true,
           draft: {
             provider: draft?.provider,
             api_key: draft?.api_key,

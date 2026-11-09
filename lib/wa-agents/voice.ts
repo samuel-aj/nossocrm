@@ -20,22 +20,26 @@ function words(text: string) {
   return text.normalize('NFC').trim().replace(/\s+/g, ' ').replace(/[.!?]+$/, '').toLocaleLowerCase('pt-BR');
 }
 
-/** Only an audio whose provider transcript matches the approved text may leave the CRM. */
-export function verifiedAudio(result: AudioCompletion, script: string): Buffer | null {
+/** A null script is a voice sample in the editor. Customer-facing speech always has a script. */
+export function verifiedAudio(result: AudioCompletion, script: string | null): Buffer | null {
   const choice = result.choices?.[0];
   const audio = choice?.message?.audio;
-  if (choice?.finish_reason !== 'stop' || !audio?.data || !audio.transcript || words(audio.transcript) !== words(script)) return null;
+  if (choice?.finish_reason !== 'stop' || !audio?.data) return null;
+  if (script !== null && (!audio.transcript || words(audio.transcript) !== words(script))) return null;
   const bytes = Buffer.from(audio.data, 'base64');
   return bytes.length > 0 && bytes.length <= 16 * 1024 * 1024 ? bytes : null;
 }
 
-export async function synthesizeVoice(admin: SupabaseClient, agent: AgentRow, text: string) {
+export async function synthesizeVoice(admin: SupabaseClient, agent: AgentRow, script: string | null) {
   const org = requireUsageContext().organizationId;
   if (org !== agent.organization_id) throw new Error('Agente de outra organização.');
   const key = agent.audio_api_key?.trim() || (agent.provider === 'openai' && agent.api_key?.trim()) ||
     await getOrganizationApiKey(admin, org, 'openai');
   if (!key) return { reason: 'Chave OpenAI para voz não configurada.' } as const;
-  const messages = [{ role: 'system', content: instructions }, { role: 'user', content: text }];
+  const messages = [
+    { role: 'system', content: instructions },
+    { role: 'user', content: script ?? 'Olá! Esta é uma amostra da minha voz em português.' },
+  ];
   const voice = agent.media_understanding?.voice ?? DEFAULT_AGENT_VOICE;
   const result = await meteredOperation({
     operation: 'voice_reply', provider: 'openai', model: MODEL, bound: textInputBound(messages) + MAX_OUTPUT_TOKENS,
@@ -53,8 +57,10 @@ export async function synthesizeVoice(admin: SupabaseClient, agent: AgentRow, te
       return measured && measured.totalTokens > 0 && measured.totalTokens === usage?.total_tokens ? measured : null;
     },
   });
-  const bytes = verifiedAudio(result, text);
-  if (!bytes) return { reason: 'A gravação não correspondeu à fala completa.' } as const;
+  const bytes = verifiedAudio(result, script);
+  if (!bytes) return { reason: script === null
+    ? 'A prévia de voz veio vazia ou incompleta. Tente ouvir novamente.'
+    : 'A gravação não correspondeu à fala completa.' } as const;
   return { bytes } as const;
 }
 
