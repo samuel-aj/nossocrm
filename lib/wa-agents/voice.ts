@@ -5,7 +5,7 @@ import { meteredOperation, textInputBound } from '@/lib/ai-usage/meteredModel';
 import { normalizeLanguageUsage } from '@/lib/ai-usage/normalize';
 import { getOrganizationApiKey } from './model';
 import { WA_MEDIA_BUCKET } from './media';
-import type { AgentRow } from './types';
+import { DEFAULT_AGENT_VOICE, type AgentRow } from './types';
 
 const MODEL = 'gpt-audio-1.5';
 const MAX_OUTPUT_TOKENS = 4096;
@@ -36,12 +36,13 @@ export async function synthesizeVoice(admin: SupabaseClient, agent: AgentRow, te
     await getOrganizationApiKey(admin, org, 'openai');
   if (!key) return { reason: 'Chave OpenAI para voz não configurada.' } as const;
   const messages = [{ role: 'system', content: instructions }, { role: 'user', content: text }];
+  const voice = agent.media_understanding?.voice ?? DEFAULT_AGENT_VOICE;
   const result = await meteredOperation({
     operation: 'voice_reply', provider: 'openai', model: MODEL, bound: textInputBound(messages) + MAX_OUTPUT_TOKENS,
     execute: async (): Promise<AudioCompletion> => {
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: MODEL, messages, modalities: ['text', 'audio'], audio: { voice: 'alloy', format: 'mp3' },
+        body: JSON.stringify({ model: MODEL, messages, modalities: ['text', 'audio'], audio: { voice, format: 'mp3' },
           max_completion_tokens: MAX_OUTPUT_TOKENS, store: false }), signal: AbortSignal.timeout(45_000),
       });
       if (!res.ok) throw new Error('Falha na geração de voz (HTTP ' + res.status + ').');

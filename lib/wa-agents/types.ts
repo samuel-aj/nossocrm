@@ -221,7 +221,12 @@ export type AgentLeadContext = z.infer<typeof AgentLeadContextSchema>;
 // ---------------------------------------------------------------------------
 // Mídia recebida: áudio, imagem, figurinha e documento viram texto pela IA do agente
 // ---------------------------------------------------------------------------
+export const AGENT_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar'] as const;
+export type AgentVoice = (typeof AGENT_VOICES)[number];
+export const DEFAULT_AGENT_VOICE: AgentVoice = 'alloy';
+
 export const AgentMediaUnderstandingSchema = z.object({
+  voice: z.enum(AGENT_VOICES).optional(),
   reply_to_audio: z.boolean().optional(),
   /** Áudio do lead transcrito (OpenAI whisper / Google; Anthropic não transcreve) */
   audio: z.boolean().default(true),

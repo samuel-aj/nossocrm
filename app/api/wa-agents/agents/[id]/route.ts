@@ -70,8 +70,8 @@ function mergeTriggers(current: AgentTriggers, incoming: unknown): unknown {
   return { ...inc, inbound: block('inbound'), deal: block('deal') };
 }
 
-/** Campos do corpo que precisam do agente salvo para serem mesclados (triggers) ou restaurados (segredos). */
-const NEEDS_EXISTING = ['triggers', 'webhooks', 'outcomes', 'custom_actions'];
+/** Campos parciais ou com segredos mascarados precisam da configuração salva. */
+const NEEDS_EXISTING = ['triggers', 'media_understanding', 'webhooks', 'outcomes', 'custom_actions'];
 
 export async function GET(_req: Request, ctx: Ctx) {
   const auth = await guardRoute({ admin: true, agents: true });
@@ -104,10 +104,13 @@ export async function PATCH(req: Request, ctx: Ctx) {
     try {
       existing = await fetchAgent(auth.admin, orgId, id);
       if (!existing) return json({ error: 'Agente não encontrado' }, 404);
-      if ('triggers' in raw) {
-        const incoming = (raw as { triggers?: unknown }).triggers;
-        body = { ...raw, triggers: mergeTriggers(normalizeTriggers(existing.triggers), incoming) };
+      const merged: Record<string, unknown> = { ...raw };
+      if ('triggers' in merged) merged.triggers = mergeTriggers(normalizeTriggers(existing.triggers), merged.triggers);
+      const media = merged.media_understanding;
+      if (media && typeof media === 'object' && !Array.isArray(media)) {
+        merged.media_understanding = { ...existing.media_understanding, ...media };
       }
+      body = merged;
     } catch (err) {
       return json({ error: getErrorMessage(err, 'Falha ao carregar o agente') }, 500);
     }

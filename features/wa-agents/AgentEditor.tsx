@@ -47,6 +47,8 @@ import ConfirmModal from '@/components/ConfirmModal';
 import { useToast } from '@/context/ToastContext';
 import {
   AI_PROVIDERS,
+  AGENT_VOICES,
+  DEFAULT_AGENT_VOICE,
   AgentInputSchema,
   DEFAULT_AGENT_AUTO_LEAD,
   DEFAULT_AGENT_TRIGGERS,
@@ -59,6 +61,7 @@ import {
   type AgentPublic,
   type AgentTriggers,
   type AgentMediaUnderstanding,
+  type AgentVoice,
   type AgentTyping,
   type AgentWebhook,
   type CustomAction,
@@ -90,6 +93,7 @@ import { FollowupsEditor } from './FollowupsEditor';
 import { KnowledgePanel } from './KnowledgePanel';
 import { AgentContractSetting } from './AgentContractSetting';
 import { AgentTestDrawer } from './AgentTestDrawer';
+import { VoicePreview } from './VoicePreview';
 import {
   BTN_PRIMARY,
   BTN_SECONDARY,
@@ -1819,7 +1823,7 @@ export const AgentEditor: React.FC<{
                 ['reply_to_audio', 'Responder em áudio quando o cliente enviar áudio', 'Responde por voz à última mensagem de áudio do cliente. Links seguem por escrito. A geração usa a chave da OpenAI configurada para o agente ou para a organização.'],
                 ['image', 'Ver imagens', 'Descreve fotos e figurinhas e lê o texto de prints, boletos e documentos fotografados.'],
                 ['document', 'Ler documentos', 'Extrai o texto de PDF, DOCX e arquivos de texto.'],
-              ] as Array<[keyof AgentMediaUnderstanding, string, string]>
+              ] as Array<[Exclude<keyof AgentMediaUnderstanding, 'voice'>, string, string]>
             ).map(([campo, titulo, ajuda]) => (
               <SettingRow
                 key={campo}
@@ -1839,6 +1843,17 @@ export const AgentEditor: React.FC<{
               />
             ))}
           </div>
+          <Field label="Voz do agente" htmlFor="agent-voice" help="Usada nas respostas em áudio e nos trechos marcados no roteiro.">
+            <div className="flex flex-wrap items-center gap-2">
+              <NativeSelect id="agent-voice" aria-label="Voz do agente" className={INPUT_CLASS + ' max-w-48'}
+                value={form.media_understanding.voice ?? DEFAULT_AGENT_VOICE}
+                onChange={e => patch({ media_understanding: { ...form.media_understanding, voice: e.target.value as AgentVoice } })}>
+                {AGENT_VOICES.map(voice => <option key={voice} value={voice}>{voice[0].toUpperCase() + voice.slice(1)}</option>)}
+              </NativeSelect>
+              <VoicePreview key={form.media_understanding.voice ?? DEFAULT_AGENT_VOICE}
+                agentId={agentId} draft={toPayload(form)} text="Como posso ajudar você hoje?" />
+            </div>
+          </Field>
           {form.media_understanding.audio && form.provider === 'anthropic' && !temChaveDeAudio ? (
             <Notice tone="amber">
               A Anthropic não transcreve áudio. Informe a chave auxiliar da OpenAI em Chave própria (ou na Central de

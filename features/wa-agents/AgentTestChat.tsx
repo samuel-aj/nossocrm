@@ -14,7 +14,8 @@ import { Send, Loader2, Eraser, Wrench, Timer } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 import { DEFAULT_AGENT_TYPING, type AgentInput } from '@/lib/wa-agents/types';
 import { typingDelayMs } from '@/lib/wa-agents/typing';
-import { useTestWaAgent, waAgentsFetch, type WaTestMessage } from './useWaAgents';
+import { useTestWaAgent, type WaTestMessage } from './useWaAgents';
+import { VoicePreview } from './VoicePreview';
 import { BTN_PRIMARY, BTN_SMALL, INPUT_CLASS, Notice, Toggle, errorMessage, newId } from './ui';
 
 type Entry = {
@@ -30,31 +31,6 @@ type Entry = {
   /** true enquanto as linhas ainda estão sendo reveladas (não mostrar "sem resposta") */
   revealing?: boolean;
 };
-
-function VoicePreview({ agentId, text, draft }: { agentId: string; text: string; draft?: Partial<AgentInput> }) {
-  const [audio, setAudio] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  async function listen() {
-    setBusy(true);
-    setError('');
-    try {
-      const result = await waAgentsFetch<{ audio: string }>(`/api/wa-agents/agents/${agentId}/test`, {
-        method: 'POST', body: { previewVoice: text, draft },
-      });
-      setAudio('data:audio/mpeg;base64,' + result.audio);
-    } catch (err) {
-      setError(errorMessage(err, 'Não foi possível gerar a prévia da voz.'));
-    } finally { setBusy(false); }
-  }
-  return <div className="mt-1">
-    {audio ? <audio controls preload="metadata" src={audio} aria-label="Prévia da resposta em áudio" /> :
-      <button className={BTN_SMALL} type="button" disabled={busy} onClick={() => void listen()}>
-        {busy ? 'Gerando áudio…' : 'Ouvir prévia'}
-      </button>}
-    {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
-  </div>;
-}
 
 function sleep(ms: number): Promise<void> {
   if (ms <= 0) return Promise.resolve();
@@ -301,7 +277,7 @@ export const AgentTestChat: React.FC<{
                   <div key={`${entry.id}-${i}`} className="flex justify-start">
                     <div className="max-w-[80%] rounded-2xl rounded-bl-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 px-3 py-2 text-sm text-slate-900 dark:text-white whitespace-pre-wrap">
                       {entry.voiceLines?.includes(i) && <small className="block font-semibold">Áudio simulado</small>}{line}
-                      {agentId && entry.voiceLines?.includes(i) && <VoicePreview agentId={agentId} text={line} draft={draft} />}
+                      {agentId && entry.voiceLines?.includes(i) && <VoicePreview key={draft?.media_understanding?.voice} agentId={agentId} text={line} draft={draft} />}
                     </div>
                   </div>
                 ))

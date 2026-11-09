@@ -54,19 +54,20 @@ describe('síntese com provedor simulado', () => {
     expect(verifiedAudio(audio('Já enviei o link.'), phrase)).toBeNull();
     expect(verifiedAudio({ choices: [{ ...audio(phrase).choices[0], finish_reason: 'length' }] }, phrase)).toBeNull();
   });
-  it('gera a prévia em memória sem armazenar mídia nem acessar o WhatsApp', async () => {
+  it.each([[undefined, 'alloy'], ['coral', 'coral']] as const)('gera a prévia em memória com a voz %s', async (voice, expectedVoice) => {
     const fetchAudio = vi.fn().mockResolvedValue(Response.json(audio(phrase)));
     vi.stubGlobal('fetch', fetchAudio);
     meter.mockImplementation(opts => opts.execute());
-    const agent = { organization_id: 'office', audio_api_key: 'teste' } as AgentRow;
+    const agent = { organization_id: 'office', audio_api_key: 'teste', media_understanding: { voice } } as AgentRow;
     const preview = await synthesizeVoice({} as SupabaseClient, agent, phrase);
     expect(preview.bytes?.toString('base64')).toBe('SUQz');
     expect(fetchAudio.mock.calls.map(([url]) => url)).toEqual(['https://api.openai.com/v1/chat/completions']);
+    expect(JSON.parse(fetchAudio.mock.calls[0][1].body).audio).toEqual({ voice: expectedVoice, format: 'mp3' });
   });
   it('mede o consumo e só grava o áudio verificado no espaço do escritório', async () => {
     const upload = vi.fn().mockResolvedValue({ error: null });
     const db = { storage: { from: vi.fn(() => ({ upload })) } } as unknown as SupabaseClient;
-    const agent = { provider: 'google', organization_id: 'office', audio_api_key: 'teste' } as AgentRow;
+    const agent = { provider: 'google', organization_id: 'office', audio_api_key: 'teste', media_understanding: { voice: 'cedar' } } as AgentRow;
     const request = vi.fn().mockResolvedValue(Response.json(audio(phrase)));
     vi.stubGlobal('fetch', request);
     meter.mockImplementation(async opts => {
@@ -77,6 +78,7 @@ describe('síntese com provedor simulado', () => {
     const file = await prepareVoiceFile(db, agent, phrase);
     expect(file.path).toMatch(/^office\/out\/.+_voz\.mp3$/);
     expect(upload).toHaveBeenCalledOnce();
+    expect(JSON.parse(request.mock.calls[0][1].body).audio.voice).toBe('cedar');
     expect(JSON.parse(request.mock.calls[0][1].body).messages.at(-1).content).toBe(phrase);
     expect(meter).toHaveBeenCalledWith(expect.objectContaining({ operation: 'voice_reply' }));
   });
