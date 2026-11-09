@@ -16,7 +16,7 @@ import { runWithUsageContext } from '@/lib/ai-usage/context';
 import { synthesizeVoice } from '@/lib/wa-agents/voice';
 import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
-import { loadAgent } from '@/lib/wa-agents/context';
+import { loadAgent, normalizeAgentRow } from '@/lib/wa-agents/context';
 import { WaAgentError } from '@/lib/wa-agents/errors';
 import { agentWithDraft, testAgentReply } from '@/lib/wa-agents/test';
 import { AgentInputSchema, type AgentRow } from '@/lib/wa-agents/types';
@@ -62,7 +62,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   if (!auth.ok) return auth.response;
 
   const { id } = await ctx.params;
-  if (!isValidUUID(id)) return json({ error: 'ID inválido' }, 400);
+  const newAgent = id === 'new';
+  if (!newAgent && !isValidUUID(id)) return json({ error: 'ID inválido' }, 400);
   const orgId = auth.user.organizationId;
 
   const rawBody = await readJsonBody(req);
@@ -70,14 +71,15 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   if (!parsed.success) return validationError(parsed.error);
 
   // loadAgent normaliza a linha (jsonb validado, números coeridos)
-  const saved = await loadAgent(auth.admin, orgId, id);
+  if (newAgent && !parsed.data.previewVoice) return json({ error: 'Salve o agente para testar a conversa.' }, 400);
+  const saved = newAgent ? normalizeAgentRow({ id, organization_id: orgId }) : await loadAgent(auth.admin, orgId, id);
   if (!saved) return json({ error: 'Agente não encontrado' }, 404);
   const agent = withDraft(saved, rawBody, parsed.data.draft as Partial<AgentRow> | undefined);
 
   try {
     if (parsed.data.previewVoice) {
       const text = parsed.data.previewVoice;
-      const scope = await createUsageContext(auth.admin, { organizationId: orgId, agentId: id, scope: 'test' });
+      const scope = await createUsageContext(auth.admin, { organizationId: orgId, agentId: newAgent ? null : id, scope: 'test' });
       const audio = await runWithUsageContext(scope, () => synthesizeVoice(auth.admin, agent, text));
       if (!audio.bytes) return json({ error: audio.reason }, 422);
       return Response.json({ audio: audio.bytes.toString('base64') }, { headers: { 'Cache-Control': 'no-store' } });
