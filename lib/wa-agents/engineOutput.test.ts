@@ -4,7 +4,7 @@ import type { AgentRow } from './types';
 import type { ConversationContext } from './context';
 import type { SupabaseClient } from '@supabase/supabase-js';
 const h = vi.hoisted(() => ({
-  voiceFile: vi.fn(), sendVoice: vi.fn(),
+  voiceFile: vi.fn(), sendVoice: vi.fn(), notice: vi.fn(), transcribe: vi.fn(),
   generate: vi.fn(), history: vi.fn(), send: vi.fn(), action: vi.fn(), outcome: vi.fn(), events: vi.fn(), log: vi.fn(),
   calendar: null as Record<string, unknown> | null,
   budget: vi.fn(), block: vi.fn(), reserve: vi.fn(), dispatch: vi.fn(), settle: vi.fn(), policyEnabled: false,
@@ -19,7 +19,7 @@ vi.mock('@/lib/ai-usage/budget', () => ({
   reserveUsage: h.reserve, dispatchUsage: h.dispatch, settleUsage: h.settle,
   createUsageContext: async (admin: SupabaseClient, input: Record<string, unknown>) => ({ admin, ...input, accountId: 'account', policyEnabled: h.policyEnabled }),
 }));
-vi.mock('ai', async original => ({ ...await original<typeof import('ai')>(), generateText: h.generate }));
+vi.mock('ai', async original => ({ ...await original<typeof import('ai')>(), generateText: h.generate, experimental_transcribe: h.transcribe }));
 vi.mock('@/lib/supabase/server', () => ({ createStaticAdminClient: () => h.db }));
 vi.mock('@/lib/supabase/actorClient', () => ({ withActor: (db: unknown) => db }));
 vi.mock('@/lib/whatsapp', () => ({ getProvider: () => ({ sendText: h.send }) }));
@@ -39,6 +39,7 @@ vi.mock('./webhooks', () => ({ dispatchAgentEvent: h.events }));
 vi.mock('./runs', () => ({ logRun: h.log }));
 
 import { handleInboundMessage, resumeDueConversations, runAgentOnConversation } from './engine';
+import { APICallError } from 'ai';
 import { AiUsageError, failUsage } from '@/lib/ai-usage/context';
 import { VOICE_NOTICE } from './voiceDelivery';
 import { meteredOperation } from '@/lib/ai-usage/meteredModel';
@@ -65,10 +66,11 @@ function fakeDb() {
       let single = false;
       const q = {
         select: () => q,
+        insert: h.notice,
         update: (p: Record<string, unknown>) => { patch = p; return q; },
         eq: (k: string, v: unknown) => { rows = rows.filter(r => r[k] === v); return q; },
         in: (k: string, values: unknown[]) => { rows = rows.filter(r => values.includes(r[k])); return q; },
-        gt: () => q, lte: () => q, not: () => q, order: () => q, limit: () => q,
+        gt: (k: string, v: string) => { rows = rows.filter(r => String(r[k]) > v); return q; }, lte: () => q, not: () => q, order: () => q, limit: () => q,
         maybeSingle: () => { single = true; return q; },
         then: (resolve: (r: unknown) => unknown) => {
           if (patch) rows.forEach(row => Object.assign(row, patch));
@@ -97,6 +99,7 @@ beforeEach(() => {
   h.ctx.conversation.id = 'conv'; h.ctx.conversation.connection_id = 'conn';
   h.ctx.connection = { id: 'conn', organization_id: org, provider: 'evolution', status: 'connected', phone_number: '+5500000000000' } as ConversationContext['connection'];
   h.db = fakeDb();
+  h.notice.mockResolvedValue({ error: null });
   h.send.mockResolvedValue({ ok: true, providerMessageId: 'fake' });
   h.action.mockResolvedValue({ events: [], changed: false });
   h.outcome.mockResolvedValue({ events: [] });
@@ -105,6 +108,37 @@ beforeEach(() => {
 const run = () => runAgentOnConversation({ organizationId: org, conversationId: 'conv', trigger: 'inbound', skipBuffer: true });
 
 describe('validação no envio real e no simulador', () => {
+  it.each(['sem transcrição', 'falha do fornecedor'])('pede outro áudio quando há %s, sem gerar outra resposta', async scenario => {
+    const original = { ...incoming };
+    Object.assign(incoming, { media_type:'audio', body:null, media_url:'fixture' });
+    h.agent!.media_understanding.audio = true;
+    h.agent!.provider = 'openai'; h.agent!.api_key = 'fake';
+    Object.assign(h.db, {storage:{from:()=>({download:async()=>({data:{type:'audio/mpeg',arrayBuffer:async()=>new Uint8Array([1,2,3]).buffer}})})}});
+    h.transcribe.mockRejectedValueOnce(scenario==='sem transcrição'
+      ? Object.assign(new Error('No transcript generated.'), {name:'AI_NoTranscriptGeneratedError',responses:[{body:{duration:3}}]})
+      : new APICallError({message:'Unavailable',url:'https://asr.invalid',requestBodyValues:{},statusCode:503}));
+    try {
+      expect((await run()).status).toBe('ok');
+      expect(h.send.mock.calls.map(([s])=>s.text)).toEqual(['Não consegui ouvir seu áudio. Pode mandar de novo ou escrever por aqui?']);
+      expect(h.settle.mock.calls.at(-1)?.[2]).toMatchObject(scenario==='sem transcrição' ? {status:'completed',actualAmount:3} : {status:'unknown'});
+      expect(h.notice).toHaveBeenCalledTimes(1);
+      expect(h.generate).not.toHaveBeenCalled();
+    } finally { Object.assign(incoming, original); Reflect.deleteProperty(incoming,'media_type'); Reflect.deleteProperty(incoming,'media_url'); }
+  });
+  it('pede reenvio uma única vez e registra aviso interno quando o áudio chega sem arquivo', async () => {
+    const original = { ...incoming };
+    Object.assign(incoming, { media_type: 'audio', body: null });
+    h.agent!.media_understanding.audio = true;
+    h.agent!.media_understanding.reply_to_audio = true;
+    try {
+      expect((await run()).status).toBe('ok');
+      expect((await run()).status).toBe('skipped');
+      expect(h.notice).toHaveBeenCalledExactlyOnceWith({ kind: 'audio_transcription', organization_id: org, source_id: incoming.id });
+      expect(h.send.mock.calls.map(([s]) => s.text)).toEqual(['Não consegui ouvir seu áudio. Pode mandar de novo ou escrever por aqui?']);
+      expect(h.sendVoice).not.toHaveBeenCalled();
+      expect(h.generate).not.toHaveBeenCalled();
+    } finally { Object.assign(incoming, original); Reflect.deleteProperty(incoming, 'media_type'); }
+  });
   it('entrega a fala do roteiro uma vez e depois o link mesmo quando a entrada também é áudio', async () => {
     const phrase = 'Vou enviar o link por aqui.';
     const link = 'https://assinatura.invalid/teste';
@@ -121,14 +155,14 @@ describe('validação no envio real e no simulador', () => {
     expect(simulated.lines).toEqual([VOICE_NOTICE, phrase, link]);
     expect(simulated.voiceLines).toEqual([1]);
     expect(h.voiceFile).not.toHaveBeenCalled(); expect(h.send).not.toHaveBeenCalled(); expect(h.sendVoice).not.toHaveBeenCalled();
-    Object.assign(incoming, { media_type: 'audio' });
+    Object.assign(incoming, { media_type: 'audio', transcription: 'Como assino?' });
     try {
       const result = await run();
       expect(result.status).toBe('ok');
       expect(h.sendVoice).toHaveBeenCalledExactlyOnceWith(h.db, expect.anything(), expect.objectContaining({ transcript: phrase }));
       expect(h.send.mock.calls.map(([entry]) => entry.text)).toEqual([VOICE_NOTICE, link]);
       expect(h.sendVoice.mock.invocationCallOrder[0]).toBeLessThan(h.send.mock.invocationCallOrder[1]);
-    } finally { Reflect.deleteProperty(incoming, 'media_type'); }
+    } finally { Reflect.deleteProperty(incoming, 'media_type'); Reflect.deleteProperty(incoming, 'transcription'); }
   });
   it('no simulador alterna áudio e texto pela última entrada, sem chamar síntese nem transporte', async () => {
     h.agent!.media_understanding.reply_to_audio = true;

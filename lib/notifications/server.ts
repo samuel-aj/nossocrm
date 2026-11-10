@@ -6,7 +6,7 @@ import { DEFAULT_PREFERENCES, PreferencesSchema, type Preferences, type Notice }
 import { usageNotices } from '@/lib/ai-usage/notifications';
 
 interface MessageRow {id:string;conversation_id:string;wa_timestamp:string|null}
-interface ConversationRow {id:string;contact_id:string|null;connection_id:string|null;wa_name:string|null;wa_phone:string;label_ids:string[]}
+interface ConversationRow {id:string;contact_id:string|null;connection_id:string|null;wa_name:string|null;wa_phone:string;label_ids:string[];assigned_owner_id:string|null}
 interface DealRow {id:string;title:string;board_id:string;owner_id:string|null;contact_id:string|null;is_won:boolean;is_lost:boolean;created_at:string}
 type Auth = Extract<RequireOrgResult, {ok: true}>;
 export async function context(auth: Auth) {
@@ -63,13 +63,13 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
   if(alerts.error) throw alerts.error;
   const alertDeals=alerts.data?.length ? await auth.admin.from('deals').select('id,title,board_id,owner_id,active_alert').eq('organization_id',auth.user.organizationId).in('id',alerts.data.map(a=>a.deal_id)).eq('owner_id',auth.user.id).is('deleted_at',null) : {data:[],error:null};
   if(alertDeals.error) throw alertDeals.error;
-  const messageIds=events.filter(e=>e.kind==='message' && p.messages).map(e=>e.source_id);
+  const messageIds=events.filter(e=>(e.kind==='message' && p.messages) || (e.kind==='audio_transcription' && p.alerts)).map(e=>e.source_id);
   const leadIds=events.filter(e=>e.kind==='lead' && p.leads && p.boardIds.includes(e.board_id)).map(e=>e.source_id);
   const messages=messageIds.length ? await auth.admin.from('wa_messages').select('id,conversation_id,wa_timestamp').eq('organization_id',auth.user.organizationId).in('id',messageIds).eq('direction','in').is('deleted_at',null) : {data:[],error:null};
   if(messages.error) throw messages.error;
   const messageRows=(messages.data ?? []) as MessageRow[];
   const convIds=[...new Set(messageRows.map(m=>m.conversation_id))];
-  const conversations=convIds.length ? await auth.admin.from('wa_conversations').select('id,contact_id,connection_id,wa_name,wa_phone,label_ids').eq('organization_id',auth.user.organizationId).in('id',convIds).eq('is_group',false) : {data:[],error:null};
+  const conversations=convIds.length ? await auth.admin.from('wa_conversations').select('id,contact_id,connection_id,wa_name,wa_phone,label_ids,assigned_owner_id').eq('organization_id',auth.user.organizationId).in('id',convIds).eq('is_group',false) : {data:[],error:null};
   if(conversations.error) throw conversations.error;
   const conversationRows=(conversations.data ?? []) as ConversationRow[];
   const contactIds=[...new Set(conversationRows.map(c=>c.contact_id).filter(Boolean))];
@@ -96,16 +96,28 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
       const d=leadRows.find(d=>d.id===event.source_id);
       if(!d || !p.leads || !p.boardIds.includes(event.board_id) || d.board_id!==event.board_id || !allowed(d)) continue;
       notices.push({id:String(event.id),kind:'lead',title:'Novo lead no board',message:`${d.title} · ${ctx.boards.find(b=>b.id===d.board_id)?.name}`,href:`/boards?board=${d.board_id}&deal=${d.id}`,createdAt:event.created_at});
-    } else {
+    } else if(event.kind==='message' || event.kind==='audio_transcription') {
+      const audioFailed = event.kind==='audio_transcription';
       const m=messageRows.find(m=>m.id===event.source_id);
       // Synchronizing an old history must not produce fresh-message alerts.
-      if(m?.wa_timestamp && Date.parse(m.wa_timestamp)<Date.parse(event.created_at)-120_000) continue;
+      if(!audioFailed && m?.wa_timestamp && Date.parse(m.wa_timestamp)<Date.parse(event.created_at)-120_000) continue;
       const c=conversationRows.find(c=>c.id===m?.conversation_id);
-      if(!p.messages || !m || !c || !connectionAllowed(rules,c.connection_id)) continue;
+      if(!(audioFailed ? p.alerts : p.messages) || !m || !c || !connectionAllowed(rules,c.connection_id)) continue;
       const labels=rules?.whatsapp.label_ids;
       if(labels && !labels.some(id=>(c.label_ids ?? []).includes(id))) continue;
       const ds=linkedRows.filter(d=>d.contact_id===c.contact_id);
       const effective=ds.find(d=>!d.is_won && !d.is_lost) ?? ds[0];
+      if (audioFailed) {
+        const owner = effective?.owner_id ?? c.assigned_owner_id;
+        if (effective ? !allowed(effective) : !access.fullAccess) continue;
+        if (owner ? owner !== auth.user.id : !access.fullAccess) continue;
+        const owners = rules?.whatsapp.owner_user_ids;
+        if (owners && (!effective?.owner_id || (effective.owner_id !== auth.user.id && !owners.includes(effective.owner_id)))) continue;
+        notices.push({id:String(event.id),kind:'alert',tone:'red',title:'Áudio sem transcrição',
+          message:`${c.wa_name || 'Cliente'} · Abra a conversa para conferir o áudio.`,
+          href:`/chats?conversation=${c.id}`,createdAt:event.created_at});
+        continue;
+      }
       if(!ds.some(allowed) || (p.scope==='own' && effective?.owner_id!==auth.user.id)) continue;
       const owners=rules?.whatsapp.owner_user_ids;
       if(owners && effective?.owner_id && effective.owner_id!==auth.user.id && !owners.includes(effective.owner_id)) continue;

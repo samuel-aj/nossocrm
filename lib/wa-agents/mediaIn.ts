@@ -121,7 +121,21 @@ async function transcribeAudio(
       // sem ele a resposta vem sem duração e o consumo ficava "desconhecido",
       // pausando a IA da conversa. Se ainda assim não vier, vale a duração
       // medida aqui nos quadros do próprio áudio (a mesma usada na reserva).
-      execute: () => transcribe({ model: openai.transcription('whisper-1'), audio: new Uint8Array(bytes), maxRetries: 0, providerOptions: { openai: {} } }),
+      execute: async () => {
+        try {
+          return await transcribe({ model: openai.transcription('whisper-1'), audio: new Uint8Array(bytes), maxRetries: 0, providerOptions: { openai: {} } });
+        } catch (error) {
+          // The SDK throws after a successful provider response with empty text.
+          // Settle the measured audio just as for a successful empty transcript.
+          if (error instanceof Error && error.name === 'AI_NoTranscriptGeneratedError') {
+            const responses = (error as Error & { responses?: { body?: { duration?: unknown } }[] }).responses;
+            const duration = responses?.[0]?.body?.duration;
+            return { text: '', durationInSeconds: typeof duration === 'number' && Number.isFinite(duration) && duration >= 0
+              ? duration : seconds ?? undefined };
+          }
+          throw error;
+        }
+      },
       usage: result => result.durationInSeconds ?? seconds ?? null,
     });
     return (result.text || '').trim() || null;

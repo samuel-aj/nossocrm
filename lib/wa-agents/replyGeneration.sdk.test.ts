@@ -5,6 +5,7 @@ import type { LanguageModelV3GenerateResult } from '@ai-sdk/provider';
 vi.mock('server-only', () => ({}));
 import { normalizeAgentRow } from './context';
 import { generateAgentReply } from './replyGeneration';
+import type { AgentMediaRow } from './types';
 
 const agent = normalizeAgentRow({
   id: 'agent', organization_id: 'org', name: 'Triagem', provider: 'openai', model: 'gpt-4.1',
@@ -33,6 +34,44 @@ function queuedModel(responses: LanguageModelV3GenerateResult[]) {
 }
 
 describe('contrato com o AI SDK instalado', () => {
+  it.each([['[audio]', 'audio'], ['[vídeo]', 'video']] as const)('recupera %s com a ferramenta e preserva a ordem', async (marker, kind) => {
+    const model = queuedModel([text('Olá! ' + marker + ' Conseguiu abrir?'),
+      response([{ type: 'tool-call', toolCallId: 'recover', toolName: 'enviar_midia', input: '{"nome":"Tutorial"}' }])]);
+    const sendMedia = vi.fn().mockResolvedValue({ ok: true });
+    const result = await generateAgentReply({ ...input, model, runtime: { media: [{ name: 'Tutorial', kind } as AgentMediaRow], sendMedia } });
+    expect(result.segments).toEqual([{ kind:'text', text:'Olá!', step:0 }, { kind:'media', name:'Tutorial', step:0, caption:undefined }, { kind:'text', text:'Conseguiu abrir?', step:0 }]);
+    expect(model.doGenerateCalls[1].tools?.map(t=>t.name)).toEqual(['enviar_midia']);
+    expect(sendMedia).toHaveBeenCalledTimes(1);
+    expect(result.usage).toMatchObject({ totalTokens: 30 });
+  });
+
+  it('remove o marcador redundante sem enviar a mídia duas vezes', async () => {
+    const model = queuedModel([response([{ type:'text', text:'Segue [áudio]' },
+      { type: 'tool-call', toolCallId:'first', toolName:'enviar_midia', input:'{"nome":"Explicação"}' }]), text('')]);
+    const sendMedia = vi.fn().mockResolvedValue({ok:true});
+    const result = await generateAgentReply({ ...input, model, runtime: {media:[{name:'Explicação',kind:'audio'} as AgentMediaRow], sendMedia} });
+    expect(result.segments.map(s=>s.kind)).toEqual(['text','media']);
+    expect(sendMedia).toHaveBeenCalledTimes(1);
+    expect(model.doGenerateCalls).toHaveLength(2);
+  });
+
+  it('só aceita a fala marcada que pertence ao roteiro salvo do follow-up', async () => {
+    const followupInstruction = 'Fale [audio]Tudo bem com você?[/audio]';
+    const good = await generateAgentReply({ ...input, followupInstruction, model:queuedModel([text('[audio]Tudo bem com você?[/audio]')]) });
+    expect(good.segments).toEqual([{kind:'text', voice:true, text:'Tudo bem com você?', step:0}]);
+    const bad = await generateAgentReply({ ...input, followupInstruction, model:queuedModel([text('[audio]Texto inventado[/audio]')]) });
+    expect(bad.outputSafety.status).toBe('blocked');
+    expect(bad.segments).toEqual([]);
+  });
+
+  it('bloqueia a entrega se na revisão o modelo só afirmar que enviou o vídeo', async () => {
+    const model = queuedModel([text('[vídeo]'), text('Enviei o vídeo.')]);
+    const sendMedia = vi.fn();
+    const result = await generateAgentReply({ ...input, model, runtime: {media:[{name:'Tutorial',kind:'video'} as AgentMediaRow], sendMedia} });
+    expect(result.outputSafety.status).toBe('blocked');
+    expect(result.segments).toEqual([]);
+    expect(sendMedia).not.toHaveBeenCalled();
+  });
   it('remove repetição entre passos reais sem perder o resultado da ferramenta', async () => {
     const question = 'Preciso fazer algumas perguntas rápidas.\nPosso continuar?';
     const model = queuedModel([response([{ type: 'text', text: question }, save]), text(question)]);
