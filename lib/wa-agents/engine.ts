@@ -940,6 +940,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
 
     // Mudança de estado pedida pelas ações (aprovação, passagem, parada): aplicada uma única vez
     // no fim. O resultado do encerramento prevalece sobre uma ação durante a conversa.
+    let humanReview = false;
     let transition: { acts: OutcomeActionsResult; summary: string; reason: string; extra: Record<string, unknown> } | null =
       null;
     const requestsTransition = (acts: OutcomeActionsResult) =>
@@ -1012,6 +1013,8 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
           renewLock: renew,
         });
         await emit('finished', { resultado: outcome.key, resultado_label: outcome.label, resumo });
+        humanReview = [outcome.key, outcome.label].some(value =>
+          value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/[\s_-]+/g, '-') === 'analise-humana');
         if (requestsTransition(acts)) {
           transition = { acts, summary: resumo, reason: 'resultado com parada', extra: { resultado: outcome.key, resumo } };
         } else {
@@ -1081,6 +1084,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
         }
       } else if (acts.stopped) {
         await stopConversation(reason, extra);
+        if (humanReview && !acts.startBotId) pushEvent('human_handoff');
         if (acts.startBotId) {
           // O robô inicia DEPOIS da parada e fora da trava (ele manda mensagens
           // e pega a própria trava de execução), como a passagem em cadeia.

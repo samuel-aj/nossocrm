@@ -107,6 +107,17 @@ beforeEach(() => {
 });
 const run = () => runAgentOnConversation({ organizationId: org, conversationId: 'conv', trigger: 'inbound', skipBuffer: true });
 
+it.each([['analise-humana','Análise humana',true],['revisar','ANÁLISE HUMANA',true],['qualificado','Qualificado',false]])(
+  'registra aviso apenas para entrega efetiva à equipe (%s)', async (key,label,expected) => {
+    h.agent!.outcomes=[{key:String(key),label:String(label),description:'Teste',actions:[{type:'stop'}]}];
+    const op={toolName:'encerrar_atendimento',toolCallId:'fim',input:{resultado:key,resumo:'Resumo de teste'}};
+    h.generate.mockResolvedValue({...draft(''),steps:[{text:'',toolCalls:[op],toolResults:[{toolCallId:'fim',output:{ok:true}}]}]});
+    expect((await run()).status).toBe('ok');
+    const events=h.log.mock.calls.at(-1)?.[1].events as {type:string}[];
+    expect(events.some(e=>e.type==='stopped')).toBe(true);
+    expect(events.filter(e=>e.type==='human_handoff')).toHaveLength(expected ? 1 : 0);
+  });
+
 describe('validação no envio real e no simulador', () => {
   it.each(['sem transcrição', 'falha do fornecedor'])('pede outro áudio quando há %s, sem gerar outra resposta', async scenario => {
     const original = { ...incoming };

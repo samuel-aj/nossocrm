@@ -19,13 +19,19 @@ import { loadCustomFieldDefs } from '@/lib/wa-agents/leadOps';
 import { addDealTag } from '@/lib/wa-agents/actions';
 import { renderTemplate } from '@/lib/wa-agents/template';
 import { ensureSignLink } from './message';
-import { officeTemplates, createTemplatePackage, PackageError } from './templatePackage';
+import { officeTemplates, createTemplatePackage, PackageError, remainingAttachments } from './templatePackage';
 import { errorMessage } from '@/lib/wa-agents/errors';
 import { ZapSignClient, ZapSignError, signerLink, type ZapSignDoc, type ZapSignSigner } from './client';
 import { resolveVariables, splitPhone, type VariableContext, type VariableSource } from './variables';
 
 export const DEAL_FILES_BUCKET = 'deal-files';
 export const MAX_ATTEMPTS = 3;
+
+export class UnconfirmedEnvelopeError extends Error {
+  constructor(readonly attempts: string[]) {
+    super('A ZapSign ainda não confirmou se criou o envelope anterior. Confira em Documentos na ZapSign antes de emitir novamente.');
+  }
+}
 
 export type ZapSignSettings = {
   organization_id: string;
@@ -74,7 +80,10 @@ export type SignatureRule = {
 export type SignatureRequest = {
   confirmed_signer?: SignerIdentity;
   package_expected?: number;
+  package_members?: { token: string; name: string }[];
+  package_attachment_models?: Record<string,string>;
   package_unverified?: boolean;
+  package_recovered?: boolean;
   agent_delivery?: 'conversation';
   agent_id?: string;
   conversation_id?: string;
@@ -266,6 +275,8 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
     };
   }
   if (!spec?.template_token) return { status: 'failed', error: 'sem modelo escolhido', retry: false };
+  if (spec.package_unverified || (row.doc_token && spec.package_members?.length))
+    return { status: 'failed', error: new PackageError(row.doc_token).message, retry: false };
 
   const snap = await loadLeadSnapshot(admin, orgId, row.deal_id);
   if (!snap || snap.deal.deleted_at) return { status: 'cancelled', reason: 'lead excluído' };
@@ -301,10 +312,18 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
 
   let doc: ZapSignDoc;
   let isPackage = false;
+  let members: SignatureRequest['package_members'];
   try {
     const tpl = officeTemplates(await client.listTemplates()).find(t => t.token === spec.template_token);
     if (!tpl) return { status: 'failed', error: 'Selecione um modelo principal ativo na conta ZapSign.', retry: false };
     isPackage = !!tpl.extra_templates?.length;
+    members = tpl.extra_templates?.map(({ token, name }) => ({ token, name }));
+    if (isPackage) {
+      const armed = await admin.from('deal_signatures').update({ request: { ...spec, confirmed_signer: signer,
+        package_members: members, package_unverified: true } }).eq('organization_id',orgId).eq('id',row.id)
+        .eq('status','processing').or('request->>package_unverified.is.null,request->>package_unverified.eq.false').select('id').maybeSingle();
+      if (armed.error || !armed.data) return { status:'failed',error:'Não foi possível reservar o pacote para este envio.',retry:false };
+    }
     doc = await createTemplatePackage(client, tpl, {
       template_id: spec.template_token,
       name: docName,
@@ -322,14 +341,19 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
         { key: 'crm_deal_id', value: row.deal_id },
         { key: 'crm_signature_id', value: row.id },
       ],
+    }, async token => {
+      const bound = await admin.from('deal_signatures').update({doc_token:token}).eq('organization_id',orgId).eq('id',row.id);
+      if (bound.error) throw new Error('Falha ao salvar a referência do envelope.');
     });
   } catch (err) {
     if (err instanceof PackageError) {
-      if (err.docToken) await admin.from('deal_signatures').update({doc_token:err.docToken,
-        request:{ ...spec, package_unverified:true }}).eq('id',row.id).eq('organization_id',orgId);
+      await admin.from('deal_signatures').update({...(err.docToken ? { doc_token: err.docToken } : {}),
+        request:{ ...spec, confirmed_signer: signer, package_members: members, package_attachment_models:err.attachmentModels, package_unverified:true }}).eq('id',row.id).eq('organization_id',orgId);
       return { status: 'failed', error: err.message, retry: false };
     }
     const e = err as ZapSignError;
+    if (isPackage && e instanceof ZapSignError && [400,401,402,403,404,422].includes(e.status))
+      await admin.from('deal_signatures').update({request:spec}).eq('organization_id',orgId).eq('id',row.id).is('doc_token',null);
     // token recusado, modelo inexistente ou dado inválido: não adianta tentar de novo
     const retry = !(e instanceof ZapSignError) || e.status === 0 || e.status === 429 || e.status >= 500;
     return { status: 'failed', error: errorMessage(err), retry };
@@ -376,7 +400,7 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
   }
 
   const signUrl = main?.sign_url ?? (main ? signerLink(main.token) : null);
-  await admin
+  const persisted = await admin
     .from('deal_signatures')
     .update({
       doc_token: doc.token,
@@ -385,11 +409,14 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
       template_name: spec.template_name ?? null,
       signers,
       sign_url: signUrl,
-      request: row.request ?? { ...spec, overrides: undefined },
+      request: isPackage ? { ...spec, confirmed_signer: signer, package_members: members, package_unverified: false } :
+        row.request ?? { ...spec, overrides: undefined },
       contact_id: snap.contact.id,
       updated_at: nowIso(),
     })
-    .eq('id', row.id);
+    .eq('organization_id',orgId).eq('id',row.id).eq('status','processing').select('id').maybeSingle();
+  if (persisted.error || !persisted.data) return {status:'failed',retry:false,
+    error:isPackage ? new PackageError(doc.token).message : 'Documento criado. Confira o envelope na ZapSign antes de prosseguir.'};
 
   // Link pelo WhatsApp do CRM (fica na conversa, sem custo na ZapSign)
   let sentVia: SendChannel = send;
@@ -411,6 +438,91 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
     }
   }
   return { status: 'pending', sent_via: sentVia, note };
+}
+
+function parentEnvelopeEvents(admin: SupabaseClient, org: string, id: string) {
+  return admin.from('zapsign_webhook_events').select('doc_token')
+    .eq('organization_id', org).eq('payload->>external_id', id)
+    .or('payload->>parent_doc_token.is.null,payload->>parent_doc_token.eq.')
+    .not('doc_token','is',null);
+}
+
+/** Reconcile a reviewed, manually issued package. Never issue, invite, or replay stage actions. */
+export async function recoverManualPackage(admin: SupabaseClient, scope: {
+  organizationId: string; dealId: string; signatureId: string; userId: string; providerToken?: string;
+}, deps: SendDeps = {}) {
+  const { organizationId: org, dealId, signatureId } = scope;
+  const read = await admin.from('deal_signatures').select('*').eq('organization_id', org)
+    .eq('deal_id', dealId).eq('id', signatureId).maybeSingle();
+  if (read.error) throw new Error(read.error.message);
+  const row = read.data as SignatureRow | null;
+  const spec = row?.request;
+  if (!row || !spec || row.origin === 'agent') throw new Error('Esta tentativa de emissão manual não foi localizada.');
+  const failed = row.status === 'failed' && (spec.package_unverified || /pacote completo/i.test(row.last_error || ''));
+  if (!failed && !(spec.package_recovered && row.status === 'pending'))
+    throw new Error('Atualize a aba Contrato para conferir a situação deste envelope.');
+  const settings = await loadZapSignSettings(admin, org);
+  if (!settings) throw new Error('Conecte a ZapSign para consultar o envelope.');
+  const client = deps.client ?? clientFor(settings, deps.fetchImpl);
+  // A token can be missing when the provider created the envelope but the POST timed out.
+  // Get one exact parent candidate, then explicitly reject any other distinct candidate.
+  const parents = () => parentEnvelopeEvents(admin, org, row.id);
+  let token = row.doc_token;
+  if (!token) {
+    const found = await parents().limit(1).maybeSingle();
+    if (found.error) throw new Error(found.error.message);
+    token = found.data?.doc_token;
+  }
+  const manualLookup = !token && !!scope.providerToken;
+  token ||= scope.providerToken ?? null;
+  if (!token) throw new Error('A ZapSign ainda não identificou o envelope. Se já o encontrou em Documentos na ZapSign, informe o identificador dele.');
+  const conflict = await parents().neq('doc_token', token).limit(1).maybeSingle();
+  if (conflict.error) throw new Error(conflict.error.message);
+  if (conflict.data) throw new Error('Existe mais de um envelope para esta tentativa. A equipe precisa conferir na ZapSign.');
+  const doc = await client.getDoc(token);
+  if (doc.token !== token || ((manualLookup || doc.external_id) && doc.external_id !== row.id))
+    throw new Error('A referência deste envelope não corresponde à tentativa do CRM.');
+  if (failed && (!row.doc_token || !spec.package_unverified)) {
+    const bind = await admin.from('deal_signatures').update({ doc_token: token, request: { ...spec, package_unverified: true } })
+      .eq('organization_id', org).eq('id', row.id).eq('status', 'failed');
+    if (bind.error) throw new Error('Não foi possível vincular o envelope a esta tentativa.');
+  }
+  const members = spec.package_members ?? (await client.getTemplate(spec.template_token)).extra_templates;
+  if (!members?.length || new Set(members.map(m=>m.token)).size !== members.length ||
+      (spec.package_expected && members.length !== spec.package_expected))
+    throw new Error('Confira a composição do modelo na ZapSign. O envelope continua vinculado ao CRM.');
+  const { remaining } = remainingAttachments(members, doc.extra_docs, spec.package_attachment_models);
+  if (remaining.size) throw new Error('Confira no mesmo envelope da ZapSign os anexos que faltam: ' +
+    [...remaining.values()].map(e=>e.name).join(', ') + '. Depois, consulte novamente.');
+  if (!['pending','signed','refused','expired','deleted'].includes(doc.status))
+    throw new Error('A ZapSign ainda não confirmou a situação do envelope.');
+  const identity = spec.confirmed_signer ?? identityFromForm(spec.overrides ?? {}, spec.variables, {name:'',phone:'',email:''});
+  const contact = agentContactToken(doc.signers ?? [], identity);
+  const signers = (doc.signers ?? []).map(s => toStoredSigner(s, s.token === contact ? 'contact' : 'extra'));
+  // A package failure happens before signer options and extra invitations are applied.
+  // Only expose a link for a verified contact with no outstanding signing requirements.
+  const options = spec.signer;
+  const mayCopy = contact && fullSignerName(identity.name) && signerPhone(identity.phone) && !spec.extra_signers?.length && !options.require_cpf && !options.require_document_photo &&
+    !options.require_selfie_photo && (!options.auth_mode || options.auth_mode === 'assinaturaTela');
+  const link = mayCopy ? signers.find(s=>s.token === contact)?.sign_url ?? null : null;
+  const signedTimes = signers.map(s=>s.signed_at).filter((at): at is string=>!!at && Number.isFinite(Date.parse(at)));
+  const signedAt = signedTimes.length ? new Date(Math.max(...signedTimes.map(at=>Date.parse(at)))).toISOString() : null;
+  const saved = await admin.from('deal_signatures').update({
+    doc_token: token, doc_name: doc.name || row.doc_name, status: doc.status, signers,
+    sign_url: doc.status === 'pending' ? link : null,
+    request: { ...spec, package_members: members, package_unverified: false, package_recovered: true },
+    ...(doc.status === 'signed' ? { signed_at: row.signed_at ?? signedAt } : {}),
+    last_error: doc.status === 'pending' && !link ? 'Confira os signatários e as exigências do envelope na ZapSign.' : null,
+    updated_at: nowIso(),
+  }).eq('organization_id',org).eq('id',row.id).eq('status',row.status).select('id').maybeSingle();
+  if (saved.error) throw new Error(saved.error.message);
+  if (saved.data && (failed || doc.status !== row.status)) {
+    const bound = { ...row, doc_token: token, doc_name: doc.name };
+    const file = doc.status === 'signed' ? await storeSignedFile(admin, bound, doc.signed_file ?? null, deps) : null;
+    await recordEvent(admin, bound, 'recovered', { status: doc.status, file_id: file?.id, file_error: file?.error },
+      { kind: 'user', id: scope.userId });
+  }
+  return { id: row.id };
 }
 
 export function toStoredSigner(s: ZapSignSigner, role: StoredSigner['role']): StoredSigner {
@@ -484,27 +596,30 @@ async function sendLinkViaCrm(
 export async function finishSend(admin: SupabaseClient, row: SignatureRow, outcome: SendOutcome): Promise<void> {
   const now = nowIso();
   if (outcome.status === 'pending') {
-    await admin
+    const result = await admin
       .from('deal_signatures')
       .update({ status: 'pending', sent_via: outcome.sent_via, sent_at: now, lock_until: null, last_error: outcome.note ?? null, updated_at: now })
-      .eq('id', row.id);
+      .eq('organization_id',row.organization_id).eq('id', row.id).eq('status','processing').select('id').maybeSingle();
+    if (result.error) throw new Error(result.error.message);
+    if (!result.data) return;
     await recordEvent(admin, row, 'sent', { sent_via: outcome.sent_via, note: outcome.note ?? null });
     return;
   }
   if (outcome.status === 'cancelled') {
-    await admin.from('deal_signatures').update({ status: 'cancelled', lock_until: null, last_error: outcome.reason, updated_at: now }).eq('id', row.id);
+    await admin.from('deal_signatures').update({ status: 'cancelled', lock_until: null, last_error: outcome.reason, updated_at: now }).eq('id', row.id).eq('status','processing');
     return;
   }
   const giveUp = !outcome.retry || row.attempts >= MAX_ATTEMPTS;
-  await admin
+  const result = await admin
     .from('deal_signatures')
     .update(
       giveUp
         ? { status: 'failed', lock_until: null, last_error: outcome.error, updated_at: now }
         : { status: 'queued', lock_until: null, last_error: outcome.error, next_attempt_at: new Date(Date.now() + 2 * 60_000 * row.attempts).toISOString(), updated_at: now }
     )
-    .eq('id', row.id);
-  if (giveUp) await recordEvent(admin, row, 'failed', { error: outcome.error });
+    .eq('organization_id',row.organization_id).eq('id', row.id).eq('status','processing').select('id').maybeSingle();
+  if (result.error) throw new Error(result.error.message);
+  if (giveUp && result.data) await recordEvent(admin, row, 'failed', { error: outcome.error });
 }
 
 export async function recordEvent(
@@ -558,11 +673,26 @@ export async function processQueuedSignatures(
  */
 export async function createManualSignature(
   admin: SupabaseClient,
-  input: { organizationId: string; dealId: string; userId: string; request: SignatureRequest; ruleStageId?: string | null; deps?: SendDeps }
+  input: { organizationId: string; dealId: string; userId: string; request: SignatureRequest; ruleStageId?: string | null; confirmedAbsent?: string[]; deps?: SendDeps }
 ): Promise<{ row: SignatureRow; outcome: SendOutcome }> {
   const { data: deal } = await admin.from('deals').select('id, stage_id, contact_id').eq('organization_id', input.organizationId).eq('id', input.dealId).maybeSingle();
   if (!deal) throw new Error('Lead não encontrado');
   const d = deal as { id: string; stage_id: string | null; contact_id: string | null };
+  // The original request may have lost its HTTP response after ZapSign accepted it.
+  // Guide the regular Send button to the existing envelope, including legacy failures.
+  const failed = await admin.from('deal_signatures').select('id,doc_token,last_error,request')
+    .eq('organization_id',input.organizationId).eq('deal_id',d.id).eq('template_token',input.request.template_token)
+    .in('origin',['manual','rule']).eq('status','failed');
+  if (failed.error) throw new Error('Falha ao conferir as tentativas anteriores deste modelo.');
+  const uncertain: string[] = [];
+  for (const prior of failed.data ?? []) {
+    if (!prior.request?.package_unverified && !/pacote completo/i.test(prior.last_error ?? '')) continue;
+    const event = prior.doc_token ? null : await parentEnvelopeEvents(admin,input.organizationId,prior.id).limit(1).maybeSingle();
+    if (event?.error) throw new Error('Falha ao consultar o envelope da tentativa anterior.');
+    if (prior.doc_token || event?.data) throw new Error('Já existe um envelope para esta tentativa. Na aba Contrato, use Recuperar envelope da ZapSign.');
+    uncertain.push(prior.id);
+  }
+  if (uncertain.some(id=>!input.confirmedAbsent?.includes(id))) throw new UnconfirmedEnvelopeError(uncertain);
   const lockUntil = new Date(Date.now() + 5 * 60_000).toISOString();
   let inserted: SignatureRow | null = null;
   if (input.ruleStageId) {

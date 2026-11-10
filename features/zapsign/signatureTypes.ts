@@ -9,6 +9,8 @@ import { useQuery } from '@tanstack/react-query';
 export type SignerLite = { name: string; status: string; signed_at: string | null; role: string };
 
 export type Signature = {
+  can_recover?: boolean;
+  doc_token?: string | null;
   id: string;
   origin: 'rule' | 'manual' | 'agent';
   status: string;
@@ -78,4 +80,4 @@ export function useDealSignatures(dealId: string, enabled = true) {
 }
 
 export type SendOutcome = { status: string; sent_via?: string; note?: string; error?: string; reason?: string };
-export type SendResponse = { error?: string; signature?: Signature; outcome?: SendOutcome };
+export type SendResponse = { error?: string; signature?: Signature; outcome?: SendOutcome; unconfirmed_attempts?: string[] };
