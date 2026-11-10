@@ -87,14 +87,21 @@ export function SignatureFields({ draft, idPrefix, disabled, variablesMode = 'in
   const authLabel = AUTH_OPTIONS.find((o) => o.value === form.authMode)?.label.replace(' (padrão)', '') ?? form.authMode;
 
   const modelSelect = (
-    <NativeSelect id={id('tpl')} className={FIELD} value={form.templateToken} onChange={(e) => pickTemplate(e.target.value)}>
-      <option value="">{templatesQ.isLoading ? 'Carregando...' : 'Escolha o modelo'}</option>
-      {templates.map((t) => (
-        <option key={t.token} value={t.token}>
-          {templateLabel(t)}
-        </option>
-      ))}
-    </NativeSelect>
+    <>
+      <NativeSelect id={id('tpl')} className={FIELD} value={form.templateToken} onChange={(e) => pickTemplate(e.target.value)}>
+        <option value="">{templatesQ.isLoading ? 'Carregando...' : 'Escolha um modelo DOCX'}</option>
+        {templates.map((t) => (
+          <option key={t.token} value={t.token} disabled={t.type === 'pdf'}>
+            {templateLabel(t)}
+          </option>
+        ))}
+      </NativeSelect>
+      {!form.templateToken && templates.length > 0 && templates.every(t => t.type === 'pdf') && (
+        <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+          Sua conta tem apenas modelos PDF. Cadastre um modelo dinâmico DOCX na ZapSign para preencher contratos pelo CRM.
+        </p>
+      )}
+    </>
   );
 
   const deliveryFields = (

@@ -373,9 +373,9 @@ export function StageSignatureSection({ stageId, stageSaved }: { stageId: string
                         setPendingOpen(token || null);
                       }}
                     >
-                      <option value="">{templatesQ.isLoading ? 'Carregando...' : 'Escolha o modelo'}</option>
+                      <option value="">{templatesQ.isLoading ? 'Carregando...' : 'Escolha um modelo DOCX'}</option>
                       {templates.map((t) => (
-                        <option key={t.token} value={t.token}>
+                        <option key={t.token} value={t.token} disabled={t.type === 'pdf'}>
                           {templateLabel(t)}
                         </option>
                       ))}

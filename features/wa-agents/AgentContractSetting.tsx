@@ -29,9 +29,9 @@ export function AgentContractSetting({ value, mapping, onChange, signedMessage, 
         <option value="">Desativado</option>
         {value && !items.some(t => t.token === value) && <option value={value} disabled>Modelo configurado (não disponível na lista)</option>}
         {packages.length > 0 && <optgroup label="Modelos com vários documentos">{packages.map(t =>
-          <option key={t.token} value={t.token}>{templateLabel(t)}</option>)}</optgroup>}
+          <option key={t.token} value={t.token} disabled={t.type === 'pdf'}>{templateLabel(t)}</option>)}</optgroup>}
         {includeSingles && <optgroup label="Modelos de um documento">{singles.map(t =>
-          <option key={t.token} value={t.token}>{t.name}</option>)}</optgroup>}
+          <option key={t.token} value={t.token} disabled={t.type === 'pdf'}>{templateLabel(t)}</option>)}</optgroup>}
       </NativeSelect>
     </Field>
     {!!packages.length && !!singles.length && <label className={HELP_CLASS}>

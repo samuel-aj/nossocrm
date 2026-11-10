@@ -7,6 +7,7 @@
  *   para cada uma (campos fixos do CRM ou campo personalizado de mesmo nome).
  */
 import { readContractTemplate } from '@/lib/zapsign/templateFile';
+import { isPdfTemplate } from '@/lib/zapsign/client';
 import { officeTemplates } from '@/lib/zapsign/templatePackage';
 import { json } from '@/lib/whatsapp/api';
 import { guardRoute, getErrorMessage } from '@/app/api/wa-agents/_shared';
@@ -34,7 +35,7 @@ export async function GET(req: Request) {
       return json({
         templates: templates
           .filter((t) => t.active !== false)
-          .map((t) => ({ token: t.token, name: t.name, lang: t.lang ?? null, folder_path: t.folder_path ?? null, type: t.template_type ?? null,
+          .map((t) => ({ token: t.token, name: t.name, lang: t.lang ?? null, folder_path: t.folder_path ?? null, type: isPdfTemplate(t) ? 'pdf' : t.template_type ?? null,
             attachments: (t.extra_templates ?? []).map(extra => extra.name) })),
       });
     }
@@ -48,7 +49,7 @@ export async function GET(req: Request) {
       variables = file.names;
       planNotice = file.planNotice;
     } catch (err) {
-      return json({ error: `Não foi possível ler todos os documentos do modelo: ${getErrorMessage(err, 'arquivo inválido')}` }, 422);
+      return json({ error: getErrorMessage(err, 'Não foi possível ler os documentos deste modelo.') }, 422);
     }
     const defs = await loadCustomFieldDefs(auth.admin, orgId).catch(() => []);
     const suggestions: Record<string, string> = {};

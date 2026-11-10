@@ -1,5 +1,5 @@
 import type { CreateDocFromTemplateInput, ZapSignClient, ZapSignDoc, ZapSignTemplate } from './client';
-import { ZapSignError, ZAPSIGN_PLAN_NOTICE } from './client';
+import { requireDynamicPrincipal, ZapSignError, ZAPSIGN_PLAN_NOTICE } from './client';
 
 /** Cross-page membership is by token. Separate templates can have identical file names. */
 export function officeTemplates(rows: ZapSignTemplate[]) {
@@ -21,6 +21,7 @@ function fileName(name: string) {
 /** A standalone create never needs this step. A package uses one principal,
  * then only the missing attachments. Never repeat a POST after an ambiguous reply. */
 export async function createTemplatePackage(client: ZapSignClient, tpl: ZapSignTemplate, input: CreateDocFromTemplateInput) {
+  requireDynamicPrincipal(tpl);
   const extras = tpl.extra_templates ?? [];
   if (!extras.length) return client.createDocFromTemplate(input);
   if (extras.length > 14 || extras.some(e => !e.token || e.token === tpl.token || e.active === false) ||

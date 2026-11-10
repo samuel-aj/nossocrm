@@ -13,6 +13,44 @@ const input = { template_id: main.token, signer_name: 'Teste', data: [{ de: '{{C
 afterEach(() => vi.restoreAllMocks());
 
 describe('modelo composto do escritório', () => {
+  it.each([
+    { template_type: 'PDF', template_file: 'https://files.invalid/principal' },
+    { template_file: 'https://files.invalid/principal.pdf?assinatura=teste' },
+  ])('identifica PDF principal antes da leitura e impede envios de regras antigas', async format => {
+    const tpl = { ...main, ...format, name: 'Contrato e procuração' };
+    const fetchImpl = vi.fn();
+    const client = new ZapSignClient({ token: 'fake', sandbox: true, fetchImpl });
+    const expected = { status: 422, message: expect.stringMatching(/Contrato e procuração.*modelo PDF.*modelo dinâmico DOCX/) };
+    await expect(readContractTemplate(client, tpl)).rejects.toMatchObject(expected);
+    await expect(createTemplatePackage(client, tpl, input)).rejects.toMatchObject(expected);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('preserva o anexo PDF de um modelo DOCX e inclui o arquivo na revisão', async () => {
+    const tpl = { ...main, extra_templates: [{ ...extras[0], template_type: 'pdf' }] };
+    const client = new ZapSignClient({ token: 'fake', sandbox: true });
+    vi.spyOn(client, 'getTemplate').mockResolvedValue(tpl);
+    let pdf = '%PDF-1.7 anexo';
+    vi.spyOn(client, 'download').mockImplementation(async url => ({
+      bytes: Buffer.from(url === main.template_file ? 'doc' : pdf), contentType: null,
+    }));
+    const extract = vi.spyOn(mammoth, 'extractRawText').mockResolvedValue({ value: '{{NOME}}', messages: [] });
+    const first = await readContractTemplate(client, tpl);
+    expect(first.names).toEqual(['NOME']);
+    expect(extract).toHaveBeenCalledTimes(1);
+    pdf += ' atualizado';
+    expect((await readContractTemplate(client, tpl)).revision).not.toBe(first.revision);
+  });
+
+  it('identifica pelo nome o DOCX ilegível e não expõe o erro interno de ZIP', async () => {
+    const client = new ZapSignClient({ token: 'fake', sandbox: true });
+    vi.spyOn(client, 'getTemplate').mockResolvedValue(main);
+    vi.spyOn(client, 'download').mockResolvedValue({ bytes: Buffer.from('arquivo inválido'), contentType: null });
+    await expect(readContractTemplate(client, main)).rejects.toMatchObject({
+      status: 422, message: expect.stringContaining(`Não foi possível abrir “${main.name}” como DOCX`),
+    });
+  });
+
   it('exclui os anexos listados em outra página e preserva um modelo avulso de mesmo nome', async () => {
     const single = { ...extras[0], token: 'avulso' };
     const fetchImpl = vi.fn().mockResolvedValueOnce(Response.json({results: [single, ...extras], next: 'page2'}))

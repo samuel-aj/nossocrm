@@ -8,7 +8,7 @@ import { createTemplatePackage, officeTemplates, PackageError } from './template
 import { agentContactToken, clientFor, loadLeadSnapshot, loadZapSignSettings, recordEvent, toStoredSigner, type SignatureRow } from './signatures';
 import { contractReview, prepareAgentDraft, type AgentContractInput, type ContractTurn } from './agentDraft';
 import { splitPhone } from './variables';
-import type { ZapSignDoc } from './client';
+import { ZapSignError, type ZapSignDoc } from './client';
 
 type Scope = { org: string; agent: string; conversation: string; deal: string; template: string; inboundId: string; since: string };
 type ResultRow = Pick<SignatureRow, 'id' | 'status' | 'doc_token' | 'sign_url' | 'origin' | 'contact_id'>;
@@ -59,7 +59,10 @@ export async function runAgentContract(admin: SupabaseClient, scope: Scope, inpu
   const tpl = officeTemplates(models).find(t => t.token === template);
   if (!tpl || !snap || snap.deal.deleted_at || snap.deal.is_lost || snap.contact.id !== contact)
     throw new Error('Verifique o modelo ativo na conta ZapSign e o contato vinculado ao lead.');
-  const file = await readContractTemplate(client, tpl).catch(() => { throw new Error('Não foi possível ler os campos do modelo DOCX do escritório.'); });
+  const file = await readContractTemplate(client, tpl).catch(error => {
+    if (error instanceof ZapSignError && error.status === 422) throw error;
+    throw new Error('Não foi possível ler os campos do modelo DOCX do escritório.');
+  });
   if (file.planNotice) throw new Error(file.planNotice);
   const history = async () => {
     const { data, error } = await admin.from('wa_messages').select('id,direction,source,status,body,transcription,created_at')

@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { loadCustomFieldDefs } from '@/lib/wa-agents/leadOps';
 import { clientFor, loadZapSignSettings } from './signatures';
 import { readContractTemplate } from './templateFile';
+import { ZapSignError } from './client';
 import { officeTemplates } from './templatePackage';
 import { contractReview, prepareAgentDraft, type AgentContractInput } from './agentDraft';
 
@@ -16,7 +17,10 @@ export async function simulateAgentContract(admin: SupabaseClient, org: string, 
   const tpl = officeTemplates(await client.listTemplates().catch(() => { throw new Error('Não foi possível consultar os modelos na conta ZapSign do escritório.'); }))
     .find(t => t.token === template && t.active !== false);
   if (!tpl) throw new Error('Modelo não disponível nesta conta.');
-  const file = await readContractTemplate(client, tpl).catch(() => { throw new Error('Não foi possível ler os campos do modelo DOCX do escritório.'); });
+  const file = await readContractTemplate(client, tpl).catch(error => {
+    if (error instanceof ZapSignError && error.status === 422) throw error;
+    throw new Error('Não foi possível ler os campos do modelo DOCX do escritório.');
+  });
   const defs = await loadCustomFieldDefs(admin, org);
   const turns = chat.map((m, i) => ({ id: String(i), direction: m.role === 'user' ? 'in' as const : 'out' as const, agent: m.role === 'assistant',
     text: m.text, at: new Date().toISOString(), ok: true }));
