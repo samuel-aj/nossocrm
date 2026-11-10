@@ -41,7 +41,6 @@ export function usePersonalNotifications() {
           if(until) q.set('until',until);
           const data:NotificationFeed=await api(`/api/notifications/events?${q}`,{signal:controller.signal});
           if(stopped) return;
-          if(!baseline) baseline=data.serverTime;
           until=data.serverTime; after=data.nextAfter;
           usageNoticesUnavailable ||= !!data.usageNoticesUnavailable;
           if(firstPage && !data.usageNoticesUnavailable) {
@@ -62,6 +61,7 @@ export function usePersonalNotifications() {
             await presentOnce(scope,notice.id,()=>{if(!stopped) deliverNotice(notice,preferences,href=>router.push(href));});
           }
         } while(after && !stopped);
+        baseline=until;
         setError(usageNoticesUnavailable ? 'Avisos de consumo da IA temporariamente indisponíveis. Tentando reconectar…' : '');
       } catch { if(!stopped) setError('Avisos temporariamente indisponíveis. Tentando reconectar…'); }
       finally {if(!stopped) timer=setTimeout(poll,4000);}

@@ -44,7 +44,7 @@ vi.mock('@/lib/wa-agents/leadOps', () => ({
   loadCustomFieldDefs: async () => [{ key: 'cpf', label: 'CPF', type: 'text', options: [] }],
 }));
 
-import { createManualSignature, discardSignature, handleZapSignWebhook, sendSignature, type SignatureRow } from './signatures';
+import { createManualSignature, discardSignature, handleZapSignWebhook, recoverManualPackage, sendSignature, type SignatureRow } from './signatures';
 import { ZapSignClient } from './client';
 import { runAgentContract } from './agentContract';
 import { simulateAgentContract } from './agentSimulation';
@@ -66,11 +66,15 @@ function fakeDb(tables: Record<string, Row[]>) {
     let payload: Row | Row[] | null = null;
     const b: Record<string, unknown> = {
       select: (_c?: string, opts?: { head?: boolean }) => ((head = !!opts?.head), b),
-      eq: (c: string, v: unknown) => (filters.push((r) => r[c] === v), b),
+      eq: (c: string, v: unknown) => (filters.push((r) => (c === 'payload->>external_id' ? (r.payload as Row)?.external_id : r[c]) === v), b),
+      neq: (c: string, v: unknown) => (filters.push(r=>r[c] !== v),b),
+      not: (c: string, _op: string, v: unknown) => (filters.push(r=>(r[c] ?? null) !== v), b),
       gte: (c: string, v: string) => (filters.push(r => String(r[c]) >= v), b),
       is: (c: string, v: unknown) => (filters.push((r) => (r[c] ?? null) === v), b),
       in: (c: string, vs: unknown[]) => (filters.push((r) => vs.includes(r[c])), b),
       or: (expr: string) => {
+        if (expr.startsWith('payload->>parent_doc_token.')) { filters.push(r=>!(r.payload as Row)?.parent_doc_token); return b; }
+        if (expr.startsWith('request->>package_unverified.')) { filters.push(r=>!(r.request as Row)?.package_unverified); return b; }
         if (expr.startsWith('origin.eq.agent,status.in.')) {
           const states = expr.slice(expr.indexOf('(') + 1, -1).split(',');
           filters.push(r => r.origin === 'agent' || states.includes(String(r.status)));
@@ -426,6 +430,76 @@ describe('retorno da ZapSign (webhook)', () => {
   });
 });
 
+describe('recuperação do pacote da mesma tentativa', () => {
+  function setup() {
+    const signature={...queued(), origin:'manual', status:'failed', last_error:'Falha no pacote completo',
+      template_token:RULE.template_token,request:{...RULE, confirmed_signer:{name:'Maria da Silva',phone:'+5511988887777',email:''}}};
+    const scope={organizationId:ORG,dealId:signature.deal_id,signatureId:signature.id,userId:'atendente'};
+    const event={organization_id:ORG,doc_token:'original',payload:{external_id:signature.id}};
+    const db=base({deal_signatures:[signature,{...signature,id:'segunda',status:'pending',doc_token:'outro'}],
+      zapsign_webhook_events:[{...event,organization_id:'outra',doc_token:'incorreto'},
+        {...event,doc_token:'filho',payload:{...event.payload,parent_doc_token:'original'}},event]});
+    const client=fakeClient();
+    client.getTemplate=vi.fn().mockResolvedValue({token:'tpl-1',extra_templates:[{token:'child',name:'Procuração'}]});
+    const doc={token:'original',status:'pending',external_id:signature.id,name:'Contrato',signers:[],
+      extra_docs:[{token:'anexo',name:'Procuração.pdf'}]};
+    client.getDoc=vi.fn().mockResolvedValue(doc);
+    client.createDocFromTemplate=vi.fn();
+    return {db,scope,client,doc,event};
+  }
+  it('localiza pelo evento principal, resiste a reexecução e não duplica mesmo com outro contrato no lead',async()=>{
+    const {db,scope,client}=setup();
+    await expect(createManualSignature(db.admin,{...scope,request:{...RULE,signer:{send:'link'}},deps:{client}})).rejects.toThrow('Já existe um envelope');
+    await recoverManualPackage(db.admin,scope,{client});
+    await recoverManualPackage(db.admin,scope,{client});
+    expect(db.tables.deal_signatures).toHaveLength(2);
+    expect(db.tables.deal_signatures[0]).toMatchObject({doc_token:'original',status:'pending',sign_url:null});
+    expect(db.tables.deal_signatures[1].doc_token).toBe('outro');
+    expect(db.tables.deal_events).toHaveLength(1);
+    expect(client.createDocFromTemplate).not.toHaveBeenCalled();
+    expect(h.texts).toHaveLength(0);
+  });
+  it('conserva o identificador quando faltam anexos e consegue conferir de novo quando completos',async()=>{
+    const {db,scope,client,doc}=setup();
+    vi.mocked(client.getDoc).mockResolvedValueOnce({...doc,extra_docs:[]});
+    await expect(recoverManualPackage(db.admin,scope,{client})).rejects.toThrow('Procuração');
+    expect(db.tables.deal_signatures[0]).toMatchObject({doc_token:'original',status:'failed',request:{package_unverified:true}});
+    await recoverManualPackage(db.admin,scope,{client});
+    expect(db.tables.deal_signatures[0].status).toBe('pending');
+  });
+  it('recusa outro identificador, referências ambíguas e tentativas de outra organização',async()=>{
+    const {db,scope,client,doc,event}=setup();
+    await expect(recoverManualPackage(db.admin,{...scope,organizationId:'outra'},{client})).rejects.toThrow();
+    vi.mocked(client.getDoc).mockResolvedValueOnce({...doc,external_id:'outra-tentativa'});
+    await expect(recoverManualPackage(db.admin,scope,{client})).rejects.toThrow('referência');
+    db.tables.zapsign_webhook_events.push({...event,doc_token:'outro-envelope'});
+    await expect(recoverManualPackage(db.admin,scope,{client})).rejects.toThrow('mais de um');
+    expect(db.tables.deal_signatures[0].doc_token).toBeNull();
+  });
+  it('aguarda prova após timeout e confere a referência de um identificador fornecido pela equipe',async()=>{
+    const {db,scope,client,doc}=setup();
+    db.tables.zapsign_webhook_events=[];
+    await expect(createManualSignature(db.admin,{...scope,request:{...RULE,signer:{send:'link'}},deps:{client}})).rejects.toMatchObject({attempts:[scope.signatureId]});
+    await expect(recoverManualPackage(db.admin,scope,{client})).rejects.toThrow('identificador');
+    vi.mocked(client.getDoc).mockResolvedValueOnce({...doc,external_id:null});
+    await expect(recoverManualPackage(db.admin,{...scope,providerToken:'original'},{client})).rejects.toThrow('referência');
+    await recoverManualPackage(db.admin,{...scope,providerToken:'original'},{client});
+    expect(db.tables.deal_signatures[0]).toMatchObject({status:'pending',doc_token:'original'});
+    expect(client.createDocFromTemplate).not.toHaveBeenCalled();
+  });
+  it('guarda o PDF e a data do envelope já assinado sem repetir automações do lead',async()=>{
+    const {db,scope,client,doc}=setup();
+    vi.mocked(client.getDoc).mockResolvedValueOnce({...doc,status:'signed',last_update_at:'2026-11-09T00:00:00Z',
+      signers:[{token:'s',name:'Maria da Silva',status:'signed',signed_at:'2026-11-07T11:33:00Z'}],signed_file:'https://fixture.invalid/arquivo'});
+    await recoverManualPackage(db.admin,scope,{client});
+    expect(db.tables.deal_signatures[0]).toMatchObject({status:'signed',signed_at:'2026-11-07T11:33:00.000Z'});
+    expect(db.tables.deal_files).toHaveLength(1);
+    expect(h.botsStarted).toHaveLength(0);
+    expect(db.tables.deals[0].stage_id).toBe('stage-1');
+    expect(h.texts).toHaveLength(0);
+  });
+});
+
 describe('criação pelo agente com ZapSign e conversa simuladas', () => {
   const scope = { org: ORG, agent: 'agent', conversation: 'conv-1', deal: 'deal-1',
     template: 'tpl-1', inboundId: '1', since: '2000-01-01T00:00:00Z' };
@@ -457,6 +531,28 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
     return { ...db, post, accept };
   }
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  it('reúne endereço de texto e áudio, sem usar números de outros documentos', async () => {
+    const db=setup();
+    db.tables.wa_messages.push({...msg('2','in','[áudio]',1),transcription:'120'},msg('3','in','Centro',2));
+    const next={...scope,inboundId:'3'};
+    const dados={ENDEREÇO:'Rua das Flores, 120, Centro'};
+    const result=await runAgentContract(db.admin,next,{modo:'preparar',dados});
+    expect(result).toMatchObject({solicitar_confirmacao:expect.stringContaining(dados.ENDEREÇO)});
+    db.tables.wa_messages[1].transcription='Meu CPF termina em 120';
+    expect(await runAgentContract(db.admin,next,{modo:'criar',dados})).toMatchObject({perguntar_ao_cliente:['ENDEREÇO']});
+    expect(db.post).not.toHaveBeenCalled();
+  });
+  it('recupera endereço identificado na ficha confirmada e ignora aceite a outra pergunta', async () => {
+    const db=setup();
+    const summary='Ficha\nNome: Maria da Silva\nTelefone: +5511988887777\nEndereço: Rua Azul, 83, Centro\nConfere os dados?';
+    db.tables.wa_messages.push(msg('2','out',summary,1),msg('3','in','Sim',2));
+    const next={...scope,inboundId:'3'};
+    const prepared=await runAgentContract(db.admin,next,{modo:'preparar',dados:{}});
+    expect(prepared).toMatchObject({solicitar_confirmacao:expect.stringContaining('Rua Azul, 83, Centro')});
+    db.tables.wa_messages[1].body=summary.replace('Confere os dados?', 'Quer tirar uma dúvida?');
+    expect(await runAgentContract(db.admin,next,{modo:'criar',dados:{}})).toMatchObject({perguntar_ao_cliente:['ENDEREÇO']});
+    expect(db.post).not.toHaveBeenCalled();
+  });
   it('usa nome e telefone confirmados por áudio e omite e-mail mesmo com e-mail antigo no cadastro', async () => {
     const db = setup();
     Object.assign(db.tables.contacts[0], { name: 'Felipe4798', phone: '+551188887777', email: 'antigo@example.org' });

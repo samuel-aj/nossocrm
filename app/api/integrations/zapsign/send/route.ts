@@ -18,7 +18,7 @@ import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { createClient } from '@/lib/supabase/server';
 import { guardRoute, readJsonBody, validationError, getErrorMessage } from '@/app/api/wa-agents/_shared';
-import { createManualSignature, loadLeadSnapshot, loadSignatureRule, loadZapSignSettings, type SignatureRow } from '@/lib/zapsign/signatures';
+import { createManualSignature, UnconfirmedEnvelopeError, loadLeadSnapshot, loadSignatureRule, loadZapSignSettings, type SignatureRow } from '@/lib/zapsign/signatures';
 import { resolveSource, SOURCE_CATALOG } from '@/lib/zapsign/variables';
 import { loadCustomFieldDefs } from '@/lib/wa-agents/leadOps';
 import { resolveDealConversation } from '@/lib/wa-agents/dealConversation';
@@ -27,6 +27,7 @@ import { getConnectionByIdForOrg, type WaConnectionRow } from '@/lib/whatsapp/se
 export const runtime = 'nodejs';
 
 const Body = z.object({
+  confirmed_absent: z.array(z.string().uuid()).max(100).optional(),
   confirmed_signer: z.object({ name: z.string().trim().max(255), phone: z.string().trim().max(40), email: z.string().trim().max(254) }).optional(),
   deal_id: z.string().uuid(),
   template_token: z.string().trim().min(1).max(200),
@@ -148,6 +149,7 @@ export async function POST(req: Request) {
       dealId: input.deal_id,
       userId: auth.user.id,
       ruleStageId: input.rule_stage_id ?? null,
+      confirmedAbsent: input.confirmed_absent,
       request: {
         confirmed_signer: input.confirmed_signer,
         template_token: input.template_token,
@@ -164,6 +166,7 @@ export async function POST(req: Request) {
     const status = outcome.status === 'pending' ? 200 : outcome.status === 'failed' ? 502 : 409;
     return json({ signature: row, outcome }, status);
   } catch (err) {
+    if (err instanceof UnconfirmedEnvelopeError) return json({error:err.message,unconfirmed_attempts:err.attempts},409);
     return json({ error: getErrorMessage(err, 'Falha ao enviar para assinatura') }, 500);
   }
 }

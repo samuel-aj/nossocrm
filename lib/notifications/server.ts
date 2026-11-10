@@ -6,7 +6,7 @@ import { DEFAULT_PREFERENCES, PreferencesSchema, type Preferences, type Notice }
 import { usageNotices } from '@/lib/ai-usage/notifications';
 
 interface MessageRow {id:string;conversation_id:string;wa_timestamp:string|null}
-interface ConversationRow {id:string;contact_id:string|null;connection_id:string|null;wa_name:string|null;wa_phone:string;label_ids:string[];assigned_owner_id:string|null}
+interface ConversationRow {id:string;deal_id:string|null;contact_id:string|null;connection_id:string|null;wa_name:string|null;wa_phone:string;label_ids:string[];assigned_owner_id:string|null}
 interface DealRow {id:string;title:string;board_id:string;owner_id:string|null;contact_id:string|null;is_won:boolean;is_lost:boolean;created_at:string}
 type Auth = Extract<RequireOrgResult, {ok: true}>;
 export async function context(auth: Auth) {
@@ -50,14 +50,16 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
     try { budgetNotices = await usageNotices(auth.admin, auth.user, null, upper); }
     catch (error) { usageNoticesUnavailable = true; console.error('[notifications] alertas de consumo indisponíveis:', error); }
   }
-  if (!since) return {events:budgetNotices,serverTime:upper,nextAfter:null,usageNoticesUnavailable};
-  const lower = new Date(Math.max(Date.parse(since),Date.now()-120_000)).toISOString();
+  // On opening the CRM, recover recent handoffs that happened while the seller was offline.
+  if (!since && !p.alerts) return {events:budgetNotices,serverTime:upper,nextAfter:null,usageNoticesUnavailable};
+  const lower = new Date(since ? Math.max(Date.parse(since),Date.now()-120_000) : Date.now()-86_400_000).toISOString();
   let query = auth.admin.from('crm_notification_events').select('id,kind,source_id,board_id,created_at')
     .eq('organization_id',auth.user.organizationId).gte('created_at',lower).lte('created_at',upper).order('id').limit(200);
   if (after) query=query.gt('id',after);
+  if (!since) query=query.eq('kind','human_handoff');
   const {data: rows,error} = await query;
   if (error) throw error;
-  const events=rows ?? [];
+  const events=(rows ?? []).filter(row=>since || row.kind==='human_handoff');
   const alertIds=events.filter(e=>e.kind==='alert' && p.alerts).map(e=>e.source_id);
   const alerts=alertIds.length ? await auth.admin.from('deal_alert_events').select('id,deal_id,message,tone').eq('organization_id',auth.user.organizationId).in('id',alertIds).is('acknowledged_at',null) : {data:[],error:null};
   if(alerts.error) throw alerts.error;
@@ -68,14 +70,16 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
   const messages=messageIds.length ? await auth.admin.from('wa_messages').select('id,conversation_id,wa_timestamp').eq('organization_id',auth.user.organizationId).in('id',messageIds).eq('direction','in').is('deleted_at',null) : {data:[],error:null};
   if(messages.error) throw messages.error;
   const messageRows=(messages.data ?? []) as MessageRow[];
-  const convIds=[...new Set(messageRows.map(m=>m.conversation_id))];
-  const conversations=convIds.length ? await auth.admin.from('wa_conversations').select('id,contact_id,connection_id,wa_name,wa_phone,label_ids,assigned_owner_id').eq('organization_id',auth.user.organizationId).in('id',convIds).eq('is_group',false) : {data:[],error:null};
+  const handoffIds=events.filter(e=>e.kind==='human_handoff' && p.alerts).map(e=>e.source_id);
+  const convIds=[...new Set([...messageRows.map(m=>m.conversation_id), ...handoffIds])];
+  const conversations=convIds.length ? await auth.admin.from('wa_conversations').select('id,deal_id,contact_id,connection_id,wa_name,wa_phone,label_ids,assigned_owner_id').eq('organization_id',auth.user.organizationId).in('id',convIds).eq('is_group',false) : {data:[],error:null};
   if(conversations.error) throw conversations.error;
   const conversationRows=(conversations.data ?? []) as ConversationRow[];
   const contactIds=[...new Set(conversationRows.map(c=>c.contact_id).filter(Boolean))];
+  const dealIds=[...new Set([...leadIds,...conversationRows.filter(c=>handoffIds.includes(c.id) && c.deal_id).map(c=>c.deal_id)])];
   const [linked,leads]=await Promise.all([
     contactIds.length ? auth.admin.from('deals').select('id,title,board_id,owner_id,contact_id,is_won,is_lost,created_at').eq('organization_id',auth.user.organizationId).in('contact_id',contactIds).is('deleted_at',null).order('created_at',{ascending:false}) : Promise.resolve({data:[],error:null}),
-    leadIds.length ? auth.admin.from('deals').select('id,title,board_id,owner_id,contact_id,is_won,is_lost,created_at').eq('organization_id',auth.user.organizationId).in('id',leadIds).is('deleted_at',null) : Promise.resolve({data:[],error:null}),
+    dealIds.length ? auth.admin.from('deals').select('id,title,board_id,owner_id,contact_id,is_won,is_lost,created_at').eq('organization_id',auth.user.organizationId).in('id',dealIds).is('deleted_at',null) : Promise.resolve({data:[],error:null}),
   ]);
   if(linked.error) throw linked.error;
   if(leads.error) throw leads.error;
@@ -96,25 +100,27 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
       const d=leadRows.find(d=>d.id===event.source_id);
       if(!d || !p.leads || !p.boardIds.includes(event.board_id) || d.board_id!==event.board_id || !allowed(d)) continue;
       notices.push({id:String(event.id),kind:'lead',title:'Novo lead no board',message:`${d.title} · ${ctx.boards.find(b=>b.id===d.board_id)?.name}`,href:`/boards?board=${d.board_id}&deal=${d.id}`,createdAt:event.created_at});
-    } else if(event.kind==='message' || event.kind==='audio_transcription') {
+    } else if(event.kind==='message' || event.kind==='audio_transcription' || event.kind==='human_handoff') {
       const audioFailed = event.kind==='audio_transcription';
+      const handoff = event.kind==='human_handoff';
       const m=messageRows.find(m=>m.id===event.source_id);
       // Synchronizing an old history must not produce fresh-message alerts.
-      if(!audioFailed && m?.wa_timestamp && Date.parse(m.wa_timestamp)<Date.parse(event.created_at)-120_000) continue;
-      const c=conversationRows.find(c=>c.id===m?.conversation_id);
-      if(!(audioFailed ? p.alerts : p.messages) || !m || !c || !connectionAllowed(rules,c.connection_id)) continue;
+      if(!audioFailed && !handoff && m?.wa_timestamp && Date.parse(m.wa_timestamp)<Date.parse(event.created_at)-120_000) continue;
+      const c=conversationRows.find(c=>c.id===(handoff ? event.source_id : m?.conversation_id));
+      if(!(audioFailed || handoff ? p.alerts : p.messages) || !c || !connectionAllowed(rules,c.connection_id)) continue;
       const labels=rules?.whatsapp.label_ids;
       if(labels && !labels.some(id=>(c.label_ids ?? []).includes(id))) continue;
       const ds=linkedRows.filter(d=>d.contact_id===c.contact_id);
-      const effective=ds.find(d=>!d.is_won && !d.is_lost) ?? ds[0];
-      if (audioFailed) {
+      const contactDeal=ds.find(d=>!d.is_won && !d.is_lost) ?? ds[0];
+      const effective=(handoff && c.deal_id ? leadRows.find(d=>d.id===c.deal_id) : null) ?? contactDeal;
+      if (audioFailed || handoff) {
         const owner = effective?.owner_id ?? c.assigned_owner_id;
         if (effective ? !allowed(effective) : !access.fullAccess) continue;
         if (owner ? owner !== auth.user.id : !access.fullAccess) continue;
         const owners = rules?.whatsapp.owner_user_ids;
-        if (owners && (!effective?.owner_id || (effective.owner_id !== auth.user.id && !owners.includes(effective.owner_id)))) continue;
-        notices.push({id:String(event.id),kind:'alert',tone:'red',title:'Áudio sem transcrição',
-          message:`${c.wa_name || 'Cliente'} · Abra a conversa para conferir o áudio.`,
+        if (owners && (!contactDeal?.owner_id || (contactDeal.owner_id !== auth.user.id && !owners.includes(contactDeal.owner_id)))) continue;
+        notices.push({id:String(event.id),kind:'alert',tone:'red',title:handoff ? 'Análise humana' : 'Áudio sem transcrição',
+          message:`${c.wa_name || 'Cliente'} · ${handoff ? 'A IA passou o atendimento para a equipe.' : 'Abra a conversa para conferir o áudio.'}`,
           href:`/chats?conversation=${c.id}`,createdAt:event.created_at});
         continue;
       }

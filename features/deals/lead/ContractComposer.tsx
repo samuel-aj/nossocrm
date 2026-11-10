@@ -43,13 +43,49 @@ export function ContractComposer({ deal, canEdit }: { deal: Deal | DealView; can
 
   return (
     <ContractForm key={review?.id ?? `stage:${deal.status}`} deal={deal} stageId={review?.stage_id ?? deal.status ?? null} ruleStageId={review?.stage_id ?? null} canEdit={canEdit} hasDocuments={documents.length > 0}>
-      {latest ? <LatestDocument latest={latest} fileUrl={sig.data.file_signature_id === latest.id ? sig.data.file_url : null} older={documents.slice(1)} /> : null}
+      {latest ? <LatestDocument dealId={deal.id} canEdit={canEdit} latest={latest} fileUrl={sig.data.file_signature_id === latest.id ? sig.data.file_url : null} older={documents.slice(1)} /> : null}
       {review ? <ReviewBanner review={review} dealId={deal.id} stageLabel={stageLabel(review.stage_id)} canEdit={canEdit} /> : null}
     </ContractForm>
   );
 }
 
-function LatestDocument({ latest, fileUrl, older }: { latest: Signature; fileUrl: string | null; older: Signature[] }) {
+function RecoverPackage({ signature, dealId }: { signature: Signature; dealId: string }) {
+  const qc = useQueryClient();
+  const { organizationId } = useAuth();
+  const { addToast } = useToast();
+  const [busy,setBusy] = useState(false);
+  const [error,setError] = useState('');
+  const [token,setToken] = useState('');
+  if (!signature.can_recover) return null;
+  async function recover() {
+    setBusy(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/integrations/zapsign/deal/${dealId}`, { method:'PATCH', credentials:'include',
+        headers:{'content-type':'application/json'}, body:JSON.stringify({signature_id:signature.id,action:'recover',provider_token:token.trim() || undefined}) });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Não foi possível conferir o envelope.');
+      addToast('Situação do envelope atualizada.', 'success');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não foi possível conferir o envelope.');
+    } finally {
+      await Promise.all([qc.invalidateQueries({queryKey:dealSignaturesKey(dealId)}),qc.invalidateQueries({queryKey:dealHistoryKey(dealId)}),invalidateLeadHistory(qc,organizationId,dealId)]);
+      setBusy(false);
+    }
+  }
+  return <span className="block">
+    {signature.doc_token && <span className="block select-all text-xs">Envelope {signature.doc_token}</span>}
+    <button type="button" disabled={busy} onClick={() => void recover()} className="font-semibold text-violet-700 hover:underline disabled:opacity-50 dark:text-violet-300">
+      {busy ? 'Conferindo…' : signature.status === 'pending' ? 'Atualizar situação do envelope' : 'Recuperar envelope da ZapSign'}
+    </button>
+    {error && <span className="block whitespace-normal" role="alert">{error}</span>}
+    {error && !signature.doc_token && <label className="mt-2 block">Identificador do envelope na ZapSign
+      <input value={token} onChange={e=>setToken(e.target.value)} className="block w-full rounded border px-2 py-1" placeholder="Identificador do documento principal" />
+    </label>}
+  </span>;
+}
+
+function LatestDocument({ latest, fileUrl, older, dealId, canEdit }: { latest: Signature; fileUrl: string | null; older: Signature[]; dealId: string; canEdit: boolean }) {
   const { addToast } = useToast();
   const copyLink = async () => {
     if (!latest.sign_url) return;
@@ -100,6 +136,7 @@ function LatestDocument({ latest, fileUrl, older }: { latest: Signature; fileUrl
         {' · '}{n.note || (n.state === 'sent' ? 'Enviado na conversa' : 'Aguardando envio')}
       </p>)}
       <div className="mt-1.5 flex flex-wrap items-center gap-3 pl-6">
+        {canEdit && <RecoverPackage signature={latest} dealId={dealId} />}
         {latest.status === 'pending' && latest.sign_url ? (
           <>
             <button type="button" onClick={() => void copyLink()} className="inline-flex items-center gap-1 font-semibold hover:underline">
@@ -122,6 +159,8 @@ function LatestDocument({ latest, fileUrl, older }: { latest: Signature; fileUrl
               {older.map((s) => (
                 <li key={s.id} className="truncate">
                   {s.doc_name || s.template_name || 'Documento'}: {(STATUS_LABEL[s.status] ?? s.status).toLowerCase()} ({DT.format(new Date(s.signed_at ?? s.sent_at ?? s.created_at))})
+                    {s.status === 'pending' && s.can_recover && s.sign_url && <a href={s.sign_url} target="_blank" rel="noreferrer" className="ml-2 underline">Abrir link de assinatura</a>}
+                    {canEdit && <RecoverPackage signature={s} dealId={dealId} />}
                 </li>
               ))}
             </ul>
@@ -193,21 +232,26 @@ function ContractForm({
   const qc = useQueryClient();
   const draft = useSignatureDraft({ dealId: deal.id, stageId });
   const [sending, setSending] = useState(false);
+  const [uncertain,setUncertain] = useState<{template:string; ids:string[]}|null>(null);
+  const [checkedAbsent,setCheckedAbsent] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string; link?: string | null } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const submit = async () => {
     if (!draft.ready || sending || !canEdit) return;
     setSending(true);
+    setCheckedAbsent(false);
     setResult(null);
     try {
       const res = await fetch('/api/integrations/zapsign/send', {
         method: 'POST',
         credentials: 'include',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ deal_id: deal.id, rule_stage_id: ruleStageId, ...draft.payload() }),
+        body: JSON.stringify({ deal_id: deal.id, rule_stage_id: ruleStageId, ...draft.payload(),
+          confirmed_absent: checkedAbsent && uncertain?.template === draft.form.templateToken ? uncertain.ids : undefined }),
       });
       const body = (await res.json().catch(() => ({}))) as SendResponse;
+      setUncertain(body.unconfirmed_attempts?.length ? {template:draft.form.templateToken,ids:body.unconfirmed_attempts} : null);
       if (body.error && !body.outcome) throw new Error(body.error);
       const o = body.outcome;
       await Promise.all([qc.invalidateQueries({ queryKey: dealSignaturesKey(deal.id) }), qc.invalidateQueries({ queryKey: dealHistoryKey(deal.id) }), qc.invalidateQueries({ queryKey: ZAPSIGN_ORG_STATUS_KEY }), invalidateLeadHistory(qc, organizationId, deal.id)]);
@@ -251,6 +295,10 @@ function ContractForm({
           </div>
         ) : null}
         <SignatureFields draft={draft} idPrefix={idPrefix} disabled={!canEdit || sending} variablesMode="modal" compact />
+        {uncertain && uncertain.template === draft.form.templateToken && <label className="flex items-start gap-2 text-xs">
+          <input type="checkbox" checked={checkedAbsent} onChange={e=>setCheckedAbsent(e.target.checked)} />
+          Conferi na ZapSign que o envelope anterior não foi criado. Quero emitir um novo contrato.
+        </label>}
       </div>
       <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-100 dark:border-white/5 bg-white dark:bg-dark-card px-3 py-2">
         <p className={`flex min-w-0 items-center gap-1 text-[11px] ${emptyBlock ? 'text-amber-700 dark:text-amber-300' : 'text-slate-400'}`}>
@@ -265,7 +313,7 @@ function ContractForm({
         <button
           type="button"
           onClick={() => void submit()}
-          disabled={!canEdit || !draft.ready || sending}
+          disabled={!canEdit || !draft.ready || sending || (!!uncertain && uncertain.template === draft.form.templateToken && !checkedAbsent)}
           title={emptyBlock ? 'Preencha os campos em branco ou marque para enviar assim mesmo' : undefined}
           className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-sky-600 px-3 text-sm font-bold text-white transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
         >

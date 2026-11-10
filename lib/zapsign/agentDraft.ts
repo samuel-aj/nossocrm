@@ -13,6 +13,31 @@ const personal = /^(?:(?:nome(?:completo)?|cpf|cnpj|rg|email|telefone|celular|wh
 const reviewQuestion = 'Você confirma os dados da ficha para eu gerar o contrato e enviar o link por aqui?';
 const shortQuestion = 'Posso gerar o contrato com os dados que você confirmou e enviar o link por aqui?';
 
+// Only join address fragments in their stated order. A bare house number must
+// be the whole answer or explicitly identified (a substring of a CPF is not evidence).
+function addressInParts(candidate: string, turns: ContractTurn[]) {
+  const segments = candidate.split(/[,;\n]+/).map(norm);
+  if (segments.length < 2 || segments.length > 12 || segments.some(s => !s)) return false;
+  const words = (s: string) => norm(s).replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const messages = turns.filter(t => t.ok && t.direction === 'in').map(t => words(t.text));
+  let next = 0;
+  for (const message of messages) {
+    const bounded = ' ' + message + ' ';
+    for (let end = segments.length; end > next; end--) {
+      const fragment = words(segments.slice(next,end).join(' '));
+      const match = /^\d+$/.test(fragment)
+        ? [' número ', ' número é ', ' número da casa é '].some(prefix => bounded.includes(prefix + fragment + ' '))
+        : fragment.length >= 3 && bounded.includes(' ' + fragment + ' ');
+      if (fragment && (message === fragment || match)) {
+        next = end;
+        break;
+      }
+    }
+    if (next === segments.length) return true;
+  }
+  return false;
+}
+
 function containsPhone(text: string, number: string) {
   return !!number && (text.match(/\+?\d[\d\s().-]{6,}\d/g) ?? []).some(part => signerPhone(part) === number);
 }
@@ -84,7 +109,10 @@ export function prepareAgentDraft(input: {
       const fromClient = (personal.test(normalizeVarName(name)) || (source === 'cliente:perguntar' && canCollectContractField(name))) &&
         !source.startsWith('texto:') && !source.startsWith('negocio.') &&
         !(source.startsWith('campo:') && input.ctx.customFieldTypes?.[source.slice(6)] === 'currency');
-      if (fromClient && candidate && evidenced(candidate)) value = candidate;
+      const confirmed = accepted?.fields.get(normalizeVarName(name));
+      if (fromClient && confirmed && (!candidate || norm(candidate) === norm(confirmed))) value = confirmed;
+      else if (fromClient && candidate && (evidenced(candidate) ||
+        (/^(endereco|logradouro)/.test(normalizeVarName(name)) && addressInParts(candidate, input.turns)))) value = candidate;
       else (fromClient ? missing : office).push(name);
     }
     data.push({ de: '{{' + name + '}}', para: value });
@@ -146,7 +174,15 @@ function acceptedFicha(turns: ContractTurn[]) {
   const name = answer.raw.match(/(?:^|[\n·;])\s*Nome(?: completo)?\s*:\s*([^·;\n]+)/iu)?.[1]?.trim();
   const phone = answer.raw.match(/\b(?:Telefone(?: com DDD)?|Celular)\s*:\s*([+()\d][\d ()-]+)/iu)?.[1];
   const email = answer.raw.match(/\bE-?mail\s*:\s*([^·;\n\s]+(?: informado)?)/iu)?.[1];
-  return { name: name && fullSignerName(name) ? name : undefined, phone: phone ? signerPhone(phone) : undefined,
+  const fields = new Map<string, string | null>();
+  for (const line of answer.raw.split(/[\n·;]|\.\s+(?=(?:[\p{L}][^.:!?\n]{0,65}:|(?:você )?(?:confirma|confere|posso|estão|está)\b))/iu)) {
+    const match = line.trim().match(/^(?:[-*•]\s*)?([^:!?]{1,100}):\s*([^:!?]+)$/u);
+    if (!match) continue;
+    const key = normalizeVarName(match[1]);
+    const value = plain(match[2]);
+    fields.set(key, fields.has(key) && fields.get(key) !== value ? null : value);
+  }
+  return { fields, name: name && fullSignerName(name) ? name : undefined, phone: phone ? signerPhone(phone) : undefined,
     email: email ? signerEmail(email.replace(/[.,!?]+$/u, '')) : undefined };
 }
 
