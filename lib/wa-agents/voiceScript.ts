@@ -1,8 +1,8 @@
 import { internalOutputReason } from './replyOutput';
 
 /** Markers belong to the saved script. Customer messages never define voice clips. */
-export function readVoiceScript(script: string, textOnly = false) {
-  const clips: string[] = [];
+export function readVoiceScript(script: string, textOnly = false, previousClips: readonly string[] = []) {
+  const clips = [...previousClips];
   let start = -1;
   let cursor = 0;
   let prompt = '';
@@ -30,7 +30,13 @@ export function readVoiceScript(script: string, textOnly = false) {
   }
   if (!error && start >= 0) error = 'Feche o trecho de áudio com [/audio].';
   // A legacy invalid script must not duplicate or execute partially parsed instructions.
-  return error ? { clips: [], prompt: script, error } : { clips, prompt: prompt + script.slice(cursor), error };
+  return error ? { clips: [...previousClips], prompt: script, error } : { clips, prompt: prompt + script.slice(cursor), error };
+}
+
+export function readAgentVoiceScripts(script: string, followup = '', textOnly = false) {
+  const primary = readVoiceScript(script, textOnly);
+  const rule = readVoiceScript(followup, textOnly, primary.clips);
+  return { prompt: primary.prompt, followupPrompt: rule.prompt, clips: rule.clips };
 }
 
 export function wrapVoiceSelection(value: string, start: number, end: number) {

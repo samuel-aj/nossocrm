@@ -1,3 +1,4 @@
+import { APICallError } from 'ai';
 import { scheduledReturnRuntime } from './scheduledReturns';
 import { loadLastInboundAt } from './lastInbound';
 import { checkProactiveFollowup, type ProactiveFollowup } from './proactiveFollowup';
@@ -510,7 +511,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
   };
   const emit = async (event: AgentEvent, extra?: Record<string, unknown>) => {
     pushEvent(event, extra);
-    if (!agent || !ctx) return;
+    if (!agent || !ctx || getUsageFailure()) return;
     const results = await dispatchAgentEvent(admin, { agent, event, ctx, extra });
     if (results.length > 0) pushEvent('webhook', { event, results });
   };
@@ -636,10 +637,29 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
         messages: pending,
         onEvent: (type, data) => pushEvent(type, data),
       });
-      assertUsageHealthy();
       await renew();
     }
     inputText = pending.map(messageText).filter(Boolean).join('\n') || null;
+    const unreadableAudio = trigger === 'inbound' && !input.forceReply && agent.media_understanding.audio
+      ? pending.filter(m => m.media_type === 'audio' && !m.transcription?.trim()) : [];
+    for (const audio of unreadableAudio) {
+      const { error } = await admin.from('crm_notification_events').insert({
+        organization_id: organizationId, kind: 'audio_transcription', source_id: audio.id,
+      });
+      if (error && error.code !== '23505') {
+        pushEvent('audio_notification_failed', { id: audio.id, error: error.message });
+        console.error('[wa-agents] aviso de áudio sem transcrição:', error.message);
+      }
+    }
+    const latest = pending.at(-1);
+    const needsAudioResend = latest && unreadableAudio.includes(latest) && !latest.body?.trim();
+    const usageFailure = getUsageFailure();
+    // A provider outage may leave usage unknown. Only a fixed, no-model reply
+    // is allowed when enforcement is off; ledger errors and active limits still win.
+    const providerFailed = APICallError.isInstance(usageFailure) ||
+      (usageFailure instanceof AiUsageError && usageFailure.code === 'AI_USAGE_UNKNOWN');
+    const fixedReplyOnly = needsAudioResend && providerFailed && usageContext?.policyEnabled === false;
+    if (!fixedReplyOnly) assertUsageHealthy();
     if (!input.forceReply) {
       if (pending.length === 0) return await finish('skipped', { reason: 'nada a responder' });
       // Só saída HUMANA (crm/echo) bloqueia; as do agente, robô e API não contam
@@ -647,6 +667,31 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       if (lastAny && lastAny.direction === 'out' && !(lastAny.source && AGENT_SOURCES.has(lastAny.source))) {
         return await finish('skipped', { reason: 'atendente respondeu por último' });
       }
+    }
+
+    if (latest && needsAudioResend) {
+      const activeCtx = ctx;
+      const activeAgentId = agent.id;
+      const reply = 'Não consegui ouvir seu áudio. Pode mandar de novo ou escrever por aqui?';
+      const canReply = async () => {
+        const { data, error } = await admin.from('wa_conversations').select('id')
+          .eq('organization_id', organizationId).eq('id', conversationId)
+          .eq('ai_agent_id', activeAgentId).eq('ai_status', 'active').eq('ai_lock_until', lockValue).maybeSingle();
+        if (error) throw new WaAgentError('DB_ERROR', error.message);
+        const last = await getLastMessage(admin, activeCtx, null);
+        if (!data || last?.id !== latest.id) throw new ProactiveInterrupted('Outra mensagem ou intervenção substituiu o pedido de reenvio.');
+        const budget = await checkConversationBudget(admin, organizationId, conversationId);
+        if (fixedReplyOnly && budget.policy.enabled) assertUsageHealthy();
+        if (budget.blocked_at) throw new ProactiveInterrupted('Atendimento pausado pelo limite de consumo.');
+      };
+      await sendLines(admin, ctx, agent, [reply], { renewLock: renew, beforeSend: canReply });
+      outputText = reply;
+      const state = { ...conv.ai_state, respostas: (Number(conv.ai_state?.respostas) || 0) + 1 };
+      await updateConversation(admin, ctx, { ai_last_processed_at: latest.created_at, ai_state: state });
+      pushEvent('audio_resend_requested', { id: latest.id });
+      await emit('reply_sent', { text: reply, lines: [reply], media: [] });
+      if (agent.max_replies > 0 && state.respostas >= agent.max_replies) await stopConversation('limite de respostas atingido');
+      return await finish('ok', { text: reply, lines: [reply] });
     }
 
     // Every paid attempt reserves its balance atomically through the model middleware.
@@ -762,7 +807,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     };
 
     // 6. Geração
-    const gen = await generateAgentReply({ model: resolved.model, agent, system, messages, runtime });
+    const gen = await generateAgentReply({ model: resolved.model, agent, system, messages, runtime, followupInstruction: input.followup?.instruction });
     assertUsageHealthy();
     toolCalls.push(...gen.toolCalls);
     usage = gen.usage;
@@ -780,7 +825,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
         .select('id').maybeSingle();
       if (error) throw new WaAgentError('DB_ERROR', error.message);
       if (paused) Object.assign(ctx.conversation, pause);
-      const reason = 'Resposta da IA bloqueada por conter dados internos. ' + (paused
+      const reason = (gen.outputSafety.recoveryError || 'Resposta da IA bloqueada por conter dados internos.') + ' ' + (paused
         ? 'Atendimento pausado para revisão da equipe.'
         : 'A conversa mudou durante a geração; o estado atual foi preservado.');
       await emit('error', { code: 'AI_OUTPUT_BLOCKED', message: reason, paused: !!paused });

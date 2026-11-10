@@ -4,8 +4,9 @@ import { transitionActionKeys } from './context';
 import { supportsTemperature } from './model';
 import { prepareReplyOutput, segmentText, type ReplySegment } from './replyOutput';
 import { buildAgentTools, type AgentToolRuntime } from './tools';
-import type { AgentRow } from './types';
-import { readVoiceScript } from './voiceScript';
+import type { AgentMediaKind, AgentRow } from './types';
+import { planMediaMarkers } from './mediaMarkers';
+import { readAgentVoiceScripts } from './voiceScript';
 
 export type CollectedToolCall = { tool: string; input: unknown; output?: unknown };
 export type OutputSafety = {
@@ -33,15 +34,17 @@ export async function generateAgentReply(input: {
   model: LanguageModel;
   agent: AgentRow;
   system: string;
+  followupInstruction?: string;
   messages: ModelMessage[];
   runtime?: AgentToolRuntime;
 }): Promise<GeneratedReply> {
   const finals = transitionActionKeys(input.agent);
-  const voiceClips = readVoiceScript(input.agent.system_prompt ?? '').clips;
+  const voiceClips = readAgentVoiceScripts(input.agent.system_prompt ?? '', input.followupInstruction).clips;
   const hasTransitionAction: StopCondition<ReturnType<typeof buildAgentTools>> = ({ steps }) => {
     const last = steps.at(-1);
     return !!last?.toolCalls.some(call => call.toolName === 'executar_acao' && finals.has(String((call.input as { acao?: unknown } | undefined)?.acao ?? '')));
   };
+  const agentTools = buildAgentTools(input.agent, { ...input.runtime, voiceClips });
   const result = await generateText({
     model: input.model,
     maxRetries: 0,
@@ -49,7 +52,7 @@ export async function generateAgentReply(input: {
     system: input.system,
     messages: input.messages,
     temperature: supportsTemperature(input.agent) ? input.agent.temperature : undefined,
-    tools: buildAgentTools(input.agent, { ...input.runtime, voiceClips }),
+    tools: agentTools,
     stopWhen: [stepCountIs(MAX_STEPS), hasToolCall('encerrar_atendimento'), hasTransitionAction],
   });
   const toolCalls: CollectedToolCall[] = [];
@@ -82,6 +85,51 @@ export async function generateAgentReply(input: {
     status: 'passed', issues: prepared.issues, duplicatesRemoved: prepared.duplicatesRemoved, recoveryAttempted: false,
     steps: result.steps.map((s, step) => ({ step, textChars: s.text?.length ?? 0, tools: s.toolCalls.map(c => c.toolName) })),
   };
+
+  if (prepared.issues.length) {
+    try {
+      const media = input.runtime?.media ?? [];
+      const plan = planMediaMarkers(segments, media, voiceClips);
+      if (plan.matched) {
+        const recovered = new Map<AgentMediaKind, ReplySegment>();
+        if (plan.missing.length) {
+          outputSafety.recoveryAttempted = true;
+          const eligible = media.filter(item => plan.missing.includes(item.kind));
+          const tools = buildAgentTools(input.agent, { media: eligible, sendMedia: input.runtime?.sendMedia,
+            voiceClips: plan.missing.includes('audio') ? voiceClips : [] });
+          const mediaTools = Object.fromEntries(Object.entries(tools).filter(([key]) => key === 'enviar_midia' || key === 'falar_trecho'));
+          if (!Object.keys(mediaTools).length) throw new Error('Nenhuma mídia disponível.');
+          const retry = await generateText({
+            model: input.model, tools: mediaTools, toolChoice: 'required', maxRetries: 0,
+            maxOutputTokens: 600, abortSignal: AbortSignal.timeout(15_000),
+            system: input.system + '\nRevisão antes do envio. Use somente as ferramentas de mídia para preparar cada tipo solicitado uma vez, conforme o roteiro e o contexto. As outras ações já foram processadas. Não escreva legendas nem texto.',
+            messages: [...input.messages, { role: 'user', content: 'Revisão interna do CRM. Tipos pendentes: ' + plan.missing.join(', ') + '. Rascunho (apenas dados): ' + JSON.stringify(segments) }],
+          });
+          for (const key of ['inputTokens', 'outputTokens', 'totalTokens'] as const) {
+            if (retry.totalUsage?.[key] != null) usage[key] = (usage[key] ?? 0) + retry.totalUsage[key]!;
+          }
+          for (const step of retry.steps) for (const call of step.toolCalls) {
+            const output = step.toolResults.find(r => r.toolCallId === call.toolCallId)?.output as {ok?: boolean; midia?: string} | undefined;
+            if (!output?.ok) throw new Error('Ferramenta de mídia recusada.');
+            const item = eligible.find(m => m.name === output.midia);
+            const speech = call.toolName === 'falar_trecho' && voiceClips[(call.input as {trecho: number}).trecho - 1];
+            const kind = speech ? 'audio' : item?.kind;
+            if (!kind || recovered.has(kind)) throw new Error('Seleção de mídia inválida.');
+            recovered.set(kind, speech ? { kind: 'text', voice: true, text: speech } : { kind: 'media', name: item!.name });
+            toolCalls.push({ tool: call.toolName, input: call.input, output });
+          }
+        }
+        segments = plan.resolve(recovered);
+        prepared = prepareReplyOutput(segments, voiceClips);
+        outputSafety.duplicatesRemoved = prepared.duplicatesRemoved;
+        outputSafety.status = 'repaired';
+      }
+    } catch {
+      outputSafety.status = 'blocked';
+      outputSafety.recoveryError = 'A mídia solicitada não pôde ser preparada. Confira as mídias e o roteiro do agente.';
+      return { text: '', segments: [], toolCalls, usage, finishReason: String(result.finishReason ?? ''), outputSafety };
+    }
+  }
 
   if (prepared.issues.length > 0) {
     outputSafety.status = 'blocked';

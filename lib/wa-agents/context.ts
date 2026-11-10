@@ -1,5 +1,5 @@
 import { readDbLeadSource } from '@/lib/deals/leadSource';
-import { readVoiceScript } from './voiceScript';
+import { readAgentVoiceScripts } from './voiceScript';
 /**
  * Contexto de uma conversa para o agente: conversa, número, contato, negócio
  * e organização; histórico como mensagens do modelo; prompt de sistema.
@@ -968,7 +968,7 @@ export function buildSystemPrompt(input: {
 }): string {
   const { agent, ctx } = input;
   const vars = buildPromptVars(input);
-  const rawScript = readVoiceScript(agent.system_prompt || '', input.textOnly).prompt;
+  const { prompt: rawScript, followupPrompt } = readAgentVoiceScripts(agent.system_prompt || '', input.followup?.instruction, input.textOnly);
   const rawStopRules = (agent.stop_rules || '').trim();
   const markers = hasScriptMarkers(rawScript) || hasScriptMarkers(rawStopRules);
   const script = replaceScriptMarkers(
@@ -1039,7 +1039,7 @@ export function buildSystemPrompt(input: {
   }
   if (input.followup) {
     lines.push(
-      `- FOLLOW-UP: o cliente está sem responder há ${input.followup.silentFor}. Escreva uma mensagem curta de retomada (1 ou 2 linhas), gentil e sem cobrar; não repita o que já foi dito e não se apresente de novo. Termine com a pergunta que ficou em aberto, se houver.${input.followup.instruction ? ` Instrução da equipe para este follow-up: ${input.followup.instruction}` : ''}`
+      `- FOLLOW-UP: o cliente está sem responder há ${input.followup.silentFor}. Escreva uma mensagem curta de retomada (1 ou 2 linhas), gentil e sem cobrar; não repita o que já foi dito e não se apresente de novo. Termine com a pergunta que ficou em aberto, se houver.${followupPrompt ? ` Instrução da equipe para este follow-up: ${followupPrompt}` : ''}`
     );
   }
   if (contextoExtra) {
