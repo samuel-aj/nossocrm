@@ -97,4 +97,11 @@ describe('ChatCrmHeader', () => {
     fireEvent.click(button);
     expect(toggle).toHaveBeenCalledOnce();
   });
+
+  it('offers group properties even without a linked lead', () => {
+    const toggle = vi.fn();
+    render(<ChatCrmHeaderActions hasDeal={false} isGroup detailsOpen={false} onToggleDetails={toggle} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Mostrar propriedades do grupo' }));
+    expect(toggle).toHaveBeenCalledOnce();
+  });
 });

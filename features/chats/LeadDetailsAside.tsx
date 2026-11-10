@@ -14,10 +14,16 @@ type Props = {
 };
 
 export function LeadDetailsAside({ deal, contact, open, drawer, onClose }: Props) {
+  return <ChatDetailsAside label="Propriedades do lead" open={open} drawer={drawer} onClose={onClose}>
+    <LeadPropertiesPanel key={deal.id} deal={deal} contact={contact} side="right" onClose={onClose} onDeleted={onClose} />
+  </ChatDetailsAside>;
+}
+
+export function ChatDetailsAside({ label, children, open, drawer, onClose }: Pick<Props, 'open' | 'drawer' | 'onClose'> & { label: string; children: React.ReactNode }) {
   return (
     <div
       role={drawer && open ? 'dialog' : undefined}
-      aria-label={drawer && open ? 'Propriedades do lead' : undefined}
+      aria-label={drawer && open ? label : undefined}
       aria-modal={drawer && open ? true : undefined}
       aria-hidden={!open}
       inert={!open}
@@ -25,7 +31,7 @@ export function LeadDetailsAside({ deal, contact, open, drawer, onClose }: Props
     >
       <FocusTrap active={drawer && open} onEscape={onClose}>
         <div className="h-full min-h-0 border-l border-slate-200 bg-white dark:border-white/10 dark:bg-dark-card">
-          <LeadPropertiesPanel key={deal.id} deal={deal} contact={contact} side="right" onClose={onClose} onDeleted={onClose} />
+          {children}
         </div>
       </FocusTrap>
     </div>

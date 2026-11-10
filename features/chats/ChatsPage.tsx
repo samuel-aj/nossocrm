@@ -39,9 +39,11 @@ import { LeadSourceSelect } from '@/features/deals/components/LeadSourceSelect';
 import { ChatCrmHeader, ChatCrmHeaderActions } from './ChatCrmHeader';
 import { DealStageControl } from '@/features/deals/lead/DealStageControl';
 import { useLeadConversation } from '@/features/deals/lead/useLeadConversation';
-import { LeadDetailsAside } from './LeadDetailsAside';
+import { ChatDetailsAside, LeadDetailsAside } from './LeadDetailsAside';
+import { GroupPropertiesPanel } from './GroupPropertiesPanel';
 import { WhatsAppChatDemo } from '@/features/whatsapp/WhatsAppChatDemo';
 import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
+import { participantName } from '@/lib/whatsapp/groupParticipants';
 import { Contact, Deal } from '@/types';
 
 /** Largura da lista de conversas no desktop (px): padrão, mínimo e máximo */
@@ -781,6 +783,19 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
     );
   }, [selected, convsQ.data, contextConnectionId]);
   const selectedConvId = selectedConv?.id ?? null;
+  const groupContactNames = useMemo(() => {
+    const names = new Map<string, string>();
+    if (!selected?.isGroup) return names;
+    for (const row of convsQ.data?.data ?? []) {
+      const name = participantName(row.wa_name);
+      if (!row.is_group && row.connection_id === selected.connectionId && name) names.set(phoneKey(row.wa_phone), name);
+    }
+    for (const contact of contacts) {
+      const name = participantName(contact.name);
+      if (contact.phone && name) names.set(phoneKey(contact.phone), name);
+    }
+    return names;
+  }, [contacts, convsQ.data, selected?.isGroup, selected?.connectionId]);
   const linkQuery = useConversationLead(selectedConv);
   const selectedLabelIds = useMemo(() => selectedConv?.label_ids ?? [], [selectedConv]);
   /** Etiquetas da conversa já resolvidas: id que não existe mais some. */
@@ -1830,7 +1845,8 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                   selected.isGroup
                     ? {
                         conversationId: selected.conversationId as string,
-                        name: selected.name,
+                        name: selectedConv?.wa_name || selected.name,
+                        memberName: phone => groupContactNames.get(phoneKey(phone)),
                         participantsCount: selected.participantsCount ?? null,
                       }
                     : null
@@ -1852,6 +1868,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                 }}
                 headerActions={
                   <ChatCrmHeaderActions
+                    isGroup={selected.isGroup}
                     hasDeal={!!selectedDeal && !selected.isGroup}
                     detailsOpen={detailsOpen}
                     onToggleDetails={() => setDetailsOpen(open => !open)}
@@ -1919,6 +1936,11 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
           drawer={detailsDrawer}
           onClose={() => setDetailsOpen(false)}
         />
+      )}
+      {selected?.isGroup && selected.conversationId && detailsOpen && (
+        <ChatDetailsAside label="Propriedades do grupo" open drawer={detailsDrawer} onClose={() => setDetailsOpen(false)}>
+          <GroupPropertiesPanel key={selected.conversationId} conversationId={selected.conversationId} avatarUrl={selectedConv?.avatar_url} onClose={() => setDetailsOpen(false)} />
+        </ChatDetailsAside>
       )}
       {leadConversation.dialogs}
 
