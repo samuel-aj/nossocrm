@@ -133,16 +133,17 @@ export function ChatCrmHeader({
   );
 }
 
-export function ChatCrmHeaderActions({ hasDeal, detailsOpen, onToggleDetails }: {
+export function ChatCrmHeaderActions({ hasDeal, isGroup, detailsOpen, onToggleDetails }: {
   hasDeal: boolean;
+  isGroup?: boolean;
   detailsOpen: boolean;
   onToggleDetails: () => void;
 }) {
-  if (!hasDeal) return null;
+  if (!hasDeal && !isGroup) return null;
   return (
     <button
       type="button"
-      aria-label={detailsOpen ? 'Ocultar propriedades do lead' : 'Mostrar propriedades do lead'}
+      aria-label={(detailsOpen ? 'Ocultar' : 'Mostrar') + ' propriedades do ' + (isGroup ? 'grupo' : 'lead')}
       aria-expanded={detailsOpen}
       onClick={onToggleDetails}
       className="inline-flex shrink-0 items-center rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-primary-600 hover:bg-primary-50 dark:border-white/10 dark:text-primary-400 dark:hover:bg-white/10"
