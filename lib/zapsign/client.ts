@@ -37,6 +37,18 @@ export type ZapSignTemplate = {
   inputs?: Array<{ variable?: string }>;
 };
 
+export function isPdfTemplate(template: ZapSignTemplate): boolean {
+  const type = template.template_type?.trim().toLowerCase();
+  if (type) return type === 'pdf' || type === 'application/pdf';
+  return /\.pdf$/i.test((template.template_file ?? '').split(/[?#]/, 1)[0]);
+}
+
+export function requireDynamicPrincipal(template: ZapSignTemplate) {
+  if (isPdfTemplate(template)) {
+    throw new ZapSignError(`“${template.name}” é um modelo PDF. Para preencher o contrato pelo CRM, cadastre o documento principal como modelo dinâmico DOCX na ZapSign e selecione-o aqui.`, 422);
+  }
+}
+
 export type ZapSignSigner = {
   token: string;
   sign_url?: string | null;
@@ -183,7 +195,7 @@ export class ZapSignClient {
   }
 
   async attachTemplate(docToken: string, template: ZapSignTemplate, data: CreateDocFromTemplateInput['data']) {
-    if (template.template_type?.toLowerCase() === 'pdf') {
+    if (isPdfTemplate(template)) {
       if (!template.template_file) throw new Error('A ZapSign não devolveu o arquivo do anexo.');
       const { bytes } = await this.download(template.template_file, 10 * 1024 * 1024);
       return this.request<{ token: string }>('POST', `/docs/${encodeURIComponent(docToken)}/upload-extra-doc/`,
