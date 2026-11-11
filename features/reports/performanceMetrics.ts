@@ -8,6 +8,7 @@ import { buildEntryFunnel, type EntryFunnel } from './entryFunnel';
 import { buildConversionFunnel, selectConversionPopulation } from './conversionFunnel';
 import type { HistoricalReportDeal } from './performanceHistory';
 import { calculateMonthlyResults, type MonthlyQualificationEvidence } from './monthlyResults';
+import { retainedCustomerStage } from './retainedCustomerStage';
 export type { LifecycleEvent, PerformanceMode } from './performanceHistory';
 
 export interface StageEvent {
@@ -73,7 +74,7 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
   const qualifiedStage = rules.steps[rules.qualifiedIndex]?.id;
   const stepIndex = (id?: string) => rules.steps.findIndex(stage => stage.id === id);
   const byId = new Map(deals.map(deal => [deal.id, deal]));
-  const validDate = (date: string, created: string) => Number.isFinite(time(date)) && time(date) >= time(created) && time(date) <= cutoff;
+  const validDate = (date: string, created: string, until = cutoff) => Number.isFinite(time(date)) && time(date) >= time(created) && time(date) <= until;
   const inPeriod = (date: string) => time(date) >= range.start.getTime() && time(date) <= cutoff;
   const filtered = (deal: Deal) => matchesReportFilters(deal, ownerId, productId);
   const boardLedger = (options.lifecycleEvents || []).filter(event => event.boardId === board.id && byId.has(event.dealId));
@@ -264,6 +265,10 @@ export function calculatePerformance(deals: Deal[], events: StageEvent[], board:
     stageEvents: history, lifecycleEvents: ledger, boardId: board.id, stages: stageData, cutoffDate: new Date(cutoff).toISOString(),
   }) : { stages: [], baseCount: 0, unknownStageCount: 0 };
   const monthly = mode === 'monthly' ? calculateMonthlyResults({ deals, board,
+    customerEvidence: retainedCustomerStage(board,
+      boardLedger.filter(event => validDate(event.date, byId.get(event.dealId)!.createdAt, snapshotDate.getTime())),
+      events.filter(event => event.boardId === board.id && byId.has(event.dealId) &&
+        validDate(event.date, byId.get(event.dealId)!.createdAt, snapshotDate.getTime()))),
     startDate: range.start.toISOString(), cutoffDate: new Date(cutoff).toISOString(), ownerId, productId,
     entries, qualifiedDeals, qualificationDates, leadQualificationDates, stageArrivals: stageData,
     qualificationConfirmedDates: new Map([...(conversion?.qualificationConfirmedAt || [])].map(([id, proof]) => [id, proof.date])),

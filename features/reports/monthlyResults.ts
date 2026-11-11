@@ -1,4 +1,5 @@
 import type { Board, Deal } from '@/types';
+import { isAutomaticWonDestination } from '@/lib/boards/boardOutcome';
 import { compareHistoricalDates, matchesReportFilters, type HistoricalReportDeal } from './performanceHistory';
 import type { EntryFunnel, EntryFunnelEvidence, EntryFunnelStage } from './entryFunnel';
 
@@ -8,6 +9,7 @@ interface MonthlyInput {
   entries: Deal[]; qualifiedDeals: Deal[]; qualificationDates: Map<string, string>; qualificationConfirmedDates: Map<string, string>;
   leadQualificationDates: Map<string, string>;
   entryFunnel: EntryFunnel; hasQualifiedStage: boolean;
+  customerEvidence: ReadonlyMap<string, EntryFunnelEvidence>;
   /** Distinct arrivals in the interval, with owner/product/source snapshots at arrival. */
   stageArrivals: readonly { stageId: string; deals: readonly Deal[] }[];
   diagnosticReasonsByDeal: Map<string, string[]>; diagnosticsDeals: Deal[]; excludedQualificationDeals: Deal[];
@@ -16,8 +18,8 @@ const rate = (numerator: number, denominator: number) => denominator ? numerator
 
 /** A deliberately narrow overlay on the existing conversion report.
  * Entry snapshots, qualification, losses, filters, sources and pre-gain progress
- * remain the caller's baseline. Only the retained-gain population uses today's
- * explicit outcome and closedAt; CUSTOMER visits never create a gain.
+ * remain the caller's baseline. Explicit outcomes take precedence over a
+ * dated fulfillment of a subsequently configured CUSTOMER stage.
  * Post-sale counts dated arrivals still retained there, independently of gains.
  */
 export function calculateMonthlyResults(input: MonthlyInput) {
@@ -25,9 +27,17 @@ export function calculateMonthlyResults(input: MonthlyInput) {
   const valid = (date?: string): date is string => !!date && Number.isFinite(Date.parse(date));
   const validForLead = (date: string | undefined, createdAt: string): date is string => valid(date) && valid(createdAt) &&
     compareHistoricalDates(date, createdAt) >= 0 && compareHistoricalDates(date, cutoffDate) <= 0;
-  const wonDeals = input.deals.filter(deal => deal.boardId === board.id && deal.isWon && !deal.isLost &&
-    validForLead(deal.closedAt, deal.createdAt) && compareHistoricalDates(deal.closedAt, startDate) >= 0 &&
-    matchesReportFilters(deal, input.ownerId || '', input.productId || ''));
+  const winEvidence = new Map<string, EntryFunnelEvidence>();
+  const wonDeals = input.deals.flatMap(deal => {
+    if (deal.boardId !== board.id || deal.isLost || !matchesReportFilters(deal, input.ownerId || '', input.productId || '')) return [];
+    const proof = input.customerEvidence.get(deal.id);
+    const useStage = !deal.isWon && !deal.closedAt && !!proof && isAutomaticWonDestination(board, deal.status);
+    const date = useStage ? proof.date : deal.isWon ? deal.closedAt : undefined;
+    if (!validForLead(date, deal.createdAt) || compareHistoricalDates(date, startDate) < 0) return [];
+    if (!useStage) return [deal];
+    winEvidence.set(deal.id, proof);
+    return [{ ...deal, isWon: true, closedAt: date }];
+  });
   const entryIds = new Set(entries.map(deal => deal.id));
   const qualifiedIds = new Set(qualifiedDeals.map(deal => deal.id));
   const entryWonDeals = wonDeals.filter(deal => entryIds.has(deal.id));
@@ -71,7 +81,7 @@ export function calculateMonthlyResults(input: MonthlyInput) {
         validForLead(arrival.updatedAt, arrival.createdAt) && compareHistoricalDates(arrival.updatedAt, startDate) >= 0;
     });
     const evidenceByDeal = new Map<string, EntryFunnelEvidence>(deals.map(deal => [deal.id, stage.milestone === 'customer'
-      ? { kind: 'win', date: deal.closedAt!, stageName: 'Ganho registrado', observedAtStage: false }
+      ? winEvidence.get(deal.id) ?? { kind: 'win', date: deal.closedAt!, stageName: 'Ganho registrado', observedAtStage: false }
       : { kind: (deal as HistoricalReportDeal).stageEvidenceKind || 'stage', date: deal.updatedAt, stageName: stage.name,
         observedAtStage: (deal as HistoricalReportDeal).stageEvidenceKind !== 'stage-completion' }]));
     return { ...stage, deals, count: deals.length, evidenceByDeal,
