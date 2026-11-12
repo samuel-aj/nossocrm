@@ -6,13 +6,14 @@ import { loadCustomFieldDefs } from '@/lib/wa-agents/leadOps';
 import { readContractTemplate } from './templateFile';
 import { createTemplatePackage, officeTemplates, PackageError } from './templatePackage';
 import { agentContactToken, clientFor, loadLeadSnapshot, loadZapSignSettings, recordEvent, toStoredSigner, type SignatureRow } from './signatures';
-import { contractReview, prepareAgentDraft, type AgentContractInput, type ContractTurn } from './agentDraft';
+import { contractReview, prepareAgentDraft, MAX_REVIEW_REQUESTS, REVIEW_HINT, type AgentContractInput, type ContractTurn } from './agentDraft';
 import { splitPhone } from './variables';
 import { ZapSignError, type ZapSignDoc } from './client';
 
 type Scope = { org: string; agent: string; conversation: string; deal: string; template: string; inboundId: string; since: string };
 type ResultRow = Pick<SignatureRow, 'id' | 'status' | 'doc_token' | 'sign_url' | 'origin' | 'contact_id'>;
 const columns = 'id,status,doc_token,sign_url,origin,contact_id';
+const REVIEW_LOOP = `O cliente recebeu esta ficha ${MAX_REVIEW_REQUESTS} vezes e não confirmou. Não envie a ficha de novo nem peça que ele copie o texto. Chame a equipe para concluir o contrato na aba Contrato.`;
 
 function existing(r: ResultRow) {
   if (r.doc_token && ['signed', 'pending'].includes(r.status)) return { ok: true, existente: true, estado: r.status === 'signed' ? 'assinado' : 'aguardando assinatura', id_documento: r.doc_token };
@@ -68,8 +69,13 @@ export async function runAgentContract(admin: SupabaseClient, scope: Scope, inpu
     const { data, error } = await admin.from('wa_messages').select('id,direction,source,status,body,transcription,created_at')
       .eq('organization_id', org).eq('conversation_id', conversation).gte('created_at', scope.since)
       .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(100);
-    if (error || data?.[0]?.id !== scope.inboundId) throw new Error('O atendimento mudou. Reavalie a mensagem mais recente.');
-    return data.slice().reverse().map((m): ContractTurn => ({
+    // The agent takes about a minute to answer, so the end of its previous reply is often
+    // stored after this message arrived. The client answered what came before it: those
+    // lines are left out. A newer message from the client or the team still stops the run.
+    const at = data?.findIndex(m => m.id === scope.inboundId) ?? -1;
+    if (error || !data || at < 0 || data.slice(0, at).some(m => m.direction !== 'out' || m.source !== 'agent'))
+      throw new Error('O atendimento mudou. Reavalie a mensagem mais recente.');
+    return data.slice(at).reverse().map((m): ContractTurn => ({
       id: m.id, direction: m.direction, agent: m.source === 'agent', text: m.transcription || m.body || '',
       ok: m.direction === 'in' || ['sent', 'delivered', 'read'].includes(m.status), at: m.created_at,
     }));
@@ -81,8 +87,10 @@ export async function runAgentContract(admin: SupabaseClient, scope: Scope, inpu
     return { ok: false, perguntar_ao_cliente: draft.missing, preencher_no_crm: draft.office };
   const review = contractReview(turns, draft, binding.reviewKey);
   if (!review.confirmed) {
+    // The client already received this same ficha three times: a person takes over instead of a fourth copy.
+    if (review.repeated >= MAX_REVIEW_REQUESTS) return { ok: false, erro: REVIEW_LOOP };
     if (review.key) rememberReview?.(review.key);
-    return { ok: true, criado: false, solicitar_confirmacao: review.question };
+    return { ok: true, criado: false, solicitar_confirmacao: review.question, como_perguntar: REVIEW_HINT };
   }
   if (input.modo === 'preparar') return { ok: true, criado: false, ficha_confirmada: true, proximo_passo: 'criar' };
   const [freshBinding, latest, freshSettings, freshSnap] = await Promise.all([

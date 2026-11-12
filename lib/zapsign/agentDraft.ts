@@ -10,27 +10,36 @@ const norm = (s: string) => plain(s).toLocaleLowerCase('pt-BR');
 // Only identification data can come from client messages. Prices, products,
 // deadlines and any other office-defined terms must have a source in the CRM.
 const personal = /^(?:(?:nome(?:completo)?|cpf|cnpj|rg|email|telefone|celular|whatsapp|endereco|logradouro|bairro|cep|numero|complemento|cidade|estado|uf|nacionalidade|estadocivil|profissao|datanascimento|datadenascimento)(?:(?:do|da)?(?:cliente|contratante|signatario|outorgante))?)$/;
+/** After this many copies of the same ficha without an acceptance, a person takes over. */
+export const MAX_REVIEW_REQUESTS = 3;
+export const REVIEW_HINT = 'Envie solicitar_confirmacao uma única vez e termine a resposta nela. Não peça para o cliente copiar ou repetir o texto: basta ele responder sim, ok, confirmado ou tá certo. Se ele corrigir um dado, prepare de novo.';
 const reviewQuestion = 'Você confirma os dados da ficha para eu gerar o contrato e enviar o link por aqui?';
 const shortQuestion = 'Posso gerar o contrato com os dados que você confirmou e enviar o link por aqui?';
 
-// Only join address fragments in their stated order. A bare house number must
-// be the whole answer or explicitly identified (a substring of a CPF is not evidence).
+// Every fragment of the address has to be in the client's own words, in the order the
+// fragments are listed. One message (a long audio) can carry several of them. A bare house
+// number must be the whole answer or explicitly identified (a substring of a CPF is not evidence).
+const HOUSE_NUMBER = [' numero ', ' numero e ', ' numero da casa e ', ' numero da rua e ', ' n ', ' nº '];
 function addressInParts(candidate: string, turns: ContractTurn[]) {
   const segments = candidate.split(/[,;\n]+/).map(norm);
   if (segments.length < 2 || segments.length > 12 || segments.some(s => !s)) return false;
-  const words = (s: string) => norm(s).replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const words = (s: string) => fold(s).replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
   const messages = turns.filter(t => t.ok && t.direction === 'in').map(t => words(t.text));
   let next = 0;
   for (const message of messages) {
     const bounded = ' ' + message + ' ';
-    for (let end = segments.length; end > next; end--) {
-      const fragment = words(segments.slice(next,end).join(' '));
-      const match = /^\d+$/.test(fragment)
-        ? [' número ', ' número é ', ' número da casa é '].some(prefix => bounded.includes(prefix + fragment + ' '))
-        : fragment.length >= 3 && bounded.includes(' ' + fragment + ' ');
-      if (fragment && (message === fragment || match)) {
-        next = end;
-        break;
+    for (let found = true; found && next < segments.length;) {
+      found = false;
+      for (let end = segments.length; end > next; end--) {
+        const fragment = words(segments.slice(next,end).join(' '));
+        const match = /^\d+$/.test(fragment)
+          ? HOUSE_NUMBER.some(prefix => bounded.includes(prefix + fragment + ' '))
+          : fragment.length >= 3 && bounded.includes(' ' + fragment + ' ');
+        if (fragment && (message === fragment || match)) {
+          next = end;
+          found = true;
+          break;
+        }
       }
     }
     if (next === segments.length) return true;
@@ -133,22 +142,72 @@ function reviewKey(draft: Draft, inboundId: string, short: boolean) {
   return createHash('sha256').update(JSON.stringify([draft.fingerprint, inboundId, short])).digest('hex');
 }
 
+const fold = (s: string) => norm(s).normalize('NFD').replace(/\p{M}/gu, '');
+
+// An acceptance is a sequence of these whole phrases and nothing else. Single words are
+// not enough: "o que é isso" and "os dados corretos eu já enviei" are not acceptances.
+const YES = new RegExp('^(?:' + [
+  'sim', 'ok(?:ay|ey)?', 'confirmo', 'confirmei', '(?:(?:esta|ta) )?confirmad[oa]s?',
+  '(?:(?:esta|ta|estao|tao) )?(?:(?:tudo|td) )?(?:cert[oa]s?|certinh[oa]s?|corret[oa]s?|perfeito|beleza)',
+  '(?:esta|ta|tudo|td)(?: tudo)? (?:bom|bem|otimo|joia)',
+  '(?:(?:todos )?os )?dados (?:(?:estao|tao) )?(?:certos|corretos)', 'a ficha (?:esta|ta) (?:certa|correta)',
+  '(?:e )?isso(?: ai)?(?: mesmo)?', 'exato', 'exatamente', 'positivo', 'claro', 'com certeza', 'sem duvidas?', 'de acordo',
+  'nao (?:tem|tenho|ha) duvidas?(?: (?:nao|nenhuma))?', 'concordo', 'aceito', 'autorizo', 'autorizado', 'fechado', 'combinado', 'blz', 'aham', 'uhum',
+  'pode(?: sim)?(?: ser)?(?: (?:criar|gerar|preparar|enviar|mandar|fazer|seguir|prosseguir|continuar))?(?: o (?:contrato|documento|link))?',
+].join('|') + ')(?= |$)');
+const POLITE = /^(?:obrigad[oa]|obg|valeu|vlw|por favor|bo(?:m|a) (?:dia|tarde|noite)|senhora?|doutora?|dra?|moc[ao]|ta|e)(?= |$)/;
+
+/** 'yes' accepts, 'neutral' adds nothing ("obrigado"), 'no' is anything else: a number, a correction, a doubt. */
+function acceptance(text: string): 'yes' | 'neutral' | 'no' {
+  if (!text.trim() || text.includes('?')) return 'no';
+  let rest = fold(text).replace(/[\u{1F44D}\u{1F44C}\u{2705}\u{1F91D}]/gu, ' ok ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  let accepted = false;
+  while (rest) {
+    const yes = YES.exec(rest), phrase = yes ?? POLITE.exec(rest);
+    if (!phrase) return 'no';
+    accepted ||= !!yes;
+    rest = rest.slice(phrase[0].length).trim();
+  }
+  return accepted ? 'yes' : 'neutral';
+}
+
 function answeredQuestion(turns: ContractTurn[], now: number) {
   const reply = turns.at(-1);
-  if (!reply || reply.direction !== 'in' || !reply.ok) return;
-  const affirmative = norm(reply.text).replace(/[.,!]+$/g, '').replace(/^sim[, ]+/, '').trim();
-  if (!/^(?:sim|confirmo|confirmado|de acordo|autorizo|isso mesmo|tudo certo|está tudo certo|estão corretos|dados corretos|a ficha está correta|pode sim|pode(?: (?:criar|gerar|preparar|enviar|mandar)(?: o (?:contrato|documento|link))?)?)$/.test(affirmative)) return;
+  // The client often answers in more than one message ("Confirmado ok", "Tudo certo").
+  // Every message after the agent's question has to be part of the acceptance.
+  let i = turns.length - 1, accepted = false;
+  for (; i >= 0 && turns[i].direction === 'in'; i--) {
+    const kind = turns[i].ok ? acceptance(turns[i].text) : 'no';
+    if (kind === 'no') return;
+    accepted ||= kind === 'yes';
+  }
+  if (!reply || !accepted) return;
   const previous: string[] = [];
-  for (let i = turns.length - 2; i >= 0; i--) {
+  for (; i >= 0; i--) {
     const t = turns[i];
-    if (t.direction === 'in' && previous.length) {
+    if (t.direction === 'in') {
       const raw = previous.join('\n').trim();
       return { text: norm(raw), raw, inboundId: t.id };
     }
-    if (t.direction !== 'out' || !t.ok || !t.agent || !Number.isFinite(Date.parse(t.at)) ||
+    if (!t.ok || !t.agent || !Number.isFinite(Date.parse(t.at)) ||
         now - Date.parse(t.at) > 86_400_000 || Date.parse(t.at) > Date.parse(reply.at)) return;
     previous.unshift(t.text);
   }
+}
+
+/** The agent may close with a short nudge ("é só responder sim"), never with new data or another subject. */
+function asked(text: string, question: string) {
+  const at = text.lastIndexOf(question);
+  if (at < 0) return false;
+  const tail = text.slice(at + question.length).trim();
+  return !tail || (tail.length <= 300 && !/[\d:@]/.test(tail) &&
+    (!tail.includes('?') || /\b(?:sim|ok|confirm\p{L}*|contrato|ficha|dados)(?![\p{L}\p{N}])/u.test(tail)));
+}
+
+function askedShort(text: string) {
+  const question = norm(shortQuestion);
+  const head = text.slice(0, Math.max(text.lastIndexOf(question), 0)).trim();
+  return asked(text, question) && head.length <= 300 && !/[\d:@]/.test(head);
 }
 
 function questionIntent(text: string) {
@@ -164,18 +223,22 @@ function questionIntent(text: string) {
 function acceptedFicha(turns: ContractTurn[]) {
   const now = Date.now();
   let answer = answeredQuestion(turns, now);
-  if (answer?.text === norm(shortQuestion)) {
+  if (answer && askedShort(answer.text)) {
     const index = turns.findIndex(t => t.id === answer?.inboundId);
     answer = answeredQuestion(turns.slice(0, index + 1), now);
   }
   if (!answer || !answer.text.endsWith('?') || !/\b(?:ficha|dados)\b/.test(answer.text)) return;
   const { asksForContract, confirmsFicha } = questionIntent(answer.raw);
   if (!asksForContract && !confirmsFicha) return;
-  const name = answer.raw.match(/(?:^|[\n·;])\s*Nome(?: completo)?\s*:\s*([^·;\n]+)/iu)?.[1]?.trim();
-  const phone = answer.raw.match(/\b(?:Telefone(?: com DDD)?|Celular)\s*:\s*([+()\d][\d ()-]+)/iu)?.[1];
-  const email = answer.raw.match(/\bE-?mail\s*:\s*([^·;\n\s]+(?: informado)?)/iu)?.[1];
+  // WhatsApp bold ("*CPF:* 123") is not part of the label or the value.
+  const raw = answer.raw.replaceAll('*', '');
+  const name = raw.match(/(?:^|[\n·;])\s*Nome(?: completo)?\s*:\s*([^·;\n]+)/iu)?.[1]?.trim();
+  const phone = raw.match(/\b(?:Telefone(?: com DDD)?|Celular)\s*:\s*([+()\d][\d ()-]+)/iu)?.[1];
+  const email = raw.match(/\bE-?mail\s*:\s*([^·;\n\s]+(?: informado)?)/iu)?.[1];
   const fields = new Map<string, string | null>();
-  for (const line of answer.raw.split(/[\n·;]|\.\s+(?=(?:[\p{L}][^.:!?\n]{0,65}:|(?:você )?(?:confirma|confere|posso|estão|está)\b))/iu)) {
+  // A sentence ends a field only when a plain label follows. "Av. Brasil, 120 · CPF: …"
+  // is one address: what comes after "Av." has a comma or a separator before the next colon.
+  for (const line of raw.split(/[\n·;]|\.\s+(?=(?:[\p{L}][^.:!?\n·;,]{0,65}:|(?:você )?(?:confirma|confere|posso|estão|está)\b))/iu)) {
     const match = line.trim().match(/^(?:[-*•]\s*)?([^:!?]{1,100}):\s*([^:!?]+)$/u);
     if (!match) continue;
     const key = normalizeVarName(match[1]);
@@ -194,12 +257,25 @@ export function contractReview(turns: ContractTurn[], draft: Draft, savedKey?: s
   const { asksForContract, confirmsFicha } = questionIntent(answer?.raw ?? '');
   const useShort = reviewedFields && (asksForContract || confirmsFicha) && answer.text.endsWith('?');
   const confirmsFull = !!answer && savedKey === reviewKey(draft, answer.inboundId, false) &&
-    (answer.text.endsWith(norm(draft.question)) || (reviewedFields && asksForContract && answer.text.endsWith('?')));
-  const confirmsShort = !!answer && savedKey === reviewKey(draft, answer.inboundId, true) && answer.text === norm(shortQuestion);
+    (asked(answer.text, norm(draft.question)) || (reviewedFields && asksForContract && answer.text.endsWith('?')));
+  const confirmsShort = !!answer && savedKey === reviewKey(draft, answer.inboundId, true) && askedShort(answer.text);
   const confirmed = !!answer && (confirmsFull || confirmsShort);
   // A ficha sent before the contract tool was called can already contain the full summary.
   // In that case only ask for issuance, without asking for the data again.
   const current = turns.at(-1);
-  return { confirmed, question: useShort ? shortQuestion : draft.question,
+  const question = useShort ? shortQuestion : draft.question;
+  return { confirmed, question, repeated: timesAsked(turns, question, now),
     key: current?.direction === 'in' ? reviewKey(draft, current.id, useShort) : undefined };
+}
+
+/** How many of the agent's replies in the last day already carried this exact question, so the tool can stop a loop. */
+function timesAsked(turns: ContractTurn[], question: string, now: number) {
+  const wanted = norm(question);
+  let count = 0, block: string[] = [];
+  for (const t of [...turns, undefined]) {
+    if (t?.direction === 'out' && t.agent && t.ok && now - Date.parse(t.at) <= 86_400_000) { block.push(t.text); continue; }
+    if (block.length && norm(block.join('\n')).includes(wanted)) count++;
+    block = [];
+  }
+  return count;
 }
