@@ -55,6 +55,7 @@ export type VariableContext = {
 
 const BRL = (v: number) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const MONTHS = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+const TODAY = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: 'numeric', day: 'numeric' });
 
 /** Extrai {{variáveis}} de um texto (o conteúdo do DOCX, por exemplo), sem repetir, na ordem. */
 export function extractTemplateVariables(text: string): string[] {
@@ -189,7 +190,8 @@ export function resolveSource(source: VariableSource, ctx: VariableContext): str
     const key = s.slice(6);
     return formatCustomField(ctx.deal.customFields?.[key], ctx.customFieldTypes?.[key]);
   }
-  const now = ctx.now ?? new Date();
+  // A data do contrato é a do Brasil, não a do servidor (UTC): às 21h de Brasília já é "amanhã" lá.
+  const today = Object.fromEntries(TODAY.formatToParts(ctx.now ?? new Date()).map((p) => [p.type, Number(p.value)]));
   const pad = (n: number) => String(n).padStart(2, '0');
   switch (s) {
     case 'contato.nome':
@@ -225,11 +227,11 @@ export function resolveSource(source: VariableSource, ctx: VariableContext): str
     case 'escritorio.nome':
       return ctx.organizationName;
     case 'data.hoje':
-      return `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()}`;
+      return `${pad(today.day)}/${pad(today.month)}/${today.year}`;
     case 'data.hoje_extenso':
-      return `${now.getDate()} de ${MONTHS[now.getMonth()]} de ${now.getFullYear()}`;
+      return `${today.day} de ${MONTHS[today.month - 1]} de ${today.year}`;
     case 'data.ano':
-      return String(now.getFullYear());
+      return String(today.year);
     default:
       return '';
   }

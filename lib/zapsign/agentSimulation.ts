@@ -4,7 +4,7 @@ import { clientFor, loadZapSignSettings } from './signatures';
 import { readContractTemplate } from './templateFile';
 import { ZapSignError } from './client';
 import { officeTemplates } from './templatePackage';
-import { contractReview, prepareAgentDraft, type AgentContractInput } from './agentDraft';
+import { contractReview, prepareAgentDraft, REVIEW_HINT, type AgentContractInput } from './agentDraft';
 
 // Only reads the selected office template. The lead, amounts, confirmation and result
 // belong to the Testar chat. No signature insert, createDoc or message transport here.
@@ -35,7 +35,7 @@ export async function simulateAgentContract(admin: SupabaseClient, org: string, 
   const review = contractReview(turns, draft, previous?.role === 'assistant' ? previous.contractReviewKey : undefined);
   if (!review.confirmed) {
     if (review.key) rememberReview?.(review.key);
-    return { ok: true, simulado: true, criado: false, solicitar_confirmacao: review.question };
+    return { ok: true, simulado: true, criado: false, solicitar_confirmacao: review.question, como_perguntar: REVIEW_HINT };
   }
   if (input.modo === 'preparar') return { ok: true, simulado: true, criado: false, ficha_confirmada: true, proximo_passo: 'criar' };
   return { ok: true, simulado: true, criado: true, envio_do_link: 'simulado na conversa' };

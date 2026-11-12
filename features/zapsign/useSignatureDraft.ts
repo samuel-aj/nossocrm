@@ -30,7 +30,7 @@ export type SendPrep = {
     template_name: string | null;
     doc_name: string | null;
     variables: Record<string, string>;
-    signer: { auth_mode?: string; require_cpf?: boolean; require_selfie_photo?: boolean; send?: string; message?: string; allow_refuse?: boolean } | null;
+    signer: { auth_mode?: string; require_cpf?: boolean; require_selfie_photo?: boolean; require_document_photo?: boolean; send?: string; message?: string; allow_refuse?: boolean } | null;
     extra_signers: Array<{ name: string; email?: string; phone?: string; qualification?: string }>;
     on_signed: Record<string, unknown> | null;
     on_refused: Record<string, unknown> | null;
@@ -346,7 +346,10 @@ export function useSignatureDraft({ dealId, stageId, enabled = true, autoAi = tr
       doc_name: form.docName.trim() || null,
       variables: vars,
       overrides,
-      signer: { send: form.send, auth_mode: form.authMode, require_cpf: form.requireCpf, message: form.message, allow_refuse: rule?.signer?.allow_refuse ?? true },
+      // selfie e foto do documento não têm campo na conferência: valem as da regra da etapa
+      signer: { send: form.send, auth_mode: form.authMode, require_cpf: form.requireCpf, message: form.message, allow_refuse: rule?.signer?.allow_refuse ?? true,
+        ...(rule?.signer?.require_selfie_photo ? { require_selfie_photo: true } : {}),
+        ...(rule?.signer?.require_document_photo ? { require_document_photo: true } : {}) },
       extra_signers: rule?.extra_signers ?? [],
       on_signed: rule?.on_signed ?? {},
       on_refused: rule?.on_refused ?? {},

@@ -319,9 +319,14 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
     isPackage = !!tpl.extra_templates?.length;
     members = tpl.extra_templates?.map(({ token, name }) => ({ token, name }));
     if (isPackage) {
-      const armed = await admin.from('deal_signatures').update({ request: { ...spec, confirmed_signer: signer,
-        package_members: members, package_unverified: true } }).eq('organization_id',orgId).eq('id',row.id)
-        .eq('status','processing').or('request->>package_unverified.is.null,request->>package_unverified.eq.false').select('id').maybeSingle();
+      // Só filtros simples: o PostgREST reaplica or()/and() às linhas devolvidas
+      // pela alteração, onde `request` não existe (select=id) e já estaria alterado.
+      // A reserva vale apenas sobre o estado lido: sem marca ou marcado como conferido.
+      const reserve = admin.from('deal_signatures').update({ request: { ...spec, confirmed_signer: signer,
+        package_members: members, package_unverified: true } }).eq('organization_id',orgId).eq('id',row.id).eq('status','processing');
+      const armed = await (spec.package_unverified === false
+        ? reserve.eq('request->>package_unverified','false')
+        : reserve.is('request->>package_unverified',null)).select('id').maybeSingle();
       if (armed.error || !armed.data) return { status:'failed',error:'Não foi possível reservar o pacote para este envio.',retry:false };
     }
     doc = await createTemplatePackage(client, tpl, {
@@ -363,6 +368,9 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
   const signers: StoredSigner[] = (doc.signers ?? []).map(s => toStoredSigner(s, s.token === clientToken ? 'contact' : 'extra'));
   const main = signers.find(s => s.role === 'contact') ?? null;
 
+  // Avisos do que a ZapSign não aplicou. Vão na nota do envio: finishSend regrava
+  // last_error com ela, então um aviso gravado só na linha se perderia.
+  const warnings: string[] = [];
   // autenticação e exigências do signatário principal (não dá para passar na criação por modelo)
   if (main) {
     const patch: Record<string, unknown> = {};
@@ -375,7 +383,7 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
         await client.updateSigner(main.token, patch);
       } catch (err) {
         // o documento já existe: segue com o padrão e registra o aviso
-        await admin.from('deal_signatures').update({ last_error: `exigências do signatário não aplicadas: ${errorMessage(err)}` }).eq('id', row.id);
+        warnings.push(`exigências do signatário não aplicadas: ${errorMessage(err)}`);
       }
     }
   }
@@ -395,7 +403,7 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
       });
       signers.push(toStoredSigner(added, 'extra'));
     } catch (err) {
-      await admin.from('deal_signatures').update({ last_error: `signatário extra "${extra.name}" não adicionado: ${errorMessage(err)}` }).eq('id', row.id);
+      warnings.push(`signatário extra "${extra.name}" não adicionado: ${errorMessage(err)}`);
     }
   }
 
@@ -437,7 +445,7 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
       note = r.reason;
     }
   }
-  return { status: 'pending', sent_via: sentVia, note };
+  return { status: 'pending', sent_via: sentVia, note: [note, ...warnings].filter(Boolean).join('; ') || undefined };
 }
 
 function parentEnvelopeEvents(admin: SupabaseClient, org: string, id: string) {
