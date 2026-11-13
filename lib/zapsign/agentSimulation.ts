@@ -31,8 +31,8 @@ export async function simulateAgentContract(admin: SupabaseClient, org: string, 
       items: [{ name: 'Serviço de teste', quantity: 1, price: 1000 }], stage: '', board: '', owner: '', description: '', customFields: {} } } });
   if (draft.missing.length || draft.office.length)
     return { ok: false, simulado: true, perguntar_ao_cliente: draft.missing, preencher_no_crm: draft.office };
-  const previous = chat.at(-2);
-  const review = contractReview(turns, draft, previous?.role === 'assistant' ? previous.contractReviewKey : undefined);
+  const previous = chat.findLast(message => message.role === 'assistant' && message.contractReviewKey);
+  const review = contractReview(turns, draft, previous?.contractReviewKey);
   if (!review.confirmed) {
     if (review.key) rememberReview?.(review.key);
     return { ok: true, simulado: true, criado: false, solicitar_confirmacao: review.question, como_perguntar: REVIEW_HINT };

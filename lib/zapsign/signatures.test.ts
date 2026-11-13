@@ -597,6 +597,38 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
     expect(await runAgentContract(db.admin,next,{modo:'criar',dados:{}})).toMatchObject({perguntar_ao_cliente:['ENDEREÇO']});
     expect(db.post).not.toHaveBeenCalled();
   });
+  it('usa o endereço rural e o CPF da ficha aceita no pacote, mesmo com cadastro anterior ou chamada sem os dados', async () => {
+    const db = setup();
+    const addressLabel = 'ENDEREÇO COMPLETO';
+    const address = 'Sítio Primavera, zona rural, Petrolina, PE, CEP 56300';
+    const cpf = '987.654.321-00';
+    vi.mocked(files.readContractTemplate).mockResolvedValue({ revision: 'r1', names: [addressLabel, 'CPF'] });
+    db.tables.wa_messages[0].body = 'O CEP daqui é 56300. Moro em Petrolina, Pernambuco.';
+    db.tables.wa_messages.push({ ...msg('2', 'in', '[áudio]', 1), transcription: 'Sítio Primavera, zona rural.' },
+      msg('3', 'in', 'Meu CPF é 987.654.321.00', 2));
+    const remember = (key: string) => { db.tables.wa_conversations[0].ai_state = { zapsign_review: key }; };
+    const review = await runAgentContract(db.admin, { ...scope, inboundId: '3' }, { modo: 'preparar',
+      dados: { [addressLabel]: address, CPF: '987.654.321.00' } }, remember);
+    expect(review).toMatchObject({ solicitar_confirmacao: expect.stringContaining(cpf) });
+    if (!('solicitar_confirmacao' in review) || !review.solicitar_confirmacao) throw new Error('Esperava uma ficha para conferir');
+    expect(review.solicitar_confirmacao).toContain(address);
+    expect(db.post).not.toHaveBeenCalled();
+    // The agent uses the everyday label and the number punctuation spoken by the customer.
+    const confirmedAddress = address.replace(', PE,', ', Pernambuco,');
+    const shown = review.solicitar_confirmacao.replace(addressLabel, 'Endereço').replace(address, confirmedAddress)
+      .replace(cpf, '987.654.321.00');
+    db.tables.wa_messages.push(msg('4', 'out', shown, 3), { ...msg('5', 'in', '[áudio]', 4), transcription: 'Está tudo certinho, pode mandar!' });
+    const approved = { ...scope, inboundId: '5' };
+    for (const changed of [{ CPF: '987.654.321-01' }, { [addressLabel]: address.replace('56300', '56300-000') }]) {
+      expect(await runAgentContract(db.admin, approved, { modo: 'criar', dados: changed })).toMatchObject({ ok: false });
+    }
+    expect(db.post).not.toHaveBeenCalled();
+    expect(await runAgentContract(db.admin, approved, { modo: 'criar', dados: {} })).toMatchObject({ criado: true });
+    expect(db.post).toHaveBeenCalledTimes(1);
+    expect(db.post.mock.calls[0][0].data).toEqual([{ de: '{{ENDEREÇO COMPLETO}}', para: confirmedAddress }, { de: '{{CPF}}', para: cpf }]);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(h.texts).toEqual([]);
+  });
   it('usa nome e telefone confirmados por áudio e omite e-mail mesmo com e-mail antigo no cadastro', async () => {
     const db = setup();
     Object.assign(db.tables.contacts[0], { name: 'Felipe4798', phone: '+551188887777', email: 'antigo@example.org' });
@@ -935,7 +967,8 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
       { ...prepare, dados: { ...prepare.dados, telefone_signatario: '(11) 98888-7777' } }, undefined, k => { key = k; });
     if (!r.solicitar_confirmacao) throw new Error('Prévia esperada');
     expect(await simulateAgentContract(db.admin, ORG, 'tpl-1',
-      [...chat, { role: 'assistant', text: r.solicitar_confirmacao, contractReviewKey: key }, { role: 'user', text: 'Confirmo' }], create))
+      [...chat, { role: 'assistant', text: r.solicitar_confirmacao, contractReviewKey: key },
+        { role: 'user', text: 'Confirmo' }, { role: 'user', text: 'Pode emitir o contrato!' }], create))
       .toMatchObject({ simulado: true, criado: true });
     expect(db.post).not.toHaveBeenCalled(); expect(db.tables.deal_signatures).toHaveLength(0);
     expect(fetch).not.toHaveBeenCalled(); expect(h.texts).toEqual([]);
