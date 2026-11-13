@@ -973,6 +973,84 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
     expect(db.post).not.toHaveBeenCalled(); expect(db.tables.deal_signatures).toHaveLength(0);
     expect(fetch).not.toHaveBeenCalled(); expect(h.texts).toEqual([]);
   });
+
+  describe('correção parcial do endereço depois da ficha', () => {
+    const label = 'ENDEREÇO COMPLETO';
+    const fragments = ['Rua das Acácias', '88', 'Vila Nova', 'Campo Grande MS'];
+    const original = fragments.join(', ');
+    const updated = 'Rua das Acácias, 98, Vila Nova, Campo Grande MS';
+    const correction = 'O número da casa tá errado, é 98 e não 88';
+
+    it('a tela Testar mostra a ficha com 98 e só simula a emissão após confirmar a ficha atualizada', async () => {
+      const db = setup();
+      vi.mocked(files.readContractTemplate).mockResolvedValue({ revision: 'r1', names: [label] });
+      const phone = '(11) 98888-7777';
+      const chat: Parameters<typeof simulateAgentContract>[3] =
+        ['Meu telefone é ' + phone, ...fragments].map(text => ({ role: 'user', text }));
+      const user = (text: string) => ({ role: 'user' as const, text });
+      const prepareReview = async (dados: Record<string, string>, address: string) => {
+        let key: string | undefined;
+        const result = await simulateAgentContract(db.admin, ORG, scope.template, chat,
+          { modo: 'preparar', dados }, undefined, k => { key = k; });
+        expect(result).toMatchObject({ criado: false, solicitar_confirmacao: expect.stringContaining(address) });
+        expect(key).toEqual(expect.any(String));
+        return { role: 'assistant' as const, text: result.solicitar_confirmacao!, contractReviewKey: key };
+      };
+
+      const originalSummary = await prepareReview({ telefone_signatario: phone, [label]: original }, original);
+      chat.push(originalSummary, user(correction));
+      const newSummary = await prepareReview({ [label]: updated }, updated);
+      // The customer has not yet seen the new summary in this branch of the chat.
+      const premature = await simulateAgentContract(db.admin, ORG, scope.template, [...chat, user('Pode gerar')],
+        { modo: 'criar', dados: { [label]: updated } });
+      expect(premature).toMatchObject({ criado: false, solicitar_confirmacao: expect.stringContaining(updated) });
+      // The tool produced a new key, but the assistant displayed the superseded number.
+      const stale = await simulateAgentContract(db.admin, ORG, scope.template,
+        [...chat, { ...newSummary, text: originalSummary.text }, user('Tá tudo certo')], { modo: 'criar', dados: {} });
+      expect(stale).not.toMatchObject({ criado: true });
+      chat.push(newSummary, user('Tá tudo certo'));
+      expect(await simulateAgentContract(db.admin, ORG, scope.template, chat, { modo: 'criar', dados: {} }))
+        .toMatchObject({ simulado: true, criado: true });
+      expect(db.post).not.toHaveBeenCalled();
+      expect(db.tables.deal_signatures).toHaveLength(0);
+      expect(fetch).not.toHaveBeenCalled();
+      expect(h.texts).toEqual([]);
+    });
+
+    it('no serviço, envia somente o endereço corrigido e confirmado ao provedor simulado', async () => {
+      const db = setup();
+      vi.mocked(files.readContractTemplate).mockResolvedValue({ revision: 'r1', names: [label] });
+      db.tables.wa_messages.splice(0, 1, ...fragments.map((text, i) => msg(String(i + 1), 'in', text, i)));
+      const remember = (key: string) => { db.tables.wa_conversations[0].ai_state = { zapsign_review: key }; };
+      const ask = async (inboundId: string, address: string) => {
+        const result = await runAgentContract(db.admin, { ...scope, inboundId },
+          { modo: 'preparar', dados: { [label]: address } }, remember);
+        expect(result).toMatchObject({ criado: false, solicitar_confirmacao: expect.stringContaining(address) });
+        if (!('solicitar_confirmacao' in result) || !result.solicitar_confirmacao) throw new Error('Esperava a ficha');
+        return result.solicitar_confirmacao;
+      };
+      const before = await ask('4', original);
+      db.tables.wa_messages.push(msg('5', 'out', before, 4), msg('6', 'in', correction, 5));
+      const unrelatedEdit = await runAgentContract(db.admin, { ...scope, inboundId: '6' },
+        { modo: 'criar', dados: { [label]: updated.replace('Vila Nova', 'Vila das Palmeiras') } });
+      expect(unrelatedEdit).not.toMatchObject({ criado: true });
+      if ('solicitar_confirmacao' in unrelatedEdit) {
+        expect(unrelatedEdit.solicitar_confirmacao).toContain(updated);
+        expect(unrelatedEdit.solicitar_confirmacao).not.toContain('Vila das Palmeiras');
+      } else {
+        expect(unrelatedEdit).toMatchObject({ ok: false });
+      }
+      const after = await ask('6', updated);
+      expect(db.post).not.toHaveBeenCalled();
+      db.tables.wa_messages.push(msg('7', 'out', after, 6), msg('8', 'in', 'Pode gerar', 7));
+      expect(await runAgentContract(db.admin, { ...scope, inboundId: '8' }, { modo: 'criar', dados: {} }))
+        .toMatchObject({ criado: true });
+      expect(db.post).toHaveBeenCalledTimes(1);
+      expect(db.post.mock.calls[0][0].data).toEqual([{ de: '{{ENDEREÇO COMPLETO}}', para: updated }]);
+      expect(fetch).not.toHaveBeenCalled();
+      expect(h.texts).toEqual([]);
+    });
+  });
 });
 
 describe('conferência antes de enviar (contrato preparado ao entrar na etapa)', () => {

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { addressCorrectionComponent, applyAddressCorrection } from './addressCorrection';
 import { addressHasCustomerEvidence, contractPersonalField, contractPersonalValueKey, cpfHasCustomerEvidence, formatContractAddress,
   formatContractCpf, sameContractPersonalValue, type ContractPersonalField } from './contractPersonalFields';
 import { fullSignerName, signerEmail, signerField, signerPhone, type SignerIdentity } from './signerIdentity';
@@ -90,18 +91,22 @@ export function prepareAgentDraft(input: {
   // A model may omit the signer inputs on the second call. Recover the exact
   // identity displayed in our review. Issuance still requires its stored hash.
   const accepted = acceptedFicha(input.turns);
-  const proposedName = plain(input.supplied.nome_signatario || suppliedIdentity.name || accepted?.name || '');
-  const proposedPhone = plain(input.supplied.telefone_signatario || suppliedIdentity.phone || accepted?.phone || '');
+  const revision = pendingAddressRevision(input.turns);
+  // A corrected review is a draft. Confirmation is still checked against the
+  // data and the message actually sent, by contractReview below.
+  const previous = accepted ?? revision?.ficha;
+  const proposedName = plain(input.supplied.nome_signatario || suppliedIdentity.name || previous?.name || '');
+  const proposedPhone = plain(input.supplied.telefone_signatario || suppliedIdentity.phone || previous?.phone || '');
   if (proposedName && norm(proposedName) !== norm(identity.name)) {
-    identity.name = evidenced(proposedName) || norm(accepted?.name ?? '') === norm(proposedName) ? proposedName : '';
+    identity.name = evidenced(proposedName) || norm(previous?.name ?? '') === norm(proposedName) ? proposedName : '';
   }
   if (proposedPhone && signerPhone(proposedPhone) !== signerPhone(identity.phone)) {
     const number = signerPhone(proposedPhone);
     const attested = input.turns.some(t => t.ok && t.direction === 'in' && containsPhone(t.text, number));
-    identity.phone = attested || number === accepted?.phone ? number : '';
+    identity.phone = attested || number === previous?.phone ? number : '';
   }
   identity.phone = signerPhone(identity.phone);
-  identity.email = customerEmail(input.turns, input.supplied.email_signatario || suppliedIdentity.email || '', accepted?.email ?? identity.email);
+  identity.email = customerEmail(input.turns, input.supplied.email_signatario || suppliedIdentity.email || '', previous?.email ?? identity.email);
   const signer = identity.name;
   if (!fullSignerName(signer)) missing.push('Nome completo de quem vai assinar');
   if (!identity.phone) missing.push('Telefone com DDD de quem vai assinar');
@@ -120,14 +125,16 @@ export function prepareAgentDraft(input: {
     const fromClient = (!source || source === 'cliente:perguntar' || customField) &&
       (kind !== undefined || personal.test(key) || (source === 'cliente:perguntar' && canCollectContractField(name)));
     const candidate = Object.hasOwn(input.supplied, name) ? plain(input.supplied[name]) : '';
-    if (kind && fromClient) {
-      value = personalValue(kind, candidate, reviewedPersonalField(accepted?.fields, kind), value, customerMessages);
+    if (kind === 'address' && fromClient && revision) {
+      value = revision.address ?? '';
+    } else if (kind && fromClient) {
+      value = personalValue(kind, candidate, reviewedPersonalField(previous?.fields, kind), value, customerMessages);
     } else if (!value && fromClient) {
-      const confirmed = accepted?.fields.get(key);
+      const confirmed = previous?.fields.get(key);
       if (confirmed && (!candidate || norm(candidate) === norm(confirmed))) value = confirmed;
       else if (candidate && (evidenced(candidate) || (key.startsWith('logradouro') && addressHasCustomerEvidence(candidate, customerMessages)))) value = candidate;
     }
-    if (!value) (fromClient ? missing : office).push(name);
+    if (!value) (fromClient ? missing : office).push((fromClient && kind === 'address' && revision?.component) || name);
     data.push({ de: '{{' + name + '}}', para: value });
   }
   const reviewData = data.map(field => {
@@ -272,7 +279,11 @@ function acceptedFicha(turns: ContractTurn[], now = Date.now()) {
     answer = answeredQuestion(turns.slice(0, index + 1), now);
   }
   if (!answer) return;
-  const { asksForContract, confirmsFicha, summary } = questionIntent(answer.raw);
+  return parseFicha(answer.raw);
+}
+
+function parseFicha(text: string) {
+  const { asksForContract, confirmsFicha, summary } = questionIntent(text);
   if (!asksForContract && !confirmsFicha) return;
   // WhatsApp bold ("*CPF:* 123") is not part of the label or the value.
   const raw = summary.replaceAll('*', '');
@@ -290,9 +301,91 @@ function acceptedFicha(turns: ContractTurn[], now = Date.now()) {
   const phone = fields.get('telefonecomddd') ?? fields.get('telefone') ?? fields.get('celular');
   const email = fields.get('email');
   // A generic "tudo certo?" can attest only to an identifiable review.
-  if (!/\b(?:ficha|dados)\b/.test(answer.text) && !(name && phone)) return;
+  if (!/\b(?:ficha|dados)\b/i.test(text) && !(name && phone)) return;
   return { fields, name: name && fullSignerName(name) ? name : undefined, phone: phone ? signerPhone(phone) : undefined,
     email: email ? signerEmail(email.replace(/[.,!?]+$/u, '')) : undefined };
+}
+
+type PresentedFicha = NonNullable<ReturnType<typeof parseFicha>>;
+type AddressRevision = {
+  ficha: PresentedFicha;
+  address: string | null;
+  component?: ReturnType<typeof addressCorrectionComponent>;
+};
+
+// After a disputed address the customer may choose to write the whole one.
+// Only use the new inbound text itself, never piece together the rejected version.
+function restatedAddress(text: string) {
+  const value = plain(text).replace(/^(?:(?:meu|o)\s+)?endere[çc]o(?:\s+(?:completo|correto))?\s*(?:[:：]|[eé]\s+)\s*/iu, '');
+  if (value.length > 500 || /[?？]/u.test(value) ||
+      /\b(?:talvez|acho|errad[oa]|em vez de|e nao|nao e|corrig\w*|representante)\b/u.test(fold(value))) return;
+  if (/^(?:rua|r\.|avenida|av\.|travessa|estrada|sítio|sitio|fazenda|alameda|rodovia|praça|vila)\s/iu.test(value) &&
+      value.split(/[,;]/u).filter(part => part.trim()).length >= 3) return formatContractAddress(value);
+}
+
+/** Replay the customer's edits to a displayed address. A repeated copy of the
+ * old ficha or an unrelated "pode gerar" must not undo a correction. */
+function pendingAddressRevision(turns: ContractTurn[], now = Date.now()): AddressRevision | undefined {
+  let ficha: PresentedFicha | undefined;
+  let address = '';
+  let revision: AddressRevision | undefined;
+  let outbound: string[] = [];
+  for (const turn of turns) {
+    const age = now - Date.parse(turn.at);
+    if (!Number.isFinite(age) || age > 86_400_000 || !turn.ok || (turn.direction === 'out' && !turn.agent)) {
+      outbound = [];
+      ficha = revision = undefined;
+      address = '';
+      continue;
+    }
+    if (turn.direction === 'out') {
+      outbound.push(turn.text);
+      continue;
+    }
+
+    const lastQuestion = outbound.join('\n');
+    outbound = [];
+    const shown = lastQuestion ? parseFicha(lastQuestion) : undefined;
+    if (shown) {
+      const displayed = reviewedPersonalField(shown.fields, 'address');
+      const differentSigner = (shown.phone && ficha?.phone && shown.phone !== ficha.phone)
+        || (shown.name && ficha?.name && norm(shown.name) !== norm(ficha.name));
+      if (differentSigner) revision = undefined;
+      if (!revision) {
+        ficha = shown;
+        address = displayed || '';
+      } else if (displayed && revision.address && sameContractPersonalValue('address', revision.address, displayed)) {
+        // The agent showed the revised draft. Future edits start from this version.
+        ficha = shown;
+        address = displayed;
+        revision.ficha = shown;
+      }
+    }
+    if (!ficha || !address) continue;
+    let customerText = turn.text;
+    const full = revision && restatedAddress(customerText);
+    if (full) {
+      address = full;
+      revision = { ficha, address };
+      continue;
+    }
+    let updated = applyAddressCorrection(address, customerText);
+    if (revision?.address === null && revision.component && lastQuestion.includes('?') &&
+        addressCorrectionComponent(lastQuestion) === revision.component && acceptance(customerText) === 'no' &&
+        updated === undefined && (!addressCorrectionComponent(customerText) || revision.component === 'Logradouro') &&
+        !/[?？]/u.test(customerText) &&
+        !/\b(?:cpf|rg|telefone|celular|whatsapp|documento|e-?mail|contrato|fatura|representante|advogado)\b/u.test(fold(customerText))) {
+      const correction = /^(?:n[aã]o [eé]|[eé])\s/iu.test(customerText.trim()) ? ' ' : ' é ';
+      customerText = revision.component + correction + customerText.trim();
+      updated = applyAddressCorrection(address, customerText);
+    }
+    if (updated === undefined) continue;
+    // Fixing a different field does not resolve one the customer still disputes.
+    if (revision?.address === null && updated && addressCorrectionComponent(customerText) !== revision.component) continue;
+    if (updated) address = updated;
+    revision = { ficha, address: updated, component: updated === null ? addressCorrectionComponent(customerText) : undefined };
+  }
+  return revision;
 }
 
 export function contractReview(turns: ContractTurn[], draft: Draft, savedKey?: string, now = Date.now()) {

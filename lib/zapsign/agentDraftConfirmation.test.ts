@@ -17,6 +17,47 @@ const review = (reply: string, question = draft.question) =>
   contractReview([first, outbound('2', question), inbound('3', reply)], draft, key);
 
 describe('resposta à conferência da ficha', () => {
+  it('pede só o número contestado e reconstrói a ficha após uma resposta curta à pergunta sobre o número', () => {
+    const name = 'ENDEREÇO COMPLETO';
+    const source = 'Rua das Acácias, 88, Vila Nova, Campo Grande MS';
+    const options = { ...input, template: { ...input.template, names: [name] }, mapping: { [name]: 'cliente:perguntar' } };
+    const compose = (turns: ContractTurn[], supplied: Record<string, string> = {}) =>
+      prepareAgentDraft({ ...options, turns, supplied });
+    const start = inbound('1', source);
+    const original = compose([start], { [name]: source });
+    const disputed = [start, outbound('2', original.question), inbound('3', 'O número da casa está errado')];
+    expect(compose(disputed).missing).toEqual(['Número da casa']);
+    const restated = [...disputed, outbound('4', 'Qual é o endereço correto?'),
+      inbound('5', 'Meu endereço correto é Rua das Acácias, 98, Vila Nova, Campo Grande MS')];
+    expect(compose(restated).data[0].para).toBe(source.replace('88', '98'));
+    expect(contractReview(restated, compose(restated)).confirmed).toBe(false);
+    const asked = [...disputed, outbound('4', 'Qual é o número correto da casa?')];
+    expect(compose([...asked, inbound('5', 'Pode gerar')]).missing).toEqual(['Número da casa']);
+    const clarified = [...asked, inbound('5', '98')];
+    const revised = compose(clarified);
+    expect(revised.missing).toEqual([]);
+    expect(revised.data[0].para).toBe(source.replace('88', '98'));
+    expect(contractReview(clarified, revised, contractReview([start], original).key).confirmed).toBe(false);
+  });
+
+  it('reaplica correções sucessivas apenas à última versão do endereço até a nova ficha ser aceita', () => {
+    const name = 'Endereço';
+    const source = 'Rua Aurora, 88, Vila Nova, Campo Grande MS';
+    const initial = inbound('1', source);
+    const compose = (turns: ContractTurn[], address?: string) => prepareAgentDraft({ ...input, turns,
+      template: { ...input.template, names: [name] }, supplied: address ? { [name]: address } : {} });
+    const firstDraft = compose([initial], source);
+    const firstEdit = [initial, outbound('2', firstDraft.question), inbound('3', 'O número da casa é 98 e não 88')];
+    const secondDraft = compose(firstEdit);
+    const secondEdit = [...firstEdit, outbound('4', secondDraft.question), inbound('5', 'O número da casa não é 98, é 108')];
+    const lastDraft = compose(secondEdit, source);
+    expect(lastDraft.data[0].para).toBe(source.replace('88', '108'));
+    const current = contractReview(secondEdit, lastDraft);
+    const confirmed = [...secondEdit, outbound('6', current.question), inbound('7', 'Tudo certo!')];
+    expect(contractReview(confirmed, compose(confirmed), current.key).confirmed).toBe(true);
+    expect(contractReview(confirmed, compose(confirmed), contractReview(firstEdit, secondDraft).key).confirmed).toBe(false);
+  });
+
   it('preserva a confirmação de uma ficha já apresentada antes da atualização', () => {
     const options = { ...input, template: { ...input.template, names: ['Endereço'] },
       mapping: { Endereço: 'cliente:perguntar' }, supplied: { Endereço: 'Rua das Flores, 10' } };
