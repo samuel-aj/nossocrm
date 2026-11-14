@@ -195,7 +195,7 @@ export function buildAgentTools(agent: AgentRow, runtime: AgentToolRuntime = {})
     const send = runtime.sendMedia;
     tools.enviar_midia = tool({
       description:
-        'Envia ao cliente uma das mídias cadastradas do agente (imagem, vídeo, áudio ou documento), pelo nome exato. Envie cada mídia uma única vez por atendimento, no momento indicado no roteiro ou quando a descrição "quando enviar" se aplicar. O arquivo vai no ponto da conversa em que você chamou a ferramenta; escreva normalmente o texto que o acompanha.',
+        'Envia ao cliente uma das mídias cadastradas do agente (imagem, vídeo, áudio ou documento), pelo nome exato. Respeite a regra de repetição indicada em cada mídia e o momento indicado no roteiro ou na descrição "quando enviar". O arquivo vai no ponto da conversa em que você chamou a ferramenta; escreva normalmente o texto que o acompanha.',
       inputSchema: z.object({
         nome: enumOf(media.map(m => m.name)).describe('Nome da mídia, exatamente como está na lista'),
         legenda: z.string().max(1000).optional().describe('Legenda curta opcional (imagem, vídeo ou documento; em áudio e figurinha ela é enviada como mensagem de texto separada, antes do arquivo). Não repita a legenda no texto da resposta: o cliente a vê junto do arquivo'),

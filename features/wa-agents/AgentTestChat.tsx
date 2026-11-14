@@ -116,6 +116,7 @@ export const AgentTestChat: React.FC<{
   const inputRef = useRef<HTMLTextAreaElement>(null);
   /** Cada envio recebe um número; revelação de envio antigo para sozinha */
   const runRef = useRef(0);
+  const sessionRef = useRef<string | null>(null);
 
   // Sempre a configuração que está na tela agora (o painel fica montado ao lado do editor)
   const draftRef = useRef(draft);
@@ -144,6 +145,7 @@ export const AgentTestChat: React.FC<{
     const run = ++runRef.current;
     try {
       const result = await test.mutateAsync({
+        sessionId: sessionRef.current ??= crypto.randomUUID(),
         messages: history,
         ...(contractState !== 'none' ? {contractState} : {}),
         ...(signed ? {signatureEvent:'signed' as const} : {}),
@@ -151,6 +153,7 @@ export const AgentTestChat: React.FC<{
         draft: draftRef.current,
       });
       if (runRef.current !== run) return;
+      sessionRef.current = result.sessionId;
       const lines = [...(result.lines.length > 0 ? result.lines : result.text ? [result.text] : [])];
       const created = result.toolCalls.some(call => toolName(call) === 'contrato_zapsign' &&
         (call as {output?:{criado?:boolean;simulado?:boolean}}).output?.criado && (call as {output?:{simulado?:boolean}}).output?.simulado);
@@ -216,6 +219,7 @@ export const AgentTestChat: React.FC<{
 
   const clear = () => {
     runRef.current++; // interrompe uma revelação em andamento
+    sessionRef.current = null;
     setEntries([]);
     setState({});
     setContractState('none');

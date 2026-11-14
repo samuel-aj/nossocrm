@@ -1,9 +1,10 @@
 /**
  * POST /api/wa-agents/agents/[id]/test  (admin)
- * body { messages: [{ role: 'user'|'assistant', text }], state?, draft? }
+ * body { sessionId?, messages: [{ role: 'user'|'assistant', text }], state?, draft? }
  *
  * Gera a resposta do agente em modo de teste: nada é enviado pelo WhatsApp e
- * nenhuma ação de encerramento é executada -> { text, lines, toolCalls, usage }
+ * nenhuma ação de encerramento é executada -> { sessionId, text, lines, toolCalls, usage }
+ * Reutilize sessionId para continuar o mesmo teste; omitir inicia outra sessão.
  *
  * `draft` é a configuração que está NA TELA (roteiro, modelo, regras, ações):
  * o teste roda com ela por cima da linha salva, para o admin experimentar antes
@@ -11,6 +12,7 @@
  * salva continuam vindo do banco.
  */
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
 import { createUsageContext } from '@/lib/ai-usage/budget';
 import { runWithUsageContext } from '@/lib/ai-usage/context';
 import { synthesizeVoice } from '@/lib/wa-agents/voice';
@@ -35,6 +37,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 120;
 
 const BodySchema = z.object({
+  sessionId: z.string().uuid().optional(),
   // true requests the editor's fixed voice sample; a string previews the exact simulator line.
   previewVoice: z.union([z.literal(true), z.string().trim().min(1).max(8000)]).optional(),
   signatureEvent: z.literal('signed').optional(),
@@ -76,6 +79,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const saved = newAgent ? normalizeAgentRow({ id, organization_id: orgId }) : await loadAgent(auth.admin, orgId, id);
   if (!saved) return json({ error: 'Agente não encontrado' }, 404);
   const agent = withDraft(saved, rawBody, parsed.data.draft as Partial<AgentRow> | undefined);
+  const sessionId = parsed.data.sessionId ?? randomUUID();
 
   try {
     if (parsed.data.previewVoice) {
@@ -92,11 +96,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       state: parsed.data.state,
       signatureEvent: parsed.data.signatureEvent,
       contractState: parsed.data.contractState,
+      session: { id: sessionId, userId: auth.user.id },
     });
-    return json(result);
+    return json({ ...result, sessionId });
   } catch (err) {
-    if (err instanceof WaAgentError) return json({ error: err.message, code: err.code }, 400);
+    if (err instanceof WaAgentError) return json({ error: err.message, code: err.code, sessionId }, 400);
     console.error('[wa-agents/test]', err);
-    return json({ error: getErrorMessage(err, 'Falha ao testar o agente') }, 500);
+    return json({ error: getErrorMessage(err, 'Falha ao testar o agente'), sessionId }, 500);
   }
 }

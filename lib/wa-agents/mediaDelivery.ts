@@ -14,14 +14,16 @@ export function mediaDeliveryKey(media: Pick<AgentMediaRow, 'storage_path'>): st
 
 /** Includes uncertain dispatches: without a provider acknowledgement, never assume it failed. */
 export async function deliveredMediaNames(db: SupabaseClient, scope: Scope, media: AgentMediaRow[], previous: string[] = []): Promise<Set<string>> {
-  const names = new Set(previous.map(normalizeKeyword));
-  if (!media.length) return names;
+  const once = media.filter(item => item.send_once_per_conversation !== false);
+  const protectedNames = new Set(once.map(item => normalizeKeyword(item.name)));
+  const names = new Set(previous.map(normalizeKeyword).filter(name => protectedNames.has(name)));
+  if (!once.length) return names;
   const { data, error } = await db.from(TABLE).select('media_key')
     .eq('organization_id', scope.organizationId).eq('conversation_id', scope.conversationId)
     .in('state', ['sending', 'sent']);
   if (error) throw new Error(`Não foi possível conferir as mídias já enviadas: ${error.message}`);
   const keys = new Set((data ?? []).map(row => String(row.media_key)));
-  const paths = media.map(m => m.outbox_path).filter((p): p is string => !!p);
+  const paths = once.map(m => m.outbox_path).filter((p): p is string => !!p);
   // Successful messages from before the receipt table was introduced also count.
   if (paths.length) {
     const old = await db.from('wa_messages').select('media_url').eq('organization_id', scope.organizationId)
@@ -29,9 +31,9 @@ export async function deliveredMediaNames(db: SupabaseClient, scope: Scope, medi
       .in('status', ['sent', 'delivered', 'read', 'played']).in('media_url', paths);
     if (old.error) throw new Error(`Não foi possível conferir o histórico de mídias: ${old.error.message}`);
     const sentPaths = new Set((old.data ?? []).map(row => String(row.media_url)));
-    for (const item of media) if (sentPaths.has(item.outbox_path ?? '')) keys.add(mediaDeliveryKey(item));
+    for (const item of once) if (sentPaths.has(item.outbox_path ?? '')) keys.add(mediaDeliveryKey(item));
   }
-  for (const item of media) if (keys.has(mediaDeliveryKey(item))) names.add(normalizeKeyword(item.name));
+  for (const item of once) if (keys.has(mediaDeliveryKey(item))) names.add(normalizeKeyword(item.name));
   return names;
 }
 

@@ -55,7 +55,7 @@ export type WaRunsResult = { runs: RunRow[]; agents: Record<string, string> };
 export type WaBotRunsResult = { runs: BotRunRow[]; bots: Record<string, string> };
 
 export type WaTestMessage = { role: 'user' | 'assistant'; text: string; audio?: boolean; contractReviewKey?: string; media?: string[] };
-export type WaTestResult = { text: string; lines: string[]; voiceLines?: number[]; toolCalls: unknown[]; usage: unknown; contractReviewKey?: string; media?: string[] };
+export type WaTestResult = { sessionId: string; text: string; lines: string[]; voiceLines?: number[]; toolCalls: unknown[]; usage: unknown; contractReviewKey?: string; media?: string[] };
 
 /** IA na configuração: gerar do zero, melhorar o roteiro atual ou aplicar um ajuste pedido. */
 export type WaAssistMode = 'generate' | 'improve' | 'adjust';
@@ -259,6 +259,7 @@ export function useWaRuns(filters: WaRunsFilters = {}) {
 export function useTestWaAgent(id: string | null | undefined) {
   return useMutation({
     mutationFn: async (vars: {
+      sessionId: string;
       messages: WaTestMessage[];
       signatureEvent?: 'signed';
       contractState?: 'invited'|'signed';
@@ -271,6 +272,7 @@ export function useTestWaAgent(id: string | null | undefined) {
         body: vars,
       });
       return {
+        sessionId: json.sessionId ?? vars.sessionId,
         text: json.text ?? '',
         lines: json.lines ?? [],
         voiceLines: json.voiceLines ?? [],
@@ -456,11 +458,11 @@ export function useAddWaAgentMedia(agentId: string | null | undefined) {
   });
 }
 
-/** Atualiza nome e/ou descrição ("quando enviar") de uma mídia. */
+/** Atualiza nome, descrição e proteção contra repetição de uma mídia. */
 export function useUpdateWaAgentMedia(agentId: string | null | undefined) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: { mediaId: string; name?: string; description?: string }): Promise<AgentMediaRow> => {
+    mutationFn: async (vars: { mediaId: string; name?: string; description?: string; send_once_per_conversation?: boolean }): Promise<AgentMediaRow> => {
       const { mediaId, ...body } = vars;
       const json = await waAgentsFetch<{ media: AgentMediaRow }>(`/api/wa-agents/agents/${agentId}/media/${mediaId}`, {
         method: 'PATCH',
@@ -468,8 +470,9 @@ export function useUpdateWaAgentMedia(agentId: string | null | undefined) {
       });
       return json.media;
     },
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: mediaKey(agentId) });
+    onSuccess: (media) => {
+      qc.setQueryData<AgentMediaRow[]>(mediaKey(agentId), (previous) =>
+        previous?.map(item => item.id === media.id ? media : item));
     },
   });
 }

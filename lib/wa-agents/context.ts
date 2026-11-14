@@ -896,8 +896,9 @@ export function buildMediaBlock(media: AgentMediaRow[], sent: string[] = []): st
   lines.push('Você pode enviar estes arquivos ao cliente com a ferramenta enviar_midia (pelo nome exato):');
   for (const m of items) {
     const when = (m.description ?? '').trim();
-    const already = sentKeys.has(m.name.trim().toLowerCase()) ? ' [JÁ ENVIADA neste atendimento: não envie de novo]' : '';
-    lines.push(`- "${m.name.trim()}" (${MEDIA_KIND_LABEL[m.kind] ?? m.kind})${when ? `: enviar quando ${when}` : ''}${already}`);
+    const repeatPolicy = m.send_once_per_conversation === false ? ' [reenvio permitido após 1 minuto]' : ' [uma vez por conversa]';
+    const already = m.send_once_per_conversation !== false && sentKeys.has(m.name.trim().toLowerCase()) ? ' [JÁ ENVIADA neste atendimento: não envie de novo]' : '';
+    lines.push(`- "${m.name.trim()}" (${MEDIA_KIND_LABEL[m.kind] ?? m.kind})${when ? `: enviar quando ${when}` : ''}${repeatPolicy}${already}`);
   }
   return lines.join('\n');
 }
@@ -1101,7 +1102,7 @@ export function buildSystemPrompt(input: {
   }
   if (mediaBlock) {
     lines.push(
-      '- Mídias: para enviar um arquivo da lista "MÍDIAS DISPONÍVEIS", chame enviar_midia com o nome exato, no momento indicado no roteiro ou quando a descrição "enviar quando" se aplicar. Cada mídia vai uma única vez por atendimento. O arquivo é entregue no ponto da conversa em que você chamou a ferramenta; escreva normalmente a mensagem que o acompanha.'
+      '- Mídias: para enviar um arquivo da lista "MÍDIAS DISPONÍVEIS", chame enviar_midia com o nome exato, no momento indicado no roteiro ou quando a descrição "enviar quando" se aplicar. Respeite a regra de repetição indicada em cada mídia. O arquivo é entregue no ponto da conversa em que você chamou a ferramenta; escreva normalmente a mensagem que o acompanha.'
     );
   }
   if (helpersBlock) {

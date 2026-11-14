@@ -28,6 +28,7 @@ import { getProvider, type SendResult } from '@/lib/whatsapp';
 import { outboundKindFromMediaType } from '@/lib/whatsapp/quote';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { checkSendWindow } from '@/lib/whatsapp/sendWindow';
+import { beginMediaCooldownDispatch, claimMediaCooldown, finishMediaCooldownDispatch, MediaCooldownError, releaseMediaCooldown, type MediaCooldownReceipt } from '@/lib/whatsapp/mediaCooldown';
 
 export const runtime = 'nodejs';
 
@@ -129,6 +130,9 @@ export async function POST(req: Request) {
     ok: boolean;
     sent: number;
     failed: number;
+    suppressed?: number;
+    code?: string;
+    retryAfterSeconds?: number;
     error?: string;
   }> = [];
   const groupsEnabled = targets.some(t => t.conversationId) ? await getWaGroupsEnabled(auth.admin, orgId) : false;
@@ -164,6 +168,8 @@ export async function POST(req: Request) {
     const conn = picked.conn;
     let sent = 0;
     let failed = 0;
+    let suppressed = 0;
+    let retryAfterSeconds = 0;
     let firstError: string | undefined;
     try {
       const windowError = await checkSendWindow(auth.admin, orgId, conn, targetPhone, { isGroup: !!group });
@@ -179,6 +185,22 @@ export async function POST(req: Request) {
 
         let result: SendResult;
         if (kind && signedUrl) {
+          let cooldown: MediaCooldownReceipt | undefined;
+          try {
+            cooldown = await claimMediaCooldown(auth.admin, { organizationId: orgId, conversationId: conv.id, mediaPath: mediaPath! });
+            await beginMediaCooldownDispatch(auth.admin, cooldown);
+          } catch (e) {
+            if (cooldown) {
+              try { await releaseMediaCooldown(auth.admin, cooldown); } catch { /* expires conservatively */ }
+            }
+            if (e instanceof MediaCooldownError) {
+              suppressed += 1;
+              retryAfterSeconds = Math.max(retryAfterSeconds, e.retryAfter);
+              firstError ??= e.message;
+              continue;
+            }
+            throw e;
+          }
           result = await provider.sendMedia({
             to: targetPhone,
             media: signedUrl,
@@ -188,6 +210,7 @@ export async function POST(req: Request) {
             caption: text || undefined,
             isGroup: !!group,
           });
+          await finishMediaCooldownDispatch(auth.admin, cooldown, result);
         } else if (text) {
           result = await provider.sendText({ to: targetPhone, text, isGroup: !!group });
         } else {
@@ -229,16 +252,17 @@ export async function POST(req: Request) {
         }
       }
     } catch (e) {
-      failed = messages.length - sent;
+      failed = messages.length - sent - suppressed;
       firstError = firstError ?? (e as Error).message;
     }
     results.push({
       phone: targetPhone,
       connectionId: conn.id,
       conversationId: group?.id ?? null,
-      ok: failed === 0,
+      ok: failed === 0 && suppressed === 0,
       sent,
       failed,
+      ...(suppressed ? { suppressed, code: 'MEDIA_COOLDOWN', retryAfterSeconds } : {}),
       ...(firstError ? { error: firstError } : {}),
     });
   }
