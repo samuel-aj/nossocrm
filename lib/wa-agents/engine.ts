@@ -37,6 +37,7 @@ import { consultHelperAgent } from './helpers';
 import { searchKnowledge } from './knowledge';
 import { internalOutputReason } from './replyOutput';
 import { sendAgentMedia, sendOutboxMedia } from './media';
+import { deliveredMediaNames } from './mediaDelivery';
 import { prepareVoiceFile } from './voice';
 import { voiceDelivery, VOICE_NOTICE } from './voiceDelivery';
 import { resolveAgentModel } from './model';
@@ -719,6 +720,8 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     // na última resposta permitida o prompt manda encerrar (mustClose) e, se o modelo não
     // encerrar, a conversa para depois do envio (passo 9d)
     const priorState = (conv.ai_state ?? {}) as ConversationAiState;
+    const mediaSentBefore = await deliveredMediaNames(admin, { organizationId, conversationId }, resources.media, priorState.midias_enviadas ?? []);
+    if (mediaSentBefore.size) priorState.midias_enviadas = [...mediaSentBefore];
     const repliesSoFar = Number(priorState.respostas ?? 0) || 0;
     const mustClose = agent.max_replies > 0 && repliesSoFar + 1 >= agent.max_replies;
     // Instrução de apresentação só no primeiro contato pelo pipeline (não nas rodadas seguintes nem após passagem)
@@ -733,7 +736,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     });
     if (agent.tools?.zapsign_template_token && conv.deal_id && conv.contact_id) {
       const { agentContractFact } = await import('@/lib/zapsign/agentContractFact');
-      const fact = await agentContractFact(admin,organizationId,conversationId,agent.id,conv.deal_id,conv.contact_id);
+      const fact = await agentContractFact(admin,organizationId,conversationId,agent.id,conv.deal_id,conv.contact_id,agent.tools.zapsign_template_token);
       if (fact) system += '\n\n' + fact;
     }
     const messages = await buildHistoryMessages(admin, ctx, agent.history_limit);
@@ -748,11 +751,10 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
 
     // Efeitos das ferramentas condicionais. enviar_midia só enfileira: a mídia
     // sai na ordem dos segmentos (texto anterior, mídia, texto seguinte), no passo 7.
-    // Cada mídia vai uma única vez por atendimento (ai_state.midias_enviadas) e
+    // Cada mídia vai uma única vez por conversa (comprovantes persistidos) e
     // as consultas (auxiliares, base) têm teto por resposta.
     const runCtx = ctx;
     const runAgent = agent;
-    const mediaSentBefore = new Set((priorState.midias_enviadas ?? []).map(normalizeKeyword));
     const mediaQueued = new Set<string>();
     let contractReviewKey: string | undefined;
     let helperCalls = 0;
@@ -889,12 +891,6 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       // nunca a recebia
       const captionText = (seg.caption ?? '').trim();
       const captionAsText = !!captionText && media.kind === 'audio';
-      if (captionAsText) {
-        const capLines = splitLines(captionText);
-        if ((lines.length > 0 || mediaSent.length > 0) && agent.line_delay_ms > 0) await sleep(agent.line_delay_ms);
-        await sendLines(admin, ctx, agent, capLines, { renewLock: renew, beforeSend: beforeProactiveSend, onSent });
-        lines.push(...capLines);
-      }
       if ((lines.length > 0 || mediaSent.length > 0) && agent.line_delay_ms > 0) await sleep(agent.line_delay_ms);
       await renew();
       await beforeProactiveSend();
@@ -904,9 +900,21 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
         ctx,
         media,
         caption: captionAsText ? undefined : seg.caption,
+        beforeDispatch: async () => {
+          // A skipped/repeated media must not send its audio caption either.
+          if (captionAsText) {
+            const capLines = splitLines(captionText);
+            await sendLines(admin, runCtx, runAgent, capLines, { renewLock: renew, beforeSend: beforeProactiveSend, onSent });
+            lines.push(...capLines);
+          }
+          await renew();
+          await beforeProactiveSend();
+        },
       });
       await renew();
-      if (sent.ok) {
+      if (sent.ok && sent.skipped) {
+        pushEvent('media_duplicate_skipped', { nome: media.name, kind: media.kind });
+      } else if (sent.ok) {
         onSent();
         mediaSent.push(media.name);
         pushEvent('media_sent', { nome: media.name, kind: media.kind, message_id: sent.messageId });

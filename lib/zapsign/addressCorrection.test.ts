@@ -67,6 +67,13 @@ describe('correção localizada no endereço já apresentado', () => {
     expect(applyAddressCorrection('Estrada da Serra km 88, Vila Nova', 'O número da casa é 98')).toBeNull();
   });
 
+  it('corrige número compacto em endereço sem vírgulas e rejeita rótulos ambíguos', () => {
+    expect(applyAddressCorrection('Rua das Flores n564 Bairro São Francisco Campanha MG', 'O número da casa é 598')).toBe(
+      'Rua das Flores n598 Bairro São Francisco Campanha MG');
+    expect(applyAddressCorrection('Rua Número 10, Centro, Campanha MG', 'O número da casa é 598')).toBeNull();
+    expect(applyAddressCorrection('Rua das Flores n564 casa número 12 Bairro Centro Campanha MG', 'O número da casa é 598')).toBeNull();
+  });
+
   it.each(['o número da casa tá errado', 'número da casa é 98 ou 99', 'acho que o número é 98',
     'O número é 98, não 99', 'Posso trocar o número para 98?', 'o número da casa é 98, mas ainda tenho dúvidas',
     'Não troque o número de 88 para 98', 'não é para mudar o número, é 98 e não 88'])(

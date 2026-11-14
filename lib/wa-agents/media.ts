@@ -15,6 +15,8 @@ import { errorMessage } from './errors';
 import { internalOutputReason } from './replyOutput';
 import { originalFileName, sanitizeStorageFileName } from './files';
 import { WA_AGENT_FILES_BUCKET, type AgentMediaRow, type AgentRow } from './types';
+import { deliveredMediaNames, finishMediaDelivery, reserveMediaDelivery } from './mediaDelivery';
+import { normalizeKeyword } from './text';
 
 export const WA_MEDIA_BUCKET = 'wa-media';
 /** Validade da URL assinada entregue ao provedor (segundos). */
@@ -26,11 +28,12 @@ export type SendAgentMediaInput = {
   ctx: ConversationContext;
   media: AgentMediaRow;
   caption?: string;
+  beforeDispatch?: () => Promise<void>;
 };
 
 export type SendAgentMediaResult =
-  | { ok: true; messageId: string | null; providerMessageId: string | null; mediaPath: string }
-  | { ok: false; error: string };
+  | { ok: true; messageId: string | null; providerMessageId: string | null; mediaPath: string; skipped?: boolean }
+  | { ok: false; error: string; retryable?: boolean };
 
 /** Extensão do arquivo (com ponto) ou ''. */
 function fileExtension(name: string): string {
@@ -120,17 +123,36 @@ export async function sendAgentMedia(admin: SupabaseClient, input: SendAgentMedi
   if (orgId !== input.organizationId || media.organization_id !== orgId) return { ok: false, error: 'mídia de outra organização' };
   if (!conn) return { ok: false, error: 'conversa sem número vinculado' };
   if (conn.status !== 'connected') return { ok: false, error: 'número desconectado' };
+  const scope = { organizationId: orgId, conversationId: ctx.conversation.id };
+  let receipt: Awaited<ReturnType<typeof reserveMediaDelivery>> = null;
+  let dispatched = false;
   try {
+    const previous = await deliveredMediaNames(admin, scope, [media], ctx.conversation.ai_state?.midias_enviadas ?? []);
+    if (previous.has(normalizeKeyword(media.name))) return { ok: true, skipped: true, messageId: null, providerMessageId: null, mediaPath: '' };
+    receipt = await reserveMediaDelivery(admin, scope, media);
+    if (!receipt) return { ok: true, skipped: true, messageId: null, providerMessageId: null, mediaPath: '' };
     const mediaPath = await ensureAgentMediaOutbox(admin, orgId, media);
-    return await sendOutboxMedia(admin, ctx, { mediaPath, kind: media.kind, mime: media.mime, caption: input.caption,
-      fileName: originalFileName(media.storage_path, media.name) });
+    const result = await sendOutboxMedia(admin, ctx, { mediaPath, kind: media.kind, mime: media.mime, caption: input.caption,
+      fileName: originalFileName(media.storage_path, media.name), beforeDispatch: async () => {
+        await input.beforeDispatch?.();
+        dispatched = true;
+      } });
+    if (result.ok) await finishMediaDelivery(admin, receipt, 'sent');
+    else if (result.retryable || !dispatched) await finishMediaDelivery(admin, receipt, 'failed');
+    return result;
   } catch (e) {
+    // A crash/timeout after dispatch may already have delivered the media. Keep
+    // the reservation, including when recording the successful result failed.
+    if (receipt && !dispatched) {
+      try { await finishMediaDelivery(admin, receipt, 'failed'); } catch { /* reservation stays conservative */ }
+    }
     return { ok: false, error: errorMessage(e) };
   }
 }
 
 export async function sendOutboxMedia(admin: SupabaseClient, ctx: ConversationContext, file: {
   mediaPath: string; kind: OutboundMediaKind; mime: string | null; fileName: string; caption?: string; transcript?: string;
+  beforeDispatch?: () => Promise<void>;
 }): Promise<SendAgentMediaResult> {
   const { mediaPath, kind, fileName } = file;
   if ([file.caption, file.transcript].some(value => value && internalOutputReason(value))) {
@@ -153,6 +175,7 @@ export async function sendOutboxMedia(admin: SupabaseClient, ctx: ConversationCo
   }
 
   let result: SendResult;
+  await file.beforeDispatch?.();
   try {
     result = await getProvider(conn).sendMedia({
       to,
@@ -197,6 +220,7 @@ export async function sendOutboxMedia(admin: SupabaseClient, ctx: ConversationCo
     console.error('[wa-agents] gravar mídia do agente falhou:', errorMessage(e));
   }
 
-  if (!result.ok) return { ok: false, error: result.error || 'falha no envio' };
+  if (!result.ok) return { ok: false, error: result.error || 'falha no envio',
+    retryable: !!result.raw && !result.providerMessageId && !/timeout|timed.?out|network|rede|ECONN|ETIMEDOUT/iu.test(result.error ?? '') };
   return { ok: true, messageId, providerMessageId: result.providerMessageId ?? null, mediaPath };
 }

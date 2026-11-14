@@ -131,13 +131,13 @@ function publicVars(vars: Record<string, unknown>): Record<string, unknown> {
  * (UPDATE atômico): o PATCH do PostgREST com filtro `or` dá 42703 neste
  * banco, e a trava nunca era obtida (o robô ficava "running" sem rodar).
  */
-async function claimBotLock(admin: SupabaseClient, runId: string, organizationId?: string): Promise<boolean> {
+async function claimBotLock(admin: SupabaseClient, runId: string, organizationId?: string): Promise<BotRunRow | null> {
   let orgId = organizationId ?? null;
   if (!orgId) {
     const { data } = await admin.from('wa_bot_runs').select('organization_id').eq('id', runId).maybeSingle();
     orgId = (data as { organization_id?: string } | null)?.organization_id ?? null;
   }
-  if (!orgId) return false;
+  if (!orgId) return null;
   const { data, error } = await admin.rpc('wa_bot_claim_lock', {
     p_org: orgId,
     p_run: runId,
@@ -145,9 +145,30 @@ async function claimBotLock(admin: SupabaseClient, runId: string, organizationId
   });
   if (error) {
     console.error('[wa-agents] trava da execução do robô falhou:', error.message);
-    return false;
+    return null;
   }
-  return data === true;
+  if (data !== true) return null;
+  // A candidate selected before this lock can already have completed or moved
+  // to a future wait. Never execute that old snapshot after a worker releases
+  // its lock: reload the current cursor, variables and status while holding it.
+  const { data: current, error: readError } = await admin.from('wa_bot_runs').select('*')
+    .eq('organization_id', orgId).eq('id', runId).maybeSingle();
+  if (readError) {
+    console.error('[wa-agents] consultar execução travada falhou:', readError.message);
+    // Leave the lease to expire when the current lock cannot be read safely.
+    return null;
+  }
+  if (!current) return null;
+  const row = current as BotRunRow;
+  const due = row.wake_at ? Date.parse(row.wake_at) : null;
+  if (!['running', 'waiting_reply'].includes(row.status) ||
+      (due !== null && (!Number.isFinite(due) || due > Date.now())) ||
+      (row.status === 'waiting_reply' && due === null)) {
+    await admin.from('wa_bot_runs').update({ lock_until: null })
+      .eq('organization_id', orgId).eq('id', runId).eq('lock_until', current.lock_until);
+    return null;
+  }
+  return row;
 }
 
 async function loadBot(admin: SupabaseClient, organizationId: string, botId: string): Promise<BotRow | null> {
@@ -1057,6 +1078,7 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
           delete st.vars[TYPED_STEP_VAR];
           const text = renderTemplate(step.text, tplVars).trim();
           if (text) {
+            if (!(await permitProactive(idx))) return;
             await sendBotText(admin, st, await getConnection(), phone, text);
             note(st, step, `mensagem enviada: ${text.slice(0, 80)}`);
           } else {
@@ -1097,6 +1119,7 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
             }
           }
           delete st.vars[TYPED_STEP_VAR];
+          if (!(await permitProactive(idx))) return;
           const tplName = await sendBotTemplate(admin, st, await getConnection(), phone, step.template_id, templateValues);
           const tplSeconds = step.timeout_seconds ?? step.timeout_minutes * 60;
           note(st, step, `modelo enviado: ${tplName}; esperando resposta por até ${formatDuration(tplSeconds)}`);
@@ -1424,6 +1447,16 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
             .eq('organization_id', orgId);
           if (error) throw new Error(error.message);
           }
+          if (proactive?.agentFollowup && proactive.agentFollowup.agentId !== agent.id) {
+            // An explicit handoff is part of the robot, not an external change
+            // that invalidates its continuation. Bind the next agent's guard.
+            const handedOff: ProactiveFollowup = { ...proactive };
+            delete handedOff.agentFollowup;
+            if (agent.tools?.zapsign_template_token) handedOff.agentFollowup = {
+              agentId: agent.id, templateToken: agent.tools.zapsign_template_token,
+            };
+            st.vars[PROACTIVE_VAR] = handedOff;
+          }
           note(st, step, `entregue ao agente ${agent.name}`);
           await completeStep(step, 'done', -1);
           await saveRun(admin, st, { status: 'done', step_index: idx + 1, wake_at: null }, { release: true });
@@ -1520,7 +1553,8 @@ export async function handleBotReply(
     // Sem a trava, o relógio (tick) pega a execução em 'running' com wake_at vencido
     const locked = await claimBotLock(admin, run.id, run.organization_id);
     if (!locked) return;
-    await processBotRun(admin, data as BotRunRow);
+    if (locked.status === 'waiting_reply') await handleBotTimeout(admin, locked);
+    else await processBotRun(admin, locked);
   } catch (e) {
     console.error('[wa-agents] resposta ao robô falhou:', errorMessage(e));
   }
@@ -1592,8 +1626,8 @@ export async function processDueBotRuns(
       try {
         const locked = await claimBotLock(admin, raw.id, raw.organization_id);
         if (!locked) continue;
-        if (raw.status === 'waiting_reply') await handleBotTimeout(admin, raw);
-        else await processBotRun(admin, raw);
+        if (locked.status === 'waiting_reply') await handleBotTimeout(admin, locked);
+        else await processBotRun(admin, locked);
         processed++;
       } catch (e) {
         const msg = errorMessage(e);
@@ -1693,7 +1727,9 @@ export async function createBotRun(
 /** Pega a trava e processa a execução agora (sem a trava, o tick cuida). */
 export async function runBotRunNow(admin: SupabaseClient, run: BotRunRow): Promise<void> {
   const locked = await claimBotLock(admin, run.id, run.organization_id);
-  if (locked) await processBotRun(admin, run);
+  if (!locked) return;
+  if (locked.status === 'waiting_reply') await handleBotTimeout(admin, locked);
+  else await processBotRun(admin, locked);
 }
 
 /** Cria a execução e, por padrão, processa na hora (`process: false` só cria). */

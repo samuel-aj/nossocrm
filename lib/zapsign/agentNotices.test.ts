@@ -49,6 +49,36 @@ beforeEach(()=>{
 });
 afterEach(()=>vi.unstubAllGlobals());
 describe('autonomia ZapSign (transportes simulados)',()=>{
+  it('acompanha assinatura de contrato manual vinculado, mas nunca envia outro convite',async()=>{
+    const s=setup('signed');
+    s.sig.origin='manual';
+    (s.sig.request as Row).agent_delivery='signed_only';
+    s.sig.signers=[{role:'contact',status:'signed'}];
+    await deliverAgentNotice(s.db,s.notice);
+    expect(s.job.state).toBe('sent');
+    expect(h.text).toHaveBeenCalledTimes(1);
+    s.job.state='working'; s.sig.signers=[{role:'contact',status:'new'}];
+    await deliverAgentNotice(s.db,{...s.notice,kind:'invite'});
+    expect(s.job.state).toBe('cancelled');
+    expect(h.text).toHaveBeenCalledTimes(1);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it('contrato manual não retoma agente pausado, outro agente nem modelo diferente',async()=>{
+    const s=setup('signed');
+    s.sig.origin='manual'; s.sig.status='signed';
+    (s.sig.request as Row).agent_delivery='signed_only';
+    s.conv.ai_status='paused';
+    await deliverAgentNotice(s.db,s.notice);
+    expect(s.job.state).toBe('pending');
+    expect(s.conv.ai_status).toBe('paused');
+    s.job.state='working';s.conv.ai_status='active';s.conv.ai_agent_id='someone-else';
+    await deliverAgentNotice(s.db,s.notice);
+    expect(s.job.state).toBe('cancelled');
+    s.job.state='working';s.conv.ai_agent_id='a';s.sig.template_token='different';
+    await deliverAgentNotice(s.db,s.notice);
+    expect(s.job.state).toBe('cancelled');
+    expect(h.text).not.toHaveBeenCalled();
+  });
   it('bloqueia uma resposta com instrução interna antes do transporte', async () => {
     const s = setup('signed');
     s.sig.status = 'signed';

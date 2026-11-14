@@ -17,6 +17,24 @@ const review = (reply: string, question = draft.question) =>
   contractReview([first, outbound('2', question), inbound('3', reply)], draft, key);
 
 describe('resposta à conferência da ficha', () => {
+  it.each(['Rua das Flores n564 Bairro São Francisco Campanha MG',
+    'Rua das Flores nº 564\nBairro São Francisco\nCampanha MG'])(
+    'corrige número no endereço %s e exige uma nova ficha', source => {
+      const compose = (turns: ContractTurn[], value?: string) => prepareAgentDraft({ ...input, turns,
+        template: { ...input.template, names: ['Endereço'] }, supplied: value ? { Endereço: value } : {} });
+      const first = inbound('1', source);
+      const initial = compose([first], source);
+      const corrected = [first, outbound('2', initial.question), inbound('3', 'O número da casa é 598 e não 564')];
+      const next = compose(corrected);
+      expect(next.missing).toEqual([]);
+      expect(next.data[0].para).toContain('598');
+      expect(next.data[0].para).not.toContain('564');
+      expect(contractReview(corrected, next).confirmed).toBe(false);
+      const review = contractReview(corrected, next);
+      const confirmed = [...corrected, outbound('4', review.question), inbound('5', 'Tá tudo certo')];
+      expect(contractReview(confirmed, compose(confirmed), review.key).confirmed).toBe(true);
+    });
+
   it('pede só o número contestado e reconstrói a ficha após uma resposta curta à pergunta sobre o número', () => {
     const name = 'ENDEREÇO COMPLETO';
     const source = 'Rua das Acácias, 88, Vila Nova, Campo Grande MS';

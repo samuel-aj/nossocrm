@@ -68,8 +68,11 @@ function updatedSegment(component: Component, part: string, before: string, afte
     if (match && !match[1].trim() && !street.test(fold(before))) return;
     // Number attached to the street name: preserve the spelling and label.
     if (!match && street.test(fold(part))) {
-      match = part.match(/^(.+?\s+(?:n[uú]mero|n[º°.])\s*[:.-]?\s*)(\d{1,6}[a-z]?)(\s*)$/iu);
-      if (!match && !/\b(?:km|br|rodovia|quadra|lote|bloco|apto|apartamento|casa|cep)\b/u.test(fold(part))) {
+      const labelledNumbers = [...part.matchAll(/\b(?:n[uú]mero|n(?:[º°.]|o\.)?)\s*[:.-]?\s*\d{1,6}[a-z]?\b/giu)];
+      if (labelledNumbers.length === 1 && street.test(fold(part.slice(0, labelledNumbers[0].index)))) {
+        match = part.match(/^(.+?\s+(?:n[uú]mero|n(?:[º°.]|o\.)?)\s*[:.-]?\s*)(\d{1,6}[a-z]?)(\b.*)$/iu);
+      }
+      if (!match && !labelledNumbers.length && !/\b(?:km|br|rodovia|quadra|lote|bloco|apto|apartamento|casa|cep)\b/u.test(fold(part))) {
         const suffix = part.match(/^(.+?\s+)(\d{1,6}[a-z]?)(\s*)$/iu);
         // "Rua 88" or "Rua Principal 88, 114" names the street; don't edit it.
         if (suffix && street.test(fold(suffix[1])) && !houseSegment.test(after)) match = suffix;

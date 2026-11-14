@@ -40,7 +40,7 @@ const BodySchema = z.object({
   signatureEvent: z.literal('signed').optional(),
   contractState: z.enum(['invited','signed']).optional(),
   messages: z
-    .array(z.object({ role: z.enum(['user', 'assistant']), text: z.string().max(8000), audio: z.boolean().optional(), contractReviewKey: z.string().regex(/^[a-f0-9]{64}$/).optional() }))
+    .array(z.object({ role: z.enum(['user', 'assistant']), text: z.string().max(8000), audio: z.boolean().optional(), contractReviewKey: z.string().regex(/^[a-f0-9]{64}$/).optional(), media: z.array(z.string().min(1).max(80)).max(100).optional() }))
     .max(200)
     .default([]),
   state: z.record(z.string(), z.unknown()).optional(),

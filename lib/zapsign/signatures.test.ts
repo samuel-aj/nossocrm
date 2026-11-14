@@ -234,6 +234,39 @@ beforeEach(() => {
   h.downloaded = [];
 });
 
+describe('emissão manual vinculada ao atendimento, sem convite automático duplicado', () => {
+  it('guarda agente, conversa e signatário conferido com acompanhamento somente após assinatura', async () => {
+    const db = base({ wa_ai_agents: [{ id: 'agent-manual', organization_id: ORG, enabled: true,
+      tools: { zapsign_template_token: 'tpl-1' }, connection_ids: ['conn-qr'] }] });
+    Object.assign(db.tables.wa_conversations[0], { ai_agent_id: 'agent-manual', ai_status: 'active' });
+    const result = await createManualSignature(db.admin, { organizationId: ORG, dealId: 'deal-1', userId: 'human',
+      request: { template_token: 'tpl-1', variables: RULE.variables, signer: { send: 'link' },
+        confirmed_signer: { name: 'Maria da Silva', phone: '+5511988887777', email: '' },
+        agent_delivery: 'conversation', agent_id: 'forged', conversation_id: 'wrong', recipient: 'wrong' },
+      deps: { client: fakeClient() } });
+    expect(result.outcome.status).toBe('pending');
+    expect(result.row.request).toMatchObject({ agent_delivery: 'signed_only', agent_id: 'agent-manual',
+      conversation_id: 'conv-1', connection_id: 'conn-qr', recipient: '+5511988887777',
+      agent_signer: { name: 'Maria da Silva', phone: '+5511988887777', email: '' } });
+    expect(result.row.origin).toBe('manual');
+    expect(result.row.signers).toEqual([expect.objectContaining({ role: 'contact', name: 'Maria da Silva' })]);
+    expect(h.created).toHaveLength(1); // fake ZapSign transport only
+    expect(h.texts).toHaveLength(0);
+    expect(db.tables.wa_conversations[0].ai_status).toBe('active');
+  });
+  it('mantém emissão humana sem vínculo automático quando duas conversas estão ativas para o lead', async () => {
+    const db = base({ wa_ai_agents: [{ id: 'agent-manual', organization_id: ORG, enabled: true,
+      tools: { zapsign_template_token: 'tpl-1' }, connection_ids: ['conn-qr'] }] });
+    Object.assign(db.tables.wa_conversations[0], { ai_agent_id: 'agent-manual', ai_status: 'active' });
+    db.tables.wa_conversations.push({ ...db.tables.wa_conversations[0], id: 'second' });
+    const result = await createManualSignature(db.admin, { organizationId: ORG, dealId: 'deal-1', userId: 'human',
+      request: { template_token: 'tpl-1', variables: RULE.variables, signer: { send: 'link' } }, deps: { client: fakeClient() } });
+    expect(result.outcome.status).toBe('pending');
+    expect(result.row.request?.agent_delivery).toBeUndefined();
+    expect(h.texts).toHaveLength(0);
+  });
+});
+
 describe('envio para assinatura (regra da etapa)', () => {
   it('cria o documento com as variáveis do lead e manda o link pelo WhatsApp do CRM', async () => {
     const db = base();
@@ -980,6 +1013,41 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
     const original = fragments.join(', ');
     const updated = 'Rua das Acácias, 98, Vila Nova, Campo Grande MS';
     const correction = 'O número da casa tá errado, é 98 e não 88';
+
+    it.each([
+      ['uma mensagem em três linhas', ['Rua das Flores nº 564\nBairro São Francisco\nCampanha MG']],
+      ['três mensagens sem vírgulas', ['Rua das Flores n564', 'Bairro São Francisco', 'Campanha MG']],
+    ])('aceita %s, confere os mesmos dados e emite apenas no provedor simulado', async (_name, parts) => {
+      const db = setup();
+      vi.mocked(files.readContractTemplate).mockResolvedValue({ revision: 'r1', names: [label] });
+      const value = 'Rua das Flores n564 Bairro São Francisco Campanha MG';
+      const phone = '(11) 98888-7777';
+      const prepare = { modo: 'preparar' as const, dados: { [label]: value, telefone_signatario: phone } };
+      const chat: Parameters<typeof simulateAgentContract>[3] = ['Meu telefone é ' + phone, ...parts].map(text => ({ role: 'user', text }));
+      let simulationKey: string | undefined;
+      const simulatedReview = await simulateAgentContract(db.admin, ORG, scope.template, chat, prepare, undefined,
+        key => { simulationKey = key; });
+      expect(simulatedReview).toMatchObject({ criado: false, solicitar_confirmacao: expect.stringContaining(value) });
+      expect(await simulateAgentContract(db.admin, ORG, scope.template,
+        [...chat, { role: 'assistant', text: simulatedReview.solicitar_confirmacao!, contractReviewKey: simulationKey },
+          { role: 'user', text: 'Tá tudo certo' }], { modo: 'criar', dados: {} }))
+        .toMatchObject({ simulado: true, criado: true });
+      expect(db.post).not.toHaveBeenCalled();
+
+      db.tables.wa_messages.splice(0, 1, ...parts.map((text, i) => msg(String(i + 1), 'in', text, i)));
+      const review = await runAgentContract(db.admin, { ...scope, inboundId: String(parts.length) },
+        { modo: 'preparar', dados: { [label]: value } },
+        key => { db.tables.wa_conversations[0].ai_state = { zapsign_review: key }; });
+      expect(review).toMatchObject({ criado: false, solicitar_confirmacao: expect.stringContaining(value) });
+      if (!('solicitar_confirmacao' in review) || !review.solicitar_confirmacao) throw new Error('Ficha esperada');
+      db.tables.wa_messages.push(msg('summary', 'out', review.solicitar_confirmacao, parts.length),
+        msg('confirmation', 'in', 'Pode gerar', parts.length + 1));
+      expect(await runAgentContract(db.admin, { ...scope, inboundId: 'confirmation' }, { modo: 'criar', dados: {} }))
+        .toMatchObject({ criado: true });
+      expect(db.post).toHaveBeenCalledTimes(1);
+      expect(db.post.mock.calls[0][0].data).toEqual([{ de: '{{ENDEREÇO COMPLETO}}', para: value }]);
+      expect(fetch).not.toHaveBeenCalled(); expect(h.texts).toEqual([]);
+    });
 
     it('a tela Testar mostra a ficha com 98 e só simula a emissão após confirmar a ficha atualizada', async () => {
       const db = setup();

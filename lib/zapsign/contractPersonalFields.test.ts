@@ -5,6 +5,25 @@ import {
 } from './contractPersonalFields';
 
 describe('personal contract fields', () => {
+  it('aceita endereço sem vírgulas em uma mensagem multilinha ou em mensagens seguidas', () => {
+    const parts = ['Rua das Flores n564', 'Bairro São Francisco', 'Campanha MG'];
+    const value = parts.join(' ');
+    expect(addressHasCustomerEvidence(value, [parts.join('\n')])).toBe(true);
+    expect(addressHasCustomerEvidence(value, parts)).toBe(true);
+    expect(addressHasCustomerEvidence(value, ['Rua das Flores nº 564\nBairro São Francisco\nCampanha MG'])).toBe(true);
+    expect(addressHasCustomerEvidence('Rua das Flores, 564, Bairro São Francisco, Campanha/MG', parts)).toBe(true);
+    expect(addressHasCustomerEvidence(value.replace('564', '565'), parts)).toBe(false);
+    expect(addressHasCustomerEvidence(value.replace('São Francisco', 'Centro'), parts)).toBe(false);
+    expect(addressHasCustomerEvidence(value + ' CEP 37400-000', parts)).toBe(false);
+  });
+
+  it('preserva número de rua, quilômetro e CEP ao reunir fragmentos sem pontuação', () => {
+    const parts = ['Sítio Porteira', 'Estrada da Serra km 8', 'Petrolina Pernambuco', 'CEP 56300'];
+    expect(addressHasCustomerEvidence('Sítio Porteira Estrada da Serra km 8 Petrolina PE CEP 56300', parts)).toBe(true);
+    expect(addressHasCustomerEvidence('Rua Número 10, 564, Centro', ['Rua 10, 564, Centro'])).toBe(false);
+    expect(addressHasCustomerEvidence('Rua das Flores, 564, Centro', ['Rua das Flores, Centro', 'CPF termina em 564'])).toBe(false);
+  });
+
   it('recognizes contact field aliases without confusing representatives or commercial terms', () => {
     for (const label of ['Endereço Completo', 'ENDEREÇO RESIDENCIAL DO CLIENTE', 'Endereço rural do titular']) {
       expect(contractPersonalField(label)).toBe('address');

@@ -316,11 +316,14 @@ type AddressRevision = {
 // After a disputed address the customer may choose to write the whole one.
 // Only use the new inbound text itself, never piece together the rejected version.
 function restatedAddress(text: string) {
-  const value = plain(text).replace(/^(?:(?:meu|o)\s+)?endere[çc]o(?:\s+(?:completo|correto))?\s*(?:[:：]|[eé]\s+)\s*/iu, '');
+  const value = formatContractAddress(text).replace(/^(?:(?:meu|o)\s+)?endere[çc]o(?:\s+(?:completo|correto))?\s*(?:[:：]|[eé]\s+)\s*/iu, '');
   if (value.length > 500 || /[?？]/u.test(value) ||
       /\b(?:talvez|acho|errad[oa]|em vez de|e nao|nao e|corrig\w*|representante)\b/u.test(fold(value))) return;
+  const words = contractPersonalValueKey('address', value) ?? '';
+  const completeUnpunctuated = words.split(' ').length >= 6 &&
+    /\s(?:ac|al|ap|am|ba|ce|df|es|go|ma|mt|ms|mg|pa|pb|pr|pe|pi|rj|rn|rs|ro|rr|sc|sp|se|to)(?: cep \d+)?$/u.test(words);
   if (/^(?:rua|r\.|avenida|av\.|travessa|estrada|sítio|sitio|fazenda|alameda|rodovia|praça|vila)\s/iu.test(value) &&
-      value.split(/[,;]/u).filter(part => part.trim()).length >= 3) return formatContractAddress(value);
+      (value.split(/[,;]/u).filter(part => part.trim()).length >= 3 || completeUnpunctuated)) return value;
 }
 
 /** Replay the customer's edits to a displayed address. A repeated copy of the
