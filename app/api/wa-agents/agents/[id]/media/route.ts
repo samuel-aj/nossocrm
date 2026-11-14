@@ -115,6 +115,7 @@ export async function POST(req: Request, ctx: Ctx) {
       mime,
       size_bytes: sizeBytes,
       storage_path: input.storage_path,
+      send_once_per_conversation: input.send_once_per_conversation,
     })
     .select(MEDIA_COLUMNS)
     .single();

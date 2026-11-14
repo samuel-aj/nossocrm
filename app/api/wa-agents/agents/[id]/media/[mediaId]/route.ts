@@ -55,6 +55,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
       }
     }
     if (typeof present.description === 'string') patch.description = present.description.trim() || null;
+    if (typeof present.send_once_per_conversation === 'boolean') {
+      patch.send_once_per_conversation = present.send_once_per_conversation;
+    }
   } catch (err) {
     return json({ error: getErrorMessage(err, 'Falha ao validar a mídia') }, 500);
   }

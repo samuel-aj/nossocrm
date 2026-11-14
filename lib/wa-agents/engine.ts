@@ -868,6 +868,10 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
               mediaPath: file.path, kind: 'audio', mime: 'audio/mpeg', fileName: 'voz.mp3', transcript: t,
             });
             if (!sent.ok) throw new WaAgentError('SEND_FAILED', sent.error);
+            if (sent.skipped) {
+              pushEvent('media_duplicate_blocked', { media_path: file.path });
+              continue;
+            }
             onSent();
             lines.push(t);
             pushEvent('voice_sent', { message_id: sent.messageId });

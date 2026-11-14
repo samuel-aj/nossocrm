@@ -508,12 +508,15 @@ export type AgentMediaRow = {
   storage_path: string;
   /** Cópia no bucket wa-media (feita no primeiro envio e reutilizada) */
   outbox_path?: string | null;
+  /** Defaults to true for existing media and legacy API payloads. */
+  send_once_per_conversation?: boolean;
   created_at: string;
 };
 
 export const AgentMediaInputSchema = z.object({
   name: z.string().min(1).max(80),
   description: z.string().max(500).default(''),
+  send_once_per_conversation: z.boolean().default(true),
   kind: z.enum(AGENT_MEDIA_KINDS),
   storage_path: z.string().min(1),
   mime: z.string().max(120),
@@ -521,10 +524,11 @@ export const AgentMediaInputSchema = z.object({
 });
 export type AgentMediaInput = z.infer<typeof AgentMediaInputSchema>;
 
-/** PATCH de uma mídia: só nome e descrição */
+/** PATCH de uma mídia: nome, descrição e controle de repetição. */
 export const AgentMediaPatchSchema = z.object({
   name: z.string().min(1).max(80).optional(),
   description: z.string().max(500).optional(),
+  send_once_per_conversation: z.boolean().optional(),
 });
 
 /** Metadados editáveis de um documento da base (título, descrição do conteúdo, etiquetas). */

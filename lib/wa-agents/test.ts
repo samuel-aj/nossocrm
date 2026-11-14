@@ -30,6 +30,7 @@ import { sanitizeSavedData } from './savedData';
 import { splitLines } from './split';
 import { normalizeKeyword } from './text';
 import { simulatedMediaNames } from './mediaDelivery';
+import { reserveTestMedia, settleTestMedia, testDeliveredMediaNames, type TestMediaReceipt } from './testMediaDelivery';
 import type { AgentToolRuntime } from './tools';
 import type { AgentRow, KnowledgeHit } from './types';
 
@@ -137,7 +138,7 @@ export function toModelMessages(messages: TestMessage[]): ModelMessage[] {
   return out.map(m => ({ role: m.role, content: m.content }) as ModelMessage);
 }
 
-type TestInput = { organizationId: string; agent: AgentRow; messages: TestMessage[]; state?: Record<string, unknown>; signatureEvent?: 'signed'; contractState?: 'invited'|'signed' };
+type TestInput = { organizationId: string; agent: AgentRow; messages: TestMessage[]; state?: Record<string, unknown>; signatureEvent?: 'signed'; contractState?: 'invited'|'signed'; session?: { id: string; userId: string } };
 export async function testAgentReply(
   admin: SupabaseClient,
   input: TestInput
@@ -173,6 +174,14 @@ async function testAgentReplyWithUsage(
   }
   const resolved = await resolveAgentModel(admin, organizationId, agent);
   const resources = await loadAgentResources(admin, organizationId, agent);
+  // Historical receipts have no timestamp; repeatable media use only the server cooldown.
+  for (const media of resources.media) if (media.send_once_per_conversation === false) sentMedia.delete(normalizeKeyword(media.name));
+  const mediaScope = input.session ? { organizationId, userId: input.session.userId, agentId: agent.id, sessionId: input.session.id } : null;
+  if (mediaScope) {
+    for (const name of await testDeliveredMediaNames(admin, mediaScope, resources.media)) sentMedia.add(name);
+  }
+  ctx.conversation.ai_state!.midias_enviadas = [...sentMedia];
+  const sessionEvents = input.session ? [{ type: 'test_session', at: new Date().toISOString(), session_id: input.session.id, user_id: input.session.userId }] : [];
   const lastUser = [...input.messages].reverse().find(m => m.role === 'user')?.text ?? null;
 
   // Mesma injeção automática da conversa real: trechos para a última mensagem do lead
@@ -187,6 +196,7 @@ async function testAgentReplyWithUsage(
 
   // Mesmos tetos por resposta da conversa real (consultas à base e a auxiliares)
   const mediaQueued = new Set<string>();
+  const mediaReceipts = new Map<string, TestMediaReceipt>();
   let helperCalls = 0;
   let knowledgeCalls = 0;
   // Local to this simulation: tool calls can inspect/reschedule/cancel without reserving a real run.
@@ -224,10 +234,15 @@ async function testAgentReplyWithUsage(
       }
       return searchKnowledge(admin, { organizationId, agent, query: q, limit: TOOL_KNOWLEDGE_LIMIT });
     },
-    // Simulado: receipts from earlier replies survive every turn of this test.
+    // No real delivery: the server retains receipts even if an API client omits history.
     sendMedia: async media => {
       const key = normalizeKeyword(media.name);
       if (sentMedia.has(key) || mediaQueued.has(key)) return { ok: false, error: `mídia "${media.name}" já enviada neste atendimento; não envie de novo` };
+      if (mediaScope) {
+        const receipt = await reserveTestMedia(admin, mediaScope, media);
+        if (!receipt) return { ok: false, error: `mídia "${media.name}" já enviada nesta simulação; não envie de novo` };
+        mediaReceipts.set(key, receipt);
+      }
       mediaQueued.add(key);
       return { ok: true, note: `mídia ${media.name} enviada (simulado)` };
     },
@@ -248,7 +263,15 @@ async function testAgentReplyWithUsage(
     if (gen.outputSafety.status === 'blocked') throw new Error('Resposta da IA bloqueada por conter dados internos. Revise o roteiro e tente novamente.');
     const lastMessage = input.messages.at(-1);
     const mirror = !!agent.media_understanding?.reply_to_audio && lastMessage?.role === 'user' && !!lastMessage.audio;
-    const segments = voiceDelivery(gen.segments, mirror);
+    const accepted = new Set<string>();
+    const visibleSegments = gen.segments.filter(segment => {
+      if (segment.kind !== 'media') return true;
+      const key = normalizeKeyword(segment.name);
+      if (!mediaQueued.has(key) || accepted.has(key)) return false;
+      accepted.add(key);
+      return true;
+    });
+    const segments = voiceDelivery(visibleSegments, mirror);
     const lines: string[] = [];
     const voiceLines: number[] = [];
     let introduced = input.messages.some(m => m.role === 'assistant' && m.text.split('\n').includes(VOICE_NOTICE));
@@ -260,14 +283,16 @@ async function testAgentReplyWithUsage(
         lines.push(seg.text);
       } else lines.push(...splitLines(seg.text));
     }
-    const media = gen.segments.filter(s => s.kind === 'media').map(s => (s.kind === 'media' ? s.name : ''));
+    const media = visibleSegments.filter(s => s.kind === 'media').map(s => (s.kind === 'media' ? s.name : ''));
+    await settleTestMedia(admin, [...mediaReceipts].filter(([name]) => !accepted.has(name)).map(([, receipt]) => receipt), false);
+    await settleTestMedia(admin, [...mediaReceipts].filter(([name]) => accepted.has(name)).map(([, receipt]) => receipt), true);
     await logRun(admin, {
       organization_id: organizationId,
       agent_id: agent.id,
       conversation_id: null,
       trigger: 'test',
       status: 'ok',
-      events: [{ type: 'output_checked', at: new Date().toISOString(), ...gen.outputSafety }],
+      events: [...sessionEvents, { type: 'output_checked', at: new Date().toISOString(), ...gen.outputSafety }],
       input_text: lastUser,
       output_text: gen.text || null,
       tool_calls: gen.toolCalls,
@@ -277,6 +302,10 @@ async function testAgentReplyWithUsage(
     });
     return { text: gen.text, lines, voiceLines, toolCalls: gen.toolCalls, usage: gen.usage, segments, media, contractReviewKey };
   } catch (e) {
+    // A failed generation/safety check produced no visible simulation result.
+    // Never touch another request's receipt, even when it used the same session.
+    try { await settleTestMedia(admin, [...mediaReceipts.values()], false); }
+    catch (cleanupError) { console.error('[wa-agents/test] media receipt cleanup', cleanupError); }
     const msg = errorMessage(e);
     await logRun(admin, {
       organization_id: organizationId,
@@ -285,7 +314,7 @@ async function testAgentReplyWithUsage(
       trigger: 'test',
       status: 'error',
       reason: generated?.outputSafety.status === 'blocked' ? 'Resposta bloqueada por conter dados internos; revisão necessária.' : null,
-      events: generated ? [{ type: 'output_checked', at: new Date().toISOString(), ...generated.outputSafety }] : [],
+      events: [...sessionEvents, ...(generated ? [{ type: 'output_checked', at: new Date().toISOString(), ...generated.outputSafety }] : [])],
       tool_calls: generated?.toolCalls ?? [],
       usage: generated?.usage ?? null,
       input_text: lastUser,
