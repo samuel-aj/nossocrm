@@ -23,6 +23,7 @@ import { officeTemplates, createTemplatePackage, PackageError, remainingAttachme
 import { errorMessage } from '@/lib/wa-agents/errors';
 import { ZapSignClient, ZapSignError, signerLink, type ZapSignDoc, type ZapSignSigner } from './client';
 import { resolveVariables, splitPhone, type VariableContext, type VariableSource } from './variables';
+import { manualAgentFollowup } from './manualAgentFollowup';
 
 export const DEAL_FILES_BUCKET = 'deal-files';
 export const MAX_ATTEMPTS = 3;
@@ -84,7 +85,7 @@ export type SignatureRequest = {
   package_attachment_models?: Record<string,string>;
   package_unverified?: boolean;
   package_recovered?: boolean;
-  agent_delivery?: 'conversation';
+  agent_delivery?: 'conversation' | 'signed_only';
   agent_id?: string;
   conversation_id?: string;
   connection_id?: string;
@@ -289,6 +290,7 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
   const values = Object.fromEntries(data.map(v => [v.de.slice(2, -2), v.para]));
   const identity = spec.confirmed_signer ?? identityFromForm(values, spec.variables, snap.contact);
   const signer = { name: identity.name.trim(), email: signerEmail(identity.email), phone: signerPhone(identity.phone) };
+  if (spec.agent_delivery === 'signed_only') spec = { ...spec, agent_signer: signer };
   if (!fullSignerName(signer.name)) return { status: 'failed', error: 'Confira o nome completo de quem vai assinar.', retry: false };
   if (identity.phone && !signer.phone) return { status: 'failed', error: 'Confira o telefone com DDD de quem vai assinar.', retry: false };
   for (const entry of data) {
@@ -418,7 +420,7 @@ export async function sendSignature(admin: SupabaseClient, row: SignatureRow, de
       signers,
       sign_url: signUrl,
       request: isPackage ? { ...spec, confirmed_signer: signer, package_members: members, package_unverified: false } :
-        row.request ?? { ...spec, overrides: undefined },
+        (row.request ? spec : { ...spec, overrides: undefined }),
       contact_id: snap.contact.id,
       updated_at: nowIso(),
     })
@@ -686,6 +688,16 @@ export async function createManualSignature(
   const { data: deal } = await admin.from('deals').select('id, stage_id, contact_id').eq('organization_id', input.organizationId).eq('id', input.dealId).maybeSingle();
   if (!deal) throw new Error('Lead não encontrado');
   const d = deal as { id: string; stage_id: string | null; contact_id: string | null };
+  // Only the server can bind post-signature automation to the current service.
+  const request = { ...input.request };
+  delete request.agent_delivery;
+  delete request.agent_id;
+  delete request.conversation_id;
+  delete request.connection_id;
+  delete request.recipient;
+  delete request.agent_signer;
+  Object.assign(request, await manualAgentFollowup(admin, { organizationId: input.organizationId,
+    dealId: d.id, contactId: d.contact_id, templateToken: request.template_token }));
   // The original request may have lost its HTTP response after ZapSign accepted it.
   // Guide the regular Send button to the existing envelope, including legacy failures.
   const failed = await admin.from('deal_signatures').select('id,doc_token,last_error,request')
@@ -713,7 +725,7 @@ export async function createManualSignature(
         requested_by: input.userId,
         template_token: input.request.template_token,
         template_name: input.request.template_name ?? null,
-        request: input.request,
+        request,
         last_error: null,
         updated_at: nowIso(),
       })
@@ -742,14 +754,14 @@ export async function createManualSignature(
         status: 'processing',
         attempts: 1,
         lock_until: lockUntil,
-        request: input.request,
+        request,
       })
       .select('*')
       .single();
     if (error) throw new Error(error.message);
     inserted = data as SignatureRow;
   }
-  const row = { ...inserted, request: input.request, signers: [] };
+  const row = { ...inserted, request, signers: [] };
   let outcome: SendOutcome;
   try {
     outcome = await sendSignature(admin, row, input.deps);
@@ -865,7 +877,7 @@ export async function handleZapSignWebhook(
   const incoming = [...(payload.signers ?? [])];
   const whoSigned = event === 'doc_signed' && payload.signer_who_signed;
   if (whoSigned && !incoming.some(s => s.token === whoSigned.token)) incoming.push(whoSigned);
-  const expected = row.request?.agent_delivery === 'conversation' ? agentContactToken(incoming,row.request.agent_signer) : null;
+  const expected = row.request?.agent_delivery ? agentContactToken(incoming,row.request.agent_signer) : null;
   const signers: StoredSigner[] = (row.signers ?? []).map((s) => {
     const u = incoming.find((i) => i.token === s.token);
     return u ? { ...s, role: u.token === expected ? 'contact' : s.role, status: s.status === 'signed' ? 'signed' : u.status, signed_at: u.signed_at ?? s.signed_at, sign_url: u.sign_url ?? s.sign_url } : s;
@@ -915,7 +927,7 @@ export async function handleZapSignWebhook(
       return { action: 'partially_signed', signatureId: row.id };
     }
     if (row.status === 'signed') {
-      if (row.request?.agent_delivery === 'conversation' && !row.agent_client_signed_at && signers.some(s=>s.role==='contact')) {
+      if (row.request?.agent_delivery && !row.agent_client_signed_at && signers.some(s=>s.role==='contact')) {
         const enriched = await admin.from('deal_signatures').update(base).eq('organization_id',orgId).eq('id',row.id);
         if (enriched.error) throw new Error(enriched.error.message);
       }

@@ -29,9 +29,12 @@ async function eligibility(db: SupabaseClient, n: Notice) {
   if (error) throw error;
   const sig = data as SignatureRow | null;
   const req = sig?.request;
-  if (sig?.origin !== 'agent' || req?.agent_delivery !== 'conversation' || !req.agent_id || !req.conversation_id ||
+  const managed = sig?.origin === 'agent' && req?.agent_delivery === 'conversation';
+  const manual = sig && ['manual', 'rule'].includes(sig.origin) && req?.agent_delivery === 'signed_only';
+  if ((!managed && !manual) || !req?.agent_id || !req.conversation_id ||
       !req.connection_id || !req.recipient || !['signed','pending'].includes(sig.status))
     return cancel('Contrato indisponível para acompanhamento.');
+  if (manual && n.kind === 'invite') return cancel('O convite deste contrato é controlado pela equipe.');
   if (n.kind === 'invite' && clientHasSigned(sig)) return cancel('O cliente já assinou.');
   if (n.kind === 'signed' && !clientHasSigned(sig)) return cancel('Falta a assinatura do cliente.');
   const [ctx, agent, approved, budget, lead, integration] = await Promise.all([

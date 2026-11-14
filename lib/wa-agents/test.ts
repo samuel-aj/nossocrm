@@ -29,10 +29,11 @@ import { logRun } from './runs';
 import { sanitizeSavedData } from './savedData';
 import { splitLines } from './split';
 import { normalizeKeyword } from './text';
+import { simulatedMediaNames } from './mediaDelivery';
 import type { AgentToolRuntime } from './tools';
 import type { AgentRow, KnowledgeHit } from './types';
 
-export type TestMessage = { role: 'user' | 'assistant'; text: string; audio?: boolean; contractReviewKey?: string };
+export type TestMessage = { role: 'user' | 'assistant'; text: string; audio?: boolean; contractReviewKey?: string; media?: string[] };
 
 /**
  * Agente salvo + a configuração que está na TELA do editor (rascunho), para o
@@ -162,6 +163,8 @@ async function testAgentReplyWithUsage(
     agent,
     state: input.state,
   });
+  const sentMedia = simulatedMediaNames(input.messages);
+  ctx.conversation.ai_state!.midias_enviadas = [...sentMedia];
 
   if (input.signatureEvent === 'signed' && agent.tools.zapsign_template_token) {
     const { composeSignedReply } = await import('@/lib/zapsign/agentSignedReply');
@@ -221,10 +224,10 @@ async function testAgentReplyWithUsage(
       }
       return searchKnowledge(admin, { organizationId, agent, query: q, limit: TOOL_KNOWLEDGE_LIMIT });
     },
-    // Simulado: nada é enviado (mas cada mídia só uma vez por resposta, como na conversa real)
+    // Simulado: receipts from earlier replies survive every turn of this test.
     sendMedia: async media => {
       const key = normalizeKeyword(media.name);
-      if (mediaQueued.has(key)) return { ok: false, error: `mídia "${media.name}" já enviada neste atendimento; não envie de novo` };
+      if (sentMedia.has(key) || mediaQueued.has(key)) return { ok: false, error: `mídia "${media.name}" já enviada neste atendimento; não envie de novo` };
       mediaQueued.add(key);
       return { ok: true, note: `mídia ${media.name} enviada (simulado)` };
     },

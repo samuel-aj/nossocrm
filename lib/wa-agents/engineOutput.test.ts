@@ -1,6 +1,6 @@
 /** Full orchestration with fake DB/model/WhatsApp; no external effects. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentRow } from './types';
+import type { AgentMediaRow, AgentRow } from './types';
 import type { ConversationContext } from './context';
 import type { SupabaseClient } from '@supabase/supabase-js';
 const h = vi.hoisted(() => ({
@@ -10,6 +10,7 @@ const h = vi.hoisted(() => ({
   budget: vi.fn(), block: vi.fn(), reserve: vi.fn(), dispatch: vi.fn(), settle: vi.fn(), policyEnabled: false,
   ctx: null as ConversationContext | null, agent: null as AgentRow | null,
   db: null as unknown as SupabaseClient,
+  media: [] as AgentMediaRow[],
 }));
 vi.mock('server-only', () => ({}));
 vi.mock('./voice', () => ({ prepareVoiceFile: h.voiceFile }));
@@ -33,7 +34,7 @@ vi.mock('./context', async original => ({
 vi.mock('./model', async original => ({ ...await original<typeof import('./model')>(), resolveAgentModel: async () => ({ model: {}, modelId: 'fake' }) }));
 vi.mock('./beta', () => ({ isAiAgentsApproved: async () => true }));
 vi.mock('./autoLead', () => ({ ensureAutoLead: async () => {} }));
-vi.mock('./resources', () => ({ loadAgentResources: async () => ({ documents: [], media: [], helpers: [] }) }));
+vi.mock('./resources', () => ({ loadAgentResources: async () => ({ documents: [], media: h.media, helpers: [] }) }));
 vi.mock('./actions', () => ({ executeCustomAction: h.action, executeOutcomeActions: h.outcome }));
 vi.mock('./webhooks', () => ({ dispatchAgentEvent: h.events }));
 vi.mock('./runs', () => ({ logRun: h.log }));
@@ -90,6 +91,7 @@ beforeEach(() => {
   h.history.mockReset().mockResolvedValue([{ role: 'user', content: 'Sim' }]);
   incoming.created_at = at;
   h.calendar = null;
+  h.media = [];
   h.policyEnabled = false;
   h.budget.mockReset().mockResolvedValue({ blocked_at: null, policy: { enabled: false } }); h.block.mockResolvedValue(undefined);
   h.reserve.mockResolvedValue({ allowed: true, replay: false, attempt_id: 'attempt' });
@@ -106,6 +108,26 @@ beforeEach(() => {
   h.events.mockResolvedValue([]); h.log.mockResolvedValue('run');
 });
 const run = () => runAgentOnConversation({ organizationId: org, conversationId: 'conv', trigger: 'inbound', skipBuffer: true });
+
+it('simulator blocks a registered video again after the customer replies, but allows another video', async () => {
+  h.media = ['boas_vindas', 'proposta'].map(name => ({ name, id: name, kind: 'video', storage_path: `org/${name}.mp4` } as AgentMediaRow));
+  let requested = 'boas_vindas';
+  h.generate.mockImplementation(async ({ tools }) => {
+    const input = { nome: requested };
+    const output = await tools.enviar_midia.execute(input, {});
+    return { text: 'Vamos continuar.', totalUsage: {}, finishReason: 'stop', steps: [{ text: 'Vamos continuar.',
+      toolCalls: [{ toolName: 'enviar_midia', toolCallId: 'video', input }], toolResults: [{ toolCallId: 'video', output }] }] };
+  });
+  const first = await testAgentReply(h.db, { organizationId: org, agent: h.agent!, messages: [{ role: 'user', text: 'Olá' }] });
+  expect(first.media).toEqual(['boas_vindas']);
+  const messages = [{ role: 'assistant' as const, text: first.text, media: first.media }, { role: 'user' as const, text: 'Maria' }];
+  const repeated = await testAgentReply(h.db, { organizationId: org, agent: h.agent!, messages });
+  expect(repeated.media).toEqual([]);
+  expect(repeated.toolCalls).toMatchObject([{ output: { ok: false } }]);
+  requested = 'proposta';
+  expect((await testAgentReply(h.db, { organizationId: org, agent: h.agent!, messages })).media).toEqual(['proposta']);
+  expect(h.send).not.toHaveBeenCalled();
+});
 
 it.each([['analise-humana','Análise humana',true],['revisar','ANÁLISE HUMANA',true],['qualificado','Qualificado',false]])(
   'registra aviso apenas para entrega efetiva à equipe (%s)', async (key,label,expected) => {

@@ -22,6 +22,7 @@ type Entry = {
   audio?: boolean;
   voiceLines?: number[];
   contractReviewKey?: string;
+  media?: string[];
   id: string;
   role: 'user' | 'assistant';
   text: string;
@@ -133,7 +134,7 @@ export const AgentTestChat: React.FC<{
     if ((!signed && !value) || busy) return;
     const userEntry: Entry = { id: newId(), role: 'user', text: value, audio, lines: [value], toolCalls: [], usage: null };
     const history: WaTestMessage[] = (signed ? entries : [...entries, userEntry]).map((e) => ({
-      role: e.role, text: e.text, audio: e.audio, contractReviewKey: e.contractReviewKey,
+      role: e.role, text: e.text, audio: e.audio, contractReviewKey: e.contractReviewKey, media: e.media,
     }));
     if (!signed) {
       setEntries((prev) => [...prev, userEntry]);
@@ -166,6 +167,7 @@ export const AgentTestChat: React.FC<{
           role: 'assistant',
           voiceLines: result.voiceLines,
           contractReviewKey: result.contractReviewKey,
+          media: result.media,
           text: lines.join('\n'),
           lines: simulate ? [] : lines,
           toolCalls: result.toolCalls,

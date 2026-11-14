@@ -96,7 +96,7 @@ function addressWords(text: string): string {
   return value.replace(stateNames, (state, offset: number) =>
     place.test(value.slice(0, offset)) ? state : states[state])
     .replace(/\bav\.(?=\s)/g, 'avenida').replace(/\br\.(?=\s)/g, 'rua')
-    .replace(/\bs\s*\/\s*n\b/g, 'sem numero').replace(/\bn[º°](?=\s*\d)/gu, 'numero ')
+    .replace(/\bs\s*\/\s*n\b/g, 'sem numero').replace(/\bn(?:[º°.]|o\.)?(?=\s*\d)/gu, 'numero ')
     .replace(/\b(bairro|cidade|estado)\s+(?:e|eh)(?=\s)/g, '$1')
     .replace(/\b(\d{5})-(\d{3})\b/g, '$1$2')
     .replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
@@ -119,6 +119,13 @@ export function addressHasCustomerEvidence(address: string, messages: readonly s
   const segments = addressText.replace(cityStateSeparator, ',').split(/[,;\n]+/u).map(addressWords).filter(Boolean);
   const evidence = messages.map(message => ' ' + addressWords(message) + ' ');
   if (!segments.length || segments.length > 16) return false;
+  // Preserve the customer's complete ordered text across adjacent fragments.
+  // This is the same evidence as a single multiline message; commas are not
+  // required and no words/numbers may be added or matched out of order here.
+  const combined = ' ' + messages.map(addressWords).join(' ') + ' ';
+  const complete = addressWords(addressText);
+  if (/^(?:rua|avenida|travessa|estrada|sitio|rodovia|alameda|praca|fazenda)\b/u.test(complete) &&
+      complete.split(' ').length >= 4 && combined.includes(' ' + complete + ' ')) return true;
   return segments.every((segment, index) => {
     const phrase = ' ' + segment + ' ';
     if (!/^\d+$/.test(segment)) return evidence.some(line => line.includes(phrase));

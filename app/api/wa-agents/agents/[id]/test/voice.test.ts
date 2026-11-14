@@ -36,6 +36,16 @@ beforeEach(() => {
 });
 
 describe('escolha da voz de um agente', () => {
+  it('preserva comprovantes de mídias simuladas entre respostas', async () => {
+    mocks.load.mockResolvedValue(saved);
+    mocks.chat.mockResolvedValue({ text: 'Continue', lines: ['Continue'], media: [] });
+    const messages = [{ role: 'assistant', text: 'Olá', media: ['boas_vindas'] }, { role: 'user', text: 'Maria' }];
+    const response = await POST(new Request('http://localhost/test', { method: 'POST', body: JSON.stringify({ messages }) }), { params: Promise.resolve({ id }) });
+    expect(response.status).toBe(200);
+    expect(mocks.chat.mock.calls[0][1].messages).toEqual(messages);
+    expect(mocks.synthesize).not.toHaveBeenCalled();
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
   it.each([id, 'new'])('ouve a voz do rascunho sem salvar ou acionar o atendimento (%s)', async agentId => {
     mocks.load.mockResolvedValue(saved);
     const response = await preview(agentId, 'coral');
