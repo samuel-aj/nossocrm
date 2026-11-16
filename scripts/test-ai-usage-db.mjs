@@ -9,7 +9,7 @@ try {
   await db.exec(await sql('supabase/tests/ai_usage.fixture.sql'));
   await db.exec(await sql('supabase/migrations/20261023141552_ai_usage_controls.sql'));
   await db.exec(await sql('supabase/migrations/20261023192659_ai_usage_optional_secondary_limits.sql'));
-  await db.exec(await sql('supabase/migrations/20261116183211_ai_usage_provider_rejection.sql'));
+  await db.exec(await sql('supabase/migrations/20261116185835_ai_usage_provider_rejection.sql'));
   const results = await db.exec(await sql('supabase/tests/ai_usage.sql'));
   for (const result of results) for (const row of result.rows) if (row.result) console.log(row.result);
   const optionalResults = await db.exec(await sql('supabase/tests/ai_usage_optional_limits.sql'));

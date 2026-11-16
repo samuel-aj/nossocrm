@@ -21,6 +21,8 @@ O classificador exige erro estruturado do SDK e resposta HTTP de recusa compatí
 
 Validação local: 589 testes em 62 arquivos passaram na suíte de agentes, consumo, interface e API; mais 7 cenários novos de voz passaram, junto com os 16 testes anteriores de voz. A suíte SQL em PGlite passou com regressões de limites, evidência de rejeição, repetição, isolamento, preservação de pendências e permissões. Typecheck, lint dos arquivos alterados, revisão independente e build final (163 páginas) também passaram.
 
-Os testes usam provedores simulados, fetch externo proibido e PostgreSQL em memória. Nenhuma mensagem, contrato, prompt, limite ou atendimento real alterado. Migração e aplicação ainda não publicadas.
+Os testes usam provedores simulados, fetch externo proibido e PostgreSQL em memória. Nenhuma mensagem, contrato, prompt, limite ou atendimento real alterado.
+
+Em 16/11/2026, a publicação foi autorizada mantendo liberação manual. Migração aplicada no projeto de produção `pldknngsszuxiuweivdz` como `20261116185835_ai_usage_provider_rejection.sql`; arquivo local alinhado à versão registrada pelo servidor, sem mudança do SQL validado. A função publicada coincide com o arquivo, RLS está ativo e execução permanece exclusiva do serviço. Políticas, tentativa pendente e orçamento da conversa reportada ficaram idênticos; atendimento continua pausado sem retomada agendada. Advisors de saúde sem alertas. Publicação da aplicação em andamento.
 
 A migração deverá preceder a aplicação. Não apaga registros, redefine quotas ou retoma conversas. A recuperação do atendimento já pausado requer regularizar a conta do provedor e uma revisão explícita do responsável; esta correção não concede tokens nem resolve pendências históricas automaticamente.
