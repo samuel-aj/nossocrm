@@ -25,4 +25,15 @@ describe('persistent consumption block', () => {
     const result = await applyConversationAction(fakeDb(), { organizationId: 'org', conversationId: 'conv', action: 'resume' });
     expect(result.ok).toBe(false); expect(h.update).not.toHaveBeenCalled();
   });
+  it.each([
+    ['provider_insufficient_quota', 'Regularize os créditos ou o limite da conta no provedor'],
+    ['usage_unknown', 'O provedor não confirmou'],
+    ['AI_USAGE_UNKNOWN', 'O provedor não confirmou'],
+  ])('keeps %s blocked while explaining its actual cause on resume', async (reason, explanation) => {
+    h.budget.mockResolvedValue({ blocked_at: '2026-11-16T17:08:00Z', blocked_reason: reason });
+    const result = await applyConversationAction(fakeDb(), { organizationId: 'org', conversationId: 'conv', action: 'resume' });
+    expect(result).toMatchObject({ ok: false, status: 409, error: expect.stringContaining(explanation) });
+    expect(result).toMatchObject({ error: expect.stringContaining('revisar e liberar a pausa') });
+    expect(h.update).not.toHaveBeenCalled(); expect(h.event).not.toHaveBeenCalled();
+  });
 });

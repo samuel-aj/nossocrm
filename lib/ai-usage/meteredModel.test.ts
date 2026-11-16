@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { embedMany, generateText, stepCountIs, tool } from 'ai';
+import { APICallError, embedMany, generateText, stepCountIs, tool } from 'ai';
+import { createOpenAI } from '@ai-sdk/openai';
 import { z } from 'zod';
 import type { LanguageModelV3, LanguageModelV3GenerateResult, EmbeddingModelV3 } from '@ai-sdk/provider';
 import { assertUsageHealthy, getUsageContext, runWithUsageContext } from './context';
@@ -19,6 +20,8 @@ function model(generate = vi.fn(async () => reply())): LanguageModelV3 {
   return { specificationVersion: 'v3', provider: 'openai.responses', modelId: 'gpt-4.1-mini', supportedUrls: {}, doGenerate: generate, doStream: vi.fn() };
 }
 const metered = (m: LanguageModelV3, operation = 'reply') => meterLanguageModel(m, { provider: 'openai', modelId: 'gpt-4.1-mini', operation });
+const billingError = () => new APICallError({ message: 'You have no credits remaining.', url: 'https://api.openai.com/v1/responses',
+  requestBodyValues: { prompt: 'private fixture' }, statusCode: 429, data: { error: { code: 'credit_balance_exhausted', type: 'insufficient_quota' } } });
 beforeEach(() => {
   vi.clearAllMocks();
   h.reserve.mockImplementation(async (_ctx, input) => ({ allowed: true, replay: false, attempt_id: input.idempotencyKey, status: 'reserved' }));
@@ -103,6 +106,65 @@ describe('provider-call metering (all providers mocked)', () => {
     await expect(runWithUsageContext(context(), () => generateText({ model: metered(model(provider)), prompt: 'x', maxRetries: 0 }))).rejects.toThrow('timeout');
     expect(provider).toHaveBeenCalledTimes(1);
     expect(h.settle.mock.calls[0][2].status).toBe('unknown');
+  });
+
+  it('releases only an explicitly rejected billing request and leaves a specific sticky failure', async () => {
+    const provider = vi.fn(async () => { throw billingError(); });
+    await runWithUsageContext(context(), async () => {
+      await expect(generateText({ model: metered(model(provider)), prompt: 'test', maxRetries: 0 }))
+        .rejects.toMatchObject({ code: 'provider_insufficient_quota' });
+      expect(() => assertUsageHealthy()).toThrow('falta de créditos');
+      await expect(generateText({ model: metered(model(provider)), prompt: 'cannot continue', maxRetries: 0 })).rejects.toThrow();
+    });
+    expect(provider).toHaveBeenCalledTimes(1);
+    expect(h.settle).toHaveBeenCalledExactlyOnceWith(expect.anything(), expect.any(String), { status: 'rejected', metadata: {
+      reason: 'provider_insufficient_quota', evidenceVersion: 'openai-quota-v1', providerStatusCode: 429,
+      providerErrorCode: 'credit_balance_exhausted', providerErrorType: 'insufficient_quota',
+    } });
+    expect(h.reserve).toHaveBeenCalledTimes(1);
+  });
+
+  it('recognizes the real OpenAI SDK error shape from an offline HTTP billing rejection', async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ error: {
+      message: 'You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.',
+      type: 'insufficient_quota', code: 'credit_balance_exhausted', param: null,
+    } }), { status: 429, headers: { 'content-type': 'application/json' } }));
+    const openai = createOpenAI({ apiKey: 'offline-fixture-key', fetch });
+    await runWithUsageContext(context(), async () => {
+      await expect(generateText({ model: metered(openai.responses('gpt-4.1-mini')), prompt: 'offline fixture', maxRetries: 0 }))
+        .rejects.toMatchObject({ code: 'provider_insufficient_quota' });
+      expect(() => assertUsageHealthy()).toThrow('liberação manual');
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(h.settle).toHaveBeenCalledExactlyOnceWith(expect.anything(), expect.any(String), { status: 'rejected', metadata: {
+      reason: 'provider_insufficient_quota', evidenceVersion: 'openai-quota-v1', providerStatusCode: 429,
+      providerErrorCode: 'credit_balance_exhausted', providerErrorType: 'insufficient_quota',
+    } });
+  });
+
+  it.each([429, 503])('preserves unknown reservation for a generic HTTP %s failure', async statusCode => {
+    const provider = vi.fn(async () => { throw new APICallError({ message: 'Unavailable', url: 'https://api.openai.com/v1/responses',
+      requestBodyValues: {}, statusCode, data: { error: { code: 'rate_limit_exceeded' } } }); });
+    await expect(runWithUsageContext(context(), () => generateText({ model: metered(model(provider)), prompt: 'test', maxRetries: 0 }))).rejects.toThrow();
+    expect(provider).toHaveBeenCalledTimes(1);
+    expect(h.settle).toHaveBeenCalledExactlyOnceWith(expect.anything(), expect.any(String), expect.objectContaining({ status: 'unknown' }));
+  });
+
+  it('keeps a successful provider request unknown when settlement fails, even if that failure looks like a billing rejection', async () => {
+    const provider = vi.fn(async () => reply());
+    h.settle.mockRejectedValueOnce(billingError());
+    await expect(runWithUsageContext(context(), () => generateText({ model: metered(model(provider)), prompt: 'test', maxRetries: 0 }))).rejects.toThrow();
+    expect(provider).toHaveBeenCalledTimes(1);
+    expect(h.settle.mock.calls.map(call => call[2].status)).toEqual(['completed', 'unknown']);
+    expect(h.settle.mock.calls[0][2]).toMatchObject({ actualAmount: 30 });
+  });
+
+  it('retains an unresolved reservation if saving a proven rejection fails', async () => {
+    const provider = vi.fn(async () => { throw billingError(); });
+    h.settle.mockRejectedValueOnce(new Error('ledger unavailable'));
+    await expect(runWithUsageContext(context(), () => generateText({ model: metered(model(provider)), prompt: 'test', maxRetries: 0 }))).rejects.toThrow('ledger');
+    expect(h.settle.mock.calls.map(call => call[2].status)).toEqual(['rejected', 'unknown']);
+    expect(provider).toHaveBeenCalledTimes(1);
   });
 
   it('reserves separately for every tool step, including the additional tool output', async () => {

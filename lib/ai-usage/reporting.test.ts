@@ -23,6 +23,15 @@ describe('consumption reporting', () => {
     const result = summarizeUsage([row(), row({ id: 'two', conversation_id: 'other-number' }), row({ id: 'test', scope: 'test', account_id: null, actual_amount: 900, total_tokens: 900, input_tokens: 900, output_tokens: 0 })], period);
     expect(result.tokens).toBe(1100); expect(result.averageTokens).toBe(200); expect(result.conversationCount).toBe(1); expect(result.otherTokens).toBe(900);
   });
+  it('keeps a rejected provider call in the audit without counting it as consumption or a pending reservation', () => {
+    const completed = row({ actual_amount: 73082, total_tokens: 73082, estimated_cost_usd: 0.15 });
+    const rejected = row({ id: 'rejected', status: 'rejected', reserved_amount: 99804, actual_amount: null, input_tokens: null, output_tokens: null, total_tokens: null });
+    const result = summarizeUsage([completed, rejected], period, 1);
+    expect(result).toMatchObject({ tokens: 73082, pendingTokens: 0, pendingOperations: 0, operationCount: 2, blockedConversations: 1, unpricedOperations: 0, estimatedCostUsd: 0.15 });
+    expect(result.conversations[0]).toMatchObject({ tokens: 73082, pending: 0, costUsd: 0.15 });
+    const ambiguous = summarizeUsage([completed, rejected, row({ id: 'unknown', status: 'unknown', reserved_amount: 800, actual_amount: null, total_tokens: null })], period);
+    expect(ambiguous).toMatchObject({ tokens: 73082, pendingTokens: 800, pendingOperations: 1 });
+  });
   it('does not double-count an attendance merged across connected numbers', () => {
     const roots = usageAccountRoots([{ id: 'a', merged_into: null }, { id: 'b', merged_into: 'a' }, { id: 'c', merged_into: 'b' }]);
     const input = [row({ account_id: 'a' }), row({ id: 'b', account_id: 'b' }), row({ id: 'c', account_id: 'c' })];

@@ -296,6 +296,27 @@ describe('validação no envio real e no simulador', () => {
     expect((await run()).status).toBe('ok');
     expect(h.send).toHaveBeenCalledTimes(1);
   });
+  it.each([false, true])('pausa por saldo do provedor sem enviar nem substituir a causa quando uma ferramenta a captura: %s', async swallowed => {
+    h.policyEnabled = true;
+    h.budget.mockResolvedValue({ blocked_at: null, policy: { enabled: true } });
+    const provider = vi.fn(async () => { throw new APICallError({ message: 'You have no credits remaining.',
+      url: 'https://api.openai.com/v1/responses', requestBodyValues: {}, statusCode: 429,
+      data: { error: { code: 'credit_balance_exhausted', type: 'insufficient_quota' } } }); });
+    h.generate.mockImplementationOnce(async () => {
+      try {
+        return await meteredOperation({ operation: 'reply', provider: 'openai', model: 'gpt-4.1', bound: 99804, execute: provider, usage: () => null });
+      } catch (error) {
+        if (swallowed) throw new Error('Falha secundária da ferramenta');
+        throw error;
+      }
+    });
+    const result = await run();
+    expect(result).toMatchObject({ status: 'error', reason: expect.stringContaining('falta de créditos') });
+    expect(h.settle).toHaveBeenCalledExactlyOnceWith(expect.anything(), 'attempt', expect.objectContaining({ status: 'rejected' }));
+    expect(h.block).toHaveBeenCalledExactlyOnceWith(expect.anything(), 'provider_insufficient_quota');
+    expect(h.send).not.toHaveBeenCalled(); expect(h.events).not.toHaveBeenCalled(); expect(h.action).not.toHaveBeenCalled();
+    expect(provider).toHaveBeenCalledTimes(1);
+  });
   it('aplica a política habilitada depois de criar o contexto de medição', async () => {
     h.generate.mockImplementation(async () => {
       h.budget.mockResolvedValue({ blocked_at: null, policy: { enabled: true } });

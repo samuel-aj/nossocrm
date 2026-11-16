@@ -6,6 +6,7 @@ import { normalizeEmbeddingUsage, normalizeLanguageUsage, type NormalizedUsage }
 import { estimateOperationCost } from './pricing';
 import type { UsageContext } from './types';
 import { audioDurationBound } from './audioBound';
+import { providerBillingRejection } from './providerFailure';
 
 const MAX_OUTPUT_TOKENS = 8192;
 const DEFAULT_OUTPUT_TOKENS = 2000;
@@ -118,7 +119,18 @@ export async function meteredOperation<T>(input: {
     attemptId = reservation.attempt_id;
     if (!(await dispatchUsage(context, attemptId))) throw new AiUsageError('AI_USAGE_DISPATCH_DENIED');
     dispatched = true;
-    const result = await input.execute();
+    let result: T;
+    try {
+      result = await input.execute();
+    } catch (error) {
+      const rejection = providerBillingRejection(error, input.provider);
+      if (!rejection) throw error;
+      // This branch surrounds only the provider call. A failed usage parse or
+      // settlement after a successful response must remain unknown, never rejected.
+      await settleUsage(context, attemptId, { status: 'rejected', metadata: rejection });
+      settled = true;
+      throw new AiUsageError('provider_insufficient_quota', 'O provedor de IA recusou a chamada por falta de créditos ou quota na conta. Regularize a conta do provedor e solicite a liberação manual.');
+    }
     const usage = input.usage(result);
     const amount = typeof usage === 'number' ? usage : usage?.totalTokens;
     if (amount == null || !Number.isFinite(amount) || amount < 0) {

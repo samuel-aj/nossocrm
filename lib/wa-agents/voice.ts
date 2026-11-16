@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { APICallError } from 'ai';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireUsageContext } from '@/lib/ai-usage/context';
 import { meteredOperation, textInputBound } from '@/lib/ai-usage/meteredModel';
@@ -49,7 +50,27 @@ export async function synthesizeVoice(admin: SupabaseClient, agent: AgentRow, sc
         body: JSON.stringify({ model: MODEL, messages, modalities: ['text', 'audio'], audio: { voice, format: 'mp3' },
           max_completion_tokens: MAX_OUTPUT_TOKENS, store: false }), signal: AbortSignal.timeout(45_000),
       });
-      if (!res.ok) throw new Error('Falha na geração de voz (HTTP ' + res.status + ').');
+      if (!res.ok) {
+        // Preserve only structured billing evidence for the usage ledger. Never
+        // attach the API key, spoken script, headers or raw provider response.
+        let data: { error: { code?: string; type?: string } } | undefined;
+        if (res.status === 429) {
+          try {
+            const body = await res.text();
+            const payload: { error?: unknown } | null = body.length <= 16_384 ? JSON.parse(body) : null;
+            if (payload?.error && typeof payload.error === 'object') {
+              const detail = payload.error as Record<string, unknown>;
+              const code = detail.code == null ? undefined
+                : typeof detail.code === 'string' && detail.code.length <= 128 ? detail.code : 'unrecognized_provider_code';
+              const type = typeof detail.type === 'string' && detail.type.length <= 128 ? detail.type : undefined;
+              data = { error: { code, type } };
+            }
+          } catch { /* An unreadable rejection remains unknown consumption. */ }
+        }
+        throw new APICallError({ message: 'Falha na geração de voz (HTTP ' + res.status + ').',
+          url: 'https://api.openai.com/v1/chat/completions', requestBodyValues: undefined,
+          statusCode: res.status, data });
+      }
       return await res.json() as AudioCompletion;
     },
     usage: ({ usage }) => {
