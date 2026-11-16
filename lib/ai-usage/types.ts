@@ -50,7 +50,7 @@ export type UsageReservation = {
   reason: string | null;
 };
 export type SettleUsageInput = {
-  status: 'completed' | 'unknown' | 'cancelled';
+  status: 'completed' | 'unknown' | 'cancelled' | 'rejected';
   actualAmount?: number | null;
   inputTokens?: number | null;
   outputTokens?: number | null;

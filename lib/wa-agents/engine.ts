@@ -1150,7 +1150,10 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       ...await finish('skipped', { reason: msg }),
       ...(!proactiveSent && e.until ? { deferredUntil: e.until } : {}),
     };
-    if (e instanceof AiUsageError || getUsageFailure()) {
+    const usageFailure = getUsageFailure();
+    if (e instanceof AiUsageError || usageFailure) {
+      const cause = usageFailure ?? e;
+      const usageMessage = errorMessage(cause);
       const usageContext = getUsageContext();
       try {
         if (usageContext) {
@@ -1159,15 +1162,15 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
           // the block RPC checks it again under its lock to close the toggle race.
           const currentBudget = await checkConversationBudget(admin, organizationId, conversationId);
           if (currentBudget.policy.enabled || currentBudget.blocked_at) {
-            await blockConversationBudget(usageContext, e instanceof AiUsageError ? e.code : 'AI_USAGE_UNAVAILABLE');
+            await blockConversationBudget(usageContext, cause instanceof AiUsageError ? cause.code : 'AI_USAGE_UNAVAILABLE');
           }
         }
       } catch (blockError) {
         console.error('[wa-agents] não foi possível persistir o bloqueio de consumo:', errorMessage(blockError));
       }
       // No error webhook: quota warnings stay inside the CRM and never message the lead.
-      pushEvent('usage_interrupted', { message: msg });
-      return await finish('error', { reason: msg, error: msg });
+      pushEvent('usage_interrupted', { message: usageMessage });
+      return await finish('error', { reason: usageMessage, error: usageMessage });
     }
     const code = e instanceof WaAgentError ? e.code : undefined;
     console.error('[wa-agents] execução falhou:', msg);

@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { OrgUser } from '@/lib/whatsapp/api';
 import type { Notice } from '@/lib/notifications/types';
 import { conversationUsageAccess } from './access';
-import { usageBlockLabel } from './alerts';
+import { usageBlockLabel, usageBlockResumeMessage } from './alerts';
 
 /** Internal alerts only. Never sends WhatsApp messages or dispatches agent webhooks. */
 export async function usageNotices(admin: SupabaseClient, user: OrgUser, from: string | null, until: string): Promise<Notice[]> {
@@ -22,7 +22,7 @@ export async function usageNotices(admin: SupabaseClient, user: OrgUser, from: s
       const access = await conversationUsageAccess(admin, user, row.conversation_id);
       if (!access.allowed || !access.canGrant) continue;
       notices.push({ id: `ai-usage-${row.id}`, kind: 'alert', category: 'ai_usage', title: usageBlockLabel(row.reason ?? null),
-        message: 'Um atendimento precisa de liberação manual de saldo. O atendimento humano continua disponível.',
+        message: `${usageBlockResumeMessage(row.reason)} O atendimento humano continua disponível.`,
         href: `/chats?conversation=${row.conversation_id}`, createdAt: row.created_at });
     }
     if (!data || data.length < 200) break;
