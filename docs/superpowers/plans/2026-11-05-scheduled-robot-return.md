@@ -9,7 +9,7 @@
 - [x] Ferramentas consultar_retorno, agendar_retorno e cancelar_retorno usando somente IDs do contexto autenticado; referência capturada antes de montar histórico.
 - [x] Worker existente respeita horário, pausa/aprovação/orçamento; espera outra geração terminar; follow-ups ordinários aguardam retorno pendente.
 - [x] Entrega ao agente recebe contexto combinado sem apagar memória; resposta ao robô remove restrição de calendário, mas preserva pausa manual.
-- [x] Agente > Ações > Recursos seleciona robô habilitado; chat exibe horário/fuso e Cancelar retorno. Simulador mantém estado apenas em memória na geração.
+- [x] Agente > Atendimento e automações > Retorno combinado com o cliente seleciona robô habilitado; chat exibe horário/fuso e Cancelar retorno. Simulador mantém estado apenas em memória na geração.
 - [x] 156 testes em9arquivos com banco/modelo/WhatsApp falsos. ESLint dos20arquivos alterados aprovado. Typecheck aprovado.
 - [x] SQL testado em PostgreSQL PGlite local: dados legados, grants/RLS, vínculos, idempotência, cancelamento, início antecipado, pausa, resposta, remarcação e replay.
 - [x] Build webpack aprovado: 162 páginas; revisão independente sem bloqueadores. Commit local desta entrega.
@@ -20,7 +20,7 @@ SQL: definir PGLITE_MODULE apontando ao módulo local e executar node scripts/ve
 Build: npm run build -- --webpack. Lint focado nos arquivos da entrega, com --max-warnings=0.
 
 ## Orientação de configuração
-Em Configurações > IA e Automações > Agentes de IA, editar agente, abrir Ações > Recursos e selecionar Robô para retorno combinado. O robô deve estar habilitado no número da conversa e pode usar Entregar a agente. Na API oficial do WhatsApp, fora da janela de24h, usar modelo aprovado antes de aguardar a resposta e entregar ao agente; agendamento não remove a restrição da Meta.
+Em Configurações > IA e Automações > Agentes de IA, editar agente, abrir Atendimento e automações > Retorno combinado com o cliente e selecionar Robô para retorno combinado. O robô deve estar habilitado no número da conversa e pode usar Entregar a agente. Na API oficial do WhatsApp, fora da janela de24h, usar modelo aprovado antes de aguardar a resposta e entregar ao agente; agendamento não remove a restrição da Meta.
 O agente consulta o relógio/fuso, confirma horário com o cliente, grava o retorno e só confirma sucesso após persistência. Nova mensagem recebida cancela um retorno ainda não iniciado para evitar contato desatualizado. É possível remarcar na conversa ou cancelar pelo banner.
 
 ## Publicação futura — não executada nesta entrega

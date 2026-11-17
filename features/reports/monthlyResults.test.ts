@@ -11,6 +11,53 @@ const calculate = (deals: Deal[], events: StageEvent[] = [], lifecycleEvents: Li
   calculatePerformance(deals, events, board, august, owner, undefined, snapshot, { mode, lifecycleEvents, productId });
 
 describe('monthly retained-gain overlay', () => {
+  it('counts the original dated fulfillment when an existing stage becomes the Customer milestone', () => {
+    const afterSale = { id: 'future', label: 'CRM futuro', color: '' };
+    const configured = { ...board, stages: [...board.stages.slice(0, -1), afterSale, board.stages.at(-1)!] };
+    const leads = Array.from({ length: 9 }, (_, i) => lead('historical-' + i, { status: i < 6 ? 'won' : 'future' }));
+    const date = '2026-08-06T21:00:00.123456Z';
+    const events = leads.flatMap(deal => [entry(deal), lifecycle(deal, 'stage_changed', '2026-08-04T12:00:00Z', { stageId: 'q' }),
+      lifecycle(deal, 'stage_completed', date, { stageId: 'signed' }), lifecycle(deal, 'stage_changed', date, { stageId: 'won' }),
+      ...(deal.status === 'future' ? [lifecycle(deal, 'stage_changed', '2026-08-10T12:00:00Z', { stageId: 'future' })] : [])]);
+    const visits = leads.map(deal => movement(deal.id, 'q', '2026-08-04T12:00:00Z', 'new'));
+    const result = calculatePerformance(leads, visits, configured, august, '', undefined, snapshot, { mode: 'monthly', lifecycleEvents: events });
+    expect(result.entries).toHaveLength(9);
+    expect(ids(result.wonDeals)).toEqual(ids(leads));
+    expect(result.cohortWonDeals).toHaveLength(9);
+    expect(result.closingRate).toBe(100);
+    expect(result.wonRevenue).toBe(900);
+    const signed = result.entryFunnel.stages.find(stage => stage.stageId === 'signed')!;
+    expect(signed.count).toBe(9);
+    expect(signed.evidenceByDeal.get(leads[0].id)).toMatchObject({ kind: 'stage-completion', date, observedAtStage: false });
+    expect(result.entryFunnel.stages.find(stage => stage.stageId === 'won')?.count).toBe(9);
+    expect(result.entryFunnel.stages.find(stage => stage.stageId === 'future')?.count).toBe(3);
+    expect(result.diagnosticsDeals).toEqual([]);
+    expect(leads.every(deal => !deal.isWon && !deal.closedAt)).toBe(true);
+  });
+
+  it('keeps the first retained date across periods, with explicit closure and subsequent reversals taking precedence', () => {
+    const dated = gain('explicit');
+    const previous = lead('previous', { createdAt: '2026-07-01', status: 'signed' });
+    const direct = lead('direct', { status: 'signed' });
+    const reopened = lead('reopened', { status: 'signed' });
+    const lost = lead('lost', { status: 'lost', isLost: true });
+    const rollback = lead('rollback', { status: 'q' });
+    const transferred = lead('transfer', { boardId: 'another', status: 'signed' });
+    const postSaleOnly = lead('no-proof', { status: 'won' });
+    const regained = lead('regained', { status: 'signed' });
+    const selected = [dated, previous, direct, reopened, lost, rollback, transferred, postSaleOnly, regained];
+    const early = '2026-08-02T10:00:00Z';
+    const later = '2026-08-05T10:00:00Z';
+    const events = selected.filter(d => d !== postSaleOnly && d !== direct).map(d => lifecycle(d, 'stage_completed', early, { stageId: 'signed' }));
+    events.push(lifecycle(previous, 'stage_changed', '2026-07-05T10:00:00Z', { stageId: 'signed' }),
+      lifecycle(reopened, 'reopened', '2026-09-03T10:00:00Z'),
+      lifecycle(regained, 'stage_changed', '2026-08-04T10:00:00Z', { stageId: 'new' }),
+      lifecycle(regained, 'stage_changed', later, { stageId: 'signed' }),
+      lifecycle(postSaleOnly, 'stage_changed', later, { stageId: 'won' }));
+    const result = calculate(selected, [movement(direct.id, 'signed', early)], events);
+    expect(result.wonDeals.map(d => [d.id, d.closedAt])).toEqual([[dated.id, dated.closedAt], [direct.id, early], [regained.id, later]]);
+  });
+
   it('preserves baseline entries, Q, losses, snapshots, sources, filters and pre-gain populations exactly', () => {
     const changed = gain('changed', { ownerId: 'bia', leadSource: 'Google Ads', value: 700,
       items: [{ id: 'new', productId: 'p2', name: 'Atual', quantity: 1, price: 700 }] });

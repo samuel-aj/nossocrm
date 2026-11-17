@@ -5,6 +5,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { checkConversationBudget } from '@/lib/ai-usage/budget';
+import { usageBlockResumeMessage } from '@/lib/ai-usage/alerts';
 import { botConnectionIds, createBotRun } from './bots';
 import { loadAgent, loadConversationContext, type WaConversationFull } from './context';
 import { errorMessage } from './errors';
@@ -189,7 +190,7 @@ export async function applyConversationAction(
     const conv = raw as WaConversationFull;
     if (['start', 'resume', 'approve'].includes(action)) {
       const budget = await checkConversationBudget(admin, organizationId, conversationId);
-      if (budget.blocked_at) return fail(409, 'IA pausada pelo limite de consumo. O responsável deve liberar saldo antes de retomar.');
+      if (budget.blocked_at) return fail(409, usageBlockResumeMessage(budget.blocked_reason));
     }
     const now = new Date().toISOString();
 

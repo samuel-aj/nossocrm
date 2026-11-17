@@ -2,9 +2,11 @@ import { loadLastInboundAt } from './lastInbound';
 import { checkConversationBudget } from '@/lib/ai-usage/budget';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { followupAllowedAt } from './followupCalendarStore';
+import { manualContractIssued } from '@/lib/zapsign/agentContractFact';
 
 export const PROACTIVE_VAR = '__proactive_followup';
-export type ProactiveFollowup = { anchor: string | null; dealId?: string; stageId?: string; ruleVersion?: number; scheduledReturnId?: string };
+export type ProactiveFollowup = { anchor: string | null; dealId?: string; stageId?: string; ruleVersion?: number; scheduledReturnId?: string;
+  agentFollowup?: { agentId: string; templateToken: string } };
 export type ProactiveDecision = { kind: 'allowed' } | { kind: 'cancel'; reason: string } | { kind: 'defer'; until: string };
 
 /** Rechecked on every scheduled robot continuation, before touching any provider. */
@@ -12,7 +14,7 @@ export async function checkProactiveFollowup(admin: SupabaseClient, orgId: strin
   context: ProactiveFollowup, now = new Date()): Promise<ProactiveDecision> {
   if (!conversationId) return { kind: 'cancel', reason: 'follow-up sem conversa vinculada' };
   const { data: conv, error } = await admin.from('wa_conversations')
-    .select('ai_status, ai_approval, connection_id').eq('organization_id', orgId).eq('id', conversationId).maybeSingle();
+    .select('ai_status, ai_approval, connection_id, ai_agent_id, deal_id, contact_id').eq('organization_id', orgId).eq('id', conversationId).maybeSingle();
   if (error) throw new Error(error.message);
   if (!conv) return { kind: 'cancel', reason: 'conversa não encontrada' };
   const lastInbound = await loadLastInboundAt(admin, orgId, conversationId);
@@ -20,6 +22,16 @@ export async function checkProactiveFollowup(admin: SupabaseClient, orgId: strin
     return { kind: 'cancel', reason: 'cliente respondeu após o agendamento' };
   if (['paused', 'stopped', 'awaiting_approval'].includes(conv.ai_status) || conv.ai_approval)
     return { kind: 'cancel', reason: 'atendimento pausado, encerrado ou aguardando aprovação' };
+  // This marker belongs only to the agent's old silence sequence, never to an
+  // independently scheduled return or a board's inactivity automation.
+  if (context.agentFollowup) {
+    if (conv.ai_agent_id !== context.agentFollowup.agentId)
+      return { kind: 'cancel', reason: 'agente responsável pelo follow-up foi alterado' };
+    if (await manualContractIssued(admin, {
+      organizationId: orgId, dealId: conv.deal_id, contactId: conv.contact_id,
+      templateToken: context.agentFollowup.templateToken, silentSince: context.anchor,
+    })) return { kind: 'cancel', reason: 'a equipe já emitiu o contrato deste atendimento' };
+  }
   if (context.dealId) {
     const { data: deal, error: dealError } = await admin.from('deals')
       .select('stage_id, is_won, is_lost, deleted_at').eq('organization_id', orgId).eq('id', context.dealId).maybeSingle();

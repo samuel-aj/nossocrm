@@ -26,6 +26,22 @@ function from(table:string) {
 }
 const auth={ok:true as const,user:{id:user,organizationId:org,role:'vendedor'},admin:{from}} as unknown as Parameters<typeof feed>[0];
 const now=()=>new Date().toISOString();
+it('entrega a análise humana ao responsável, inclusive ao reabrir o CRM, respeitando canal e preferências', async () => {
+  tables.crm_notification_events=[{id:7,kind:'human_handoff',source_id:'c',created_at:now()}];
+  tables.wa_messages=[];
+  expect((await notices())[0]).toMatchObject({id:'7',title:'Análise humana',href:'/chats?conversation=c'});
+  expect((await feed(auth,null,null,null)).events).toHaveLength(1);
+  tables.deals[0].owner_id='outro';
+  expect(await notices()).toEqual([]);
+  tables.deals=[];
+  tables.wa_conversations[0].assigned_owner_id=user;
+  expect(await notices()).toHaveLength(1);
+  vi.mocked(getVisibilityRules).mockResolvedValue({...DEFAULT_VISIBILITY_RULES,whatsapp:{connection_ids:[],label_ids:null,owner_user_ids:null}});
+  expect(await notices()).toEqual([]);
+  vi.mocked(getVisibilityRules).mockResolvedValue(null);
+  tables.crm_notification_preferences[0].preferences={...DEFAULT_PREFERENCES,messages:true,alerts:false};
+  expect(await notices()).toEqual([]);
+});
 async function notices(){return (await feed(auth,now(),null,null)).events;}
 beforeEach(()=>{
   queries.length=0;
@@ -35,6 +51,13 @@ beforeEach(()=>{
   tables={boards:[{id:'b',name:'Vendas'}],crm_notification_preferences:[{preferences:{...DEFAULT_PREFERENCES,messages:true,scope:'all',leads:true,boardIds:['11111111-1111-4111-8111-111111111111']}}],crm_notification_events:[{id:1,kind:'message',source_id:'m',created_at:now()}],wa_messages:[{id:'m',conversation_id:'c'}],wa_conversations:[{id:'c',contact_id:'contact',connection_id:'connection',wa_name:'Cliente',label_ids:[]}],deals:[{id:'d',title:'Lead',board_id:'b',owner_id:user,contact_id:'contact',is_won:false,is_lost:false}]};
 });
 describe('personal notification security and audiences',()=>{
+  it('entrega o aviso de áudio ao responsável mesmo com avisos de mensagens desligados',async()=>{
+    tables.crm_notification_events[0].kind='audio_transcription';
+    tables.crm_notification_preferences[0].preferences={...DEFAULT_PREFERENCES,alerts:true,messages:false};
+    expect(await notices()).toEqual([expect.objectContaining({kind:'alert',tone:'red',title:'Áudio sem transcrição',href:'/chats?conversation=c'})]);
+    tables.deals[0].owner_id='outro';
+    expect(await notices()).toEqual([]);
+  });
   it('defaults off and rejects arbitrary keys',async()=>{tables.crm_notification_preferences=[];expect((await context(auth)).preferences).toEqual(DEFAULT_PREFERENCES);expect(PreferencesSchema.safeParse({...DEFAULT_PREFERENCES,user_id:'other'}).success).toBe(false);expect(await notices()).toEqual([]);});
   it('keeps saved subscriptions when sound fields are missing',async()=>{const preferences=tables.crm_notification_preferences[0].preferences;delete preferences.soundType;delete preferences.volume;expect((await context(auth)).preferences).toMatchObject({messages:true,leads:true,scope:'all',soundType:'current',volume:40});});
   it('starts with a baseline without replaying old messages',async()=>{expect((await feed(auth,null,null,null)).events).toEqual([]);});
@@ -79,7 +102,7 @@ describe('durable usage alerts in the personal feed',()=>{
     expect(result.events).toEqual([oldNotice]);
     expect(result.nextAfter).toBeNull();
     expect(usageNotices).toHaveBeenCalledWith(auth.admin,auth.user,null,result.serverTime);
-    expect(queries.some(q=>q.table==='crm_notification_events')).toBe(false);
+    expect(queries.find(q=>q.table==='crm_notification_events')?.filters).toContainEqual(['kind','human_handoff']);
     expect(queries.some(q=>q.table==='wa_messages')).toBe(false);
   });
   it('keeps unresolved alerts after an offline interval and uses stable IDs on repeated polls',async()=>{

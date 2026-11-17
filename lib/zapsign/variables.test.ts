@@ -27,6 +27,13 @@ describe('variáveis do modelo', () => {
     expect(extractTemplateVariables(text)).toEqual(['NOME COMPLETO', 'CPF', 'VALOR', 'VALOR EXTENSO', 'DATA']);
   });
 
+  it('data de hoje é a do Brasil mesmo quando o servidor (UTC) já virou o dia', () => {
+    const late = { ...ctx, now: new Date('2027-01-01T01:30:00Z') }; // 22h30 de 31/12 em Brasília
+    expect(resolveSource('data.hoje', late)).toBe('31/12/2026');
+    expect(resolveSource('data.hoje_extenso', late)).toBe('31 de dezembro de 2026');
+    expect(resolveSource('data.ano', late)).toBe('2026');
+  });
+
   it('sugere a origem pelo nome, preferindo campo personalizado de mesmo nome', () => {
     const fields = [{ key: 'cpf', label: 'CPF' }, { key: 'oab', label: 'Número da OAB' }];
     expect(autoMatchVariable('NOME COMPLETO', fields)).toBe('contato.nome');

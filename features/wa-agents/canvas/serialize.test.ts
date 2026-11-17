@@ -299,3 +299,29 @@ it.each([undefined, 'green', 'red'] as const)('roundtrips recovery alert tone %s
   expect(result.steps.find(s => s.id === 'alert')).toMatchObject({ ...steps[0], tone: tone ?? 'green' });
   expect(createBlock('activate_alert', 'new')).toMatchObject({ data: { message: 'Respondeu à recuperação', tone: 'green' } });
 });
+
+describe('gatilho "Mensagem recebida"', () => {
+  const steps = [{ id: 'm1', type: 'send_text', text: 'Oi', next_step_id: null }] as BotStep[];
+
+  it('salva e reabre com o número que recebe e as palavras do filtro', () => {
+    const saved = bot(steps, 'm1');
+    saved.trigger = { type: 'message_received', board_id: null, stage_id: null, connection_id: NUMERO, match: 'contains', keywords: ['quero contratar', 'orçamento'] };
+    const flow = botToFlow(saved, []);
+    const node = flow.nodes.find((n) => n.id === TRIGGER_NODE_ID) as FlowNode;
+    expect(node.data).toMatchObject({ trigger_type: 'message_received', connection_id: NUMERO, match: 'contains', keywords: 'quero contratar, orçamento' });
+    const back = flowToBot(flow.nodes, flow.edges, HEADER);
+    expect(back.trigger).toMatchObject({ type: 'message_received', board_id: null, stage_id: null, connection_id: NUMERO, match: 'contains', keywords: ['quero contratar', 'orçamento'] });
+  });
+
+  it('"Qualquer mensagem" não grava palavras; "contém" sem palavras acusa erro', () => {
+    const saved = bot(steps, 'm1');
+    saved.trigger = { type: 'message_received', board_id: null, stage_id: null };
+    const flow = botToFlow(saved, []);
+    const node = flow.nodes.find((n) => n.id === TRIGGER_NODE_ID) as FlowNode;
+    expect(flowToBot(flow.nodes, flow.edges, HEADER).trigger).toMatchObject({ type: 'message_received', match: 'any', keywords: [] });
+    (node.data as Record<string, unknown>).match = 'contains';
+    (node.data as Record<string, unknown>).keywords = ' , ';
+    const v = validateFlow(flow.nodes, flow.edges, HEADER);
+    expect(JSON.stringify(v)).toContain('escreva as palavras da mensagem');
+  });
+});

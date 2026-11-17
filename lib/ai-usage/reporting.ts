@@ -24,7 +24,7 @@ export type UsageSummary = {
 export const USAGE_OPERATION_LABELS: Record<string, string> = {
   reply: 'Resposta', safety: 'Revisão de segurança', helper: 'Agente auxiliar', action_variables: 'Variáveis de ação',
   image: 'Leitura de imagem', transcription: 'Transcrição', embedding: 'Busca de conhecimento', test: 'Simulador', assist: 'Configuração',
-  image_understanding: 'Leitura de imagem', audio_transcription: 'Transcrição de áudio', audio_understanding: 'Compreensão de áudio', agent_configuration: 'Configuração do agente',
+  image_understanding: 'Leitura de imagem', audio_transcription: 'Transcrição de áudio', audio_understanding: 'Compreensão de áudio', voice_reply: 'Resposta em áudio', agent_configuration: 'Configuração do agente',
 };
 export const USAGE_SCOPE_LABELS: Record<UsageScope, string> = {
   conversation: 'Atendimentos', test: 'Simulador', configuration: 'Configuração', knowledge: 'Conhecimento', crm: 'Outros recursos',

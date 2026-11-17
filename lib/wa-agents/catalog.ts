@@ -10,11 +10,16 @@ export type ModelCatalogEntry = { id: string; name: string; hint: string };
 export const MODEL_CATALOG: Record<AgentProvider, ModelCatalogEntry[]> = {
   openai: [
     { id: 'gpt-4.1', name: 'GPT-4.1', hint: 'Bom equilíbrio entre qualidade e custo' },
+    // IDs oficiais verificados em 17/11/2026: developers.openai.com/api/docs/models.
+    { id: 'gpt-6-luna', name: 'GPT-6 Luna', hint: 'Mais econômico para tarefas objetivas e alto volume' },
+    { id: 'gpt-6.1-terra', name: 'GPT-6.1 Terra', hint: 'Rápido, com foco em imagens e escrita natural' },
+    { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', hint: 'Equilíbrio entre capacidade e custo em tarefas complexas' },
+    { id: 'gpt-6-astra', name: 'GPT-6 Astra', hint: 'Maior capacidade para tarefas exigentes, custo mais alto' },
     { id: 'gpt-4.1-mini', name: 'GPT-4.1 mini', hint: 'Rápido e barato, ideal para triagem' },
     { id: 'gpt-4o', name: 'GPT-4o', hint: 'Geração anterior, ainda muito capaz' },
     { id: 'gpt-4o-mini', name: 'GPT-4o mini', hint: 'Mais barato da linha 4o' },
     { id: 'gpt-5-mini', name: 'GPT-5 mini', hint: 'Nova geração, custo reduzido' },
-    { id: 'gpt-5.2', name: 'GPT-5.2', hint: 'Mais capaz da OpenAI, custo maior' },
+    { id: 'gpt-5.2', name: 'GPT-5.2', hint: 'Geração anterior com raciocínio avançado' },
   ],
   anthropic: [
     { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', hint: 'Ótimo em conversas naturais e instruções longas' },

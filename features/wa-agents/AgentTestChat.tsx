@@ -15,9 +15,14 @@ import { useToast } from '@/context/ToastContext';
 import { DEFAULT_AGENT_TYPING, type AgentInput } from '@/lib/wa-agents/types';
 import { typingDelayMs } from '@/lib/wa-agents/typing';
 import { useTestWaAgent, type WaTestMessage } from './useWaAgents';
+import { VoicePreview } from './VoicePreview';
 import { BTN_PRIMARY, BTN_SMALL, INPUT_CLASS, Notice, Toggle, errorMessage, newId } from './ui';
 
 type Entry = {
+  audio?: boolean;
+  voiceLines?: number[];
+  contractReviewKey?: string;
+  media?: string[];
   id: string;
   role: 'user' | 'assistant';
   text: string;
@@ -100,15 +105,18 @@ export const AgentTestChat: React.FC<{
   const [entries, setEntries] = useState<Entry[]>([]);
   const [state, setState] = useState<Record<string, unknown>>({});
   const [text, setText] = useState('');
+  const [audio, setAudio] = useState(false);
   // Último erro também aqui no painel: o toast, no canto da tela, pode passar despercebido.
   const [error, setError] = useState<string | null>(null);
   /** Ritmo real (digitando + intervalo entre linhas); desligue para ver a resposta de uma vez */
   const [simulate, setSimulate] = useState(true);
   const [typingNow, setTypingNow] = useState(false);
+  const [contractState, setContractState] = useState<'none'|'invited'|'signed'>('none');
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   /** Cada envio recebe um número; revelação de envio antigo para sozinha */
   const runRef = useRef(0);
+  const sessionRef = useRef<string | null>(null);
 
   // Sempre a configuração que está na tela agora (o painel fica montado ao lado do editor)
   const draftRef = useRef(draft);
@@ -122,30 +130,48 @@ export const AgentTestChat: React.FC<{
     onMessagesChange?.(entries.map((e) => ({ role: e.role, text: e.text })));
   }, [entries]);
 
-  const send = async () => {
+  const send = async (signed = false) => {
     const value = text.trim();
-    if (!value || busy) return;
-    const userEntry: Entry = { id: newId(), role: 'user', text: value, lines: [value], toolCalls: [], usage: null };
-    const history: WaTestMessage[] = [...entries, userEntry].map((e) => ({ role: e.role, text: e.text }));
-    setEntries((prev) => [...prev, userEntry]);
-    setText('');
+    if ((!signed && !value) || busy) return;
+    const userEntry: Entry = { id: newId(), role: 'user', text: value, audio, lines: [value], toolCalls: [], usage: null };
+    const history: WaTestMessage[] = (signed ? entries : [...entries, userEntry]).map((e) => ({
+      role: e.role, text: e.text, audio: e.audio, contractReviewKey: e.contractReviewKey, media: e.media,
+    }));
+    if (!signed) {
+      setEntries((prev) => [...prev, userEntry]);
+      setText('');
+    }
     setError(null);
     const run = ++runRef.current;
     try {
       const result = await test.mutateAsync({
+        sessionId: sessionRef.current ??= crypto.randomUUID(),
         messages: history,
+        ...(contractState !== 'none' ? {contractState} : {}),
+        ...(signed ? {signatureEvent:'signed' as const} : {}),
         state: Object.keys(state).length ? state : undefined,
         draft: draftRef.current,
       });
       if (runRef.current !== run) return;
-      const lines = result.lines.length > 0 ? result.lines : result.text ? [result.text] : [];
+      sessionRef.current = result.sessionId;
+      const lines = [...(result.lines.length > 0 ? result.lines : result.text ? [result.text] : [])];
+      const created = result.toolCalls.some(call => toolName(call) === 'contrato_zapsign' &&
+        (call as {output?:{criado?:boolean;simulado?:boolean}}).output?.criado && (call as {output?:{simulado?:boolean}}).output?.simulado);
+      if (created && contractState === 'none') {
+        lines.push('Segue o link do seu contrato (simulação): https://assinatura.invalid/contrato-de-teste');
+        setContractState('invited');
+      }
+      if (signed) setContractState('signed');
       const entryId = newId();
       setEntries((prev) => [
         ...prev,
         {
           id: entryId,
           role: 'assistant',
-          text: result.text,
+          voiceLines: result.voiceLines,
+          contractReviewKey: result.contractReviewKey,
+          media: result.media,
+          text: lines.join('\n'),
           lines: simulate ? [] : lines,
           toolCalls: result.toolCalls,
           usage: result.usage,
@@ -193,8 +219,11 @@ export const AgentTestChat: React.FC<{
 
   const clear = () => {
     runRef.current++; // interrompe uma revelação em andamento
+    sessionRef.current = null;
     setEntries([]);
     setState({});
+    setContractState('none');
+    setAudio(false);
     setText('');
     setError(null);
     setTypingNow(false);
@@ -209,6 +238,8 @@ export const AgentTestChat: React.FC<{
           WhatsApp e nenhuma ação é executada.
         </p>
         <div className="flex items-center gap-2 shrink-0">
+          {contractState === 'invited' && <button type="button" className={BTN_SMALL} disabled={busy}
+            onClick={() => void send(true)}>Simular assinatura do cliente</button>}
           <span
             className="hidden sm:inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400"
             title="Espera o tempo de digitação e o intervalo entre linhas configurados"
@@ -234,7 +265,7 @@ export const AgentTestChat: React.FC<{
           entry.role === 'user' ? (
             <div key={entry.id} className="flex justify-end">
               <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-green-500 text-white px-3 py-2 text-sm whitespace-pre-wrap">
-                {entry.text}
+                {entry.audio && <small className="block font-semibold">Áudio simulado</small>}{entry.text}
               </div>
             </div>
           ) : (
@@ -251,7 +282,8 @@ export const AgentTestChat: React.FC<{
                 entry.lines.map((line, i) => (
                   <div key={`${entry.id}-${i}`} className="flex justify-start">
                     <div className="max-w-[80%] rounded-2xl rounded-bl-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 px-3 py-2 text-sm text-slate-900 dark:text-white whitespace-pre-wrap">
-                      {line}
+                      {entry.voiceLines?.includes(i) && <small className="block font-semibold">Áudio simulado</small>}{line}
+                      {agentId && entry.voiceLines?.includes(i) && <VoicePreview key={draft?.media_understanding?.voice} agentId={agentId} text={line} draft={draft} />}
                     </div>
                   </div>
                 ))
@@ -309,6 +341,10 @@ export const AgentTestChat: React.FC<{
         </div>
       ) : null}
 
+      <label className="flex items-center gap-2 text-xs pb-1">
+        <input type="checkbox" checked={audio} onChange={e => setAudio(e.target.checked)} disabled={busy} />
+        Simular áudio do cliente
+      </label>
       <div className="flex items-end gap-2 pt-2 border-t border-slate-200 dark:border-white/10">
         <textarea
           ref={inputRef}
@@ -322,7 +358,7 @@ export const AgentTestChat: React.FC<{
               void send();
             }
           }}
-          placeholder="Escreva como o lead (Enter envia, Shift+Enter quebra linha)"
+          placeholder={audio ? 'Digite o que o cliente diria no áudio' : 'Escreva como o lead (Enter envia, Shift+Enter quebra linha)'}
           aria-label="Mensagem de teste"
           disabled={busy}
         />

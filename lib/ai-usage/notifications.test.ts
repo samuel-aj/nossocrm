@@ -66,6 +66,21 @@ it('identifies quota blocks without calling an unknown consumption error a reach
   ]);
 });
 
+it('explains provider credit and pending consumption alerts without asking staff to increase CRM quota', async () => {
+  access.mockResolvedValue({ allowed: true, canGrant: true });
+  const { db } = database([
+    { ...row('credits'), reason: 'provider_insufficient_quota' },
+    { ...row('pending'), reason: 'usage_unknown' },
+  ]);
+  const result = await usageNotices(db, user, from, until);
+  expect(result[0]).toMatchObject({ title: 'IA pausada: limite da API', message: expect.stringContaining('Regularize os créditos ou o limite da conta no provedor') });
+  expect(result[1]).toMatchObject({ title: 'IA pausada: consumo pendente', message: expect.stringContaining('O provedor não confirmou') });
+  for (const notice of result) {
+    expect(notice.message).toContain('revisar e liberar a pausa');
+    expect(notice.message).not.toContain('liberar saldo');
+  }
+});
+
 it('keeps 205 notices unique when older rows resolve and newer rows arrive between pages', async () => {
   access.mockResolvedValue({ allowed: true, canGrant: true });
   const { db, queries } = database(Array.from({ length: 205 }, (_, i) => numbered(i + 1)), (read, rows) => {

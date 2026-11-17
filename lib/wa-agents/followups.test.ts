@@ -1,30 +1,32 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-const h = vi.hoisted(() => ({ run: vi.fn(), create: vi.fn(), rules: [] as unknown[], claim: vi.fn() }));
+const h = vi.hoisted(() => ({ run: vi.fn(), create: vi.fn(), rules: [] as unknown[], claim: vi.fn(), manualContract: vi.fn() }));
 vi.mock('./beta', () => ({ isAiAgentsApproved: async () => true }));
-vi.mock('./context', () => ({ loadAgent: async () => ({ followups: h.rules }) }));
+vi.mock('./context', () => ({ loadAgent: async () => ({ followups: h.rules, tools: { zapsign_template_token: 'template' } }) }));
+vi.mock('@/lib/zapsign/agentContractFact', () => ({ manualContractIssued: h.manualContract }));
 vi.mock('./engine', () => ({ runAgentOnConversation: h.run }));
 vi.mock('./bots', () => ({ createBotRun: h.create, runBotRunNow: vi.fn() }));
 import { processFollowups } from './followups';
 const cycle = '2026-11-06T10:00:00Z';
 const calendar = { enabled: true, timezone: 'America/Manaus', slots: [{ day: 1, start: '09:00', end: '18:00' }] };
-function db(enabled = true) {
+function db(enabled = true, inboundAt = cycle) {
   const rows: Record<string, unknown[]> = {
     followup_calendars: [{ ...calendar, enabled }],
     wa_ai_agents: [{ id: 'agent', organization_id: 'org', followups: h.rules }],
-    wa_conversations: [{ id: 'conv', organization_id: 'org', ai_agent_id: 'agent', last_inbound_at: cycle, ai_state: {} }],
+    wa_conversations: [{ id: 'conv', organization_id: 'org', ai_agent_id: 'agent', last_inbound_at: cycle, ai_state: {}, deal_id: 'deal', contact_id: 'contact' }],
     wa_messages: [{ created_at: '2026-11-06T10:01:00Z' }],
   };
   return { rpc: h.claim, from: (table: string) => {
     let single = false; let inbound = false;
     const q = { not: () => q, is: () => q, select: () => q, eq: (key: string, value: string) => { if (key === 'direction' && value === 'in') inbound = true; return q; }, gt: () => q, limit: () => q, order: () => q,
       maybeSingle: () => { single = true; return q; },
-      then: (resolve: (r: unknown) => void) => resolve({ data: single ? (inbound ? { created_at: cycle } : rows[table]?.[0]) ?? null : rows[table] ?? [], error: null }) };
+      then: (resolve: (r: unknown) => void) => resolve({ data: single ? (inbound ? { created_at: inboundAt } : rows[table]?.[0]) ?? null : rows[table] ?? [], error: null }) };
     return q;
   } } as never;
 }
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-09T14:00:00Z'));
   vi.clearAllMocks(); h.claim.mockResolvedValue({ data: true }); h.run.mockResolvedValue({ status: 'ok' });
+  h.manualContract.mockResolvedValue(false);
   h.rules = [60, 360, 1440].map(after_minutes => ({ id: String(after_minutes), after_minutes, kind: 'agent', instruction: 'retome', only_in_window: false }));
 });
 afterEach(() => vi.useRealTimers());
@@ -56,5 +58,35 @@ it('passes proactive scope to a follow-up robot', async () => {
   h.rules = [{ id: 'bot', after_minutes: 60, kind: 'bot', bot_id: 'robot' }];
   h.create.mockResolvedValue({ ok: true, run: {} });
   await processFollowups(db());
-  expect(h.create).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ proactive: { anchor: cycle }, conversationId: 'conv' }));
+  expect(h.create).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ proactive: {
+    anchor: cycle, agentFollowup: { agentId: 'agent', templateToken: 'template' },
+  }, conversationId: 'conv' }));
+});
+it.each(['agent', 'bot'])('does not run an old %s follow-up after the team issues this contract', async kind => {
+  h.rules = [{ id: 'one', after_minutes: 60, kind, bot_id: 'robot', instruction: 'peça endereço', only_in_window: false }];
+  h.manualContract.mockResolvedValue(true);
+  expect((await processFollowups(db())).fired).toBe(0);
+  expect(h.manualContract).toHaveBeenCalledWith(expect.anything(), {
+    organizationId: 'org', dealId: 'deal', contactId: 'contact', templateToken: 'template', silentSince: cycle,
+  });
+  expect(h.claim).not.toHaveBeenCalled();
+  expect(h.run).not.toHaveBeenCalled();
+  expect(h.create).not.toHaveBeenCalled();
+});
+it.each(['agent', 'bot'])('allows a %s follow-up in the new post-contract reply cycle', async kind => {
+  const newCycle = '2026-11-09T11:00:00Z';
+  h.rules = [{ id: 'one', after_minutes: 60, kind, bot_id: 'robot', instruction: 'acompanhe o cliente', only_in_window: false }];
+  h.manualContract.mockImplementation(async (_db: unknown, scope: { silentSince: string }) => scope.silentSince !== newCycle);
+  h.create.mockResolvedValue({ ok: true, run: {} });
+  expect((await processFollowups(db(true, newCycle))).fired).toBe(1);
+  expect(h.manualContract).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ silentSince: newCycle }));
+  expect(h.claim).toHaveBeenCalledWith('claim_agent_followup', expect.objectContaining({ p_cycle: newCycle }));
+  expect(kind === 'agent' ? h.run : h.create).toHaveBeenCalledTimes(1);
+});
+it('defers without consuming the follow-up if the contract check is unavailable', async () => {
+  h.manualContract.mockRejectedValue(new Error('contract lookup unavailable'));
+  expect((await processFollowups(db())).fired).toBe(0);
+  expect(h.claim).not.toHaveBeenCalled();
+  expect(h.run).not.toHaveBeenCalled();
+  expect(h.create).not.toHaveBeenCalled();
 });

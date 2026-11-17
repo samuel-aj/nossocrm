@@ -4,7 +4,7 @@ import { sequenceHash } from './journal';
 import type { SequenceInput } from './schemas';
 import type { WhatsAppContext } from './access';
 
-const m = vi.hoisted(() => ({ sendText: vi.fn(), sendMedia: vi.fn(), record: vi.fn(), destination: vi.fn(), attachment: vi.fn(), window: vi.fn(), statuses: [] as { id: string; status: string }[] }));
+const m = vi.hoisted(() => ({ sendText: vi.fn(), sendMedia: vi.fn(), record: vi.fn(), destination: vi.fn(), attachment: vi.fn(), window: vi.fn(), cooldown: vi.fn(), release: vi.fn(), statuses: [] as { id: string; status: string }[] }));
 const conn = { id: 'connection', organization_id: 'org', provider: 'evolution', status: 'connected', phone_number: '+5511900000000' };
 const conv = { id: 'conversation', organization_id: 'org', connection_id: 'connection', wa_phone: '120000@g.us', is_group: true };
 vi.mock('./access', async importOriginal => ({ ...await importOriginal<typeof import('./access')>(), requireDestination: m.destination }));
@@ -55,12 +55,22 @@ const input = (): SequenceInput => ({ operationId: 'operation', conversationId: 
   { itemId: 'three', type: 'text', text: 'Obrigado!\nAguardamos a revisão.' },
 ] });
 const ctx = { user: { id: 'actor', organizationId: 'org', role: 'admin' }, apiKeyId: 'key', admin: {
-  from: () => { const q = { select: () => q, eq: () => q, in: async () => ({ data: m.statuses, error: null }) }; return q; },
+  rpc: m.cooldown,
+  from: (table: string) => { const q = {
+    select: () => q, eq: () => q, in: async () => ({ data: m.statuses, error: null }),
+    delete: () => { m.release(table); return q; },
+    then: (resolve: (value: unknown) => unknown) => Promise.resolve(resolve({ data: null, error: null })),
+  }; return q; },
   storage: { from: () => ({ createSignedUrl: async () => ({ data: { signedUrl: 'https://storage.test/signed' }, error: null }) }) },
 } } as unknown as WhatsAppContext;
 
 beforeEach(() => {
   vi.clearAllMocks(); m.statuses = [];
+  m.cooldown.mockReset().mockImplementation(async (name: string) => {
+    if (name === 'claim_wa_media_cooldown') return { data: [{ acquired: true, retry_after_seconds: 60 }], error: null };
+    if (name === 'touch_wa_media_cooldown' || name === 'finish_wa_media_cooldown') return { data: true, error: null };
+    throw new Error(`Unexpected RPC: ${name}`);
+  });
   m.destination.mockResolvedValue({ connection: conn, conversation: conv });
   m.window.mockResolvedValue(null);
   m.attachment.mockResolvedValue({ path: 'org/out/sealed.pdf', kind: 'document', fileName: 'Revisão.pdf', mimeType: 'application/pdf' });
@@ -104,6 +114,31 @@ describe('persistent ordered sequences through the shared chat service', () => {
     expect(partial.items.map(i => i.state)).toEqual(['completed','pending','pending']);
     expect((await resumeSequence(ctx,'operation',store)).completed).toBe(true);
     expect(m.sendText).toHaveBeenCalledTimes(2); expect(m.sendMedia).toHaveBeenCalledTimes(1);
+  });
+  it('keeps a PDF retryable when cooldown validation fails before the dispatch hook', async () => {
+    const store = new MemoryJournal();
+    let failTouch = true;
+    m.cooldown.mockImplementation(async (name: string) => {
+      if (name === 'claim_wa_media_cooldown') return { data: [{ acquired: true, retry_after_seconds: 60 }], error: null };
+      if (name === 'touch_wa_media_cooldown' && failTouch) {
+        failTouch = false;
+        return { data: null, error: { message: 'Cooldown DB unavailable' } };
+      }
+      if (name === 'touch_wa_media_cooldown' || name === 'finish_wa_media_cooldown') return { data: true, error: null };
+      throw new Error(`Unexpected RPC: ${name}`);
+    });
+    const partial = await sendSequence(ctx, input(), store);
+    expect(partial.items.map(item => item.state)).toEqual(['completed', 'pending', 'pending']);
+    expect(partial.items[1]).toMatchObject({ retryAllowed: true, messageId: null, providerMessageId: null });
+    expect(store.items[1].record).toBeNull();
+    expect(m.sendMedia).not.toHaveBeenCalled();
+    expect(m.sendText).toHaveBeenCalledTimes(1);
+    expect(m.record).toHaveBeenCalledTimes(1);
+    expect(m.release).toHaveBeenCalledWith('wa_media_send_cooldowns');
+    expect((await resumeSequence(ctx, 'operation', store)).completed).toBe(true);
+    expect(m.sendText.mock.calls.map(call => call[0].text)).toEqual([input().items[0].type === 'text' && input().items[0].text, 'Obrigado!\nAguardamos a revisão.']);
+    expect(m.sendMedia).toHaveBeenCalledTimes(1);
+    expect(m.record).toHaveBeenCalledTimes(3);
   });
   it('stops after a provider timeout and never resends the uncertain item', async () => {
     const store = new MemoryJournal(); m.sendMedia.mockRejectedValueOnce(new Error('timeout with secret token'));

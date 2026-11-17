@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Modal } from '@/components/ui/Modal';
 import type { GroupParticipant } from '@/lib/whatsapp/groupParticipants';
+import { participantName } from '@/lib/whatsapp/groupParticipants';
 
 export function useGroupMembers(conversationId: string | null, enabled: boolean) {
   return useQuery<{ participants: GroupParticipant[]; connectionId: string }>({
@@ -29,7 +30,7 @@ export function GroupMembersModal({ name, members, loading, error, onClose, onOp
     {error && <div role="alert" className="text-sm text-amber-600">{error}<button type="button" onClick={onRetry} className="ml-2 underline">Tentar novamente</button></div>}
     {!loading && !error && <><p className="mb-2 text-xs text-slate-500">{members.length} participantes</p>
       <ul className="space-y-2">{filtered.map(m => <li key={m.id} className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-white/10 p-3">
-        <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{m.name}</p><p className="text-xs text-slate-500">{m.phone || 'Telefone não disponibilizado'}{m.admin && ' · Administrador'}</p></div>
+        <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{participantName(m.name) || 'Nome não disponível'}</p><p className="text-xs text-slate-500">{m.phone || 'Telefone não disponibilizado'}{m.admin && ' · Administrador'}</p></div>
         {onOpenChat && <button type="button" disabled={!m.phone} title={!m.phone ? 'O WhatsApp não disponibilizou o telefone deste participante.' : undefined} onClick={() => onOpenChat(m)} className="shrink-0 rounded-lg px-2 py-1 text-xs text-emerald-600 hover:bg-emerald-50 dark:hover:bg-white/5 disabled:opacity-40">Abrir conversa</button>}
       </li>)}</ul>{!filtered.length && <p className="text-sm text-slate-500">Nenhum participante encontrado.</p>}</>}
   </Modal>;

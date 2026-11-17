@@ -32,6 +32,7 @@ import { getGroupParticipants } from '@/lib/whatsapp/groups';
 import { resolveGroupMentions, type GroupMention } from '@/lib/whatsapp/groupParticipants';
 import { normalizePhoneE164 } from '@/lib/phone';
 import { checkSendWindow } from '@/lib/whatsapp/sendWindow';
+import { beginMediaCooldownDispatch, claimMediaCooldown, finishMediaCooldownDispatch, MediaCooldownError, releaseMediaCooldown, type MediaCooldownReceipt } from './mediaCooldown';
 
 const MEDIA_KINDS: OutboundMediaKind[] = ['image', 'video', 'document', 'audio', 'sticker'];
 
@@ -225,24 +226,47 @@ export async function sendMessage(auth: Extract<RequireOrgResult, { ok: true }>,
     send = () => provider.sendText({ ...(options.signal ? { signal: options.signal } : {}), to, text: wireText || `[Modelo: ${templateName}]`, quoted, isGroup: !!group, mentioned });
   }
 
-  const { result, message } = await dispatchOutbound({
-    admin: auth.admin, connection: conn, isGroup: !!group, send, hooks: options.hooks,
-    record: {
-      orgId: auth.user.organizationId,
-      conversationId: conv.id,
-      text: text || (templateName ? `[Modelo: ${templateName}]` : ''),
-      fromPhone: conn.phone_number,
-      toPhone: to,
-      sentBy: auth.user.id,
-      mediaType: media ? mediaKind : null,
-      mediaUrl: media ? mediaPath : null,
-      mediaMime: media?.mimeType ?? null,
-      ...(quotedRow ? { quotedMessageId: quotedRow.id, quoted: quotedSnapshot } : {}),
-    },
-  });
+  let cooldown: MediaCooldownReceipt | undefined;
+  let dispatched = false;
+  try {
+    if (media && mediaKind) cooldown = await claimMediaCooldown(auth.admin, {
+      organizationId: auth.user.organizationId, conversationId: conv.id, mediaPath,
+    });
+    if (cooldown) await beginMediaCooldownDispatch(auth.admin, cooldown);
+    const { result, message } = await dispatchOutbound({
+      admin: auth.admin, connection: conn, isGroup: !!group, send: async () => {
+        dispatched = true;
+        const sent = await send();
+        if (cooldown) await finishMediaCooldownDispatch(auth.admin, cooldown, sent);
+        return sent;
+      }, hooks: options.hooks,
+      record: {
+        orgId: auth.user.organizationId,
+        conversationId: conv.id,
+        text: text || (templateName ? `[Modelo: ${templateName}]` : ''),
+        fromPhone: conn.phone_number,
+        toPhone: to,
+        sentBy: auth.user.id,
+        mediaType: media ? mediaKind : null,
+        mediaUrl: media ? mediaPath : null,
+        mediaMime: media?.mimeType ?? null,
+        ...(quotedRow ? { quotedMessageId: quotedRow.id, quoted: quotedSnapshot } : {}),
+      },
+    });
 
-  if (!result.ok) {
-    return json({ ok: false, error: result.error || 'Falha no envio', message }, 502);
+    if (!result.ok) {
+      return json({ ok: false, error: result.error || 'Falha no envio', message }, 502);
+    }
+    return json({ ok: true, message });
+  } catch (error) {
+    if (cooldown && !dispatched) {
+      try { await releaseMediaCooldown(auth.admin, cooldown); } catch { /* keep the short reservation on DB failure */ }
+    }
+    if (error instanceof MediaCooldownError) {
+      const response = json({ ok: false, code: error.code, error: error.message, retryAfterSeconds: error.retryAfter }, 409);
+      response.headers.set('Retry-After', String(error.retryAfter));
+      return response;
+    }
+    throw error;
   }
-  return json({ ok: true, message });
 }

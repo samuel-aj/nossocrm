@@ -9,8 +9,10 @@ import { useQuery } from '@tanstack/react-query';
 export type SignerLite = { name: string; status: string; signed_at: string | null; role: string };
 
 export type Signature = {
+  can_recover?: boolean;
+  doc_token?: string | null;
   id: string;
-  origin: 'rule' | 'manual';
+  origin: 'rule' | 'manual' | 'agent';
   status: string;
   stage_id: string | null;
   template_name: string | null;
@@ -24,6 +26,7 @@ export type Signature = {
   file_id: string | null;
   last_error: string | null;
   signers: SignerLite[];
+  notices?: Array<{kind:'invite'|'signed'; state:string; note:string | null}>;
   created_at: string;
 };
 
@@ -70,10 +73,11 @@ export function useDealSignatures(dealId: string, enabled = true) {
     staleTime: 10_000,
     refetchInterval: (query) => {
       const list = query.state.data?.signatures ?? [];
-      return list.some((s) => LIVE_STATUSES.includes(s.status)) ? 15_000 : false;
+      return list.some((s) => LIVE_STATUSES.includes(s.status) ||
+        s.notices?.some(n => ['pending','working','dispatching'].includes(n.state))) ? 15_000 : false;
     },
   });
 }
 
 export type SendOutcome = { status: string; sent_via?: string; note?: string; error?: string; reason?: string };
-export type SendResponse = { error?: string; signature?: Signature; outcome?: SendOutcome };
+export type SendResponse = { error?: string; signature?: Signature; outcome?: SendOutcome; unconfirmed_attempts?: string[] };

@@ -43,6 +43,18 @@ describe('media goes through the same budget before payment', () => {
     expect(h.settle.mock.calls[0][2]).toMatchObject({ status: 'completed', actualAmount: 1 });
   });
 
+  it('settles silent audio without blocking the run or saving a fake transcript', async () => {
+    const f = fixture(wav());
+    h.transcribe.mockRejectedValueOnce(Object.assign(new Error('No transcript generated.'), { name: 'AI_NoTranscriptGeneratedError' }));
+    await runWithUsageContext(f.usage, async () => {
+      const rows = await understandMedia(f.admin, { organizationId: org, agent: agent(), messages: [message('audio')] });
+      expect(rows[0].transcription).toBeNull();
+      expect(() => assertUsageHealthy()).not.toThrow();
+    });
+    expect(h.settle.mock.calls[0][2]).toMatchObject({ status: 'completed', actualAmount: 2 });
+    expect(f.chain.update).not.toHaveBeenCalled();
+  });
+
   it('asks Whisper for the duration and, when it still does not come, settles with the locally measured duration', async () => {
     const f = fixture(wav());
     h.transcribe.mockResolvedValueOnce({ text: 'Texto fictício' });

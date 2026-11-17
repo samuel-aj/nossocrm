@@ -4,7 +4,15 @@ import { loadFollowupCalendar } from './followupCalendarStore';
 
 function db(rows: Record<string, unknown>, fail?: string) {
   return { rpc: async () => ({ data: rows.budget ?? { blocked_at: null }, error: null }), from: (table: string) => {
-    const q = { in: () => q, not: () => q, order: () => q, limit: () => q, select: vi.fn(() => q), eq: vi.fn(() => q), maybeSingle: async () => ({ data: (table === 'wa_messages' ? { created_at: (rows.wa_conversations as typeof conv)?.last_inbound_at } : rows[table]) ?? null, error: fail === table ? { message: 'offline' } : null }) };
+    let single = false;
+    const q = { in: () => q, not: () => q, order: () => q, limit: () => q, select: vi.fn(() => q), eq: vi.fn(() => q),
+      maybeSingle: () => { single = true; return q; },
+      then: (resolve: (result: unknown) => void) => {
+        const value = table === 'wa_messages' ? { created_at: (rows.wa_conversations as typeof conv)?.last_inbound_at } : rows[table];
+        const matches = value == null ? [] : Array.isArray(value) ? value : [value];
+        return resolve({ data: single ? matches[0] ?? null : matches, error: fail === table ? { message: 'offline' } : null });
+      },
+    };
     return q;
   } } as never;
 }
@@ -39,6 +47,40 @@ describe('proactive follow-up guard', () => {
   });
   it('cancels a robot continuation after the stage rule changes', async () => {
     expect((await checkProactiveFollowup(db({ wa_conversations: conv, deals: { stage_id: 'stage' }, stage_followup_rules: { enabled: true, version: 2 } }), 'org', 'conv', { anchor, dealId: 'deal', stageId: 'stage', ruleVersion: 1 }, now)).kind).toBe('cancel');
+  });
+});
+
+describe('contrato manual durante follow-up do agente', () => {
+  const conversation = { ...conv, ai_agent_id: 'agent', deal_id: 'deal', contact_id: 'contact' };
+  const context = { anchor, agentFollowup: { agentId: 'agent', templateToken: 'template' } };
+  const contract = { status: 'pending', created_at: '2026-11-06T11:00:00Z', doc_token: 'document', request: {} };
+  it('reconfere e cancela se o contrato aparece depois da primeira validação', async () => {
+    const rows: Record<string, unknown> = { wa_conversations: conversation };
+    const admin = db(rows);
+    expect(await checkProactiveFollowup(admin, 'org', 'conv', context, now)).toEqual({ kind: 'allowed' });
+    rows.deal_signatures = contract;
+    expect(await checkProactiveFollowup(admin, 'org', 'conv', context, now))
+      .toEqual({ kind: 'cancel', reason: 'a equipe já emitiu o contrato deste atendimento' });
+  });
+  it('permite acompanhar o novo ciclo quando o cliente responde depois da emissão', async () => {
+    const newer = '2026-11-06T12:00:00Z';
+    const rows = { wa_conversations: { ...conversation, last_inbound_at: newer }, deal_signatures: contract };
+    expect(await checkProactiveFollowup(db(rows), 'org', 'conv', { ...context, anchor: newer }, now))
+      .toEqual({ kind: 'allowed' });
+  });
+  it('falha fechada se a situação do contrato não puder ser conferida', async () => {
+    await expect(checkProactiveFollowup(db({ wa_conversations: conversation }, 'deal_signatures'), 'org', 'conv', context, now))
+      .rejects.toThrow('Não foi possível conferir o contrato emitido pela equipe');
+  });
+  it('cancela a régua antiga quando o agente da conversa mudou', async () => {
+    expect((await checkProactiveFollowup(db({ wa_conversations: { ...conversation, ai_agent_id: 'other' } }), 'org', 'conv', context, now)).kind)
+      .toBe('cancel');
+  });
+  it('não aplica regra de contrato a automação independente da etapa', async () => {
+    const rows = { wa_conversations: conversation, deal_signatures: contract, deals: { stage_id: 'stage' },
+      stage_followup_rules: { enabled: true, version: 1 } };
+    expect(await checkProactiveFollowup(db(rows, 'deal_signatures'), 'org', 'conv', { anchor, dealId: 'deal', stageId: 'stage', ruleVersion: 1 }, now))
+      .toEqual({ kind: 'allowed' });
   });
 });
 

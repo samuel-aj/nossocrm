@@ -12,6 +12,7 @@ export type TokenTariff = {
 
 export type CostEstimate = { estimatedCostUsd: number | null; pricingVersion: string | null };
 export const PRICING_VERSION = '2026-10-23-standard-usd-v1';
+export const GPT6_PRICING_VERSION = '2026-11-17-standard-usd-v1';
 const UNKNOWN_COST: CostEstimate = { estimatedCostUsd: null, pricingVersion: null };
 
 // Standard direct-API list prices, USD per million tokens. Verified 2026-10-23.
@@ -39,7 +40,30 @@ const STANDARD_RATES: Record<string, readonly [input: number, cached: number | n
   'google:gemini-embedding-001': [0.15, null, 0],
 };
 
+// Verified 2026-11-17 against each model's official page linked above.
+// Separate version: existing tariffs and stored estimates keep their provenance.
+const GPT6_RATES: Record<string, readonly [input: number, cached: number, output: number]> = {
+  'openai:gpt-6-luna': [0.1, 0.01, 0.5],
+  'openai:gpt-6.1-terra': [1, 0.05, 5],
+  'openai:gpt-6-astra': [10, 1, 50],
+  'openai:gpt-6.1-sol': [2, 0.1, 10],
+};
+
 export function tokenTariff(provider: string, model: string, usage: NormalizedUsage, operation?: string): TokenTariff | null {
+  const gpt6Rates = GPT6_RATES[`${provider}:${model}`];
+  if (gpt6Rates) {
+    // Cache writes carry a separate price/retention tier. Unknown counts must not
+    // be treated as zero when the installed SDK omits that usage breakdown.
+    if (usage.cacheWriteTokens !== 0) return null;
+    const [input, cached, output] = gpt6Rates;
+    const longContext = usage.inputTokens > 272_000;
+    return {
+      version: GPT6_PRICING_VERSION, provider, model, currency: 'USD',
+      inputPerMillion: input * (longContext ? 2 : 1),
+      cachedInputPerMillion: cached * (longContext ? 2 : 1),
+      outputPerMillion: output * (longContext ? 1.5 : 1),
+    };
+  }
   const rates = STANDARD_RATES[`${provider}:${model}`];
   if (!rates) return null;
   // Cache-write TTL affects Anthropic prices and is not recorded by our SDK contract.

@@ -47,6 +47,8 @@ import ConfirmModal from '@/components/ConfirmModal';
 import { useToast } from '@/context/ToastContext';
 import {
   AI_PROVIDERS,
+  AGENT_VOICES,
+  DEFAULT_AGENT_VOICE,
   AgentInputSchema,
   DEFAULT_AGENT_AUTO_LEAD,
   DEFAULT_AGENT_TRIGGERS,
@@ -59,6 +61,7 @@ import {
   type AgentPublic,
   type AgentTriggers,
   type AgentMediaUnderstanding,
+  type AgentVoice,
   type AgentTyping,
   type AgentWebhook,
   type CustomAction,
@@ -67,6 +70,7 @@ import {
   type AgentFollowup,
 } from '@/lib/wa-agents/types';
 import { MODEL_CATALOG, PROMPT_VARIABLE_NAMES, PROVIDER_LABELS } from '@/lib/wa-agents/catalog';
+import { supportsModelTemperature } from '@/lib/ai/modelCapabilities';
 import { typingDelayMs, typingSecondsLabel } from '@/lib/wa-agents/typing';
 import { DEFAULT_OUTCOMES, DEFAULT_STOP_RULES, DEFAULT_SYSTEM_PROMPT } from '@/lib/wa-agents/defaults';
 import {
@@ -88,7 +92,9 @@ import { HighlightedScript } from './HighlightedScript';
 import type { KnownTokens } from './tokens';
 import { FollowupsEditor } from './FollowupsEditor';
 import { KnowledgePanel } from './KnowledgePanel';
+import { AgentContractSetting } from './AgentContractSetting';
 import { AgentTestDrawer } from './AgentTestDrawer';
+import { VoicePreview } from './VoicePreview';
 import {
   BTN_PRIMARY,
   BTN_SECONDARY,
@@ -119,7 +125,7 @@ type InboundMode = AgentTriggers['inbound']['mode'];
 type DealEvent = AgentTriggers['deal']['event'];
 
 /** Ferramentas extras do agente (espelha AgentToolsSchema). */
-type AgentToolsState = { calculator: boolean; scheduled_return_bot_id?: string | null };
+type AgentToolsState = AgentInput['tools'];
 
 type AgentFormState = {
   name: string;
@@ -133,7 +139,7 @@ type AgentFormState = {
   api_key: string;
   /** Remover a chave própria ao salvar */
   clear_api_key: boolean;
-  /** Chave da OpenAI só para transcrever áudio, digitada agora ('' = não mexe) */
+  /** Chave da OpenAI para transcrição e síntese, digitada agora ('' = não mexe) */
   audio_api_key: string;
   /** Remover a chave de áudio ao salvar */
   clear_audio_api_key: boolean;
@@ -296,7 +302,7 @@ function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInpu
     triggers: normalizeTriggers(src.triggers),
     webhooks: src.webhooks ?? [],
     helper_agent_ids: src.helper_agent_ids ?? [],
-    tools: { calculator: src.tools?.calculator ?? true, scheduled_return_bot_id: src.tools?.scheduled_return_bot_id ?? null },
+    tools: { ...src.tools, calculator: src.tools?.calculator ?? true, scheduled_return_bot_id: src.tools?.scheduled_return_bot_id ?? null },
     typing: (({ ms_per_char, min_ms, max_ms }) => ({ ms_per_char, min_ms, max_ms }))(normalizeTyping(src.typing)),
     media_understanding: { ...DEFAULT_AGENT_MEDIA_UNDERSTANDING, ...(src.media_understanding ?? {}) },
     auto_lead: { ...DEFAULT_AGENT_AUTO_LEAD, ...(src.auto_lead ?? {}) },
@@ -341,7 +347,7 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
     },
     webhooks: form.webhooks,
     helper_agent_ids: form.helper_agent_ids,
-    tools: { calculator: form.tools.calculator, scheduled_return_bot_id: form.tools.scheduled_return_bot_id ?? null },
+    tools: { ...form.tools, scheduled_return_bot_id: form.tools.scheduled_return_bot_id ?? null },
     typing: fixedTyping(form.typing),
     lead_context: { ...FIXED_LEAD_CONTEXT },
     media_understanding: form.media_understanding,
@@ -920,7 +926,7 @@ export const AgentEditor: React.FC<{
   const [hasAudioApiKey, setHasAudioApiKey] = useState<boolean>(agent?.has_audio_api_key ?? false);
   // Valores antigos dos comportamentos fixos: vão junto no primeiro PATCH (ver legacyDefaultsPatch).
   const [legacyPatch, setLegacyPatch] = useState<Partial<AgentInput>>(() => legacyDefaultsPatch(agent));
-  /** Terá chave para transcrever áudio depois de salvar (digitada agora ou já salva). */
+  /** Terá chave auxiliar de áudio depois de salvar (digitada agora ou já salva). */
   const temChaveDeAudio = form.clear_audio_api_key ? false : hasAudioApiKey || !!form.audio_api_key.trim();
   const [tab, setTabState] = useState<EditorTab>('roteiro');
   const [testOpen, setTestOpen] = useState(false);
@@ -965,6 +971,7 @@ export const AgentEditor: React.FC<{
   const connections = options?.connections ?? [];
   const agents = agentsQ.data ?? [];
   const catalog = MODEL_CATALOG[form.provider] ?? [];
+  const temperatureEnabled = supportsModelTemperature(form.provider, form.model);
   const isCatalogModel = catalog.some((m) => m.id === form.model);
   const [customModel, setCustomModel] = useState<boolean>(() => {
     const models = MODEL_CATALOG[form.provider] ?? [];
@@ -1305,16 +1312,11 @@ export const AgentEditor: React.FC<{
         </Panel>
 
         <Panel title="Recursos" icon={<Calculator size={16} />}>
-          <div className="mb-4 space-y-2">
-            <label className="block text-sm font-semibold" htmlFor="scheduled-return-bot">Robô para retorno combinado</label>
-            <select id="scheduled-return-bot" className="w-full rounded-lg border border-slate-200 bg-transparent p-2 text-sm dark:border-slate-700" value={form.tools.scheduled_return_bot_id ?? ''} onChange={event => patch({ tools: { ...form.tools, scheduled_return_bot_id: event.target.value || null } })}>
-              <option value="">Desativado</option>
-              {botsMinimal.map(bot => <option key={bot.id} value={bot.id} disabled={!bot.enabled}>{bot.name}{bot.enabled ? '' : ' (desligado)'}</option>)}
-            </select>
-            <p className="text-xs text-slate-500">A IA pode agendar este robô após combinar data, horário e fuso com o cliente, inclusive fora dos horários de follow-up. No robô, use Entregar a agente para reativar a IA. Na API oficial, retornos fora da janela de 24h precisam de modelo aprovado.</p>
-            <p className="text-xs text-slate-500">O robô precisa estar ligado e configurado para o mesmo número da conversa.</p>
-          </div>
           <div className={ROW_DIVIDER_CLASS}>
+            {tab === 'acoes' && <AgentContractSetting value={form.tools.zapsign_template_token} mapping={form.tools.zapsign_variables ?? {}}
+              signedMessage={form.tools.zapsign_signed_message_template} connectionIds={form.connection_ids}
+              onSignedMessage={id => patch({ tools: { ...form.tools, zapsign_signed_message_template:id } })}
+              onChange={(token, variables) => patch({ tools: { ...form.tools, zapsign_template_token: token, zapsign_variables: variables } })} />}
             <SettingRow
               title="Calculadora"
               tip="Ferramenta calcular: contas de parcelas, prazos e percentuais sem o modelo chutar números."
@@ -1504,6 +1506,30 @@ export const AgentEditor: React.FC<{
         >
           <FollowupsEditor value={form.followups} onChange={(followups) => patch({ followups })} bots={botsQ.data ?? []} />
         </Panel>
+
+        <Panel
+          title="Retorno combinado com o cliente"
+          description="Se o cliente pedir “me chama daqui a 13 horas”, a IA combina o horário e agenda o robô para aquele momento, inclusive fora dos horários de follow-up."
+          icon={<AlarmClock size={16} />}
+        >
+          <Field label="Robô para retorno combinado" htmlFor="scheduled-return-bot">
+            <NativeSelect
+              id="scheduled-return-bot"
+              className={INPUT_CLASS}
+              value={form.tools.scheduled_return_bot_id ?? ''}
+              onChange={(event) => patch({ tools: { ...form.tools, scheduled_return_bot_id: event.target.value || null } })}
+            >
+              <option value="">Desativado</option>
+              {botsMinimal.map((bot) => (
+                <option key={bot.id} value={bot.id} disabled={!bot.enabled}>
+                  {bot.name}{bot.enabled ? '' : ' (desligado)'}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
+          <p className="mt-2 text-xs text-slate-500">Escolha um robô ligado ao mesmo número da conversa. Use o bloco <strong>Entregar a agente</strong> para a IA retomar o atendimento.</p>
+          <p className="mt-1 text-xs text-slate-500">Na API oficial do WhatsApp, retornos fora da janela de 24 horas precisam de um modelo aprovado.</p>
+        </Panel>
       </TabPanel>
 
       {/* 5. Modelo e resposta */}
@@ -1564,9 +1590,11 @@ export const AgentEditor: React.FC<{
               ) : null}
             </Field>
             <Field
-              label={`Temperatura: ${form.temperature.toFixed(2)}`}
+              label={temperatureEnabled ? `Temperatura: ${form.temperature.toFixed(2)}` : 'Temperatura automática'}
               htmlFor="agent-temperature"
-              tip="Baixa = respostas mais previsíveis; alta = mais criativas. Para atendimento, entre 0,3 e 0,7."
+              tip={temperatureEnabled
+                ? 'Baixa = respostas mais previsíveis; alta = mais criativas. Para atendimento, entre 0,3 e 0,7.'
+                : 'Este modelo usa o padrão de temperatura do provedor.'}
             >
               <input
                 id="agent-temperature"
@@ -1575,8 +1603,9 @@ export const AgentEditor: React.FC<{
                 max={1.5}
                 step={0.05}
                 value={form.temperature}
+                disabled={!temperatureEnabled}
                 onChange={(e) => patch({ temperature: Number(e.target.value) })}
-                className="w-full accent-purple-600 mt-2.5"
+                className="w-full accent-purple-600 mt-2.5 disabled:opacity-40 disabled:cursor-not-allowed"
               />
             </Field>
           </div>
@@ -1634,7 +1663,7 @@ export const AgentEditor: React.FC<{
             <Field
               label="Chave auxiliar da OpenAI (áudio)"
               htmlFor="agent-audio-api-key"
-              tip="Só para transcrever os áudios do lead (whisper-1) quando o provedor do agente não é a OpenAI. Vazio: o Google transcreve com a chave do próprio agente e a Anthropic usa a chave da OpenAI da organização (Central de I.A.)."
+              tip="Chave OpenAI dedicada para transcrever e gerar voz. Sem ela, a geração de voz usa a chave OpenAI do agente ou da organização."
               help={
                 form.clear_audio_api_key
                   ? 'A chave de áudio será removida ao salvar.'
@@ -1789,17 +1818,17 @@ export const AgentEditor: React.FC<{
         </Panel>
 
         <Panel
-          title="Mídias recebidas no atendimento"
-          description="Arquivos que o lead manda na conversa viram texto para o agente. Não tem relação com a base de conhecimento."
+          title="Mídias no atendimento"
           icon={<Paperclip size={16} />}
         >
           <div className={ROW_DIVIDER_CLASS}>
             {(
               [
-                ['audio', 'Ouvir áudios', 'Transcreve o que o lead falou. A transcrição também aparece no chat.'],
                 ['image', 'Ver imagens', 'Descreve fotos e figurinhas e lê o texto de prints, boletos e documentos fotografados.'],
                 ['document', 'Ler documentos', 'Extrai o texto de PDF, DOCX e arquivos de texto.'],
-              ] as Array<[keyof AgentMediaUnderstanding, string, string]>
+                ['audio', 'Ouvir áudios', 'Transcreve o que o lead falou. A transcrição também aparece no chat.'],
+                ['reply_to_audio', 'Responder em áudio quando o cliente enviar áudio', 'Responde por voz à última mensagem de áudio do cliente. Links seguem por escrito. A geração usa a chave da OpenAI configurada para o agente ou para a organização.'],
+              ] as Array<[Exclude<keyof AgentMediaUnderstanding, 'voice'>, string, string]>
             ).map(([campo, titulo, ajuda]) => (
               <SettingRow
                 key={campo}
@@ -1807,12 +1836,29 @@ export const AgentEditor: React.FC<{
                 tip={ajuda}
                 control={
                   <Toggle
-                    checked={form.media_understanding[campo]}
-                    onChange={(v) => patch({ media_understanding: { ...form.media_understanding, [campo]: v } })}
+                    checked={!!form.media_understanding[campo]}
+                    onChange={(v) => patch({ media_understanding: {
+                      ...form.media_understanding, [campo]: v,
+                      ...(campo === 'reply_to_audio' && v ? { audio: true } : {}),
+                      ...(campo === 'audio' && !v ? { reply_to_audio: false } : {}),
+                    } })}
                     label={titulo}
                   />
                 }
-              />
+              >
+                {campo === 'reply_to_audio' && (
+                  <Field label="Voz do agente" htmlFor="agent-voice" help="Usada nas respostas em áudio e nos trechos marcados no roteiro.">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <NativeSelect id="agent-voice" aria-label="Voz do agente" className={INPUT_CLASS + ' max-w-48'}
+                        value={form.media_understanding.voice ?? DEFAULT_AGENT_VOICE}
+                        onChange={e => patch({ media_understanding: { ...form.media_understanding, voice: e.target.value as AgentVoice } })}>
+                        {AGENT_VOICES.map(voice => <option key={voice} value={voice}>{voice[0].toUpperCase() + voice.slice(1)}</option>)}
+                      </NativeSelect>
+                      <VoicePreview key={form.media_understanding.voice ?? DEFAULT_AGENT_VOICE} agentId={agentId} draft={toPayload(form)} />
+                    </div>
+                  </Field>
+                )}
+              </SettingRow>
             ))}
           </div>
           {form.media_understanding.audio && form.provider === 'anthropic' && !temChaveDeAudio ? (

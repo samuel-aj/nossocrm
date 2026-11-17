@@ -5,6 +5,7 @@
  */
 import { z } from 'zod';
 import { isPublicHttpUrl } from './url';
+import { readVoiceScript } from './voiceScript';
 
 export const WA_AGENTS_BETA_FLAG = 'wa_agents_beta';
 /**
@@ -183,6 +184,9 @@ export const AgentToolsSchema = z.object({
   /** Ferramenta calcular (avaliador seguro de expressões) */
   calculator: z.boolean().default(true),
   scheduled_return_bot_id: z.string().uuid().nullable().optional(),
+  zapsign_template_token: z.string().trim().min(1).max(160).nullable().optional(),
+  zapsign_variables: z.record(z.string().min(1).max(160), z.string().max(1000)).optional(),
+  zapsign_signed_message_template: z.string().uuid().nullable().optional(),
 });
 export type AgentTools = z.infer<typeof AgentToolsSchema>;
 export const DEFAULT_AGENT_TOOLS: AgentTools = { calculator: true };
@@ -217,7 +221,13 @@ export type AgentLeadContext = z.infer<typeof AgentLeadContextSchema>;
 // ---------------------------------------------------------------------------
 // Mídia recebida: áudio, imagem, figurinha e documento viram texto pela IA do agente
 // ---------------------------------------------------------------------------
+export const AGENT_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar'] as const;
+export type AgentVoice = (typeof AGENT_VOICES)[number];
+export const DEFAULT_AGENT_VOICE: AgentVoice = 'alloy';
+
 export const AgentMediaUnderstandingSchema = z.object({
+  voice: z.enum(AGENT_VOICES).optional(),
+  reply_to_audio: z.boolean().optional(),
   /** Áudio do lead transcrito (OpenAI whisper / Google; Anthropic não transcreve) */
   audio: z.boolean().default(true),
   /** Imagem e figurinha descritas pelo modelo do agente */
@@ -295,7 +305,10 @@ export const AgentInputSchema = z.object({
   api_key: z.string().max(500).nullable().optional(),
   /** Chave da OpenAI usada SÓ para transcrever áudio (provedor que não ouve); mesma regra de undefined/null */
   audio_api_key: z.string().max(500).nullable().optional(),
-  system_prompt: z.string().max(60000).default(''),
+  system_prompt: z.string().max(60000).superRefine((script, ctx) => {
+    const { error } = readVoiceScript(script);
+    if (error) ctx.addIssue({ code: 'custom', message: error });
+  }).default(''),
   buffer_seconds: z.number().int().min(0).max(60).default(10),
   history_limit: z.number().int().min(5).max(200).default(40),
   line_delay_ms: z.number().int().min(0).max(10000).default(0),
@@ -495,12 +508,15 @@ export type AgentMediaRow = {
   storage_path: string;
   /** Cópia no bucket wa-media (feita no primeiro envio e reutilizada) */
   outbox_path?: string | null;
+  /** Defaults to true for existing media and legacy API payloads. */
+  send_once_per_conversation?: boolean;
   created_at: string;
 };
 
 export const AgentMediaInputSchema = z.object({
   name: z.string().min(1).max(80),
   description: z.string().max(500).default(''),
+  send_once_per_conversation: z.boolean().default(true),
   kind: z.enum(AGENT_MEDIA_KINDS),
   storage_path: z.string().min(1),
   mime: z.string().max(120),
@@ -508,10 +524,11 @@ export const AgentMediaInputSchema = z.object({
 });
 export type AgentMediaInput = z.infer<typeof AgentMediaInputSchema>;
 
-/** PATCH de uma mídia: só nome e descrição */
+/** PATCH de uma mídia: nome, descrição e controle de repetição. */
 export const AgentMediaPatchSchema = z.object({
   name: z.string().min(1).max(80).optional(),
   description: z.string().max(500).optional(),
+  send_once_per_conversation: z.boolean().optional(),
 });
 
 /** Metadados editáveis de um documento da base (título, descrição do conteúdo, etiquetas). */
@@ -747,8 +764,13 @@ export type BotStep = z.infer<typeof BotStepSchema>;
 export type BotStepType = BotStep['type'];
 
 export const BotTriggerSchema = z.object({
-  /** agent_followup: só entra em ação por uma regra de follow-up de um agente de IA */
-  type: z.enum(['deal_created', 'deal_stage_entered', 'manual', 'agent_followup']),
+  /**
+   * agent_followup: só entra em ação por uma regra de follow-up de um agente de IA.
+   * message_received: o cliente mandou mensagem num número do robô (ou no
+   * `connection_id`, quando escolhido); a mensagem vira a "última mensagem do
+   * lead" que o bloco Condição lê.
+   */
+  type: z.enum(['deal_created', 'deal_stage_entered', 'manual', 'agent_followup', 'message_received']),
   board_id: z.string().uuid().nullable().optional(),
   stage_id: z.string().uuid().nullable().optional(),
   /**
@@ -761,6 +783,12 @@ export const BotTriggerSchema = z.object({
    * movido para ela ou qualquer um (padrão). Lido pelo trigger wa_bot_on_deal.
    */
   entry: z.enum(['any', 'created', 'moved']).optional(),
+  /**
+   * Só message_received: dispara com qualquer mensagem (padrão) ou só quando ela
+   * contém uma das palavras de `keywords` (sem acentos/maiúsculas).
+   */
+  match: z.enum(['any', 'contains']).optional(),
+  keywords: z.array(z.string().trim().min(1).max(100)).max(20).optional(),
   /** Posição do nó Gatilho no quadro (persistida como a dos passos) */
   ui: BotStepUiSchema.optional(),
 });
@@ -921,6 +949,8 @@ export type ConversationApproval = {
 
 /** Conteúdo de `wa_conversations.ai_state` */
 export type ConversationAiState = {
+  /** Comprovante interno da ficha apresentada nesta conversa. */
+  zapsign_review?: string;
   /** dados salvos pela ferramenta salvar_dados */
   dados?: Record<string, unknown>;
   /** passagem de bastão vinda de outro agente */
@@ -931,6 +961,7 @@ export type ConversationAiState = {
   deal_id?: string | null;
   /** nomes das mídias já enviadas neste atendimento (enviar_midia não repete) */
   midias_enviadas?: string[];
+  voice_introduced?: boolean;
   /** respostas já enviadas pelo agente neste atendimento (teto max_replies) */
   respostas?: number;
   /** "Limpar memória": o agente só enxerga mensagens a partir desta data (ISO) */

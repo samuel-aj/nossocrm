@@ -211,11 +211,13 @@ export const productsService = {
         // Atualiza EM UMA TACADA (por condição, sem lista de ids) os itens que
         // herdaram o padrão antigo OU estão zerados, e recebe de volta os
         // deal_ids afetados pra recalcular o total de cada lead.
+        // in() e não or(): numa alteração com retorno o PostgREST reaplica or()
+        // às linhas devolvidas, onde `price` não existe, e a alteração falha (400).
         let upd = supabase
           .from('deal_items')
           .update({ price: newPrice })
           .eq('product_id', productId)
-          .or(`price.eq.${oldPrice},price.eq.0`)
+          .in('price', [oldPrice, 0])
           .neq('price', newPrice);
         if (orgId) upd = upd.eq('organization_id', orgId);
         const { data: updatedItems, error: itemsError } = await upd.select('deal_id');

@@ -14,6 +14,7 @@ import { loadLastInboundAt } from './lastInbound';
  * parar o agente: a resposta do lead volta para o agente.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { manualContractIssued } from '@/lib/zapsign/agentContractFact';
 import { loadFollowupCalendar } from './followupCalendarStore';
 import { nextFollowupWindow } from './followupCalendar';
 import { getServiceWindow } from '@/lib/whatsapp/serviceWindow';
@@ -23,12 +24,15 @@ import { loadAgent } from './context';
 import { runAgentOnConversation } from './engine';
 import { errorMessage } from './errors';
 import type { AgentFollowup, ConversationAiState } from './types';
+import type { ProactiveFollowup } from './proactiveFollowup';
 
 type ConvRow = {
   id: string;
   organization_id: string;
   ai_agent_id: string;
   connection_id: string | null;
+  deal_id: string | null;
+  contact_id: string | null;
   last_inbound_at: string | null;
   ai_state: ConversationAiState | null;
   ai_status_changed_at: string | null;
@@ -109,7 +113,7 @@ export async function processFollowups(
 
       const { data: convsRaw } = await admin
         .from('wa_conversations')
-        .select('id, organization_id, ai_agent_id, connection_id, ai_state, ai_status_changed_at')
+        .select('id, organization_id, ai_agent_id, connection_id, deal_id, contact_id, ai_state, ai_status_changed_at')
         .eq('organization_id', a.organization_id)
         .eq('ai_agent_id', a.id)
         .eq('ai_status', 'active')
@@ -121,6 +125,12 @@ export async function processFollowups(
         try {
           conv.last_inbound_at = await loadLastInboundAt(admin, conv.organization_id, conv.id);
           if (await pendingRobotReturn(admin, conv.organization_id, conv.id)) continue;
+          // A reviewed manual contract supersedes this agent's collection
+          // sequence. Inbound replies and the signature notice remain active.
+          if (await manualContractIssued(admin, {
+            organizationId: conv.organization_id, dealId: conv.deal_id, contactId: conv.contact_id,
+            templateToken: agent.tools?.zapsign_template_token, silentSince: conv.last_inbound_at,
+          })) continue;
           const state = (conv.ai_state ?? {}) as ConversationAiState;
           const cycle = conv.last_inbound_at ?? null;
           const done = state.followups && state.followups.cycle === cycle ? [...state.followups.done] : [];
@@ -143,7 +153,7 @@ export async function processFollowups(
           if (claimError) throw new Error(claimError.message);
           if (!claimed) continue;
 
-          const fired = await fireRule(admin, conv, rule, elapsed);
+          const fired = await fireRule(admin, conv, rule, elapsed, agent.tools?.zapsign_template_token);
           if (typeof fired === 'string') {
             // Window closed while preparing the response, before any outbound: keep it pending.
             const { error } = await admin.rpc('claim_agent_followup', {
@@ -164,14 +174,17 @@ export async function processFollowups(
   return result;
 }
 
-async function fireRule(admin: SupabaseClient, conv: ConvRow, rule: AgentFollowup, elapsedMs: number): Promise<boolean | string> {
+async function fireRule(admin: SupabaseClient, conv: ConvRow, rule: AgentFollowup, elapsedMs: number,
+  templateToken?: string | null): Promise<boolean | string> {
+  const proactive: ProactiveFollowup = { anchor: conv.last_inbound_at,
+    ...(templateToken ? { agentFollowup: { agentId: conv.ai_agent_id, templateToken } } : {}) };
   if (rule.kind === 'bot') {
     if (!rule.bot_id) return false;
     const created = await createBotRun(admin, {
       organizationId: conv.organization_id,
       botId: rule.bot_id,
       conversationId: conv.id,
-      proactive: { anchor: conv.last_inbound_at },
+      proactive,
     });
     if (!created.ok || !created.run) {
       console.error('[wa-agents] follow-up: robô não iniciou:', created.error);
@@ -188,7 +201,7 @@ async function fireRule(admin: SupabaseClient, conv: ConvRow, rule: AgentFollowu
     organizationId: conv.organization_id,
     conversationId: conv.id,
     trigger: 'followup',
-    proactive: { anchor: conv.last_inbound_at },
+    proactive,
     agentId: conv.ai_agent_id,
     forceReply: true,
     skipBuffer: true,

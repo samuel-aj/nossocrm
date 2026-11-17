@@ -10,6 +10,7 @@
  */
 import { envEvolution } from '@/lib/whatsapp';
 import type { WaConnectionRow } from '@/lib/whatsapp/service';
+import { participantName, phoneFrom, type GroupParticipant } from './groupParticipants';
 
 const GRAPH = () => `https://graph.facebook.com/${(process.env.META_GRAPH_VERSION || 'v21.0').trim()}`;
 
@@ -195,4 +196,89 @@ export async function getGroupParticipants(conn: WaConnectionRow, groupJid: stri
   } catch {
     return { ok: false as const, error: 'Não foi possível consultar os participantes. Tente novamente.' };
   }
+}
+
+export async function getMetaGroupParticipants(conn: WaConnectionRow, groupId: string): Promise<Ok<{ participants: GroupParticipant[] }> | Fail> {
+  if (!conn.instance_token) return { ok: false, error: 'Número da API oficial sem token.' };
+  type MetaMember = { wa_id?: string; user_id?: string; username?: string; profile?: { name?: string } };
+  const result = await graph<{ participants?: MetaMember[] }>('GET', '/' + encodeURIComponent(groupId) + '?fields=participants', conn.instance_token);
+  if (!result.ok) return result;
+  if (!Array.isArray(result.data?.participants)) return { ok: false, error: 'A Meta não disponibilizou a lista de participantes.' };
+  const members = new Map<string, GroupParticipant>();
+  for (const item of result.data.participants) {
+    if (!item) continue;
+    const phone = phoneFrom(item.wa_id);
+    const id = item.user_id || phone;
+    if (id) members.set(id, { id, phone, name: participantName(item.profile?.name) || participantName(item.username) || phone || '', admin: false });
+  }
+  return { ok: true, participants: [...members.values()] };
+}
+
+export interface GroupProperties { subject: string; description: string; pictureUrl: string | null }
+export type GroupEdit = { field: 'subject' | 'description'; value: string } | { field: 'photo'; jpeg: Uint8Array<ArrayBuffer> };
+
+/** Only the server derives the group, connection and provider URL. */
+async function groupRequest(conn: WaConnectionRow, groupId: string, edit?: GroupEdit) {
+  const meta = conn.provider === 'meta_cloud';
+  if (conn.provider && !meta && conn.provider !== 'evolution') return { ok: false as const, error: 'Esta conexão não permite gerenciar as propriedades do grupo.' };
+  let url: string;
+  let body: FormData | string | undefined;
+  const headers: Record<string, string> = {};
+  if (meta) {
+    if (!conn.instance_token) return { ok: false as const, error: 'Número da API oficial sem token.' };
+    headers.Authorization = 'Bearer ' + conn.instance_token;
+    url = GRAPH() + '/' + encodeURIComponent(groupId);
+    if (edit) {
+      body = new FormData();
+      body.set('messaging_product', 'whatsapp');
+      if (edit.field === 'photo') body.set('profile_picture_file', new Blob([edit.jpeg], { type: 'image/jpeg' }), 'grupo.jpg');
+      else body.set(edit.field, edit.value);
+    } else url += '?fields=subject,description';
+  } else {
+    const { baseUrl, token } = evolutionBase(conn);
+    if (!baseUrl || !token) return { ok: false as const, error: 'Evolution não configurada.' };
+    headers.apikey = token;
+    let action = 'findGroupInfos';
+    if (edit) {
+      const actions = { subject: 'updateGroupSubject', description: 'updateGroupDescription', photo: 'updateGroupPicture' };
+      action = actions[edit.field];
+      headers['Content-Type'] = 'application/json';
+      const change = edit.field === 'photo' ? { image: Buffer.from(edit.jpeg).toString('base64') } : { [edit.field]: edit.value };
+      body = JSON.stringify({ groupJid: groupId, ...change });
+    }
+    url = baseUrl + '/group/' + action + '/' + encodeURIComponent(conn.instance_name) + '?groupJid=' + encodeURIComponent(groupId);
+  }
+  try {
+    const res = await fetch(url, { method: edit ? 'POST' : 'GET', headers, body, cache: 'no-store', signal: AbortSignal.timeout(15_000) });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || data.error) {
+      const error = edit
+        ? 'O WhatsApp não confirmou a alteração. Confira se o número conectado pode editar este grupo.'
+        : 'Não foi possível consultar as propriedades do grupo no WhatsApp.';
+      return { ok: false as const, error };
+    }
+    return { ok: true as const, data, meta };
+  } catch {
+    return { ok: false as const, error: 'Sem confirmação do WhatsApp. Consulte o grupo antes de tentar novamente.' };
+  }
+}
+
+export async function readGroupProperties(conn: WaConnectionRow, groupId: string): Promise<Ok<{ properties: GroupProperties }> | Fail> {
+  const result = await groupRequest(conn, groupId);
+  if (!result.ok) return result;
+  const { subject, desc, description, pictureUrl } = result.data;
+  if (typeof subject !== 'string') return { ok: false, error: 'O WhatsApp não disponibilizou os dados deste grupo.' };
+  return { ok: true, properties: {
+    subject, description: (result.meta ? description : desc) ?? '',
+    pictureUrl: typeof pictureUrl === 'string' && pictureUrl.startsWith('https://') ? pictureUrl : null,
+  } };
+}
+
+export async function editGroupProperty(conn: WaConnectionRow, groupId: string, edit: GroupEdit): Promise<Ok<{ pending: boolean }> | Fail> {
+  const result = await groupRequest(conn, groupId, edit);
+  if (!result.ok) return result;
+  if (result.meta ? !result.data.request_id && result.data.success !== true : result.data.update !== 'success') {
+    return { ok: false, error: 'O WhatsApp não confirmou a alteração. Atualize o grupo para conferir.' };
+  }
+  return { ok: true, pending: !!result.data.request_id };
 }

@@ -8,10 +8,18 @@ export interface GroupParticipant {
 export interface GroupMention { id: string; start: number; end: number }
 const MEMBER_JID = /^[0-9]+(?::[0-9]+)?@(s\.whatsapp\.net|lid)$/;
 
-function phoneFrom(value: unknown): string | null {
+export function phoneFrom(value: unknown): string | null {
   if (typeof value !== 'string' || value.endsWith('@lid')) return null;
   const raw = value.replace(/@s\.whatsapp\.net$/, '').replace(/:\d+$/, '');
   return /^\+?[1-9]\d{6,14}$/.test(raw) ? `+${raw.replace(/^\+/, '')}` : null;
+}
+
+/** A number, bare JID or empty string from the provider is not a display name. */
+export function participantName(value: unknown): string | undefined {
+  if (typeof value !== 'string') return;
+  const name = value.trim();
+  if (!name || /^[+\d\s().-]+$/.test(name) || MEMBER_JID.test(name)) return;
+  return name.slice(0, 120);
 }
 
 export function normalizeGroupParticipants(raw: unknown): GroupParticipant[] {
@@ -21,8 +29,10 @@ export function normalizeGroupParticipants(raw: unknown): GroupParticipant[] {
   for (const item of values) {
     if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !MEMBER_JID.test(item.id)) continue;
     const phone = phoneFrom(item.phoneNumber) ?? phoneFrom(item.phone) ?? phoneFrom(item.id);
-    const name = [item.name, item.pushName, item.notify].find(v => typeof v === 'string' && v.trim()) as string | undefined;
-    result.set(item.id, { id: item.id, name: name?.trim().slice(0, 120) || phone || 'Participante sem nome', phone, admin: item.admin === 'admin' || item.admin === 'superadmin' });
+    const previous = result.get(item.id);
+    const name = [item.name, item.pushName, item.notify, item.verifiedName, previous?.name].map(participantName).find(Boolean);
+    const telephone = phone ?? previous?.phone ?? null;
+    result.set(item.id, { id: item.id, name: name || telephone || '', phone: telephone, admin: !!previous?.admin || item.admin === 'admin' || item.admin === 'superadmin' });
   }
   return [...result.values()];
 }

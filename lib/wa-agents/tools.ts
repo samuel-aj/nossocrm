@@ -1,4 +1,5 @@
 import { ReturnTimeSchema, type ReturnTimeInput } from './scheduledReturnTime';
+import type { AgentContractInput } from '@/lib/zapsign/agentDraft';
 /**
  * Ferramentas do modelo (AI SDK v6): encerrar_atendimento, salvar_dados,
  * executar_acao e, quando o agente tem os recursos, consultar_documentos,
@@ -20,6 +21,8 @@ import type { AgentDocumentRow, AgentMediaRow, AgentRow, KnowledgeHit } from './
 export type MediaSendResult = { ok: boolean; error?: string; note?: string };
 
 export type AgentToolRuntime = {
+  voiceClips?: readonly string[];
+  contract?: (input: AgentContractInput) => Promise<unknown>;
   scheduledReturn?: {
     inspect: () => Promise<unknown>;
     schedule: (input: ReturnTimeInput) => Promise<unknown>;
@@ -169,14 +172,30 @@ export function buildAgentTools(agent: AgentRow, runtime: AgentToolRuntime = {})
     });
     tools.cancelar_retorno = tool({ description: 'Cancela o retorno ainda não iniciado quando o cliente pedir. Não encerra o atendimento.', inputSchema: z.object({}), execute: async () => safe(service.cancel) });
   }
+  if (agent.tools?.zapsign_template_token && runtime.contract) {
+    const contract = runtime.contract;
+    tools.contrato_zapsign = tool({
+      description: 'Antes de apresentar a ficha, use preparar. Em dados, use os nomes das variáveis e informe nome_signatario e telefone_signatario com o nome completo e o telefone com DDD de quem assina. Omita email_signatario se a pessoa não tiver e-mail. Reúna os dados que o cliente já informou por texto ou áudio. Separe as partes do endereço por vírgulas. Se a ferramenta ainda pedir um dado pessoal já informado em partes ou lido no documento, mostre o resumo numa ficha, com um campo por linha (ex.: Endereço: Rua das Flores, 120, Centro), e pergunte se os dados estão corretos. Após o aceite, prepare novamente. Pergunte apenas o que estiver faltando e use linguagem natural com o cliente. Para pendências do escritório, chame a equipe. Use solicitar_confirmacao como a pergunta de confirmação, uma única vez, e termine a resposta nela. Nunca peça para o cliente copiar ou repetir a ficha: uma resposta simples como sim, ok, confirmado ou tá certo já é o aceite. Após o aceite, use criar com os mesmos dados. Se preparar devolver ficha_confirmada, passe direto a criar. Só anuncie a criação quando a ferramenta confirmar. O CRM entrega o link e avisa quando o cliente assina. Mantenha o atendimento aberto.',
+      inputSchema: z.object({ modo: z.enum(['preparar', 'criar']), dados: z.record(z.string().min(1).max(160), z.string().max(500)) }),
+      execute: async input => { try { return await contract(input); } catch (e) { return { ok: false, erro: errorMessage(e) }; } },
+    });
+  }
   Object.assign(tools, buildUtilityTools(agent, runtime));
+  const clips = runtime.voiceClips;
+  if (clips?.length) {
+    tools.falar_trecho = tool({
+      description: 'No momento indicado no roteiro, enfileira a fala cadastrada pelo número do trecho. O CRM usa o texto original. Não repita a fala na resposta.',
+      inputSchema: z.object({ trecho: z.number().int().min(1).max(clips.length) }),
+      execute: async ({ trecho }) => ({ ok: !!clips[trecho - 1], trecho, fala: clips[trecho - 1] }),
+    });
+  }
 
   const media = uniqueNames(runtime.media ?? []);
   if (media.length > 0 && runtime.sendMedia) {
     const send = runtime.sendMedia;
     tools.enviar_midia = tool({
       description:
-        'Envia ao cliente uma das mídias cadastradas do agente (imagem, vídeo, áudio ou documento), pelo nome exato. Envie cada mídia uma única vez por atendimento, no momento indicado no roteiro ou quando a descrição "quando enviar" se aplicar. O arquivo vai no ponto da conversa em que você chamou a ferramenta; escreva normalmente o texto que o acompanha.',
+        'Envia ao cliente uma das mídias cadastradas do agente (imagem, vídeo, áudio ou documento), pelo nome exato. Respeite a regra de repetição indicada em cada mídia e o momento indicado no roteiro ou na descrição "quando enviar". O arquivo vai no ponto da conversa em que você chamou a ferramenta; escreva normalmente o texto que o acompanha.',
       inputSchema: z.object({
         nome: enumOf(media.map(m => m.name)).describe('Nome da mídia, exatamente como está na lista'),
         legenda: z.string().max(1000).optional().describe('Legenda curta opcional (imagem, vídeo ou documento; em áudio e figurinha ela é enviada como mensagem de texto separada, antes do arquivo). Não repita a legenda no texto da resposta: o cliente a vê junto do arquivo'),

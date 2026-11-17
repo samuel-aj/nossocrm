@@ -29,6 +29,9 @@ const h = vi.hoisted(() => ({
   agentCalls: [] as Array<Record<string, unknown>>,
   budgetBlocked: false,
   beginAllowed: true,
+  beforeClaim: null as null | (() => void),
+  onTyping: null as null | (() => void),
+  contractReadFails: false,
 }));
 
 vi.mock('@/lib/whatsapp', () => ({
@@ -40,6 +43,8 @@ vi.mock('@/lib/whatsapp', () => ({
     sendTemplate: async (input: unknown) => { h.sentTemplates.push(input); return { ok: true, providerMessageId: 'template-message' }; },
     sendTyping: async ({ ms }: { ms: number }) => {
       h.typingCalls.push(ms);
+      h.onTyping?.();
+      h.onTyping = null;
     },
   }),
 }));
@@ -95,7 +100,7 @@ vi.mock('./webhooks', () => ({
   postWebhook: async () => { h.webhookCalls++; return { ok: false, error: 'HTTP 500' }; },
 }));
 
-import { createBotRun, handleBotReply, processBotRun, processDueBotRuns, sendTemplateToConversation } from './bots';
+import { createBotRun, handleBotReply, pickMessageTriggeredBot, processBotRun, processDueBotRuns, runBotRunNow, sendTemplateToConversation, startBotForInboundMessage } from './bots';
 import type { BotRunRow } from './types';
 
 type Row = Record<string, unknown>;
@@ -111,6 +116,7 @@ function fakeDb(tables: Record<string, Row[]>) {
     let limit: number | null = null;
     const rows = () => (tables[table] ??= []);
     const run = () => {
+      if (table === 'deal_signatures' && h.contractReadFails) return { data: null, error: { message: 'contract offline' } };
       if (table === 'wa_conversations' && op === 'update' && h.linkFails) {
         return { data: null, error: { message: 'link indisponível' } };
       }
@@ -148,6 +154,14 @@ function fakeDb(tables: Record<string, Row[]>) {
     return b;
   };
   return { from, rpc: async (name: string, args: Record<string, unknown>) => {
+    if (name === 'wa_bot_claim_lock') {
+      h.beforeClaim?.();
+      h.beforeClaim = null;
+      const r = tables.wa_bot_runs.find(row => row.id === args.p_run && row.organization_id === args.p_org);
+      if (!r || (r.lock_until && Date.parse(String(r.lock_until)) >= Date.now())) return { data: false, error: null };
+      r.lock_until = new Date(Date.now() + 120_000).toISOString();
+      return { data: true, error: null };
+    }
     if (name === 'ai_usage_budget') return { data: { blocked_at: h.budgetBlocked ? '2026-11-01T00:00:00Z' : null }, error: null };
     if (name === 'begin_scheduled_robot_return') {
       const r = tables.wa_bot_runs.find(row => row.id === args.p_run && row.organization_id === args.p_org);
@@ -235,11 +249,121 @@ beforeEach(() => {
   h.branchFails = false;
   h.webhookCalls = 0;
   h.agent = null; h.agentCalls = []; h.budgetBlocked = false; h.beginAllowed = true;
+  h.beforeClaim = null;
+  h.onTyping = null; h.contractReadFails = false;
   h.deal = { id: 'deal-1', contact_id: 'contact-1', title: 'Lead', stage_id: 's1', board_id: 'b1', tags: [], stage_label: 'Novo' };
 });
 
 const chain = (steps: Row[]) =>
   steps.map((s, i) => ({ next_step_id: steps[i + 1]?.id ?? null, ...s }));
+
+describe('retomadas concorrentes do robô', () => {
+  it('não reenvia usando uma cópia antiga de execução já concluída', async () => {
+    const original = run({ wake_at: new Date(Date.now() - 1000).toISOString() });
+    const snapshot = structuredClone(original);
+    const tables = db(bot([{ id: 'text', type: 'send_text', text: 'Está por aí?' }]), [original]);
+    const admin = fakeDb(tables);
+    await runBotRunNow(admin, snapshot);
+    await runBotRunNow(admin, snapshot);
+    expect(h.sent).toEqual(['Está por aí?']);
+    expect(tables.wa_bot_runs[0]).toMatchObject({ status: 'done', lock_until: null });
+  });
+
+  it('respeita a espera atual e retoma do próximo passo, mesmo com snapshot antigo', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-11-14T12:41:00Z'));
+      const original = run({ wake_at: new Date().toISOString() });
+      const snapshot = structuredClone(original);
+      const steps = chain([{ id: 'first', type: 'send_text', text: 'Está por aí?' },
+        { id: 'wait', type: 'wait', seconds: 90 }, { id: 'later', type: 'send_text', text: 'Próxima tentativa' }]);
+      const tables = db(bot(steps), [original]);
+      const admin = fakeDb(tables);
+      await runBotRunNow(admin, snapshot);
+      await runBotRunNow(admin, snapshot);
+      expect(h.sent).toEqual(['Está por aí?']);
+      expect(tables.wa_bot_runs[0]).toMatchObject({ status: 'running', step_index: 2, lock_until: null });
+      vi.setSystemTime(new Date('2026-11-14T12:42:31Z'));
+      await runBotRunNow(admin, snapshot);
+      expect(h.sent).toEqual(['Está por aí?', 'Próxima tentativa']);
+      expect(tables.wa_bot_runs[0].status).toBe('done');
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('só um trabalhador simultâneo executa o envio', async () => {
+    const original = run({ wake_at: new Date(Date.now() - 1000).toISOString() });
+    const tables = db(bot([{ id: 'text', type: 'send_text', text: 'Está por aí?' }]), [original]);
+    const admin = fakeDb(tables);
+    await Promise.all([runBotRunNow(admin, structuredClone(original)), runBotRunNow(admin, structuredClone(original))]);
+    expect(h.sent).toEqual(['Está por aí?']);
+  });
+
+  it('o relógio descarta candidato que outro trabalhador terminou antes da trava', async () => {
+    const original = run({ wake_at: new Date(Date.now() - 1000).toISOString() });
+    const tables = db(bot([{ id: 'text', type: 'send_text', text: 'Está por aí?' }]), [original]);
+    h.beforeClaim = () => { Object.assign(tables.wa_bot_runs[0], { status: 'done', wake_at: null, lock_until: null }); };
+    expect(await processDueBotRuns(fakeDb(tables))).toEqual({ processed: 0 });
+    expect(h.sent).toEqual([]);
+    expect(tables.wa_bot_runs[0]).toMatchObject({ status: 'done', lock_until: null });
+  });
+
+  it('resposta do cliente acorda a espera futura e executa o próximo passo atualizado', async () => {
+    const original = run({ wake_at: new Date(Date.now() - 1000).toISOString() });
+    const steps = chain([{ id: 'reply', type: 'wait_reply', timeout_minutes: 60 },
+      { id: 'thanks', type: 'send_text', text: 'Obrigado pela resposta' }]);
+    const tables = db(bot(steps), [original]);
+    const admin = fakeDb(tables);
+    await runBotRunNow(admin, structuredClone(original));
+    const waiting = structuredClone(tables.wa_bot_runs[0]) as BotRunRow;
+    expect(waiting.status).toBe('waiting_reply');
+    expect(Date.parse(waiting.wake_at!)).toBeGreaterThan(Date.now());
+    await handleBotReply(admin, { run: waiting, message: { id: 'new-reply', body: 'Estou aqui', transcription: null } });
+    expect(h.sent).toEqual(['Obrigado pela resposta']);
+    expect(tables.wa_bot_runs[0]).toMatchObject({ status: 'done', lock_until: null,
+      vars: { last_reply: 'Estou aqui', last_reply_message_id: 'new-reply' } });
+  });
+});
+
+describe('contrato manual antes de um envio proativo do robô', () => {
+  function setup() {
+    const anchor = new Date(Date.now() - 3600_000).toISOString();
+    const r = run({ deal_id: 'deal-1', vars: { __proactive_followup: {
+      anchor, agentFollowup: { agentId: 'agent-1', templateToken: 'template-1' },
+    } } });
+    const tables = db(bot([{ id: 'text', type: 'send_text', text: 'Falta seu endereço', typing_seconds: 1 }]), [r],
+      { ai_status: 'active', ai_agent_id: 'agent-1', deal_id: 'deal-1' });
+    tables.deal_signatures = [];
+    return { r, tables };
+  }
+  it('não envia se a equipe concluir a ficha durante o indicador digitando', async () => {
+    const { r, tables } = setup();
+    h.onTyping = () => { tables.deal_signatures.push({ organization_id: ORG, deal_id: 'deal-1', contact_id: 'contact-1',
+      origin: 'manual', status: 'pending', template_token: 'template-1', doc_token: 'doc', request: {}, created_at: new Date().toISOString() }); };
+    await processBotRun(fakeDb(tables), r);
+    expect(h.sent).toEqual([]);
+    expect(tables.wa_bot_runs[0].status).toBe('cancelled');
+  });
+  it('não envia se a consulta do contrato falhar após o indicador digitando', async () => {
+    const { r, tables } = setup();
+    h.onTyping = () => { h.contractReadFails = true; };
+    await processBotRun(fakeDb(tables), r);
+    expect(h.sent).toEqual([]);
+    expect(tables.wa_bot_runs[0].status).toBe('error');
+  });
+  it.each([undefined, 'next-template'])('permite transferência explícita para outro agente (modelo %s)', async templateToken => {
+    const { r, tables } = setup();
+    const nextAgent = '11111111-1111-4111-8111-111111111111';
+    tables.wa_bots[0] = bot([{ id: 'handoff', type: 'handoff_agent', agent_id: nextAgent }]);
+    h.agent = { id: nextAgent, name: 'Pós-venda', enabled: true, tools: { zapsign_template_token: templateToken } };
+    await processBotRun(fakeDb(tables), r);
+    expect(h.agentCalls).toHaveLength(1);
+    const proactive = h.agentCalls[0].proactive as { anchor: string; agentFollowup?: unknown };
+    expect(proactive.anchor).toBe((r.vars.__proactive_followup as { anchor: string }).anchor);
+    expect(proactive.agentFollowup).toEqual(templateToken ? { agentId: nextAgent, templateToken } : undefined);
+    expect(tables.wa_bot_runs[0].status).toBe('done');
+    expect(h.sent).toEqual([]);
+  });
+});
 
 describe('robô de retorno combinado (provedores falsos)', () => {
   const due = '2026-11-07T18:00:00.000Z'; // sábado às 14h em Manaus
@@ -773,5 +897,82 @@ describe('structured robot telemetry (offline)', () => {
     expect(h.sent).toEqual(['loop','loop']);
     expect(events('tx','entered')).toHaveLength(1);
     expect(events('tx')).toHaveLength(1);
+  });
+});
+
+describe('gatilho "Mensagem recebida"', () => {
+  const BOARD = '00000000-0000-4000-8000-0000000000b1';
+  const STAGE = '00000000-0000-4000-8000-0000000000e1';
+  const trig = (extra: Row = {}) => ({ type: 'message_received', ...extra });
+  const robot = (id: string, trigger: Row, created_at: string, connection_ids = ['conn-a']) =>
+    ({ id, name: id, trigger, connection_id: connection_ids[0] ?? null, connection_ids, created_at }) as never;
+
+  it('escolhe o robô: palavra que bate vem antes do "qualquer mensagem"; empate, o mais antigo', () => {
+    const geral = robot('geral', trig(), '2026-01-01');
+    const contratar = robot('contratar', trig({ match: 'contains', keywords: ['quero contratar'] }), '2026-02-01');
+    const outro = robot('outro', trig({ match: 'contains', keywords: ['orçamento'] }), '2026-01-15');
+    expect(pickMessageTriggeredBot([geral, contratar, outro], 'conn-a', 'Oi, QUERO contratar!')).toBe(contratar);
+    expect(pickMessageTriggeredBot([geral, contratar, outro], 'conn-a', 'Preciso de um orcamento')).toBe(outro);
+    expect(pickMessageTriggeredBot([geral, contratar, outro], 'conn-a', 'bom dia')).toBe(geral);
+    expect(pickMessageTriggeredBot([contratar, outro], 'conn-a', 'bom dia')).toBeNull();
+  });
+
+  it('respeita o número: o do gatilho quando escolhido; senão, os do robô', () => {
+    const doRobo = robot('robo', trig(), '2026-01-01', ['conn-a']);
+    const soB = robot('so-b', trig({ connection_id: 'conn-b' }), '2026-01-02', ['conn-a', 'conn-b']);
+    expect(pickMessageTriggeredBot([doRobo, soB], 'conn-b', 'oi')).toBe(soB);
+    expect(pickMessageTriggeredBot([doRobo], 'conn-c', 'oi')).toBeNull();
+    expect(pickMessageTriggeredBot([robot('manual', { type: 'manual' }, '2026-01-01')], 'conn-a', 'oi')).toBeNull();
+  });
+
+  function world(message: string, extra: { runs?: Row[]; conv?: Row } = {}) {
+    const steps = [
+      { id: 'cond', type: 'condition', rules: [{ match: 'all', clauses: [{ field: 'reply', op: 'contains', value: 'contratar' }], goto_step_id: 'lead' }], else_step_id: 'oi' },
+      { id: 'lead', type: 'create_lead', board_id: BOARD, stage_id: STAGE, changes: [], next_step_id: null },
+      { id: 'oi', type: 'send_text', text: 'Oi! Em que posso ajudar?', next_step_id: null },
+    ];
+    const tables = db(bot(steps, { trigger: trig(), created_at: '2026-01-01' }), extra.runs ?? [], { is_group: false, ...extra.conv });
+    tables.wa_messages = [{ id: 'msg-1', organization_id: ORG, conversation_id: 'conv-1', direction: 'in', body: message, media_type: null, transcription: null }];
+    return tables;
+  }
+
+  it('mensagem que contém a palavra: o robô começa com ela e segue pelo caminho do "contém" (cria o lead)', async () => {
+    h.deal = null;
+    const tables = world('Olá, quero CONTRATAR vocês');
+    const r = await startBotForInboundMessage(fakeDb(tables), { organizationId: ORG, conversationId: 'conv-1', messageId: 'msg-1' });
+    expect(r).toMatchObject({ started: true, botId: 'bot-1' });
+    const saved = tables.wa_bot_runs[0];
+    expect(saved.vars).toMatchObject({ last_reply: 'Olá, quero CONTRATAR vocês', trigger_message_id: 'msg-1' });
+    expect(saved.status).toBe('done');
+    expect(h.created).toHaveLength(1);
+    expect(h.created[0]).toMatchObject({ boardId: BOARD, stageId: STAGE });
+    expect(h.sent).toEqual([]);
+  });
+
+  it('mensagem que não contém: vai pelo outro caminho', async () => {
+    const tables = world('bom dia');
+    await startBotForInboundMessage(fakeDb(tables), { organizationId: ORG, conversationId: 'conv-1', messageId: 'msg-1' });
+    expect(h.created).toHaveLength(0);
+    expect(h.sent).toEqual(['Oi! Em que posso ajudar?']);
+  });
+
+  it('não começa por cima de um robô que já está rodando na conversa', async () => {
+    const tables = world('quero contratar', { runs: [{ ...run({ id: 'run-ativo', status: 'running' }) }] });
+    const r = await startBotForInboundMessage(fakeDb(tables), { organizationId: ORG, conversationId: 'conv-1', messageId: 'msg-1' });
+    expect(r).toMatchObject({ started: false, reason: 'já há um robô rodando nesta conversa' });
+    expect(tables.wa_bot_runs).toHaveLength(1);
+    expect(tables.wa_bot_runs[0].status).toBe('running');
+  });
+
+  it('nunca em grupo, nem em número que o robô não atende, nem com robô desligado', async () => {
+    const grupo = world('quero contratar', { conv: { is_group: true } });
+    expect(await startBotForInboundMessage(fakeDb(grupo), { organizationId: ORG, conversationId: 'conv-1', messageId: 'msg-1' })).toMatchObject({ started: false, reason: 'grupo' });
+    const outroNumero = world('quero contratar', { conv: { connection_id: 'conn-z' } });
+    expect(await startBotForInboundMessage(fakeDb(outroNumero), { organizationId: ORG, conversationId: 'conv-1', messageId: 'msg-1' })).toMatchObject({ started: false });
+    const desligado = world('quero contratar');
+    desligado.wa_bots[0].enabled = false;
+    expect(await startBotForInboundMessage(fakeDb(desligado), { organizationId: ORG, conversationId: 'conv-1', messageId: 'msg-1' })).toMatchObject({ started: false });
+    expect(h.created).toHaveLength(0);
+    expect(h.sent).toEqual([]);
   });
 });

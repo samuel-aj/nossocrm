@@ -1,4 +1,5 @@
 import { readDbLeadSource } from '@/lib/deals/leadSource';
+import { readAgentVoiceScripts } from './voiceScript';
 /**
  * Contexto de uma conversa para o agente: conversa, número, contato, negócio
  * e organização; histórico como mensagens do modelo; prompt de sistema.
@@ -895,8 +896,9 @@ export function buildMediaBlock(media: AgentMediaRow[], sent: string[] = []): st
   lines.push('Você pode enviar estes arquivos ao cliente com a ferramenta enviar_midia (pelo nome exato):');
   for (const m of items) {
     const when = (m.description ?? '').trim();
-    const already = sentKeys.has(m.name.trim().toLowerCase()) ? ' [JÁ ENVIADA neste atendimento: não envie de novo]' : '';
-    lines.push(`- "${m.name.trim()}" (${MEDIA_KIND_LABEL[m.kind] ?? m.kind})${when ? `: enviar quando ${when}` : ''}${already}`);
+    const repeatPolicy = m.send_once_per_conversation === false ? ' [reenvio permitido após 1 minuto]' : ' [uma vez por conversa]';
+    const already = m.send_once_per_conversation !== false && sentKeys.has(m.name.trim().toLowerCase()) ? ' [JÁ ENVIADA neste atendimento: não envie de novo]' : '';
+    lines.push(`- "${m.name.trim()}" (${MEDIA_KIND_LABEL[m.kind] ?? m.kind})${when ? `: enviar quando ${when}` : ''}${repeatPolicy}${already}`);
   }
   return lines.join('\n');
 }
@@ -952,6 +954,7 @@ export function buildKnowledgeBlock(
 export function buildSystemPrompt(input: {
   agent: AgentRow;
   ctx: ConversationContext;
+  textOnly?: boolean;
   now?: Date;
   /** Primeiro contato iniciado pelo sistema (gatilho por pipeline): o lead ainda não recebeu mensagem */
   firstContact?: boolean;
@@ -966,7 +969,7 @@ export function buildSystemPrompt(input: {
 }): string {
   const { agent, ctx } = input;
   const vars = buildPromptVars(input);
-  const rawScript = agent.system_prompt || '';
+  const { prompt: rawScript, followupPrompt } = readAgentVoiceScripts(agent.system_prompt || '', input.followup?.instruction, input.textOnly);
   const rawStopRules = (agent.stop_rules || '').trim();
   const markers = hasScriptMarkers(rawScript) || hasScriptMarkers(rawStopRules);
   const script = replaceScriptMarkers(
@@ -1037,7 +1040,7 @@ export function buildSystemPrompt(input: {
   }
   if (input.followup) {
     lines.push(
-      `- FOLLOW-UP: o cliente está sem responder há ${input.followup.silentFor}. Escreva uma mensagem curta de retomada (1 ou 2 linhas), gentil e sem cobrar; não repita o que já foi dito e não se apresente de novo. Termine com a pergunta que ficou em aberto, se houver.${input.followup.instruction ? ` Instrução da equipe para este follow-up: ${input.followup.instruction}` : ''}`
+      `- FOLLOW-UP: o cliente está sem responder há ${input.followup.silentFor}. Escreva uma mensagem curta de retomada (1 ou 2 linhas), gentil e sem cobrar; não repita o que já foi dito e não se apresente de novo. Termine com a pergunta que ficou em aberto, se houver.${followupPrompt ? ` Instrução da equipe para este follow-up: ${followupPrompt}` : ''}`
     );
   }
   if (contextoExtra) {
@@ -1099,13 +1102,16 @@ export function buildSystemPrompt(input: {
   }
   if (mediaBlock) {
     lines.push(
-      '- Mídias: para enviar um arquivo da lista "MÍDIAS DISPONÍVEIS", chame enviar_midia com o nome exato, no momento indicado no roteiro ou quando a descrição "enviar quando" se aplicar. Cada mídia vai uma única vez por atendimento. O arquivo é entregue no ponto da conversa em que você chamou a ferramenta; escreva normalmente a mensagem que o acompanha.'
+      '- Mídias: para enviar um arquivo da lista "MÍDIAS DISPONÍVEIS", chame enviar_midia com o nome exato, no momento indicado no roteiro ou quando a descrição "enviar quando" se aplicar. Respeite a regra de repetição indicada em cada mídia. O arquivo é entregue no ponto da conversa em que você chamou a ferramenta; escreva normalmente a mensagem que o acompanha.'
     );
   }
   if (helpersBlock) {
     lines.push(
       '- Agentes auxiliares: para dúvidas do assunto deles, chame consultar_agente com o nome exato e uma pergunta objetiva com o contexto do caso; use a resposta para orientar o cliente com suas palavras, sem citar o auxiliar nem repassar a resposta inteira.'
     );
+  }
+  if (agent.tools?.zapsign_template_token) {
+    lines.push('- Contrato: quando o cliente quiser contratar, use contrato_zapsign antes de pedir confirmação da ficha. Use a ficha devolvida pela ferramenta como a única conferência dos dados e autorização para gerar o contrato. Com o aceite, chame criar. Aproveite o e-mail que o cliente informou. Se ele não tiver, preferir não informar ou seguir sem responder esse campo, omita o e-mail e prossiga com os outros dados. Nunca invente um endereço. O CRM entrega o link na conversa e aciona o acompanhamento quando o cliente assinar. Mantenha o atendimento disponível. Só confirme assinatura com informação da ZapSign.');
   }
   if (agent.tools?.calculator !== false) {
     lines.push('- Contas (percentuais, prazos, valores): chame a ferramenta calcular com a expressão em vez de calcular de cabeça.');

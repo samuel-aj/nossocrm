@@ -52,6 +52,7 @@ import { EditMessageModal } from './EditMessageModal';
 import { GroupMembersModal, MentionSuggestions, useGroupMembers } from './GroupMembers';
 import { mentionQuery, useMentionDraft } from './useMentionDraft';
 import type { GroupParticipant } from '@/lib/whatsapp/groupParticipants';
+import { participantName } from '@/lib/whatsapp/groupParticipants';
 import { useChatImageTransfer } from './useChatImageTransfer';
 import { ForwardMessageModal } from './ForwardMessageModal';
 import {
@@ -1134,7 +1135,7 @@ function DealWhatsAppChatSession({
   /** GRUPO do WhatsApp: a conversa é o grupo (sem contato nem telefone); as
    * mensagens recebidas mostram quem escreveu; sem agente, robô nem janela de 24 h. */
   onOpenGroupMember?: (member: GroupParticipant, connectionId: string) => void;
-  group?: { conversationId: string; name: string; participantsCount?: number | null } | null;
+  group?: { conversationId: string; name: string; participantsCount?: number | null; memberName?: (phone: string) => string | undefined } | null;
   /** Tela do lead: histórico unificado e compositor com modos (ver ChatTimelineProps) */
   timeline?: ChatTimelineProps | null;
   /** Ações da página Chats ao lado da pesquisa; independentes da timeline. */
@@ -1150,10 +1151,17 @@ function DealWhatsAppChatSession({
   const [mentionCaret, setMentionCaret] = useState(0);
   const [mentionDismissed, setMentionDismissed] = useState(false);
   const [mentionIndex, setMentionIndex] = useState(0);
-  const mentionCandidate = isGroup && !mentionDismissed ? mentionQuery(text, mentionCaret) : null;
+  const mentionCandidate = isGroup && data?.provider !== 'meta_cloud' && !mentionDismissed ? mentionQuery(text, mentionCaret) : null;
   const activeMention = mentionCandidate && !mentions.some(m => m.start === mentionCandidate.start) ? mentionCandidate : null;
   const membersQuery = useGroupMembers(group?.conversationId ?? null, membersOpen || !!activeMention);
-  const mentionMembers = (membersQuery.data?.participants ?? []).filter(m => activeMention && `${m.name} ${m.phone || ''}`.toLocaleLowerCase().includes(activeMention.query)).slice(0, 20);
+  const groupMembers = useMemo(() => {
+    if (!membersQuery.data?.participants.length) return [];
+    return membersQuery.data.participants.map(member => ({
+      ...member, name: participantName(member.name) || (member.phone && group?.memberName?.(member.phone)) || member.phone || '',
+    }));
+  }, [membersQuery.data, group?.memberName]);
+  const mentionMembers = groupMembers.filter(m => activeMention && `${m.name} ${m.phone || ''}`.toLocaleLowerCase().includes(activeMention.query))
+    .slice(0, 20).map(m => m.name ? m : { ...m, name: 'Participante sem nome' });
   const activeMentionIndex = Math.min(mentionIndex, Math.max(0, mentionMembers.length - 1));
   const chooseMention = (member: GroupParticipant) => {
     if (!activeMention) return;
@@ -3264,7 +3272,7 @@ function DealWhatsAppChatSession({
       />
       </div>
 
-      {membersOpen && <GroupMembersModal name={contactName} members={membersQuery.data?.participants ?? []} loading={membersQuery.isLoading} error={membersQuery.error?.message ?? null} onClose={() => setMembersOpen(false)} onRetry={() => void membersQuery.refetch()} onOpenChat={onOpenGroupMember && membersQuery.data ? member => {
+      {membersOpen && <GroupMembersModal name={contactName} members={groupMembers} loading={membersQuery.isLoading} error={membersQuery.error?.message ?? null} onClose={() => setMembersOpen(false)} onRetry={() => void membersQuery.refetch()} onOpenChat={onOpenGroupMember && membersQuery.data ? member => {
         if (!member.phone || !membersQuery.data) return;
         setMembersOpen(false); onOpenGroupMember(member, membersQuery.data.connectionId);
       } : undefined} />}

@@ -131,13 +131,13 @@ function publicVars(vars: Record<string, unknown>): Record<string, unknown> {
  * (UPDATE atômico): o PATCH do PostgREST com filtro `or` dá 42703 neste
  * banco, e a trava nunca era obtida (o robô ficava "running" sem rodar).
  */
-async function claimBotLock(admin: SupabaseClient, runId: string, organizationId?: string): Promise<boolean> {
+async function claimBotLock(admin: SupabaseClient, runId: string, organizationId?: string): Promise<BotRunRow | null> {
   let orgId = organizationId ?? null;
   if (!orgId) {
     const { data } = await admin.from('wa_bot_runs').select('organization_id').eq('id', runId).maybeSingle();
     orgId = (data as { organization_id?: string } | null)?.organization_id ?? null;
   }
-  if (!orgId) return false;
+  if (!orgId) return null;
   const { data, error } = await admin.rpc('wa_bot_claim_lock', {
     p_org: orgId,
     p_run: runId,
@@ -145,9 +145,30 @@ async function claimBotLock(admin: SupabaseClient, runId: string, organizationId
   });
   if (error) {
     console.error('[wa-agents] trava da execução do robô falhou:', error.message);
-    return false;
+    return null;
   }
-  return data === true;
+  if (data !== true) return null;
+  // A candidate selected before this lock can already have completed or moved
+  // to a future wait. Never execute that old snapshot after a worker releases
+  // its lock: reload the current cursor, variables and status while holding it.
+  const { data: current, error: readError } = await admin.from('wa_bot_runs').select('*')
+    .eq('organization_id', orgId).eq('id', runId).maybeSingle();
+  if (readError) {
+    console.error('[wa-agents] consultar execução travada falhou:', readError.message);
+    // Leave the lease to expire when the current lock cannot be read safely.
+    return null;
+  }
+  if (!current) return null;
+  const row = current as BotRunRow;
+  const due = row.wake_at ? Date.parse(row.wake_at) : null;
+  if (!['running', 'waiting_reply'].includes(row.status) ||
+      (due !== null && (!Number.isFinite(due) || due > Date.now())) ||
+      (row.status === 'waiting_reply' && due === null)) {
+    await admin.from('wa_bot_runs').update({ lock_until: null })
+      .eq('organization_id', orgId).eq('id', runId).eq('lock_until', current.lock_until);
+    return null;
+  }
+  return row;
 }
 
 async function loadBot(admin: SupabaseClient, organizationId: string, botId: string): Promise<BotRow | null> {
@@ -1057,6 +1078,7 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
           delete st.vars[TYPED_STEP_VAR];
           const text = renderTemplate(step.text, tplVars).trim();
           if (text) {
+            if (!(await permitProactive(idx))) return;
             await sendBotText(admin, st, await getConnection(), phone, text);
             note(st, step, `mensagem enviada: ${text.slice(0, 80)}`);
           } else {
@@ -1097,6 +1119,7 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
             }
           }
           delete st.vars[TYPED_STEP_VAR];
+          if (!(await permitProactive(idx))) return;
           const tplName = await sendBotTemplate(admin, st, await getConnection(), phone, step.template_id, templateValues);
           const tplSeconds = step.timeout_seconds ?? step.timeout_minutes * 60;
           note(st, step, `modelo enviado: ${tplName}; esperando resposta por até ${formatDuration(tplSeconds)}`);
@@ -1424,6 +1447,16 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
             .eq('organization_id', orgId);
           if (error) throw new Error(error.message);
           }
+          if (proactive?.agentFollowup && proactive.agentFollowup.agentId !== agent.id) {
+            // An explicit handoff is part of the robot, not an external change
+            // that invalidates its continuation. Bind the next agent's guard.
+            const handedOff: ProactiveFollowup = { ...proactive };
+            delete handedOff.agentFollowup;
+            if (agent.tools?.zapsign_template_token) handedOff.agentFollowup = {
+              agentId: agent.id, templateToken: agent.tools.zapsign_template_token,
+            };
+            st.vars[PROACTIVE_VAR] = handedOff;
+          }
           note(st, step, `entregue ao agente ${agent.name}`);
           await completeStep(step, 'done', -1);
           await saveRun(admin, st, { status: 'done', step_index: idx + 1, wake_at: null }, { release: true });
@@ -1520,7 +1553,8 @@ export async function handleBotReply(
     // Sem a trava, o relógio (tick) pega a execução em 'running' com wake_at vencido
     const locked = await claimBotLock(admin, run.id, run.organization_id);
     if (!locked) return;
-    await processBotRun(admin, data as BotRunRow);
+    if (locked.status === 'waiting_reply') await handleBotTimeout(admin, locked);
+    else await processBotRun(admin, locked);
   } catch (e) {
     console.error('[wa-agents] resposta ao robô falhou:', errorMessage(e));
   }
@@ -1592,8 +1626,8 @@ export async function processDueBotRuns(
       try {
         const locked = await claimBotLock(admin, raw.id, raw.organization_id);
         if (!locked) continue;
-        if (raw.status === 'waiting_reply') await handleBotTimeout(admin, raw);
-        else await processBotRun(admin, raw);
+        if (locked.status === 'waiting_reply') await handleBotTimeout(admin, locked);
+        else await processBotRun(admin, locked);
         processed++;
       } catch (e) {
         const msg = errorMessage(e);
@@ -1625,6 +1659,8 @@ export type StartBotRunInput = {
   /** Excluded from production analytics and the production round-robin sequence. */
   isTest?: boolean;
   proactive?: ProactiveFollowup;
+  /** Mensagem que disparou o robô (gatilho message_received): vira a última mensagem do lead */
+  message?: { id: string; text: string };
 };
 
 /** Só cria a execução (status 'running', wake_at agora), sem processar. */
@@ -1678,6 +1714,7 @@ export async function createBotRun(
           ...(input.context?.trim() ? { contexto_extra: input.context.trim() } : {}),
           ...(input.proactive ? { [PROACTIVE_VAR]: input.proactive } : {}),
           ...(input.chainDepth ? { [CHAIN_DEPTH_VAR]: input.chainDepth } : {}),
+          ...(input.message ? { last_reply: input.message.text, last_reply_message_id: input.message.id, trigger_message_id: input.message.id } : {}),
         },
         log: [],
       })
@@ -1693,7 +1730,9 @@ export async function createBotRun(
 /** Pega a trava e processa a execução agora (sem a trava, o tick cuida). */
 export async function runBotRunNow(admin: SupabaseClient, run: BotRunRow): Promise<void> {
   const locked = await claimBotLock(admin, run.id, run.organization_id);
-  if (locked) await processBotRun(admin, run);
+  if (!locked) return;
+  if (locked.status === 'waiting_reply') await handleBotTimeout(admin, locked);
+  else await processBotRun(admin, locked);
 }
 
 /** Cria a execução e, por padrão, processa na hora (`process: false` só cria). */
@@ -1710,4 +1749,93 @@ export async function startBotRun(
   } catch (e) {
     return { ok: false, error: errorMessage(e) };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Gatilho "Mensagem recebida"
+// ---------------------------------------------------------------------------
+
+type MessageTriggerBot = Pick<BotRow, 'id' | 'name' | 'trigger' | 'connection_id' | 'connection_ids' | 'created_at'>;
+
+/**
+ * Qual robô a mensagem dispara neste número: os que filtram por palavra e
+ * acham uma delas vêm antes dos que disparam com qualquer mensagem; empate, o
+ * mais antigo. Número: o do gatilho, quando escolhido; senão, os do robô.
+ */
+export function pickMessageTriggeredBot<T extends MessageTriggerBot>(bots: T[], connectionId: string, text: string): T | null {
+  const said = normalizeKeyword(text);
+  const onNumber = bots.filter(b => {
+    if (b.trigger?.type !== 'message_received') return false;
+    const chosen = b.trigger.connection_id;
+    return chosen ? chosen === connectionId : botConnectionIds(b).includes(connectionId);
+  });
+  const oldest = (list: T[]) => [...list].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))[0] ?? null;
+  const byWord = onNumber.filter(b => {
+    if (b.trigger.match !== 'contains') return false;
+    return (b.trigger.keywords ?? []).some(k => {
+      const kw = normalizeKeyword(k);
+      return kw.length > 0 && said.includes(kw);
+    });
+  });
+  if (byWord.length) return oldest(byWord);
+  return oldest(onNumber.filter(b => b.trigger.match !== 'contains'));
+}
+
+/**
+ * Mensagem recebida: inicia o robô com gatilho "Mensagem recebida" do número
+ * da conversa. Nunca em grupo, e nunca por cima de um robô que já está rodando
+ * na conversa (um robô por vez; o que espera resposta já recebeu a mensagem
+ * antes de chegar aqui). Não depende da liberação do agente de IA, e o agente
+ * da conversa segue normalmente.
+ */
+export async function startBotForInboundMessage(
+  admin: SupabaseClient,
+  input: { organizationId: string; conversationId: string; messageId: string }
+): Promise<{ started: boolean; botId?: string; runId?: string; reason: string }> {
+  const { organizationId, conversationId, messageId } = input;
+  const { data: convRow } = await admin
+    .from('wa_conversations')
+    .select('id, connection_id, is_group')
+    .eq('organization_id', organizationId)
+    .eq('id', conversationId)
+    .maybeSingle();
+  const conv = convRow as { id: string; connection_id: string | null; is_group?: boolean | null } | null;
+  if (!conv) return { started: false, reason: 'conversa não encontrada' };
+  if (conv.is_group) return { started: false, reason: 'grupo' };
+  if (!conv.connection_id) return { started: false, reason: 'conversa sem número' };
+
+  const { data: botRows } = await admin
+    .from('wa_bots')
+    .select('id, name, enabled, trigger, connection_id, connection_ids, created_at')
+    .eq('organization_id', organizationId)
+    .eq('enabled', true);
+  const bots = ((botRows ?? []) as MessageTriggerBot[]).filter(b => b.trigger?.type === 'message_received');
+  if (!bots.length) return { started: false, reason: 'nenhum robô com gatilho de mensagem' };
+
+  const { data: msgRow } = await admin
+    .from('wa_messages')
+    .select('id, direction, body, media_type, transcription')
+    .eq('organization_id', organizationId)
+    .eq('id', messageId)
+    .maybeSingle();
+  const msg = msgRow as { id: string; direction: string; body: string | null; media_type: string | null; transcription: string | null } | null;
+  if (!msg || msg.direction !== 'in') return { started: false, reason: 'mensagem não encontrada' };
+  const text = (msg.body ?? '').trim() || (msg.transcription ?? '').trim();
+
+  const bot = pickMessageTriggeredBot(bots, conv.connection_id, text);
+  if (!bot) return { started: false, reason: 'nenhum robô para esta mensagem' };
+
+  const { data: active } = await admin
+    .from('wa_bot_runs')
+    .select('id')
+    .eq('organization_id', organizationId)
+    .eq('conversation_id', conversationId)
+    .in('status', ['running', 'waiting_reply'])
+    .limit(1);
+  if ((active ?? []).length > 0) return { started: false, botId: bot.id, reason: 'já há um robô rodando nesta conversa' };
+
+  const created = await createBotRun(admin, { organizationId, botId: bot.id, conversationId, message: { id: msg.id, text } });
+  if (!created.ok || !created.run) return { started: false, botId: bot.id, reason: created.error ?? 'não foi possível iniciar o robô' };
+  await runBotRunNow(admin, created.run);
+  return { started: true, botId: bot.id, runId: created.run.id, reason: 'robô iniciado pela mensagem' };
 }

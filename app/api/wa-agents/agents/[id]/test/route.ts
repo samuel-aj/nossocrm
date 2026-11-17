@@ -1,9 +1,10 @@
 /**
  * POST /api/wa-agents/agents/[id]/test  (admin)
- * body { messages: [{ role: 'user'|'assistant', text }], state?, draft? }
+ * body { sessionId?, messages: [{ role: 'user'|'assistant', text }], state?, draft? }
  *
  * Gera a resposta do agente em modo de teste: nada é enviado pelo WhatsApp e
- * nenhuma ação de encerramento é executada -> { text, lines, toolCalls, usage }
+ * nenhuma ação de encerramento é executada -> { sessionId, text, lines, toolCalls, usage }
+ * Reutilize sessionId para continuar o mesmo teste; omitir inicia outra sessão.
  *
  * `draft` é a configuração que está NA TELA (roteiro, modelo, regras, ações):
  * o teste roda com ela por cima da linha salva, para o admin experimentar antes
@@ -11,9 +12,13 @@
  * salva continuam vindo do banco.
  */
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
+import { createUsageContext } from '@/lib/ai-usage/budget';
+import { runWithUsageContext } from '@/lib/ai-usage/context';
+import { synthesizeVoice } from '@/lib/wa-agents/voice';
 import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
-import { loadAgent } from '@/lib/wa-agents/context';
+import { loadAgent, normalizeAgentRow } from '@/lib/wa-agents/context';
 import { WaAgentError } from '@/lib/wa-agents/errors';
 import { agentWithDraft, testAgentReply } from '@/lib/wa-agents/test';
 import { AgentInputSchema, type AgentRow } from '@/lib/wa-agents/types';
@@ -32,8 +37,13 @@ export const runtime = 'nodejs';
 export const maxDuration = 120;
 
 const BodySchema = z.object({
+  sessionId: z.string().uuid().optional(),
+  // true requests the editor's fixed voice sample; a string previews the exact simulator line.
+  previewVoice: z.union([z.literal(true), z.string().trim().min(1).max(8000)]).optional(),
+  signatureEvent: z.literal('signed').optional(),
+  contractState: z.enum(['invited','signed']).optional(),
   messages: z
-    .array(z.object({ role: z.enum(['user', 'assistant']), text: z.string().max(8000) }))
+    .array(z.object({ role: z.enum(['user', 'assistant']), text: z.string().max(8000), audio: z.boolean().optional(), contractReviewKey: z.string().regex(/^[a-f0-9]{64}$/).optional(), media: z.array(z.string().min(1).max(80)).max(100).optional() }))
     .max(200)
     .default([]),
   state: z.record(z.string(), z.unknown()).optional(),
@@ -56,7 +66,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   if (!auth.ok) return auth.response;
 
   const { id } = await ctx.params;
-  if (!isValidUUID(id)) return json({ error: 'ID inválido' }, 400);
+  const newAgent = id === 'new';
+  if (!newAgent && !isValidUUID(id)) return json({ error: 'ID inválido' }, 400);
   const orgId = auth.user.organizationId;
 
   const rawBody = await readJsonBody(req);
@@ -64,21 +75,33 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   if (!parsed.success) return validationError(parsed.error);
 
   // loadAgent normaliza a linha (jsonb validado, números coeridos)
-  const saved = await loadAgent(auth.admin, orgId, id);
+  if (newAgent && !parsed.data.previewVoice) return json({ error: 'Salve o agente para testar a conversa.' }, 400);
+  const saved = newAgent ? normalizeAgentRow({ id, organization_id: orgId }) : await loadAgent(auth.admin, orgId, id);
   if (!saved) return json({ error: 'Agente não encontrado' }, 404);
   const agent = withDraft(saved, rawBody, parsed.data.draft as Partial<AgentRow> | undefined);
+  const sessionId = parsed.data.sessionId ?? randomUUID();
 
   try {
+    if (parsed.data.previewVoice) {
+      const script = parsed.data.previewVoice === true ? null : parsed.data.previewVoice;
+      const scope = await createUsageContext(auth.admin, { organizationId: orgId, agentId: newAgent ? null : id, scope: 'test' });
+      const audio = await runWithUsageContext(scope, () => synthesizeVoice(auth.admin, agent, script));
+      if (!audio.bytes) return json({ error: audio.reason }, 422);
+      return Response.json({ audio: audio.bytes.toString('base64') }, { headers: { 'Cache-Control': 'no-store' } });
+    }
     const result = await testAgentReply(auth.admin, {
       organizationId: orgId,
       agent,
       messages: parsed.data.messages,
       state: parsed.data.state,
+      signatureEvent: parsed.data.signatureEvent,
+      contractState: parsed.data.contractState,
+      session: { id: sessionId, userId: auth.user.id },
     });
-    return json(result);
+    return json({ ...result, sessionId });
   } catch (err) {
-    if (err instanceof WaAgentError) return json({ error: err.message, code: err.code }, 400);
+    if (err instanceof WaAgentError) return json({ error: err.message, code: err.code, sessionId }, 400);
     console.error('[wa-agents/test]', err);
-    return json({ error: getErrorMessage(err, 'Falha ao testar o agente') }, 500);
+    return json({ error: getErrorMessage(err, 'Falha ao testar o agente'), sessionId }, 500);
   }
 }

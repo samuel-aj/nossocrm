@@ -5,6 +5,7 @@ import type { LanguageModelV3GenerateResult } from '@ai-sdk/provider';
 vi.mock('server-only', () => ({}));
 import { normalizeAgentRow } from './context';
 import { generateAgentReply } from './replyGeneration';
+import type { AgentMediaRow } from './types';
 
 const agent = normalizeAgentRow({
   id: 'agent', organization_id: 'org', name: 'Triagem', provider: 'openai', model: 'gpt-4.1',
@@ -33,6 +34,44 @@ function queuedModel(responses: LanguageModelV3GenerateResult[]) {
 }
 
 describe('contrato com o AI SDK instalado', () => {
+  it.each([['[audio]', 'audio'], ['[vídeo]', 'video']] as const)('recupera %s com a ferramenta e preserva a ordem', async (marker, kind) => {
+    const model = queuedModel([text('Olá! ' + marker + ' Conseguiu abrir?'),
+      response([{ type: 'tool-call', toolCallId: 'recover', toolName: 'enviar_midia', input: '{"nome":"Tutorial"}' }])]);
+    const sendMedia = vi.fn().mockResolvedValue({ ok: true });
+    const result = await generateAgentReply({ ...input, model, runtime: { media: [{ name: 'Tutorial', kind } as AgentMediaRow], sendMedia } });
+    expect(result.segments).toEqual([{ kind:'text', text:'Olá!', step:0 }, { kind:'media', name:'Tutorial', step:0, caption:undefined }, { kind:'text', text:'Conseguiu abrir?', step:0 }]);
+    expect(model.doGenerateCalls[1].tools?.map(t=>t.name)).toEqual(['enviar_midia']);
+    expect(sendMedia).toHaveBeenCalledTimes(1);
+    expect(result.usage).toMatchObject({ totalTokens: 30 });
+  });
+
+  it('remove o marcador redundante sem enviar a mídia duas vezes', async () => {
+    const model = queuedModel([response([{ type:'text', text:'Segue [áudio]' },
+      { type: 'tool-call', toolCallId:'first', toolName:'enviar_midia', input:'{"nome":"Explicação"}' }]), text('')]);
+    const sendMedia = vi.fn().mockResolvedValue({ok:true});
+    const result = await generateAgentReply({ ...input, model, runtime: {media:[{name:'Explicação',kind:'audio'} as AgentMediaRow], sendMedia} });
+    expect(result.segments.map(s=>s.kind)).toEqual(['text','media']);
+    expect(sendMedia).toHaveBeenCalledTimes(1);
+    expect(model.doGenerateCalls).toHaveLength(2);
+  });
+
+  it('só aceita a fala marcada que pertence ao roteiro salvo do follow-up', async () => {
+    const followupInstruction = 'Fale [audio]Tudo bem com você?[/audio]';
+    const good = await generateAgentReply({ ...input, followupInstruction, model:queuedModel([text('[audio]Tudo bem com você?[/audio]')]) });
+    expect(good.segments).toEqual([{kind:'text', voice:true, text:'Tudo bem com você?', step:0}]);
+    const bad = await generateAgentReply({ ...input, followupInstruction, model:queuedModel([text('[audio]Texto inventado[/audio]')]) });
+    expect(bad.outputSafety.status).toBe('blocked');
+    expect(bad.segments).toEqual([]);
+  });
+
+  it('bloqueia a entrega se na revisão o modelo só afirmar que enviou o vídeo', async () => {
+    const model = queuedModel([text('[vídeo]'), text('Enviei o vídeo.')]);
+    const sendMedia = vi.fn();
+    const result = await generateAgentReply({ ...input, model, runtime: {media:[{name:'Tutorial',kind:'video'} as AgentMediaRow], sendMedia} });
+    expect(result.outputSafety.status).toBe('blocked');
+    expect(result.segments).toEqual([]);
+    expect(sendMedia).not.toHaveBeenCalled();
+  });
   it('remove repetição entre passos reais sem perder o resultado da ferramenta', async () => {
     const question = 'Preciso fazer algumas perguntas rápidas.\nPosso continuar?';
     const model = queuedModel([response([{ type: 'text', text: question }, save]), text(question)]);
@@ -62,11 +101,29 @@ describe('contrato com o AI SDK instalado', () => {
   });
 
   it('bloqueia erro real de parsing do SDK sem terceira chamada ao provedor', async () => {
-    const model = queuedModel([text('{"dados":{}}'), text('JSON inválido')]);
+    const model = queuedModel([text('{"dados":{}}'), text('JSON inválido PAYLOAD_PRIVADO')]);
     const result = await generateAgentReply({ ...input, model });
-    expect(result.outputSafety.status).toBe('blocked');
+    expect(result.outputSafety).toMatchObject({ status: 'blocked', recoveryFailureCode: 'parse_or_provider_failure',
+      blockedSamples: [{ phase: 'original', segment: 0, step: 0, field: 'text', reason: 'internal_data', excerpt: '{"dados":{}}' }] });
+    expect(JSON.stringify(result.outputSafety)).not.toContain('PAYLOAD_PRIVADO');
     expect(result.text).toBe('');
     expect(result.segments).toEqual([]);
     expect(model.doGenerateCalls).toHaveLength(2);
+  });
+  it('guarda somente amostras limitadas quando a revisão estruturada real ainda contém instruções internas', async () => {
+    const original = '[instrução interna]' + 'a'.repeat(600);
+    const review = 'salvar_dados ' + 'b'.repeat(600);
+    const model = queuedModel([text(original), text(JSON.stringify({ replacements: [{ id: 0, text: review }] }))]);
+    const result = await generateAgentReply({ ...input, model });
+    expect(result.outputSafety).toMatchObject({ status: 'blocked', recoveryFailureCode: 'internal_content',
+      blockedSamples: [
+        { phase: 'original', segment: 0, field: 'text', reason: 'internal_marker', excerpt: original.slice(0, 500) },
+        { phase: 'review', segment: 0, field: 'text', reason: 'tool_call', excerpt: review.slice(0, 500) },
+      ] });
+    expect(result.text).toBe('');
+    expect(result.segments).toEqual([]);
+    expect(result.toolCalls).toEqual([]);
+    expect(model.doGenerateCalls).toHaveLength(2);
+    expect(model.doGenerateCalls[1].tools ?? []).toHaveLength(0);
   });
 });

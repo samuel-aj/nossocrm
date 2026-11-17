@@ -50,21 +50,33 @@ export async function POST(req: Request, ctx: Ctx) {
     .insert({ organization_id: orgId, doc_token: payload.token ?? null, event_type: payload.event_type ?? null, dedupe_key: dedupe, payload })
     .select('id')
     .maybeSingle();
-  if (!inserted) {
+  let eventId = (inserted as { id: string } | null)?.id;
+  if (!eventId) {
     const { data: prev } = await admin.from('zapsign_webhook_events').select('id, processed').eq('organization_id', orgId).eq('dedupe_key', dedupe).maybeSingle();
     if ((prev as { processed?: boolean } | null)?.processed) return json({ ok: true, duplicate: true });
+    eventId = prev?.id;
   }
-  const eventId = (inserted as { id: string } | null)?.id ?? null;
+  if (!eventId) return json({ error: 'Falha ao registrar evento' }, 503);
 
-  after(async () => {
+  const processEvent = async () => {
     try {
       const result = await handleZapSignWebhook(admin, orgId, payload);
-      if (eventId) await admin.from('zapsign_webhook_events').update({ processed: true, error: result.action }).eq('id', eventId);
+      const recorded = await admin.from('zapsign_webhook_events').update({ processed: true, error: result.action }).eq('id', eventId);
+      if (recorded.error) throw new Error(recorded.error.message);
+      return true;
     } catch (err) {
       console.error('[zapsign/webhook] falha ao processar', err);
       if (eventId) await admin.from('zapsign_webhook_events').update({ processed: false, error: (err as Error).message }).eq('id', eventId);
+      return false;
     }
-  });
+  };
+  // Acknowledge these events only after the status and its notification are committed.
+  let lookup = admin.from('deal_signatures').select('id').eq('organization_id', orgId).eq('origin','agent');
+  lookup = payload.external_id && isValidUUID(payload.external_id) ? lookup.eq('id', payload.external_id) : lookup.eq('doc_token',payload.token);
+  const agentSignature = await lookup.maybeSingle();
+  if (agentSignature.error) return json({ error:'Falha ao consultar contrato' },503);
+  if (agentSignature.data) return await processEvent() ? json({ ok:true }) : json({ error:'Falha ao processar confirmação' },503);
+  after(async () => { await processEvent(); });
   return json({ ok: true });
 }
 

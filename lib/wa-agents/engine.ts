@@ -1,3 +1,4 @@
+import { APICallError } from 'ai';
 import { scheduledReturnRuntime } from './scheduledReturns';
 import { loadLastInboundAt } from './lastInbound';
 import { checkProactiveFollowup, type ProactiveFollowup } from './proactiveFollowup';
@@ -17,7 +18,7 @@ import { withActor } from '@/lib/supabase/actorClient';
 import { executeCustomAction, executeOutcomeActions, type OutcomeActionsResult } from './actions';
 import { ensureAutoLead } from './autoLead';
 import { isAiAgentsApproved } from './beta';
-import { handleBotReply, startBotRun } from './bots';
+import { handleBotReply, startBotForInboundMessage, startBotRun } from './bots';
 import {
   AGENT_SOURCES,
   buildHistoryMessages,
@@ -34,7 +35,11 @@ import {
 import { errorMessage, WaAgentError } from './errors';
 import { consultHelperAgent } from './helpers';
 import { searchKnowledge } from './knowledge';
-import { sendAgentMedia } from './media';
+import { internalOutputReason } from './replyOutput';
+import { sendAgentMedia, sendOutboxMedia } from './media';
+import { deliveredMediaNames } from './mediaDelivery';
+import { prepareVoiceFile } from './voice';
+import { voiceDelivery, VOICE_NOTICE } from './voiceDelivery';
 import { resolveAgentModel } from './model';
 import { generateAgentReply, type CollectedToolCall } from './replyGeneration';
 import { segmentText } from './replyOutput';
@@ -351,6 +356,7 @@ async function sendLines(
   lines: string[],
   opts: { renewLock?: () => Promise<void>; beforeSend?: () => Promise<void>; onSent?: () => void } = {}
 ): Promise<void> {
+  if (lines.some(line => internalOutputReason(line))) throw new WaAgentError('SEND_FAILED', 'Resposta bloqueada por conter instrução interna.');
   await opts.beforeSend?.();
   const conn = ctx.connection;
   if (!conn) throw new WaAgentError('NO_CONNECTION', 'Conversa sem número vinculado');
@@ -506,7 +512,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
   };
   const emit = async (event: AgentEvent, extra?: Record<string, unknown>) => {
     pushEvent(event, extra);
-    if (!agent || !ctx) return;
+    if (!agent || !ctx || getUsageFailure()) return;
     const results = await dispatchAgentEvent(admin, { agent, event, ctx, extra });
     if (results.length > 0) pushEvent('webhook', { event, results });
   };
@@ -632,10 +638,29 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
         messages: pending,
         onEvent: (type, data) => pushEvent(type, data),
       });
-      assertUsageHealthy();
       await renew();
     }
     inputText = pending.map(messageText).filter(Boolean).join('\n') || null;
+    const unreadableAudio = trigger === 'inbound' && !input.forceReply && agent.media_understanding.audio
+      ? pending.filter(m => m.media_type === 'audio' && !m.transcription?.trim()) : [];
+    for (const audio of unreadableAudio) {
+      const { error } = await admin.from('crm_notification_events').insert({
+        organization_id: organizationId, kind: 'audio_transcription', source_id: audio.id,
+      });
+      if (error && error.code !== '23505') {
+        pushEvent('audio_notification_failed', { id: audio.id, error: error.message });
+        console.error('[wa-agents] aviso de áudio sem transcrição:', error.message);
+      }
+    }
+    const latest = pending.at(-1);
+    const needsAudioResend = latest && unreadableAudio.includes(latest) && !latest.body?.trim();
+    const usageFailure = getUsageFailure();
+    // A provider outage may leave usage unknown. Only a fixed, no-model reply
+    // is allowed when enforcement is off; ledger errors and active limits still win.
+    const providerFailed = APICallError.isInstance(usageFailure) ||
+      (usageFailure instanceof AiUsageError && usageFailure.code === 'AI_USAGE_UNKNOWN');
+    const fixedReplyOnly = needsAudioResend && providerFailed && usageContext?.policyEnabled === false;
+    if (!fixedReplyOnly) assertUsageHealthy();
     if (!input.forceReply) {
       if (pending.length === 0) return await finish('skipped', { reason: 'nada a responder' });
       // Só saída HUMANA (crm/echo) bloqueia; as do agente, robô e API não contam
@@ -643,6 +668,31 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       if (lastAny && lastAny.direction === 'out' && !(lastAny.source && AGENT_SOURCES.has(lastAny.source))) {
         return await finish('skipped', { reason: 'atendente respondeu por último' });
       }
+    }
+
+    if (latest && needsAudioResend) {
+      const activeCtx = ctx;
+      const activeAgentId = agent.id;
+      const reply = 'Não consegui ouvir seu áudio. Pode mandar de novo ou escrever por aqui?';
+      const canReply = async () => {
+        const { data, error } = await admin.from('wa_conversations').select('id')
+          .eq('organization_id', organizationId).eq('id', conversationId)
+          .eq('ai_agent_id', activeAgentId).eq('ai_status', 'active').eq('ai_lock_until', lockValue).maybeSingle();
+        if (error) throw new WaAgentError('DB_ERROR', error.message);
+        const last = await getLastMessage(admin, activeCtx, null);
+        if (!data || last?.id !== latest.id) throw new ProactiveInterrupted('Outra mensagem ou intervenção substituiu o pedido de reenvio.');
+        const budget = await checkConversationBudget(admin, organizationId, conversationId);
+        if (fixedReplyOnly && budget.policy.enabled) assertUsageHealthy();
+        if (budget.blocked_at) throw new ProactiveInterrupted('Atendimento pausado pelo limite de consumo.');
+      };
+      await sendLines(admin, ctx, agent, [reply], { renewLock: renew, beforeSend: canReply });
+      outputText = reply;
+      const state = { ...conv.ai_state, respostas: (Number(conv.ai_state?.respostas) || 0) + 1 };
+      await updateConversation(admin, ctx, { ai_last_processed_at: latest.created_at, ai_state: state });
+      pushEvent('audio_resend_requested', { id: latest.id });
+      await emit('reply_sent', { text: reply, lines: [reply], media: [] });
+      if (agent.max_replies > 0 && state.respostas >= agent.max_replies) await stopConversation('limite de respostas atingido');
+      return await finish('ok', { text: reply, lines: [reply] });
     }
 
     // Every paid attempt reserves its balance atomically through the model middleware.
@@ -670,10 +720,12 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     // na última resposta permitida o prompt manda encerrar (mustClose) e, se o modelo não
     // encerrar, a conversa para depois do envio (passo 9d)
     const priorState = (conv.ai_state ?? {}) as ConversationAiState;
+    const mediaSentBefore = await deliveredMediaNames(admin, { organizationId, conversationId }, resources.media, priorState.midias_enviadas ?? []);
+    if (mediaSentBefore.size) priorState.midias_enviadas = [...mediaSentBefore];
     const repliesSoFar = Number(priorState.respostas ?? 0) || 0;
     const mustClose = agent.max_replies > 0 && repliesSoFar + 1 >= agent.max_replies;
     // Instrução de apresentação só no primeiro contato pelo pipeline (não nas rodadas seguintes nem após passagem)
-    const system = buildSystemPrompt({
+    let system = buildSystemPrompt({
       agent,
       ctx,
       firstContact: input.trigger === 'deal',
@@ -682,6 +734,11 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       mustClose,
       followup: input.followup ?? null,
     });
+    if (agent.tools?.zapsign_template_token && conv.deal_id && conv.contact_id) {
+      const { agentContractFact } = await import('@/lib/zapsign/agentContractFact');
+      const fact = await agentContractFact(admin,organizationId,conversationId,agent.id,conv.deal_id,conv.contact_id,agent.tools.zapsign_template_token);
+      if (fact) system += '\n\n' + fact;
+    }
     const messages = await buildHistoryMessages(admin, ctx, agent.history_limit);
     if (input.forceReply && (messages.length === 0 || messages[messages.length - 1].role === 'assistant')) {
       messages.push({
@@ -694,15 +751,29 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
 
     // Efeitos das ferramentas condicionais. enviar_midia só enfileira: a mídia
     // sai na ordem dos segmentos (texto anterior, mídia, texto seguinte), no passo 7.
-    // Cada mídia vai uma única vez por atendimento (ai_state.midias_enviadas) e
+    // Cada mídia vai uma única vez por conversa (comprovantes persistidos) e
     // as consultas (auxiliares, base) têm teto por resposta.
     const runCtx = ctx;
     const runAgent = agent;
-    const mediaSentBefore = new Set((priorState.midias_enviadas ?? []).map(normalizeKeyword));
     const mediaQueued = new Set<string>();
+    let contractReviewKey: string | undefined;
     let helperCalls = 0;
     let knowledgeCalls = 0;
     const runtime: AgentToolRuntime = {
+      ...(agent.tools?.zapsign_template_token && !input.forceReply && !input.proactive && pending.length ? {
+        contract: async (args: Parameters<NonNullable<AgentToolRuntime['contract']>>[0]) => {
+          assertUsageHealthy();
+          await renew();
+          const { runAgentContract } = await import('@/lib/zapsign/agentContract');
+          return runAgentContract(admin, { org: organizationId, agent: runAgent.id, conversation: conversationId,
+            deal: runCtx.deal?.id ?? '', template: runAgent.tools.zapsign_template_token!,
+            inboundId: pending[pending.length - 1].id,
+            // An auto-lead can be created *after* the inbound message that opened it.
+            since: [memoriaDesde, [runCtx.deal?.created_at, pending[pending.length - 1].created_at]
+              .filter((v): v is string => !!v).sort()[0]].filter((v): v is string => !!v).sort().pop() ?? since }, args,
+            key => { contractReviewKey = key; });
+        },
+      } : {}),
       ...(agent.tools?.scheduled_return_bot_id ? { scheduledReturn: scheduledReturnRuntime(admin, organizationId, conversationId, agent, returnAnchor) } : {}),
       documents: resources.documents,
       media: resources.media,
@@ -738,7 +809,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     };
 
     // 6. Geração
-    const gen = await generateAgentReply({ model: resolved.model, agent, system, messages, runtime });
+    const gen = await generateAgentReply({ model: resolved.model, agent, system, messages, runtime, followupInstruction: input.followup?.instruction });
     assertUsageHealthy();
     toolCalls.push(...gen.toolCalls);
     usage = gen.usage;
@@ -755,8 +826,65 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
         .eq('ai_agent_id', agent.id).eq('ai_status', 'active').eq('ai_lock_until', lockValue)
         .select('id').maybeSingle();
       if (error) throw new WaAgentError('DB_ERROR', error.message);
-      if (paused) Object.assign(ctx.conversation, pause);
-      const reason = 'Resposta da IA bloqueada por conter dados internos. ' + (paused
+      if (paused) {
+        Object.assign(ctx.conversation, pause);
+        // The existing run trigger persists the bell alert even if the fixed
+        // reply below fails. Only the winner of this pause can notify/send.
+        pushEvent('human_handoff', { reason: 'output_safety', code: 'AI_OUTPUT_BLOCKED' });
+        const anchor = pending.at(-1);
+        if (trigger === 'inbound' && !input.forceReply && !input.proactive && anchor) {
+          const reviewCtx = ctx;
+          const reviewAgent = agent;
+          const reply = 'Vou encaminhar seu atendimento para a equipe conferir uma informação e continuar por aqui.';
+          let consumptionInterrupted = false;
+          const canSendReviewNotice = async () => {
+            assertUsageHealthy();
+            // A block applied while generation was in flight still takes priority.
+            try {
+              const budget = await checkConversationBudget(admin, organizationId, conversationId);
+              if (budget.blocked_at) throw new Error('Atendimento pausado pelo controle de consumo.');
+            } catch (error) {
+              consumptionInterrupted = true;
+              throw error;
+            }
+            const { data: owned, error: stateError } = await admin.from('wa_conversations').select('id')
+              .eq('organization_id', organizationId).eq('id', conversationId)
+              .eq('ai_agent_id', reviewAgent.id).eq('ai_status', 'paused')
+              .eq('ai_status_changed_at', pause.ai_status_changed_at).is('ai_paused_by', null)
+              .eq('connection_id', reviewCtx.connection?.id ?? '')
+              .eq('wa_phone', reviewCtx.conversation.wa_phone)
+              .eq('ai_lock_until', lockValue).gt('ai_lock_until', new Date().toISOString()).maybeSingle();
+            if (stateError) throw new WaAgentError('DB_ERROR', stateError.message);
+            if (!owned) throw new ProactiveInterrupted('A equipe alterou o atendimento durante a revisão.');
+            const { data: last, error: messageError } = await admin.from('wa_messages').select('id')
+              .eq('organization_id', organizationId).eq('conversation_id', conversationId)
+              .order('created_at', { ascending: false }).limit(1).maybeSingle();
+            if (messageError) throw new WaAgentError('DB_ERROR', messageError.message);
+            if (last?.id !== anchor.id) throw new ProactiveInterrupted('Outra mensagem substituiu a resposta em revisão.');
+            if (reviewCtx.connection?.provider === 'meta_cloud' &&
+              !getServiceWindow(await loadLastInboundAt(admin, organizationId, conversationId, reviewCtx.connection.id)).open) {
+              throw new ProactiveInterrupted('Janela do WhatsApp fechada. A equipe foi avisada no CRM.');
+            }
+          };
+          try {
+            await sendLines(admin, reviewCtx, reviewAgent, [reply], {
+              renewLock: renew, beforeSend: canSendReviewNotice, onSent,
+            });
+            outputText = reply;
+            pushEvent('output_review_notice_sent');
+          } catch (noticeError) {
+            // Never retry a possibly accepted send or discard the human alert.
+            pushEvent(noticeError instanceof ProactiveInterrupted ? 'output_review_notice_skipped' : 'output_review_notice_failed', {
+              reason: errorMessage(noticeError),
+            });
+          }
+          if (consumptionInterrupted || getUsageFailure()) {
+            const reason = 'Resposta bloqueada para revisão; aviso ao cliente impedido pelo controle de consumo.';
+            return await finish('error', { reason, error: reason });
+          }
+        }
+      }
+      const reason = (gen.outputSafety.recoveryError || 'Resposta da IA bloqueada por conter dados internos.') + ' ' + (paused
         ? 'Atendimento pausado para revisão da equipe.'
         : 'A conversa mudou durante a geração; o estado atual foi preservado.');
       await emit('error', { code: 'AI_OUTPUT_BLOCKED', message: reason, paused: !!paused });
@@ -766,11 +894,48 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     // 7. Envio na ordem dos segmentos: linhas de texto e mídias no ponto em que foram pedidas
     const lines: string[] = [];
     const mediaSent: string[] = [];
-    for (const seg of gen.segments) {
+    const mirrorAudio = !!agent.media_understanding?.reply_to_audio && !input.forceReply && !input.proactive &&
+      pending.at(-1)?.media_type === 'audio';
+    let voiceIntroduced = !!priorState.voice_introduced;
+    for (const seg of voiceDelivery(gen.segments, mirrorAudio)) {
       assertUsageHealthy();
       if (seg.kind === 'text') {
         const t = segmentText(seg);
         if (!t) continue;
+        if (seg.voice) {
+          await renew();
+          await beforeProactiveSend();
+          const file = await prepareVoiceFile(admin, agent, t);
+          assertUsageHealthy();
+          // A human may have paused the AI or taken over while the voice was being generated.
+          const { data: stillActive, error: stateError } = await admin.from('wa_conversations').select('id')
+            .eq('id', conversationId).eq('organization_id', organizationId)
+            .eq('ai_agent_id', agent.id).eq('ai_status', 'active').eq('ai_lock_until', lockValue).maybeSingle();
+          if (stateError) throw new WaAgentError('DB_ERROR', stateError.message);
+          if (!stillActive) return await finish('skipped', { reason: 'Atendimento alterado durante a geração de voz.' });
+          if (file.path) {
+            await renew();
+            await beforeProactiveSend();
+            if (!voiceIntroduced) {
+              await sendLines(admin, ctx, agent, [VOICE_NOTICE], { renewLock: renew, beforeSend: beforeProactiveSend, onSent });
+              voiceIntroduced = true;
+            }
+            await beforeProactiveSend();
+            const sent = await sendOutboxMedia(admin, ctx, {
+              mediaPath: file.path, kind: 'audio', mime: 'audio/mpeg', fileName: 'voz.mp3', transcript: t,
+            });
+            if (!sent.ok) throw new WaAgentError('SEND_FAILED', sent.error);
+            if (sent.skipped) {
+              pushEvent('media_duplicate_blocked', { media_path: file.path });
+              continue;
+            }
+            onSent();
+            lines.push(t);
+            pushEvent('voice_sent', { message_id: sent.messageId });
+            continue;
+          }
+          pushEvent('voice_fallback_text', { reason: file.reason });
+        }
         const segLines = splitLines(t);
         if (lines.length > 0 && agent.line_delay_ms > 0) await sleep(agent.line_delay_ms);
         await sendLines(admin, ctx, agent, segLines, { renewLock: renew, beforeSend: beforeProactiveSend, onSent });
@@ -787,12 +952,6 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       // nunca a recebia
       const captionText = (seg.caption ?? '').trim();
       const captionAsText = !!captionText && media.kind === 'audio';
-      if (captionAsText) {
-        const capLines = splitLines(captionText);
-        if ((lines.length > 0 || mediaSent.length > 0) && agent.line_delay_ms > 0) await sleep(agent.line_delay_ms);
-        await sendLines(admin, ctx, agent, capLines, { renewLock: renew, beforeSend: beforeProactiveSend, onSent });
-        lines.push(...capLines);
-      }
       if ((lines.length > 0 || mediaSent.length > 0) && agent.line_delay_ms > 0) await sleep(agent.line_delay_ms);
       await renew();
       await beforeProactiveSend();
@@ -802,9 +961,21 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
         ctx,
         media,
         caption: captionAsText ? undefined : seg.caption,
+        beforeDispatch: async () => {
+          // A skipped/repeated media must not send its audio caption either.
+          if (captionAsText) {
+            const capLines = splitLines(captionText);
+            await sendLines(admin, runCtx, runAgent, capLines, { renewLock: renew, beforeSend: beforeProactiveSend, onSent });
+            lines.push(...capLines);
+          }
+          await renew();
+          await beforeProactiveSend();
+        },
       });
       await renew();
-      if (sent.ok) {
+      if (sent.ok && sent.skipped) {
+        pushEvent('media_duplicate_skipped', { nome: media.name, kind: media.kind });
+      } else if (sent.ok) {
         onSent();
         mediaSent.push(media.name);
         pushEvent('media_sent', { nome: media.name, kind: media.kind, message_id: sent.messageId });
@@ -818,6 +989,8 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     const lastIn = pending.length > 0 ? pending[pending.length - 1] : await getLastMessage(admin, ctx, 'in');
     const saved = mergeSavedData(gen.toolCalls);
     const state: ConversationAiState = { ...priorState };
+    if (voiceIntroduced) state.voice_introduced = true;
+    if (contractReviewKey && lines.length) state.zapsign_review = contractReviewKey;
     if (saved) state.dados = mergeSavedDataInto(state.dados, saved);
     if (mediaSent.length > 0) {
       state.midias_enviadas = Array.from(new Set([...(state.midias_enviadas ?? []), ...mediaSent]));
@@ -836,6 +1009,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
 
     // Mudança de estado pedida pelas ações (aprovação, passagem, parada): aplicada uma única vez
     // no fim. O resultado do encerramento prevalece sobre uma ação durante a conversa.
+    let humanReview = false;
     let transition: { acts: OutcomeActionsResult; summary: string; reason: string; extra: Record<string, unknown> } | null =
       null;
     const requestsTransition = (acts: OutcomeActionsResult) =>
@@ -888,7 +1062,9 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     }
 
     // 9b. Encerramento (encerrar_atendimento)
-    const end = gen.toolCalls.find(t => t.tool === 'encerrar_atendimento');
+    const waitingForContract = gen.toolCalls.some(t => t.tool === 'contrato_zapsign' &&
+      (t.output as {criado?: boolean} | undefined)?.criado === true);
+    const end = !waitingForContract && gen.toolCalls.find(t => t.tool === 'encerrar_atendimento');
     if (end) {
       const args = (end.input ?? {}) as { resultado?: unknown; resumo?: unknown };
       const resultado = String(args.resultado ?? '').trim();
@@ -906,6 +1082,8 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
           renewLock: renew,
         });
         await emit('finished', { resultado: outcome.key, resultado_label: outcome.label, resumo });
+        humanReview = [outcome.key, outcome.label].some(value =>
+          value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/[\s_-]+/g, '-') === 'analise-humana');
         if (requestsTransition(acts)) {
           transition = { acts, summary: resumo, reason: 'resultado com parada', extra: { resultado: outcome.key, resumo } };
         } else {
@@ -975,6 +1153,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
         }
       } else if (acts.stopped) {
         await stopConversation(reason, extra);
+        if (humanReview && !acts.startBotId) pushEvent('human_handoff');
         if (acts.startBotId) {
           // O robô inicia DEPOIS da parada e fora da trava (ele manda mensagens
           // e pega a própria trava de execução), como a passagem em cadeia.
@@ -1028,7 +1207,10 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       ...await finish('skipped', { reason: msg }),
       ...(!proactiveSent && e.until ? { deferredUntil: e.until } : {}),
     };
-    if (e instanceof AiUsageError || getUsageFailure()) {
+    const usageFailure = getUsageFailure();
+    if (e instanceof AiUsageError || usageFailure) {
+      const cause = usageFailure ?? e;
+      const usageMessage = errorMessage(cause);
       const usageContext = getUsageContext();
       try {
         if (usageContext) {
@@ -1037,15 +1219,15 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
           // the block RPC checks it again under its lock to close the toggle race.
           const currentBudget = await checkConversationBudget(admin, organizationId, conversationId);
           if (currentBudget.policy.enabled || currentBudget.blocked_at) {
-            await blockConversationBudget(usageContext, e instanceof AiUsageError ? e.code : 'AI_USAGE_UNAVAILABLE');
+            await blockConversationBudget(usageContext, cause instanceof AiUsageError ? cause.code : 'AI_USAGE_UNAVAILABLE');
           }
         }
       } catch (blockError) {
         console.error('[wa-agents] não foi possível persistir o bloqueio de consumo:', errorMessage(blockError));
       }
       // No error webhook: quota warnings stay inside the CRM and never message the lead.
-      pushEvent('usage_interrupted', { message: msg });
-      return await finish('error', { reason: msg, error: msg });
+      pushEvent('usage_interrupted', { message: usageMessage });
+      return await finish('error', { reason: usageMessage, error: usageMessage });
     }
     const code = e instanceof WaAgentError ? e.code : undefined;
     console.error('[wa-agents] execução falhou:', msg);
@@ -1110,6 +1292,14 @@ export async function handleInboundMessage(input: {
       };
       await handleBotReply(admin, { run: waiting as BotRunRow, message: m });
       return { status: 'ok', reason: 'robô' };
+    }
+
+    // Robô com gatilho "Mensagem recebida" no número: também não depende da liberação do
+    // agente de IA, e o agente da conversa (se houver) segue normalmente logo abaixo
+    try {
+      await startBotForInboundMessage(admin, { organizationId, conversationId, messageId });
+    } catch (e) {
+      console.error('[wa-agents] gatilho de mensagem do robô falhou:', errorMessage(e));
     }
 
     if (!(await isAiAgentsApproved(admin, organizationId))) {

@@ -1,5 +1,24 @@
 # ZapSign: contratos com conferência antes do envio
 
+## Criar pelo agente de WhatsApp (ajuste local de 06/11/2026)
+
+O recurso fica **desativado** até o escritório escolher um modelo para aquele agente. Ele não altera a conexão da ZapSign; o acesso à configuração da integração continua reservado ao Mestre/superadministrador.
+
+1. Abra **Configurações → IA e Automações → Agentes de IA**, edite o agente e acesse **Ações e recursos → Recursos → Modelo de contrato da ZapSign**.
+2. Escolha um modelo ativo da conta do escritório. Em **Configurar campos do modelo**, associe cada variável a um campo do CRM, a um texto fixo ou à opção **Perguntar ao cliente na conversa**. Para valores e condições comerciais, use os dados do escritório. Salve o agente.
+3. A IA reúne os dados e apresenta a ficha com uma única pergunta: “Você confirma os dados da ficha para eu gerar o contrato e enviar o link por aqui?”. O aceite dessa ficha libera a criação. Se o cliente já conferiu uma ficha completa que só perguntava pelos dados, o agente pede apenas autorização para gerar o contrato. Se os termos ou o modelo mudarem, pede novo aceite. Quando o e-mail pessoal do cliente não foi informado, a variável de texto do documento recebe um espaço. O contato e o endereço do signatário continuam sem e-mail quando não há endereço cadastrado.
+4. Após a criação, o CRM envia o link pelo WhatsApp do atendimento. Em **Lead → Contrato**, a equipe vê se o envio está pendente, confirmado ou precisa de conferência.
+5. Quando a ZapSign confirma a assinatura do cliente, o agente lê a conversa, parabeniza e orienta sobre o próximo passo previsto pelo escritório. Se outra pessoa ainda precisa assinar, o contrato continua aguardando as demais assinaturas. O acompanhamento respeita a pausa do agente, o limite de consumo e os horários de follow-up do escritório.
+6. Para retomar pela API oficial com a janela de 24 horas fechada, selecione em **Confirmação de assinatura fora da janela do WhatsApp** uma mensagem aprovada para aquele número, com texto fixo. Sem esse modelo, o envio aguarda uma nova mensagem do cliente. Se o WhatsApp deixar o resultado de um envio incerto, a equipe pode conferir a conversa na aba Contrato.
+
+**Roteiro sugerido para o agente:** “Peça os dados que faltam, apresente as condições do escritório e aguarde o aceite. Crie o contrato e avise que o link chegará nesta conversa. Mantenha o atendimento disponível. Quando receber a confirmação da ZapSign, parabenize o cliente e explique o próximo passo previsto no nosso roteiro.”
+
+**Teste no editor:** abra **Testar**, converse como um cliente fictício e confirme o resumo. O painel mostra o link de teste. Clique em **Simular assinatura do cliente** para receber a resposta do agente no simulador. A criação e a entrega são simuladas.
+
+**Modelos com anexos:** no agente, selecione o modelo principal. A quantidade ao lado do nome inclui o documento principal e os anexos que a ZapSign vinculou a ele. O CRM reúne os campos desses documentos, apresenta um único resumo e libera o link do cliente quando confirma que o envelope contém todos os documentos. Se a ZapSign não confirmar um anexo, confira o envelope antes de repetir o pedido. Para escolher um modelo avulso legítimo, use **Mostrar também modelos de um documento**. Seleções antigas não são trocadas automaticamente.
+
+Listar os modelos não comprova que a conta permite criar documentos pela API em produção. Se a ZapSign exigir um plano de API, o editor informa a limitação e o agente não cria o contrato.
+
 Estado em 28/10/2026: branch `feat/zapsign` e preview `staging`. Não está em produção.
 
 ## O que a pessoa vê

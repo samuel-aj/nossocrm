@@ -454,7 +454,7 @@ function MediaCard({
   otherNames: string[];
   busy: boolean;
   onInsert: (name: string) => void;
-  onSave: (patch: { name?: string; description?: string }) => Promise<unknown>;
+  onSave: (patch: { name?: string; description?: string; send_once_per_conversation?: boolean }) => Promise<unknown>;
   /** Chamado depois de renomear no servidor (o editor pai atualiza os marcadores do roteiro) */
   onRenamed?: (oldName: string, newName: string) => void;
   onDelete: () => void;
@@ -548,6 +548,23 @@ function MediaCard({
           placeholder="Ex.: quando o cliente pedir a tabela de preços"
         />
       </Field>
+
+      <label className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-200">
+        <input
+          type="checkbox"
+          className="mt-0.5 h-4 w-4 accent-purple-600"
+          checked={media.send_once_per_conversation !== false}
+          disabled={busy}
+          onChange={(event) => { void onSave({ send_once_per_conversation: event.target.checked }).catch(() => {}); }}
+        />
+        <span>
+          <span className="font-medium">Enviar apenas uma vez por conversa</span>
+          <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+            Impede o agente de repetir esta mídia, mesmo em atendimentos retomados.
+            Ao desativar, permanece o intervalo mínimo de 1 minuto entre envios.
+          </span>
+        </span>
+      </label>
 
       <div className="flex flex-wrap items-center gap-2">
         <button

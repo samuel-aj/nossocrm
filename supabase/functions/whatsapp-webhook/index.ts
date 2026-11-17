@@ -21,6 +21,7 @@ import { encryptedEdit, resolveEncryptedEdit } from "./encrypted-edits.ts";
 import { parseMessageEdit, applyMessageEdit } from "./edits.ts";
 import { applyDeliveryStatus } from "./statuses.ts";
 import { enrichMissingQuote, extractEvolutionQuoteContext, resolveQuoteWhenPresent, type QuoteSnapshot } from "../_shared/quotes.ts";
+import { evolutionCtwa, recordCtwa } from "../_shared/ctwa.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -612,6 +613,7 @@ Deno.serve(async (req) => {
 
   // --- Mensagens (recebidas e eco de enviadas) ---
   if (event === "messages.upsert") {
+    let referralsSaved = true;
     const msgs = Array.isArray(data) ? data : Array.isArray(data?.messages) ? data.messages : [data];
     // GRUPOS: só entram quando a organização ligou "Grupos do WhatsApp no
     // chat" (organization_settings.wa_groups_enabled). Banco sem a coluna
@@ -770,7 +772,16 @@ Deno.serve(async (req) => {
           if (!convId) console.error("[wa-webhook] conversa nao criada:", convErr.message);
         }
       }
-      if (!convId) continue;
+      const adReferral = !isGroup && !fromMe && !ctx.forwarded ? evolutionCtwa(m) : null;
+      if (!convId) {
+        if (adReferral) referralsSaved = false;
+        continue;
+      }
+      if (adReferral) {
+        const saved = await recordCtwa(supabase, { organizationId: orgId, connectionId: conn.id, conversationId: convId,
+          messageId: providerId, timestamp: waTs }, "evolution", adReferral);
+        if (!saved) referralsSaved = false;
+      }
 
       // Eco de mensagem já gravada (ex.: enviada pelo CRM no /send)? Pula tudo
       // — evita upload duplicado de mídia e o insert com erro de unicidade.
@@ -947,7 +958,7 @@ Deno.serve(async (req) => {
         await supabase.rpc("wa_increment_unread", { p_conversation_id: convId });
       }
     }
-    return json(200, { ok: true });
+    return referralsSaved ? json(200, { ok: true }) : json(503, { error: "Falha ao registrar origem do anúncio" });
   }
 
   // Evento que a função não trata: registra o NOME (ajuda a descobrir formatos novos)
