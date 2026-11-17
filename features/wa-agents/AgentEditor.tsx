@@ -70,6 +70,7 @@ import {
   type AgentFollowup,
 } from '@/lib/wa-agents/types';
 import { MODEL_CATALOG, PROMPT_VARIABLE_NAMES, PROVIDER_LABELS } from '@/lib/wa-agents/catalog';
+import { supportsModelTemperature } from '@/lib/ai/modelCapabilities';
 import { typingDelayMs, typingSecondsLabel } from '@/lib/wa-agents/typing';
 import { DEFAULT_OUTCOMES, DEFAULT_STOP_RULES, DEFAULT_SYSTEM_PROMPT } from '@/lib/wa-agents/defaults';
 import {
@@ -970,6 +971,7 @@ export const AgentEditor: React.FC<{
   const connections = options?.connections ?? [];
   const agents = agentsQ.data ?? [];
   const catalog = MODEL_CATALOG[form.provider] ?? [];
+  const temperatureEnabled = supportsModelTemperature(form.provider, form.model);
   const isCatalogModel = catalog.some((m) => m.id === form.model);
   const [customModel, setCustomModel] = useState<boolean>(() => {
     const models = MODEL_CATALOG[form.provider] ?? [];
@@ -1588,9 +1590,11 @@ export const AgentEditor: React.FC<{
               ) : null}
             </Field>
             <Field
-              label={`Temperatura: ${form.temperature.toFixed(2)}`}
+              label={temperatureEnabled ? `Temperatura: ${form.temperature.toFixed(2)}` : 'Temperatura automática'}
               htmlFor="agent-temperature"
-              tip="Baixa = respostas mais previsíveis; alta = mais criativas. Para atendimento, entre 0,3 e 0,7."
+              tip={temperatureEnabled
+                ? 'Baixa = respostas mais previsíveis; alta = mais criativas. Para atendimento, entre 0,3 e 0,7.'
+                : 'Este modelo usa o padrão de temperatura do provedor.'}
             >
               <input
                 id="agent-temperature"
@@ -1599,8 +1603,9 @@ export const AgentEditor: React.FC<{
                 max={1.5}
                 step={0.05}
                 value={form.temperature}
+                disabled={!temperatureEnabled}
                 onChange={(e) => patch({ temperature: Number(e.target.value) })}
-                className="w-full accent-purple-600 mt-2.5"
+                className="w-full accent-purple-600 mt-2.5 disabled:opacity-40 disabled:cursor-not-allowed"
               />
             </Field>
           </div>
