@@ -18,6 +18,7 @@ export const TRIGGER_LABELS: Record<BotTriggerType, string> = {
   deal_stage_entered: 'Entrou na etapa',
   manual: 'Manual',
   agent_followup: 'Follow-up do agente de IA',
+  message_received: 'Mensagem recebida',
 };
 
 /** Rótulos dos tipos de bloco. */
@@ -160,8 +161,15 @@ export type TriggerData = {
   trigger_type: BotTriggerType;
   board_id: string;
   stage_id: string;
-  /** Número que inicia a conversa quando o gatilho dispara ('' = primeiro do robô) */
+  /**
+   * Número que inicia a conversa quando o gatilho dispara ('' = primeiro do robô).
+   * Em "Mensagem recebida": o número que recebe ('' = qualquer número do robô).
+   */
   connection_id: string;
+  /** Só "Mensagem recebida": qualquer mensagem ou só a que contém uma das palavras */
+  match?: 'any' | 'contains';
+  /** Palavras do filtro, como digitadas (separadas por vírgula) */
+  keywords?: string;
 };
 /** typing_seconds: "digitando..." antes de enviar (0 = envia direto) */
 export type MessageData = { text: string; typing_seconds: number };
@@ -194,7 +202,7 @@ export type ConditionOp =
   | 'lt';
 export type ConditionMatch = 'all' | 'any';
 export const CONDITION_FIELD_LABELS: Record<ConditionField, string> = {
-  reply: 'Última resposta do lead',
+  reply: 'Mensagem do lead (última recebida)',
   tags: 'Rótulos do negócio',
   stage: 'Etapa do negócio',
   board: 'Quadro do negócio',

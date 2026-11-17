@@ -1659,6 +1659,8 @@ export type StartBotRunInput = {
   /** Excluded from production analytics and the production round-robin sequence. */
   isTest?: boolean;
   proactive?: ProactiveFollowup;
+  /** Mensagem que disparou o robô (gatilho message_received): vira a última mensagem do lead */
+  message?: { id: string; text: string };
 };
 
 /** Só cria a execução (status 'running', wake_at agora), sem processar. */
@@ -1712,6 +1714,7 @@ export async function createBotRun(
           ...(input.context?.trim() ? { contexto_extra: input.context.trim() } : {}),
           ...(input.proactive ? { [PROACTIVE_VAR]: input.proactive } : {}),
           ...(input.chainDepth ? { [CHAIN_DEPTH_VAR]: input.chainDepth } : {}),
+          ...(input.message ? { last_reply: input.message.text, last_reply_message_id: input.message.id, trigger_message_id: input.message.id } : {}),
         },
         log: [],
       })
@@ -1746,4 +1749,93 @@ export async function startBotRun(
   } catch (e) {
     return { ok: false, error: errorMessage(e) };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Gatilho "Mensagem recebida"
+// ---------------------------------------------------------------------------
+
+type MessageTriggerBot = Pick<BotRow, 'id' | 'name' | 'trigger' | 'connection_id' | 'connection_ids' | 'created_at'>;
+
+/**
+ * Qual robô a mensagem dispara neste número: os que filtram por palavra e
+ * acham uma delas vêm antes dos que disparam com qualquer mensagem; empate, o
+ * mais antigo. Número: o do gatilho, quando escolhido; senão, os do robô.
+ */
+export function pickMessageTriggeredBot<T extends MessageTriggerBot>(bots: T[], connectionId: string, text: string): T | null {
+  const said = normalizeKeyword(text);
+  const onNumber = bots.filter(b => {
+    if (b.trigger?.type !== 'message_received') return false;
+    const chosen = b.trigger.connection_id;
+    return chosen ? chosen === connectionId : botConnectionIds(b).includes(connectionId);
+  });
+  const oldest = (list: T[]) => [...list].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))[0] ?? null;
+  const byWord = onNumber.filter(b => {
+    if (b.trigger.match !== 'contains') return false;
+    return (b.trigger.keywords ?? []).some(k => {
+      const kw = normalizeKeyword(k);
+      return kw.length > 0 && said.includes(kw);
+    });
+  });
+  if (byWord.length) return oldest(byWord);
+  return oldest(onNumber.filter(b => b.trigger.match !== 'contains'));
+}
+
+/**
+ * Mensagem recebida: inicia o robô com gatilho "Mensagem recebida" do número
+ * da conversa. Nunca em grupo, e nunca por cima de um robô que já está rodando
+ * na conversa (um robô por vez; o que espera resposta já recebeu a mensagem
+ * antes de chegar aqui). Não depende da liberação do agente de IA, e o agente
+ * da conversa segue normalmente.
+ */
+export async function startBotForInboundMessage(
+  admin: SupabaseClient,
+  input: { organizationId: string; conversationId: string; messageId: string }
+): Promise<{ started: boolean; botId?: string; runId?: string; reason: string }> {
+  const { organizationId, conversationId, messageId } = input;
+  const { data: convRow } = await admin
+    .from('wa_conversations')
+    .select('id, connection_id, is_group')
+    .eq('organization_id', organizationId)
+    .eq('id', conversationId)
+    .maybeSingle();
+  const conv = convRow as { id: string; connection_id: string | null; is_group?: boolean | null } | null;
+  if (!conv) return { started: false, reason: 'conversa não encontrada' };
+  if (conv.is_group) return { started: false, reason: 'grupo' };
+  if (!conv.connection_id) return { started: false, reason: 'conversa sem número' };
+
+  const { data: botRows } = await admin
+    .from('wa_bots')
+    .select('id, name, enabled, trigger, connection_id, connection_ids, created_at')
+    .eq('organization_id', organizationId)
+    .eq('enabled', true);
+  const bots = ((botRows ?? []) as MessageTriggerBot[]).filter(b => b.trigger?.type === 'message_received');
+  if (!bots.length) return { started: false, reason: 'nenhum robô com gatilho de mensagem' };
+
+  const { data: msgRow } = await admin
+    .from('wa_messages')
+    .select('id, direction, body, media_type, transcription')
+    .eq('organization_id', organizationId)
+    .eq('id', messageId)
+    .maybeSingle();
+  const msg = msgRow as { id: string; direction: string; body: string | null; media_type: string | null; transcription: string | null } | null;
+  if (!msg || msg.direction !== 'in') return { started: false, reason: 'mensagem não encontrada' };
+  const text = (msg.body ?? '').trim() || (msg.transcription ?? '').trim();
+
+  const bot = pickMessageTriggeredBot(bots, conv.connection_id, text);
+  if (!bot) return { started: false, reason: 'nenhum robô para esta mensagem' };
+
+  const { data: active } = await admin
+    .from('wa_bot_runs')
+    .select('id')
+    .eq('organization_id', organizationId)
+    .eq('conversation_id', conversationId)
+    .in('status', ['running', 'waiting_reply'])
+    .limit(1);
+  if ((active ?? []).length > 0) return { started: false, botId: bot.id, reason: 'já há um robô rodando nesta conversa' };
+
+  const created = await createBotRun(admin, { organizationId, botId: bot.id, conversationId, message: { id: msg.id, text } });
+  if (!created.ok || !created.run) return { started: false, botId: bot.id, reason: created.error ?? 'não foi possível iniciar o robô' };
+  await runBotRunNow(admin, created.run);
+  return { started: true, botId: bot.id, runId: created.run.id, reason: 'robô iniciado pela mensagem' };
 }

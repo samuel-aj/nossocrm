@@ -206,6 +206,16 @@ export function createBubble(blocks: Block[], position: XYPosition, name = '', i
   return { id, type: 'bubble', position, data: { name, blocks } };
 }
 
+/** Palavras do filtro do gatilho "Mensagem recebida" (vírgula ou linha nova), sem repetir. */
+export function splitTriggerKeywords(raw: string | undefined | null): string[] {
+  const out: string[] = [];
+  for (const part of String(raw ?? '').split(/[,\n]/)) {
+    const k = part.trim().slice(0, 100);
+    if (k && !out.some((o) => o.toLowerCase() === k.toLowerCase())) out.push(k);
+  }
+  return out.slice(0, 20);
+}
+
 function createTriggerNode(trigger: BotRow['trigger'] | null, position: XYPosition): TriggerNode {
   return {
     id: TRIGGER_NODE_ID,
@@ -217,6 +227,8 @@ function createTriggerNode(trigger: BotRow['trigger'] | null, position: XYPositi
       board_id: trigger?.board_id ?? '',
       stage_id: trigger?.stage_id ?? '',
       connection_id: trigger?.connection_id ?? '',
+      match: trigger?.match ?? 'any',
+      keywords: (trigger?.keywords ?? []).join(', '),
     },
   };
 }
@@ -681,6 +693,8 @@ export function flowToBot(nodes: FlowNode[], edges: FlowEdge[], header: FlowHead
   }
 
   const triggerType = trigger?.data.trigger_type ?? 'manual';
+  const byMessage = triggerType === 'message_received';
+  const keywords = splitTriggerKeywords(trigger?.data.keywords);
   return {
     name: header.name.trim(),
     enabled: header.enabled,
@@ -689,10 +703,14 @@ export function flowToBot(nodes: FlowNode[], edges: FlowEdge[], header: FlowHead
     connection_ids: header.connection_ids ?? [],
     trigger: {
       type: triggerType,
-      board_id: triggerType === 'manual' || triggerType === 'agent_followup' ? null : trigger?.data.board_id || null,
+      board_id: triggerType === 'manual' || triggerType === 'agent_followup' || byMessage ? null : trigger?.data.board_id || null,
       stage_id: triggerType === 'deal_stage_entered' ? trigger?.data.stage_id || null : null,
-      // Número que inicia a conversa quando o gatilho dispara (vazio = primeiro do robô)
+      // Número que inicia a conversa quando o gatilho dispara (vazio = primeiro do robô);
+      // em "Mensagem recebida", o número que recebe (vazio = qualquer número do robô)
       connection_id: trigger?.data.connection_id || null,
+      ...(byMessage
+        ? { match: trigger?.data.match === 'contains' && keywords.length ? ('contains' as const) : ('any' as const), keywords: trigger?.data.match === 'contains' ? keywords : [] }
+        : {}),
       ...(trigger ? { ui: { x: Math.round(trigger.position.x), y: Math.round(trigger.position.y) } } : {}),
     },
     steps,
@@ -809,6 +827,9 @@ export function validateFlow(nodes: FlowNode[], edges: FlowEdge[], header: FlowH
   }
 
   const trigger = nodes.find(isTriggerNode);
+  if (trigger && trigger.data.trigger_type === 'message_received' && trigger.data.match === 'contains' && splitTriggerKeywords(trigger.data.keywords).length === 0) {
+    errors.push({ nodeId: trigger.id, message: 'Gatilho: escreva as palavras da mensagem que dispara o robô' });
+  }
   if (trigger && trigger.data.trigger_type === 'deal_stage_entered') {
     if (!trigger.data.board_id) errors.push({ nodeId: trigger.id, message: 'Gatilho: escolha o quadro' });
     else if (!trigger.data.stage_id) {

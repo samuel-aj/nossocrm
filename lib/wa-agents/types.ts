@@ -764,8 +764,13 @@ export type BotStep = z.infer<typeof BotStepSchema>;
 export type BotStepType = BotStep['type'];
 
 export const BotTriggerSchema = z.object({
-  /** agent_followup: só entra em ação por uma regra de follow-up de um agente de IA */
-  type: z.enum(['deal_created', 'deal_stage_entered', 'manual', 'agent_followup']),
+  /**
+   * agent_followup: só entra em ação por uma regra de follow-up de um agente de IA.
+   * message_received: o cliente mandou mensagem num número do robô (ou no
+   * `connection_id`, quando escolhido); a mensagem vira a "última mensagem do
+   * lead" que o bloco Condição lê.
+   */
+  type: z.enum(['deal_created', 'deal_stage_entered', 'manual', 'agent_followup', 'message_received']),
   board_id: z.string().uuid().nullable().optional(),
   stage_id: z.string().uuid().nullable().optional(),
   /**
@@ -778,6 +783,12 @@ export const BotTriggerSchema = z.object({
    * movido para ela ou qualquer um (padrão). Lido pelo trigger wa_bot_on_deal.
    */
   entry: z.enum(['any', 'created', 'moved']).optional(),
+  /**
+   * Só message_received: dispara com qualquer mensagem (padrão) ou só quando ela
+   * contém uma das palavras de `keywords` (sem acentos/maiúsculas).
+   */
+  match: z.enum(['any', 'contains']).optional(),
+  keywords: z.array(z.string().trim().min(1).max(100)).max(20).optional(),
   /** Posição do nó Gatilho no quadro (persistida como a dos passos) */
   ui: BotStepUiSchema.optional(),
 });
