@@ -321,12 +321,15 @@ function TriggerNodeView({ id, data, selected }: NodeProps<TriggerNode>) {
   const boards = options?.boards ?? [];
   const board = boards.find((b) => b.id === data.board_id) ?? null;
   const set = (patch: Partial<TriggerData>) => updateNodeData(id, patch);
+  const byMessage = data.trigger_type === 'message_received';
   const help =
     data.trigger_type === 'deal_created'
       ? 'Dispara quando um negócio é cadastrado no quadro escolhido (ou em qualquer um).'
       : data.trigger_type === 'deal_stage_entered'
         ? 'Dispara quando um negócio entra nesta etapa.'
-        : 'Só dispara pelo botão Testar ou pela API.';
+        : byMessage
+          ? 'Dispara quando o cliente manda mensagem no número. Para seguir caminhos diferentes, use o bloco Condição com "Mensagem do lead" contém.'
+          : 'Só dispara pelo botão Testar ou pela API.';
   const issue = issues.byNode.get(id);
   const linked = connected.has(edgeIdFor(id, HANDLE_NEXT));
 
@@ -355,7 +358,7 @@ function TriggerNodeView({ id, data, selected }: NodeProps<TriggerNode>) {
           aria-label="Quando o robô dispara"
           onChange={(e) => {
             const t = e.target.value as BotTriggerType;
-            set(t === 'manual' || t === 'agent_followup' ? { trigger_type: t, board_id: '', stage_id: '' } : { trigger_type: t });
+            set(t === 'manual' || t === 'agent_followup' || t === 'message_received' ? { trigger_type: t, board_id: '', stage_id: '' } : { trigger_type: t });
           }}
         >
           {(Object.keys(TRIGGER_LABELS) as BotTriggerType[]).map((t) => (
@@ -369,7 +372,7 @@ function TriggerNodeView({ id, data, selected }: NodeProps<TriggerNode>) {
             Entra em ação quando uma regra de follow-up de um agente de IA aponta para este robô (lead sem responder).
           </p>
         ) : null}
-        {data.trigger_type !== 'manual' && data.trigger_type !== 'agent_followup' ? (
+        {data.trigger_type !== 'manual' && data.trigger_type !== 'agent_followup' && !byMessage ? (
           <NativeSelect
             className={INPUT_CLASS}
             value={data.board_id}
@@ -408,16 +411,39 @@ function TriggerNodeView({ id, data, selected }: NodeProps<TriggerNode>) {
             aria-label="Número que inicia a conversa"
             onChange={(e) => set({ connection_id: e.target.value })}
           >
-            <option value="">Número que inicia: o primeiro do robô</option>
+            <option value="">{byMessage ? 'Recebida em qualquer número do robô' : 'Número que inicia: o primeiro do robô'}</option>
             {(options?.connections ?? [])
               .filter((c) => (botConnectionIds ?? []).length === 0 || (botConnectionIds ?? []).includes(c.id) || c.id === data.connection_id)
               .map((c) => (
               <option key={c.id} value={c.id}>
-                Inicia por {c.label}
+                {byMessage ? 'Recebida em' : 'Inicia por'} {c.label}
                 {c.status === 'connected' ? '' : ' (desconectado)'}
               </option>
             ))}
           </NativeSelect>
+        ) : null}
+        {byMessage ? (
+          <>
+            <NativeSelect
+              className={INPUT_CLASS}
+              value={data.match ?? 'any'}
+              aria-label="Qual mensagem dispara"
+              onChange={(e) => set({ match: e.target.value === 'contains' ? 'contains' : 'any' })}
+            >
+              <option value="any">Qualquer mensagem</option>
+              <option value="contains">Só a mensagem que contém...</option>
+            </NativeSelect>
+            {data.match === 'contains' ? (
+              <input
+                className={INPUT_CLASS}
+                value={data.keywords ?? ''}
+                aria-label="Palavras da mensagem que dispara"
+                placeholder="ex.: quero contratar, orçamento"
+                maxLength={1000}
+                onChange={(e) => set({ keywords: e.target.value })}
+              />
+            ) : null}
+          </>
         ) : null}
         <p className={HELP_CLASS}>{help}</p>
       </div>

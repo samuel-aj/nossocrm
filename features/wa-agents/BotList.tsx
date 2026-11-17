@@ -86,6 +86,11 @@ export const BotList: React.FC = () => {
     if (t.type === 'deal_created') return `${TRIGGER_LABELS.deal_created}${board ? ` em ${board.name}` : ' (qualquer board)'}`;
     if (t.type === 'deal_stage_entered')
       return `${TRIGGER_LABELS.deal_stage_entered}: ${board?.name ?? 'board'} / ${stage?.label ?? 'etapa'}`;
+    if (t.type === 'message_received') {
+      const words = t.match === 'contains' ? (t.keywords ?? []) : [];
+      return words.length ? `${TRIGGER_LABELS.message_received} com "${words.join('", "')}"` : `${TRIGGER_LABELS.message_received} (qualquer mensagem)`;
+    }
+    if (t.type === 'agent_followup') return TRIGGER_LABELS.agent_followup;
     return TRIGGER_LABELS.manual;
   };
 

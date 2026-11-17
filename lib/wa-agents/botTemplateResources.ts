@@ -50,6 +50,10 @@ export async function botResourceError(admin: SupabaseClient, orgId: string, bot
     if (!numbers.length && bot.steps.some(step => CONVERSATION_STEPS.has(step.type))) return 'Escolha em quais números o robô atende antes de ligá-lo';
     if (bot.trigger.connection_id && !numbers.includes(bot.trigger.connection_id)) return 'O número do gatilho precisa estar selecionado no robô';
     if (bot.trigger.type === 'deal_stage_entered' && !bot.trigger.stage_id) return 'Escolha a etapa do gatilho antes de ligar';
+    if (bot.trigger.type === 'message_received') {
+      if (!numbers.length) return 'Escolha em quais números o robô recebe as mensagens antes de ligá-lo';
+      if (bot.trigger.match === 'contains' && !(bot.trigger.keywords ?? []).length) return 'Escreva as palavras da mensagem que dispara o robô antes de ligá-lo';
+    }
   }
   return null;
 }

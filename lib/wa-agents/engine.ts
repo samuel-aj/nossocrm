@@ -18,7 +18,7 @@ import { withActor } from '@/lib/supabase/actorClient';
 import { executeCustomAction, executeOutcomeActions, type OutcomeActionsResult } from './actions';
 import { ensureAutoLead } from './autoLead';
 import { isAiAgentsApproved } from './beta';
-import { handleBotReply, startBotRun } from './bots';
+import { handleBotReply, startBotForInboundMessage, startBotRun } from './bots';
 import {
   AGENT_SOURCES,
   buildHistoryMessages,
@@ -1292,6 +1292,14 @@ export async function handleInboundMessage(input: {
       };
       await handleBotReply(admin, { run: waiting as BotRunRow, message: m });
       return { status: 'ok', reason: 'robô' };
+    }
+
+    // Robô com gatilho "Mensagem recebida" no número: também não depende da liberação do
+    // agente de IA, e o agente da conversa (se houver) segue normalmente logo abaixo
+    try {
+      await startBotForInboundMessage(admin, { organizationId, conversationId, messageId });
+    } catch (e) {
+      console.error('[wa-agents] gatilho de mensagem do robô falhou:', errorMessage(e));
     }
 
     if (!(await isAiAgentsApproved(admin, organizationId))) {
