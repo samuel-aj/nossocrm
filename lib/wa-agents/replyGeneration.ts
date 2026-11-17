@@ -2,19 +2,23 @@ import { generateText, hasToolCall, Output, stepCountIs, type LanguageModel, typ
 import { z } from 'zod';
 import { transitionActionKeys } from './context';
 import { supportsTemperature } from './model';
-import { prepareReplyOutput, segmentText, type ReplySegment } from './replyOutput';
+import { prepareReplyOutput, segmentText, type OutputIssue, type ReplySegment } from './replyOutput';
 import { buildAgentTools, type AgentToolRuntime } from './tools';
 import type { AgentMediaKind, AgentRow } from './types';
 import { planMediaMarkers } from './mediaMarkers';
 import { readAgentVoiceScripts } from './voiceScript';
 
 export type CollectedToolCall = { tool: string; input: unknown; output?: unknown };
+type RecoveryFailureCode = 'invalid_slots' | 'internal_content' | 'parse_or_provider_failure';
+type BlockedSample = OutputIssue & { phase: 'original' | 'review'; excerpt: string };
 export type OutputSafety = {
   status: 'passed' | 'repaired' | 'blocked';
   issues: ReturnType<typeof prepareReplyOutput>['issues'];
   duplicatesRemoved: number;
   recoveryAttempted: boolean;
   recoveryError?: string;
+  recoveryFailureCode?: RecoveryFailureCode;
+  blockedSamples?: BlockedSample[];
   steps: Array<{ step: number; textChars: number; tools: string[] }>;
 };
 export type GeneratedReply = {
@@ -28,6 +32,27 @@ export type GeneratedReply = {
 
 const RepairSchema = z.object({ replacements: z.array(z.object({ id: z.number().int().nonnegative(), text: z.string().max(4000) })).min(1).max(16) });
 const MAX_STEPS = 6;
+const MAX_BLOCKED_SAMPLES = 3;
+const MAX_BLOCKED_EXCERPT = 500;
+
+class RecoveryFailure extends Error {
+  constructor(readonly code: RecoveryFailureCode) { super(code); }
+}
+
+/** Bounded diagnostics for run logs only; never used as customer-facing output. */
+function rememberBlockedSamples(safety: OutputSafety, segments: readonly ReplySegment[], issues: readonly OutputIssue[], phase: BlockedSample['phase']) {
+  const samples = issues.flatMap(issue => {
+    const segment = segments[issue.segment];
+    // Literal voice clips originate in the saved script, not the generated draft.
+    if (!segment || (phase === 'original' && segment.kind === 'text' && segment.voice)) return [];
+    const text = segment.kind === 'text' ? segment.text : segment.caption ?? '';
+    return [{ ...issue, phase, excerpt: text.slice(0, MAX_BLOCKED_EXCERPT) }];
+  }).slice(0, MAX_BLOCKED_SAMPLES);
+  if (!samples.length) return;
+  // Retain evidence of a rejected review even when the original fills the limit.
+  const previous = phase === 'review' ? (safety.blockedSamples ?? []).slice(0, MAX_BLOCKED_SAMPLES - 1) : [];
+  safety.blockedSamples = [...previous, ...samples].slice(0, MAX_BLOCKED_SAMPLES);
+}
 
 /** Generate once with tools, then prepare the whole reply before any customer message is sent. */
 export async function generateAgentReply(input: {
@@ -85,6 +110,7 @@ export async function generateAgentReply(input: {
     status: 'passed', issues: prepared.issues, duplicatesRemoved: prepared.duplicatesRemoved, recoveryAttempted: false,
     steps: result.steps.map((s, step) => ({ step, textChars: s.text?.length ?? 0, tools: s.toolCalls.map(c => c.toolName) })),
   };
+  rememberBlockedSamples(outputSafety, segments, prepared.issues, 'original');
 
   if (prepared.issues.length) {
     try {
@@ -98,7 +124,7 @@ export async function generateAgentReply(input: {
           const tools = buildAgentTools(input.agent, { media: eligible, sendMedia: input.runtime?.sendMedia,
             voiceClips: plan.missing.includes('audio') ? voiceClips : [] });
           const mediaTools = Object.fromEntries(Object.entries(tools).filter(([key]) => key === 'enviar_midia' || key === 'falar_trecho'));
-          if (!Object.keys(mediaTools).length) throw new Error('Nenhuma mídia disponível.');
+          if (!Object.keys(mediaTools).length) throw new RecoveryFailure('invalid_slots');
           const retry = await generateText({
             model: input.model, tools: mediaTools, toolChoice: 'required', maxRetries: 0,
             maxOutputTokens: 600, abortSignal: AbortSignal.timeout(15_000),
@@ -110,11 +136,11 @@ export async function generateAgentReply(input: {
           }
           for (const step of retry.steps) for (const call of step.toolCalls) {
             const output = step.toolResults.find(r => r.toolCallId === call.toolCallId)?.output as {ok?: boolean; midia?: string} | undefined;
-            if (!output?.ok) throw new Error('Ferramenta de mídia recusada.');
+            if (!output?.ok) throw new RecoveryFailure('invalid_slots');
             const item = eligible.find(m => m.name === output.midia);
             const speech = call.toolName === 'falar_trecho' && voiceClips[(call.input as {trecho: number}).trecho - 1];
             const kind = speech ? 'audio' : item?.kind;
-            if (!kind || recovered.has(kind)) throw new Error('Seleção de mídia inválida.');
+            if (!kind || recovered.has(kind)) throw new RecoveryFailure('invalid_slots');
             recovered.set(kind, speech ? { kind: 'text', voice: true, text: speech } : { kind: 'media', name: item!.name });
             toolCalls.push({ tool: call.toolName, input: call.input, output });
           }
@@ -124,8 +150,9 @@ export async function generateAgentReply(input: {
         outputSafety.duplicatesRemoved = prepared.duplicatesRemoved;
         outputSafety.status = 'repaired';
       }
-    } catch {
+    } catch (error) {
       outputSafety.status = 'blocked';
+      outputSafety.recoveryFailureCode = error instanceof RecoveryFailure ? error.code : 'parse_or_provider_failure';
       outputSafety.recoveryError = 'A mídia solicitada não pôde ser preparada. Confira as mídias e o roteiro do agente.';
       return { text: '', segments: [], toolCalls, usage, finishReason: String(result.finishReason ?? ''), outputSafety };
     }
@@ -163,18 +190,20 @@ export async function generateAgentReply(input: {
       }
       const replacements = RepairSchema.parse(repair.output).replacements;
       const byId = new Map(replacements.map(r => [r.id, r.text]));
-      if (replacements.length !== slots.length || byId.size !== slots.length || slots.some(s => !byId.has(s.id))) throw new Error('invalid_repair_slots');
+      if (replacements.length !== slots.length || byId.size !== slots.length || slots.some(s => !byId.has(s.id))) throw new RecoveryFailure('invalid_slots');
       for (const slot of slots) {
         const text = byId.get(slot.id)!;
-        if (!segmentText({ kind: 'text', text }) || (slot.kind === 'media' && text.length > 1000)) throw new Error('empty_or_long_repair');
+        if (!segmentText({ kind: 'text', text }) || (slot.kind === 'media' && text.length > 1000)) throw new RecoveryFailure('invalid_slots');
       }
       segments = segments.map((s, i) => !byId.has(i) ? s : s.kind === 'text' ? { ...s, text: byId.get(i)! } : { ...s, caption: byId.get(i)! });
       prepared = prepareReplyOutput(segments, voiceClips);
-      if (prepared.issues.length > 0) throw new Error('internal_content_in_repair');
+      rememberBlockedSamples(outputSafety, segments, prepared.issues, 'review');
+      if (prepared.issues.length > 0) throw new RecoveryFailure('internal_content');
       outputSafety.status = 'repaired';
       outputSafety.duplicatesRemoved = prepared.duplicatesRemoved;
-    } catch {
+    } catch (error) {
       // Nothing from the invalid draft escapes, including earlier valid text/media.
+      outputSafety.recoveryFailureCode = error instanceof RecoveryFailure ? error.code : 'parse_or_provider_failure';
       outputSafety.recoveryError = 'Não foi possível obter uma resposta válida na tentativa de revisão.';
       prepared = { text: '', segments: [], issues: outputSafety.issues, duplicatesRemoved: 0 };
     }
