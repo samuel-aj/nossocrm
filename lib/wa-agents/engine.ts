@@ -826,7 +826,64 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
         .eq('ai_agent_id', agent.id).eq('ai_status', 'active').eq('ai_lock_until', lockValue)
         .select('id').maybeSingle();
       if (error) throw new WaAgentError('DB_ERROR', error.message);
-      if (paused) Object.assign(ctx.conversation, pause);
+      if (paused) {
+        Object.assign(ctx.conversation, pause);
+        // The existing run trigger persists the bell alert even if the fixed
+        // reply below fails. Only the winner of this pause can notify/send.
+        pushEvent('human_handoff', { reason: 'output_safety', code: 'AI_OUTPUT_BLOCKED' });
+        const anchor = pending.at(-1);
+        if (trigger === 'inbound' && !input.forceReply && !input.proactive && anchor) {
+          const reviewCtx = ctx;
+          const reviewAgent = agent;
+          const reply = 'Vou encaminhar seu atendimento para a equipe conferir uma informação e continuar por aqui.';
+          let consumptionInterrupted = false;
+          const canSendReviewNotice = async () => {
+            assertUsageHealthy();
+            // A block applied while generation was in flight still takes priority.
+            try {
+              const budget = await checkConversationBudget(admin, organizationId, conversationId);
+              if (budget.blocked_at) throw new Error('Atendimento pausado pelo controle de consumo.');
+            } catch (error) {
+              consumptionInterrupted = true;
+              throw error;
+            }
+            const { data: owned, error: stateError } = await admin.from('wa_conversations').select('id')
+              .eq('organization_id', organizationId).eq('id', conversationId)
+              .eq('ai_agent_id', reviewAgent.id).eq('ai_status', 'paused')
+              .eq('ai_status_changed_at', pause.ai_status_changed_at).is('ai_paused_by', null)
+              .eq('connection_id', reviewCtx.connection?.id ?? '')
+              .eq('wa_phone', reviewCtx.conversation.wa_phone)
+              .eq('ai_lock_until', lockValue).gt('ai_lock_until', new Date().toISOString()).maybeSingle();
+            if (stateError) throw new WaAgentError('DB_ERROR', stateError.message);
+            if (!owned) throw new ProactiveInterrupted('A equipe alterou o atendimento durante a revisão.');
+            const { data: last, error: messageError } = await admin.from('wa_messages').select('id')
+              .eq('organization_id', organizationId).eq('conversation_id', conversationId)
+              .order('created_at', { ascending: false }).limit(1).maybeSingle();
+            if (messageError) throw new WaAgentError('DB_ERROR', messageError.message);
+            if (last?.id !== anchor.id) throw new ProactiveInterrupted('Outra mensagem substituiu a resposta em revisão.');
+            if (reviewCtx.connection?.provider === 'meta_cloud' &&
+              !getServiceWindow(await loadLastInboundAt(admin, organizationId, conversationId, reviewCtx.connection.id)).open) {
+              throw new ProactiveInterrupted('Janela do WhatsApp fechada. A equipe foi avisada no CRM.');
+            }
+          };
+          try {
+            await sendLines(admin, reviewCtx, reviewAgent, [reply], {
+              renewLock: renew, beforeSend: canSendReviewNotice, onSent,
+            });
+            outputText = reply;
+            pushEvent('output_review_notice_sent');
+          } catch (noticeError) {
+            // Never retry a possibly accepted send or discard the human alert.
+            pushEvent(noticeError instanceof ProactiveInterrupted ? 'output_review_notice_skipped' : 'output_review_notice_failed', {
+              reason: errorMessage(noticeError),
+            });
+          }
+          if (consumptionInterrupted || getUsageFailure()) {
+            const reason = 'Resposta bloqueada para revisão; aviso ao cliente impedido pelo controle de consumo.';
+            return await finish('error', { reason, error: reason });
+          }
+        }
+      }
       const reason = (gen.outputSafety.recoveryError || 'Resposta da IA bloqueada por conter dados internos.') + ' ' + (paused
         ? 'Atendimento pausado para revisão da equipe.'
         : 'A conversa mudou durante a geração; o estado atual foi preservado.');

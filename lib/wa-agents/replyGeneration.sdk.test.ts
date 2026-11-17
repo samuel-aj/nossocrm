@@ -101,11 +101,29 @@ describe('contrato com o AI SDK instalado', () => {
   });
 
   it('bloqueia erro real de parsing do SDK sem terceira chamada ao provedor', async () => {
-    const model = queuedModel([text('{"dados":{}}'), text('JSON inválido')]);
+    const model = queuedModel([text('{"dados":{}}'), text('JSON inválido PAYLOAD_PRIVADO')]);
     const result = await generateAgentReply({ ...input, model });
-    expect(result.outputSafety.status).toBe('blocked');
+    expect(result.outputSafety).toMatchObject({ status: 'blocked', recoveryFailureCode: 'parse_or_provider_failure',
+      blockedSamples: [{ phase: 'original', segment: 0, step: 0, field: 'text', reason: 'internal_data', excerpt: '{"dados":{}}' }] });
+    expect(JSON.stringify(result.outputSafety)).not.toContain('PAYLOAD_PRIVADO');
     expect(result.text).toBe('');
     expect(result.segments).toEqual([]);
     expect(model.doGenerateCalls).toHaveLength(2);
+  });
+  it('guarda somente amostras limitadas quando a revisão estruturada real ainda contém instruções internas', async () => {
+    const original = '[instrução interna]' + 'a'.repeat(600);
+    const review = 'salvar_dados ' + 'b'.repeat(600);
+    const model = queuedModel([text(original), text(JSON.stringify({ replacements: [{ id: 0, text: review }] }))]);
+    const result = await generateAgentReply({ ...input, model });
+    expect(result.outputSafety).toMatchObject({ status: 'blocked', recoveryFailureCode: 'internal_content',
+      blockedSamples: [
+        { phase: 'original', segment: 0, field: 'text', reason: 'internal_marker', excerpt: original.slice(0, 500) },
+        { phase: 'review', segment: 0, field: 'text', reason: 'tool_call', excerpt: review.slice(0, 500) },
+      ] });
+    expect(result.text).toBe('');
+    expect(result.segments).toEqual([]);
+    expect(result.toolCalls).toEqual([]);
+    expect(model.doGenerateCalls).toHaveLength(2);
+    expect(model.doGenerateCalls[1].tools ?? []).toHaveLength(0);
   });
 });
