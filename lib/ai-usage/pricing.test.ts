@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { MODEL_CATALOG } from '@/lib/wa-agents/catalog';
 import { normalizeLanguageUsage, type NormalizedUsage } from './normalize';
-import { estimateOperationCost, PRICING_VERSION, tokenTariff } from './pricing';
+import { estimateOperationCost, GPT6_PRICING_VERSION, PRICING_VERSION, tokenTariff } from './pricing';
 
 const usage: NormalizedUsage = { inputTokens: 1_000, outputTokens: 200, cachedInputTokens: 400, cacheWriteTokens: 0, reasoningTokens: 80, totalTokens: 1_200 };
 const cost = (provider: string, model: string, value: NormalizedUsage | number = usage, operation = 'reply') => estimateOperationCost({ provider, model, operation, usage: value });
@@ -10,7 +10,7 @@ const cost = (provider: string, model: string, value: NormalizedUsage | number =
 describe('verified standard direct-API price estimates', () => {
   it('covers every model offered by the existing agent editor with a dated tariff', () => {
     for (const [provider, models] of Object.entries(MODEL_CATALOG)) {
-      for (const model of models) expect(tokenTariff(provider, model.id, usage)?.version).toBe(PRICING_VERSION);
+      for (const model of models) expect([PRICING_VERSION, GPT6_PRICING_VERSION]).toContain(tokenTariff(provider, model.id, usage)?.version);
     }
   });
 
@@ -18,6 +18,38 @@ describe('verified standard direct-API price estimates', () => {
     const result = cost('openai', 'gpt-4.1-mini');
     expect(result.estimatedCostUsd).toBeCloseTo((600 * 0.4 + 400 * 0.1 + 200 * 1.6) / 1_000_000, 10);
     expect(result.pricingVersion).toBe(PRICING_VERSION);
+  });
+
+  it.each([
+    ['gpt-6-luna', 0.1, 0.01, 0.5],
+    ['gpt-6.1-terra', 1, 0.05, 5],
+    ['gpt-6-astra', 10, 1, 50],
+    ['gpt-6.1-sol', 2, 0.1, 10],
+  ] as const)('prices %s cache and reasoning without double counting', (model, input, cached, output) => {
+    const result = cost('openai', model);
+    expect(result.estimatedCostUsd).toBeCloseTo((600 * input + 400 * cached + 200 * output) / 1_000_000, 10);
+    expect(result.pricingVersion).toBe(GPT6_PRICING_VERSION);
+  });
+
+  it.each([
+    ['gpt-6-luna', 0.1, 0.01, 0.5],
+    ['gpt-6.1-terra', 1, 0.05, 5],
+    ['gpt-6-astra', 10, 1, 50],
+    ['gpt-6.1-sol', 2, 0.1, 10],
+  ] as const)('applies the %s long-context tier only above 272K, to the entire request', (model, input, cached, output) => {
+    const boundary = { ...usage, inputTokens: 272_000, cachedInputTokens: 100_000, totalTokens: 272_200 };
+    const long = { ...boundary, inputTokens: 272_001, totalTokens: 272_201 };
+    expect(cost('openai', model, boundary).estimatedCostUsd).toBeCloseTo((172_000 * input + 100_000 * cached + 200 * output) / 1_000_000, 10);
+    expect(cost('openai', model, long).estimatedCostUsd).toBeCloseTo((172_001 * input * 2 + 100_000 * cached * 2 + 200 * output * 1.5) / 1_000_000, 10);
+  });
+
+  it.each(['gpt-6-luna', 'gpt-6.1-terra', 'gpt-6-astra', 'gpt-6.1-sol'])('does not guess %s cache-write pricing or custom rates', model => {
+    for (const cacheWriteTokens of [100, null, undefined]) {
+      expect(cost('openai', model, { ...usage, cacheWriteTokens })).toEqual({ estimatedCostUsd: null, pricingVersion: null });
+    }
+    expect(cost('openai', `${model}-2026-11-17`).estimatedCostUsd).toBeNull();
+    expect(cost('other', model).estimatedCostUsd).toBeNull();
+    expect(estimateOperationCost({ provider: 'openai', model, operation: 'reply', usage, standardPricing: false }).estimatedCostUsd).toBeNull();
   });
 
   it('uses the verified rates for each vendor', () => {

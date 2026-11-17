@@ -7,6 +7,7 @@ import { estimateOperationCost } from './pricing';
 import type { UsageContext } from './types';
 import { audioDurationBound } from './audioBound';
 import { providerBillingRejection } from './providerFailure';
+import { isOpenAIReasoningModel } from '@/lib/ai/modelCapabilities';
 
 const MAX_OUTPUT_TOKENS = 8192;
 const DEFAULT_OUTPUT_TOKENS = 2000;
@@ -171,7 +172,9 @@ export function meterLanguageModel(model: LanguageModel, input: { provider: stri
     specificationVersion: 'v3',
     async transformParams({ params }) {
       const context = requireUsageContext();
-      if (context.policyEnabled && !KNOWN_MODELS[input.provider]?.test(input.modelId)) return unsupported(context);
+      const knownModel = KNOWN_MODELS[input.provider]?.test(input.modelId)
+        || (input.provider === 'openai' && isOpenAIReasoningModel(input.modelId));
+      if (context.policyEnabled && !knownModel) return unsupported(context);
       const maxOutputTokens = params.maxOutputTokens ?? DEFAULT_OUTPUT_TOKENS;
       if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 1 || (context.policyEnabled && maxOutputTokens > MAX_OUTPUT_TOKENS)) return unsupported(context);
       if (!context.policyEnabled) return { ...params, maxOutputTokens };

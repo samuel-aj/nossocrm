@@ -11,7 +11,9 @@
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
+import { wrapLanguageModel } from 'ai';
 import { AIProvider as AIProviderConst } from '@/types/constants';
+import { isOpenAIReasoningModel } from './modelCapabilities';
 
 /**
  * Provedores de IA suportados pelo sistema.
@@ -55,6 +57,27 @@ export const getModel = (provider: AIProvider, apiKey: string, modelId: string) 
 
         case AIProviderConst.OPENAI:
             const openai = createOpenAI({ apiKey });
+            if (isOpenAIReasoningModel(modelId)) {
+                // SDK 3.0.1 predates these IDs. This inner wrapper runs after the
+                // usage middleware, including when the usage policy is disabled.
+                return wrapLanguageModel({
+                    model: openai.responses(modelId),
+                    middleware: {
+                        specificationVersion: 'v3',
+                        async transformParams({ params }) {
+                            return {
+                                ...params,
+                                temperature: undefined,
+                                topP: undefined,
+                                providerOptions: {
+                                    ...params.providerOptions,
+                                    openai: { ...params.providerOptions?.openai, forceReasoning: true },
+                                },
+                            };
+                        },
+                    },
+                });
+            }
             return openai(modelId || 'gpt-4o');
 
         case AIProviderConst.ANTHROPIC:
