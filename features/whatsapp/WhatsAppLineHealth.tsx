@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertTriangle, CheckCircle2, Clock3, HelpCircle, Unplug } from 'lucide-react';
+import { AlertTriangle, Bell, CheckCircle2, Clock3, HelpCircle, Unplug } from 'lucide-react';
 import { NativeSelect } from '@/components/ui/NativeSelect';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/context/ToastContext';
@@ -61,7 +61,7 @@ export function LineHealthDetails({ health }: { health?: ConnectionDiagnostics }
   </div>;
 }
 
-export function LineAlertOwner({ connectionId, ownerId }: { connectionId: string; ownerId: string | null }) {
+export function LineAlertOwner({ connectionId, ownerId, canEdit }: { connectionId: string; ownerId: string | null; canEdit: boolean }) {
   const qc = useQueryClient();
   const { addToast } = useToast();
   const members = useOrgMembers();
@@ -73,19 +73,33 @@ export function LineAlertOwner({ connectionId, ownerId }: { connectionId: string
       });
       if (!res.ok) throw new Error('Não foi possível salvar o responsável pelos alertas.');
     },
-    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['waConnection'] }); },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['waConnection'] });
+      addToast('Destinatários dos alertas atualizados.', 'success');
+    },
     onError: (error: Error) => addToast(error.message, 'error'),
   });
   const options = (members.data || []).filter(member => member.member);
   const fieldId = `wa-alert-owner-${connectionId}`;
-  return <div className="mt-3 max-w-sm space-y-1">
-    <label htmlFor={fieldId} className="text-xs font-semibold text-slate-700 dark:text-slate-300">Responsável pelos alertas</label>
-    <NativeSelect id={fieldId} value={save.isPending ? save.variables : ownerId || ''} disabled={save.isPending || !members.isSuccess}
-      onChange={event => save.mutate(event.target.value)} className="w-full text-xs">
-      <option value="">Somente administradores</option>
-      {ownerId && !options.some(m => m.id === ownerId) && <option value={ownerId} disabled>Responsável cadastrado</option>}
-      {options.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-    </NativeSelect>
-    {members.isError && <p className="text-xs text-red-700 dark:text-red-300">Não foi possível carregar os membros da equipe.</p>}
-  </div>;
+  const owner = options.find(member => member.id === ownerId);
+  return <section aria-labelledby={`${fieldId}-heading`} className="mt-4 space-y-1.5 text-xs text-slate-600 dark:text-slate-400">
+    <h3 id={`${fieldId}-heading`} className="flex items-center gap-1.5 text-sm font-semibold text-slate-800 dark:text-slate-100">
+      <Bell size={15} aria-hidden /> Alertas no sino
+    </h3>
+    <p>O CRM exibe um aviso quando este número apresenta falha e outro quando a conexão volta.</p>
+    {canEdit ? <div className="max-w-sm space-y-1">
+      <label htmlFor={fieldId} className="font-semibold text-slate-700 dark:text-slate-300">Quem recebe os avisos</label>
+      <NativeSelect id={fieldId} value={save.isPending ? save.variables : ownerId || ''} disabled={save.isPending || !members.isSuccess}
+        onChange={event => save.mutate(event.target.value)} className="w-full text-xs">
+        <option value="">Somente administradores</option>
+        {ownerId && !owner && <option value={ownerId} disabled>Administradores e responsável cadastrado</option>}
+        {options.map(m => <option key={m.id} value={m.id}>Administradores e {m.name}</option>)}
+      </NativeSelect>
+      {members.isError && <p role="alert" className="text-red-700 dark:text-red-300">Não foi possível carregar os membros da equipe.</p>}
+    </div> : <p>
+      {ownerId ? `Os administradores e ${owner?.name ?? 'o responsável cadastrado'} recebem os avisos deste número.` : 'Somente os administradores recebem os avisos deste número.'}
+      {' '}Um administrador pode alterar os destinatários.
+    </p>}
+    <p>Para ajustar o som ou os avisos no computador, abra o sino no topo e escolha <strong>Preferências de notificações</strong>.</p>
+  </section>;
 }

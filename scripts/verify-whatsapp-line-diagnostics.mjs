@@ -56,6 +56,39 @@ try {
   assert.ok(third.last_delivered_message_at);
   const acl = await db.query("select has_function_privilege('authenticated','wa_line_diagnostics(uuid,uuid[])','EXECUTE') as allowed");
   assert.equal(acl.rows[0].allowed, false);
+  await db.exec(`
+    reset role;
+    alter table wa_connection_incidents add column id uuid primary key default gen_random_uuid(), add column resolution text;
+  `);
+  await db.exec(await readFile(new URL('../supabase/migrations/20261118180001_wa_connection_history.sql', import.meta.url), 'utf8'));
+  await db.query(`insert into wa_connection_incidents(connection_id, organization_id, opened_at, resolved_at, reason, source, resolution)
+    select $1::uuid, $2::uuid, '2020-01-01T01:01:01.000001Z', '2020-01-01T01:01:02Z', 'crm_send_blocked', 'send_blocked', 'disabled'
+    from generate_series(1,12)`, [line,org]);
+  await db.exec('set role service_role');
+  const history = (tenant, number, before = null, id = null, limit = 11) =>
+    db.query('select *, opened_at::text as exact_time from wa_connection_history($1,$2,$3,$4,$5)', [tenant, number, before, id, limit]);
+  const first = (await history(org,line)).rows;
+  assert.equal(first.length,11);
+  assert.deepEqual([first[0].diagnostic_source,first[0].diagnostic_reason], [a.diagnostic_source,a.diagnostic_reason]);
+  const last = first[9];
+  const second = (await history(org,line,last.exact_time,last.id)).rows;
+  assert.equal(second.length,3);
+  assert.equal(second[0].id,first[10].id);
+  assert.equal(new Set([...first.slice(0,10),...second].map(row=>row.id)).size,13);
+  assert.equal(second[0].resolution,'disabled');
+  assert.equal((await history(elsewhere,line)).rows.length,0);
+  assert.equal((await history(org,hiddenLine)).rows.length,0);
+  assert.equal((await history(org,line,last.exact_time,null)).rows.length,0);
+  assert.equal((await history(org,line,null,null,1000)).rows.length,11);
+  const latestClosed = (await history(org,otherLine)).rows[0];
+  assert.equal(latestClosed.diagnostic_reason,b.diagnostic_reason);
+  const currentCard = (await list(org,[otherLine])).rows[0];
+  assert.equal(currentCard.diagnostic_reason,latestClosed.diagnostic_reason);
+  assert.equal(currentCard.diagnostic_at.getTime(),latestClosed.diagnostic_at.getTime());
+  for (const role of ['anon','authenticated']) {
+    const allowed = await db.query("select has_function_privilege($1,'wa_connection_history(uuid,uuid,timestamptz,uuid,integer)','execute') as allowed", [role]);
+    assert.equal(allowed.rows[0].allowed,false);
+  }
   console.log('PGlite: diagnostics migration, mixed receipts/failures, reconnection boundary, pending/review, tenant isolation and ACL passed.');
 } finally {
   await db.close();
