@@ -13,9 +13,11 @@ import { WhatsAppConnectionHistory } from './WhatsAppConnectionHistory';
 import { LineAlertOwner, LineHealthDetails, LineStatusBadge } from './WhatsAppLineHealth';
 import type { ConnectionDiagnostics } from '@/lib/whatsapp/connectionDiagnostics';
 import { WhatsAppPairingPanel } from './WhatsAppPairingPanel';
+import Link from 'next/link';
 import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  ArrowLeft,
   Copy,
   ExternalLink,
   KeyRound,
@@ -79,10 +81,10 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   return json;
 }
 
-export function WhatsAppConnectionSettings() {
+export function WhatsAppConnectionSettings({ alertsOnly = false }: { alertsOnly?: boolean }) {
   const qc = useQueryClient();
   const { addToast } = useToast();
-  const { profile } = useAuth();
+  const { profile, loading } = useAuth();
   // MULTI-NÚMERO: a confirmação de desconectar é POR conexão (guarda o id)
   const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
   // Reiniciar a sessão da instância (Evolution) quando ela diz "conectado" mas os envios falham
@@ -122,7 +124,7 @@ export function WhatsAppConnectionSettings() {
   const groupsQ = useQuery<{ enabled: boolean }>({
     queryKey: ['waGroupsSetting'],
     queryFn: () => fetchJson<{ enabled: boolean }>('/api/whatsapp/groups'),
-    enabled: isAdminRole,
+    enabled: isAdminRole && !alertsOnly,
     staleTime: 60_000,
   });
   const groupsMut = useMutation({
@@ -148,6 +150,7 @@ export function WhatsAppConnectionSettings() {
   const connQ = useQuery<ConnResponse>({
     queryKey: ['waConnection'],
     queryFn: () => fetchJson<ConnResponse>('/api/whatsapp/connection'),
+    enabled: !alertsOnly || isAdminRole,
     // aguardando pareamento de um QR: checa rápido; senão devagar
     refetchInterval: () => (qrTargetId ? 4000 : 30000),
     refetchOnWindowFocus: true,
@@ -219,6 +222,7 @@ export function WhatsAppConnectionSettings() {
   const esQ = useQuery<{ configured: boolean; temAppSalvo?: boolean; faltaSecret?: boolean; appId: string | null; configId: string | null; graphVersion: string }>({
     queryKey: ['waEmbeddedSignupCfg'],
     queryFn: () => fetchJson('/api/whatsapp/embedded-signup'),
+    enabled: !alertsOnly,
     staleTime: 5 * 60_000,
   });
   const [esBusy, setEsBusy] = useState(false);
@@ -789,6 +793,40 @@ export function WhatsAppConnectionSettings() {
     </>
   );
 
+
+  if (alertsOnly) {
+    let content: React.ReactNode;
+    if (loading || (isAdminRole && connQ.isLoading)) {
+      content = <p role="status">Carregando números…</p>;
+    } else if (!isAdminRole) {
+      content = <p>Somente administradores podem configurar os alertas de conexão.</p>;
+    } else if (connQ.isError) {
+      content = <p role="alert">Não foi possível carregar os números.{' '}
+        <button type="button" className="underline" onClick={() => void connQ.refetch()}>Tentar novamente</button>
+      </p>;
+    } else if (conns.length === 0) {
+      content = <p>Conecte um número do WhatsApp para configurar os alertas.</p>;
+    } else {
+      content = <div className="space-y-3">
+        {conns.map(line => (
+          <section key={line.id} aria-labelledby={`alert-line-${line.id}`} className="rounded-xl border border-slate-200 p-4 dark:border-white/10">
+            <h2 id={`alert-line-${line.id}`} className="font-semibold text-slate-900 dark:text-white">
+              {line.profileName || line.phoneNumber || line.instanceName}
+            </h2>
+            {line.profileName && line.phoneNumber && <p className="text-sm text-slate-500 dark:text-slate-400">{line.phoneNumber}</p>}
+            <LineAlertOwner connectionId={line.id} ownerId={line.alertOwnerId ?? null} canEdit />
+          </section>
+        ))}
+      </div>;
+    }
+    return <div className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-white/10 dark:bg-dark-card">
+      <Link href="/conexao-whatsapp" className="inline-flex items-center gap-1.5 text-sm font-medium text-primary-600 hover:underline dark:text-primary-400">
+        <ArrowLeft size={16} aria-hidden /> Voltar para Conexão
+      </Link>
+      <h1 className="my-4 text-xl font-bold text-slate-900 dark:text-white">Alertas de conexão</h1>
+      {content}
+    </div>;
+  }
 
   return (
     <div className="bg-white dark:bg-dark-card rounded-2xl border border-slate-200 dark:border-white/10 p-6">
