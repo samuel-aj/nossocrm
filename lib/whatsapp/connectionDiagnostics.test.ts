@@ -38,6 +38,11 @@ describe('status of a WhatsApp number', () => {
   it.each([
     ['crm_send_blocked', 'send_blocked', /antes de chamar o provedor/],
     ['meta_code_190_sub_463', 'send_failure', /código 190 \(subcódigo 463\)/],
+    ['meta_code_138024', 'poll', /chamadas via SIP \(código 138024\)/],
+    ['meta_code_138025', 'poll', /chamadas via SIP \(código 138025\)/],
+    ['meta_query_code_100_sub_33', 'poll', /consulta à Meta.*código 100 \(subcódigo 33\)/],
+    ['meta_query_http_503', 'poll', /consulta à Meta retornou HTTP 503/],
+    ['evolution_socket_http_429', 'poll', /teste de disponibilidade da sessão Evolution retornou HTTP 429/],
     ['evolution_disconnect_401', 'webhook', /desconexão 401/],
     ['webhook_undated_evolution_disconnect_440', 'webhook', /440 em um evento sem horário/],
     ['disconnected', 'webhook', /evento veio sem código de motivo/],
@@ -58,5 +63,19 @@ describe('status of a WhatsApp number', () => {
       lastIncident: { openedAt: opened, resolvedAt: resolved, observedAt: diagnostic, detectedBy: 'Controle de envio do CRM',
         observation: expect.stringMatching(expected) },
     });
+  });
+  it.each([
+    ['meta_cloud', 'connected', 'meta_messaging_limited', true],
+    ['meta_cloud', 'disconnected', 'meta_messaging_limited', false],
+    ['meta_cloud', 'connected', 'meta_code_138024', false],
+    ['meta_cloud', 'connected', 'not_a_public_reason', false],
+    ['evolution', 'connected', 'meta_messaging_limited', false],
+  ] as const)('exposes only a confirmed messaging restriction for %s/%s/%s', async (provider, status, reason, limited) => {
+    const admin = { rpc: vi.fn().mockResolvedValue({ data: [{ connection_id: 'line' }], error: null }) } as unknown as SupabaseClient;
+    const [health] = await getLineDiagnostics(admin, 'org', [
+      { ...row, id: 'line', provider, status, health_probe_reason: reason },
+    ], now);
+    expect(health).toMatchObject({ state: status, metaMessagingLimited: limited });
+    expect(health).not.toHaveProperty('health_probe_reason');
   });
 });

@@ -40,6 +40,51 @@ interface MetaMediaUploadResponse {
   error?: MetaSendResponse['error'];
 }
 
+interface MetaHealthError {
+  error_code?: number;
+  capabilities?: string[];
+}
+
+interface MetaHealthEntity {
+  entity_type?: string;
+  can_send_message?: string;
+  can_receive_call_sip?: string;
+  errors?: MetaHealthError[];
+}
+
+// These two codes describe SIP configuration, and do not say whether messaging works.
+function sipOnlyError(error: MetaHealthError | null): boolean {
+  if (Array.isArray(error?.capabilities) && error.capabilities.length) {
+    return error.capabilities.every(capability => String(capability).toLowerCase() === 'can_receive_call_sip');
+  }
+  return error?.error_code === 138024 || error?.error_code === 138025;
+}
+
+function messagingHealth(health?: { can_send_message?: string; entities?: MetaHealthEntity[] }): Awaited<ReturnType<WhatsAppProvider['checkConnectionHealth']>> {
+  const aggregate = health?.can_send_message;
+  const entities = Array.isArray(health?.entities) ? health.entities : [];
+  const messagingBlocked = entities.filter(entity => entity?.can_send_message === 'BLOCKED');
+  if (messagingBlocked.length) {
+    const errors = messagingBlocked.flatMap(entity => Array.isArray(entity.errors) ? entity.errors : []);
+    const reason = errors.filter(error => !sipOnlyError(error)).map(error => metaErrorReason({ code: error?.error_code })).find(Boolean);
+    return { state: 'disconnected', reason: reason ?? 'meta_health_blocked' };
+  }
+  const messagingLimited = entities.some(entity => entity?.can_send_message === 'LIMITED');
+  if (aggregate === 'AVAILABLE') return messagingLimited ? { state: 'connected', reason: 'meta_messaging_limited' } : { state: 'connected' };
+  if (aggregate !== 'BLOCKED' && aggregate !== 'LIMITED') return { state: 'unknown', reason: 'meta_health_unknown' };
+
+  // Meta's documented SIP example has aggregate BLOCKED, even though every messaging node is AVAILABLE.
+  // Override it only with complete phone-number health evidence and an actual calling restriction.
+  const complete = ['PHONE_NUMBER', 'WABA', 'BUSINESS', 'APP'].every(type => entities.some(entity => entity?.entity_type === type));
+  const messagingPermitted = complete && entities.every(entity => entity?.can_send_message === 'AVAILABLE' || entity?.can_send_message === 'LIMITED');
+  const matchingSipRestriction = entities.some(entity => entity?.can_receive_call_sip === aggregate);
+  const onlyCallingErrors = entities.every(entity => !Array.isArray(entity?.errors) || entity.errors.every(sipOnlyError));
+  if (messagingPermitted && matchingSipRestriction && onlyCallingErrors) {
+    return messagingLimited ? { state: 'connected', reason: 'meta_messaging_limited' } : { state: 'connected' };
+  }
+  return aggregate === 'LIMITED' ? { state: 'connected', reason: 'meta_messaging_limited' } : { state: 'disconnected', reason: 'meta_health_blocked' };
+}
+
 // Code 190 is an explicit OAuth rejection before acceptance, including a rejected media upload.
 function metaSendFailure(error: MetaSendResponse['error'], fallback: string): string {
   if (error?.code === 190) return 'Número desconectado: a Meta recusou a credencial do número.';
@@ -289,20 +334,15 @@ export class MetaCloudProvider implements WhatsAppProvider {
       headers: { Authorization: `Bearer ${this.token}` }, cache: 'no-store', signal: AbortSignal.timeout(6000),
     });
     const data = await res.json().catch(() => null) as {
-      health_status?: { can_send_message?: string; entities?: Array<{ can_send_message?: string; errors?: Array<{ error_code?: number }> }> };
+      health_status?: { can_send_message?: string; entities?: MetaHealthEntity[] };
       error?: MetaSendResponse['error'];
     } | null;
-    if (data?.error || !res.ok) return { state: data?.error?.code === 190 ? 'disconnected' : 'unknown',
-      reason: metaErrorReason(data?.error) ?? `meta_http_${res.status}` };
-    const availability = data?.health_status?.can_send_message;
-    if (availability === 'AVAILABLE') return { state: 'connected' };
-    if (availability === 'BLOCKED' || availability === 'LIMITED') {
-      const entities = data?.health_status?.entities;
-      const blocked = Array.isArray(entities) ? entities.find(entity => entity?.can_send_message === availability && entity.errors?.[0]?.error_code) : null;
-      const reason = metaErrorReason({ code: blocked?.errors?.[0]?.error_code }) ?? `meta_health_${availability.toLowerCase()}`;
-      return { state: availability === 'BLOCKED' ? 'disconnected' : 'unknown', reason };
+    if (data?.error || !res.ok) {
+      const code = metaErrorReason(data?.error);
+      if (data?.error?.code === 190) return { state: 'disconnected', reason: code };
+      return { state: 'unknown', reason: code?.replace('meta_code_', 'meta_query_code_') ?? `meta_query_http_${res.status}` };
     }
-    return { state: 'unknown', reason: 'meta_health_unknown' };
+    return messagingHealth(data?.health_status);
   }
 
   async getQrCode(): Promise<QrResult> {

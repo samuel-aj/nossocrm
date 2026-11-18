@@ -47,6 +47,20 @@ describe('connection health and QR reconciliation', () => {
     mock.rows.mockRejectedValue(new Error('offline'));
     expect((await GET()).status).toBe(503);
   });
+  it('returns a connected Meta line with a messaging advisory only for the permitted number', async () => {
+    const line = { ...visible, provider: 'meta_cloud', health_checked_at: new Date().toISOString(), health_probe_reason: 'meta_messaging_limited' };
+    mock.rows.mockResolvedValue([line, hidden]);
+    mock.subset.mockReturnValue([line]);
+    const admin = { rpc: vi.fn().mockResolvedValue({ data: [{ connection_id: line.id }], error: null }) };
+    mock.auth.mockResolvedValue({ ok: true, user: { organizationId: 'org-a', id: 'u', role: 'seller' }, admin });
+    const { getLineDiagnostics } = await vi.importActual<typeof import('@/lib/whatsapp/connectionDiagnostics')>('@/lib/whatsapp/connectionDiagnostics');
+    mock.diagnostics.mockImplementationOnce(getLineDiagnostics);
+    const data = await (await GET()).json();
+    expect(data.connected).toBe(true);
+    expect(data.connections).toHaveLength(1);
+    expect(data.connections[0].diagnostics).toMatchObject({ state: 'connected', metaMessagingLimited: true, incidentOpenedAt: null });
+    expect(JSON.stringify(data)).not.toMatch(/meta_messaging_limited|private|restricted/);
+  });
   it('limits reconciliation to the paired number after an administrator finishes pairing', async () => {
     const post = () => POST(new Request('https://crm.test/api/whatsapp/connection', {
       method: 'POST', body: JSON.stringify({ mode: 'finish_pairing', connectionId: visible.id }),

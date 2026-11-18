@@ -25,6 +25,7 @@ export interface ConnectionDiagnostics {
   receivedDuringIncidentAt: string | null;
   failedCount: number;
   identityMismatch: boolean;
+  metaMessagingLimited: boolean;
   pendingCount: number | null;
   reviewCount: number | null;
 }
@@ -65,9 +66,17 @@ function describeObservation(reason: string | null, source: string | null): stri
   if (parts) return parts[1]
     ? `A Evolution informou o código de desconexão ${parts[2]} em um evento sem horário de origem.`
     : `A Evolution informou o código de desconexão ${parts[2]}.`;
-  const meta = reason?.match(/^meta_code_(\d{1,8})(?:_sub_(\d{1,10}))?$/);
-  if (meta) return `A Meta retornou o código ${meta[1]}${meta[2] ? ` (subcódigo ${meta[2]})` : ''}.`;
-  const http = reason?.match(/^(evolution_send|evolution|meta)_http_(\d{3})$/);
+  const meta = reason?.match(/^meta_(query_)?code_(\d{1,8})(?:_sub_(\d{1,10}))?$/);
+  if (meta) {
+    const code = meta[2] + (meta[3] ? ` (subcódigo ${meta[3]})` : '');
+    if (meta[1]) return `A consulta à Meta sobre o estado deste número retornou o código ${code}.`;
+    if (meta[2] === '138024' || meta[2] === '138025') {
+      return `A Meta informou uma restrição de chamadas via SIP (código ${code}). Esse aviso, por si só, não indica falha no envio de mensagens.`;
+    }
+    return `A Meta retornou o código ${code}.`;
+  }
+  const http = reason?.match(/^(evolution_send|evolution_socket|evolution|meta_query|meta)_http_(\d{3})$/);
+  if (http?.[1] === 'evolution_socket') return `O teste de disponibilidade da sessão Evolution retornou HTTP ${http[2]}.`;
   if (http) return http[1] === 'evolution_send'
     ? `A Evolution recusou o envio e retornou HTTP ${http[2]}.`
     : `A consulta à ${http[1] === 'evolution' ? 'Evolution' : 'Meta'} retornou HTTP ${http[2]}.`;
@@ -119,8 +128,10 @@ export async function getLineDiagnostics(
   return connections.map(conn => {
     const row = evidence.get(conn.id);
     const incident = row?.opened_at ? { connection_id: conn.id, opened_at: row.opened_at, reason: row.incident_reason ?? '' } : undefined;
+    const state = connectionDisplayState(conn, incident, Boolean(row?.failed_count), !error && Boolean(row), now);
     return {
-      state: connectionDisplayState(conn, incident, Boolean(row?.failed_count), !error && Boolean(row), now),
+      state,
+      metaMessagingLimited: state === 'connected' && conn.provider === 'meta_cloud' && conn.health_probe_reason === 'meta_messaging_limited',
       lastCheckedAt: conn.health_checked_at ?? null,
       historyAvailable: !error && Boolean(row),
       lastDeliveredMessageAt: row?.last_delivered_message_at ?? null,
