@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WhatsAppConnectionHistory } from './WhatsAppConnectionHistory';
 
 const line = { organizationId: 'office', userId: 'person', connectionId: 'line' };
-const toggle = () => screen.getByRole('button', { name: 'Histórico da conexão' });
 function renderHistory() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={client}><WhatsAppConnectionHistory {...line} /></QueryClientProvider>);
@@ -20,17 +19,12 @@ function incident(id: string, resolved: boolean) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('histórico por número', () => {
-  it('offers history on a healthy line with no records and only reads it when opened', async () => {
+  it('shows the empty result for the requested line', async () => {
     const request = vi.fn().mockResolvedValue(Response.json({ items: [], nextCursor: null }));
     vi.stubGlobal('fetch', request);
     renderHistory();
-    expect(toggle()).toHaveAttribute('aria-expanded', 'false');
-    expect(request).not.toHaveBeenCalled();
-    fireEvent.click(toggle());
     expect(await screen.findByText(/Nenhum incidente registrado/)).toBeVisible();
     expect(request).toHaveBeenCalledWith('/api/whatsapp/connection/history?connectionId=line', expect.objectContaining({ credentials: 'include' }));
-    fireEvent.click(toggle());
-    expect(screen.queryByText(/Nenhum incidente registrado/)).not.toBeInTheDocument();
   });
 
   it('shows open and recovered incidents, evidence and earlier pages for this line', async () => {
@@ -39,7 +33,6 @@ describe('histórico por número', () => {
       .mockResolvedValueOnce(Response.json({ items: [incident('anterior', true)], nextCursor: null }));
     vi.stubGlobal('fetch', request);
     renderHistory();
-    fireEvent.click(toggle());
     expect(await screen.findByText('Em andamento')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Ver incidentes anteriores' }));
     expect(await screen.findByText('Observação anterior')).toBeVisible();
@@ -54,7 +47,6 @@ describe('histórico por número', () => {
       .mockResolvedValueOnce(new Response(null, { status: 503 }))
       .mockResolvedValueOnce(Response.json({ items: [], nextCursor: null })));
     renderHistory();
-    fireEvent.click(toggle());
     expect(await screen.findByRole('alert')).toHaveTextContent('Não foi possível carregar');
     expect(screen.queryByText(/Nenhum incidente registrado/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }));

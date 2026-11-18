@@ -9,7 +9,7 @@
  * vê sempre as conexões da organização ATIVA — cada cliente tem as suas.
  */
 import { CopyId } from '@/components/ui/CopyId';
-import { WhatsAppConnectionHistory } from './WhatsAppConnectionHistory';
+import { ConnectionCardActions } from './ConnectionCardActions';
 import { LineAlertOwner, LineHealthDetails, LineStatusBadge } from './WhatsAppLineHealth';
 import type { ConnectionDiagnostics } from '@/lib/whatsapp/connectionDiagnostics';
 import { WhatsAppPairingPanel } from './WhatsAppPairingPanel';
@@ -942,35 +942,34 @@ export function WhatsAppConnectionSettings({ alertsOnly = false }: { alertsOnly?
                   className="rounded-2xl border border-slate-200 dark:border-white/10 overflow-hidden"
                 >
                   <div className="p-4">
-                    {/* Linha 1: identidade do número (nome, status, telefone) com espaço próprio */}
-                    <div className="flex items-center gap-3">
-                    <span
-                      className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                        rowBiz
-                          ? 'bg-sky-100 text-sky-600 dark:bg-sky-900/40 dark:text-sky-400'
-                          : 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400'
-                      }`}
-                    >
-                      {rowBiz ? <KeyRound size={18} /> : <QrCode size={18} />}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                          {c.profileName || (rowBiz ? 'WhatsApp API oficial' : 'WhatsApp do celular')}
+                    <div className="grid grid-cols-[1fr_auto] items-start gap-x-3 gap-y-2 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
+                      <span
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                          rowBiz
+                            ? 'bg-sky-100 text-sky-600 dark:bg-sky-900/40 dark:text-sky-400'
+                            : 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400'
+                        }`}
+                      >
+                        {rowBiz ? <KeyRound size={18} /> : <QrCode size={18} />}
+                      </span>
+                      <div className="col-span-2 row-start-2 min-w-0 sm:col-span-1 sm:col-start-2 sm:row-start-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="break-words text-sm font-bold text-slate-900 dark:text-white">
+                            {c.profileName || (rowBiz ? 'WhatsApp API oficial' : 'WhatsApp do celular')}
+                          </p>
+                          <LineStatusBadge state={connQ.isError ? 'unknown' : rowPairing ? 'connecting' : c.diagnostics?.state || 'unknown'} />
+                        </div>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          {c.phoneNumber ||
+                            (rowBiz ? 'Número da Meta (Cloud API)' : 'Número pareado pelo celular')}
+                          {' · '}
+                          {rowBiz ? 'API oficial da Meta' : 'QR ou código'}
                         </p>
-                        <LineStatusBadge state={connQ.isError ? 'unknown' : rowPairing ? 'connecting' : c.diagnostics?.state || 'unknown'} />
                       </div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                        {c.phoneNumber ||
-                          (rowBiz ? 'Número da Meta (Cloud API)' : 'Número pareado pelo celular')}
-                        {' · '}
-                        {rowBiz ? 'API oficial da Meta' : 'QR ou código'}
-                      </p>
-                      <LineHealthDetails health={c.diagnostics} />
+                      <ConnectionCardActions connectionId={c.id} ownerId={c.alertOwnerId ?? null} profile={profile} canEdit={isAdminRole}
+                        lineLabel={[c.profileName, c.phoneNumber].filter(Boolean).join(' · ') || c.instanceName || c.id} />
                     </div>
-                    </div>
-                    {profile?.organization_id && <WhatsAppConnectionHistory connectionId={c.id} organizationId={profile.organization_id} userId={profile.id} />}
-                    <LineAlertOwner connectionId={c.id} ownerId={c.alertOwnerId ?? null} canEdit={isAdminRole} />
+                    <LineHealthDetails health={c.diagnostics} />
                     {/* Linha 2: barra de ações, separada da identidade para nada ficar espremido */}
                     {confirmDisconnect === c.id ? (
                       <div className="flex items-center gap-2 flex-wrap mt-3 pt-3 border-t border-slate-100 dark:border-white/10">

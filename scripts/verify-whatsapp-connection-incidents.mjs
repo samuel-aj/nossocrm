@@ -36,11 +36,13 @@ try {
     insert into wa_connections(id,organization_id,phone_number,status,last_connected_at) values ('${line}','${org}','+5511000000001','connected','2026-01-01 06:00Z');
     insert into wa_conversations values ('${conv}','${org}','${line}');
   `);
-  for(const m of ['20261118140000_wa_connection_incidents','20261118160000_wa_connection_monitor']) {
+  for(const m of ['20261118140000_wa_connection_incidents','20261118160000_wa_connection_monitor','20261118190000_wa_connection_hostinger_mail']) {
     await db.exec(readFileSync(`supabase/migrations/${m}.sql`,'utf8'));
   }
   assert.equal((await q("select has_function_privilege('authenticated','wa_claim_connection_probes(integer)','execute') ok"))[0].ok,false);
   assert.equal((await q("select has_function_privilege('anon','wa_claim_connection_emails(integer)','execute') ok"))[0].ok,false);
+  assert.equal((await q("select has_function_privilege('authenticated','wa_claim_connection_email_batch(int,text[],timestamptz)','execute') ok"))[0].ok,false);
+  assert.equal((await q("select has_function_privilege('anon','wa_begin_hostinger_connection_email(uuid,uuid)','execute') ok"))[0].ok,false);
   assert.equal((await q("select relrowsecurity from pg_class where relname='wa_connection_incidents'"))[0].relrowsecurity,true);
   assert.equal((await q("select has_function_privilege('authenticated','crm_internal.dispatch_wa_connection_monitor()','execute') ok"))[0].ok,false);
   await db.exec(`
@@ -76,6 +78,65 @@ try {
   assert.equal((await q('select * from wa_connection_bell($1,$2,now())',[org,visitor])).length,0);
   assert.equal(await observe('connected','webhook','07:59:59'),false);
   assert.equal(await observe('connected','webhook','08:02:00'),false);
+
+  // Simulate a provider cutover with an old backlog, lost responses and worker restarts.
+  await db.exec('begin');
+  await q(`WITH old AS (
+    INSERT INTO wa_connection_incidents(organization_id,connection_id,line_label,opened_at,resolved_at,reason,source)
+    SELECT $1,$2,'Linha antiga',now()-interval '2 hours',now()-interval '1 hour','disconnected','poll'
+    FROM generate_series(1,29) RETURNING id
+  ) INSERT INTO wa_connection_incident_notices(incident_id,organization_id,user_id,phase,recipient_email,created_at,next_attempt_at)
+    SELECT id,$1,$3,'resolved','admin@example.invalid',now()-interval '1 hour',now()-interval '1 hour' FROM old`, [org,line,user]);
+  const claimHost = () => q("select * from wa_claim_connection_email_batch(1,array['hostinger','resend'],now()-interval '30 minutes')");
+  const beginHost = async job => (await q('select wa_begin_hostinger_connection_email($1,$2) ok',[job.id,job.lease_token]))[0].ok;
+  const finishHost = async (job,error) => (await q('select wa_finish_connection_email($1,$2,$3) ok',[job.id,job.lease_token,error]))[0].ok;
+  const mailState = async id => (await q('select mail_state from wa_connection_incident_notices where id=$1',[id]))[0].mail_state;
+  const [first] = await claimHost();
+  assert.equal(first.phase,'opened');
+  assert.equal(first.mail_provider,'hostinger');
+  assert.equal((await q("select id from wa_connection_incident_notices where last_error='before_mail_activation' and attempts=0")).length,29);
+  assert.equal((await q('select * from wa_connection_bell($1,$2,now())',[org,user])).length,30);
+  // Crash before submission: reclaim only with the original provider and a fresh lease.
+  await q("update wa_connection_incident_notices set lease_until=now()-interval '1 second' where id=$1",[first.id]);
+  assert.equal((await q('select * from wa_claim_connection_emails(12)')).length,0);
+  const [retry] = await claimHost();
+  assert.equal(await beginHost(first),false);
+  assert.equal(await beginHost(retry),true);
+  assert.equal(await beginHost(retry),false);
+  assert.equal(await finishHost(retry,'hostinger_http_429'),true);
+  assert.equal(await mailState(retry.id),'pending');
+  assert.equal((await claimHost()).length,0);
+  await q('update wa_connection_incident_notices set next_attempt_at=now() where id=$1',[retry.id]);
+  const [again] = await claimHost();
+  // Recheck visibility immediately before the remote request.
+  await db.exec('savepoint revoke_recipient');
+  await q("update profiles set role='member' where id=$1",[user]);
+  await q("insert into user_visibility_rules values ($1,$2,'{\"whatsapp\":{\"connection_ids\":[]}}')",[user,org]);
+  assert.equal(await beginHost(again),false);
+  assert.equal(await mailState(again.id),'cancelled');
+  await db.exec('rollback to revoke_recipient');
+  await db.exec('reset role');
+  await q("update auth.users set email='changed@example.invalid' where id=$1",[user]);
+  await db.exec('set role service_role');
+  assert.equal(await beginHost(again),false);
+  assert.equal(await mailState(again.id),'cancelled');
+  await db.exec('rollback to revoke_recipient');
+  assert.equal(await beginHost(again),true);
+  await db.exec('savepoint submission');
+  for (const [result,state] of [[null,'sent'],['hostinger_http_422','failed'],['hostinger_unconfirmed','unconfirmed']]) {
+    assert.equal(await finishHost(again,result),true);
+    assert.equal(await mailState(again.id),state);
+    assert.equal((await claimHost()).length,0);
+    await db.exec('rollback to submission');
+  }
+  // A crash during submission or after 204 but before the local acknowledgement cannot be retried.
+  await q("update wa_connection_incident_notices set lease_until=now()-interval '1 second' where id=$1",[again.id]);
+  assert.equal((await claimHost()).length,0);
+  assert.equal(await mailState(again.id),'unconfirmed');
+  assert.equal((await q('select * from wa_claim_connection_emails(12)')).length,0);
+  assert.equal((await q('select * from wa_connection_bell($1,$2,now()) where id=$3',[org,user,again.id]))[0].mail_state,'unconfirmed');
+  await db.exec('rollback');
+
   const [job]=await q('select * from wa_claim_connection_emails(12)');
   assert.equal(job.recipient_email,'admin@example.invalid');
   assert.equal((await q('select * from wa_claim_connection_emails(12)')).length,0);

@@ -1,8 +1,6 @@
 'use client';
 
-import { useId, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { ChevronDown, History } from 'lucide-react';
 import type { ConnectionHistoryPage } from '@/lib/whatsapp/connectionHistory';
 
 const dateFormat = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
@@ -14,7 +12,7 @@ function Timestamp({ value }: { value: string }) {
 type Line = { connectionId: string; organizationId: string; userId: string };
 const resolutionLabels = { disabled: 'Monitoramento desativado', reconnected: 'Reconexão' };
 
-function HistoryEntries({ connectionId, organizationId, userId }: Line) {
+export function WhatsAppConnectionHistory({ connectionId, organizationId, userId }: Line) {
   const history = useInfiniteQuery({
     queryKey: ['waConnectionHistory', organizationId, userId, connectionId],
     initialPageParam: null as string | null,
@@ -62,19 +60,4 @@ function HistoryEntries({ connectionId, organizationId, userId }: Line) {
       {history.isFetchingNextPage ? 'Carregando…' : 'Ver incidentes anteriores'}
     </button>}
   </>;
-}
-
-export function WhatsAppConnectionHistory(props: Line) {
-  const [open, setOpen] = useState(false);
-  const panelId = useId();
-  return <div className="mt-3">
-    <button type="button" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(!open)}
-      className="inline-flex items-center gap-2 rounded-md py-1.5 text-sm font-semibold text-primary-700 hover:underline focus-visible:outline-2 dark:text-primary-300">
-      <History size={16} aria-hidden /> Histórico da conexão
-      <ChevronDown size={14} aria-hidden className={open ? 'rotate-180' : ''} />
-    </button>
-    <div id={panelId} hidden={!open} className="mt-1 rounded-lg bg-slate-50 p-3 text-xs text-slate-600 dark:bg-white/5 dark:text-slate-300">
-      {open && <HistoryEntries {...props} />}
-    </div>
-  </div>;
 }

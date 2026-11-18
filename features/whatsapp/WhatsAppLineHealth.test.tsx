@@ -24,7 +24,7 @@ describe('status por número', () => {
     expect(first.getByText(/Reconecte o número original/)).toBeInTheDocument();
     expect(within(screen.getByRole('region', { name: 'Número B' })).getByText('Conectado')).toBeInTheDocument();
   });
-  it('keeps the last incident visible after recovery without presenting it as an active outage', () => {
+  it('keeps the current check and delivery visible after recovery and leaves the closed incident in history', () => {
     const health: ConnectionDiagnostics = {
       state: 'connected', lastCheckedAt: '2026-11-18T12:01:00Z', lastDeliveredMessageAt: '2026-11-18T12:00:00Z',
       incidentOpenedAt: null, receivedDuringIncidentAt: null, failedCount: 0, pendingCount: 0, reviewCount: 0,
@@ -38,10 +38,10 @@ describe('status por número', () => {
     render(<><LineStatusBadge state={health.state} /><LineHealthDetails health={health} /></>);
     expect(screen.getByText('Conectado')).toBeInTheDocument();
     expect(screen.queryByText(/Incidente de conexão desde/)).not.toBeInTheDocument();
-    expect(screen.getByText(/Último incidente de/)).toBeInTheDocument();
-    expect(screen.getByText(/código de desconexão 401/)).toBeInTheDocument();
-    expect(screen.getByText(/Origem do incidente · Controle de envio do CRM/)).toBeInTheDocument();
-    expect(screen.getByText(/Evento recebido do provedor/).querySelector('time')).toHaveAttribute('datetime', health.lastIncident!.observedAt);
+    expect(screen.getByText(/Última verificação/)).toBeVisible();
+    expect(screen.getByText(/Último envio com entrega confirmada/)).toBeVisible();
+    expect(screen.queryByText(/código de desconexão 401/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Evento recebido do provedor/)).not.toBeInTheDocument();
   });
   it('shows a Meta messaging restriction beside a connected number and clears it after a healthy check', () => {
     const health: ConnectionDiagnostics = {

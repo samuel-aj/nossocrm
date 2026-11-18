@@ -2,6 +2,7 @@ import type { RequireOrgResult } from '@/lib/whatsapp/api';
 import type { VisibilityRules } from '@/lib/permissions/types';
 import { connectionAllowed } from '@/lib/permissions/server';
 import type { Notice } from './types';
+import { incidentMailConfigured } from '@/lib/whatsapp/connectionIncidentEmail';
 
 type Auth = Extract<RequireOrgResult, { ok: true }>;
 interface IncidentNotice {
@@ -23,7 +24,11 @@ export async function connectionIncidentNotices(auth: Auth, rules: VisibilityRul
     let message = row.reason === 'number_changed' && !recovered
       ? `${row.line_label} · O telefone pareado mudou. Confira a identidade antes de retomar os envios.`
       : `${row.line_label} · Abra a conexão para consultar o estado do número.`;
-    if (row.mail_state === 'pending' && (!process.env.RESEND_API_KEY?.trim() || !process.env.WA_CONNECTION_ALERT_EMAIL_FROM?.trim())) {
+    if (row.mail_state === 'unconfirmed') {
+      message += ' O envio do e-mail ficou sem confirmação. Confira a pasta Enviados do remetente.';
+    } else if (row.mail_state === 'failed') {
+      message += ' O provedor recusou o aviso por e-mail.';
+    } else if (row.mail_state === 'pending' && !incidentMailConfigured()) {
       message += ' O envio do aviso por e-mail aguarda a configuração de um remetente.';
     }
     return [{ id: `wa-line-${row.id}`, kind: 'alert', category: recovered ? undefined : 'connection_outage', tone: recovered ? 'green' : 'red',

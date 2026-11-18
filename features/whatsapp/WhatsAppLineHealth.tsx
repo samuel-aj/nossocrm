@@ -37,10 +37,7 @@ export function LineHealthDetails({ health }: { health?: ConnectionDiagnostics }
       Incidente de conexão desde {time(health.incidentOpenedAt)}.
       {health.receivedDuringIncidentAt && ` O número recebeu mensagem em ${time(health.receivedDuringIncidentAt)} durante o incidente.`}
     </p>}
-    {health?.lastIncident && <div className="space-y-0.5">
-      {health.lastIncident.resolvedAt && <p className="font-medium">
-        Último incidente de {time(health.lastIncident.openedAt)} a {time(health.lastIncident.resolvedAt)}.
-      </p>}
+    {health?.incidentOpenedAt && health.lastIncident && !health.lastIncident.resolvedAt && <div className="space-y-0.5">
       <p>{health.lastIncident.observation}</p>
       <p>{health.lastIncident.observedBy} · <time dateTime={health.lastIncident.observedAt}>{time(health.lastIncident.observedAt)}</time></p>
       {health.lastIncident.detectedBy !== health.lastIncident.observedBy && <p>
@@ -86,7 +83,7 @@ export function LineAlertOwner({ connectionId, ownerId, canEdit }: { connectionI
     <h3 id={`${fieldId}-heading`} className="flex items-center gap-1.5 text-sm font-semibold text-slate-800 dark:text-slate-100">
       <Bell size={15} aria-hidden /> Alertas no sino
     </h3>
-    <p>O CRM exibe um aviso quando este número apresenta falha e outro quando a conexão volta.</p>
+    <p>O sino avisa quando este número apresenta falha e quando a conexão volta. Quando ativo, o alerta por e-mail usa os mesmos destinatários do sino para este número.</p>
     {canEdit ? <div className="max-w-sm space-y-1">
       <label htmlFor={fieldId} className="font-semibold text-slate-700 dark:text-slate-300">Quem recebe os avisos</label>
       <NativeSelect id={fieldId} value={save.isPending ? save.variables : ownerId || ''} disabled={save.isPending || !members.isSuccess}
