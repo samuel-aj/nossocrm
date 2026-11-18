@@ -110,11 +110,25 @@ try {
   const [again] = await claimHost();
   // Recheck visibility immediately before the remote request.
   await db.exec('savepoint revoke_recipient');
+  await q("update profiles set role='member' where id=$1",[user]);
   await q("insert into user_visibility_rules values ($1,$2,'{\"whatsapp\":{\"connection_ids\":[]}}')",[user,org]);
   assert.equal(await beginHost(again),false);
   assert.equal(await mailState(again.id),'cancelled');
   await db.exec('rollback to revoke_recipient');
+  await db.exec('reset role');
+  await q("update auth.users set email='changed@example.invalid' where id=$1",[user]);
+  await db.exec('set role service_role');
+  assert.equal(await beginHost(again),false);
+  assert.equal(await mailState(again.id),'cancelled');
+  await db.exec('rollback to revoke_recipient');
   assert.equal(await beginHost(again),true);
+  await db.exec('savepoint submission');
+  for (const [result,state] of [[null,'sent'],['hostinger_http_422','failed'],['hostinger_unconfirmed','unconfirmed']]) {
+    assert.equal(await finishHost(again,result),true);
+    assert.equal(await mailState(again.id),state);
+    assert.equal((await claimHost()).length,0);
+    await db.exec('rollback to submission');
+  }
   // A crash during submission or after 204 but before the local acknowledgement cannot be retried.
   await q("update wa_connection_incident_notices set lease_until=now()-interval '1 second' where id=$1",[again.id]);
   assert.equal((await claimHost()).length,0);
