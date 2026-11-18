@@ -8,12 +8,34 @@ import { normalizeAgentRow } from './context';
 
 const agent = normalizeAgentRow({ id: 'agent', organization_id: 'org', name: 'Triagem', provider: 'openai', model: 'gpt-4.1', tools: {}, outcomes: [], custom_actions: [] });
 const input = { agent, model: {} as LanguageModel, system: 'Converse com o cliente.', messages: [{ role: 'user' as const, content: 'Posso continuar?' }] };
+const withLookup = { ...agent, custom_actions: [{ key: 'preco', label: 'Preço', description: 'Pergunta por preço', actions: [
+  { type: 'consult_knowledge' as const, knowledgeId: 'd1', description: 'Tabela de preços' },
+  { type: 'stop' as const },
+] }] };
 const saved = { toolName: 'salvar_dados', toolCallId: 'save', input: { dados: { autorizacao: true } } };
 const step = (text: string, calls: typeof saved[] = []) => ({ text, toolCalls: calls, toolResults: calls.map(c => ({ toolCallId: c.toolCallId, output: { ok: true } })) });
 const result = (steps: ReturnType<typeof step>[]) => ({ steps, text: steps.at(-1)?.text, totalUsage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 }, finishReason: 'stop' });
 beforeEach(() => h.generate.mockReset());
 
 describe('preparação da resposta dos agentes', () => {
+  it('permite uma última resposta com os trechos consultados, sem repetir a ação final', async () => {
+    h.generate.mockImplementationOnce(async ({ stopWhen, prepareStep }) => {
+      const steps = [{ toolCalls: [{ toolName: 'executar_acao', input: { acao: 'preco' } }] }];
+      expect(stopWhen.some((stop: (args: { steps: unknown[] }) => boolean) => stop({ steps }))).toBe(false);
+      expect(prepareStep({ steps })).toEqual({ toolChoice: 'none' });
+      return result([step('O serviço custa 27 reais.')]);
+    });
+    expect((await generateAgentReply({ ...input, agent: withLookup })).text).toBe('O serviço custa 27 reais.');
+  });
+  it.each(['O serviço custa 27 reais.', ''])('descarta o preço escrito antes da consulta, inclusive no fallback de texto (%s)', async answer => {
+    const lookup = { toolName: 'executar_acao', toolCallId: 'consulta', input: { acao: 'preco', detalhes: 'Valor do serviço?' } };
+    const unconfirmed = 'O serviço custa 40 reais.';
+    const before = { text: unconfirmed, toolCalls: [lookup], toolResults: [{ toolCallId: 'consulta', output: { ok: true } }] };
+    h.generate.mockResolvedValueOnce({ steps: answer ? [before, step(answer)] : [before], text: answer || unconfirmed, totalUsage: {}, finishReason: 'stop' });
+    const reply = await generateAgentReply({ ...input, agent: withLookup });
+    expect(reply.text).toBe(answer);
+    expect(reply.toolCalls).toHaveLength(1);
+  });
   it('preserva o formato de uma fala literal do roteiro mesmo se o modelo a escrever sem acionar a ferramenta', async () => {
     const clip = 'Vou te enviar o link.';
     h.generate.mockResolvedValueOnce(result([step(clip + ' https://exemplo.invalid/assinar')]));

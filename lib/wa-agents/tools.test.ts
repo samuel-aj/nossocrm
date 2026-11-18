@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { buildAgentTools, buildUtilityTools, findByName, helperDisplayName, uniqueNames } from './tools';
 import { DEFAULT_AGENT_TRIGGERS, type AgentDocumentRow, type AgentMediaRow, type AgentRow } from './types';
 
@@ -86,6 +86,36 @@ describe('buildAgentTools', () => {
       agent({ custom_actions: [{ key: 'ja-tem-advogado', label: 'Já tem advogado', description: 'x', actions: [] }] })
     );
     expect(tools.executar_acao).toBeDefined();
+  });
+
+  it('reaproveita a consulta repetida, isola a base da ação e preserva os documentos gerais', async () => {
+    const current = agent({ custom_actions: [{ key: 'precos', label: 'Preços', description: 'preço do produto',
+      actions: [{ type: 'consult_knowledge', knowledgeId: 'd1', description: 'Tabela de preços' }] }] });
+    const docs = ['d1', 'd2', 'd3'].map(id => ({ ...doc, id, agent_id: current.id }));
+    const search = vi.fn().mockResolvedValue(docs.map(d => ({ content: d.id + '-texto', document_id: d.id, idx: 0, score: 1 })));
+    const tools = buildAgentTools(current, { documents: docs, searchKnowledge: search });
+    const lookup = tools.executar_acao!.execute as (input: { acao: string; detalhes: string }, opts: unknown) => Promise<unknown>;
+    const args = { acao: 'precos', detalhes: 'Qual é o preço?' };
+    const responses = await Promise.all([lookup(args, {}), lookup(args, {})]);
+    expect(responses[0]).toEqual(responses[1]);
+    expect(JSON.stringify(responses[0])).toContain('d1-texto');
+    expect(JSON.stringify(responses[0])).not.toContain('d2-texto');
+    expect(search).toHaveBeenCalledExactlyOnceWith(args.detalhes, 'd1');
+    const general = tools.consultar_documentos!.execute as (input: { pergunta: string; documento: string }, opts: unknown) => Promise<unknown>;
+    expect(await general({ pergunta: 'Quando?', documento: 'd1' }, {})).toMatchObject({ encontrado: false });
+    expect(await general({ pergunta: 'Quando?', documento: 'd2' }, {})).toMatchObject({ encontrado: true, trechos: expect.stringContaining('d2-texto') });
+    expect(search).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([{ status: 'error' }, { agent_id: 'outro' }, { organization_id: 'outra' }])('recusa a base indisponível %j sem buscar em outra fonte', async override => {
+    const current = agent({ custom_actions: [{ key: 'precos', label: 'Preços', description: 'preço do produto',
+      actions: [{ type: 'consult_knowledge', knowledgeId: doc.id, description: 'Preços' }] }] });
+    const search = vi.fn();
+    const docs = [{ ...doc, agent_id: current.id, ...override } as AgentDocumentRow, { ...doc, id: 'outra-base' }];
+    const tools = buildAgentTools(current, { documents: docs, searchKnowledge: search });
+    const lookup = tools.executar_acao!.execute as (input: { acao: string; detalhes: string }, opts: unknown) => Promise<unknown>;
+    expect(await lookup({ acao: 'precos', detalhes: 'Qual é o preço?' }, {})).toMatchObject({ ok: false, consultas: [{ encontrado: false }] });
+    expect(search).not.toHaveBeenCalled();
   });
 
   it('consultar_documentos, enviar_midia e consultar_agente só com os recursos e os efeitos', () => {

@@ -13,6 +13,7 @@ import { loadDealItems, type ContextDealItem } from './dealItems';
 import { getDealWhatsappGroupField } from '@/lib/whatsapp/group-links/service';
 import { renderTemplate } from './template';
 import { formatKnowledgeHits } from './knowledge';
+import { configuredKnowledgeIds, knowledgeLookups } from './knowledgeActions';
 import { normalizeKeyword } from './text';
 import {
   AgentAiVarSchema,
@@ -26,7 +27,6 @@ import {
   AgentWebhookSchema,
   AI_PROVIDERS,
   CustomActionSchema,
-  EndActionSchema,
   DEFAULT_AGENT_AUTO_LEAD,
   DEFAULT_AGENT_LEAD_CONTEXT,
   DEFAULT_AGENT_MEDIA_UNDERSTANDING,
@@ -225,12 +225,13 @@ export function normalizeHelperIds(raw: unknown): string[] {
  * conhece, campo fora do limite): antes o item inteiro sumia em silêncio e o motor
  * registrava "não encontrado". Agora só a ação inválida sai (com aviso no log).
  */
-function parseWithValidActions<T>(schema: { safeParse: (v: unknown) => { success: boolean; data?: unknown } }, item: unknown): T | null {
+function parseWithValidActions<T>(schema: typeof OutcomeSchema | typeof CustomActionSchema, item: unknown): T | null {
   const direct = schema.safeParse(item);
   if (direct.success) return direct.data as T;
   if (!item || typeof item !== 'object' || !Array.isArray((item as { actions?: unknown }).actions)) return null;
   const actions = (item as { actions: unknown[] }).actions;
-  const valid = actions.filter(a => EndActionSchema.safeParse(a).success);
+  const stepSchema = schema.shape.actions.unwrap().element;
+  const valid = actions.filter(a => stepSchema.safeParse(a).success);
   if (valid.length === actions.length) return null;
   const retry = schema.safeParse({ ...(item as Record<string, unknown>), actions: valid });
   if (!retry.success) return null;
@@ -798,16 +799,22 @@ export function buildCustomActionsBlock(agent: Pick<AgentRow, 'custom_actions'>)
   const lines: string[] = ['## AÇÕES DURANTE A CONVERSA'];
   lines.push('Você tem a ferramenta executar_acao para registrar situações que acontecem no meio do atendimento:');
   for (const a of actions) {
-    const final = finals.has(a.key)
-      ? ' [AÇÃO FINAL: escreva a mensagem final para o cliente antes de chamar; depois dela você não responde mais]'
-      : '';
+    const lookups = knowledgeLookups(a);
+    const finalHint = lookups.length
+      ? ' [AÇÃO FINAL COM CONSULTA: consulte primeiro e use o resultado na sua última mensagem]'
+      : ' [AÇÃO FINAL: escreva a mensagem final para o cliente antes de chamar; depois dela você não responde mais]';
+    const final = finals.has(a.key) ? finalHint : '';
     lines.push(`- acao=${a.key} (${a.label}): quando ${a.description.trim()}${final}`);
+    for (const step of lookups) lines.push(`  Base a consultar por esta ação: ${step.description}.`);
   }
   lines.push(
     'Chame executar_acao no momento em que a situação descrita acontecer, uma vez por ocorrência, com "acao" igual à chave e "detalhes" resumindo o que o cliente disse. Se várias situações acontecerem ao mesmo tempo, chame executar_acao para cada uma delas na mesma resposta: todas são executadas.'
   );
   if (actions.some(a => !finals.has(a.key))) {
     lines.push('Nas ações que não são finais, continue a conversa normalmente depois: a ação não encerra o atendimento.');
+  }
+  if (actions.some(a => knowledgeLookups(a).length > 0)) {
+    lines.push('Para as ações com base de conhecimento, chame executar_acao antes de responder ou encerrar, com a pergunta do cliente em "detalhes". Aguarde o resultado e responda com suas palavras usando somente os trechos dessa consulta. Se a base estiver indisponível ou não responder à dúvida, diga que não conseguiu confirmar. A descrição da base orienta a escolha da ação, não comprova uma resposta.');
   }
   return lines.join('\n');
 }
@@ -982,7 +989,8 @@ export function buildSystemPrompt(input: {
 
   const state = (ctx.conversation.ai_state ?? {}) as ConversationAiState;
   const dados = state.dados && Object.keys(state.dados).length > 0 ? JSON.stringify(state.dados) : '{}';
-  const documents = input.resources?.documents ?? [];
+  const reservedDocuments = configuredKnowledgeIds(agent);
+  const documents = (input.resources?.documents ?? []).filter(d => !reservedDocuments.has(d.id));
   const media = input.resources?.media ?? [];
   const helpers = input.resources?.helpers ?? [];
 
@@ -1004,7 +1012,7 @@ export function buildSystemPrompt(input: {
     blocks.push(`## CONTEXTO ADICIONAL INFORMADO PELA EQUIPE\n${clipText(contextoExtra, 3000)}`);
   }
 
-  const knowledgeBlock = buildKnowledgeBlock(input.knowledge ?? [], documents);
+  const knowledgeBlock = reservedDocuments.size ? '' : buildKnowledgeBlock(input.knowledge ?? [], documents);
   if (knowledgeBlock) blocks.push(knowledgeBlock);
 
   const mediaBlock = buildMediaBlock(media, state.midias_enviadas ?? []);
@@ -1084,7 +1092,7 @@ export function buildSystemPrompt(input: {
   }
   if (actionsBlock) {
     lines.push(
-      '- A ferramenta executar_acao serve só para as situações listadas em "AÇÕES DURANTE A CONVERSA". Nas ações marcadas como finais, escreva a mensagem final ao cliente antes de chamar; nas demais, continue conversando.'
+      '- A ferramenta executar_acao serve só para as situações listadas em "AÇÕES DURANTE A CONVERSA". Siga a ordem indicada nas ações finais. Nas demais, continue conversando.'
     );
   }
   if (documents.length > 0) {
@@ -1095,7 +1103,9 @@ export function buildSystemPrompt(input: {
       .slice(0, 1500);
     lines.push(`- Documentos da base de conhecimento: ${catalog}.`);
     lines.push(
-      knowledgeBlock
+      reservedDocuments.size
+        ? '- Use consultar_documentos para outros assuntos cobertos pelos documentos gerais. Para os assuntos das ações de consulta configuradas, use a própria ação e a base escolhida para ela.'
+        : knowledgeBlock
         ? '- Base de conhecimento: responda com base nos trechos do bloco "TRECHOS DA BASE DE CONHECIMENTO". Quando precisar de mais detalhes, ou a dúvida do cliente não estiver coberta por eles, chame consultar_documentos com a pergunta. Não invente informações que não estejam na base.'
         : '- Base de conhecimento: antes de responder dúvidas sobre o escritório, serviços, valores, prazos ou procedimentos, chame consultar_documentos com a pergunta e responda só com o que estiver nos trechos. Não invente informações que não estejam na base.'
     );
