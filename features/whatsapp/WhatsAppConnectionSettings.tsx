@@ -9,6 +9,7 @@
  * vê sempre as conexões da organização ATIVA — cada cliente tem as suas.
  */
 import { CopyId } from '@/components/ui/CopyId';
+import { WhatsAppConnectionHistory } from './WhatsAppConnectionHistory';
 import { LineAlertOwner, LineHealthDetails, LineStatusBadge } from './WhatsAppLineHealth';
 import type { ConnectionDiagnostics } from '@/lib/whatsapp/connectionDiagnostics';
 import { WhatsAppPairingPanel } from './WhatsAppPairingPanel';
@@ -930,7 +931,8 @@ export function WhatsAppConnectionSettings() {
                       <LineHealthDetails health={c.diagnostics} />
                     </div>
                     </div>
-                    {isAdminRole && <LineAlertOwner connectionId={c.id} ownerId={c.alertOwnerId ?? null} />}
+                    {profile?.organization_id && <WhatsAppConnectionHistory connectionId={c.id} organizationId={profile.organization_id} userId={profile.id} />}
+                    <LineAlertOwner connectionId={c.id} ownerId={c.alertOwnerId ?? null} canEdit={isAdminRole} />
                     {/* Linha 2: barra de ações, separada da identidade para nada ficar espremido */}
                     {confirmDisconnect === c.id ? (
                       <div className="flex items-center gap-2 flex-wrap mt-3 pt-3 border-t border-slate-100 dark:border-white/10">

@@ -60,7 +60,7 @@ const observations: Record<string, string> = {
   probe_transport_error: 'A consulta ao provedor falhou antes de obter uma resposta.',
 };
 
-function describeObservation(reason: string | null, source: string | null): string {
+export function describeObservation(reason: string | null, source: string | null): string {
   if (reason && Object.hasOwn(observations, reason)) return observations[reason];
   const parts = reason?.match(/^(webhook_undated_)?evolution_disconnect_(\d{1,6})$/);
   if (parts) return parts[1]
@@ -87,7 +87,7 @@ function describeObservation(reason: string | null, source: string | null): stri
   return 'O registro não permite identificar a causa da interrupção.';
 }
 
-function sourceLabel(source: string | null) {
+export function sourceLabel(source: string | null) {
   return source && Object.hasOwn(observationSources, source) ? observationSources[source] : 'Origem não informada';
 }
 
