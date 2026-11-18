@@ -23,6 +23,7 @@ import { agentHistoryText } from './replyOutput';
 import { voiceDelivery, VOICE_NOTICE } from './voiceDelivery';
 import { consultHelperAgent } from './helpers';
 import { searchKnowledge } from './knowledge';
+import { configuredKnowledgeIds } from './knowledgeActions';
 import { resolveAgentModel } from './model';
 import { loadAgentResources } from './resources';
 import { logRun } from './runs';
@@ -186,7 +187,7 @@ async function testAgentReplyWithUsage(
 
   // Mesma injeção automática da conversa real: trechos para a última mensagem do lead
   let knowledge: KnowledgeHit[] = [];
-  if (resources.documents.length > 0 && lastUser) {
+  if (resources.documents.length > 0 && lastUser && !configuredKnowledgeIds(agent).size) {
     knowledge = await searchKnowledge(admin, { organizationId, agent, query: lastUser, limit: AUTO_KNOWLEDGE_LIMIT });
   }
   const system = buildSystemPrompt({ agent, ctx, resources, knowledge }) +
@@ -227,12 +228,12 @@ async function testAgentReplyWithUsage(
     documents: resources.documents,
     media: resources.media,
     helpers: resources.helpers,
-    searchKnowledge: async q => {
+    searchKnowledge: async (q, documentId) => {
       knowledgeCalls += 1;
       if (knowledgeCalls > MAX_KNOWLEDGE_CALLS_PER_RUN) {
         throw new Error(`Limite de ${MAX_KNOWLEDGE_CALLS_PER_RUN} consultas à base de conhecimento nesta resposta atingido: responda com o que já tem`);
       }
-      return searchKnowledge(admin, { organizationId, agent, query: q, limit: TOOL_KNOWLEDGE_LIMIT });
+      return searchKnowledge(admin, { organizationId, agent, query: q, limit: TOOL_KNOWLEDGE_LIMIT, documentId });
     },
     // No real delivery: the server retains receipts even if an API client omits history.
     sendMedia: async media => {

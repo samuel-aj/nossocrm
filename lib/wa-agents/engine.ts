@@ -37,6 +37,7 @@ import { reportBlockedSend, reportRejectedSend } from '@/lib/whatsapp/connection
 import { enqueueDisconnectedTurn, pendingReplyDecision, type AfterPendingSend } from './connectionRecovery';
 import { consultHelperAgent } from './helpers';
 import { searchKnowledge } from './knowledge';
+import { configuredKnowledgeIds } from './knowledgeActions';
 import { internalOutputReason } from './replyOutput';
 import { sendAgentMedia, sendOutboxMedia } from './media';
 import { deliveredMediaNames } from './mediaDelivery';
@@ -765,7 +766,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     }
     // Trechos da base para a(s) última(s) mensagem(ns) do lead, injetados no prompt
     let knowledge: KnowledgeHit[] = [];
-    if (resources.documents.length > 0 && !input.recoveryLines) {
+    if (resources.documents.length > 0 && !input.recoveryLines && !configuredKnowledgeIds(agent).size) {
       const lastInForQuery = pending.length > 0 ? null : await getLastMessage(admin, ctx, 'in');
       const query = inputText ?? (lastInForQuery ? messageText(lastInForQuery) : '');
       if (query) {
@@ -850,12 +851,14 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       documents: resources.documents,
       media: resources.media,
       helpers: resources.helpers,
-      searchKnowledge: async q => {
+      searchKnowledge: async (q, documentId) => {
         knowledgeCalls += 1;
         if (knowledgeCalls > MAX_KNOWLEDGE_CALLS_PER_RUN) {
           throw new Error(`Limite de ${MAX_KNOWLEDGE_CALLS_PER_RUN} consultas à base de conhecimento nesta resposta atingido: responda com o que já tem`);
         }
-        return searchKnowledge(admin, { organizationId, agent: runAgent, query: q, limit: TOOL_KNOWLEDGE_LIMIT });
+        const hits = await searchKnowledge(admin, { organizationId, agent: runAgent, query: q, limit: TOOL_KNOWLEDGE_LIMIT, documentId });
+        if (documentId) pushEvent('knowledge_consulted', { document_id: documentId, trechos: hits.length });
+        return hits;
       },
       sendMedia: async media => {
         const conn = runCtx.connection;

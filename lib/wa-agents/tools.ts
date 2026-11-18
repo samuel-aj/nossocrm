@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { CALC_FUNCTIONS, evaluateExpression, formatCalcResult } from './calc';
 import { errorMessage } from './errors';
 import { formatKnowledgeHits } from './knowledge';
+import { configuredKnowledgeIds, knowledgeLookups } from './knowledgeActions';
 import { SAVED_DATA_KEY_MAX_CHARS, SAVED_DATA_MAX_KEYS, SAVED_DATA_VALUE_MAX_CHARS } from './savedData';
 import { normalizeKeyword } from './text';
 import type { AgentDocumentRow, AgentMediaRow, AgentRow, KnowledgeHit } from './types';
@@ -34,10 +35,36 @@ export type AgentToolRuntime = {
   media?: AgentMediaRow[];
   /** Agentes auxiliares: liga consultar_agente */
   helpers?: AgentRow[];
-  searchKnowledge?: (question: string) => Promise<KnowledgeHit[]>;
+  searchKnowledge?: (question: string, documentId?: string) => Promise<KnowledgeHit[]>;
   sendMedia?: (media: AgentMediaRow, caption?: string) => Promise<MediaSendResult>;
   consultHelper?: (helper: AgentRow, question: string) => Promise<string>;
 };
+
+/** Uma consulta por documento e pergunta neste turno, inclusive em chamadas paralelas. */
+function createDocumentLookup(agent: AgentRow, runtime: AgentToolRuntime) {
+  const ready = (runtime.documents ?? []).filter(doc =>
+    doc.status === 'ready' && doc.agent_id === agent.id && doc.organization_id === agent.organization_id
+  );
+  const cache = new Map<string, Promise<KnowledgeHit[]>>();
+  return async (id: string, question: string) => {
+    const doc = ready.find(d => d.id === id);
+    if (!doc || !runtime.searchKnowledge) return { encontrado: false, erro: 'A base escolhida está indisponível.' };
+    const base = doc.title || doc.name;
+    try {
+      const key = JSON.stringify([id, question]);
+      let lookup = cache.get(key);
+      if (!lookup) {
+        lookup = runtime.searchKnowledge(question, id);
+        cache.set(key, lookup);
+      }
+      const hits = (await lookup).filter(hit => hit.document_id === id);
+      const trechos = formatKnowledgeHits(hits, [doc]);
+      return trechos ? { base, encontrado: true, trechos } : { base, encontrado: false };
+    } catch (e) {
+      return { base, encontrado: false, erro: errorMessage(e) };
+    }
+  };
+}
 
 /** Enum do zod exige pelo menos um valor. */
 function enumOf(values: string[]): z.ZodEnum<Record<string, string>> {
@@ -76,20 +103,29 @@ export function helperDisplayName(agent: Pick<AgentRow, 'name' | 'persona_name'>
  * Ferramentas "utilitárias" (sem efeito na conversa): consultar_documentos e
  * calcular. Usadas pelo agente principal e pelos auxiliares.
  */
-export function buildUtilityTools(agent: Pick<AgentRow, 'tools'>, runtime: AgentToolRuntime = {}): ToolSet {
+export function buildUtilityTools(agent: Pick<AgentRow, 'tools'>, runtime: AgentToolRuntime = {}, reservedDocuments = new Set<string>()): ToolSet {
   const tools: ToolSet = {};
-  const documents = runtime.documents ?? [];
+  const documents = (runtime.documents ?? []).filter(doc => !reservedDocuments.has(doc.id));
   if (documents.length > 0 && runtime.searchKnowledge) {
     const search = runtime.searchKnowledge;
+    const scoped = reservedDocuments.size > 0;
+    const choices = scoped && documents.length > 1 ? {
+      documento: enumOf(documents.map(d => d.id)).describe(documents.map(d => `${d.id}: ${d.title || d.name}`).join('; ')),
+    } : {};
     tools.consultar_documentos = tool({
       description:
-        'Busca na base de conhecimento do agente (documentos do escritório) os trechos relevantes para uma pergunta. Use quando precisar de detalhes que não estão nos trechos já mostrados ou quando a dúvida do cliente não estiver coberta. Responda só com o que estiver nos trechos.',
+        scoped
+          ? 'Consulta um dos documentos gerais para dúvidas sem uma ação de consulta configurada. Responda só com os trechos encontrados.'
+          : 'Busca na base de conhecimento do agente (documentos do escritório) os trechos relevantes para uma pergunta. Use quando precisar de detalhes que não estão nos trechos já mostrados ou quando a dúvida do cliente não estiver coberta. Responda só com o que estiver nos trechos.',
       inputSchema: z.object({
         pergunta: z.string().describe('Pergunta ou tema a pesquisar, em linguagem natural'),
+        ...choices,
       }),
-      execute: async ({ pergunta }) => {
+      execute: async ({ pergunta, documento }) => {
         try {
-          const hits = await search(pergunta);
+          const selected = scoped ? (documents.length === 1 ? documents[0] : documents.find(d => d.id === documento)) : undefined;
+          if (scoped && !selected) return { encontrado: false, erro: 'Escolha um dos documentos disponíveis.' };
+          const hits = selected ? (await search(pergunta, selected.id)).filter(h => h.document_id === selected.id) : await search(pergunta);
           if (hits.length === 0) return { encontrado: false, trechos: 'Nada encontrado na base de conhecimento para essa pergunta.' };
           return { encontrado: true, trechos: formatKnowledgeHits(hits, documents) };
         } catch (e) {
@@ -149,15 +185,26 @@ export function buildAgentTools(agent: AgentRow, runtime: AgentToolRuntime = {})
 
   // Ações durante a conversa: só quando o agente tem alguma configurada
   const actionKeys = (agent.custom_actions ?? []).map(a => a.key).filter(Boolean);
+  const reservedDocuments = configuredKnowledgeIds(agent);
   if (actionKeys.length > 0) {
+    const lookup = createDocumentLookup(agent, runtime);
     tools.executar_acao = tool({
       description:
-        'Executa uma ação configurada no momento em que a situação descrita acontece na conversa (uma vez por ocorrência). Se mais de uma situação acontecer na mesma mensagem, chame executar_acao uma vez para CADA ação, na mesma resposta. Nas ações marcadas como finais no prompt, escreva a mensagem final ao cliente antes de chamar; as demais não encerram o atendimento.',
+        'Executa uma ação configurada quando a situação descrita acontece. Se mais de uma situação acontecer na mesma mensagem, chame executar_acao uma vez para cada ação. Siga a indicação do roteiro nas ações finais. Nas ações de consulta à base, chame antes de responder e use os trechos devolvidos.',
       inputSchema: z.object({
         acao: enumOf(actionKeys).describe('Chave da ação'),
-        detalhes: z.string().describe('O que o cliente disse ou o contexto que motivou a ação, em uma ou duas frases'),
+        detalhes: z.string().describe('O que o cliente disse ou o contexto que motivou a ação. Para consulta à base, inclua a pergunta objetiva e o produto ou assunto a pesquisar.'),
       }),
-      execute: async args => ({ ok: true, acao: args.acao }),
+      execute: async ({ acao, detalhes }) => {
+        const rule = agent.custom_actions.find(action => action.key === acao);
+        const steps = rule ? knowledgeLookups(rule) : [];
+        if (!steps.length) return { ok: true, acao };
+        const question = detalhes.trim();
+        if (!question) return { ok: false, acao, erro: 'Informe a pergunta a consultar.' };
+        const ids = new Set(steps.map(s => s.knowledgeId));
+        const consultas = await Promise.all([...ids].map(id => lookup(id, question)));
+        return { ok: consultas.every(c => !('erro' in c)), acao, consultas };
+      },
     });
   }
 
@@ -180,7 +227,7 @@ export function buildAgentTools(agent: AgentRow, runtime: AgentToolRuntime = {})
       execute: async input => { try { return await contract(input); } catch (e) { return { ok: false, erro: errorMessage(e) }; } },
     });
   }
-  Object.assign(tools, buildUtilityTools(agent, runtime));
+  Object.assign(tools, buildUtilityTools(agent, runtime, reservedDocuments));
   const clips = runtime.voiceClips;
   if (clips?.length) {
     tools.falar_trecho = tool({

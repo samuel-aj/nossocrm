@@ -1,6 +1,7 @@
-import { generateText, hasToolCall, Output, stepCountIs, type LanguageModel, type ModelMessage, type StopCondition } from 'ai';
+import { generateText, Output, stepCountIs, type LanguageModel, type ModelMessage } from 'ai';
 import { z } from 'zod';
 import { transitionActionKeys } from './context';
+import { knowledgeLookups } from './knowledgeActions';
 import { supportsTemperature } from './model';
 import { prepareReplyOutput, segmentText, type OutputIssue, type ReplySegment } from './replyOutput';
 import { buildAgentTools, type AgentToolRuntime } from './tools';
@@ -64,10 +65,16 @@ export async function generateAgentReply(input: {
   runtime?: AgentToolRuntime;
 }): Promise<GeneratedReply> {
   const finals = transitionActionKeys(input.agent);
+  const lookupKeys = new Set((input.agent.custom_actions ?? []).filter(a => knowledgeLookups(a).length > 0).map(a => a.key));
   const voiceClips = readAgentVoiceScripts(input.agent.system_prompt ?? '', input.followupInstruction).clips;
-  const hasTransitionAction: StopCondition<ReturnType<typeof buildAgentTools>> = ({ steps }) => {
-    const last = steps.at(-1);
-    return !!last?.toolCalls.some(call => call.toolName === 'executar_acao' && finals.has(String((call.input as { acao?: unknown } | undefined)?.acao ?? '')));
+  const actionKey = (call: { toolName: string; input: unknown }) => call.toolName === 'executar_acao'
+    ? String((call.input as { acao?: unknown } | null)?.acao ?? '') : '';
+  const callsKnowledge = (call: { toolName: string; input: unknown }) => lookupKeys.has(actionKey(call));
+  const afterTools = (calls: readonly { toolName: string; input: unknown }[] = []) => {
+    if (!calls.some(c => c.toolName === 'encerrar_atendimento' || finals.has(actionKey(c)))) return 'continue';
+    // A transition normally stops generation here. When the same step consulted a
+    // document, allow one text-only final answer grounded in the returned excerpts.
+    return calls.some(callsKnowledge) ? 'answer' : 'stop';
   };
   const agentTools = buildAgentTools(input.agent, { ...input.runtime, voiceClips });
   const result = await generateText({
@@ -78,12 +85,17 @@ export async function generateAgentReply(input: {
     messages: input.messages,
     temperature: supportsTemperature(input.agent) ? input.agent.temperature : undefined,
     tools: agentTools,
-    stopWhen: [stepCountIs(MAX_STEPS), hasToolCall('encerrar_atendimento'), hasTransitionAction],
+    stopWhen: [stepCountIs(MAX_STEPS), ({ steps }) => afterTools(steps.at(-1)?.toolCalls) === 'stop'],
+    prepareStep: ({ steps }) => afterTools(steps.at(-1)?.toolCalls) === 'answer' ? { toolChoice: 'none' } : {},
   });
   const toolCalls: CollectedToolCall[] = [];
   let segments: ReplySegment[] = [];
   for (const [stepIndex, step] of result.steps.entries()) {
-    if (step.text?.trim()) segments.push({ kind: 'text', text: step.text.trim(), step: stepIndex });
+    // Text alongside a lookup was generated before the document was read. Only
+    // later steps can give the customer an answer grounded in its result.
+    if (step.text?.trim() && !step.toolCalls.some(callsKnowledge)) {
+      segments.push({ kind: 'text', text: step.text.trim(), step: stepIndex });
+    }
     for (const call of step.toolCalls) {
       const output = step.toolResults.find(r => r.toolCallId === call.toolCallId)?.output;
       toolCalls.push({ tool: call.toolName, input: call.input, output });
@@ -99,7 +111,9 @@ export async function generateAgentReply(input: {
       }
     }
   }
-  if (segments.length === 0 && result.text?.trim()) segments.push({ kind: 'text', text: result.text.trim() });
+  if (segments.length === 0 && result.text?.trim() && !result.steps.some(step => step.toolCalls.some(callsKnowledge))) {
+    segments.push({ kind: 'text', text: result.text.trim() });
+  }
   const usage = {
     inputTokens: result.totalUsage?.inputTokens ?? null,
     outputTokens: result.totalUsage?.outputTokens ?? null,

@@ -5,7 +5,7 @@ import type { LanguageModelV3GenerateResult } from '@ai-sdk/provider';
 vi.mock('server-only', () => ({}));
 import { normalizeAgentRow } from './context';
 import { generateAgentReply } from './replyGeneration';
-import type { AgentMediaRow } from './types';
+import type { AgentDocumentRow, AgentMediaRow } from './types';
 
 const agent = normalizeAgentRow({
   id: 'agent', organization_id: 'org', name: 'Triagem', provider: 'openai', model: 'gpt-4.1',
@@ -34,6 +34,31 @@ function queuedModel(responses: LanguageModelV3GenerateResult[]) {
 }
 
 describe('contrato com o AI SDK instalado', () => {
+  it('entrega ao modelo os trechos da base selecionada antes da resposta ao cliente', async () => {
+    const id = '39333333-3333-4333-8333-333333333333';
+    const configured = normalizeAgentRow({ ...agent, custom_actions: [{
+      key: 'precos', label: 'Preços', description: 'Quando perguntarem pelo valor',
+      actions: [{ type: 'consult_knowledge', knowledgeId: id, description: 'Preço da consulta inicial' }],
+    }] });
+    const model = queuedModel([
+      response([{ type: 'tool-call', toolCallId: 'pesquisa', toolName: 'executar_acao',
+        input: JSON.stringify({ acao: 'precos', detalhes: 'Quanto custa a consulta inicial?' }) }]),
+      text('A consulta inicial custa R$ 80.'),
+    ]);
+    const searchKnowledge = vi.fn().mockResolvedValue([{ document_id: id, content: 'Consulta inicial: R$ 80.', idx: 0, score: 1 }]);
+    const result = await generateAgentReply({
+      ...input, agent: configured, model,
+      runtime: {
+        documents: [{ id, name: 'Tabela atual', status: 'ready', agent_id: agent.id, organization_id: agent.organization_id } as AgentDocumentRow],
+        searchKnowledge,
+      },
+    });
+    expect(searchKnowledge).toHaveBeenCalledExactlyOnceWith('Quanto custa a consulta inicial?', id);
+    const sources = model.doGenerateCalls[1].prompt.filter(message => message.role === 'tool');
+    expect(JSON.stringify(sources)).toContain('Consulta inicial: R$ 80.');
+    expect(result.text).toBe('A consulta inicial custa R$ 80.');
+  });
+
   it.each([['[audio]', 'audio'], ['[vídeo]', 'video']] as const)('recupera %s com a ferramenta e preserva a ordem', async (marker, kind) => {
     const model = queuedModel([text('Olá! ' + marker + ' Conseguiu abrir?'),
       response([{ type: 'tool-call', toolCallId: 'recover', toolName: 'enviar_midia', input: '{"nome":"Tutorial"}' }])]);

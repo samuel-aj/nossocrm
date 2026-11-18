@@ -9,6 +9,7 @@ import {
   CustomActionSchema,
   DEFAULT_AGENT_TRIGGERS,
   EndActionSchema,
+  OutcomeSchema,
   isAllowedMediaMime,
   isMaskedSecret,
   SECRET_MASK,
@@ -121,6 +122,19 @@ describe('esquemas do agente (adendo)', () => {
       description: 'o cliente informar que já tem advogado',
     });
     expect(ok.actions).toEqual([]);
+  });
+
+  it('guarda o documento e a descrição da consulta apenas nas ações durante a conversa', () => {
+    const step = {
+      type: 'consult_knowledge',
+      knowledgeId: '10000000-0000-4000-8000-000000000001',
+      description: 'Preços e prazos de entrega',
+    };
+    const rule = { key: 'precos', label: 'Preços', description: 'O cliente perguntar o valor', actions: [step] };
+    expect(CustomActionSchema.parse(rule).actions).toEqual([step]);
+    expect(OutcomeSchema.safeParse(rule).success).toBe(false);
+    expect(EndActionSchema.safeParse({ ...step, knowledgeId: '' }).success).toBe(false);
+    expect(EndActionSchema.safeParse({ ...step, description: '  ' }).success).toBe(false);
   });
 
   it('AgentInputSchema aplica os padrões de helper_agent_ids e tools', () => {

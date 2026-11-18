@@ -24,6 +24,7 @@ import {
   type AgentTriggers,
   type BotLayout,
   type BotStep,
+  type CustomAction,
   type EndAction,
 } from '@/lib/wa-agents/types';
 
@@ -134,6 +135,41 @@ export function validationMessage(message: string, path: string): Response {
     { error: 'Dados inválidos', code: 'VALIDATION_ERROR', issues: [{ code: 'custom', path: path.split('.'), message }] },
     400
   );
+}
+
+/** Um documento pode ser consultado somente pelo agente que o recebeu. */
+export async function validateKnowledgeActions(
+  admin: SupabaseClient,
+  orgId: string,
+  agentId: string | null,
+  rules: CustomAction[]
+): Promise<Response | null> {
+  const paths = new Map<string, string>();
+  for (const [ruleIndex, rule] of rules.entries()) {
+    for (const [stepIndex, action] of rule.actions.entries()) {
+      if (action.type === 'consult_knowledge') {
+        paths.set(action.knowledgeId, `custom_actions.${ruleIndex}.actions.${stepIndex}.knowledgeId`);
+      }
+    }
+  }
+  if (paths.size === 0) return null;
+
+  const ready = new Set<string>();
+  if (agentId) {
+    const { data, error } = await admin
+      .from('wa_ai_agent_documents')
+      .select('id')
+      .eq('organization_id', orgId)
+      .eq('agent_id', agentId)
+      .eq('status', 'ready')
+      .in('id', [...paths.keys()]);
+    if (error) throw new Error(error.message);
+    for (const doc of data ?? []) ready.add(doc.id);
+  }
+  for (const [id, path] of paths) {
+    if (!ready.has(id)) return validationMessage('Selecione um documento pronto na base de conhecimento deste agente', path);
+  }
+  return null;
 }
 
 /** Lê o JSON do corpo sem lançar (null quando inválido ou vazio). */
