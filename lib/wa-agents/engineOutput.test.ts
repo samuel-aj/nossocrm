@@ -1,6 +1,6 @@
 /** Full orchestration with fake DB/model/WhatsApp; no external effects. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentMediaRow, AgentRow } from './types';
+import type { AgentDocumentRow, AgentMediaRow, AgentRow } from './types';
 import type { ConversationContext } from './context';
 import type { SupabaseClient } from '@supabase/supabase-js';
 const h = vi.hoisted(() => ({
@@ -11,6 +11,7 @@ const h = vi.hoisted(() => ({
   ctx: null as ConversationContext | null, agent: null as AgentRow | null,
   db: null as unknown as SupabaseClient,
   media: [] as AgentMediaRow[],
+  documents: [] as AgentDocumentRow[], search: vi.fn(),
   messages: [] as Record<string, unknown>[],
 }));
 vi.mock('server-only', () => ({}));
@@ -35,7 +36,8 @@ vi.mock('./context', async original => ({
 vi.mock('./model', async original => ({ ...await original<typeof import('./model')>(), resolveAgentModel: async () => ({ model: {}, modelId: 'fake' }) }));
 vi.mock('./beta', () => ({ isAiAgentsApproved: async () => true }));
 vi.mock('./autoLead', () => ({ ensureAutoLead: async () => {} }));
-vi.mock('./resources', () => ({ loadAgentResources: async () => ({ documents: [], media: h.media, helpers: [] }) }));
+vi.mock('./resources', () => ({ loadAgentResources: async () => ({ documents: h.documents, media: h.media, helpers: [] }) }));
+vi.mock('./knowledge', async original => ({ ...await original<typeof import('./knowledge')>(), searchKnowledge: h.search }));
 vi.mock('./actions', () => ({ executeCustomAction: h.action, executeOutcomeActions: h.outcome }));
 vi.mock('./webhooks', () => ({ dispatchAgentEvent: h.events }));
 vi.mock('./runs', () => ({ logRun: h.log }));
@@ -97,6 +99,7 @@ beforeEach(() => {
   incoming.created_at = at;
   h.calendar = null;
   h.media = [];
+  h.documents = [];
   h.messages = [];
   h.policyEnabled = false;
   h.budget.mockReset().mockResolvedValue({ blocked_at: null, policy: { enabled: false } }); h.block.mockResolvedValue(undefined);
@@ -148,6 +151,36 @@ describe('recuperação de desconexão com transporte falso', () => {
     expect(rpc).not.toHaveBeenCalledWith('enqueue_wa_agent_connection_reply',expect.anything());
     expect(h.send).toHaveBeenCalledTimes(1);
   });
+});
+
+it.each(['conversa', 'simulador'])('consulta a base configurada antes de responder na %s, sem busca global', async mode => {
+  const agent = h.agent!;
+  const id = '33333333-3333-4333-8333-333333333333';
+  agent.custom_actions = [{ key: 'precos', label: 'Preços', description: 'cliente perguntar pelo preço',
+    actions: [{ type: 'consult_knowledge', knowledgeId: id, description: 'Preços do catálogo' }] }];
+  h.documents = [{ id, agent_id: agent.id, organization_id: org, status: 'ready', name: 'Catálogo' } as AgentDocumentRow];
+  const detalhes = 'Qual é o preço do produto?';
+  const answer = 'O produto custa 27 reais.';
+  h.search.mockResolvedValue([{ content: answer, document_id: id, idx: 0, score: 1 }]);
+  h.generate.mockImplementation(async ({ tools }) => {
+    expect(tools.consultar_documentos).toBeUndefined();
+    const input = { acao: 'precos', detalhes };
+    const output = await tools.executar_acao.execute(input, {});
+    expect(output.consultas[0].trechos).toContain(answer);
+    return { text: answer, totalUsage: {}, finishReason: 'stop', steps: [
+      { text: '', toolCalls: [{ toolName: 'executar_acao', toolCallId: 'lookup', input }], toolResults: [{ toolCallId: 'lookup', output }] },
+      { text: answer, toolCalls: [], toolResults: [] },
+    ] };
+  });
+  if (mode === 'conversa') {
+    expect((await run()).status).toBe('ok');
+    expect(h.send.mock.calls.map(([message]) => message.text)).toEqual([answer]);
+  } else {
+    const result = await testAgentReply(h.db, { organizationId: org, agent, messages: [{ role: 'user', text: detalhes }] });
+    expect(result.text).toBe(answer);
+    expect(h.send).not.toHaveBeenCalled();
+  }
+  expect(h.search).toHaveBeenCalledExactlyOnceWith(h.db, expect.objectContaining({ organizationId: org, agent, query: detalhes, documentId: id }));
 });
 
 it('simulator blocks a registered video again after the customer replies, but allows another video', async () => {

@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { chunkText, cleanExtractedText, extractDocumentText, formatKnowledgeHits, resolveDocumentMime } from './knowledge';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { describe, expect, it, vi } from 'vitest';
+import { chunkText, cleanExtractedText, extractDocumentText, formatKnowledgeHits, resolveDocumentMime, searchKnowledge } from './knowledge';
 
 /** PDF mínimo escrito à mão com uma linha de texto (o pdf.js tolera o xref simples). */
 function buildTinyPdf(text: string): Buffer {
@@ -104,5 +105,37 @@ describe('formatKnowledgeHits', () => {
     expect(out).toBe('[1] (Guia.pdf) Trecho um com quebra\n[2] Trecho dois');
     expect(formatKnowledgeHits([], [])).toBe('');
     expect(formatKnowledgeHits([{ content: 'x'.repeat(100), document_id: 'd', idx: 0, score: 1 }], [], 50)).toBe('');
+  });
+});
+
+describe('searchKnowledge por documento', () => {
+  const agent = { id: 'agent', organization_id: 'org' };
+
+  it('consulta o perfil e a busca textual apenas para o documento selecionado', async () => {
+    const documents = {
+      data: [{ chunk_count: 1, embedding_model: null }],
+      eq: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+    };
+    const db = {
+      from: vi.fn().mockReturnValue(documents),
+      rpc: vi.fn().mockResolvedValue({ data: [{ document_id: 'doc', idx: 0, content: 'Preço', rank: 0.1 }] }),
+    };
+    const result = await searchKnowledge(db as unknown as SupabaseClient, {
+      organizationId: 'org', agent, query: 'Preço', documentId: 'doc',
+    });
+    expect(documents.eq.mock.calls).toEqual([['organization_id', 'org'], ['agent_id', 'agent'], ['status', 'ready'], ['id', 'doc']]);
+    expect(db.rpc).toHaveBeenCalledTimes(1);
+    expect(db.rpc).toHaveBeenCalledWith('wa_ai_search_document_chunks', {
+      p_org: 'org', p_agent: 'agent', p_document: 'doc', p_query: 'Preço', p_limit: 5,
+    });
+    expect(result).toEqual([{ document_id: 'doc', idx: 0, content: 'Preço', score: 0.1 }]);
+  });
+
+  it('uma escolha vazia não amplia a busca para toda a base', async () => {
+    const db = { from: vi.fn(), rpc: vi.fn() };
+    expect(await searchKnowledge(db as unknown as SupabaseClient, { organizationId: 'org', agent, query: 'preço', documentId: '' })).toEqual([]);
+    expect(db.from).not.toHaveBeenCalled();
+    expect(db.rpc).not.toHaveBeenCalled();
   });
 });

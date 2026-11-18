@@ -1,9 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { loadDealContext, buildLeadDataBlock, type ConversationContext } from './context';
+import { loadDealContext, buildCustomActionsBlock, buildLeadDataBlock, type ConversationContext } from './context';
 
 const org = '11111111-1111-4111-8111-111111111111';
 const id = '22222222-2222-4222-8222-222222222222';
+it('descreve a base e seu gatilho separadamente para orientar a ferramenta', () => {
+  const prompt = buildCustomActionsBlock({ custom_actions: [{ key: 'politica', label: 'Política', description: 'o cliente pedir uma troca',
+    actions: [{ type: 'consult_knowledge', knowledgeId: id, description: 'Prazos e critérios de devolução' }] }] });
+  expect(prompt).toContain('quando o cliente pedir uma troca');
+  expect(prompt).toContain('Prazos e critérios de devolução');
+  expect(prompt).toContain('antes de responder');
+  expect(prompt).not.toContain(id);
+});
+
 function client(field: unknown, rawDeal: unknown = { id, title: 'Lead', custom_fields: {}, whatsapp_group_id: 'client@g.us' }, error: unknown = null) {
   const rpc = vi.fn().mockResolvedValue({ data: field, error });
   const from = vi.fn((table: string) => {

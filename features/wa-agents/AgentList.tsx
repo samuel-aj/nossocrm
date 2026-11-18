@@ -8,7 +8,8 @@ import React, { useEffect, useState } from 'react';
 import { Bot, Plus, Pencil, Copy, Trash2, Phone, Cpu } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
 import { useToast } from '@/context/ToastContext';
-import { DEFAULT_AGENT_TRIGGERS, type AgentInput, type AgentPublic } from '@/lib/wa-agents/types';
+import { DEFAULT_AGENT_TRIGGERS, SCRIPT_ACTION_MARKER_RE, type AgentInput, type AgentPublic } from '@/lib/wa-agents/types';
+import { normalizeKeyword } from '@/lib/wa-agents/text';
 import { PROVIDER_LABELS } from '@/lib/wa-agents/catalog';
 import { useDeleteWaAgent, useSaveWaAgent, useWaAgentOptions, useWaAgentsList, type WaAgentListItem } from './useWaAgents';
 import { AgentEditor } from './AgentEditor';
@@ -28,8 +29,18 @@ function asPublic(item: WaAgentListItem): AgentPublic | null {
  * pipeline vem configurado, mas desligado quando já tem um número que inicia
  * a conversa, para não disparar em dobro com o original.
  */
-function toAgentInput(agent: AgentPublic): Partial<AgentInput> {
+export function toAgentInput(agent: AgentPublic): Partial<AgentInput> {
   const deal = agent.triggers?.deal;
+  const removedKeys = new Set<string>();
+  // Os arquivos pertencem ao agente original. Uma regra que só consultava
+  // documentos também sai, para não se tornar um disparo vazio de webhook.
+  const customActions = (agent.custom_actions ?? []).flatMap(rule => {
+    const actions = rule.actions.filter(step => step.type !== 'consult_knowledge');
+    if (actions.length === rule.actions.length) return [rule];
+    if (actions.length) return [{ ...rule, actions }];
+    removedKeys.add(rule.key);
+    return [];
+  });
   return {
     name: `${agent.name} (cópia)`,
     persona_name: agent.persona_name ?? null,
@@ -38,14 +49,15 @@ function toAgentInput(agent: AgentPublic): Partial<AgentInput> {
     provider: agent.provider,
     model: agent.model,
     temperature: agent.temperature,
-    system_prompt: agent.system_prompt,
+    system_prompt: agent.system_prompt.replace(SCRIPT_ACTION_MARKER_RE, (marker, key: string) =>
+      removedKeys.has(normalizeKeyword(key)) ? '' : marker),
     buffer_seconds: agent.buffer_seconds,
     history_limit: agent.history_limit,
     line_delay_ms: agent.line_delay_ms,
     human_pause_minutes: agent.human_pause_minutes,
     only_new_conversations: agent.only_new_conversations,
     outcomes: agent.outcomes,
-    custom_actions: agent.custom_actions ?? [],
+    custom_actions: customActions,
     triggers: {
       inbound: agent.triggers?.inbound ?? DEFAULT_AGENT_TRIGGERS.inbound,
       deal: { ...DEFAULT_AGENT_TRIGGERS.deal, ...deal, enabled: deal?.connection_id ? false : (deal?.enabled ?? false) },
@@ -219,7 +231,13 @@ export const AgentList: React.FC = () => {
                       aria-label={`Duplicar agente ${item.name}`}
                       title="Duplicar"
                       disabled={!full}
-                      onClick={() => full && setEditor({ agent: null, initial: toAgentInput(full) })}
+                      onClick={() => {
+                        if (!full) return;
+                        setEditor({ agent: null, initial: toAgentInput(full) });
+                        if (full.custom_actions?.some(rule => rule.actions.some(step => step.type === 'consult_knowledge'))) {
+                          showToast('Depois de salvar a cópia, adicione os documentos e configure as consultas à base deste agente.', 'info');
+                        }
+                      }}
                     >
                       <Copy size={16} aria-hidden="true" />
                     </button>

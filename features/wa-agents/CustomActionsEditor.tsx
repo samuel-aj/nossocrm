@@ -11,7 +11,7 @@ import React, { useState } from 'react';
 import { FileText, Plus, Zap } from 'lucide-react';
 import type { AgentAiVar, CustomAction } from '@/lib/wa-agents/types';
 import type { WaAgentListItem, WaAgentOptions } from './useWaAgents';
-import { ActionSummary, ActionsEditor, slugifyKey, type ActionType } from './OutcomesEditor';
+import { ActionSummary, ActionsEditor, slugifyKey, type ActionType, type KnowledgeChoices } from './OutcomesEditor';
 import { actionToken } from './PromptEditor';
 import { RuleEditorModal, RuleList } from './RuleList';
 import { BTN_SMALL, Disclosure, Field, INPUT_CLASS, TEXTAREA_CLASS, TokenChip } from './ui';
@@ -39,12 +39,13 @@ export const CustomActionsEditor: React.FC<{
   onChange: (value: CustomAction[]) => void;
   agents: WaAgentListItem[];
   options: WaAgentOptions | undefined;
+  knowledge: KnowledgeChoices;
   aiVars?: AgentAiVar[];
   onAiVarsChange?: (vars: AgentAiVar[]) => void;
   currentAgentId?: string | null;
   /** Insere o marcador `[[acao:chave]]` no cursor do roteiro (o editor pai troca de aba) */
   onInsertToken?: (token: string) => void;
-}> = ({ value, onChange, agents, options, aiVars = [], onAiVarsChange = () => {}, currentAgentId, onInsertToken }) => {
+}> = ({ value, onChange, agents, options, knowledge, aiVars = [], onAiVarsChange = () => {}, currentAgentId, onInsertToken }) => {
   const [editing, setEditing] = useState<number | null>(null);
 
   const update = (index: number, patch: Partial<CustomAction>) => {
@@ -108,6 +109,7 @@ export const CustomActionsEditor: React.FC<{
               actions={a.actions}
               agents={agents}
               options={options}
+              knowledge={knowledge}
               emptyText="Sem ações no CRM: só o evento de webhook é disparado."
             />
           ),
@@ -163,6 +165,7 @@ export const CustomActionsEditor: React.FC<{
               onChange={(actions) => update(editing, { actions })}
               agents={agents}
               options={options}
+              knowledge={knowledge}
               aiVars={aiVars}
               onAiVarsChange={onAiVarsChange}
               currentAgentId={currentAgentId}

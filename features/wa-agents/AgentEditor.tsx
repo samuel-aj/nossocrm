@@ -529,6 +529,11 @@ function findFriendlyIssue(form: AgentFormState, agents: WaAgentListItem[]): Fri
     if (!a.description.trim()) return { message: `Ação "${a.label}": descreva quando ela deve acontecer`, tab: 'acoes' };
     if (a.actions.some((x) => x.type === 'webhook' && !x.url.trim()))
       return { message: `Ação "${a.label}": informe a URL do webhook`, tab: 'acoes' };
+    for (const step of a.actions) {
+      if (step.type !== 'consult_knowledge') continue;
+      if (!step.knowledgeId) return { message: `Escolha a base de conhecimento da ação “${a.label}”.`, tab: 'acoes' };
+      if (!step.description.trim()) return { message: `Descreva o conteúdo da base na ação “${a.label}”.`, tab: 'acoes' };
+    }
     const leadIssue = updateLeadIssue(a.actions);
     if (leadIssue) return { message: `Ação "${a.label}": ${leadIssue}`, tab: 'acoes' };
   }
@@ -1287,6 +1292,10 @@ export const AgentEditor: React.FC<{
             onChange={(custom_actions) => patch({ custom_actions })}
             agents={agents}
             options={options}
+            knowledge={{
+              documents: docsQ.data ?? [],
+              message: docsQ.isLoading ? 'Carregando documentos…' : docsQ.isError ? 'Falha ao carregar os documentos da aba Conhecimento.' : undefined,
+            }}
             aiVars={form.ai_vars}
             onAiVarsChange={(ai_vars) => patch({ ai_vars })}
             currentAgentId={agentId}
