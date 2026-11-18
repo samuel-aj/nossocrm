@@ -14,7 +14,7 @@ it.each([['admin', true], ['super_admin', true], ['vendedor', false]] as const)(
     fireEvent.click(screen.getByRole('button', { name: /Notificações/ }));
     expect(screen.getByRole('button', { name: 'Preferências de notificações' })).toBeEnabled();
     const link = screen.queryByRole('link', { name: 'Configurar alertas de conexão' });
-    if (canEdit) expect(link).toHaveAttribute('href', '/conexao-whatsapp');
+    if (canEdit) expect(link).toHaveAttribute('href', '/conexao-whatsapp?aba=alertas');
     else expect(link).not.toBeInTheDocument();
   }
 );

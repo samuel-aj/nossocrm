@@ -123,7 +123,7 @@ export const NotificationPopover = () => {
 
                     <div className="px-4 py-3 border-b border-slate-100 dark:border-white/5">
                         <button className="text-sm font-medium text-primary-600 dark:text-primary-400 disabled:opacity-50" disabled={!personal.settings} onClick={()=>{setIsOpen(false);setPreferencesOpen(true);}}>Preferências de notificações</button>
-                        {canManageConnectionAlerts && <Link href="/conexao-whatsapp" onClick={() => setIsOpen(false)}
+                        {canManageConnectionAlerts && <Link href="/conexao-whatsapp?aba=alertas" onClick={() => setIsOpen(false)}
                             className="mt-1 block w-fit text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline">
                             Configurar alertas de conexão
                         </Link>}
