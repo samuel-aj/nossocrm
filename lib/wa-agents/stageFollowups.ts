@@ -10,14 +10,15 @@
  * (robô iniciado, mensagem enviada, pulado ou falhou), nunca "enviado" só
  * porque entrou na fila. SERVER.
  */
-import { checkProactiveFollowup } from './proactiveFollowup';
+import { checkProactiveFollowup, type ProactiveFollowup } from './proactiveFollowup';
+import { reportBlockedSend } from '@/lib/whatsapp/connectionSendFailure';
 import { startStageFollowupAgent } from './stageFollowupAgent';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getServiceWindow } from '@/lib/whatsapp/serviceWindow';
-import { getConnectionByIdForOrg, type WaConnectionRow } from '@/lib/whatsapp/service';
+import { getConnectionByIdForOrg } from '@/lib/whatsapp/service';
 import { sendTemplateToConversation, sendTextToConversation, startBotRun } from './bots';
 import { loadDealContext } from './context';
-import { errorMessage } from './errors';
+import { errorMessage, WaAgentError } from './errors';
 import { renderTemplate } from './template';
 import { lastInboundAt, resolveDealConversation, type DealConversation as Conv } from './dealConversation';
 
@@ -31,6 +32,7 @@ export type FollowupSchedule = {
   due_at: string;
   status: string;
   attempts: number;
+  last_result?: { recovery?: ProactiveFollowup['connectionRecovery']; recovery_anchor?: string; recovery_rule?: number };
 };
 
 export type FollowupRule = {
@@ -47,7 +49,7 @@ export type FollowupRule = {
 };
 
 type Outcome =
-  | { status: 'deferred'; until: string; reason: string }
+  | { status: 'deferred'; until: string; reason: string; recovery?: ProactiveFollowup['connectionRecovery'] }
   | { status: 'done'; result: Record<string, unknown> }
   | { status: 'skipped'; reason: string }
   | { status: 'failed'; error: string }
@@ -110,10 +112,25 @@ export async function runStageFollowup(admin: SupabaseClient, s: FollowupSchedul
   if (!resolved.ok) return { status: 'skipped', reason: resolved.reason };
   const conv: Conv | null = resolved.conversation;
 
-  const proactive = { anchor: s.anchor_at, dealId: deal.id, stageId: s.stage_id, ruleVersion: s.rule_version };
+  const proactive: ProactiveFollowup = { anchor: s.anchor_at, dealId: deal.id, stageId: s.stage_id, ruleVersion: s.rule_version,
+    ...(s.last_result?.recovery && s.last_result.recovery_anchor === s.anchor_at && s.last_result.recovery_rule === s.rule_version
+      ? { connectionRecovery: s.last_result.recovery } : {}) };
   const decision = await checkProactiveFollowup(admin, orgId, conv?.id ?? null, proactive);
-  if (decision.kind === 'defer') return { status: 'deferred', until: decision.until, reason: 'aguardando horário de follow-up' };
+  if (decision.kind === 'defer') return { status: 'deferred', until: decision.until, reason: 'aguardando disponibilidade do follow-up',
+    ...(proactive.connectionRecovery ? { recovery: proactive.connectionRecovery } : {}) };
   if (decision.kind === 'cancel') return { status: 'cancelled', reason: decision.reason };
+  const connection = conv?.connection_id ? await getConnectionByIdForOrg(admin, orgId, conv.connection_id) : null;
+  const waitForLine = (): Outcome => {
+    if (!conv?.connection_id) return { status: 'cancelled', reason: 'Conversa perdeu o vínculo com o número.' };
+    return { status: 'deferred', reason: 'aguardando reconexão do número',
+      until: new Date(Date.now() + 60_000).toISOString(), recovery: proactive.connectionRecovery ?? {
+        since: s.due_at, line: conv.connection_id, agent: conv.ai_agent_id ?? null, stateAt: conv.ai_status_changed_at ?? null,
+      } };
+  };
+  if (connection && connection.status !== 'connected') {
+    await reportBlockedSend(admin, connection.id);
+    return waitForLine();
+  }
   if (rule.action_type === 'agent') {
     if (!conv || !rule.agent_id) return { status: 'failed', error: 'Escolha um agente e uma conversa válidos' };
     const result = await startStageFollowupAgent(admin, { organizationId: orgId, conversationId: conv.id,
@@ -152,9 +169,7 @@ export async function runStageFollowup(admin: SupabaseClient, s: FollowupSchedul
   if (!conv.connection_id) return { status: 'failed', error: 'a conversa não tem número conectado' };
   const phone = (conv.wa_phone ?? '').trim();
   if (!phone) return { status: 'failed', error: 'a conversa não tem telefone' };
-  const connection = (await getConnectionByIdForOrg(admin, orgId, conv.connection_id)) as WaConnectionRow | null;
   if (!connection) return { status: 'failed', error: 'o número da conversa não existe mais' };
-  if (connection.status !== 'connected') return { status: 'failed', error: 'o número da conversa está desconectado' };
 
   const msg = rule.message ?? {};
   const ctxDeal = await loadDealContext(admin, orgId, { dealId: deal.id });
@@ -163,22 +178,28 @@ export async function runStageFollowup(admin: SupabaseClient, s: FollowupSchedul
     const { data: c } = await admin.from('contacts').select('name').eq('id', deal.contact_id).maybeSingle();
     contactName = ((c as { name?: string } | null)?.name ?? '').trim();
   }
+  if (proactive.connectionRecovery) {
+    const current = await checkProactiveFollowup(admin,orgId,conv.id,proactive);
+    if (current.kind === 'cancel') return { status:'cancelled',reason:current.reason };
+    if (current.kind === 'defer') return { status:'deferred',until:current.until,
+      reason:'aguardando disponibilidade do follow-up',recovery:proactive.connectionRecovery };
+  }
 
   if (msg.kind === 'template') {
     if (!msg.template_id) return { status: 'failed', error: 'regra sem modelo escolhido' };
-    const name = await sendTemplateToConversation(admin, {
-      organizationId: orgId,
-      conversationId: conv.id,
-      connection,
-      phone,
-      templateId: msg.template_id,
-      values: {
-        'contato.nome': contactName,
-        'contato.telefone': phone,
-        'lead.titulo': ctxDeal?.title ?? '',
-        'lead.etapa': ctxDeal?.stage_label ?? '',
-      },
-    });
+    let name: string;
+    try {
+      name = await sendTemplateToConversation(admin, {
+        organizationId: orgId, conversationId: conv.id, connection, phone, templateId: msg.template_id,
+        values: {
+          'contato.nome': contactName, 'contato.telefone': phone,
+          'lead.titulo': ctxDeal?.title ?? '', 'lead.etapa': ctxDeal?.stage_label ?? '',
+        },
+      });
+    } catch (e) {
+      if (e instanceof WaAgentError && e.code === 'DISCONNECTED') return waitForLine();
+      throw e;
+    }
     return { status: 'done', result: { kind: 'message_sent', template: name, conversation_id: conv.id } };
   }
 
@@ -193,7 +214,12 @@ export async function runStageFollowup(admin: SupabaseClient, s: FollowupSchedul
   if (connection.provider === 'meta_cloud' && !getServiceWindow(lastIn).open) {
     return { status: 'failed', error: 'janela de 24 h fechada na API oficial: use um modelo de mensagem aprovado' };
   }
-  await sendTextToConversation(admin, { organizationId: orgId, conversationId: conv.id, connection, phone, text });
+  try {
+    await sendTextToConversation(admin, { organizationId: orgId, conversationId: conv.id, connection, phone, text });
+  } catch (e) {
+    if (e instanceof WaAgentError && e.code === 'DISCONNECTED') return waitForLine();
+    throw e;
+  }
   return { status: 'done', result: { kind: 'message_sent', text: text.slice(0, 200), conversation_id: conv.id } };
 }
 
@@ -206,7 +232,8 @@ async function finish(admin: SupabaseClient, s: FollowupSchedule, outcome: Outco
       ? outcome.result
       : outcome.status === 'failed'
         ? { error: outcome.error }
-        : { reason: outcome.reason };
+        : { reason: outcome.reason, ...(outcome.status === 'deferred' && outcome.recovery
+          ? { recovery: outcome.recovery, recovery_anchor: s.anchor_at, recovery_rule: s.rule_version } : {}) };
   const { data } = await admin
     .from('deal_followup_schedules')
     .update({

@@ -25,7 +25,7 @@ function db(enabled = true, inboundAt = cycle) {
 }
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-09T14:00:00Z'));
-  vi.clearAllMocks(); h.claim.mockResolvedValue({ data: true }); h.run.mockResolvedValue({ status: 'ok' });
+  vi.clearAllMocks(); h.claim.mockResolvedValue({ data: 'claimed' }); h.run.mockResolvedValue({ status: 'ok' });
   h.manualContract.mockResolvedValue(false);
   h.rules = [60, 360, 1440].map(after_minutes => ({ id: String(after_minutes), after_minutes, kind: 'agent', instruction: 'retome', only_in_window: false }));
 });
@@ -38,14 +38,14 @@ it('does not consume or call anything during the weekend', async () => {
 it('Monday executes only the latest overdue rule, claiming the backlog together', async () => {
   expect((await processFollowups(db())).fired).toBe(1);
   expect(h.run).toHaveBeenCalledTimes(1);
-  expect(h.claim).toHaveBeenCalledWith('claim_agent_followup', expect.objectContaining({ p_done: ['60', '360', '1440'], p_cycle: cycle }));
+  expect(h.claim).toHaveBeenCalledWith('claim_connection_aware_followup', expect.objectContaining({ p_done: ['60', '360', '1440'], p_cycle: cycle }));
 });
 it('preserves the existing order when calendar is disabled', async () => {
   await processFollowups(db(false));
-  expect(h.claim).toHaveBeenCalledWith('claim_agent_followup', expect.objectContaining({ p_done: ['60'] }));
+  expect(h.claim).toHaveBeenCalledWith('claim_connection_aware_followup', expect.objectContaining({ p_done: ['60'] }));
 });
 it('does not execute when another worker wins the claim', async () => {
-  h.claim.mockResolvedValue({ data: false });
+  h.claim.mockResolvedValue({ data: 'skip' });
   await processFollowups(db()); expect(h.run).not.toHaveBeenCalled();
 });
 it('restores pending rules when the window closes before an outbound', async () => {
@@ -80,7 +80,7 @@ it.each(['agent', 'bot'])('allows a %s follow-up in the new post-contract reply 
   h.create.mockResolvedValue({ ok: true, run: {} });
   expect((await processFollowups(db(true, newCycle))).fired).toBe(1);
   expect(h.manualContract).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ silentSince: newCycle }));
-  expect(h.claim).toHaveBeenCalledWith('claim_agent_followup', expect.objectContaining({ p_cycle: newCycle }));
+  expect(h.claim).toHaveBeenCalledWith('claim_connection_aware_followup', expect.objectContaining({ p_cycle: newCycle }));
   expect(kind === 'agent' ? h.run : h.create).toHaveBeenCalledTimes(1);
 });
 it('defers without consuming the follow-up if the contract check is unavailable', async () => {

@@ -21,7 +21,11 @@ import { getServiceWindow } from '@/lib/whatsapp/serviceWindow';
 import { isAiAgentsApproved } from './beta';
 import { createBotRun, runBotRunNow } from './bots';
 import { loadAgent } from './context';
-import { runAgentOnConversation } from './engine';
+import { runAgentOnConversation, type RunResult } from './engine';
+import { pendingReplyDecision, type PendingReply } from './connectionRecovery';
+import { reportBlockedSend } from '@/lib/whatsapp/connectionSendFailure';
+import { checkConversationBudget } from '@/lib/ai-usage/budget';
+import { checkProactiveFollowup } from './proactiveFollowup';
 import { errorMessage } from './errors';
 import type { AgentFollowup, ConversationAiState } from './types';
 import type { ProactiveFollowup } from './proactiveFollowup';
@@ -145,23 +149,27 @@ export async function processFollowups(
           const consumed = calendar.enabled ? due : [rule];
 
           // Atomic compare-and-swap merges only this key, preserving memory and manual pauses.
-          const { data: claimed, error: claimError } = await admin.rpc('claim_agent_followup', {
+          const { data: claimed, error: claimError } = await admin.rpc('claim_connection_aware_followup', {
             p_org: conv.organization_id, p_conversation: conv.id, p_agent: conv.ai_agent_id,
             p_cycle: cycle, p_expected: state.followups ?? null,
             p_done: [...done, ...consumed.map(item => item.id)],
+            p_rule: rule, p_connection: conv.connection_id, p_state_at: conv.ai_status_changed_at,
           });
           if (claimError) throw new Error(claimError.message);
-          if (!claimed) continue;
+          if (claimed === 'queued' && conv.connection_id) {
+            await reportBlockedSend(admin, conv.connection_id);
+          }
+          if (claimed !== 'claimed') continue;
 
           const fired = await fireRule(admin, conv, rule, elapsed, agent.tools?.zapsign_template_token);
-          if (typeof fired === 'string') {
+          if (fired.deferredUntil) {
             // Window closed while preparing the response, before any outbound: keep it pending.
             const { error } = await admin.rpc('claim_agent_followup', {
               p_org: conv.organization_id, p_conversation: conv.id, p_agent: conv.ai_agent_id,
               p_cycle: cycle, p_expected: { cycle, done: [...done, ...consumed.map(item => item.id)] }, p_done: done,
             });
             if (error) throw new Error(error.message);
-          } else if (fired) result.fired++;
+          } else if (fired.status === 'ok') result.fired++;
           else result.skipped++;
         } catch (e) {
           console.error('[wa-agents] follow-up falhou:', errorMessage(e));
@@ -175,11 +183,13 @@ export async function processFollowups(
 }
 
 async function fireRule(admin: SupabaseClient, conv: ConvRow, rule: AgentFollowup, elapsedMs: number,
-  templateToken?: string | null): Promise<boolean | string> {
+  templateToken?: string | null, job?: PendingReply): Promise<RunResult> {
   const proactive: ProactiveFollowup = { anchor: conv.last_inbound_at,
+    ...(job ? { connectionRecovery: { since: job.created_at, line: job.connection_id, agent: job.agent_id,
+      stateAt: job.agent_state_at } } : {}),
     ...(templateToken ? { agentFollowup: { agentId: conv.ai_agent_id, templateToken } } : {}) };
   if (rule.kind === 'bot') {
-    if (!rule.bot_id) return false;
+    if (!rule.bot_id) return { status: 'skipped', reason: 'Robô removido.' };
     const created = await createBotRun(admin, {
       organizationId: conv.organization_id,
       botId: rule.bot_id,
@@ -188,24 +198,73 @@ async function fireRule(admin: SupabaseClient, conv: ConvRow, rule: AgentFollowu
     });
     if (!created.ok || !created.run) {
       console.error('[wa-agents] follow-up: robô não iniciou:', created.error);
-      return false;
+      return { status: 'error', reason: created.error };
     }
     await runBotRunNow(admin, created.run);
-    return true;
+    return { status: 'ok' };
   }
   // kind 'agent': na API oficial só dentro da janela de 24 h
   if (rule.only_in_window && (await isMetaConnection(admin, conv.organization_id, conv.connection_id))) {
-    if (!getServiceWindow(conv.last_inbound_at).open) return false;
+    if (!getServiceWindow(conv.last_inbound_at).open) return { status: 'skipped', reason: 'Janela de atendimento encerrada.' };
   }
   const run = await runAgentOnConversation({
     organizationId: conv.organization_id,
     conversationId: conv.id,
     trigger: 'followup',
     proactive,
+    followupRule: rule,
+    recoveryId: job?.id,
+    recoveryLines: job?.remaining_lines ?? undefined,
+    recoverySentIds: job?.sent_ids,
+    recoveryAfterSend: job?.after_send ?? undefined,
     agentId: conv.ai_agent_id,
     forceReply: true,
     skipBuffer: true,
     followup: { instruction: rule.instruction.trim(), silentFor: formatSilence(elapsedMs) },
   });
-  return run.deferredUntil ?? (run.status === 'ok');
+  return run;
+}
+
+export async function recoverConnectionFollowup(admin: SupabaseClient, job: PendingReply, start: () => void): Promise<RunResult> {
+  const org = job.organization_id;
+  const { data: conv, error } = await admin.from('wa_conversations')
+    .select('id,organization_id,ai_agent_id,connection_id,deal_id,contact_id,ai_state,ai_status_changed_at')
+    .eq('organization_id', org).eq('id', job.conversation_id).maybeSingle();
+  if (error) throw new Error(error.message);
+  const agent = await loadAgent(admin, org, job.agent_id);
+  const rule = agent?.followups.find(item => item.id === job.rule?.id);
+  if (!conv || !agent?.enabled || !rule || !job.rule || rule.kind !== job.rule.kind ||
+      rule.bot_id !== job.rule.bot_id || rule.after_minutes !== job.rule.after_minutes ||
+      rule.instruction !== job.rule.instruction || rule.only_in_window !== job.rule.only_in_window ||
+      !agent.connection_ids.includes(job.connection_id) || !(await isAiAgentsApproved(admin, org))) {
+    return { status: 'skipped', reason: 'Regra ou agente alterado.' };
+  }
+  if ((await checkConversationBudget(admin, org, conv.id)).blocked_at) return { status: 'skipped', reason: 'IA pausada por consumo.' };
+  const cycle = await loadLastInboundAt(admin, org, conv.id);
+  const decision = await checkProactiveFollowup(admin, org, conv.id, { anchor: cycle,
+    ...(agent.tools.zapsign_template_token ? { agentFollowup: { agentId: agent.id, templateToken: agent.tools.zapsign_template_token } } : {}) });
+  if (decision.kind === 'cancel') return { status: 'skipped', reason: decision.reason };
+  if (decision.kind === 'defer') return { status: 'skipped', deferredUntil: decision.until };
+  const row: ConvRow = { ...conv, last_inbound_at: cycle };
+  const startedAt = await silenceStartedAt(admin, row);
+  if (startedAt === null) return { status: 'skipped', reason: 'Ciclo de silêncio encerrado.' };
+  const elapsed = Date.now() - startedAt;
+  const previous = row.ai_state?.followups;
+  const done = previous?.done ?? [];
+  const overdue = agent.followups.filter(r => !done.includes(r.id) && r.after_minutes * 60_000 <= elapsed);
+  const selected = job.remaining_lines?.length ? rule : [rule, ...overdue].sort((a,b) => b.after_minutes - a.after_minutes)[0];
+  if (overdue.length) {
+    // Collapse only the outage backlog. Future steps retain their original schedule.
+    const { error: saved } = await admin.from('wa_agent_connection_pending').update({ rule: selected })
+      .eq('id', job.id).eq('organization_id', org).eq('state', 'dispatching');
+    if (saved) throw new Error(saved.message);
+    const claim = await admin.rpc('claim_agent_followup', { p_org: org, p_conversation: row.id, p_agent: agent.id,
+      p_cycle: cycle, p_expected: previous ?? null, p_done: [...done, ...overdue.map(r => r.id)] });
+    if (claim.error) throw new Error(claim.error.message);
+    if (!claim.data) return { status: 'skipped', reason: 'locked' };
+  }
+  const ready = await pendingReplyDecision(admin, job.id);
+  if (ready !== 'ready') return { status: 'skipped', reason: ready, connectionPending: ready === 'offline' };
+  start();
+  return fireRule(admin, row, selected, elapsed, agent.tools.zapsign_template_token, job);
 }

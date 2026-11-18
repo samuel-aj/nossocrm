@@ -33,6 +33,8 @@ import {
   type WaMessageLite,
 } from './context';
 import { errorMessage, WaAgentError } from './errors';
+import { reportBlockedSend, reportRejectedSend } from '@/lib/whatsapp/connectionSendFailure';
+import { enqueueDisconnectedTurn, pendingReplyDecision, type AfterPendingSend } from './connectionRecovery';
 import { consultHelperAgent } from './helpers';
 import { searchKnowledge } from './knowledge';
 import { internalOutputReason } from './replyOutput';
@@ -54,6 +56,7 @@ import { buildAgentTools, findByName, type AgentToolRuntime } from './tools';
 import { pickInboundAgent } from './triggers';
 import type {
   AgentEvent,
+  AgentFollowup,
   AgentResources,
   AgentRow,
   AgentRunEvent,
@@ -72,7 +75,14 @@ class ProactiveInterrupted extends Error {
   constructor(message: string, readonly until?: string) { super(message); }
 }
 
+/** Only this suffix was explicitly refused by the provider. An ambiguous
+ * timeout or absent acknowledgement must never create a retry. */
+class DisconnectedText extends WaAgentError {
+  constructor(readonly lines: string[]) { super('DISCONNECTED', 'O provedor recusou o envio por desconexão.'); }
+}
+
 export type RunResult = {
+  connectionPending?: boolean;
   deferredUntil?: string;
   status: RunStatus;
   reason?: string;
@@ -89,6 +99,11 @@ export type RunAgentInput = {
   forceReply?: boolean;
   skipBuffer?: boolean;
   triggerMessageId?: string;
+  recoveryId?: string;
+  recoveryLines?: string[];
+  recoverySentIds?: string[];
+  recoveryAfterSend?: AfterPendingSend;
+  followupRule?: AgentFollowup;
   depth?: number;
   /** Follow-up por tempo sem resposta (trigger 'followup'): instrução da equipe e há quanto tempo o lead está calado */
   proactive?: ProactiveFollowup;
@@ -354,7 +369,7 @@ async function sendLines(
   ctx: ConversationContext,
   agent: AgentRow,
   lines: string[],
-  opts: { renewLock?: () => Promise<void>; beforeSend?: () => Promise<void>; onSent?: () => void } = {}
+  opts: { renewLock?: () => Promise<void>; beforeSend?: () => Promise<void>; onSent?: (id?: string | null) => void } = {}
 ): Promise<void> {
   if (lines.some(line => internalOutputReason(line))) throw new WaAgentError('SEND_FAILED', 'Resposta bloqueada por conter instrução interna.');
   await opts.beforeSend?.();
@@ -400,13 +415,22 @@ async function sendLines(
       await sleep(typingMs);
       if (opts.renewLock) await opts.renewLock();
     }
-    await opts.beforeSend?.();
+    try {
+      await opts.beforeSend?.();
+    } catch (e) {
+      if (e instanceof WaAgentError && e.code === 'DISCONNECTED') throw new DisconnectedText(lines.slice(i));
+      throw e;
+    }
     let result: SendResult;
+    let returnedByProvider = false;
+    const attemptAt = new Date().toISOString();
     try {
       result = await provider.sendText({ to, text });
+      returnedByProvider = true;
     } catch (e) {
       result = { ok: false, error: errorMessage(e) };
     }
+    let receipt: string | null = null;
     // A gravação no chat nunca derruba o fluxo: mensagem enviada (ou falha) fica registrada
     try {
       const msg = await recordOutboundMessage(admin, {
@@ -422,6 +446,7 @@ async function sendLines(
         error: result.ok ? null : result.error || 'falha no envio',
       });
       if (result.ok) {
+        receipt = msg.id;
         await replicateOutboundToSiblings(admin, conn, {
           toPhone: to,
           text: msg.body,
@@ -432,9 +457,12 @@ async function sendLines(
       console.error('[wa-agents] gravar mensagem do agente falhou:', errorMessage(e));
     }
     if (!result.ok) {
+      if (returnedByProvider && await reportRejectedSend(admin, conn.id, result, attemptAt)) {
+        throw new DisconnectedText(lines.slice(i));
+      }
       throw new WaAgentError('SEND_FAILED', `Envio falhou na linha ${i + 1}: ${result.error || 'erro desconhecido'}`);
     }
-    opts.onSent?.();
+    opts.onSent?.(receipt);
     if (opts.renewLock) await opts.renewLock();
     // Com "digitando" ligado, a pausa entre linhas já é o tempo de digitação da
     // próxima: somar o intervalo fixo deixaria o atendimento arrastado
@@ -485,8 +513,23 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
   const { organizationId, conversationId, trigger } = input;
   const depth = input.depth ?? 0;
   let proactiveSent = false;
-  const onSent = () => { proactiveSent = true; };
+  let effectfulTool = false;
+  const sentIds = [...(input.recoverySentIds ?? [])];
+  let missingReceipt = false;
+  let remainingAfterSegment: string[] | undefined;
+  let contractReviewKey = input.recoveryAfterSend?.contractReviewKey;
+  const onSent = (id?: string | null) => {
+    proactiveSent = true;
+    if (id) sentIds.push(id); else missingReceipt = true;
+  };
   const beforeProactiveSend = async () => {
+    if (input.recoveryId) {
+      const readiness = await pendingReplyDecision(admin, input.recoveryId, proactiveSent);
+      if (readiness === 'offline') throw new WaAgentError('DISCONNECTED', 'número desconectado');
+      if (readiness !== 'ready') throw new ProactiveInterrupted('Atendimento já respondido ou alterado.');
+      const budget = await checkConversationBudget(admin, organizationId, conversationId);
+      if (budget.blocked_at) throw new ProactiveInterrupted('IA pausada por consumo.');
+    }
     if (!input.proactive) return;
     const decision = await checkProactiveFollowup(admin, organizationId, conversationId, input.proactive);
     if (decision.kind !== 'allowed') throw new ProactiveInterrupted(decision.kind === 'cancel' ? decision.reason : 'aguardando horário de follow-up', decision.kind === 'defer' ? decision.until : undefined);
@@ -612,6 +655,21 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     if (conv.ai_agent_id !== agent.id) {
       return await finish('skipped', { reason: 'agente da conversa mudou' });
     }
+    // Known outages are queued before generating text, creating contracts or executing tools.
+    if ((input.triggerMessageId || input.followupRule) && ctx.connection && ctx.connection.status !== 'connected') {
+      if (ctx.connection.health_monitor_enabled === false || ctx.connection.health_identity_mismatch_at) {
+        return await finish('skipped', { reason: 'Número desligado ou com identidade alterada.' });
+      }
+      await reportBlockedSend(admin, ctx.connection.id);
+      throw new WaAgentError('DISCONNECTED', 'número desconectado');
+    }
+    if (input.recoveryId) {
+      await beforeProactiveSend();
+      if (ctx.connection?.provider === 'meta_cloud' &&
+        !getServiceWindow(await loadLastInboundAt(admin, organizationId, conversationId, ctx.connection.id)).open) {
+        return await finish('skipped', { reason: 'Janela de atendimento encerrada.' });
+      }
+    }
 
     // 4b. Lead automático: contato sem negócio aberto ganha um antes do
     // atendimento (dentro da trava; a própria função reconfere duplicidade)
@@ -631,7 +689,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     // Áudio, imagem, figurinha e documento que o lead mandou viram TEXTO aqui,
     // com a IA do próprio agente, antes de o prompt ser montado (o resultado fica
     // em wa_messages.transcription, que é o que o histórico e o chat leem).
-    if (pending.some(m => m.media_type)) {
+    if (!input.recoveryLines && pending.some(m => m.media_type)) {
       pending = await understandMedia(admin, {
         organizationId,
         agent,
@@ -653,7 +711,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       }
     }
     const latest = pending.at(-1);
-    const needsAudioResend = latest && unreadableAudio.includes(latest) && !latest.body?.trim();
+    const needsAudioResend = !input.recoveryLines && latest && unreadableAudio.includes(latest) && !latest.body?.trim();
     const usageFailure = getUsageFailure();
     // A provider outage may leave usage unknown. Only a fixed, no-model reply
     // is allowed when enforcement is off; ledger errors and active limits still win.
@@ -675,6 +733,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       const activeAgentId = agent.id;
       const reply = 'Não consegui ouvir seu áudio. Pode mandar de novo ou escrever por aqui?';
       const canReply = async () => {
+        await beforeProactiveSend();
         const { data, error } = await admin.from('wa_conversations').select('id')
           .eq('organization_id', organizationId).eq('id', conversationId)
           .eq('ai_agent_id', activeAgentId).eq('ai_status', 'active').eq('ai_lock_until', lockValue).maybeSingle();
@@ -698,8 +757,6 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     // Every paid attempt reserves its balance atomically through the model middleware.
 
     // 5. Modelo, recursos (documentos, mídias, auxiliares), prompt e histórico
-    const resolved = await resolveAgentModel(admin, organizationId, agent);
-    modelId = resolved.modelId;
     const resources: AgentResources = await loadAgentResources(admin, organizationId, agent);
     // Mídias contam na trava (cópia + envio): renova já com a duração nova
     if (resources.media.length > 0) {
@@ -708,7 +765,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     }
     // Trechos da base para a(s) última(s) mensagem(ns) do lead, injetados no prompt
     let knowledge: KnowledgeHit[] = [];
-    if (resources.documents.length > 0) {
+    if (resources.documents.length > 0 && !input.recoveryLines) {
       const lastInForQuery = pending.length > 0 ? null : await getLastMessage(admin, ctx, 'in');
       const query = inputText ?? (lastInForQuery ? messageText(lastInForQuery) : '');
       if (query) {
@@ -756,12 +813,15 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     const runCtx = ctx;
     const runAgent = agent;
     const mediaQueued = new Set<string>();
-    let contractReviewKey: string | undefined;
     let helperCalls = 0;
     let knowledgeCalls = 0;
+    const returns = agent.tools?.scheduled_return_bot_id
+      ? scheduledReturnRuntime(admin, organizationId, conversationId, agent, returnAnchor) : null;
     const runtime: AgentToolRuntime = {
       ...(agent.tools?.zapsign_template_token && !input.forceReply && !input.proactive && pending.length ? {
         contract: async (args: Parameters<NonNullable<AgentToolRuntime['contract']>>[0]) => {
+          await beforeProactiveSend();
+          effectfulTool = true;
           assertUsageHealthy();
           await renew();
           const { runAgentContract } = await import('@/lib/zapsign/agentContract');
@@ -774,7 +834,19 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
             key => { contractReviewKey = key; });
         },
       } : {}),
-      ...(agent.tools?.scheduled_return_bot_id ? { scheduledReturn: scheduledReturnRuntime(admin, organizationId, conversationId, agent, returnAnchor) } : {}),
+      ...(returns ? { scheduledReturn: {
+        inspect: returns.inspect,
+        schedule: async args => {
+          await beforeProactiveSend();
+          effectfulTool = true;
+          return returns.schedule(args);
+        },
+        cancel: async () => {
+          await beforeProactiveSend();
+          effectfulTool = true;
+          return returns.cancel();
+        },
+      } } : {}),
       documents: resources.documents,
       media: resources.media,
       helpers: resources.helpers,
@@ -809,7 +881,20 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     };
 
     // 6. Geração
-    const gen = await generateAgentReply({ model: resolved.model, agent, system, messages, runtime, followupInstruction: input.followup?.instruction });
+    // Only the already approved suffix remains. Do not regenerate the draft or
+    // re-execute its tools; ordinary post-delivery CRM actions still run once.
+    const recoveredLines = input.recoveryLines;
+    let gen: Awaited<ReturnType<typeof generateAgentReply>>;
+    if (recoveredLines?.length) {
+      if (recoveredLines.some(line => internalOutputReason(line))) throw new WaAgentError('SEND_FAILED', 'Texto pendente bloqueado para revisão.');
+      gen = { text: recoveredLines.join('\n'), segments: recoveredLines.map(text => ({ kind: 'text', text })),
+        toolCalls: input.recoveryAfterSend?.toolCalls ?? [], usage: null, finishReason: 'recovered',
+        outputSafety: { status: 'passed', issues: [], duplicatesRemoved: 0, recoveryAttempted: false, steps: [] } };
+    } else {
+      const resolved = await resolveAgentModel(admin, organizationId, agent);
+      modelId = resolved.modelId;
+      gen = await generateAgentReply({ model: resolved.model, agent, system, messages, runtime, followupInstruction: input.followup?.instruction });
+    }
     assertUsageHealthy();
     toolCalls.push(...gen.toolCalls);
     usage = gen.usage;
@@ -894,10 +979,12 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     // 7. Envio na ordem dos segmentos: linhas de texto e mídias no ponto em que foram pedidas
     const lines: string[] = [];
     const mediaSent: string[] = [];
-    const mirrorAudio = !!agent.media_understanding?.reply_to_audio && !input.forceReply && !input.proactive &&
+    const mirrorAudio = !recoveredLines && !!agent.media_understanding?.reply_to_audio && !input.forceReply && !input.proactive &&
       pending.at(-1)?.media_type === 'audio';
     let voiceIntroduced = !!priorState.voice_introduced;
-    for (const seg of voiceDelivery(gen.segments, mirrorAudio)) {
+    const segments = voiceDelivery(gen.segments, mirrorAudio);
+    for (const [index, seg] of segments.entries()) {
+      remainingAfterSegment = undefined;
       assertUsageHealthy();
       if (seg.kind === 'text') {
         const t = segmentText(seg);
@@ -924,12 +1011,12 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
             const sent = await sendOutboxMedia(admin, ctx, {
               mediaPath: file.path, kind: 'audio', mime: 'audio/mpeg', fileName: 'voz.mp3', transcript: t,
             });
-            if (!sent.ok) throw new WaAgentError('SEND_FAILED', sent.error);
+            if (!sent.ok) throw new WaAgentError(sent.disconnectRejected ? 'DISCONNECTED' : 'SEND_FAILED', sent.error);
             if (sent.skipped) {
               pushEvent('media_duplicate_blocked', { media_path: file.path });
               continue;
             }
-            onSent();
+            onSent(sent.messageId);
             lines.push(t);
             pushEvent('voice_sent', { message_id: sent.messageId });
             continue;
@@ -937,6 +1024,10 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
           pushEvent('voice_fallback_text', { reason: file.reason });
         }
         const segLines = splitLines(t);
+        const rest = segments.slice(index + 1);
+        if (rest.every(next => next.kind === 'text' && !next.voice)) {
+          remainingAfterSegment = rest.flatMap(next => next.kind === 'text' ? splitLines(segmentText(next)) : []);
+        }
         if (lines.length > 0 && agent.line_delay_ms > 0) await sleep(agent.line_delay_ms);
         await sendLines(admin, ctx, agent, segLines, { renewLock: renew, beforeSend: beforeProactiveSend, onSent });
         lines.push(...segLines);
@@ -976,10 +1067,12 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       if (sent.ok && sent.skipped) {
         pushEvent('media_duplicate_skipped', { nome: media.name, kind: media.kind });
       } else if (sent.ok) {
-        onSent();
+        onSent(sent.messageId);
         mediaSent.push(media.name);
         pushEvent('media_sent', { nome: media.name, kind: media.kind, message_id: sent.messageId });
       } else {
+        if (sent.disconnectRejected) throw new WaAgentError('DISCONNECTED', sent.error);
+        if (!sent.retryable) effectfulTool = true;
         // O texto já foi: a falha da mídia fica registrada (e a mensagem 'failed' aparece no chat)
         pushEvent('media_failed', { nome: media.name, error: sent.error });
       }
@@ -1230,6 +1323,24 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       return await finish('error', { reason: usageMessage, error: usageMessage });
     }
     const code = e instanceof WaAgentError ? e.code : undefined;
+    const remaining = e instanceof DisconnectedText && remainingAfterSegment && !missingReceipt
+      ? [...e.lines, ...remainingAfterSegment] : undefined;
+    if (code === 'DISCONNECTED' && (remaining || (!proactiveSent && !effectfulTool)) && ctx?.connection && agent &&
+      (input.triggerMessageId || input.followupRule)) {
+      if (!input.recoveryId) {
+        await enqueueDisconnectedTurn(admin, { org: organizationId, conversation: conversationId,
+          connection: ctx.connection.id, agent: agent.id, stateAt: ctx.conversation.ai_status_changed_at,
+          inbound: input.triggerMessageId, rule: input.followupRule, anchor: input.proactive?.anchor,
+          lines: remaining, sentIds, started: new Date(startedAt).toISOString(),
+          afterSend: remaining ? { toolCalls, contractReviewKey } : undefined });
+      } else if (remaining) {
+        const { error } = await admin.from('wa_agent_connection_pending').update({ remaining_lines: remaining, sent_ids: sentIds,
+          after_send: { toolCalls, contractReviewKey } })
+          .eq('id', input.recoveryId).eq('organization_id', organizationId).eq('state', 'dispatching');
+        if (error) throw new Error(error.message);
+      }
+      return { ...await finish('skipped', { reason: 'Aguardando reconexão do número.' }), connectionPending: true };
+    }
     console.error('[wa-agents] execução falhou:', msg);
     try {
       await emit('error', { message: msg, code });

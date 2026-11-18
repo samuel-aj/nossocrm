@@ -20,6 +20,7 @@ import { parseMessageDeletion, applyMessageDeletion } from "./deletions.ts";
 import { encryptedEdit, resolveEncryptedEdit } from "./encrypted-edits.ts";
 import { parseMessageEdit, applyMessageEdit } from "./edits.ts";
 import { applyDeliveryStatus } from "./statuses.ts";
+import { evolutionConnectionEvent } from "./connection-event-time.ts";
 import { enrichMissingQuote, extractEvolutionQuoteContext, resolveQuoteWhenPresent, type QuoteSnapshot } from "../_shared/quotes.ts";
 import { evolutionCtwa, recordCtwa } from "../_shared/ctwa.ts";
 
@@ -251,12 +252,6 @@ function base64ToBytes(b64: string): Uint8Array | null {
   }
 }
 
-function mapState(s?: string): string {
-  if (s === "open") return "connected";
-  if (s === "connecting") return "connecting";
-  return "disconnected";
-}
-
 // AUTO-CURA da assinatura de eventos na Evolution: instâncias antigas foram
 // registradas SEM o evento MESSAGES_EDITED (edição de mensagem nunca chegava
 // aqui e o CRM ficava com o texto antigo). Reaplica o webhook com a lista
@@ -360,9 +355,9 @@ Deno.serve(async (req) => {
   // edição) ficam em wa_webhook_debug pra inspeção. Best-effort; derrubar a
   // tabela e este bloco quando o diagnóstico terminar.
   try {
-    const conhecidos = ["messages.upsert", "messages.update", "connection.update", "qrcode.updated", "diag.webhook", "diag.edit", "diag.find", "heal.ping"];
+    const conhecidos = ["messages.upsert", "messages.update", "connection.update", "status.instance", "qrcode.updated", "diag.webhook", "diag.edit", "diag.find", "heal.ping"];
     const citaEdicao = rawBody.includes("editedMessage") || rawBody.includes("protocolMessage") || event.includes("edit");
-    if (!conhecidos.includes(event) || citaEdicao) {
+    if (event !== "connection.update" && event !== "status.instance" && (!conhecidos.includes(event) || citaEdicao)) {
       await supabase.from("wa_webhook_debug").insert({ event, payload });
     }
   } catch {
@@ -465,7 +460,8 @@ Deno.serve(async (req) => {
   const espelhoUrl = String(conn.forward_webhook_url ?? "").trim();
   const espelhoEvento =
     typeof payload?.event === "string" ? payload.event.replace(/[^\x20-\x7e]/g, "").trim() : "";
-  if (espelhoUrl && espelhoEvento) {
+  // Some Evolution installations emit this internal event globally. Never mirror its raw disconnect object.
+  if (espelhoUrl && espelhoEvento && event !== "status.instance") {
     const espelho = (async () => {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 8000);
@@ -497,21 +493,14 @@ Deno.serve(async (req) => {
   const data = payload?.data;
 
   // --- Estado da conexão ---
-  if (event === "connection.update") {
-    const state = mapState(data?.state);
-
-    if (state !== "connected") {
-      // Desconectou: as conversas NÃO são apagadas — as rotas do app param de
-      // exibi-las enquanto status != connected (reconectar o MESMO número
-      // traz tudo de volta).
-      await supabase.from("wa_connections").update({ status: state }).eq("id", conn.id);
-      return json(200, { ok: true });
-    }
+  if (event === "connection.update" || event === "status.instance") {
+    const { state, emittedAt, reason } = evolutionConnectionEvent(event, data, payload.date_time);
 
     // Conectou: descobre o NÚMERO do WhatsApp (wuid do evento; fallback:
     // consulta a Evolution). É a chave da posse das conversas no CRM.
-    let ownerPhone = jidToE164(data?.wuid ?? data?.ownerJid);
-    if (!ownerPhone) {
+    const ownerNumber = (value: unknown) => typeof value === "string" && /^\+?\d+(?::\d+)?(?:@s\.whatsapp\.net)?$/.test(value) ? jidToE164(value) : "";
+    let ownerPhone = ownerNumber(data?.wuid ?? data?.ownerJid);
+    if (state === "connected" && !ownerPhone) {
       const evoBaseUrl = String(conn.base_url ?? Deno.env.get("EVOLUTION_BASE_URL") ?? "")
         .replace(/\/+$/, "")
         .replace(/\/manager$/, "");
@@ -520,49 +509,28 @@ Deno.serve(async (req) => {
         try {
           const r = await fetch(
             `${evoBaseUrl}/instance/fetchInstances?instanceName=${encodeURIComponent(instanceName)}`,
-            { headers: { apikey: evoApiToken } }
+            { headers: { apikey: evoApiToken }, signal: AbortSignal.timeout(6000) }
           );
           if (r.ok) {
             const arr = await r.json();
             // deno-lint-ignore no-explicit-any
-            const inst: any = Array.isArray(arr) ? arr[0] : arr;
-            ownerPhone = jidToE164(inst?.ownerJid ?? inst?.instance?.owner ?? inst?.owner);
+            const inst = (Array.isArray(arr) ? arr : [arr]).find((item: any) =>
+              (item?.name ?? item?.instanceName ?? item?.instance?.instanceName) === instanceName);
+            ownerPhone = ownerNumber(inst?.ownerJid ?? inst?.instance?.owner ?? inst?.owner);
           }
         } catch {
-          // segue sem número — não arrisca apagar nada sem certeza
+          // O monitor verifica a identidade na próxima consulta ao provedor.
         }
       }
     }
 
-    // Conectou um NÚMERO DIFERENTE do anterior => conversas do número antigo
-    // saem do CRM de vez (não podem aparecer sob o número novo). A comparação
-    // usa as variantes do nono dígito BR pra não confundir grafias do MESMO
-    // número com troca de número.
-    const prevPhone = String(conn.phone_number ?? "");
-    const samePhone =
-      !prevPhone || !ownerPhone ||
-      brPhoneVariants(prevPhone).includes(ownerPhone) ||
-      brPhoneVariants(ownerPhone).includes(prevPhone);
-    if (!samePhone) {
-      // MULTI-NÚMERO: apaga SÓ as conversas DESTA conexão (+ as legadas sem
-      // connection_id, que nasceram na era de 1 conexão por org). As conversas
-      // dos OUTROS números (ex.: API oficial) ficam intactas.
-      await supabase
-        .from("wa_conversations")
-        .delete()
-        .eq("organization_id", orgId)
-        .or(`connection_id.eq.${conn.id},connection_id.is.null`);
-    }
-
-    await supabase
-      .from("wa_connections")
-      .update({
-        status: state,
-        last_connected_at: new Date().toISOString(),
-        ...(ownerPhone ? { phone_number: ownerPhone } : {}),
-        ...(data?.profileName ? { profile_name: String(data.profileName) } : {}),
-      })
-      .eq("id", conn.id);
+    const { error } = await supabase.rpc("wa_observe_connection", {
+      p_connection_id: conn.id, p_state: state, p_source: "webhook",
+      p_observed_at: emittedAt ?? new Date().toISOString(), p_reason: reason,
+      p_owner_phone: state === "connected" ? ownerPhone || null : null,
+      p_profile_name: state === "connected" ? data?.profileName || null : null,
+    });
+    if (error) return json(503, { error: "Falha ao registrar o estado da conexão" });
     return json(200, { ok: true });
   }
 

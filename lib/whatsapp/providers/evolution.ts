@@ -12,6 +12,7 @@
  */
 import { normalizePhoneE164, toWhatsAppPhone } from '@/lib/phone';
 import { pairingCode, pairingPhone, PairingInstanceMissingError } from '@/lib/whatsapp/pairing';
+import { connectionEventTime, evolutionDisconnectReason, type EvolutionConnectionDetails } from '@/supabase/functions/whatsapp-webhook/connection-event-time';
 import type {
   WhatsAppProvider,
   ProviderConfig,
@@ -107,7 +108,7 @@ function describeEvolutionError(status: number, data: unknown): string {
 // Evolution precisar do socket do WhatsApp para responder.
 const SESSION_PROBE_NUMBER = '5511999999999';
 const SESSION_PROBE_TTL_MS = 60_000;
-const sessionProbeCache = new Map<string, { alive: boolean; at: number }>();
+const sessionProbeCache = new Map<string, number>();
 
 export class EvolutionProvider implements WhatsAppProvider {
   readonly instanceName: string;
@@ -155,6 +156,19 @@ export class EvolutionProvider implements WhatsAppProvider {
     return { ok: res.ok, status: res.status, data };
   }
 
+  async getPairingIdentity(): Promise<{ phone: string; profileName?: string } | null> {
+    type Row = { name?: string; instanceName?: string; ownerJid?: string; profileName?: string;
+      instance?: { instanceName?: string; owner?: string; profileName?: string } };
+    const { ok, data } = await this.call<Row[] | Row>('GET',
+      `/instance/fetchInstances?instanceName=${encodeURIComponent(this.instanceName)}`, undefined, 6000);
+    if (!ok || !data) return null;
+    const row = (Array.isArray(data) ? data : [data]).find(item =>
+      (item.name ?? item.instanceName ?? item.instance?.instanceName) === this.instanceName);
+    const owner = row?.ownerJid ?? row?.instance?.owner;
+    if (!owner || !/^\+?\d+(?::\d+)?(?:@s\.whatsapp\.net)?$/.test(owner)) return null;
+    return { phone: jidToE164(owner), profileName: row?.profileName ?? row?.instance?.profileName };
+  }
+
   async getConnectionState(): Promise<WaConnectionState> {
     const { ok, data } = await this.call<{ instance?: { state?: string }; state?: string }>(
       'GET',
@@ -166,21 +180,53 @@ export class EvolutionProvider implements WhatsAppProvider {
     // SESSÃO ZUMBI: depois de um reinício do servidor a Evolution segue dizendo
     // "open", mas o socket do WhatsApp está morto (não chega nem sai mensagem).
     // Confirma com uma consulta que só funciona com a sessão viva.
-    return (await this.probeSession()) === false ? 'disconnected' : state;
+    return (await this.probeSession()).state === 'disconnected' ? 'disconnected' : state;
+  }
+
+  async checkConnectionHealth(lastConnectedAt?: string | null): ReturnType<WhatsAppProvider['checkConnectionHealth']> {
+    const response = await this.call<EvolutionConnectionDetails & { instance?: EvolutionConnectionDetails }>(
+      'GET', `/instance/connectionState/${encodeURIComponent(this.instanceName)}`, undefined, 6000
+    );
+    if (!response.ok) return { state: response.status === 404 ? 'disconnected' : 'unknown', reason: `evolution_http_${response.status}` };
+    const state = response.data?.instance?.state ?? response.data?.state;
+    if (state === 'connecting') return { state: 'connecting', reason: 'evolution_state_connecting' };
+    if (state === 'close' || state === 'closed' || state === 'refused' || state === 'disconnected') {
+      const code = evolutionDisconnectReason(response.data?.instance) ?? evolutionDisconnectReason(response.data)
+        ?? await this.recentDisconnectReason(lastConnectedAt);
+      return { state: 'disconnected', reason: code ?? 'evolution_state_close' };
+    }
+    if (state !== 'open') return { state: 'unknown', reason: 'evolution_state_unknown' };
+    return this.probeSession(true);
+  }
+
+  private async recentDisconnectReason(lastConnectedAt?: string | null): Promise<string | undefined> {
+    const lastConnected = Date.parse(lastConnectedAt || '');
+    if (!Number.isFinite(lastConnected)) return;
+    type Row = EvolutionConnectionDetails & { name?: string; instanceName?: string; instance?: EvolutionConnectionDetails & { instanceName?: string } };
+    const result = await this.call<Row[] | Row>('GET', `/instance/fetchInstances?instanceName=${encodeURIComponent(this.instanceName)}`, undefined, 4000)
+      .catch(() => null);
+    if (!result?.ok || !result.data) return;
+    const row = (Array.isArray(result.data) ? result.data : [result.data]).find(item =>
+      (item?.name ?? item?.instanceName ?? item?.instance?.instanceName) === this.instanceName);
+    // The instance row may retain an old code across successful reconnections.
+    const observed = Date.parse(connectionEventTime(row?.disconnectionAt ?? row?.instance?.disconnectionAt) || '');
+    if (!Number.isFinite(observed) || observed < lastConnected || observed < Date.now() - 10 * 60_000) return;
+    return evolutionDisconnectReason(row) ?? evolutionDisconnectReason(row?.instance);
   }
 
   /**
-   * true = sessão viva; false = a Evolution respondeu "Connection Closed";
-   * null = não deu para saber (rede/timeout), e aí vale o estado informado.
+   * Só uma rejeição explícita do socket confirma a queda. Erros de consulta
+   * conservam o código e deixam a verificação inconclusiva.
    * Cache de 1 minuto por instância: a tela consulta o status a cada poucos
    * segundos e não precisa bater no WhatsApp toda vez.
    */
-  private async probeSession(): Promise<boolean | null> {
-    const cached = sessionProbeCache.get(this.instanceName);
-    if (cached && cached.at > Date.now() - SESSION_PROBE_TTL_MS) return cached.alive;
+  private async probeSession(fresh = false): ReturnType<WhatsAppProvider['checkConnectionHealth']> {
+    const cacheKey = `${this.baseUrl}/${this.instanceName}`;
+    const cached = sessionProbeCache.get(cacheKey);
+    if (!fresh && cached && cached > Date.now() - SESSION_PROBE_TTL_MS) return { state: 'connected' };
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 6000);
-    let alive: boolean | null = null;
+    let result: Awaited<ReturnType<WhatsAppProvider['checkConnectionHealth']>>;
     try {
       const res = await fetch(`${this.baseUrl}/chat/whatsappNumbers/${encodeURIComponent(this.instanceName)}`, {
         method: 'POST',
@@ -189,17 +235,19 @@ export class EvolutionProvider implements WhatsAppProvider {
         cache: 'no-store',
         signal: ctrl.signal,
       });
-      if (res.ok) alive = true;
-      else if (/connection closed/i.test(await res.text().catch(() => ''))) alive = false;
+      if (res.ok) result = { state: 'connected' };
+      else if (/connection closed/i.test(await res.text().catch(() => ''))) result = { state: 'disconnected', reason: 'evolution_session_closed' };
+      else result = { state: 'unknown', reason: `evolution_socket_http_${res.status}` };
     } catch {
-      alive = null;
+      result = { state: 'unknown', reason: ctrl.signal.aborted ? 'probe_timeout' : 'probe_transport_error' };
     } finally {
       clearTimeout(timer);
     }
     // Só guarda sessão VIVA: a morta responde na hora (sem ir ao WhatsApp) e
     // precisa ser reavaliada logo, senão o "Reiniciar" ficaria 1 min sem ver a volta.
-    if (alive === true) sessionProbeCache.set(this.instanceName, { alive, at: Date.now() });
-    return alive;
+    if (result.state === 'connected') sessionProbeCache.set(cacheKey, Date.now());
+    else sessionProbeCache.delete(cacheKey);
+    return result;
   }
 
   async getQrCode(): Promise<QrResult> {
@@ -383,7 +431,7 @@ export class EvolutionProvider implements WhatsAppProvider {
   }
 
   async restart(): Promise<void> {
-    sessionProbeCache.delete(this.instanceName);
+    sessionProbeCache.delete(`${this.baseUrl}/${this.instanceName}`);
     const { ok, status } = await this.call('PUT', `/instance/restart/${encodeURIComponent(this.instanceName)}`);
     if (!ok) throw new Error(`Evolution respondeu ${status} ao reiniciar a instância`);
   }

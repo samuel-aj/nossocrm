@@ -8,6 +8,23 @@ const state = (value: string) => response({ instance: { state: value } });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('Evolution device pairing', () => {
+  it('reads only the requested instance identity even when the provider returns other numbers', async () => {
+    const fetch = vi.fn().mockResolvedValue(response([
+      { name: 'other', ownerJid: '12025550101@s.whatsapp.net' },
+      { name: 'test / one', ownerJid: '12025550123:7@s.whatsapp.net', profileName: 'Fictício' },
+    ]));
+    vi.stubGlobal('fetch', fetch);
+    expect(await provider().getPairingIdentity()).toEqual({ phone: '+12025550123', profileName: 'Fictício' });
+    expect(fetch.mock.calls[0][1].method).toBe('GET');
+    expect(fetch.mock.calls[0][0]).toContain('instanceName=test%20%2F%20one');
+  });
+  it('does not use an unrelated instance or an opaque LID as the actual phone', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([
+      { name: 'other', ownerJid: '12025550123@s.whatsapp.net' },
+      { name: 'test / one', ownerJid: '1234567890@lid' },
+    ])));
+    expect(await provider().getPairingIdentity()).toBeNull();
+  });
   it('accepts formatted international phones and rejects arbitrary text and invalid numbers', () => {
     expect(pairingPhone('+55 (11) 99999-0000')).toBe('5511999990000');
     expect(pairingPhone('+1 202-555-0123')).toBe('12025550123');

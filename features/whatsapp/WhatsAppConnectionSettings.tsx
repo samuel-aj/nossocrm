@@ -9,12 +9,12 @@
  * vê sempre as conexões da organização ATIVA — cada cliente tem as suas.
  */
 import { CopyId } from '@/components/ui/CopyId';
+import { LineAlertOwner, LineHealthDetails, LineStatusBadge } from './WhatsAppLineHealth';
+import type { ConnectionDiagnostics } from '@/lib/whatsapp/connectionDiagnostics';
 import { WhatsAppPairingPanel } from './WhatsAppPairingPanel';
 import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  AlertTriangle,
-  CheckCircle2,
   Copy,
   ExternalLink,
   KeyRound,
@@ -42,8 +42,8 @@ interface WaConnectionInfo {
   status: 'disconnected' | 'connecting' | 'connected' | string;
   /** Espelho: outro sistema que também recebe os webhooks deste número */
   forwardWebhookUrl?: string | null;
-  /** Últimos envios pela conexão: todos falharam = sessão morta (mesmo "conectado") */
-  sendHealth?: { failing: boolean; failedCount: number; lastError: string | null; lastAt: string | null } | null;
+  diagnostics?: ConnectionDiagnostics;
+  alertOwnerId?: string | null;
 }
 
 /** Só pra admin (modo API oficial): credenciais salvas, pra edição abrir preenchida.
@@ -65,8 +65,6 @@ interface ConnResponse {
   metaCredentials?: MetaCreds | null;
   /** MULTI-NÚMERO: todas as conexões da org (a de cima é a "padrão") */
   connections?: ConnWithCreds[];
-  /** Conexões repetidas (mesmo número) que o servidor acabou de unificar */
-  removed?: Array<{ id: string; phoneNumber: string | null; duplicate: boolean; keptId: string }>;
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -102,7 +100,7 @@ export function WhatsAppConnectionSettings() {
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
       addToast(
         j.status === 'connected'
-          ? 'Conexão reiniciada e conectada. Mande uma mensagem de teste para conferir.'
+          ? 'O provedor confirmou a conexão após o reinício.'
           : `Conexão reiniciada (${j.status || 'aguardando'}). Se não conectar em instantes, reconecte por QR ou código.`,
         j.status === 'connected' ? 'success' : 'error'
       );
@@ -165,7 +163,6 @@ export function WhatsAppConnectionSettings() {
   // DIRETO na Meta (meta_cloud). A UI trata os dois igual (sem QR, credenciais).
   const isBusinessProvider = (p?: string | null) =>
     ['evolution_business', 'meta_cloud'].includes((p || '').toLowerCase());
-  const isBusiness = isBusinessProvider(conn?.provider);
   // HUB: primeira linha QR (Baileys) da org — usada pelo seletor de modo da
   // org sem nada conectado (re-pareamento sem criar linha nova).
   const firstQrConn = conns.find(c => !isBusinessProvider(c.provider)) ?? null;
@@ -175,39 +172,31 @@ export function WhatsAppConnectionSettings() {
   const qrTarget = qrTargetId ? conns.find(c => c.id === qrTargetId) ?? null : null;
   const waitingScan = !!qrTargetId && (qrTarget?.status ?? 'connecting') !== 'connected';
 
-  // UM NÚMERO = UMA CONEXÃO: o servidor removeu conexões repetidas. Avisa e,
-  // se era o QR que estava sendo pareado, fecha o painel sem o "conectado!".
-  const removedList = connQ.data?.removed;
-  React.useEffect(() => {
-    if (!removedList?.length) return;
-    const numero = removedList[0].phoneNumber ? ` (${removedList[0].phoneNumber})` : '';
-    const doPareamento = qrTargetId
-      ? removedList.find(r => r.id === qrTargetId || r.keptId === qrTargetId)
-      : undefined;
-    // Removida uma linha antiga desconectada enquanto o QR novo pareava: segue o
-    // fluxo normal (o "conectado!" aparece). Repetição de verdade fecha o painel.
-    if (doPareamento && (doPareamento.duplicate || doPareamento.id === qrTargetId)) {
+  // Só o pareamento iniciado pelo administrador consolida linhas do mesmo número.
+  const finalizing = useRef<string | null>(null);
+  const finishPairing = React.useCallback((id: string) => {
+    if (finalizing.current === id) return;
+    finalizing.current = id;
+    void fetchJson<{ removed?: Array<{ duplicate: boolean }> }>('/api/whatsapp/connection', {
+      method: 'POST', body: JSON.stringify({ mode: 'finish_pairing', connectionId: id }),
+    }).then(result => {
+      const duplicate = result.removed?.some(row => row.duplicate);
+      addToast(duplicate ? 'Este número já estava conectado. As conversas foram reunidas.' : 'WhatsApp conectado!', duplicate ? 'warning' : 'success');
+    }).catch((error: Error) => {
+      addToast(error.message || 'Não foi possível confirmar o número pareado.', 'error');
+    }).finally(() => {
       setQrTargetId(null);
-      addToast(
-        `Este número${numero} já está conectado no CRM. Ficou uma conexão só, com todas as conversas.`,
-        'error'
-      );
-    } else if (!doPareamento) {
-      addToast(`Havia mais de uma conexão do mesmo número${numero}. Ficou uma só, com todas as conversas.`, 'warning');
-    }
-  }, [removedList]);
-
-  // Pareou: fecha o painel e avisa (a linha vira mais um cartão do hub)
-  React.useEffect(() => {
-    if (qrTargetId && qrTarget?.status === 'connected') {
-      setQrTargetId(null);
-      addToast(`Número ${qrTarget.phoneNumber || ''} conectado!`.replace('  ', ' '), 'success');
-    }
-  }, [qrTargetId, qrTarget?.status, qrTarget?.phoneNumber]);
+      finalizing.current = null;
+      void qc.invalidateQueries({ queryKey: ['waConnection'] });
+    });
+  }, [addToast, qc]);
+  useEffect(() => {
+    if (qrTargetId && qrTarget?.status === 'connected' && qrTarget.phoneNumber) finishPairing(qrTargetId);
+  }, [qrTargetId, qrTarget?.status, qrTarget?.phoneNumber, finishPairing]);
   // HUB: o seletor de modo (2 cartões grandes) só existe pra org SEM nenhuma
   // conexão criada; com 1+, a lista de cartões + botões de adicionar assume
   // (linha desconectada tem Reconectar/Editar no próprio cartão).
-  const showChooser = !connQ.isLoading && conns.length === 0 && !waitingScan;
+  const showChooser = connQ.isSuccess && conns.length === 0 && !waitingScan;
 
   // Form do modo API oficial
   const [bizOpen, setBizOpen] = useState(false);
@@ -740,11 +729,7 @@ export function WhatsAppConnectionSettings() {
   const qrPanel = qrTargetId ? (
     <WhatsAppPairingPanel key={qrTargetId} connectionId={qrTargetId}
       onClose={() => setQrTargetId(null)}
-      onConnected={() => {
-        setQrTargetId(null);
-        void qc.invalidateQueries({ queryKey: ['waConnection'] });
-        addToast('WhatsApp conectado!', 'success');
-      }} />
+      onConnected={() => finishPairing(qrTargetId)} />
   ) : null;
 
   // Bloco de ativação do Cadastro Embutido (super_admin): renderiza tanto no
@@ -812,17 +797,6 @@ export function WhatsAppConnectionSettings() {
           <MessageCircle size={16} />
         </span>
         <h2 className="text-lg font-bold text-slate-900 dark:text-white">WhatsApp</h2>
-        {connected && (
-          <span className="ml-auto inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
-            <CheckCircle2 size={13} /> Conectado
-            {conns.filter(c => c.status === 'connected').length > 1
-              ? ` · ${conns.filter(c => c.status === 'connected').length} números`
-              : isBusiness
-                ? ' · API oficial'
-                : ''}
-          </span>
-        )}
-        {/* o "Aguardando QR" agora vive no selo do próprio cartão do número */}
       </div>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">
         Conecte o <span className="font-semibold">WhatsApp do seu escritório</span> pra atender seus
@@ -830,6 +804,7 @@ export function WhatsAppConnectionSettings() {
         card de cada lead.
       </p>
 
+      {connQ.isError && <p role="alert" className="mb-3 text-sm text-red-700 dark:text-red-300">Não foi possível atualizar o status dos números.</p>}
       {connQ.isLoading && (
         <div className="flex items-center gap-2 text-slate-400 py-8 justify-center">
           <Loader2 className="animate-spin" size={18} /> Carregando…
@@ -869,8 +844,7 @@ export function WhatsAppConnectionSettings() {
               </span>
               <p className="text-sm font-bold text-slate-900 dark:text-white mb-1.5">WhatsApp API oficial (Meta)</p>
               <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed flex-1 mb-4">
-                Número registrado na Meta, sem QR, 100% estável e sem risco de bloqueio. Requer
-                conta na Meta Business e tem cobrança por conversa.
+                Use um número registrado na sua conta empresarial da Meta para atender pelo CRM.
               </p>
               {esAtivacaoBloco}
               {esQ.data?.configured && (
@@ -945,53 +919,18 @@ export function WhatsAppConnectionSettings() {
                         <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
                           {c.profileName || (rowBiz ? 'WhatsApp API oficial' : 'WhatsApp do celular')}
                         </p>
-                        {rowOn && c.sendHealth?.failing ? (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-500/15 text-red-700 dark:text-red-300">
-                            <AlertTriangle size={11} /> Falha de envio
-                          </span>
-                        ) : rowOn ? (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
-                            <CheckCircle2 size={11} /> Conectado
-                          </span>
-                        ) : rowPairing ? (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300">
-                            <Loader2 size={11} className="animate-spin" /> Aguardando conexão
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400">
-                            <Unplug size={11} /> Desconectado
-                          </span>
-                        )}
+                        <LineStatusBadge state={connQ.isError ? 'unknown' : rowPairing ? 'connecting' : c.diagnostics?.state || 'unknown'} />
                       </div>
-                      {rowOn && c.sendHealth?.failing ? (
-                        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-900/15 px-3 py-2 text-xs text-red-700 dark:text-red-300">
-                          <AlertTriangle size={14} className="shrink-0" />
-                          <span className="flex-1 min-w-[12rem]">
-                            Os últimos {c.sendHealth.failedCount} envios falharam
-                            {c.sendHealth.lastError ? ` (${c.sendHealth.lastError})` : ''}. O provedor diz "conectado", mas a
-                            sessão do WhatsApp pode ter caído: reinicie a conexão; se continuar, reconecte por QR ou código.
-                          </span>
-                          {!rowBiz ? (
-                            <button
-                              type="button"
-                              onClick={() => void restartConn(c.id)}
-                              disabled={restartingId === c.id}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-300 dark:border-red-500/40 bg-white dark:bg-black/20 text-red-700 dark:text-red-300 font-bold hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors disabled:opacity-60"
-                            >
-                              {restartingId === c.id ? <Loader2 size={13} className="animate-spin" /> : <RotateCw size={13} />}
-                              Reiniciar conexão
-                            </button>
-                          ) : null}
-                        </div>
-                      ) : null}
                       <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
                         {c.phoneNumber ||
                           (rowBiz ? 'Número da Meta (Cloud API)' : 'Número pareado pelo celular')}
                         {' · '}
                         {rowBiz ? 'API oficial da Meta' : 'QR ou código'}
                       </p>
+                      <LineHealthDetails health={c.diagnostics} />
                     </div>
                     </div>
+                    {isAdminRole && <LineAlertOwner connectionId={c.id} ownerId={c.alertOwnerId ?? null} />}
                     {/* Linha 2: barra de ações, separada da identidade para nada ficar espremido */}
                     {confirmDisconnect === c.id ? (
                       <div className="flex items-center gap-2 flex-wrap mt-3 pt-3 border-t border-slate-100 dark:border-white/10">
@@ -1033,7 +972,7 @@ export function WhatsAppConnectionSettings() {
                           </button>
                         )}
                         {/* Sessão caiu (ex.: reinício do servidor): reiniciar costuma voltar sem ler o QR */}
-                        {!rowBiz && !rowOn && !rowPairing && c.phoneNumber && (
+                        {!rowBiz && (!rowOn || c.diagnostics?.state === 'send_failure') && !rowPairing && c.phoneNumber && (
                           <button
                             type="button"
                             onClick={() => void restartConn(c.id)}

@@ -12,6 +12,7 @@ import { resolveTemplateComponents } from '@/lib/whatsapp/templateMedia';
  * Geramos uma URL assinada curta e passamos pra Evolution baixar de lá.
  */
 import { json, type RequireOrgResult } from '@/lib/whatsapp/api';
+import { reportBlockedSend } from './connectionSendFailure';
 import { connectionAllowed, getVisibilityRules } from '@/lib/permissions/server';
 import {
   getConnectionByOrg,
@@ -96,11 +97,12 @@ export async function sendMessage(auth: Extract<RequireOrgResult, { ok: true }>,
     conn = group.connection_id
       ? await getConnectionByIdForOrg(auth.admin, auth.user.organizationId, group.connection_id)
       : null;
-    if (!conn || conn.status !== 'connected') {
-      return json({ error: 'O número deste grupo está desconectado. Reconecte na aba Conexão.' }, 409);
-    }
-    if (!connectionAllowed(vis, conn.id)) {
+    if (conn && !connectionAllowed(vis, conn.id)) {
       return json({ error: 'Você não tem acesso a este número.' }, 403);
+    }
+    if (!conn || conn.status !== 'connected') {
+      if (conn) await reportBlockedSend(auth.admin, conn.id);
+      return json({ error: 'O número deste grupo está desconectado. Reconecte na aba Conexão.' }, 409);
     }
     // Meta: grupo da Groups API (recipient_type "group"); Evolution: JID do grupo
     to = group.group_jid || group.wa_phone;
@@ -121,6 +123,7 @@ export async function sendMessage(auth: Extract<RequireOrgResult, { ok: true }>,
     // Sem conexão ATIVA não tenta enviar: senão a Evolution devolve um 404 cru
     // de instância inexistente, que confunde o usuário
     if (!conn || conn.status !== 'connected') {
+      if (conn) await reportBlockedSend(auth.admin, conn.id);
       return json(
         {
           error: connectionId

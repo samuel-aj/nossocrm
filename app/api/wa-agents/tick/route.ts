@@ -18,6 +18,9 @@ import { processFollowups } from '@/lib/wa-agents/followups';
 import { processStageFollowups } from '@/lib/wa-agents/stageFollowups';
 import { processQueuedSignatures } from '@/lib/zapsign/signatures';
 import { processAgentNotices } from '@/lib/zapsign/agentNotices';
+import { monitorConnections } from '@/lib/whatsapp/connectionMonitor';
+import { dispatchConnectionIncidentEmails } from '@/lib/whatsapp/connectionIncidentEmail';
+import { processPendingConnectionReplies } from '@/lib/wa-agents/connectionRecovery';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,6 +29,23 @@ const TICK_BUDGET_MS = 240_000;
 
 async function handle(req: Request): Promise<Response> {
   if (!verifyInternalSecret(req)) return json({ error: 'Não autorizado' }, 401);
+
+  const payload = req.method === 'POST' ? await req.json().catch(() => null) : null;
+  if (payload?.job === 'connection_health') {
+    after(async () => {
+      const admin = createStaticAdminClient();
+      const deadlineMs = Date.now() + TICK_BUDGET_MS;
+      await Promise.all([
+        dispatchConnectionIncidentEmails(admin).catch(() => console.error('[wa-connection] Falha na fila de e-mail.')),
+        (async () => {
+          await monitorConnections(admin, deadlineMs).catch(() => console.error('[wa-connection] Falha ao verificar as linhas.'));
+          await processPendingConnectionReplies(admin, { limit: 10, deadlineMs })
+            .catch(() => console.error('[wa-connection] Falha na recuperação dos atendimentos.'));
+        })(),
+      ]);
+    });
+    return json({ accepted: true }, 202);
+  }
 
   after(async () => {
     const admin = createStaticAdminClient();

@@ -20,6 +20,12 @@ export interface WaConnectionRow {
   status: string;
   webhook_secret: string;
   last_connected_at: string | null;
+  health_checked_at?: string | null;
+  health_state_at?: string | null;
+  health_check_error?: string | null;
+  health_monitor_enabled?: boolean;
+  health_identity_mismatch_at?: string | null;
+  health_alert_owner_id?: string | null;
   /** Só meta_cloud: phone_number_id e WABA id da Meta. */
   meta_phone_number_id: string | null;
   meta_waba_id: string | null;
@@ -133,13 +139,15 @@ export async function getQuotableMessage(
 /** TODAS as conexões da org (multi-número), da mais antiga pra mais nova. */
 export async function getConnectionsByOrg(
   admin: SupabaseClient,
-  orgId: string
+  orgId: string,
+  throwOnError = false
 ): Promise<WaConnectionRow[]> {
-  const { data } = await admin
+  const { data, error } = await admin
     .from('wa_connections')
     .select('*')
     .eq('organization_id', orgId)
     .order('created_at', { ascending: true });
+  if (throwOnError && error) throw error;
   return (data ?? []) as WaConnectionRow[];
 }
 

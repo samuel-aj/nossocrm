@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), byId: vi.fn(), all: vi.fn(), start: vi.fn(), status: vi.fn(), duplicate: vi.fn(), ensure: vi.fn(), save: vi.fn(), webhook: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), byId: vi.fn(), all: vi.fn(), start: vi.fn(), status: vi.fn(), duplicate: vi.fn(), ensure: vi.fn(), save: vi.fn(), webhook: vi.fn(), observe: vi.fn() }));
+vi.mock('@/lib/whatsapp/connectionIncidents', () => ({ observeConnection: mocks.observe }));
 vi.mock('@/lib/whatsapp/api', () => ({
   requireOrgUser: mocks.auth, isOrgAdmin: (role: string) => ['admin', 'super_admin'].includes(role),
   json: (body: unknown, status = 200) => new Response(JSON.stringify(body), { status }),
@@ -52,6 +53,7 @@ describe('pairing authorization and contract', () => {
     const result = await post({ id, method: 'code', phone: '+55 (11) 99999-0000' });
     expect(result.status).toBe(200); expect(result.headers.get('Cache-Control')).toContain('no-store');
     expect(mocks.start).toHaveBeenCalledWith('5511999990000');
+    expect(mocks.observe).toHaveBeenCalledWith('admin-client', id, 'connecting', 'manual', expect.any(String), 'pair_requested');
   });
   it('blocks duplicate connected numbers', async () => {
     mocks.duplicate.mockReturnValue({ id: 'another' });
@@ -63,6 +65,7 @@ describe('pairing authorization and contract', () => {
     expect(await result.json()).toEqual({ state: 'disconnected' });
     expect(result.headers.get('Cache-Control')).toContain('no-store');
     expect(mocks.start).not.toHaveBeenCalled();
+    expect(mocks.observe).not.toHaveBeenCalled();
   });
   it('hides network/provider internals', async () => {
     mocks.start.mockRejectedValue(new Error('https://secret.internal/key=private'));

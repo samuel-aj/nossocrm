@@ -1,4 +1,5 @@
 import { conversationAllowed } from '@/lib/permissions/conversationAccess';
+import { reportRejectedSend } from '@/lib/whatsapp/connectionSendFailure';
 /**
  * POST /api/whatsapp/forward -> encaminha mensagens do chat para outros contatos
  * (estilo "encaminhar" do WhatsApp), reenviando texto ou mídia pelo provedor.
@@ -184,6 +185,7 @@ export async function POST(req: Request) {
         const text = (m.body ?? '').trim();
 
         let result: SendResult;
+        const startedAt = new Date().toISOString();
         if (kind && signedUrl) {
           let cooldown: MediaCooldownReceipt | undefined;
           try {
@@ -219,6 +221,7 @@ export async function POST(req: Request) {
           continue;
         }
 
+        if (!result.ok) await reportRejectedSend(auth.admin, conn.id, result, startedAt);
         const recorded = await recordOutboundMessage(auth.admin, {
           orgId,
           conversationId: conv.id,

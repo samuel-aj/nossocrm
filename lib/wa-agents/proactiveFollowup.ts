@@ -6,15 +6,26 @@ import { manualContractIssued } from '@/lib/zapsign/agentContractFact';
 
 export const PROACTIVE_VAR = '__proactive_followup';
 export type ProactiveFollowup = { anchor: string | null; dealId?: string; stageId?: string; ruleVersion?: number; scheduledReturnId?: string;
+  connectionRecovery?: { since: string; line: string; agent: string | null; stateAt: string | null };
   agentFollowup?: { agentId: string; templateToken: string } };
 export type ProactiveDecision = { kind: 'allowed' } | { kind: 'cancel'; reason: string } | { kind: 'defer'; until: string };
+
+/** Only called after this execution has atomically transferred the conversation. */
+export async function bindRecoveredHandoff(admin: SupabaseClient, org: string, id: string, context: ProactiveFollowup, agent: string) {
+  if (!context.connectionRecovery) return context;
+  const { data, error } = await admin.from('wa_conversations').select('ai_agent_id,ai_status,ai_status_changed_at')
+    .eq('organization_id',org).eq('id',id).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (data?.ai_status !== 'active' || data.ai_agent_id !== agent) throw new Error('Atendimento alterado após a transferência.');
+  return { ...context, connectionRecovery: { ...context.connectionRecovery, agent, stateAt: data.ai_status_changed_at } };
+}
 
 /** Rechecked on every scheduled robot continuation, before touching any provider. */
 export async function checkProactiveFollowup(admin: SupabaseClient, orgId: string, conversationId: string | null,
   context: ProactiveFollowup, now = new Date()): Promise<ProactiveDecision> {
   if (!conversationId) return { kind: 'cancel', reason: 'follow-up sem conversa vinculada' };
   const { data: conv, error } = await admin.from('wa_conversations')
-    .select('ai_status, ai_approval, connection_id, ai_agent_id, deal_id, contact_id').eq('organization_id', orgId).eq('id', conversationId).maybeSingle();
+    .select('ai_status, ai_status_changed_at, ai_approval, connection_id, ai_agent_id, deal_id, contact_id').eq('organization_id', orgId).eq('id', conversationId).maybeSingle();
   if (error) throw new Error(error.message);
   if (!conv) return { kind: 'cancel', reason: 'conversa não encontrada' };
   const lastInbound = await loadLastInboundAt(admin, orgId, conversationId);
@@ -22,6 +33,29 @@ export async function checkProactiveFollowup(admin: SupabaseClient, orgId: strin
     return { kind: 'cancel', reason: 'cliente respondeu após o agendamento' };
   if (['paused', 'stopped', 'awaiting_approval'].includes(conv.ai_status) || conv.ai_approval)
     return { kind: 'cancel', reason: 'atendimento pausado, encerrado ou aguardando aprovação' };
+  if (context.connectionRecovery) {
+    const recovery = context.connectionRecovery;
+    if (conv.connection_id !== recovery.line || conv.ai_agent_id !== recovery.agent ||
+      conv.ai_status_changed_at !== recovery.stateAt) return { kind: 'cancel', reason: 'Atendimento alterado após a desconexão.' };
+    const { data: handled, error: lookupError } = await admin.from('wa_messages').select('id')
+      .eq('organization_id', orgId).eq('conversation_id', conversationId).eq('direction','out')
+      .in('source', ['crm','echo','api']).gte('created_at', recovery.since).limit(1).maybeSingle();
+    if (lookupError) throw new Error(lookupError.message);
+    if (handled) return { kind: 'cancel', reason: 'Conversa já atendida após a desconexão.' };
+    if ((await checkConversationBudget(admin, orgId, conversationId)).blocked_at)
+      return { kind: 'cancel', reason: 'IA pausada por consumo.' };
+    const { data: line, error: lineError } = await admin.from('wa_connections')
+      .select('status,health_monitor_enabled,health_identity_mismatch_at,health_uncertain_since')
+      .eq('organization_id', orgId).eq('id', recovery.line).maybeSingle();
+    if (lineError) throw new Error(lineError.message);
+    if (!line || !line.health_monitor_enabled) return { kind: 'cancel', reason: 'Número removido ou desligado.' };
+    if (line.status !== 'connected' || line.health_identity_mismatch_at || line.health_uncertain_since)
+      return { kind: 'defer', until: new Date(now.getTime() + 60_000).toISOString() };
+    const { data: incident, error: incidentError } = await admin.from('wa_connection_incidents').select('id')
+      .eq('organization_id', orgId).eq('connection_id',recovery.line).is('resolved_at',null).limit(1).maybeSingle();
+    if (incidentError) throw new Error(incidentError.message);
+    if (incident) return { kind: 'defer', until: new Date(now.getTime() + 60_000).toISOString() };
+  }
   // This marker belongs only to the agent's old silence sequence, never to an
   // independently scheduled return or a board's inactivity automation.
   if (context.agentFollowup) {
