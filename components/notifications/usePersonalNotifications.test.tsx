@@ -28,6 +28,22 @@ afterEach(() => { cleanup(); client.clear(); vi.useRealTimers(); vi.unstubAllGlo
 const wrapper = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 async function tick(ms = 20) { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); }
 
+it('keeps an open connection incident visible and replaces it on recovery with personal alerts off', async () => {
+  const incident: Notice = {...ordinary,id:'wa-line-open',kind:'alert',category:'connection_outage',title:'Falha na conexão do WhatsApp'};
+  const restored: Notice = {...ordinary,id:'wa-line-recovered',kind:'alert',title:'WhatsApp reconectado'};
+  feed={...feed,events:[incident]};
+  vi.stubGlobal('fetch',vi.fn(async(url:string)=>Response.json(url.includes('preferences')
+    ? {preferences:{...DEFAULT_PREFERENCES,alerts:false,messages:false,leads:false},boards:[]} : feed)));
+  const {result}=renderHook(()=>usePersonalNotifications(),{wrapper});
+  await tick();
+  expect(result.current.notices.map(n=>n.id)).toEqual([incident.id]);
+  act(()=>result.current.clear());
+  expect(result.current.notices.map(n=>n.id)).toEqual([incident.id]);
+  feed={...feed,events:[restored]};
+  await tick(4000);
+  expect(result.current.notices.map(n=>n.id)).toEqual([restored.id]);
+});
+
 it('retains an unresolved block through clear, polling and outages; removes it only on a complete feed', async () => {
   const { result } = renderHook(() => usePersonalNotifications(), { wrapper });
   await tick();

@@ -25,7 +25,7 @@ vi.mock('ai', async original => ({ ...await original<typeof import('ai')>(), gen
 vi.mock('@/lib/supabase/server', () => ({ createStaticAdminClient: () => h.db }));
 vi.mock('@/lib/supabase/actorClient', () => ({ withActor: (db: unknown) => db }));
 vi.mock('@/lib/whatsapp', () => ({ getProvider: () => ({ sendText: h.send }) }));
-vi.mock('@/lib/whatsapp/service', () => ({ recordOutboundMessage: async (_db: unknown, input: { text: string }) => ({ body: input.text }), replicateOutboundToSiblings: async () => {} }));
+vi.mock('@/lib/whatsapp/service', () => ({ recordOutboundMessage: async (_db: unknown, input: { text: string }) => ({ id: 'receipt', body: input.text }), replicateOutboundToSiblings: async () => {} }));
 vi.mock('./context', async original => ({
   ...await original<typeof import('./context')>(),
   loadConversationContext: async () => structuredClone(h.ctx), loadAgent: async () => h.agent,
@@ -55,6 +55,7 @@ function fakeDb() {
   return {
     rpc: async (name: string, args?: Record<string, unknown>) => {
       if (name === 'wa_ai_claim_lock') { h.ctx!.conversation.ai_lock_until = new Date(Date.now() + 90_000).toISOString(); return { data: true }; }
+      if (name === 'wa_agent_connection_reply_decision') return { data: 'ready' };
       if (name === 'schedule_robot_return') {
         return args?.p_anchor === incoming.created_at
           ? { data: 'scheduled-return', error: null }
@@ -113,6 +114,41 @@ beforeEach(() => {
   h.events.mockResolvedValue([]); h.log.mockResolvedValue('run');
 });
 const run = () => runAgentOnConversation({ organizationId: org, conversationId: 'conv', trigger: 'inbound', skipBuffer: true });
+
+describe('recuperação de desconexão com transporte falso', () => {
+  const input = { organizationId: org, conversationId:'conv', trigger:'inbound' as const,
+    triggerMessageId:'message', skipBuffer:true };
+  it('guarda a entrada uma vez por mensagem antes do modelo e das ações', async () => {
+    h.ctx!.connection!.status = 'disconnected';
+    const rpc = vi.spyOn(h.db,'rpc');
+    expect((await runAgentOnConversation(input)).connectionPending).toBe(true);
+    expect(rpc).toHaveBeenCalledWith('enqueue_wa_agent_connection_reply',expect.objectContaining({ p_inbound:'message',p_lines:null }));
+    expect(h.generate).not.toHaveBeenCalled(); expect(h.send).not.toHaveBeenCalled(); expect(h.action).not.toHaveBeenCalled();
+  });
+  it('só o restante da mensagem recusada sai na volta, e a ação pós-envio executa uma vez', async () => {
+    const rpc = vi.spyOn(h.db,'rpc');
+    h.generate.mockResolvedValue(draft('Primeira linha.\nSegunda linha.'));
+    h.send.mockResolvedValueOnce({ok:true,providerMessageId:'primeiro'})
+      .mockResolvedValueOnce({ok:false,error:'Evolution respondeu 400: Connection Closed'});
+    const first = await runAgentOnConversation(input);
+    expect(first.connectionPending).toBe(true);
+    const saved = rpc.mock.calls.find(([name])=>name==='enqueue_wa_agent_connection_reply')?.[1];
+    expect(saved).toMatchObject({p_lines:['Segunda linha.'],p_sent:['receipt']});
+    expect(h.action).not.toHaveBeenCalled();
+    const replay = await runAgentOnConversation({ ...input, recoveryId:'job',
+      recoveryLines: saved!.p_lines, recoveryAfterSend: saved!.p_after_send, recoverySentIds: saved!.p_sent });
+    expect(replay.status).toBe('ok'); expect(h.generate).toHaveBeenCalledTimes(1); expect(h.action).toHaveBeenCalledTimes(1);
+    expect(h.send.mock.calls.map(([m])=>m.text)).toEqual(['Primeira linha.','Segunda linha.','Segunda linha.']);
+  });
+  it('recusa o replay quando o provedor pode ter aceitado a mensagem', async () => {
+    const rpc = vi.spyOn(h.db,'rpc');
+    h.generate.mockResolvedValue(draft('Teste.',false));
+    h.send.mockRejectedValueOnce(new Error('socket timeout'));
+    expect((await runAgentOnConversation(input)).status).toBe('error');
+    expect(rpc).not.toHaveBeenCalledWith('enqueue_wa_agent_connection_reply',expect.anything());
+    expect(h.send).toHaveBeenCalledTimes(1);
+  });
+});
 
 it('simulator blocks a registered video again after the customer replies, but allows another video', async () => {
   h.media = ['boas_vindas', 'proposta'].map(name => ({ name, id: name, kind: 'video', storage_path: `org/${name}.mp4` } as AgentMediaRow));

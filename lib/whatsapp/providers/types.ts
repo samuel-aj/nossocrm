@@ -137,12 +137,15 @@ export interface WhatsAppProvider {
   editText?(input: { to: string; providerMessageId: string; text: string }): Promise<SendResult>;
   /** Estado atual da conexão da instância. */
   getConnectionState(): Promise<WaConnectionState>;
+  /** Conferência periódica sem envio de mensagem. Indisponibilidade da consulta é inconclusiva. */
+  checkConnectionHealth(): Promise<{ state: WaConnectionState | 'unknown'; reason?: string }>;
   /** Inicia/obtém o QR para conectar o número. */
   getQrCode(): Promise<QrResult>;
   /** Starts a fresh linking attempt; an already connected session is preserved. */
   startPairing?(phoneNumber?: string): Promise<QrResult>;
   /** Reads a pending attempt without starting another after it expires. */
   getPairingStatus?(): Promise<QrResult>;
+  getPairingIdentity?(): Promise<{ phone: string; profileName?: string } | null>;
   /** Envia uma mensagem de texto. */
   sendText(input: SendTextInput): Promise<SendResult>;
   /** Envia mídia: imagem, vídeo, documento, áudio (voz) ou figurinha. */

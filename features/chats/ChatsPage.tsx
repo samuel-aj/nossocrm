@@ -19,6 +19,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, KanbanSquare, Loader2, MessageCircle, MessageSquareDot, Pencil, Plus, Search, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { useCRM } from '@/context/CRMContext';
 import { useOrgMembers, useDeal, useContact } from '@/lib/query/hooks';
+import { LineStatusBadge } from '@/features/whatsapp/WhatsAppLineHealth';
+import type { ConnectionDiagnostics } from '@/lib/whatsapp/connectionDiagnostics';
 import { useAnchoredMenu } from '@/hooks/useAnchoredMenu';
 import {
   LABEL_CHIP_CLASS,
@@ -285,6 +287,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
     phoneNumber: string | null;
     profileName: string | null;
     status: string;
+    diagnostics?: ConnectionDiagnostics;
   };
   const connQ = useQuery<{ connected: boolean; connections?: ConnRow[] }>({
     queryKey: ['waConnection'],
@@ -1239,13 +1242,8 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                     onClick={() => setConnMenuOpen(o => !o)}
                     aria-expanded={connMenuOpen}
                     title="Escolher de qual número ver os chats"
-                    className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-1 rounded-full transition-colors ${
-                      connected
-                        ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/40'
-                        : 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/40'
-                    }`}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-1 rounded-full bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-white/10 dark:text-slate-300"
                   >
-                    <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                     {connFilter === 'all'
                       ? 'Todos os números'
                       : connsList.find(c => c.id === connFilter)?.phoneNumber ||
@@ -1277,16 +1275,14 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                               : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10'
                           }`}
                         >
-                          <span
-                            className={`w-1.5 h-1.5 shrink-0 rounded-full ${
-                              c.status === 'connected' ? 'bg-emerald-500' : 'bg-amber-500'
-                            }`}
-                          />
                           <span className="min-w-0">
                             <span className="block font-semibold truncate">{c.phoneNumber || 'Sem número'}</span>
                             {c.profileName && (
                               <span className="block text-[10px] text-slate-400 truncate">{c.profileName}</span>
                             )}
+                          </span>
+                          <span className="ml-auto">
+                            <LineStatusBadge state={connQ.isError ? 'unknown' : c.diagnostics?.state ?? 'unknown'} />
                           </span>
                         </button>
                       ))}
@@ -1294,17 +1290,8 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
                   )}
                 </span>
               ) : (
-                <span
-                  className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-1 rounded-full ${
-                    connected
-                      ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400'
-                      : 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400'
-                  }`}
-                  title={connected ? 'WhatsApp conectado' : 'WhatsApp desconectado. Conecte na aba Conexão, no menu WhatsApp'}
-                >
-                  <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                  {connected ? 'Conectado' : 'Desconectado'}
-                </span>
+                <LineStatusBadge state={connQ.isSuccess && !connsList.length ? 'disconnected'
+                  : connQ.isError ? 'unknown' : connsList[0]?.diagnostics?.state ?? 'unknown'} />
               )}
               {canOpenNewGroup && (
                 <button

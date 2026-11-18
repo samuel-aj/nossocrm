@@ -5,7 +5,7 @@ import {useRouter} from 'next/navigation';
 import {useAuth} from '@/context/AuthContext';
 import {deliverNotice,presentOnce,unlockNotificationSound} from '@/lib/notifications/delivery';
 import type {Notice,NotificationFeed,NotificationSettings,Preferences} from '@/lib/notifications/types';
-import { clearReadNotices, reconcileUsageNotices } from '@/lib/notifications/history';
+import { clearReadNotices, isOngoingNotice, reconcileUsageNotices } from '@/lib/notifications/history';
 
 async function api<T>(url:string,init?:RequestInit):Promise<T> {
   const r=await fetch(url,{cache:'no-store',...init}); const data=await r.json();
@@ -25,7 +25,7 @@ export function usePersonalNotifications() {
   const preferences=settings.data?.preferences;
   const fingerprint=JSON.stringify(preferences);
   useEffect(()=>{
-    if(!scope || !preferences || (!preferences.messages && !preferences.leads && !preferences.alerts)) return;
+    if(!scope || !preferences) return;
     const controller=new AbortController(); let stopped=false; let timer:ReturnType<typeof setTimeout>;
     let baseline:string|null=null;
     seen.current=new Set();
@@ -33,6 +33,7 @@ export function usePersonalNotifications() {
       try {
         let after:string|null=null, until:string|null=null;
         let usageNoticesUnavailable = false;
+        let connectionNoticesUnavailable = false;
         do {
           const firstPage = !after;
           const q=new URLSearchParams();
@@ -43,9 +44,10 @@ export function usePersonalNotifications() {
           if(stopped) return;
           until=data.serverTime; after=data.nextAfter;
           usageNoticesUnavailable ||= !!data.usageNoticesUnavailable;
-          if(firstPage && !data.usageNoticesUnavailable) {
+          connectionNoticesUnavailable ||= !!data.connectionNoticesUnavailable;
+          if(firstPage && !data.usageNoticesUnavailable && !data.connectionNoticesUnavailable) {
             setHistory(previous=>({scope,items:reconcileUsageNotices(previous.scope===scope ? previous.items : [],data.events)}));
-            setToast(previous=>previous?.scope===scope && previous.notice.category==='ai_usage' && !data.events.some(n=>n.id===previous.notice.id) ? null : previous);
+            setToast(previous=>previous?.scope===scope && isOngoingNotice(previous.notice) && !data.events.some(n=>n.id===previous.notice.id) ? null : previous);
           }
           for(const notice of data.events) {
             if(seen.current.has(notice.id)) continue;
@@ -53,16 +55,17 @@ export function usePersonalNotifications() {
             if(seen.current.size>2000) seen.current.delete(seen.current.values().next().value!);
             setHistory(previous=>{
               const items=previous.scope===scope ? previous.items.filter(n=>n.id!==notice.id) : [];
-              const ordinary=[notice,...items].filter(n=>n.category!=='ai_usage').slice(0,30);
-              const usage=[notice,...items].filter(n=>n.category==='ai_usage');
-              return {scope,items:[...usage,...ordinary]};
+              const ordinary=[notice,...items].filter(n=>!isOngoingNotice(n)).slice(0,30);
+              const ongoing=[notice,...items].filter(isOngoingNotice);
+              return {scope,items:[...ongoing,...ordinary]};
             });
             if(document.visibilityState==='visible') setToast({scope,notice});
             await presentOnce(scope,notice.id,()=>{if(!stopped) deliverNotice(notice,preferences,href=>router.push(href));});
           }
         } while(after && !stopped);
         baseline=until;
-        setError(usageNoticesUnavailable ? 'Avisos de consumo da IA temporariamente indisponíveis. Tentando reconectar…' : '');
+        setError(usageNoticesUnavailable ? 'Avisos de consumo da IA temporariamente indisponíveis. Tentando reconectar…'
+          : connectionNoticesUnavailable ? 'Avisos de conexão temporariamente indisponíveis. Tentando reconectar…' : '');
       } catch { if(!stopped) setError('Avisos temporariamente indisponíveis. Tentando reconectar…'); }
       finally {if(!stopped) timer=setTimeout(poll,4000);}
     };

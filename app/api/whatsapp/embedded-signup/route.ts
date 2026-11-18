@@ -18,7 +18,8 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireOrgUser, isOrgAdmin, json } from '@/lib/whatsapp/api';
-import { getConnectionsByOrg, upsertConnection, updateConnectionStatus } from '@/lib/whatsapp/service';
+import { getConnectionsByOrg, upsertConnection } from '@/lib/whatsapp/service';
+import { observeConnection } from '@/lib/whatsapp/connectionIncidents';
 import { findConnectedSameNumber } from '@/lib/whatsapp/dedupe';
 import { instanceNameForOrg } from '@/lib/whatsapp/admin';
 import { setupMetaWebhooks, validateMetaCredentials } from '@/lib/whatsapp/metaCloudSetup';
@@ -136,6 +137,7 @@ export async function PATCH(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const requestedAt = new Date().toISOString();
   if (!isAllowedOrigin(req)) return json({ error: 'Forbidden' }, 403);
 
   const auth = await requireOrgUser();
@@ -263,12 +265,11 @@ export async function POST(req: Request) {
     verifyToken: conn.webhook_secret,
   });
 
-  await updateConnectionStatus(auth.admin, conn.id, {
-    status: 'connected',
-    phone_number: check.displayPhoneNumber
+  await observeConnection(auth.admin, conn.id, 'connected', 'manual', requestedAt, 'meta_validated', {
+    phone: check.displayPhoneNumber
       ? `+${check.displayPhoneNumber.replace(/\D/g, '')}`
       : undefined,
-    profile_name: check.verifiedName || undefined,
+    profileName: check.verifiedName,
   });
 
   // 5) COEXISTÊNCIA: a Meta dá 24h a partir do onboarding para pedir a agenda

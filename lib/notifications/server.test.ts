@@ -1,5 +1,6 @@
 import {beforeEach,describe,expect,it,vi} from 'vitest';
 vi.mock('server-only',()=>({}));
+vi.mock('./connectionIncidents',()=>({connectionIncidentNotices:vi.fn(async()=>[])}));
 vi.mock('@/lib/ai-usage/notifications',()=>({usageNotices:vi.fn()}));
 vi.mock('@/lib/permissions/teamAccessServer',async()=>{
   const actual=await vi.importActual<typeof import('@/lib/permissions/teamAccessServer')>('@/lib/permissions/teamAccessServer');
@@ -12,6 +13,7 @@ import {DEFAULT_VISIBILITY_RULES} from '@/lib/permissions/types';
 import {context,feed,saveSettings} from './server';
 import {DEFAULT_PREFERENCES,PreferencesSchema} from './types';
 import {usageNotices} from '@/lib/ai-usage/notifications';
+import {connectionIncidentNotices} from './connectionIncidents';
 
 const org='org-a',user='user-a';
 let tables:Record<string,Record<string,unknown>[]>;
@@ -26,6 +28,12 @@ function from(table:string) {
 }
 const auth={ok:true as const,user:{id:user,organizationId:org,role:'vendedor'},admin:{from}} as unknown as Parameters<typeof feed>[0];
 const now=()=>new Date().toISOString();
+it('delivers connection incidents to the bell even if personal lead alerts are disabled',async()=>{
+  tables.crm_notification_preferences[0].preferences={...DEFAULT_PREFERENCES,alerts:false};
+  const outage={id:'wa-line-1',kind:'alert' as const,category:'connection_outage' as const,title:'Falha na conexão do WhatsApp',message:'Linha A',href:'/conexao-whatsapp',createdAt:now()};
+  vi.mocked(connectionIncidentNotices).mockResolvedValueOnce([outage]);
+  expect((await feed(auth,null,null,null)).events).toEqual([outage]);
+});
 it('entrega a análise humana ao responsável, inclusive ao reabrir o CRM, respeitando canal e preferências', async () => {
   tables.crm_notification_events=[{id:7,kind:'human_handoff',source_id:'c',created_at:now()}];
   tables.wa_messages=[];

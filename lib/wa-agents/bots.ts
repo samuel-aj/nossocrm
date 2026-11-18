@@ -1,4 +1,4 @@
-import { checkProactiveFollowup, PROACTIVE_VAR, type ProactiveFollowup } from './proactiveFollowup';
+import { bindRecoveredHandoff, checkProactiveFollowup, PROACTIVE_VAR, type ProactiveFollowup } from './proactiveFollowup';
 import { resolveTemplateComponents } from '@/lib/whatsapp/templateMedia';
 import { checkConversationBudget } from '@/lib/ai-usage/budget';
 import { loadLastInboundAt } from './lastInbound';
@@ -24,7 +24,8 @@ import { applyLeadChanges, ensureLeadForContact, recordLossHistory, removeDealTa
 import { isAiAgentsApproved } from './beta';
 import { loadAgent, loadConversationContext, loadDealContext, loadLastInboundProviderId } from './context';
 import { runAgentOnConversation } from './engine';
-import { errorMessage } from './errors';
+import { errorMessage, WaAgentError } from './errors';
+import { reportBlockedSend, reportRejectedSend } from '@/lib/whatsapp/connectionSendFailure';
 import { renderTemplate } from './template';
 import { normalizeKeyword } from './text';
 import {
@@ -312,11 +313,14 @@ async function sendBotText(
   phone: string,
   text: string
 ): Promise<void> {
-  if (connection.status !== 'connected') throw new Error('número desconectado');
+  await requireBotConnection(admin, connection);
   const provider = getProvider(connection);
   let result: SendResult;
+  const startedAt = nowIso();
+  let rejected = false;
   try {
     result = await provider.sendText({ to: phone, text });
+    if (!result.ok) rejected = await reportRejectedSend(admin, connection.id, result, startedAt);
   } catch (e) {
     result = { ok: false, error: errorMessage(e) };
   }
@@ -343,7 +347,14 @@ async function sendBotText(
   } catch (e) {
     console.error('[wa-agents] gravar mensagem do robô falhou:', errorMessage(e));
   }
+  if (rejected) throw new WaAgentError('DISCONNECTED', 'número desconectado');
   if (!result.ok) throw new Error(`envio falhou: ${result.error || 'erro desconhecido'}`);
+}
+
+async function requireBotConnection(admin: SupabaseClient, connection: WaConnectionRow) {
+  if (connection.status === 'connected') return;
+  await reportBlockedSend(admin, connection.id);
+  throw new WaAgentError('DISCONNECTED', 'número desconectado');
 }
 
 type BotTemplateRow = {
@@ -395,7 +406,7 @@ async function sendBotTemplate(
     throw new Error('Este modelo de API pertence a outro número. O envio foi bloqueado.');
   }
   if (tpl.type === 'whatsapp_api' && tpl.meta_status !== 'APPROVED') throw new Error('Modelo não aprovado pela Meta');
-  if (connection.status !== 'connected') throw new Error('número desconectado');
+  await requireBotConnection(admin, connection);
   const provider = getProvider(connection);
   const sendTemplate = provider.sendTemplate?.bind(provider);
   if (tpl.type === 'whatsapp_api' && (!tpl.meta_name || !sendTemplate)) {
@@ -403,6 +414,8 @@ async function sendBotTemplate(
   }
   const text = fillTemplate(tpl.body, values) || `[Modelo: ${tpl.name}]`;
   let result: SendResult;
+  const startedAt = nowIso();
+  let rejected = false;
   try {
     if (tpl.type === 'whatsapp_api' && tpl.meta_name && sendTemplate) {
       const params = templateParams(tpl.body, values);
@@ -415,6 +428,7 @@ async function sendBotTemplate(
     } else {
       result = await provider.sendText({ to: phone, text });
     }
+    if (!result.ok) rejected = await reportRejectedSend(admin, connection.id, result, startedAt);
   } catch (e) {
     result = { ok: false, error: errorMessage(e) };
   }
@@ -441,6 +455,7 @@ async function sendBotTemplate(
   } catch (e) {
     console.error('[wa-agents] gravar modelo do robô falhou:', errorMessage(e));
   }
+  if (rejected) throw new WaAgentError('DISCONNECTED', 'número desconectado');
   if (!result.ok) throw new Error(`envio do modelo falhou: ${result.error || 'erro desconhecido'}`);
   return tpl.name;
 }
@@ -1457,6 +1472,10 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
             };
             st.vars[PROACTIVE_VAR] = handedOff;
           }
+          if (proactive?.connectionRecovery) {
+            st.vars[PROACTIVE_VAR] = await bindRecoveredHandoff(admin, orgId, conversationId,
+              st.vars[PROACTIVE_VAR] as ProactiveFollowup, agent.id);
+          }
           note(st, step, `entregue ao agente ${agent.name}`);
           await completeStep(step, 'done', -1);
           await saveRun(admin, st, { status: 'done', step_index: idx + 1, wake_at: null }, { release: true });
@@ -1502,6 +1521,24 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
       }
       await completeStep(step, outputId, idx);
       } catch (stepError) {
+        const proactive = st.vars[PROACTIVE_VAR] as ProactiveFollowup | undefined;
+        if (proactive && conversationId && stepError instanceof WaAgentError && stepError.code === 'DISCONNECTED' &&
+          (step.type === 'send_text' || step.type === 'send_template')) {
+          if (!proactive.connectionRecovery) {
+            const { data: owner, error } = await admin.from('wa_conversations')
+              .select('connection_id,ai_agent_id,ai_status_changed_at').eq('organization_id',orgId)
+              .eq('id',conversationId).maybeSingle();
+            if (error) throw new Error(error.message);
+            if (!owner?.connection_id) throw stepError;
+            st.vars[PROACTIVE_VAR] = { ...proactive, connectionRecovery: { line: owner.connection_id,
+              agent: owner.ai_agent_id, stateAt: owner.ai_status_changed_at, since: nowIso() } };
+          }
+          // Only the explicitly rejected block is pending; previous blocks
+          // can include CRM actions, external webhooks or a delivered message.
+          await saveRun(admin, st, { status: 'running', step_index: idx,
+            wake_at: new Date(Date.now() + 60_000).toISOString() }, { release: true });
+          return;
+        }
         // Ação de CRM que falha não derruba o resto do balão: registra e segue
         if (CONTINUE_ON_FAILURE.has(step.type) && !(stepError instanceof BotTelemetryError)) {
           failNote(st, step, errorMessage(stepError));

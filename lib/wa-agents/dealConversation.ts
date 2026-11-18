@@ -13,6 +13,8 @@ export type DealConversation = {
   deal_id: string | null;
   contact_id: string | null;
   last_message_at: string | null;
+  ai_agent_id?: string | null;
+  ai_status_changed_at?: string | null;
 };
 
 export type DealConversationResult =
@@ -26,7 +28,7 @@ export async function resolveDealConversation(
 ): Promise<DealConversationResult> {
   let convQuery = admin
     .from('wa_conversations')
-    .select('id, connection_id, wa_phone, deal_id, contact_id, last_message_at, is_group')
+    .select('id, connection_id, wa_phone, deal_id, contact_id, last_message_at, ai_agent_id, ai_status_changed_at, is_group')
     .eq('organization_id', orgId);
   convQuery = deal.contact_id ? convQuery.or(`deal_id.eq.${deal.id},contact_id.eq.${deal.contact_id}`) : convQuery.eq('deal_id', deal.id);
   const { data: convRows } = await convQuery;

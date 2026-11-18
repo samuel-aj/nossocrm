@@ -4,6 +4,7 @@ import { envEvolution, getProvider, isBusinessConnection } from '@/lib/whatsapp'
 import { ensureEvolutionInstance, registerWebhook } from '@/lib/whatsapp/admin';
 import { findConnectedSameNumber } from '@/lib/whatsapp/dedupe';
 import { isValidUUID } from '@/lib/supabase/utils';
+import { observeConnection } from '@/lib/whatsapp/connectionIncidents';
 import { pairingPhone, PairingInstanceMissingError } from '@/lib/whatsapp/pairing';
 
 export const runtime = 'nodejs';
@@ -54,6 +55,9 @@ export async function POST(req: Request) {
     }
   }
   try {
+    if (target.conn.status !== 'connected' || target.conn.health_monitor_enabled === false) {
+      await observeConnection(target.auth.admin, target.conn.id, 'connecting', 'manual', new Date().toISOString(), 'pair_requested');
+    }
     try {
       return reply(await target.provider.startPairing(phone));
     } catch (error) {

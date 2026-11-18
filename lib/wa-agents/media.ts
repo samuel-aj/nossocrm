@@ -13,6 +13,7 @@ import { getProvider, type OutboundMediaKind, type SendResult } from '@/lib/what
 import { recordOutboundMessage, replicateOutboundToSiblings } from '@/lib/whatsapp/service';
 import type { ConversationContext } from './context';
 import { errorMessage } from './errors';
+import { reportRejectedSend } from '@/lib/whatsapp/connectionSendFailure';
 import { internalOutputReason } from './replyOutput';
 import { originalFileName } from './files';
 import { WA_AGENT_FILES_BUCKET, type AgentMediaRow, type AgentRow } from './types';
@@ -35,7 +36,7 @@ export type SendAgentMediaInput = {
 
 export type SendAgentMediaResult =
   | { ok: true; messageId: string | null; providerMessageId: string | null; mediaPath: string; skipped?: boolean }
-  | { ok: false; error: string; retryable?: boolean };
+  | { ok: false; error: string; retryable?: boolean; disconnectRejected?: boolean };
 
 /** Extensão do arquivo (com ponto) ou ''. */
 function fileExtension(name: string): string {
@@ -201,6 +202,8 @@ export async function sendOutboxMedia(admin: SupabaseClient, ctx: ConversationCo
     if (e instanceof MediaCooldownError) return { ok: true, skipped: true, messageId: null, providerMessageId: null, mediaPath };
     return { ok: false, error: errorMessage(e), retryable: true };
   }
+  const attemptAt = new Date().toISOString();
+  let confirmedOffline = false;
   try {
     result = await getProvider(conn).sendMedia({
       to,
@@ -210,6 +213,7 @@ export async function sendOutboxMedia(admin: SupabaseClient, ctx: ConversationCo
       fileName,
       caption: caption || undefined,
     });
+    confirmedOffline = !result.ok && await reportRejectedSend(admin, conn.id, result, attemptAt);
   } catch (e) {
     result = { ok: false, error: errorMessage(e) };
   }
@@ -246,6 +250,9 @@ export async function sendOutboxMedia(admin: SupabaseClient, ctx: ConversationCo
     console.error('[wa-agents] gravar mídia do agente falhou:', errorMessage(e));
   }
 
+  if (confirmedOffline) {
+    return { ok: false, error: result.error || 'número desconectado', retryable: true, disconnectRejected: true };
+  }
   if (!result.ok) return { ok: false, error: result.error || 'falha no envio',
     retryable: !!result.raw && !result.providerMessageId && !/timeout|timed.?out|network|rede|ECONN|ETIMEDOUT/iu.test(result.error ?? '') };
   return { ok: true, messageId, providerMessageId: result.providerMessageId ?? null, mediaPath };

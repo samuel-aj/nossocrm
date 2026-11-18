@@ -36,7 +36,13 @@ interface MetaSendResponse {
 
 interface MetaMediaUploadResponse {
   id?: string;
-  error?: { message?: string; error_data?: { details?: string } };
+  error?: MetaSendResponse['error'];
+}
+
+// Code 190 is an explicit OAuth rejection before acceptance, including a rejected media upload.
+function metaSendFailure(error: MetaSendResponse['error'], fallback: string): string {
+  if (error?.code === 190) return 'Número desconectado: a Meta recusou a credencial do número.';
+  return error?.error_data?.details || error?.message || fallback;
 }
 
 export class MetaCloudProvider implements WhatsAppProvider {
@@ -85,7 +91,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
     if (!res.ok || data?.error) {
       // A Meta detalha o motivo (ex.: fora da janela de 24h precisa de template).
       const err = data?.error;
-      const detail = err?.error_data?.details || err?.message || `Meta respondeu ${res.status}`;
+      const detail = metaSendFailure(err, `Meta respondeu ${res.status}`);
       return { ok: false, error: detail, raw: data };
     }
     return { ok: true, providerMessageId: data?.messages?.[0]?.id, raw: data };
@@ -226,7 +232,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
     }
     if (!res.ok || !data?.id) {
       const err = data?.error;
-      return { error: err?.error_data?.details || err?.message || `Meta recusou a mídia (HTTP ${res.status})` };
+      return { error: metaSendFailure(err, `Meta recusou a mídia (HTTP ${res.status})`) };
     }
     return { id: data.id };
   }
@@ -273,6 +279,18 @@ export class MetaCloudProvider implements WhatsAppProvider {
   // Cloud API é por credenciais, sem sessão/QR.
   async getConnectionState(): Promise<WaConnectionState> {
     return this.phoneNumberId && this.token ? 'connected' : 'disconnected';
+  }
+
+  async checkConnectionHealth(): ReturnType<WhatsAppProvider['checkConnectionHealth']> {
+    if (!this.phoneNumberId || !this.token) return { state: 'disconnected', reason: 'Credenciais do número ausentes.' };
+    const res = await fetch(`https://graph.facebook.com/${this.graphVersion}/${encodeURIComponent(this.phoneNumberId)}?fields=health_status`, {
+      headers: { Authorization: `Bearer ${this.token}` }, cache: 'no-store', signal: AbortSignal.timeout(6000),
+    });
+    const data = await res.json().catch(() => null) as { health_status?: { can_send_message?: string }; error?: { code?: number } } | null;
+    if (data?.error?.code === 190) return { state: 'disconnected', reason: 'A Meta recusou a credencial do número.' };
+    if (res.ok && data?.health_status?.can_send_message === 'AVAILABLE') return { state: 'connected' };
+    if (res.ok && data?.health_status?.can_send_message === 'BLOCKED') return { state: 'disconnected', reason: 'Envios bloqueados pela Meta.' };
+    return { state: 'unknown', reason: 'A Meta não confirmou disponibilidade plena de envio para este número.' };
   }
 
   async getQrCode(): Promise<QrResult> {

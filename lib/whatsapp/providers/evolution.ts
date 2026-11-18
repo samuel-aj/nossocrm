@@ -155,6 +155,19 @@ export class EvolutionProvider implements WhatsAppProvider {
     return { ok: res.ok, status: res.status, data };
   }
 
+  async getPairingIdentity(): Promise<{ phone: string; profileName?: string } | null> {
+    type Row = { name?: string; instanceName?: string; ownerJid?: string; profileName?: string;
+      instance?: { instanceName?: string; owner?: string; profileName?: string } };
+    const { ok, data } = await this.call<Row[] | Row>('GET',
+      `/instance/fetchInstances?instanceName=${encodeURIComponent(this.instanceName)}`, undefined, 6000);
+    if (!ok || !data) return null;
+    const row = (Array.isArray(data) ? data : [data]).find(item =>
+      (item.name ?? item.instanceName ?? item.instance?.instanceName) === this.instanceName);
+    const owner = row?.ownerJid ?? row?.instance?.owner;
+    if (!owner || !/^\+?\d+(?::\d+)?(?:@s\.whatsapp\.net)?$/.test(owner)) return null;
+    return { phone: jidToE164(owner), profileName: row?.profileName ?? row?.instance?.profileName };
+  }
+
   async getConnectionState(): Promise<WaConnectionState> {
     const { ok, data } = await this.call<{ instance?: { state?: string }; state?: string }>(
       'GET',
@@ -169,15 +182,31 @@ export class EvolutionProvider implements WhatsAppProvider {
     return (await this.probeSession()) === false ? 'disconnected' : state;
   }
 
+  async checkConnectionHealth(): ReturnType<WhatsAppProvider['checkConnectionHealth']> {
+    const response = await this.call<{ instance?: { state?: string }; state?: string }>(
+      'GET', `/instance/connectionState/${encodeURIComponent(this.instanceName)}`, undefined, 6000
+    );
+    if (response.status === 404) return { state: 'disconnected', reason: 'Instância não encontrada na Evolution.' };
+    const state = response.data?.instance?.state ?? response.data?.state;
+    if (!response.ok || !['open', 'close', 'connecting'].includes(state ?? '')) {
+      return { state: 'unknown', reason: 'A Evolution não confirmou o estado da instância.' };
+    }
+    if (state !== 'open') return { state: mapState(state), reason: `Evolution informou ${state}.` };
+    const alive = await this.probeSession(true);
+    if (alive === null) return { state: 'unknown', reason: 'A sessão abriu, mas a verificação de disponibilidade foi inconclusiva.' };
+    return alive ? { state: 'connected' } : { state: 'disconnected', reason: 'A Evolution confirmou que a sessão está fechada.' };
+  }
+
   /**
    * true = sessão viva; false = a Evolution respondeu "Connection Closed";
    * null = não deu para saber (rede/timeout), e aí vale o estado informado.
    * Cache de 1 minuto por instância: a tela consulta o status a cada poucos
    * segundos e não precisa bater no WhatsApp toda vez.
    */
-  private async probeSession(): Promise<boolean | null> {
-    const cached = sessionProbeCache.get(this.instanceName);
-    if (cached && cached.at > Date.now() - SESSION_PROBE_TTL_MS) return cached.alive;
+  private async probeSession(fresh = false): Promise<boolean | null> {
+    const cacheKey = `${this.baseUrl}/${this.instanceName}`;
+    const cached = sessionProbeCache.get(cacheKey);
+    if (!fresh && cached && cached.at > Date.now() - SESSION_PROBE_TTL_MS) return cached.alive;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 6000);
     let alive: boolean | null = null;
@@ -198,7 +227,8 @@ export class EvolutionProvider implements WhatsAppProvider {
     }
     // Só guarda sessão VIVA: a morta responde na hora (sem ir ao WhatsApp) e
     // precisa ser reavaliada logo, senão o "Reiniciar" ficaria 1 min sem ver a volta.
-    if (alive === true) sessionProbeCache.set(this.instanceName, { alive, at: Date.now() });
+    if (alive === true) sessionProbeCache.set(cacheKey, { alive, at: Date.now() });
+    else sessionProbeCache.delete(cacheKey);
     return alive;
   }
 
@@ -383,7 +413,7 @@ export class EvolutionProvider implements WhatsAppProvider {
   }
 
   async restart(): Promise<void> {
-    sessionProbeCache.delete(this.instanceName);
+    sessionProbeCache.delete(`${this.baseUrl}/${this.instanceName}`);
     const { ok, status } = await this.call('PUT', `/instance/restart/${encodeURIComponent(this.instanceName)}`);
     if (!ok) throw new Error(`Evolution respondeu ${status} ao reiniciar a instância`);
   }
