@@ -20,7 +20,7 @@ import { parseMessageDeletion, applyMessageDeletion } from "./deletions.ts";
 import { encryptedEdit, resolveEncryptedEdit } from "./encrypted-edits.ts";
 import { parseMessageEdit, applyMessageEdit } from "./edits.ts";
 import { applyDeliveryStatus } from "./statuses.ts";
-import { connectionEventTime } from "./connection-event-time.ts";
+import { evolutionConnectionEvent } from "./connection-event-time.ts";
 import { enrichMissingQuote, extractEvolutionQuoteContext, resolveQuoteWhenPresent, type QuoteSnapshot } from "../_shared/quotes.ts";
 import { evolutionCtwa, recordCtwa } from "../_shared/ctwa.ts";
 
@@ -252,12 +252,6 @@ function base64ToBytes(b64: string): Uint8Array | null {
   }
 }
 
-function mapState(s?: string): string {
-  if (s === "open") return "connected";
-  if (s === "connecting") return "connecting";
-  return "disconnected";
-}
-
 // AUTO-CURA da assinatura de eventos na Evolution: instâncias antigas foram
 // registradas SEM o evento MESSAGES_EDITED (edição de mensagem nunca chegava
 // aqui e o CRM ficava com o texto antigo). Reaplica o webhook com a lista
@@ -361,9 +355,9 @@ Deno.serve(async (req) => {
   // edição) ficam em wa_webhook_debug pra inspeção. Best-effort; derrubar a
   // tabela e este bloco quando o diagnóstico terminar.
   try {
-    const conhecidos = ["messages.upsert", "messages.update", "connection.update", "qrcode.updated", "diag.webhook", "diag.edit", "diag.find", "heal.ping"];
+    const conhecidos = ["messages.upsert", "messages.update", "connection.update", "status.instance", "qrcode.updated", "diag.webhook", "diag.edit", "diag.find", "heal.ping"];
     const citaEdicao = rawBody.includes("editedMessage") || rawBody.includes("protocolMessage") || event.includes("edit");
-    if (!conhecidos.includes(event) || citaEdicao) {
+    if (event !== "connection.update" && event !== "status.instance" && (!conhecidos.includes(event) || citaEdicao)) {
       await supabase.from("wa_webhook_debug").insert({ event, payload });
     }
   } catch {
@@ -466,7 +460,8 @@ Deno.serve(async (req) => {
   const espelhoUrl = String(conn.forward_webhook_url ?? "").trim();
   const espelhoEvento =
     typeof payload?.event === "string" ? payload.event.replace(/[^\x20-\x7e]/g, "").trim() : "";
-  if (espelhoUrl && espelhoEvento) {
+  // Some Evolution installations emit this internal event globally. Never mirror its raw disconnect object.
+  if (espelhoUrl && espelhoEvento && event !== "status.instance") {
     const espelho = (async () => {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 8000);
@@ -498,14 +493,8 @@ Deno.serve(async (req) => {
   const data = payload?.data;
 
   // --- Estado da conexão ---
-  if (event === "connection.update") {
-    const emittedAt = connectionEventTime(payload.date_time ?? data?.date_time);
-    const state = emittedAt && ["open", "connecting", "close", "closed", "disconnected"].includes(data?.state)
-      ? mapState(data.state) : "unknown";
-    // Raw provider errors can contain PII. Only persist numeric reason codes.
-    const reasonCode = data?.statusReason ?? data?.lastDisconnect?.error?.output?.statusCode;
-    const reason = !emittedAt ? "webhook_undated" : state === "unknown" ? "webhook_unknown_state"
-      : /^\d{3,6}$/.test(String(reasonCode ?? "")) ? `provider_${reasonCode}` : state;
+  if (event === "connection.update" || event === "status.instance") {
+    const { state, emittedAt, reason } = evolutionConnectionEvent(event, data, payload.date_time);
 
     // Conectou: descobre o NÚMERO do WhatsApp (wuid do evento; fallback:
     // consulta a Evolution). É a chave da posse das conversas no CRM.

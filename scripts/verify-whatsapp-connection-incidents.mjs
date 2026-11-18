@@ -14,6 +14,8 @@ try {
   await db.exec(`
     create role service_role bypassrls; create role authenticated; create role anon;
     create schema auth; create schema crm_internal; create schema cron;
+    create schema net;
+    create table net._http_response(id bigint primary key,status_code integer,timed_out boolean);
     create function cron.schedule(text,text,text) returns bigint language sql as $$select 1::bigint$$;
     create table organizations(id uuid primary key);
     create table auth.users(id uuid primary key,email text,banned_until timestamptz);
@@ -40,6 +42,16 @@ try {
   assert.equal((await q("select has_function_privilege('authenticated','wa_claim_connection_probes(integer)','execute') ok"))[0].ok,false);
   assert.equal((await q("select has_function_privilege('anon','wa_claim_connection_emails(integer)','execute') ok"))[0].ok,false);
   assert.equal((await q("select relrowsecurity from pg_class where relname='wa_connection_incidents'"))[0].relrowsecurity,true);
+  assert.equal((await q("select has_function_privilege('authenticated','crm_internal.dispatch_wa_connection_monitor()','execute') ok"))[0].ok,false);
+  await db.exec(`
+    insert into crm_internal.wa_connection_monitor_dispatches(request_id,result,requested_at) values
+      (2,'pending',now()),(3,'pending',now()),(4,'pending',now()),(5,'pending',now()),
+      (6,'pending',now()-interval '4 minutes'),(7,'accepted',now()-interval '31 days');
+    insert into net._http_response values (2,202,false),(3,503,false),(4,null,true),(5,null,false);
+    select crm_internal.dispatch_wa_connection_monitor();
+  `);
+  assert.deepEqual((await q('select result,http_status from crm_internal.wa_connection_monitor_dispatches order by request_id')).map(x=>[x.result,x.http_status]),
+    [['pending',null],['accepted',202],['http_error',503],['timeout',null],['transport_error',null],['no_response',null]]);
   await db.exec('set role service_role');
   assert.equal((await q('select id from wa_claim_connection_probes(2)')).length,1);
   assert.equal((await q('select id from wa_claim_connection_probes(2)')).length,0);
@@ -53,6 +65,11 @@ try {
   await observe('connected','poll','07:55:01');
   await observe('disconnected','webhook','08:00:00');
   await observe('disconnected','send_blocked','08:01:00','local_gate');
+  await observe('disconnected','poll','08:01:01','evolution_state_close');
+  await observe('disconnected','poll','08:01:02','evolution_disconnect_401');
+  await observe('disconnected','poll','08:01:03','evolution_disconnect_401');
+  assert.equal((await q("select reason from wa_connection_health_events where source='send_blocked' and reason='local_gate'")).length,1);
+  assert.equal((await q("select reason from wa_connection_health_events where reason='evolution_disconnect_401'")).length,1);
   assert.equal((await q('select * from wa_connection_incidents')).length,1);
   assert.equal((await q('select user_id from wa_connection_incident_notices')).length,1);
   assert.equal((await q('select * from wa_connection_bell($1,$2,now())',[org,user])).length,1);
@@ -69,8 +86,10 @@ try {
   await q("insert into wa_messages values ($1,$2,'out','delivered','b','crm','2026-01-02 08:04Z','2026-01-02 08:04Z')",[org,conv]);
   assert.equal((await q('select * from wa_connection_incidents where resolved_at is null')).length,0);
   assert.equal(await observe('disconnected','send_blocked','08:05:00','local_gate'),false);
-  await observe('unknown','poll','08:06:00','provider_unavailable');
-  await observe('unknown','poll','08:13:00','provider_unavailable');
+  await observe('unknown','poll','08:06:00','probe_timeout');
+  await observe('unknown','poll','08:13:00','probe_timeout');
+  await observe('unknown','poll','08:13:30','probe_timeout');
+  assert.equal((await q("select reason from wa_connection_health_events where reason='probe_timeout'")).length,2);
   assert.equal((await q('select reason from wa_connection_incidents where resolved_at is null'))[0].reason,'verification_unavailable');
   await observe('connected','poll','08:14:00');
   await observe('connected','webhook','08:15:00','connected','+5511000000002');

@@ -6,6 +6,7 @@ alter table public.wa_connections
   add column health_state_at timestamptz,
   add column health_source text,
   add column health_checked_at timestamptz,
+  add column health_probe_reason text,
   add column health_check_error text,
   add column health_identity_mismatch_at timestamptz,
   add column health_uncertain_since timestamptz,
@@ -137,13 +138,19 @@ begin
     open_incident := true;
   elsif p_state='unknown' then
     if (c.health_checked_at is not null and t<c.health_checked_at)
-       or (c.health_state_at is not null and t<c.health_state_at) then return false; end if;
+       or (c.health_state_at is not null and t<c.health_state_at) then
+      if p_source='webhook' then
+        insert into public.wa_connection_health_events(organization_id,connection_id,observed_at,state,source,reason,applied)
+        values(c.organization_id,c.id,t,p_state,p_source,reason,false);
+      end if;
+      return false;
+    end if;
     update public.wa_connections set
       health_checked_at=case when p_source='poll' then t else health_checked_at end,
+      health_probe_reason=case when p_source='poll' then reason else health_probe_reason end,
       health_next_probe_at=case when p_source='webhook' then least(now(),health_next_probe_at) else health_next_probe_at end,
       health_uncertain_since=coalesce(health_uncertain_since,t),health_check_error=reason where id=c.id;
     open_incident := (c.last_connected_at is not null or c.status='connected') and c.health_uncertain_since <= t-interval '5 minutes';
-    if open_incident then reason := 'verification_unavailable'; end if;
     if p_source='webhook' and c.health_uncertain_since is null then
       perform public.wa_wake_connection_monitor();
     end if;
@@ -196,6 +203,7 @@ begin
     update public.wa_connections set status=p_state, health_state_at=t, health_source=p_source,
       health_monitor_enabled=case when p_source='manual' and reason<>'number_changed' then p_state<>'disconnected' else health_monitor_enabled end,
       health_checked_at=case when p_source='poll' then greatest(t,health_checked_at) else health_checked_at end,
+      health_probe_reason=case when p_source='poll' then reason else health_probe_reason end,
       health_next_probe_at=case when p_state<>'connected' and p_source<>'poll' then least(now(),health_next_probe_at) else health_next_probe_at end,
       health_check_error=null,health_uncertain_since=null,
       last_connected_at=case when p_state='connected' and (status<>'connected' or last_connected_at is null) then t else last_connected_at end,
@@ -208,9 +216,13 @@ begin
       and not (coalesce(c.health_source,'')='manual' and c.status='connecting' and t-c.health_state_at<interval '2 minutes'); end if;
   end if;
 
-  if p_source in ('webhook','manual','send_failure') or (p_source='send_blocked' and i.id is null)
-     or (p_state='unknown' and c.health_check_error is distinct from reason)
-     or (p_source='poll' and p_state<>'unknown' and (c.status<>p_state or c.health_check_error is not null))
+  if p_source in ('webhook','manual','send_failure')
+     or (p_source='send_blocked' and (i.id is null or not exists (
+       select from public.wa_connection_health_events e where e.connection_id=c.id and e.source='send_blocked'
+       and e.observed_at>=i.opened_at and e.applied)))
+     or (p_state='unknown' and open_incident and i.id is null)
+     or (p_source='poll' and (c.health_probe_reason is distinct from reason or
+       (p_state<>'unknown' and (c.status<>p_state or c.health_check_error is not null))))
      or (p_source='delivery' and c.status<>'connected') then
     insert into public.wa_connection_health_events(organization_id,connection_id,observed_at,state,source,reason,applied)
     values(c.organization_id,c.id,t,p_state,p_source,reason,true);
@@ -223,7 +235,8 @@ begin
     if close_mode='reconnected' then perform crm_internal.wa_line_notify(i,c.health_alert_owner_id,'resolved'); end if;
   elsif open_incident and i.id is null then
     insert into public.wa_connection_incidents(organization_id,connection_id,line_label,opened_at,reason,source)
-    values(c.organization_id,c.id,coalesce(nullif(c.phone_number,''),nullif(c.profile_name,''),'WhatsApp'),t,reason,p_source)
+    values(c.organization_id,c.id,coalesce(nullif(c.phone_number,''),nullif(c.profile_name,''),'WhatsApp'),t,
+      case when p_state='unknown' then 'verification_unavailable' else reason end,p_source)
     returning * into i;
     perform crm_internal.wa_line_notify(i,c.health_alert_owner_id,'opened');
   elsif open_incident and i.reason='verification_unavailable' and p_state='disconnected' then

@@ -138,7 +138,7 @@ export interface WhatsAppProvider {
   /** Estado atual da conexão da instância. */
   getConnectionState(): Promise<WaConnectionState>;
   /** Conferência periódica sem envio de mensagem. Indisponibilidade da consulta é inconclusiva. */
-  checkConnectionHealth(): Promise<{ state: WaConnectionState | 'unknown'; reason?: string }>;
+  checkConnectionHealth(lastConnectedAt?: string | null): Promise<{ state: WaConnectionState | 'unknown'; reason?: string }>;
   /** Inicia/obtém o QR para conectar o número. */
   getQrCode(): Promise<QrResult>;
   /** Starts a fresh linking attempt; an already connected session is preserved. */

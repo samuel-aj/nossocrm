@@ -24,6 +24,7 @@ import type {
   WaConnectionState,
   SendTemplateInput,
 } from './types';
+import { metaErrorReason } from './metaCloudError';
 
 const DEFAULT_GRAPH_VERSION = 'v21.0';
 /** Versão usada só no recibo de leitura / "digitando" (ver readReceipt). */
@@ -31,7 +32,7 @@ const READ_RECEIPT_GRAPH_VERSION = (process.env.META_READ_RECEIPT_GRAPH_VERSION 
 
 interface MetaSendResponse {
   messages?: Array<{ id?: string }>;
-  error?: { message?: string; code?: number; error_data?: { details?: string } };
+  error?: { message?: string; code?: number; error_subcode?: number; error_data?: { details?: string } };
 }
 
 interface MetaMediaUploadResponse {
@@ -185,7 +186,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
    * devolve o motivo exato se recusar (formato, tamanho...), em vez de baixar
    * o link depois, "adivinhar" o tipo e falhar em silêncio no recibo.
    */
-  private async uploadMedia(input: SendMediaInput): Promise<{ id?: string; error?: string }> {
+  private async uploadMedia(input: SendMediaInput): Promise<{ id?: string; error?: string; codes?: {code: number; error_subcode?: number} }> {
     let dl: Response;
     try {
       dl = await fetch(input.media, { cache: 'no-store', ...(input.signal ? { signal: input.signal } : {}) });
@@ -232,7 +233,8 @@ export class MetaCloudProvider implements WhatsAppProvider {
     }
     if (!res.ok || !data?.id) {
       const err = data?.error;
-      return { error: metaSendFailure(err, `Meta recusou a mídia (HTTP ${res.status})`) };
+      return { error: metaSendFailure(err, `Meta recusou a mídia (HTTP ${res.status})`),
+        ...(err?.code === 190 ? { codes: { code: err.code, error_subcode: err.error_subcode } } : {}) };
     }
     return { id: data.id };
   }
@@ -244,7 +246,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
     // Upload primeiro (validação imediata) e envio por media ID — sem depender
     // da Meta baixar link. Só imagem/vídeo/documento aceitam legenda.
     const up = await this.uploadMedia(input);
-    if (!up.id) return { ok: false, error: up.error || 'Falha ao subir a mídia pra Meta' };
+    if (!up.id) return { ok: false, error: up.error || 'Falha ao subir a mídia pra Meta', ...(up.codes ? { raw: { error: up.codes } } : {}) };
     const id = up.id;
 
     let media: Record<string, unknown>;
@@ -282,15 +284,25 @@ export class MetaCloudProvider implements WhatsAppProvider {
   }
 
   async checkConnectionHealth(): ReturnType<WhatsAppProvider['checkConnectionHealth']> {
-    if (!this.phoneNumberId || !this.token) return { state: 'disconnected', reason: 'Credenciais do número ausentes.' };
+    if (!this.phoneNumberId || !this.token) return { state: 'disconnected', reason: 'meta_missing_credentials' };
     const res = await fetch(`https://graph.facebook.com/${this.graphVersion}/${encodeURIComponent(this.phoneNumberId)}?fields=health_status`, {
       headers: { Authorization: `Bearer ${this.token}` }, cache: 'no-store', signal: AbortSignal.timeout(6000),
     });
-    const data = await res.json().catch(() => null) as { health_status?: { can_send_message?: string }; error?: { code?: number } } | null;
-    if (data?.error?.code === 190) return { state: 'disconnected', reason: 'A Meta recusou a credencial do número.' };
-    if (res.ok && data?.health_status?.can_send_message === 'AVAILABLE') return { state: 'connected' };
-    if (res.ok && data?.health_status?.can_send_message === 'BLOCKED') return { state: 'disconnected', reason: 'Envios bloqueados pela Meta.' };
-    return { state: 'unknown', reason: 'A Meta não confirmou disponibilidade plena de envio para este número.' };
+    const data = await res.json().catch(() => null) as {
+      health_status?: { can_send_message?: string; entities?: Array<{ can_send_message?: string; errors?: Array<{ error_code?: number }> }> };
+      error?: MetaSendResponse['error'];
+    } | null;
+    if (data?.error || !res.ok) return { state: data?.error?.code === 190 ? 'disconnected' : 'unknown',
+      reason: metaErrorReason(data?.error) ?? `meta_http_${res.status}` };
+    const availability = data?.health_status?.can_send_message;
+    if (availability === 'AVAILABLE') return { state: 'connected' };
+    if (availability === 'BLOCKED' || availability === 'LIMITED') {
+      const entities = data?.health_status?.entities;
+      const blocked = Array.isArray(entities) ? entities.find(entity => entity?.can_send_message === availability && entity.errors?.[0]?.error_code) : null;
+      const reason = metaErrorReason({ code: blocked?.errors?.[0]?.error_code }) ?? `meta_health_${availability.toLowerCase()}`;
+      return { state: availability === 'BLOCKED' ? 'disconnected' : 'unknown', reason };
+    }
+    return { state: 'unknown', reason: 'meta_health_unknown' };
   }
 
   async getQrCode(): Promise<QrResult> {

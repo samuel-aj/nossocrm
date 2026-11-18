@@ -8,12 +8,13 @@ export async function monitorConnections(admin: SupabaseClient, deadlineMs: numb
   for (let batch = 0; batch < 5 && Date.now() + 20_000 < deadlineMs; batch++) {
     const { data, error } = await admin.rpc('wa_claim_connection_probes', { p_limit: 8 });
     if (error) throw new Error('Falha ao reservar as conexões para verificação.');
-    const connections = (data ?? []) as Array<ConnectionLike & { id: string }>;
+    const connections = (data ?? []) as Array<ConnectionLike & { id: string; last_connected_at?: string }>;
     const checked = await Promise.allSettled(connections.map(async connection => {
       const startedAt = new Date().toISOString();
       const provider = getProvider(connection);
-      const health = await provider.checkConnectionHealth().catch(() => ({
-        state: 'unknown' as const, reason: 'O provedor não respondeu à verificação do número.',
+      const health = await provider.checkConnectionHealth(connection.last_connected_at).catch((error: unknown) => ({
+        state: 'unknown' as const, reason: error instanceof Error && ['TimeoutError','AbortError'].includes(error.name)
+          ? 'probe_timeout' : 'probe_transport_error',
       }));
       // A live QR socket can belong to another handset if a pairing webhook was lost.
       if (health.state === 'connected' && connection.provider === 'evolution') {

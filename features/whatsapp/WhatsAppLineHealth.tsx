@@ -34,6 +34,16 @@ export function LineHealthDetails({ health }: { health?: ConnectionDiagnostics }
       Incidente de conexão desde {time(health.incidentOpenedAt)}.
       {health.receivedDuringIncidentAt && ` O número recebeu mensagem em ${time(health.receivedDuringIncidentAt)} durante o incidente.`}
     </p>}
+    {health?.lastIncident && <div className="space-y-0.5">
+      {health.lastIncident.resolvedAt && <p className="font-medium">
+        Último incidente de {time(health.lastIncident.openedAt)} a {time(health.lastIncident.resolvedAt)}.
+      </p>}
+      <p>{health.lastIncident.observation}</p>
+      <p>{health.lastIncident.observedBy} · <time dateTime={health.lastIncident.observedAt}>{time(health.lastIncident.observedAt)}</time></p>
+      {health.lastIncident.detectedBy !== health.lastIncident.observedBy && <p>
+        Origem do incidente · {health.lastIncident.detectedBy}
+      </p>}
+    </div>}
     {!health?.incidentOpenedAt && Boolean(health?.failedCount) && <p className="text-red-700 dark:text-red-300">
       Os últimos {health?.failedCount} envios falharam.
     </p>}

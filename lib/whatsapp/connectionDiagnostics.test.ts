@@ -35,4 +35,28 @@ describe('status of a WhatsApp number', () => {
     expect(b).toMatchObject({ pendingCount: 3, reviewCount: 1, state: 'send_failure', lastDeliveredMessageAt: 'old' });
     expect((await getLineDiagnostics(admin, 'org', lines, now))[1].pendingCount).toBeNull();
   });
+  it.each([
+    ['crm_send_blocked', 'send_blocked', /antes de chamar o provedor/],
+    ['meta_code_190_sub_463', 'send_failure', /código 190 \(subcódigo 463\)/],
+    ['evolution_disconnect_401', 'webhook', /desconexão 401/],
+    ['webhook_undated_evolution_disconnect_440', 'webhook', /440 em um evento sem horário/],
+    ['disconnected', 'webhook', /evento veio sem código de motivo/],
+    ['evolution_http_503', 'poll', /consulta à Evolution retornou HTTP 503/],
+    ['unknown_text_that_might_contain_customer_data', 'webhook', /não permite identificar a causa/],
+  ] as const)('describes a closed incident without changing the line state: %s', async (reason, source, expected) => {
+    const opened = '2026-11-18T09:00:00Z';
+    const resolved = '2026-11-18T10:00:00Z';
+    const diagnostic = '2026-11-18T09:05:00Z';
+    const admin = { rpc: vi.fn().mockResolvedValue({ data: [{
+      connection_id: 'line', opened_at: null, failed_count: 0, last_incident_opened_at: opened,
+      last_incident_resolved_at: resolved, last_incident_source: 'send_blocked', diagnostic_reason: reason,
+      diagnostic_source: source, diagnostic_at: diagnostic,
+    }], error: null }) } as unknown as SupabaseClient;
+    const [result] = await getLineDiagnostics(admin, 'org', [{ ...row, id: 'line' }], now);
+    expect(result).toMatchObject({
+      state: 'connected', incidentOpenedAt: null,
+      lastIncident: { openedAt: opened, resolvedAt: resolved, observedAt: diagnostic, detectedBy: 'Controle de envio do CRM',
+        observation: expect.stringMatching(expected) },
+    });
+  });
 });
