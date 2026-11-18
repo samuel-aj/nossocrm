@@ -23,6 +23,7 @@ export interface WaConnectionRow {
   health_checked_at?: string | null;
   health_state_at?: string | null;
   health_check_error?: string | null;
+  health_probe_reason?: string | null;
   health_monitor_enabled?: boolean;
   health_identity_mismatch_at?: string | null;
   health_alert_owner_id?: string | null;

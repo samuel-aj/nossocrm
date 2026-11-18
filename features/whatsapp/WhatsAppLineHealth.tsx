@@ -27,6 +27,9 @@ const time = (iso: string) => new Date(iso).toLocaleString('pt-BR', { dateStyle:
 
 export function LineHealthDetails({ health }: { health?: ConnectionDiagnostics }) {
   return <div className="mt-2 space-y-1 text-xs text-slate-600 dark:text-slate-400">
+    {health?.metaMessagingLimited && <p>
+      Na última verificação, a Meta informou restrições ao envio de mensagens neste número.
+    </p>}
     {health?.identityMismatch && <p className="font-medium text-red-700 dark:text-red-300">
       O telefone pareado é diferente do telefone cadastrado. Reconecte o número original para liberar os envios.
     </p>}

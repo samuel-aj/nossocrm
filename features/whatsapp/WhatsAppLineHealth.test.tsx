@@ -9,7 +9,7 @@ describe('status por número', () => {
       state: 'send_failure', lastCheckedAt: '2026-11-18T10:00:00Z', lastDeliveredMessageAt: '2026-11-17T20:00:00Z',
       incidentOpenedAt: '2026-11-18T01:00:00Z', receivedDuringIncidentAt: '2026-11-18T09:55:00Z', failedCount: 0,
       lastIncident: null,
-      identityMismatch: true, pendingCount: 2, reviewCount: 1, historyAvailable: true,
+      identityMismatch: true, pendingCount: 2, reviewCount: 1, historyAvailable: true, metaMessagingLimited: false,
     };
     render(<>
       <section aria-label="Número A"><LineStatusBadge state={health.state} /><LineHealthDetails health={health} /></section>
@@ -28,7 +28,7 @@ describe('status por número', () => {
     const health: ConnectionDiagnostics = {
       state: 'connected', lastCheckedAt: '2026-11-18T12:01:00Z', lastDeliveredMessageAt: '2026-11-18T12:00:00Z',
       incidentOpenedAt: null, receivedDuringIncidentAt: null, failedCount: 0, pendingCount: 0, reviewCount: 0,
-      identityMismatch: false, historyAvailable: true,
+      identityMismatch: false, historyAvailable: true, metaMessagingLimited: false,
       lastIncident: {
         openedAt: '2026-11-18T10:00:00Z', resolvedAt: '2026-11-18T12:00:00Z',
         detectedBy: 'Controle de envio do CRM', observedBy: 'Evento recebido do provedor',
@@ -42,5 +42,18 @@ describe('status por número', () => {
     expect(screen.getByText(/código de desconexão 401/)).toBeInTheDocument();
     expect(screen.getByText(/Origem do incidente · Controle de envio do CRM/)).toBeInTheDocument();
     expect(screen.getByText(/Evento recebido do provedor/).querySelector('time')).toHaveAttribute('datetime', health.lastIncident!.observedAt);
+  });
+  it('shows a Meta messaging restriction beside a connected number and clears it after a healthy check', () => {
+    const health: ConnectionDiagnostics = {
+      state: 'connected', lastCheckedAt: '2026-11-18T12:01:00Z', lastDeliveredMessageAt: null,
+      incidentOpenedAt: null, receivedDuringIncidentAt: null, lastIncident: null, failedCount: 0,
+      identityMismatch: false, historyAvailable: true, pendingCount: 0, reviewCount: 0, metaMessagingLimited: true,
+    };
+    const { rerender } = render(<><LineStatusBadge state={health.state} /><LineHealthDetails health={health} /></>);
+    expect(screen.getByText('Conectado')).toBeInTheDocument();
+    expect(screen.getByText(/restrições ao envio de mensagens/)).toBeInTheDocument();
+    expect(screen.queryByText(/Incidente de conexão/)).not.toBeInTheDocument();
+    rerender(<LineHealthDetails health={{ ...health, metaMessagingLimited: false }} />);
+    expect(screen.queryByText(/restrições ao envio de mensagens/)).not.toBeInTheDocument();
   });
 });

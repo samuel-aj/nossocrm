@@ -63,11 +63,44 @@ describe('verificação em segundo plano sem envio', () => {
       .mockResolvedValueOnce(reply({ error: { code: 190, error_subcode: 463 } }, 401));
     vi.stubGlobal('fetch', fetcher);
     const provider = new MetaCloudProvider(config);
-    for (const [state, reason] of [['connected', undefined], ['disconnected', 'meta_code_123'], ['unknown', 'meta_health_limited'], ['disconnected', 'meta_code_190_sub_463']]) {
+    for (const [state, reason] of [['connected', undefined], ['disconnected', 'meta_code_123'], ['connected', 'meta_messaging_limited'], ['disconnected', 'meta_code_190_sub_463']]) {
       const health = await provider.checkConnectionHealth();
       expect([health.state, health.reason]).toEqual([state, reason]);
     }
     expect(fetcher.mock.calls.every(([url, init]) => new URL(url).searchParams.get('fields') === 'health_status' && !init.body)).toBe(true);
+  });
+
+  it('trata o bloqueio exclusivo de chamadas SIP do exemplo da Meta com evidência das quatro entidades de mensagens', async () => {
+    const phone = { entity_type: 'PHONE_NUMBER', can_send_message: 'AVAILABLE', can_receive_call_sip: 'BLOCKED', errors: [{ error_code: 138024 }] };
+    const app = { entity_type: 'APP', can_send_message: 'AVAILABLE', can_receive_call_sip: 'BLOCKED', errors: [{ error_code: 138025 }] };
+    const waba = { entity_type: 'WABA', can_send_message: 'AVAILABLE' };
+    const business = { entity_type: 'BUSINESS', can_send_message: 'AVAILABLE' };
+    const probe = async (entities: unknown[], aggregate = 'BLOCKED') => {
+      const fetcher = vi.fn().mockResolvedValue(reply({ health_status: { can_send_message: aggregate, entities } }));
+      vi.stubGlobal('fetch', fetcher);
+      const health = await new MetaCloudProvider(config).checkConnectionHealth();
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(new URL(fetcher.mock.calls[0][0]).pathname).not.toMatch(/messages$/);
+      return health;
+    };
+    expect(await probe([phone, app, waba, business])).toEqual({ state: 'connected' });
+    expect(await probe([phone, app, waba, { ...business, can_send_message: 'LIMITED' }])).toEqual({ state: 'connected', reason: 'meta_messaging_limited' });
+    expect(await probe([phone, app, waba, { ...business, can_send_message: 'BLOCKED', errors: [{ error_code: 131031 }] }])).toEqual({ state: 'disconnected', reason: 'meta_code_131031' });
+    expect(await probe([phone, app, waba])).toEqual({ state: 'disconnected', reason: 'meta_health_blocked' });
+    expect(await probe([{ ...phone, can_send_message: undefined }, app, waba, business])).toEqual({ state: 'disconnected', reason: 'meta_health_blocked' });
+    expect(await probe([{ ...phone, can_receive_call_sip: 'LIMITED' }, { ...app, can_receive_call_sip: 'LIMITED' }, waba, business], 'LIMITED')).toEqual({ state: 'connected' });
+    const mixed = { ...phone, errors: [{ error_code: 138024, capabilities: ['CAN_SEND_MESSAGE', 'CAN_RECEIVE_CALL_SIP'] }] };
+    expect(await probe([mixed, app, waba, business])).toEqual({ state: 'disconnected', reason: 'meta_health_blocked' });
+  });
+
+  it('um erro HTTP ou código isolado de SIP no Graph não comprova a capacidade de enviar mensagens', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(reply({ error: { code: 138024 } }, 400))
+      .mockResolvedValueOnce(reply({}, 503)).mockResolvedValueOnce(reply({ health_status: { entities: [{ errors: [{ error_code: 138024 }] }] } }));
+    vi.stubGlobal('fetch', fetcher);
+    const provider = new MetaCloudProvider(config);
+    for (const reason of ['meta_query_code_138024', 'meta_query_http_503', 'meta_health_unknown']) {
+      expect(await provider.checkConnectionHealth()).toEqual({ state: 'unknown', reason });
+    }
   });
 
   it('registra também consultas inconclusivas com a hora de início e não toca nas conversas', async () => {
