@@ -7,9 +7,82 @@ export type ReplySegment =
   | { kind: 'media'; name: string; caption?: string; step?: number };
 export type OutputIssue = { segment: number; step?: number; field: 'text' | 'caption'; reason: string };
 
+/** End of one complete JSON object, including nested objects and braces in strings. */
+function jsonObjectEnd(raw: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < raw.length; i++) {
+    const char = raw[i];
+    if (inString) {
+      if (char === '\\') i++;
+      else if (char === '"') inString = false;
+    } else if (char === '"') inString = true;
+    else if (char === '{') depth++;
+    else if (char === '}' && --depth === 0) {
+      try {
+        JSON.parse(raw.slice(start, i + 1));
+        return i + 1;
+      } catch { return -1; }
+    }
+  }
+  return -1;
+}
+
+function looksLikeProse(text: string): boolean {
+  // A second object, fence, or leftover JSON key is ambiguous even if it isn't
+  // one of the known internal field names.
+  return /\p{L}/u.test(text) && !/[{}]|```|["'”]\s*:|(?:^|\n)\s*[\]},:]/u.test(text);
+}
+
+/** Remove only a delimited, complete annotation. Never interpret the payload as a tool call. */
+function stripSavedDataAnnotation(segment: ReplySegment): ReplySegment {
+  if (segment.kind === 'text' && segment.voice) return segment;
+  const raw = segment.kind === 'text' ? segment.text : segment.caption ?? '';
+  const marker = /(?<!\S)\[salvar_dados\]\s*(?=\{)/iu.exec(raw);
+  if (!marker) return segment;
+  const end = jsonObjectEnd(raw, marker.index + marker[0].length);
+  if (end < 0 || (end < raw.length && !/\s/u.test(raw[end]))) return segment;
+  const before = raw.slice(0, marker.index);
+  const after = raw.slice(end);
+  const separator = /\n\s*$/u.test(before) || /^\s*\n/u.test(after) ? '\n' : ' ';
+  const prose = cleanText([before.trim(), after.trim()].filter(Boolean).join(separator));
+  if (prose && !looksLikeProse(prose)) return segment;
+  return segment.kind === 'text' ? { ...segment, text: prose } : { ...segment, caption: prose };
+}
+
+/** Keep slot positions stable for review. Empty text drops out when output is prepared. */
+export function stripSavedDataAnnotations(input: readonly ReplySegment[]) {
+  let removed = 0;
+  const emptySlots: number[] = [];
+  const segments = input.map((original, index) => {
+    const stripped = stripSavedDataAnnotation(original);
+    if (stripped !== original) {
+      removed++;
+      if (!(stripped.kind === 'text' ? stripped.text : stripped.caption)) emptySlots.push(index);
+    }
+    return stripped;
+  });
+  if (!emptySlots.length) return { segments, removed };
+  const hasSpeech = segments.some(s => {
+    const text = cleanText(s.kind === 'text' ? s.text : s.caption ?? '');
+    return looksLikeProse(text) && !internalOutputReason(text);
+  });
+  if (!hasSpeech) {
+    // With no independent customer-facing words, request the ordinary tool-free
+    // rewrite without passing the saved fields to the reviewer.
+    const placeholder = '[anotação de salvar_dados sem mensagem ao cliente]';
+    for (const index of emptySlots) {
+      const s = segments[index];
+      segments[index] = s.kind === 'text' ? { ...s, text: placeholder } : { ...s, caption: placeholder };
+    }
+  }
+  return { segments, removed };
+}
+
 /** Customer-facing text must never contain bracketed instructions or a serialized tool call. */
 export function internalOutputReason(raw: string): string | null {
   const text = raw.normalize('NFKC').replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\\(["'])/g, '$1');
+  if (/\[\s*salvar_dados\b/iu.test(text)) return 'invalid_saved_data_annotation';
   if (text.includes('[')) return 'internal_marker';
   if (/\b(?:salvar_dados|encerrar_atendimento|executar_acao|enviar_midia|consultar_agente|consultar_documentos|consultar_retorno|agendar_retorno|cancelar_retorno|contrato_zapsign|falar_trecho|nome_signatario|telefone_signatario|email_signatario)\b/iu.test(text) ||
       /\bcalcular\s*\(|(?:^|\s)(?:functions|tools)\.[\w-]+|(?:^|\s)to=(?:functions|tools)\.|<\/?(?:tool_call|tool_use|function_call|invoke|function)(?:\s|[=>/])/iu.test(text)) return 'tool_call';

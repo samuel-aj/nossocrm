@@ -591,15 +591,19 @@ export async function buildHistoryMessages(
 
   const out: Array<{ role: 'user' | 'assistant'; content: string }> = [];
   for (const r of rows) {
-    const rawText = messageText(r);
-    const text = r.direction === 'out' && r.source === 'agent' ? agentHistoryText(rawText) : rawText;
+    const automated = r.direction === 'out' && !!r.source && AGENT_SOURCES.has(r.source);
+    // Only the caption or spoken words belong in the assistant's turn. A media
+    // placeholder is a CRM annotation, and would also hide a legitimate caption.
+    const text = automated
+      ? agentHistoryText((r.media_type && r.transcription?.trim()) || r.body || '')
+      : messageText(r);
     if (!text) continue;
     let role: 'user' | 'assistant';
     let content: string;
     if (r.direction === 'in') {
       role = 'user';
       content = text;
-    } else if (r.source && AGENT_SOURCES.has(r.source)) {
+    } else if (automated) {
       role = 'assistant';
       content = text;
     } else {
