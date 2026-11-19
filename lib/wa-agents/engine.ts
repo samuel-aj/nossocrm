@@ -269,6 +269,27 @@ async function getPendingInbound(
   return (data ?? []) as WaMessageLite[];
 }
 
+// A previous run may finish sending after the inbound arrived, but before this
+// run acquires the lock. Only its already recorded agent messages can coexist
+// with the unprocessed inbound. A human, bot or newly inserted message wins.
+async function reviewNoticeMessageIds(
+  admin: SupabaseClient, ctx: ConversationContext, pending: MediaMessageRow[]
+): Promise<Set<string> | null> {
+  const anchor = pending.at(-1);
+  if (!anchor) return null;
+  const { data, count, error } = await admin.from('wa_messages').select('id, direction, source', { count: 'exact' })
+    .eq('organization_id', ctx.conversation.organization_id).eq('conversation_id', ctx.conversation.id)
+    .gte('created_at', anchor.created_at);
+  if (error) {
+    console.error('[wa-agents] conferir mensagens do aviso de revisão:', error.message);
+    return null;
+  }
+  if (!data || data.length !== count || !data.some(row => row.id === anchor.id)) return null;
+  const inboundIds = new Set(pending.map(row => row.id));
+  if (data.some(row => row.direction === 'in' ? !inboundIds.has(row.id) : row.source !== 'agent')) return null;
+  return new Set(data.map(row => row.id));
+}
+
 /**
  * Pega a trava da conversa. Devolve o valor gravado em ai_lock_until (quem o
  * conhece é o dono: só ele renova e libera) ou null se não conseguiu.
@@ -687,6 +708,8 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     const returnAnchor = agent.tools?.scheduled_return_bot_id
       ? await loadLastInboundAt(admin, organizationId, conversationId) : null;
     let pending = await getPendingInbound(admin, ctx, since);
+    const reviewInbound = trigger === 'inbound' && !input.forceReply && !input.proactive && pending.length > 0;
+    const reviewMessages = reviewInbound ? await reviewNoticeMessageIds(admin, ctx, pending) : null;
     // Áudio, imagem, figurinha e documento que o lead mandou viram TEXTO aqui,
     // com a IA do próprio agente, antes de o prompt ser montado (o resultado fica
     // em wa_messages.transcription, que é o que o histórico e o chat leem).
@@ -909,18 +932,22 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       const pause = {
         ai_status: 'paused', ai_status_changed_at: new Date().toISOString(), ai_resume_at: null,
       } as const;
-      const { data: paused, error } = await admin.from('wa_conversations').update(pause)
+      let pauseCurrentTurn = admin.from('wa_conversations').update(pause)
         .eq('organization_id', organizationId).eq('id', conversationId)
         .eq('ai_agent_id', agent.id).eq('ai_status', 'active').eq('ai_lock_until', lockValue)
-        .select('id').maybeSingle();
+        .eq('wa_phone', conv.wa_phone);
+      pauseCurrentTurn = conv.connection_id
+        ? pauseCurrentTurn.eq('connection_id', conv.connection_id) : pauseCurrentTurn.is('connection_id', null);
+      pauseCurrentTurn = conv.ai_status_changed_at
+        ? pauseCurrentTurn.eq('ai_status_changed_at', conv.ai_status_changed_at) : pauseCurrentTurn.is('ai_status_changed_at', null);
+      const { data: paused, error } = await pauseCurrentTurn.select('id').maybeSingle();
       if (error) throw new WaAgentError('DB_ERROR', error.message);
       if (paused) {
         Object.assign(ctx.conversation, pause);
         // The existing run trigger persists the bell alert even if the fixed
         // reply below fails. Only the winner of this pause can notify/send.
         pushEvent('human_handoff', { reason: 'output_safety', code: 'AI_OUTPUT_BLOCKED' });
-        const anchor = pending.at(-1);
-        if (trigger === 'inbound' && !input.forceReply && !input.proactive && anchor) {
+        if (reviewInbound) {
           const reviewCtx = ctx;
           const reviewAgent = agent;
           const reply = 'Vou encaminhar seu atendimento para a equipe conferir uma informação e continuar por aqui.';
@@ -944,14 +971,14 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
               .eq('ai_lock_until', lockValue).gt('ai_lock_until', new Date().toISOString()).maybeSingle();
             if (stateError) throw new WaAgentError('DB_ERROR', stateError.message);
             if (!owned) throw new ProactiveInterrupted('A equipe alterou o atendimento durante a revisão.');
-            const { data: last, error: messageError } = await admin.from('wa_messages').select('id')
-              .eq('organization_id', organizationId).eq('conversation_id', conversationId)
-              .order('created_at', { ascending: false }).limit(1).maybeSingle();
-            if (messageError) throw new WaAgentError('DB_ERROR', messageError.message);
-            if (last?.id !== anchor.id) throw new ProactiveInterrupted('Outra mensagem substituiu a resposta em revisão.');
             if (reviewCtx.connection?.provider === 'meta_cloud' &&
               !getServiceWindow(await loadLastInboundAt(admin, organizationId, conversationId, reviewCtx.connection.id)).open) {
               throw new ProactiveInterrupted('Janela do WhatsApp fechada. A equipe foi avisada no CRM.');
+            }
+            const currentMessages = await reviewNoticeMessageIds(admin, reviewCtx, pending);
+            if (!reviewMessages || !currentMessages || currentMessages.size !== reviewMessages.size ||
+              [...currentMessages].some(id => !reviewMessages.has(id))) {
+              throw new ProactiveInterrupted('As mensagens deste atendimento mudaram ou não puderam ser confirmadas durante a revisão.');
             }
           };
           try {

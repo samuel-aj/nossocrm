@@ -120,7 +120,7 @@ export function buildTestContext(input: {
 }
 
 /** Converte as mensagens do painel em mensagens do modelo (alternância garantida). */
-export function toModelMessages(messages: TestMessage[]): ModelMessage[] {
+export function toModelMessages(messages: TestMessage[], trigger: 'reply' | 'signature' = 'reply'): ModelMessage[] {
   const out: Array<{ role: 'user' | 'assistant'; content: string }> = [];
   for (const m of messages) {
     const rawText = (m.text ?? '').trim();
@@ -131,8 +131,10 @@ export function toModelMessages(messages: TestMessage[]): ModelMessage[] {
     if (last && last.role === role) last.content = `${last.content}\n${text}`;
     else out.push({ role, content: text });
   }
+  if (out[0]?.role === 'assistant') out.unshift({ role: 'user', content: '(início da conversa)' });
+  // The signature confirmation supplies its own next turn.
+  if (trigger === 'signature') return out;
   if (out.length === 0) out.push({ role: 'user', content: '(o sistema pediu que você inicie o atendimento agora)' });
-  else if (out[0].role === 'assistant') out.unshift({ role: 'user', content: '(início da conversa)' });
   if (out[out.length - 1].role === 'assistant') {
     out.push({ role: 'user', content: '(o sistema pediu que você continue o atendimento agora)' });
   }
@@ -170,7 +172,7 @@ async function testAgentReplyWithUsage(
 
   if (input.signatureEvent === 'signed' && agent.tools.zapsign_template_token) {
     const { composeSignedReply } = await import('@/lib/zapsign/agentSignedReply');
-    const text = await composeSignedReply(admin, agent, ctx, input.messages.map(m=>({role:m.role,content:m.text})), true);
+    const text = await composeSignedReply(admin, agent, ctx, toModelMessages(input.messages, 'signature'), true);
     return { text, lines:[text], toolCalls:[], usage:null, segments:[{kind:'text',text}], media:[] };
   }
   const resolved = await resolveAgentModel(admin, organizationId, agent);

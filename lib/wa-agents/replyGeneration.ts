@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { transitionActionKeys } from './context';
 import { knowledgeLookups } from './knowledgeActions';
 import { supportsTemperature } from './model';
-import { prepareReplyOutput, segmentText, type OutputIssue, type ReplySegment } from './replyOutput';
+import { prepareReplyOutput, segmentText, stripSavedDataAnnotations, type OutputIssue, type ReplySegment } from './replyOutput';
 import { buildAgentTools, type AgentToolRuntime } from './tools';
 import type { AgentMediaKind, AgentRow } from './types';
 import { planMediaMarkers } from './mediaMarkers';
@@ -16,6 +16,7 @@ export type OutputSafety = {
   status: 'passed' | 'repaired' | 'blocked';
   issues: ReturnType<typeof prepareReplyOutput>['issues'];
   duplicatesRemoved: number;
+  savedDataAnnotationsRemoved?: number;
   recoveryAttempted: boolean;
   recoveryError?: string;
   recoveryFailureCode?: RecoveryFailureCode;
@@ -44,6 +45,7 @@ class RecoveryFailure extends Error {
 function rememberBlockedSamples(safety: OutputSafety, segments: readonly ReplySegment[], issues: readonly OutputIssue[], phase: BlockedSample['phase']) {
   const samples = issues.flatMap(issue => {
     const segment = segments[issue.segment];
+    if (issue.reason === 'invalid_saved_data_annotation') return [];
     // Literal voice clips originate in the saved script, not the generated draft.
     if (!segment || (phase === 'original' && segment.kind === 'text' && segment.voice)) return [];
     const text = segment.kind === 'text' ? segment.text : segment.caption ?? '';
@@ -119,12 +121,25 @@ export async function generateAgentReply(input: {
     outputTokens: result.totalUsage?.outputTokens ?? null,
     totalTokens: result.totalUsage?.totalTokens ?? null,
   };
+  const stripped = stripSavedDataAnnotations(segments);
+  segments = stripped.segments;
   let prepared = prepareReplyOutput(segments, voiceClips);
   const outputSafety: OutputSafety = {
-    status: 'passed', issues: prepared.issues, duplicatesRemoved: prepared.duplicatesRemoved, recoveryAttempted: false,
+    status: stripped.removed ? 'repaired' : 'passed', issues: prepared.issues,
+    ...(stripped.removed > 0 && { savedDataAnnotationsRemoved: stripped.removed }),
+    duplicatesRemoved: prepared.duplicatesRemoved, recoveryAttempted: false,
     steps: result.steps.map((s, step) => ({ step, textChars: s.text?.length ?? 0, tools: s.toolCalls.map(c => c.toolName) })),
   };
   rememberBlockedSamples(outputSafety, segments, prepared.issues, 'original');
+
+  // An ambiguous annotation can span multiple lines or steps and can contain
+  // apparent media commands. Keep the whole draft out of both recovery paths.
+  if (prepared.issues.some(issue => issue.reason === 'invalid_saved_data_annotation')) {
+    outputSafety.status = 'blocked';
+    outputSafety.recoveryFailureCode = 'internal_content';
+    outputSafety.recoveryError = 'A anotação de dados não pôde ser separada da resposta ao cliente.';
+    return { text: '', segments: [], toolCalls, usage, finishReason: String(result.finishReason ?? ''), outputSafety };
+  }
 
   if (prepared.issues.length) {
     try {
@@ -209,7 +224,16 @@ export async function generateAgentReply(input: {
         const text = byId.get(slot.id)!;
         if (!segmentText({ kind: 'text', text }) || (slot.kind === 'media' && text.length > 1000)) throw new RecoveryFailure('invalid_slots');
       }
-      segments = segments.map((s, i) => !byId.has(i) ? s : s.kind === 'text' ? { ...s, text: byId.get(i)! } : { ...s, caption: byId.get(i)! });
+      const reviewed = segments.map((s, i) => {
+        const text = byId.get(i);
+        if (text === undefined) return s;
+        return s.kind === 'text' ? { ...s, text } : { ...s, caption: text };
+      });
+      const strippedReview = stripSavedDataAnnotations(reviewed);
+      segments = strippedReview.segments;
+      if (strippedReview.removed) {
+        outputSafety.savedDataAnnotationsRemoved = (outputSafety.savedDataAnnotationsRemoved ?? 0) + strippedReview.removed;
+      }
       prepared = prepareReplyOutput(segments, voiceClips);
       rememberBlockedSamples(outputSafety, segments, prepared.issues, 'review');
       if (prepared.issues.length > 0) throw new RecoveryFailure('internal_content');

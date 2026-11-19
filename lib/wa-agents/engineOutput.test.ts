@@ -77,12 +77,13 @@ function fakeDb() {
         is: (k: string, v: unknown) => { rows = rows.filter(r => v === null ? r[k] == null : r[k] === v); return q; },
         in: (k: string, values: unknown[]) => { rows = rows.filter(r => values.includes(r[k])); return q; },
         gt: (k: string, v: string) => { rows = rows.filter(r => String(r[k]) > v); return q; }, lte: () => q, not: () => q,
+        gte: (k: string, v: string) => { rows = rows.filter(r => String(r[k]) >= v); return q; },
         order: (k: string, options: { ascending: boolean }) => { rows.sort((a,b) => String(a[k]).localeCompare(String(b[k])) * (options.ascending ? 1 : -1)); return q; },
         limit: (n: number) => { rows = rows.slice(0,n); return q; },
         maybeSingle: () => { single = true; return q; },
         then: (resolve: (r: unknown) => unknown) => {
           if (patch) rows.forEach(row => Object.assign(row, patch));
-          return Promise.resolve(resolve({ data: single ? rows[0] ?? null : rows, error: null }));
+          return Promise.resolve(resolve({ data: single ? rows[0] ?? null : rows, count: rows.length, error: null }));
         },
       };
       return q;
@@ -283,10 +284,19 @@ describe('validação no envio real e no simulador', () => {
   it('evento do simulador de assinatura gera a resposta do agente sem transporte nem ferramentas', async () => {
     h.agent!.tools = { ...h.agent!.tools, zapsign_template_token:'modelo' };
     h.generate.mockResolvedValue({text:'Parabéns pela assinatura! Posso ajudar com os próximos passos?'});
+    const annotation = '[salvar_dados] {"dados":{"confirmado":true}}';
     const r = await testAgentReply(h.db, {organizationId:org, agent:h.agent!, contractState:'invited',
-      signatureEvent:'signed', messages:[{role:'user',text:'Sim'},{role:'assistant',text:'Segue o link simulado.'}]});
+      signatureEvent:'signed', messages:[{role:'user',text:annotation},{role:'assistant',text:annotation},
+        {role:'assistant',text:'Segue o link simulado.'}]});
     expect(r.text).toContain('Parabéns'); expect(r.toolCalls).toEqual([]);
-    expect(h.generate).toHaveBeenCalledWith(expect.objectContaining({system:expect.stringContaining('assinatura completa')}));
+    expect(h.generate).toHaveBeenCalledWith(expect.objectContaining({
+      system: expect.stringContaining('assinatura completa'),
+      messages: [
+        { role: 'user', content: annotation },
+        { role: 'assistant', content: 'Segue o link simulado.' },
+        { role: 'user', content: expect.stringContaining('Evento interno do CRM') },
+      ],
+    }));
     expect(h.send).not.toHaveBeenCalled(); expect(h.action).not.toHaveBeenCalled();
   });
   it('retorno permanece vinculado à mensagem anterior quando cliente escreve durante montagem do histórico', async () => {
@@ -450,6 +460,71 @@ describe('validação no envio real e no simulador', () => {
     ]));
     expect(saved.output_text).toBeNull();
   });
+  it('avisa uma vez sobre a revisão dos áudios mesmo que o turno anterior tenha terminado de enviar depois deles', async () => {
+    const time = (hhmmss: string) => `2026-11-18T${hhmmss}.000Z`;
+    h.ctx!.conversation.ai_last_processed_at = time('11:10:00');
+    const firstAudio = { ...incoming, id: 'audio-1', created_at: time('11:10:39'), body: null, media_type: 'audio', transcription: 'Primeiro áudio' };
+    const secondAudio = { ...firstAudio, id: 'audio-2', created_at: time('11:10:42'), transcription: 'Segundo áudio' };
+    const priorReply = { ...incoming, direction: 'out', source: 'agent' };
+    h.messages = [firstAudio, secondAudio,
+      { ...priorReply, id: 'reply-1', created_at: time('11:10:57') },
+      { ...priorReply, id: 'reply-2', created_at: time('11:11:15') },
+    ];
+    h.generate.mockResolvedValueOnce(draft('[salvar_dados] {"campo_de_teste":"valor fictício"}', false));
+    h.generate.mockResolvedValueOnce({ output: { replacements: [{ id: 9, text: 'Resposta para outro trecho.' }] } });
+    const turn = { organizationId: org, conversationId: 'conv', trigger: 'inbound' as const, triggerMessageId: secondAudio.id, skipBuffer: true };
+    expect((await runAgentOnConversation(turn)).status).toBe('error');
+    expect(h.send.mock.calls.map(([m]) => m.text)).toEqual(['Vou encaminhar seu atendimento para a equipe conferir uma informação e continuar por aqui.']);
+    expect(h.ctx!.conversation).toMatchObject({ ai_status: 'paused', ai_resume_at: null });
+    expect(h.log.mock.calls[0][1].input_text).toBe('Primeiro áudio\nSegundo áudio');
+    expect(h.log.mock.calls[0][1].events).toContainEqual(expect.objectContaining({
+      type: 'output_checked', status: 'blocked', recoveryFailureCode: 'invalid_slots', savedDataAnnotationsRemoved: 1,
+    }));
+    expect(h.log.mock.calls[0][1].events).toContainEqual(expect.objectContaining({ type: 'human_handoff' }));
+    h.messages.push({ ...incoming, id: 'after-pause', created_at: time('11:56:00') });
+    expect(await handleInboundMessage({ organizationId: org, conversationId: 'conv', messageId: 'after-pause' }))
+      .toMatchObject({ status: 'skipped', reason: 'conversa paused' });
+    expect(h.send).toHaveBeenCalledTimes(1);
+    expect(h.generate).toHaveBeenCalledTimes(2);
+  });
+  it.each(['agent', 'crm', 'bot', 'api'])('preserva o alerta mas não envia aviso sobre uma saída %s surgida durante a geração', async source => {
+    const previous = { ...incoming, id: 'previous', direction: 'out', source: 'agent', created_at: '2026-10-01T12:01:00.000Z' };
+    h.messages = [previous];
+    h.generate.mockResolvedValueOnce(draft('[acao:proposta]'));
+    h.generate.mockImplementationOnce(async () => {
+      // Same database timestamp as an already visible outbound; only the ID distinguishes them.
+      h.messages.push({ ...previous, id: 'concurrent', source });
+      throw new Error('invalid output');
+    });
+    expect((await run()).status).toBe('error');
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.log.mock.calls[0][1].events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'human_handoff' }), expect.objectContaining({ type: 'output_review_notice_skipped' }),
+    ]));
+  });
+  it('uma resposta humana entre o inbound e a última saída do agente já registrada impede o aviso', async () => {
+    h.messages = [
+      { ...incoming, id: 'human', direction: 'out', source: 'crm', created_at: '2026-10-01T12:00:01.000Z' },
+      { ...incoming, id: 'old-agent', direction: 'out', source: 'agent', created_at: '2026-10-01T12:00:02.000Z' },
+    ];
+    h.generate.mockResolvedValueOnce(draft('[acao:proposta]')).mockRejectedValueOnce(new Error('invalid output'));
+    expect((await run()).status).toBe('error');
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.log.mock.calls[0][1].events).toContainEqual(expect.objectContaining({ type: 'human_handoff' }));
+  });
+  it('preserva a revisão manual e avisa a equipe se o cliente acrescenta uma mensagem durante a geração', async () => {
+    h.generate.mockResolvedValueOnce(draft('[acao:proposta]'));
+    h.generate.mockImplementationOnce(async () => {
+      h.messages.push({ ...incoming, id: 'additional', created_at: '2026-10-01T12:01:00.000Z' });
+      throw new Error('invalid output');
+    });
+    expect((await run()).status).toBe('error');
+    expect(h.ctx!.conversation).toMatchObject({ ai_status: 'paused', ai_resume_at: null });
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.log.mock.calls[0][1].events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'human_handoff' }), expect.objectContaining({ type: 'output_review_notice_skipped' }),
+    ]));
+  });
   it('não entrega o vídeo enfileirado nem aplica ações do rascunho bloqueado', async () => {
     h.media = [{id:'proposta',name:'proposta',kind:'video',storage_path:'fixture.mp4'} as AgentMediaRow];
     h.generate.mockImplementationOnce(async ({tools}) => {
@@ -546,6 +621,17 @@ describe('validação no envio real e no simulador', () => {
     expect(h.send).not.toHaveBeenCalled();
     expect(h.action).not.toHaveBeenCalled();
     expect(h.log.mock.calls[0][1].events.some((e:{type:string}) => e.type==='human_handoff')).toBe(false);
+  });
+  it('preserva a retomada manual do mesmo agente durante a geração', async () => {
+    h.generate.mockResolvedValueOnce(draft('[acao:proposta]'));
+    h.generate.mockImplementationOnce(async () => {
+      h.ctx!.conversation.ai_status_changed_at = '2026-11-18T15:20:00.000Z';
+      throw new Error('invalid output');
+    });
+    expect((await run()).status).toBe('error');
+    expect(h.ctx!.conversation.ai_status).toBe('active');
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.events.mock.calls[0][1].extra).toMatchObject({ code: 'AI_OUTPUT_BLOCKED', paused: false });
   });
   it('após recuperação envia apenas o texto corrigido e aplica a ação uma vez', async () => {
     h.generate.mockResolvedValueOnce(draft('{"dados":{"nome":"Teste"}}'));
