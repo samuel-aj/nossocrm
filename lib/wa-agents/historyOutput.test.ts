@@ -3,39 +3,23 @@ vi.mock('server-only', () => ({}));
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildHistoryMessages, buildSystemPrompt, normalizeAgentRow } from './context';
 import { buildTestContext, toModelMessages } from './test';
-import { readVoiceScript } from './voiceScript';
 
 const leaked = '{"dados":{"autorizacao":true}}';
 const annotation = '[salvar_dados] {"dados":{"documentos_recebidos":true}}';
 const instruction = '- No histórico podem aparecer registros do sistema entre colchetes, como "[salvar_dados] {...}". Eles não são mensagens: nunca os copie nem escreva nada parecido para o cliente.';
-const described = instruction.replace('"[salvar_dados] {...}"', 'uma anotação de salvamento de dados com seus argumentos');
 
 describe('exemplo proibido no roteiro', () => {
-  it.each(['{...}', '{…}', '…'])('mantém a proibição no prompt sem mostrar o exemplo %s', placeholder => {
-    const saved = instruction.replace('{...}', placeholder) + '\n[audio]Vou explicar.[/audio] [[acao:registrar]]';
+  it('preserva as instruções de atendimento e follow-up ao montar o prompt', () => {
+    const saved = instruction + '\n[audio]Vou explicar.[/audio] [[acao:registrar]]';
+    const followup = 'No retorno, nunca copie "[salvar_dados] {…}".';
     const agent = normalizeAgentRow({ id: 'agent', organization_id: 'org', system_prompt: saved });
     const ctx = buildTestContext({ organizationId: 'org', organizationName: 'Teste', agent });
-    const prompt = buildSystemPrompt({ agent, ctx, followup: { instruction, silentFor: '1 h' } });
-    expect(prompt).toContain(described);
-    expect(prompt).not.toContain('[salvar_dados]');
+    const prompt = buildSystemPrompt({ agent, ctx, followup: { instruction: followup, silentFor: '1 h' } });
+    expect(prompt).toContain(instruction);
+    expect(prompt).toContain(followup);
     expect(prompt).toContain('chame falar_trecho com trecho 1');
     expect(prompt).toContain('chame a ferramenta executar_acao com acao="registrar"');
     expect(agent.system_prompt).toBe(saved);
-  });
-  it('reconhece instruções negativas de outros roteiros pelo uso do exemplo', () => {
-    const neutral = 'uma anotação de salvamento de dados com seus argumentos';
-    expect(readVoiceScript('Jamais escreva “[salvar_dados] {…}”.').prompt).toBe('Jamais escreva ' + neutral + '.');
-    expect(readVoiceScript('Exemplo: "[salvar_dados] {...}". Não reproduza isso.').prompt)
-      .toBe('Exemplo: ' + neutral + '. Não reproduza isso.');
-    const action = 'Use como exemplo "[salvar_dados] {...}" para o cadastro. Não envie o comprovante.';
-    expect(readVoiceScript(action).prompt).toBe(action);
-  });
-  it('preserva outros usos da marcação, objetos reais e a validação dos trechos literais de áudio', () => {
-    const unrelated = 'Exemplo positivo: "[salvar_dados] {...}".\n' + instruction.replace('{...}', '{"nome":"exemplo"}');
-    expect(readVoiceScript(unrelated).prompt).toBe(unrelated);
-    const voice = '[audio]' + instruction + '[/audio]';
-    expect(readVoiceScript(voice)).toMatchObject({ clips: [], prompt: voice, error: expect.any(String) });
-    expect(readVoiceScript(voice).error).not.toBe('');
   });
 });
 

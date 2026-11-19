@@ -1,31 +1,5 @@
 import { internalOutputReason } from './replyOutput';
 
-const quotedSaveExample = /["“]\[salvar_dados\][ \t]+(?:\{[ \t]*(?:\.\.\.|…)[ \t]*\}|…)["”]/gu;
-const writingProhibition = /\b(?:não|nunca|jamais)\s+(?:(o|a|os|as)\s+)?(?:copie|escreva|repita|reproduza|envie|mostre|exiba|inclua)\b/iu;
-
-/** Replace an example of forbidden text in instructions, never an action or a literal voice clip. */
-function scriptInstructions(text: string): string {
-  if (!text.includes('[salvar_dados]')) return text;
-  return text.replace(/[^\r\n]+/gu, line => {
-    const prohibition = writingProhibition.exec(line);
-    if (!prohibition) return line;
-    const prohibitionEnd = prohibition.index + prohibition[0].length;
-    return line.replace(quotedSaveExample, (literal, offset: number) => {
-      const before = line.slice(0, offset).trimEnd();
-      if (before.length !== prohibitionEnd) {
-        if (!/\b(?:como|exemplo)\s*[:,]?\s*$/iu.test(before)) return literal;
-        // A later prohibition must refer back to the example. An unrelated
-        // instruction such as “não envie o comprovante” does not qualify.
-        const refersToExample = prohibitionEnd <= offset
-          ? !/[.!?]/u.test(line.slice(prohibitionEnd, offset))
-          : prohibition[1] || /^\s+(?:isso|isto|ess[ae]s?|est[ae]s?|o exemplo)\b/iu.test(line.slice(prohibitionEnd));
-        if (!refersToExample) return literal;
-      }
-      return 'uma anotação de salvamento de dados com seus argumentos';
-    });
-  });
-}
-
 /** Markers belong to the saved script. Customer messages never define voice clips. */
 export function readVoiceScript(script: string, textOnly = false, previousClips: readonly string[] = []) {
   const clips = [...previousClips];
@@ -37,7 +11,7 @@ export function readVoiceScript(script: string, textOnly = false, previousClips:
     const i = match.index!;
     if (!match[1]) {
       if (start >= 0) { error = 'Feche o trecho de áudio antes de abrir outro.'; break; }
-      prompt += scriptInstructions(script.slice(cursor, i));
+      prompt += script.slice(cursor, i);
       start = i + match[0].length;
       continue;
     }
@@ -56,7 +30,7 @@ export function readVoiceScript(script: string, textOnly = false, previousClips:
   }
   if (!error && start >= 0) error = 'Feche o trecho de áudio com [/audio].';
   // A legacy invalid script must not duplicate or execute partially parsed instructions.
-  return error ? { clips: [...previousClips], prompt: script, error } : { clips, prompt: prompt + scriptInstructions(script.slice(cursor)), error };
+  return error ? { clips: [...previousClips], prompt: script, error } : { clips, prompt: prompt + script.slice(cursor), error };
 }
 
 export function readAgentVoiceScripts(script: string, followup = '', textOnly = false) {
