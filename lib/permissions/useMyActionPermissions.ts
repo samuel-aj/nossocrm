@@ -17,7 +17,8 @@ export function useMyActionPermissions(boardId?: string): ActionPermissions {
       if (!res.ok) throw new Error('Falha ao consultar permissões');
       return res.json();
     },
-    staleTime: 10_000, refetchInterval: 15_000, refetchOnWindowFocus: 'always', retry: 1,
+    // 60 s (era 15 s): cada consulta confere as permissões no banco; ao voltar para a aba confere na hora
+    staleTime: 10_000, refetchInterval: 60_000, refetchOnWindowFocus: 'always', retry: 1,
   });
   useEffect(() => {
     const next = JSON.stringify([organizationId, user?.id, isError ? null : data]);

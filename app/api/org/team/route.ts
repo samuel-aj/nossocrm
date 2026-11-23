@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
-import { getTeamAccess } from '@/lib/permissions/teamAccessServer';
+import { forgetTeamAccess, getTeamAccess } from '@/lib/permissions/teamAccessServer';
 import { TeamRoleSchema } from '@/lib/permissions/teamRoles';
 
 const Mutation = z.discriminatedUnion('action', [
@@ -36,5 +36,7 @@ export async function POST(req: Request) {
     p_org: auth.user.organizationId, p_actor: auth.user.id, p_action: parsed.data.action, p_data: parsed.data.data,
   });
   if (error) return json({ error: error.code === '23503' ? 'Esta função está em uso. Altere a atribuição dos membros antes de excluí-la.' : error.message }, error.code === '42501' ? 403 : 400);
+  // Papéis mudaram: as permissões guardadas desta organização deixam de valer
+  forgetTeamAccess(auth.user.organizationId);
   return json({ ok: true });
 }

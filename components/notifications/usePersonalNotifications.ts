@@ -17,7 +17,7 @@ export function usePersonalNotifications() {
   const scope=user && organizationId ? `${organizationId}:${user.id}` : '';
   const router=useRouter(), client=useQueryClient();
   const queryKey=['personal-notification-settings',scope];
-  const settings=useQuery({queryKey,enabled:!!scope,queryFn:()=>api<NotificationSettings>('/api/notifications/preferences'),staleTime:15_000,refetchInterval:30_000,refetchIntervalInBackground:true});
+  const settings=useQuery({queryKey,enabled:!!scope,queryFn:()=>api<NotificationSettings>('/api/notifications/preferences'),staleTime:15_000,refetchInterval:60_000});
   const [history,setHistory]=useState<{scope:string;items:Notice[]}>({scope:'',items:[]});
   const [toast,setToast]=useState<{scope:string;notice:Notice}|null>(null);
   const [error,setError]=useState('');
@@ -26,10 +26,24 @@ export function usePersonalNotifications() {
   const fingerprint=JSON.stringify(preferences);
   useEffect(()=>{
     if(!scope || !preferences) return;
-    const controller=new AbortController(); let stopped=false; let timer:ReturnType<typeof setTimeout>;
+    const controller=new AbortController(); let stopped=false; let timer:ReturnType<typeof setTimeout>|undefined;
+    let running=false;
     let baseline:string|null=null;
     seen.current=new Set();
+    // Cada consulta faz várias perguntas ao banco, em todas as abas abertas (antes era
+    // a cada 4 s e pesou no banco em 23/11/2026): 15 s com a aba visível, 30 s com ela
+    // escondida (o aviso com som continua chegando; presentOnce evita repetir entre
+    // abas) e 60 s para quem desligou os avisos (só os alertas de conexão).
+    const quiet=!preferences.messages && !preferences.leads && !preferences.alerts;
+    const schedule=()=>{
+      clearTimeout(timer); timer=undefined;
+      if(stopped) return;
+      const interval=quiet ? 60_000 : document.visibilityState==='hidden' ? 30_000 : 15_000;
+      timer=setTimeout(()=>void poll(),interval);
+    };
     const poll=async()=>{
+      if(running || stopped) return;
+      running=true;
       try {
         let after:string|null=null, until:string|null=null;
         let usageNoticesUnavailable = false;
@@ -67,12 +81,15 @@ export function usePersonalNotifications() {
         setError(usageNoticesUnavailable ? 'Avisos de consumo da IA temporariamente indisponíveis. Tentando reconectar…'
           : connectionNoticesUnavailable ? 'Avisos de conexão temporariamente indisponíveis. Tentando reconectar…' : '');
       } catch { if(!stopped) setError('Avisos temporariamente indisponíveis. Tentando reconectar…'); }
-      finally {if(!stopped) timer=setTimeout(poll,4000);}
+      finally {running=false; schedule();}
     };
     void poll();
+    // Voltou para a aba: consulta na hora em vez de esperar o intervalo de aba escondida
+    const onVisibility=()=>{if(document.visibilityState==='visible' && !running){clearTimeout(timer); timer=undefined; void poll();}};
+    document.addEventListener('visibilitychange',onVisibility);
     const unlock=()=>{if(preferences.sound) void unlockNotificationSound().catch(()=>{});};
     window.addEventListener('pointerdown',unlock); window.addEventListener('keydown',unlock);
-    return()=>{stopped=true;controller.abort();clearTimeout(timer);window.removeEventListener('pointerdown',unlock);window.removeEventListener('keydown',unlock);};
+    return()=>{stopped=true;controller.abort();clearTimeout(timer);document.removeEventListener('visibilitychange',onVisibility);window.removeEventListener('pointerdown',unlock);window.removeEventListener('keydown',unlock);};
     // JSON fingerprint avoids restarting the baseline on equivalent refetches.
   },[scope,fingerprint,router]);
   useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(null),7000);return()=>clearTimeout(timer);},[toast]);

@@ -128,6 +128,13 @@ export async function processFollowups(
         result.checked++;
         try {
           conv.last_inbound_at = await loadLastInboundAt(admin, conv.organization_id, conv.id);
+          const state = (conv.ai_state ?? {}) as ConversationAiState;
+          const cycle = conv.last_inbound_at ?? null;
+          const done = state.followups && state.followups.cycle === cycle ? [...state.followups.done] : [];
+          const pending = rules.filter(r => !done.includes(r.id));
+          // Tudo já enviado neste ciclo: nada a consultar (antes cada conversa ainda
+          // ia ao banco por retorno agendado e contrato a cada 30 s)
+          if (pending.length === 0) continue;
           if (await pendingRobotReturn(admin, conv.organization_id, conv.id)) continue;
           // A reviewed manual contract supersedes this agent's collection
           // sequence. Inbound replies and the signature notice remain active.
@@ -135,11 +142,6 @@ export async function processFollowups(
             organizationId: conv.organization_id, dealId: conv.deal_id, contactId: conv.contact_id,
             templateToken: agent.tools?.zapsign_template_token, silentSince: conv.last_inbound_at,
           })) continue;
-          const state = (conv.ai_state ?? {}) as ConversationAiState;
-          const cycle = conv.last_inbound_at ?? null;
-          const done = state.followups && state.followups.cycle === cycle ? [...state.followups.done] : [];
-          const pending = rules.filter(r => !done.includes(r.id));
-          if (pending.length === 0) continue;
           const startedAt = await silenceStartedAt(admin, conv);
           if (startedAt === null) continue; // o agente ainda não respondeu: não é silêncio do lead
           const elapsed = Date.now() - startedAt;

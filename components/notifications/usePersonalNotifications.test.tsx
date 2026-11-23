@@ -40,8 +40,34 @@ it('keeps an open connection incident visible and replaces it on recovery with p
   act(()=>result.current.clear());
   expect(result.current.notices.map(n=>n.id)).toEqual([incident.id]);
   feed={...feed,events:[restored]};
-  await tick(4000);
+  // Avisos pessoais desligados: só os alertas de conexão, a cada 60 s
+  await tick(59_000);
+  expect(result.current.notices.map(n=>n.id)).toEqual([incident.id]);
+  await tick(1_000);
   expect(result.current.notices.map(n=>n.id)).toEqual([restored.id]);
+});
+
+it('consulta a cada 15 s com a aba visível e 30 s com ela escondida, e na hora ao voltar', async () => {
+  const fetchMock=vi.fn(async(url:string)=>Response.json(url.includes('preferences') ? {preferences:{...DEFAULT_PREFERENCES,messages:true},boards:[]} : {...feed,events:[]}));
+  vi.stubGlobal('fetch',fetchMock);
+  const events=()=>fetchMock.mock.calls.filter(([url])=>String(url).includes('/api/notifications/events')).length;
+  renderHook(()=>usePersonalNotifications(),{wrapper});
+  await tick();
+  expect(events()).toBe(1);
+  await tick(14_000);
+  expect(events()).toBe(1);
+  await tick(1_000);
+  expect(events()).toBe(2);
+  const visibility=vi.spyOn(document,'visibilityState','get').mockReturnValue('hidden');
+  await tick(15_000);
+  expect(events()).toBe(3);
+  await tick(29_000);
+  expect(events()).toBe(3);
+  visibility.mockReturnValue('visible');
+  await act(async()=>{document.dispatchEvent(new Event('visibilitychange'));});
+  await tick();
+  expect(events()).toBe(4);
+  visibility.mockRestore();
 });
 
 it('retains an unresolved block through clear, polling and outages; removes it only on a complete feed', async () => {
@@ -50,15 +76,15 @@ it('retains an unresolved block through clear, polling and outages; removes it o
   expect(result.current.notices.map(n => n.id).sort()).toEqual(['block', 'message']);
   act(() => result.current.clear());
   expect(result.current.notices.map(n => n.id)).toEqual(['block']);
-  await tick(4000);
+  await tick(15_000);
   expect(result.current.notices.map(n => n.id)).toEqual(['block']);
   expect(h.deliver).toHaveBeenCalledTimes(2);
   feed = { ...feed, events: [], usageNoticesUnavailable: true };
-  await tick(4000);
+  await tick(15_000);
   expect(result.current.notices.map(n => n.id)).toEqual(['block']);
   expect(result.current.error).toContain('temporariamente indisponíveis');
   feed = { ...feed, usageNoticesUnavailable: false };
-  await tick(4000);
+  await tick(15_000);
   expect(result.current.notices).toEqual([]);
   expect(result.current.error).toBe('');
 });
