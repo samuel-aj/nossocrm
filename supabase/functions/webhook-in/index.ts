@@ -185,11 +185,6 @@ Deno.serve(async (req) => {
   const sourceId = getSourceIdFromPath(req);
   if (!sourceId) return json(404, { error: "source_id ausente na URL" });
 
-  // Rate limiting por source_id
-  if (isRateLimited(sourceId)) {
-    return json(429, { error: "Muitas requisições. Tente novamente em 1 minuto." });
-  }
-
   const secretHeader = getSecretFromRequest(req);
   if (!secretHeader) return json(401, { error: "Secret ausente" });
 
@@ -214,6 +209,12 @@ Deno.serve(async (req) => {
   if (sourceErr) { console.error("[webhook-in] source lookup:", sourceErr.message); return json(500, { error: "Erro ao buscar fonte" }); }
   if (!source || !source.active) return json(404, { error: "Fonte não encontrada/inativa" });
   if (String(source.secret) !== String(secretHeader)) return json(401, { error: "Secret inválido" });
+
+  // Rate limiting por source_id, só DEPOIS do secret (auditoria 23/11/2026): antes,
+  // quem soubesse o source_id travava a entrada de leads só mandando lixo.
+  if (isRateLimited(sourceId)) {
+    return json(429, { error: "Muitas requisições. Tente novamente em 1 minuto." });
+  }
 
   let payload: LeadPayload;
   try {
@@ -317,9 +318,13 @@ Deno.serve(async (req) => {
   }
 
   if (leadEmail || leadPhone) {
+    // Valor entre aspas no filtro do PostgREST: vírgula, ponto e parênteses do
+    // payload não viram filtro novo (antes `phone: "x,id.not.is.null"` casava
+    // qualquer contato da org e sobrescrevia os dados dele).
+    const quoted = (v: string) => `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
     const filters: string[] = [];
-    if (leadEmail) filters.push(`email.eq.${leadEmail}`);
-    if (leadPhone) filters.push(`phone.eq.${leadPhone}`);
+    if (leadEmail) filters.push(`email.eq.${quoted(leadEmail)}`);
+    if (leadPhone) filters.push(`phone.eq.${quoted(leadPhone)}`);
 
     const { data: existingContacts, error: findErr } = await supabase
       .from("contacts")

@@ -236,6 +236,7 @@ export async function POST(req: Request) {
     }
   }
 
-  console.log('[admin/invites POST] Created invite:', { id: invite?.id, token: invite?.token, expires_at: invite?.expires_at, emailSent });
+  // Sem o token: quem lê o log da Vercel não pode usar o convite.
+  console.log('[admin/invites POST] Created invite:', { id: invite?.id, expires_at: invite?.expires_at, emailSent });
   return json({ invite, emailSent, emailError }, 201);
 }

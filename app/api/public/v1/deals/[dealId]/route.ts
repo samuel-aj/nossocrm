@@ -8,6 +8,7 @@ import { isValidUUID, sanitizeUUID } from '@/lib/supabase/utils';
 import { normalizeText } from '@/lib/public-api/sanitize';
 import { moveStageByDealId } from '@/lib/public-api/dealsMoveStage';
 import { resolveOwnerId } from '@/lib/public-api/resolve';
+import { refBelongsToOrg } from '@/lib/public-api/orgRefs';
 
 export const runtime = 'nodejs';
 
@@ -227,6 +228,13 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
   if (parsed.data.contact_id !== undefined) updates.contact_id = sanitizeUUID(parsed.data.contact_id);
   if (parsed.data.client_company_id !== undefined) updates.client_company_id = parsed.data.client_company_id === null ? null : (sanitizeUUID(parsed.data.client_company_id) || null);
   if (parsed.data.loss_reason !== undefined) updates.loss_reason = parsed.data.loss_reason === null ? null : normalizeText(parsed.data.loss_reason);
+  // Contato e empresa precisam ser desta organização (a gravação ignora RLS).
+  if (updates.contact_id && !(await refBelongsToOrg('contacts', updates.contact_id, auth.organizationId))) {
+    return NextResponse.json({ error: 'Contact not found', code: 'CONTACT_NOT_FOUND' }, { status: 422 });
+  }
+  if (updates.client_company_id && !(await refBelongsToOrg('crm_companies', updates.client_company_id, auth.organizationId))) {
+    return NextResponse.json({ error: 'Company not found', code: 'COMPANY_NOT_FOUND' }, { status: 422 });
+  }
 
   // Responsável (owner): owner_id (null limpa) OU owner_email (resolve p/ id).
   if (parsed.data.owner_id !== undefined || parsed.data.owner_email !== undefined) {

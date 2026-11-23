@@ -5,6 +5,7 @@ import { createStaticAdminClient } from '@/lib/supabase/server';
 import { decodeOffsetCursor, encodeOffsetCursor, parseLimit } from '@/lib/public-api/cursor';
 import { normalizeEmail, normalizePhone, normalizeText } from '@/lib/public-api/sanitize';
 import { sanitizeUUID } from '@/lib/supabase/utils';
+import { refBelongsToOrg } from '@/lib/public-api/orgRefs';
 
 export const runtime = 'nodejs';
 
@@ -159,6 +160,10 @@ export async function POST(request: Request) {
   if (lastInteraction === '__INVALID__') return NextResponse.json({ error: 'Invalid last_interaction', code: 'VALIDATION_ERROR' }, { status: 422 });
 
   let clientCompanyId = sanitizeUUID(parsed.data.client_company_id) || null;
+  // Empresa precisa ser desta organização (a gravação ignora RLS).
+  if (clientCompanyId && !(await refBelongsToOrg('crm_companies', clientCompanyId, auth.organizationId))) {
+    return NextResponse.json({ error: 'Company not found', code: 'COMPANY_NOT_FOUND' }, { status: 422 });
+  }
   if (!clientCompanyId && companyName) {
     try {
       clientCompanyId = await resolveCompanyIdFromName({ organizationId: auth.organizationId, companyName });

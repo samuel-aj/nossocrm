@@ -5,6 +5,7 @@ import { createStaticAdminClient } from '@/lib/supabase/server';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { normalizeEmail, normalizePhone, normalizeText } from '@/lib/public-api/sanitize';
 import { sanitizeUUID } from '@/lib/supabase/utils';
+import { refBelongsToOrg } from '@/lib/public-api/orgRefs';
 
 export const runtime = 'nodejs';
 
@@ -95,6 +96,10 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ contactId
   if (parsed.data.notes !== undefined) updates.notes = normalizeText(parsed.data.notes);
   if (parsed.data.client_company_id !== undefined) {
     updates.client_company_id = parsed.data.client_company_id === null ? null : (sanitizeUUID(parsed.data.client_company_id) || null);
+    // Empresa precisa ser desta organização (a gravação ignora RLS).
+    if (updates.client_company_id && !(await refBelongsToOrg('crm_companies', updates.client_company_id, auth.organizationId))) {
+      return NextResponse.json({ error: 'Company not found', code: 'COMPANY_NOT_FOUND' }, { status: 422 });
+    }
   }
   if (parsed.data.birth_date !== undefined) {
     updates.birth_date = parsed.data.birth_date === null ? null : toIsoDateString(parsed.data.birth_date);

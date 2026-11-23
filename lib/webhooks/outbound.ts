@@ -1,5 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { prepareGroupLinkWebhookPayload } from './groupLinks';
+import { isPublicHttpUrl } from '@/lib/wa-agents/url';
+import { resolvesToPrivateAddress } from '@/lib/wa-agents/webhooks';
 
 // Exponential backoff schedule (in minutes): 1m, 5m, 30m, 2h, 12h
 const BACKOFF_MINUTES = [1, 5, 30, 120, 720];
@@ -108,6 +110,11 @@ export async function deliverWebhook(
   let success = false;
 
   try {
+    // Destino precisa ser público (auditoria 23/11/2026): a URL é cadastrada pela
+    // org e a resposta fica gravada, então um endereço interno viraria leitura
+    // da rede da Vercel. Mesma regra dos webhooks dos agentes; sem seguir redirect.
+    const blocked = isPublicHttpUrl(endpoint.url) ? await resolvesToPrivateAddress(endpoint.url) : 'endereço não público';
+    if (blocked) throw new Error(`Destino recusado: ${blocked}`);
     const payload = await prepareGroupLinkWebhookPayload(supabase, delivery.organization_id, event.payload);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
@@ -121,6 +128,7 @@ export async function deliverWebhook(
       },
       body: JSON.stringify(payload),
       signal: controller.signal,
+      redirect: 'manual',
     });
 
     clearTimeout(timeout);

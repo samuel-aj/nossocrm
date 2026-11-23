@@ -7,6 +7,7 @@ import { createStaticAdminClient } from '@/lib/supabase/server';
 import { withActor } from '@/lib/supabase/actorClient';
 import { decodeOffsetCursor, encodeOffsetCursor, parseLimit } from '@/lib/public-api/cursor';
 import { resolveBoardId, resolveBoardIdFromKey, resolveFirstStageId, resolveOwnerId } from '@/lib/public-api/resolve';
+import { quotePostgrestValue, refBelongsToOrg } from '@/lib/public-api/orgRefs';
 import { normalizeEmail, normalizePhone, normalizeText } from '@/lib/public-api/sanitize';
 import { isValidUUID, sanitizeUUID } from '@/lib/supabase/utils';
 
@@ -171,12 +172,16 @@ async function upsertContactForDeal(opts: {
     .select('id')
     .eq('organization_id', opts.organizationId)
     .is('deleted_at', null);
-  if (email && phone) lookup = lookup.or(`email.eq.${email},phone.eq.${phone}`);
+  if (email && phone) lookup = lookup.or(`email.eq.${quotePostgrestValue(email)},phone.eq.${quotePostgrestValue(phone)}`);
   else if (email) lookup = lookup.eq('email', email);
   else lookup = lookup.eq('phone', phone);
 
   const existing = await lookup.maybeSingle();
   if (existing.error) throw existing.error;
+
+  // Empresa de outra organização é ignorada (a gravação ignora RLS).
+  let companyId = sanitizeUUID(opts.contact.client_company_id) || null;
+  if (companyId && !(await refBelongsToOrg('crm_companies', companyId, opts.organizationId))) companyId = null;
 
   const now = new Date().toISOString();
   const base: any = {
@@ -184,7 +189,7 @@ async function upsertContactForDeal(opts: {
     email,
     phone,
     role: normalizeText(opts.contact.role),
-    client_company_id: sanitizeUUID(opts.contact.client_company_id) || null,
+    client_company_id: companyId,
     updated_at: now,
   };
 
