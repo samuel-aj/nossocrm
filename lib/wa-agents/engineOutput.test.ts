@@ -124,6 +124,33 @@ beforeEach(() => {
 });
 const run = () => runAgentOnConversation({ organizationId: org, conversationId: 'conv', trigger: 'inbound', skipBuffer: true });
 
+it.each(['conversa', 'simulador'])('processa os dois marcadores da proposta na %s sem expor comandos', async mode => {
+  const agent = h.agent!;
+  agent.line_delay_ms = 0;
+  agent.custom_actions = [{ key: 'etapa-proposta', label: 'Proposta', description: 'Ao apresentar a proposta',
+    actions: [{ type: 'add_tag', tag: 'Proposta' }] }];
+  h.media = [{ id: 'proposta', name: 'proposta', kind: 'video', storage_path: 'org/proposta.mp4', agent_id: agent.id, organization_id: org } as AgentMediaRow];
+  h.generate.mockResolvedValueOnce(draft('Segue a proposta.\n[[enviar_midia: proposta]]\n[[executar_acao: etapa-proposta]]', false));
+  if (mode === 'simulador') {
+    const sim = await testAgentReply(h.db, { organizationId: org, agent, messages: [{ role: 'user', text: 'Sim' }] });
+    expect(sim).toMatchObject({ text: 'Segue a proposta.', media: ['proposta'],
+      toolCalls: [{ tool: 'enviar_midia' }, { tool: 'executar_acao' }] });
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.action).not.toHaveBeenCalled();
+  } else {
+    const transport = vi.spyOn(await import('./media'), 'sendAgentMedia').mockResolvedValue({ ok: true, messageId: 'fake-media' });
+    try {
+      expect(await run()).toMatchObject({ status: 'ok', lines: ['Segue a proposta.'] });
+      expect(h.ctx!.conversation.ai_status).toBe('active');
+      expect(transport).toHaveBeenCalledTimes(1);
+      expect(h.action).toHaveBeenCalledExactlyOnceWith(h.db, expect.objectContaining({ action: agent.custom_actions[0] }));
+    } finally {
+      transport.mockRestore();
+    }
+  }
+  expect(h.generate).toHaveBeenCalledTimes(1);
+});
+
 describe('espera da confirmação do contrato', () => {
   it.each(['conversa', 'simulador'])('descarta texto e conclusão concorrentes na %s', async mode => {
     const output = { ok: true, aguardando_confirmacao_zapsign: true };
@@ -338,6 +365,29 @@ describe('validação no envio real e no simulador', () => {
       ],
     }));
     expect(h.send).not.toHaveBeenCalled(); expect(h.action).not.toHaveBeenCalled();
+  });
+  it.each(['conversa', 'simulador'])('transforma o pedido de retorno às 20h em uma reserva na %s, com transporte falso', async mode => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-22T18:00:00Z'));
+    try {
+      h.agent!.tools.scheduled_return_bot_id = org;
+      h.calendar = { organization_id: org, enabled: true, timezone: 'America/Manaus', slots: [{ day: 1, start: '09:00', end: '18:00' }] };
+      const text = 'Pode me chamar às 20h?';
+      h.history.mockResolvedValue([{ role: 'user', content: text }]);
+      const rpc = vi.spyOn(h.db, 'rpc');
+      if (mode === 'conversa') {
+        const result = await run();
+        expect(result).toMatchObject({ status: 'ok', text: expect.stringContaining('20:00') });
+        expect(rpc).toHaveBeenCalledWith('schedule_robot_return', expect.objectContaining({ p_at: '2026-11-23T00:00:00.000Z', p_timezone: 'America/Manaus', p_anchor: at }));
+        expect(h.ctx!.conversation.ai_status).toBe('active');
+      } else {
+        const result = await testAgentReply(h.db, { organizationId: org, agent: h.agent!, messages: [{ role: 'user', text }] });
+        expect(result.toolCalls).toContainEqual(expect.objectContaining({ tool: 'agendar_retorno', output: expect.objectContaining({ simulated: true, scheduledAt: '2026-11-23T00:00:00.000Z' }) }));
+        expect(rpc).not.toHaveBeenCalled();
+        expect(h.send).not.toHaveBeenCalled();
+      }
+      expect(h.generate).not.toHaveBeenCalled();
+      expect(h.action).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
   });
   it('retorno permanece vinculado à mensagem anterior quando cliente escreve durante montagem do histórico', async () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-05T12:00:00Z'));

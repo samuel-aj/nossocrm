@@ -7,8 +7,10 @@ import { prepareReplyOutput, segmentText, stripSavedDataAnnotations, type Output
 import { buildAgentTools, type AgentToolRuntime } from './tools';
 import type { AgentMediaKind, AgentRow } from './types';
 import { planMediaMarkers } from './mediaMarkers';
+import { recoverNamedReplyMarkers } from './namedReplyMarkers';
 import { readAgentVoiceScripts } from './voiceScript';
 import { contractTurnWait, type ContractTurnWait } from './contractConfirmation';
+import { bookExplicitReturn, guardReturnPromises } from './agreedReturn';
 
 export type CollectedToolCall = { tool: string; input: unknown; output?: unknown };
 type RecoveryFailureCode = 'invalid_slots' | 'internal_content' | 'parse_or_provider_failure';
@@ -18,6 +20,7 @@ export type OutputSafety = {
   issues: ReturnType<typeof prepareReplyOutput>['issues'];
   duplicatesRemoved: number;
   savedDataAnnotationsRemoved?: number;
+  returnReplyAdjusted?: boolean;
   recoveryAttempted: boolean;
   recoveryError?: string;
   recoveryFailureCode?: RecoveryFailureCode;
@@ -67,7 +70,16 @@ export async function generateAgentReply(input: {
   followupInstruction?: string;
   messages: ModelMessage[];
   runtime?: AgentToolRuntime;
+  inboundReturn?: boolean;
 }): Promise<GeneratedReply> {
+  if (input.inboundReturn && input.agent.tools?.scheduled_return_bot_id && input.runtime?.scheduledReturn) {
+    const booking = await bookExplicitReturn(input.messages, input.runtime.scheduledReturn);
+    if (booking) return {
+      text: booking.text, segments: [{ kind: 'text', text: booking.text }], toolCalls: booking.calls,
+      usage: null, finishReason: 'explicit_return',
+      outputSafety: { status: 'passed', issues: [], recoveryAttempted: false, duplicatesRemoved: 0, steps: [] },
+    };
+  }
   const finals = transitionActionKeys(input.agent);
   const lookupKeys = new Set((input.agent.custom_actions ?? []).filter(a => knowledgeLookups(a).length > 0).map(a => a.key));
   const voiceClips = readAgentVoiceScripts(input.agent.system_prompt ?? '', input.followupInstruction).clips;
@@ -157,6 +169,14 @@ export async function generateAgentReply(input: {
   if (prepared.issues.length) {
     try {
       const media = input.runtime?.media ?? [];
+      const named = await recoverNamedReplyMarkers(segments, toolCalls, input.agent, media, agentTools, input.messages, voiceClips);
+      if (named) {
+        segments = named.segments;
+        toolCalls.push(...named.calls);
+        prepared = prepareReplyOutput(segments, voiceClips);
+        outputSafety.status = 'repaired';
+        outputSafety.duplicatesRemoved = prepared.duplicatesRemoved;
+      }
       const plan = planMediaMarkers(segments, media, voiceClips);
       if (plan.matched) {
         const recovered = new Map<AgentMediaKind, ReplySegment>();
@@ -257,6 +277,17 @@ export async function generateAgentReply(input: {
       outputSafety.recoveryFailureCode = error instanceof RecoveryFailure ? error.code : 'parse_or_provider_failure';
       outputSafety.recoveryError = 'Não foi possível obter uma resposta válida na tentativa de revisão.';
       prepared = { text: '', segments: [], issues: outputSafety.issues, duplicatesRemoved: 0 };
+    }
+  }
+  if (outputSafety.status !== 'blocked') {
+    const leavingAgent = toolCalls.some(c => c.tool === 'encerrar_atendimento' ||
+      (c.tool === 'executar_acao' && finals.has(String((c.input as { acao?: string } | null)?.acao ?? ''))));
+    const canBook = !!input.agent.tools?.scheduled_return_bot_id && !!input.runtime?.scheduledReturn && !leavingAgent;
+    const checked = guardReturnPromises(prepared.segments, toolCalls, canBook, input.inboundReturn ? input.messages : []);
+    if (checked) {
+      prepared = prepareReplyOutput(checked);
+      outputSafety.status = 'repaired';
+      outputSafety.returnReplyAdjusted = true;
     }
   }
   return { text: prepared.text, segments: prepared.segments, toolCalls, usage, finishReason: String(result.finishReason ?? ''), outputSafety };

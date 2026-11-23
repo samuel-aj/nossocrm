@@ -844,7 +844,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     const mediaQueued = new Set<string>();
     let helperCalls = 0;
     let knowledgeCalls = 0;
-    const returns = agent.tools?.scheduled_return_bot_id
+    const returns = agent.tools?.scheduled_return_bot_id && !mustClose
       ? scheduledReturnRuntime(admin, organizationId, conversationId, agent, returnAnchor) : null;
     const runtime: AgentToolRuntime = {
       ...(agent.tools?.zapsign_template_token && !input.forceReply && !input.proactive && pending.length ? {
@@ -894,7 +894,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
         if (conn.status !== 'connected') return { ok: false, error: 'número desconectado' };
         const key = normalizeKeyword(media.name);
         if (mediaSentBefore.has(key) || mediaQueued.has(key)) {
-          return { ok: false, error: `mídia "${media.name}" já enviada neste atendimento; não envie de novo` };
+          return { ok: false, alreadyDelivered: mediaSentBefore.has(key), error: `mídia "${media.name}" já enviada neste atendimento; não envie de novo` };
         }
         mediaQueued.add(key);
         return { ok: true, note: `mídia "${media.name}" será enviada neste ponto da conversa` };
@@ -924,7 +924,8 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     } else {
       const resolved = await resolveAgentModel(admin, organizationId, agent);
       modelId = resolved.modelId;
-      gen = await generateAgentReply({ model: resolved.model, agent, system, messages, runtime, followupInstruction: input.followup?.instruction });
+      gen = await generateAgentReply({ model: resolved.model, agent, system, messages, runtime, followupInstruction: input.followup?.instruction,
+        inboundReturn: !input.forceReply && !input.proactive && pending.length > 0 });
     }
     assertUsageHealthy();
     toolCalls.push(...gen.toolCalls);
