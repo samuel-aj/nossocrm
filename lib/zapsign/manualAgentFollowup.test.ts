@@ -70,6 +70,13 @@ describe('contrato manual e atendimento existente, sem transportes', () => {
     expect(fact).toContain('Documento assinado por todos');
     expect(fact).toContain('Emissão anterior sem acompanhamento automático');
   });
+  it('mantém a responsabilidade do convite com a equipe após confirmação tardia', async () => {
+    const db = database({ deal_signatures: [{ ...issued, origin:'agent', confirmation_timed_out_at:'2026-11-19T15:05:00Z',
+      request: { agent_delivery:'conversation', conversation_id:'chat', agent_id:'agent' } }] });
+    const fact = await agentContractFact(db, 'org', 'chat', 'agent', 'lead', 'person', 'model');
+    expect(fact).toContain('equipe assumiu');
+    expect(fact).not.toContain('automaticamente');
+  });
   it('suprime o ciclo anterior à emissão, permitindo retomada após nova mensagem do cliente',async()=>{
     const db=database({deal_signatures:[issued]});
     expect(await manualContractIssued(db,{...scope,silentSince:'2026-11-14T10:00:00Z'})).toBe(true);

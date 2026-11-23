@@ -17,6 +17,7 @@ import { recordOutboundMessage, replicateOutboundToSiblings } from '@/lib/whatsa
 import { withActor } from '@/lib/supabase/actorClient';
 import { executeCustomAction, executeOutcomeActions, type OutcomeActionsResult } from './actions';
 import { ensureAutoLead } from './autoLead';
+import { contractConfirmationDue } from './contractConfirmation';
 import { isAiAgentsApproved } from './beta';
 import { handleBotReply, startBotForInboundMessage, startBotRun } from './bots';
 import {
@@ -677,6 +678,10 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     if (conv.ai_agent_id !== agent.id) {
       return await finish('skipped', { reason: 'agente da conversa mudou' });
     }
+    if (agent.tools?.zapsign_template_token) {
+      const due = await contractConfirmationDue(admin, organizationId, conversationId, conv);
+      if (due) return { ...await finish('skipped', { reason: 'Aguardando confirmação da ZapSign.' }), deferredUntil: due };
+    }
     // Known outages are queued before generating text, creating contracts or executing tools.
     if ((input.triggerMessageId || input.followupRule) && ctx.connection && ctx.connection.status !== 'connected') {
       if (ctx.connection.health_monitor_enabled === false || ctx.connection.health_identity_mismatch_at) {
@@ -924,6 +929,25 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     assertUsageHealthy();
     toolCalls.push(...gen.toolCalls);
     usage = gen.usage;
+    if (gen.contractWait) {
+      pushEvent('zapsign_wait', { waiting_for: gen.contractWait });
+      const lastInbound = pending.at(-1);
+      if (lastInbound && gen.contractWait !== 'team') {
+        let checkpoint = admin.from('wa_conversations').update({ ai_last_processed_at: lastInbound.created_at })
+          .eq('organization_id', organizationId).eq('id', conversationId)
+          .eq('ai_agent_id', agent.id).eq('ai_status', 'active').eq('ai_lock_until', lockValue);
+        checkpoint = conv.ai_status_changed_at
+          ? checkpoint.eq('ai_status_changed_at', conv.ai_status_changed_at) : checkpoint.is('ai_status_changed_at', null);
+        const { error } = await checkpoint;
+        if (error) throw new WaAgentError('DB_ERROR', error.message);
+      }
+      const reason = {
+        confirmation: 'Aguardando confirmação da ZapSign.',
+        delivery: 'Contrato confirmado. Aguardando entrega do link.',
+        team: 'Conferência do contrato sob responsabilidade da equipe.',
+      }[gen.contractWait];
+      return await finish('ok', { reason, lines: [] });
+    }
     const text = gen.text;
     outputText = text || null;
     pushEvent('output_checked', { ...gen.outputSafety });

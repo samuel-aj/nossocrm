@@ -28,6 +28,8 @@ async function eligibility(db: SupabaseClient, n: Notice) {
   const { data, error } = await db.from('deal_signatures').select('*').eq('id', n.signature_id).eq('organization_id', org).maybeSingle();
   if (error) throw error;
   const sig = data as SignatureRow | null;
+  if (sig?.confirmation_timed_out_at || sig?.confirmation_delivery_suppressed)
+    return cancel('A equipe assumiu a entrega deste contrato.');
   const req = sig?.request;
   const managed = sig?.origin === 'agent' && req?.agent_delivery === 'conversation';
   const manual = sig && ['manual', 'rule'].includes(sig.origin) && req?.agent_delivery === 'signed_only';
@@ -46,6 +48,9 @@ async function eligibility(db: SupabaseClient, n: Notice) {
   if (lead.error || integration.error) throw new Error('Não foi possível validar o lead e a integração.');
   if (!lead.data || !integration.data) return cancel('Vínculo do lead ou da ZapSign removido.');
   const conv = ctx.conversation;
+  if (n.kind === 'invite' && req.await_provider_confirmation &&
+      (conv.ai_status_changed_at ?? null) !== (req.confirmation_agent_state_at ?? null))
+    return cancel('A sessão de atendimento mudou após o pedido do contrato. Confira o link na aba Contrato.');
   if (conv.contact_id !== sig.contact_id || conv.deal_id !== sig.deal_id || ctx.deal?.id !== sig.deal_id ||
       conv.connection_id !== req.connection_id || conv.wa_phone !== req.recipient ||
       (conv.ai_agent_id && conv.ai_agent_id !== req.agent_id))

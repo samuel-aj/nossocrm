@@ -9,9 +9,13 @@ export function officeTemplates(rows: ZapSignTemplate[]) {
 }
 
 export class PackageError extends Error {
-  constructor(readonly docToken: string | null, readonly attachmentModels: Record<string,string> = {}) {
+  constructor(readonly docToken: string | null, readonly attachmentModels: Record<string,string> = {}, readonly awaitConfirmation = false) {
     super('Não foi possível confirmar o pacote completo. Confira o envelope na ZapSign antes de tentar novamente. O CRM não enviou o link.');
   }
+}
+
+export function isDefinitiveCreateError(error: unknown): boolean {
+  return error instanceof ZapSignError && [400, 401, 402, 403, 404, 405, 410, 413, 415, 422].includes(error.status);
 }
 
 function fileName(name: string) {
@@ -37,13 +41,15 @@ export function remainingAttachments<T extends Pick<ZapSignTemplate, 'name'|'tok
 
 /** A standalone create never needs this step. A package uses one principal,
  * then only the missing attachments. Never repeat a POST after an ambiguous reply. */
-export async function createTemplatePackage(client: ZapSignClient, tpl: ZapSignTemplate, input: CreateDocFromTemplateInput, rememberPrincipal?: (token: string) => Promise<void>) {
+export async function createTemplatePackage(client: ZapSignClient, tpl: ZapSignTemplate, input: CreateDocFromTemplateInput,
+  rememberPrincipal?: (token: string) => Promise<void>, attachUntil?: number) {
   requireDynamicPrincipal(tpl);
   const extras = tpl.extra_templates ?? [];
   if (!extras.length) return client.createDocFromTemplate(input);
   if (extras.length > 14 || extras.some(e => !e.token || e.token === tpl.token || e.active === false) ||
       new Set(extras.map(e => e.token)).size !== extras.length) throw new ZapSignError('Confira os modelos dos anexos do pacote antes de emitir.',422);
   let token: string | null = null;
+  let postingAttachment = false;
   const receipts: Record<string,string> = {};
   try {
     const doc = await client.createDocFromTemplate({ ...input, send_automatic_email: false, send_automatic_whatsapp: false });
@@ -55,7 +61,10 @@ export async function createTemplatePackage(client: ZapSignClient, tpl: ZapSignT
     if (detail.token !== token || !Array.isArray(detail.extra_docs)) throw new Error();
     const { remaining, seen } = remainingAttachments(extras, detail.extra_docs);
     for (const extra of remaining.values()) {
+      if (attachUntil !== undefined && Date.now() >= attachUntil) throw new PackageError(token, receipts, true);
+      postingAttachment = true;
       const added = await client.attachTemplate(token, extra, input.data);
+      postingAttachment = false;
       if (!added.token || seen.has(added.token)) throw new Error();
       seen.add(added.token);
       receipts[added.token] = extra.token;
@@ -67,7 +76,9 @@ export async function createTemplatePackage(client: ZapSignClient, tpl: ZapSignT
     return { ...doc, ...complete };
   } catch (error) {
     if (!token && error instanceof ZapSignError && error.status === 402) throw new ZapSignError(ZAPSIGN_PLAN_NOTICE, 402);
-    if (!token && error instanceof ZapSignError && [400,401,403,404,422].includes(error.status)) throw error;
-    throw new PackageError(token, receipts);
+    if (!token && isDefinitiveCreateError(error)) throw error;
+    // A principal already accepted may still be invisible to a subsequent read.
+    // Only an explicit rejection of a POST proves this requested write failed.
+    throw new PackageError(token, receipts, !!token && !postingAttachment || !isDefinitiveCreateError(error));
   }
 }

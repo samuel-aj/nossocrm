@@ -6,6 +6,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 const h = vi.hoisted(() => ({
   voiceFile: vi.fn(), sendVoice: vi.fn(), notice: vi.fn(), transcribe: vi.fn(),
   generate: vi.fn(), history: vi.fn(), send: vi.fn(), action: vi.fn(), outcome: vi.fn(), events: vi.fn(), log: vi.fn(),
+  confirmationDue: vi.fn(),
   calendar: null as Record<string, unknown> | null,
   budget: vi.fn(), block: vi.fn(), reserve: vi.fn(), dispatch: vi.fn(), settle: vi.fn(), policyEnabled: false,
   ctx: null as ConversationContext | null, agent: null as AgentRow | null,
@@ -15,6 +16,9 @@ const h = vi.hoisted(() => ({
   messages: [] as Record<string, unknown>[],
 }));
 vi.mock('server-only', () => ({}));
+vi.mock('./contractConfirmation', async original => ({
+  ...await original<typeof import('./contractConfirmation')>(), contractConfirmationDue: h.confirmationDue,
+}));
 vi.mock('./voice', () => ({ prepareVoiceFile: h.voiceFile }));
 vi.mock('./media', async original => ({ ...await original<typeof import('./media')>(), sendOutboxMedia: h.sendVoice }));
 vi.mock('@/lib/ai-usage/budget', () => ({
@@ -102,6 +106,7 @@ beforeEach(() => {
   h.media = [];
   h.documents = [];
   h.messages = [];
+  h.confirmationDue.mockReset().mockResolvedValue(null);
   h.policyEnabled = false;
   h.budget.mockReset().mockResolvedValue({ blocked_at: null, policy: { enabled: false } }); h.block.mockResolvedValue(undefined);
   h.reserve.mockResolvedValue({ allowed: true, replay: false, attempt_id: 'attempt' });
@@ -118,6 +123,41 @@ beforeEach(() => {
   h.events.mockResolvedValue([]); h.log.mockResolvedValue('run');
 });
 const run = () => runAgentOnConversation({ organizationId: org, conversationId: 'conv', trigger: 'inbound', skipBuffer: true });
+
+describe('espera da confirmação do contrato', () => {
+  it.each(['conversa', 'simulador'])('descarta texto e conclusão concorrentes na %s', async mode => {
+    const output = { ok: true, aguardando_confirmacao_zapsign: true };
+    h.generate.mockResolvedValue({ text: 'Enviei o link.', totalUsage: {}, steps: [{
+      text: 'Enviei o link.', toolCalls: [call, { toolName: 'encerrar_atendimento', toolCallId: 'end', input: {} },
+        { toolName: 'contrato_zapsign', toolCallId: 'contract', input: { modo: 'criar' } }],
+      toolResults: [{ toolCallId: 'contract', output }],
+    }] });
+    if (mode === 'conversa') {
+      expect(await run()).toMatchObject({ status: 'ok', lines: [], reason: 'Aguardando confirmação da ZapSign.' });
+      expect(h.ctx!.conversation.ai_status).toBe('active');
+      expect(h.ctx!.conversation.ai_last_processed_at).toBe(at);
+    } else {
+      const result = await testAgentReply(h.db, { organizationId: org, agent: h.agent!, messages: [{ role: 'user', text: 'Sim' }] });
+      expect(result).toMatchObject({ text: '', lines: [], media: [], toolCalls: [{ tool: 'contrato_zapsign', output }] });
+    }
+    expect(h.action).not.toHaveBeenCalled();
+    expect(h.outcome).not.toHaveBeenCalled();
+    expect(h.send).not.toHaveBeenCalled();
+  });
+
+  it('adia a nova entrada enquanto o emissor confere a reserva e respeita uma pausa manual', async () => {
+    h.agent!.tools.zapsign_template_token = 'template';
+    const due = new Date(Date.now() + 60_000).toISOString();
+    h.confirmationDue.mockResolvedValue(due);
+    expect(await run()).toMatchObject({ status: 'skipped', deferredUntil: due });
+    expect(h.ctx!.conversation.ai_last_processed_at).toBeFalsy();
+    h.ctx!.conversation.ai_status = 'paused';
+    expect(await run()).toMatchObject({ status: 'skipped', reason: 'conversa paused' });
+    expect(h.confirmationDue).toHaveBeenCalledTimes(1);
+    expect(h.generate).not.toHaveBeenCalled();
+    expect(h.send).not.toHaveBeenCalled();
+  });
+});
 
 describe('recuperação de desconexão com transporte falso', () => {
   const input = { organizationId: org, conversationId:'conv', trigger:'inbound' as const,

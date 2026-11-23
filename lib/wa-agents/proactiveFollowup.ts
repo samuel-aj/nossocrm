@@ -3,6 +3,7 @@ import { checkConversationBudget } from '@/lib/ai-usage/budget';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { followupAllowedAt } from './followupCalendarStore';
 import { manualContractIssued } from '@/lib/zapsign/agentContractFact';
+import { contractConfirmationDue } from './contractConfirmation';
 
 export const PROACTIVE_VAR = '__proactive_followup';
 export type ProactiveFollowup = { anchor: string | null; dealId?: string; stageId?: string; ruleVersion?: number; scheduledReturnId?: string;
@@ -25,7 +26,7 @@ export async function checkProactiveFollowup(admin: SupabaseClient, orgId: strin
   context: ProactiveFollowup, now = new Date()): Promise<ProactiveDecision> {
   if (!conversationId) return { kind: 'cancel', reason: 'follow-up sem conversa vinculada' };
   const { data: conv, error } = await admin.from('wa_conversations')
-    .select('ai_status, ai_status_changed_at, ai_approval, connection_id, ai_agent_id, deal_id, contact_id').eq('organization_id', orgId).eq('id', conversationId).maybeSingle();
+    .select('ai_status, ai_status_changed_at, ai_approval, connection_id, wa_phone, ai_agent_id, deal_id, contact_id').eq('organization_id', orgId).eq('id', conversationId).maybeSingle();
   if (error) throw new Error(error.message);
   if (!conv) return { kind: 'cancel', reason: 'conversa não encontrada' };
   const lastInbound = await loadLastInboundAt(admin, orgId, conversationId);
@@ -61,6 +62,8 @@ export async function checkProactiveFollowup(admin: SupabaseClient, orgId: strin
   if (context.agentFollowup) {
     if (conv.ai_agent_id !== context.agentFollowup.agentId)
       return { kind: 'cancel', reason: 'agente responsável pelo follow-up foi alterado' };
+    const due = await contractConfirmationDue(admin, orgId, conversationId, conv, now);
+    if (due) return { kind: 'defer', until: due };
     if (await manualContractIssued(admin, {
       organizationId: orgId, dealId: conv.deal_id, contactId: conv.contact_id,
       templateToken: context.agentFollowup.templateToken, silentSince: context.anchor,
