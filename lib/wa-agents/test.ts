@@ -303,7 +303,10 @@ async function testAgentReplyWithUsage(
       model: resolved.modelId,
       duration_ms: Date.now() - startedAt,
     });
-    return { text: gen.text, lines, voiceLines, toolCalls: gen.toolCalls, usage: gen.usage, segments, media, contractReviewKey };
+    // The UI applies saved-data calls to simulated state. Return only the effective
+    // contract tool on a suspended turn; the run log retains the full trace above.
+    const appliedCalls = gen.contractWait ? gen.toolCalls.filter(call => call.tool === 'contrato_zapsign') : gen.toolCalls;
+    return { text: gen.text, lines, voiceLines, toolCalls: appliedCalls, usage: gen.usage, segments, media, contractReviewKey };
   } catch (e) {
     // A failed generation/safety check produced no visible simulation result.
     // Never touch another request's receipt, even when it used the same session.

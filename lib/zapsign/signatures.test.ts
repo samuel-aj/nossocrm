@@ -44,8 +44,8 @@ vi.mock('@/lib/wa-agents/leadOps', () => ({
   loadCustomFieldDefs: async () => [{ key: 'cpf', label: 'CPF', type: 'text', options: [] }],
 }));
 
-import { createManualSignature, discardSignature, handleZapSignWebhook, recoverManualPackage, sendSignature, type SignatureRow } from './signatures';
-import { ZapSignClient } from './client';
+import { createManualSignature, discardSignature, handleZapSignWebhook, reconcileWaitingAgentPackage, recoverManualPackage, sendSignature, type SignatureRow } from './signatures';
+import { ZapSignClient, ZapSignError } from './client';
 import { runAgentContract } from './agentContract';
 import { simulateAgentContract } from './agentSimulation';
 import * as files from './templateFile';
@@ -103,7 +103,7 @@ function fakeDb(tables: Record<string, Row[]>) {
         tables[table] ??= [];
         if (op === 'insert') {
           const list = Array.isArray(payload) ? payload : [payload as Row];
-          const inserted = list.map((p) => ({ id: `${table}-${tables[table].length + 1}`, created_at: new Date().toISOString(), ...p }));
+          const inserted = list.map((p) => ({ id: table === 'deal_signatures' && p.origin === 'agent' ? crypto.randomUUID() : `${table}-${tables[table].length + 1}`, created_at: new Date().toISOString(), ...p }));
           if (table === 'deal_signatures' && list.some(p => p.origin === 'agent' && tables[table].some(r =>
             r.origin === 'agent' && r.organization_id === p.organization_id && r.deal_id === p.deal_id && r.template_token === p.template_token)))
             return resolve({ data: null, error: { code: '23505' } });
@@ -594,9 +594,10 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
     vi.spyOn(files, 'readContractTemplate').mockResolvedValue({ revision: 'r1', names: ['NOME', 'VALOR', 'ENDEREÇO'] });
     vi.spyOn(budgets, 'checkConversationBudget').mockResolvedValue({ blocked_at: null } as never);
     vi.spyOn(ZapSignClient.prototype, 'listTemplates').mockResolvedValue([{ token: 'tpl-1', name: 'Honorários', active: true }]);
-    const post = vi.spyOn(ZapSignClient.prototype, 'createDocFromTemplate').mockResolvedValue({
-      token: 'doc-agente', status: 'pending', name: 'Honorários', signers: [{ name: 'Maria da Silva', token: 's1', status: 'new', sign_url: 'https://assinatura.invalid/s1' }],
-    });
+    const post = vi.spyOn(ZapSignClient.prototype, 'createDocFromTemplate').mockImplementation(async input => ({
+      token: 'doc-agente', status: 'pending', name: 'Honorários',
+      signers: [{ name: input.signer_name, token: 's1', status: 'new', sign_url: 'https://assinatura.invalid/s1' }],
+    }));
     async function accept(answer = 'Sim', sent = 'sent') {
       const draft = await runAgentContract(db.admin, scope, prepare, key => {
         db.tables.wa_conversations[0].ai_state = { zapsign_review: key };
@@ -932,12 +933,13 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
     const approved = await db.accept();
     vi.spyOn(ZapSignClient.prototype,'getDoc').mockResolvedValue({name:'Contrato',token:'doc-agente',status:'pending',signers:[],extra_docs:[]});
     const add = vi.spyOn(ZapSignClient.prototype,'attachTemplate').mockRejectedValue(new Error('Timeout'));
-    await expect(runAgentContract(db.admin,approved,create)).rejects.toThrow(/pacote completo/);
-    expect(db.tables.deal_signatures[0]).toMatchObject({doc_token:'doc-agente',status:'failed'});
+    await expect(runAgentContract(db.admin,approved,create)).resolves.toMatchObject({aguardando_confirmacao_zapsign:true});
+    expect(db.tables.deal_signatures[0]).toMatchObject({doc_token:'doc-agente',status:'processing',
+      request:{package_unverified:true, package_members:[{token:'child',name:'Procuração'}]}});
     expect(db.tables.deal_signatures[0].sign_url).toBeFalsy();
-    await expect(handleZapSignWebhook(db.admin,ORG,{token:'doc-agente',event_type:'doc_created',signers:[]}))
-      .resolves.toMatchObject({action:'package_requires_review'});
-    expect(await runAgentContract(db.admin,approved,create)).toMatchObject({ok:false});
+    await handleZapSignWebhook(db.admin,ORG,{token:'doc-agente',event_type:'doc_created',signers:[]});
+    expect(db.tables.deal_signatures[0].sign_url).toBeFalsy();
+    expect(await runAgentContract(db.admin,approved,create)).toMatchObject({aguardando_confirmacao_zapsign:true});
     expect(db.post).toHaveBeenCalledTimes(1); expect(add).toHaveBeenCalledTimes(1);
     expect(h.texts).toEqual([]);
   });
@@ -951,14 +953,34 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
     expect(db.tables.deal_signatures[0]).toMatchObject({status:'processing',doc_token:null});
     expect(db.tables.deal_signatures[0].sign_url).toBeFalsy();
   });
+  it('preserva os recibos quando a montagem do pacote termina depois da análise humana', async () => {
+    const db = setup();
+    vi.mocked(ZapSignClient.prototype.listTemplates).mockResolvedValue([{token:'tpl-1',name:'Contrato',
+      extra_templates:[{token:'c1',name:'Procuração'}, {token:'c2',name:'Declaração'}]}]);
+    const approved = await db.accept();
+    vi.spyOn(ZapSignClient.prototype,'getDoc').mockResolvedValue({name:'Contrato',token:'doc-agente',status:'pending',signers:[],extra_docs:[]});
+    const timeout = new Date().toISOString();
+    const attach = vi.spyOn(ZapSignClient.prototype,'attachTemplate').mockResolvedValueOnce({token:'recibo-1',name:'Procuração'})
+      .mockImplementationOnce(async () => {
+        Object.assign(db.tables.deal_signatures[0], {status:'failed',confirmation_timed_out_at:timeout,last_error:'Conferência humana'});
+        throw new Error('Timeout');
+      });
+    expect(await runAgentContract(db.admin, approved, create)).toMatchObject({prazo_confirmacao_encerrado:true});
+    expect(db.tables.deal_signatures[0]).toMatchObject({status:'failed',confirmation_timed_out_at:timeout,
+      last_error:'Conferência humana',doc_token:'doc-agente',request:{package_unverified:true,package_attachment_models:{'recibo-1':'c1'}}});
+    expect(db.tables.deal_signatures[0].sign_url).toBeFalsy();
+    expect(attach).toHaveBeenCalledTimes(2);
+    expect(db.post).toHaveBeenCalledTimes(1);
+  });
   it('não cria de novo após timeout; webhook autenticado recompõe o vínculo na própria organização', async () => {
     const db = setup(), approved = await db.accept();
     db.post.mockRejectedValue(new Error('timeout'));
-    await expect(runAgentContract(db.admin, approved, create)).rejects.toThrow(/não repita/);
-    expect(await runAgentContract(db.admin, approved, create)).toMatchObject({ ok: false });
-    expect(db.post).toHaveBeenCalledTimes(1);
+    const replies = await Promise.all([runAgentContract(db.admin, approved, create), runAgentContract(db.admin, approved, create)]);
     const row = db.tables.deal_signatures[0];
-    row.id = '11111111-1111-4111-8111-111111111111'; // DB normally generates a UUID.
+    const limit = new Date(Date.parse(String(row.created_at)) + 300_000).toISOString();
+    for (const reply of replies) expect(reply).toMatchObject({ ok:true, aguardando_confirmacao_zapsign:true, limite_confirmacao_em:limit });
+    expect(row).toMatchObject({ status:'processing', request:{await_provider_confirmation:true} });
+    expect(db.post).toHaveBeenCalledTimes(1);
     const event = { external_id: row.id as string, token: 'doc', event_type: 'doc_created', status: 'pending',
       signers: [{ name: 'Maria da Silva', token: 's1', status: 'new', sign_url: 'https://assinatura.invalid/s1' }] };
     expect((await handleZapSignWebhook(db.admin, 'outro', event)).action).toBe('ignored_unknown_doc');
@@ -966,6 +988,58 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
     await handleZapSignWebhook(db.admin, ORG, event);
     expect(row).toMatchObject({ status: 'pending', doc_token: 'doc', sign_url: event.signers[0].sign_url });
     expect(db.tables.deal_events.filter(e => e.new_value === 'created')).toHaveLength(1);
+    expect(await runAgentContract(db.admin, approved, create)).toMatchObject({existente:true, aguarda_assinatura_no_atendimento:true});
+    expect(db.post).toHaveBeenCalledTimes(1);
+  });
+  it('usa a confirmação que chegou enquanto o POST ainda estava sem resposta', async () => {
+    const db = setup(), approved = await db.accept();
+    db.post.mockImplementationOnce(async input => {
+      await handleZapSignWebhook(db.admin, ORG, { external_id:input.external_id, token:'doc', event_type:'doc_created',
+        signers:[{name:'Maria da Silva',token:'cliente',status:'new',sign_url:'https://assinatura.invalid/teste'}] });
+      throw new ZapSignError('rede indisponível', 0);
+    });
+    expect(await runAgentContract(db.admin,approved,create)).toMatchObject({ok:true, existente:true, aguarda_assinatura_no_atendimento:true});
+    expect(db.tables.deal_signatures[0]).toMatchObject({status:'pending',doc_token:'doc'});
+    expect(db.post).toHaveBeenCalledTimes(1);
+  });
+  it('não impõe a espera da sessão anterior depois da retomada manual', async () => {
+    const db = setup(), approved = await db.accept();
+    db.post.mockRejectedValueOnce(new Error('timeout'));
+    expect(await runAgentContract(db.admin, approved, create)).toMatchObject({aguardando_confirmacao_zapsign:true});
+    db.tables.wa_conversations[0].ai_status_changed_at = new Date().toISOString();
+    const result = await runAgentContract(db.admin, approved, create);
+    expect(result).toMatchObject({ok:true,existente:true});
+    expect(result).not.toHaveProperty('aguardando_confirmacao_zapsign');
+    expect(db.post).toHaveBeenCalledTimes(1);
+  });
+  it.each([400, 402, 422])('encaminha recusa explícita %i sem agendar espera ou recriar', async code => {
+    const db = setup(), approved = await db.accept();
+    db.post.mockRejectedValueOnce(new ZapSignError('rejeitado',code));
+    await expect(runAgentContract(db.admin,approved,create)).rejects.toThrow(/ZapSign/);
+    expect(db.tables.deal_signatures[0]).toMatchObject({status:'failed'});
+    expect(await runAgentContract(db.admin,approved,create)).toMatchObject({ok:false});
+    expect(db.post).toHaveBeenCalledTimes(1);
+  });
+  it.each([{signers:[]}, {signers:[{ name:'Outra pessoa', token:'terceiro', status:'new', sign_url:'https://assinatura.invalid/terceiro' }]}])(
+    'aguarda o cliente verificado quando os signatários devolvidos são $signers', async ({signers}) => {
+    const db=setup(), approved=await db.accept();
+    db.post.mockResolvedValueOnce({token:'doc',name:'Teste',status:'pending',signers});
+    expect(await runAgentContract(db.admin,approved,create)).toMatchObject({aguardando_confirmacao_zapsign:true});
+    expect(await runAgentContract(db.admin,approved,create)).toMatchObject({aguardando_confirmacao_zapsign:true});
+    expect(db.tables.deal_signatures[0]).toMatchObject({status:'pending',doc_token:'doc',sign_url:null});
+    expect(db.post).toHaveBeenCalledTimes(1);
+  });
+  it('guarda a confirmação HTTP tardia para a equipe sem prometer convite ou retomar a IA', async () => {
+    const db=setup(), approved=await db.accept();
+    db.post.mockImplementationOnce(async () => {
+      Object.assign(db.tables.deal_signatures[0], {status:'failed',confirmation_timed_out_at:new Date().toISOString()});
+      return {token:'doc',name:'Teste',status:'pending',signers:[{name:'Maria da Silva', token:'cliente', status:'new', sign_url:'https://assinatura.invalid/teste'}]};
+    });
+    const result = await runAgentContract(db.admin,approved,create);
+    expect(result).toMatchObject({prazo_confirmacao_encerrado:true});
+    expect(result).not.toHaveProperty('criado', true);
+    expect(db.tables.deal_signatures[0]).toMatchObject({status:'pending',doc_token:'doc',sign_url:'https://assinatura.invalid/teste'});
+    expect(db.post).toHaveBeenCalledTimes(1);
   });
   it('preserva uma conferência humana já pendente e bloqueia condições não cadastradas no CRM', async () => {
     const db = setup();
@@ -1164,5 +1238,65 @@ describe('conferência antes de enviar (contrato preparado ao entrar na etapa)',
     expect(await discardSignature(db.admin, { organizationId: ORG, dealId: 'deal-1', signatureId: 'sent-1', userId: 'u1' })).toBeNull();
     expect(db.tables.deal_signatures.find((r) => r.id === 'sent-1')?.status).toBe('pending');
     expect(db.tables.deal_events.map((e) => [e.kind, e.new_value, e.actor_kind, e.actor_id])).toEqual([['signature', 'discarded', 'user', 'u1']]);
+  });
+});
+
+describe('confirmação posterior do pacote solicitado pela IA', () => {
+  const id = '98980101-1000-4000-8000-0123456789ab';
+  const token = 'doc-pacote';
+  const signer = { name: 'Maria da Silva', token: 'sig-cliente', status: 'new' };
+  const doc = { name: 'Pacote', token, external_id: id, status: 'pending', signers: [signer],
+    extra_docs: [{ name: 'Procuração', token: 'anexo', template: 'procuracao' }] };
+  const event = { event_type: 'doc_created', external_id: id, token };
+  function setup() {
+    const row = { ...queued(), id, origin: 'agent', request: {
+      template_token: 'principal', agent_delivery: 'conversation', agent_signer: {name: signer.name, phone: '', email: ''},
+      await_provider_confirmation: true, package_expected: 1, package_unverified: true,
+      package_members: [{ name: 'Procuração', token: 'procuracao' }],
+    } };
+    const db = base({ deal_signatures: [row] });
+    const client = fakeClient();
+    const get = vi.fn<ZapSignClient['getDoc']>().mockResolvedValue(doc);
+    client.getDoc = get;
+    return { db, row, client, get };
+  }
+  it('libera o link apenas após conferir o envelope e os anexos, inclusive com webhook repetido', async () => {
+    const { db, client, get } = setup();
+    await handleZapSignWebhook(db.admin, ORG, event, { client });
+    await handleZapSignWebhook(db.admin, ORG, event, { client });
+    expect(db.tables.deal_signatures[0]).toMatchObject({status:'pending', doc_token:token,
+      sign_url: expect.stringContaining(signer.token), request: {package_unverified: false} });
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(db.tables.deal_events.filter(e => e.new_value === 'created')).toHaveLength(1);
+    expect(h.created).toHaveLength(0);
+    expect(h.texts).toHaveLength(0);
+  });
+  it.each([
+    ['anexo pendente', { extra_docs: [] }],
+    ['outra reserva', { external_id: 'outra' }],
+    ['outro cliente', { signers: [{...signer, name: 'Outro Nome'}] }],
+    ['anexo de outro modelo', { extra_docs: [{ name: 'Procuração', token: 'anexo', template: 'outro' }] }],
+  ] as const)('conserva a espera se a consulta indicar %s', async (_label, patch) => {
+    const { db, client, get } = setup();
+    get.mockResolvedValue({ ...doc, ...patch, extra_docs: [...('extra_docs' in patch ? patch.extra_docs : doc.extra_docs)],
+      signers: [...('signers' in patch ? patch.signers : doc.signers)] });
+    expect(await handleZapSignWebhook(db.admin, ORG, event, { client })).toMatchObject({action:'awaiting_package'});
+    expect(db.tables.deal_signatures[0]).toMatchObject({status:'processing', sign_url:null});
+    expect(db.tables.deal_events).toHaveLength(0);
+  });
+  it('usa o webhook já registrado quando o GET de confirmação ocorre depois do callback', async () => {
+    const { db, client } = setup();
+    db.tables.zapsign_webhook_events = [{organization_id: ORG, doc_token: token, payload: {external_id: id}}];
+    expect(await reconcileWaitingAgentPackage(db.admin, ORG, id, {client})).toMatchObject({status:'pending',doc_token:token});
+  });
+  it('registra a assinatura já concluída e mantém a marca de expiração para a equipe', async () => {
+    const { db, client, get } = setup();
+    Object.assign(db.tables.deal_signatures[0], { status: 'failed', confirmation_timed_out_at: '2026-11-19T12:05:00Z' });
+    get.mockResolvedValue({ ...doc, status: 'signed', signers: [{ ...signer, status:'signed' }] });
+    await handleZapSignWebhook(db.admin, ORG, event, {client});
+    expect(db.tables.deal_signatures[0]).toMatchObject({status:'signed',confirmation_timed_out_at:'2026-11-19T12:05:00Z'});
+    expect(db.tables.deal_events.filter(e => e.new_value === 'signed')).toHaveLength(1);
+    expect(h.created).toHaveLength(0);
+    expect(h.texts).toHaveLength(0);
   });
 });

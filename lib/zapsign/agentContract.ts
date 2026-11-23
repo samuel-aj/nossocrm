@@ -4,19 +4,48 @@ import { AgentToolsSchema } from '@/lib/wa-agents/types';
 import { checkConversationBudget } from '@/lib/ai-usage/budget';
 import { loadCustomFieldDefs } from '@/lib/wa-agents/leadOps';
 import { readContractTemplate } from './templateFile';
-import { createTemplatePackage, officeTemplates, PackageError } from './templatePackage';
-import { agentContactToken, clientFor, loadLeadSnapshot, loadZapSignSettings, recordEvent, toStoredSigner, type SignatureRow } from './signatures';
+import { createTemplatePackage, isDefinitiveCreateError, officeTemplates, PackageError } from './templatePackage';
+import { agentContactToken, clientFor, loadLeadSnapshot, loadZapSignSettings, reconcileWaitingAgentPackage, recordEvent, toStoredSigner, type SignatureRow } from './signatures';
 import { contractReview, prepareAgentDraft, MAX_REVIEW_REQUESTS, REVIEW_HINT, type AgentContractInput, type ContractTurn } from './agentDraft';
 import { splitPhone } from './variables';
 import { ZapSignError, type ZapSignDoc } from './client';
 
 type Scope = { org: string; agent: string; conversation: string; deal: string; template: string; inboundId: string; since: string };
-type ResultRow = Pick<SignatureRow, 'id' | 'status' | 'doc_token' | 'sign_url' | 'origin' | 'contact_id'>;
-const columns = 'id,status,doc_token,sign_url,origin,contact_id';
+type ResultRow = Pick<SignatureRow, 'id' | 'status' | 'doc_token' | 'sign_url' | 'origin' | 'contact_id' | 'request' |
+  'sent_at' | 'created_at' | 'confirmation_timed_out_at' | 'confirmation_delivery_suppressed' | 'agent_client_signed_at'>;
+const columns = 'id,status,doc_token,sign_url,origin,contact_id,request,sent_at,created_at,confirmation_timed_out_at,confirmation_delivery_suppressed,agent_client_signed_at';
 const REVIEW_LOOP = `O cliente recebeu esta ficha ${MAX_REVIEW_REQUESTS} vezes e não confirmou. Não envie a ficha de novo nem peça que ele copie o texto. Chame a equipe para concluir o contrato na aba Contrato.`;
 
-function existing(r: ResultRow) {
-  if (r.doc_token && ['signed', 'pending'].includes(r.status)) return { ok: true, existente: true, estado: r.status === 'signed' ? 'assinado' : 'aguardando assinatura', id_documento: r.doc_token };
+function confirmationDeadline(createdAt: string) {
+  return Date.parse(createdAt) + 5 * 60_000;
+}
+
+function awaitingConfirmation(createdAt: string) {
+  return { ok: true, aguardando_confirmacao_zapsign: true, estado: 'aguardando confirmação da ZapSign',
+    limite_confirmacao_em: new Date(confirmationDeadline(createdAt)).toISOString() };
+}
+
+function existing(r: ResultRow, session: Scope & { phone: string; connection: string; stateAt: string | null }, currentAttempt = false) {
+  const managed = r.origin === 'agent' && r.request?.agent_delivery === 'conversation' &&
+    r.request.conversation_id === session.conversation && r.request.agent_id === session.agent &&
+    r.request.connection_id === session.connection && r.request.recipient === session.phone &&
+    (!r.request.await_provider_confirmation || r.request.confirmation_agent_state_at === session.stateAt);
+  if (currentAttempt && r.confirmation_timed_out_at) {
+    // The deadline worker owns the manual handoff. Discard a response from the old turn.
+    return { ok: true, aguardando_confirmacao_zapsign: true, prazo_confirmacao_encerrado: true, estado: 'encaminhado para conferência humana' };
+  }
+  if (r.confirmation_delivery_suppressed || r.confirmation_timed_out_at || (!managed && r.request?.await_provider_confirmation)) {
+    return { ok:true, existente:true, entrega_sob_responsabilidade_da_equipe:true, ...(currentAttempt && {aguardando_confirmacao_zapsign:true}),
+      estado:'entrega do contrato sob responsabilidade da equipe' };
+  }
+  const signed = r.status === 'signed' || !!r.agent_client_signed_at;
+  if (managed && r.request?.await_provider_confirmation && !r.confirmation_timed_out_at &&
+      (r.status === 'processing' || (r.status === 'pending' && !r.sign_url && !signed))) {
+    return awaitingConfirmation(r.created_at);
+  }
+  if (r.doc_token && ['signed', 'pending'].includes(r.status)) return { ok: true, existente: true,
+    ...(managed && !signed && !r.sent_at && r.sign_url && !r.confirmation_timed_out_at ? { aguarda_assinatura_no_atendimento: true } : {}),
+    estado: signed ? 'assinado' : 'aguardando assinatura', id_documento: r.doc_token };
   return { ok: false, erro: r.status === 'review' ? 'Este contrato já aguarda conferência humana na aba Contrato.' :
     'Já há uma tentativa deste modelo para o lead. Confira a aba Contrato e a ZapSign antes de qualquer nova criação.' };
 }
@@ -26,7 +55,7 @@ export async function runAgentContract(admin: SupabaseClient, scope: Scope, inpu
   if (!deal || !scope.inboundId) throw new Error('A criação precisa de uma conversa recebida e vinculada a um lead.');
   async function checkBinding() {
     const [conv, config, budget] = await Promise.all([
-      admin.from('wa_conversations').select('deal_id, contact_id, connection_id, wa_phone, ai_state').eq('organization_id', org).eq('id', conversation)
+      admin.from('wa_conversations').select('deal_id, contact_id, connection_id, wa_phone, ai_state, ai_status_changed_at').eq('organization_id', org).eq('id', conversation)
         .eq('ai_status', 'active').eq('is_group', false).eq('ai_agent_id', agent).eq('deal_id', deal).maybeSingle(),
       admin.from('wa_ai_agents').select('tools').eq('organization_id', org).eq('id', agent).eq('enabled', true).maybeSingle(),
       checkConversationBudget(admin, org, conversation),
@@ -36,9 +65,11 @@ export async function runAgentContract(admin: SupabaseClient, scope: Scope, inpu
       throw new Error('A conversa, o agente, o limite ou o modelo não permitem criar este contrato.');
     return { contact: conv.data.contact_id as string, connection: conv.data.connection_id as string,
       phone: conv.data.wa_phone as string, mapping: tools.data.zapsign_variables ?? {},
+      stateAt: (conv.data.ai_status_changed_at ?? null) as string | null,
       reviewKey: conv.data.ai_state?.zapsign_review as string | undefined };
   }
   const binding = await checkBinding();
+  const session = { ...scope, ...binding };
   const { contact, mapping } = binding;
   const settings = await loadZapSignSettings(admin, org);
   if (!settings) throw new Error('ZapSign desconectada neste escritório.');
@@ -51,7 +82,7 @@ export async function runAgentContract(admin: SupabaseClient, scope: Scope, inpu
     return data as ResultRow | null;
   };
   const prior = await findExisting();
-  if (prior) return existing(prior);
+  if (prior) return existing(prior, session);
   const client = clientFor(settings);
   const [models, snap, defs] = await Promise.all([
     client.listTemplates().catch(() => { throw new Error('Não foi possível consultar os modelos na conta ZapSign do escritório.'); }),
@@ -102,18 +133,26 @@ export async function runAgentContract(admin: SupabaseClient, scope: Scope, inpu
     throw new Error('Os dados do atendimento mudaram. Prepare o contrato novamente.');
 
   const signerIdentity = draft.identity;
+  const members = tpl.extra_templates?.map(({token, name}) => ({token, name}));
+  const request = { template_token: template, template_name: tpl.name, variables: {}, signer: { send: 'link' },
+    agent_id: agent, conversation_id: conversation, connection_id: binding.connection, recipient: binding.phone,
+    agent_delivery: 'conversation', agent_signer: signerIdentity, confirmation_message_id: scope.inboundId, values: draft.data,
+    await_provider_confirmation: true, confirmation_agent_state_at: binding.stateAt,
+    ...(members?.length ? { package_expected: members.length, package_members: members } : {}) };
   const { data: row, error } = await admin.from('deal_signatures').insert({
     organization_id: org, deal_id: deal, contact_id: contact, stage_id: snap.deal.stage_id, origin: 'agent',
     status: 'processing', lock_until: null, attempts: 1, template_token: template, template_name: tpl.name,
-    request: { template_token: template, template_name: tpl.name, variables: {}, signer: { send: 'link' },
-      agent_id: agent, conversation_id: conversation, connection_id: binding.connection, recipient: binding.phone,
-      agent_delivery: 'conversation', agent_signer:signerIdentity, confirmation_message_id: scope.inboundId, values: draft.data,
-      ...(tpl.extra_templates?.length ? { package_expected: tpl.extra_templates.length } : {}) },
-  }).select('id').single();
+    request,
+  }).select('id,created_at').single();
   if (error?.code === '23505') {
-    const other = await findExisting(); if (other) return existing(other);
+    const other = await findExisting(); if (other) return existing(other, session);
   }
   if (error || !row) throw new Error('Não foi possível reservar a criação. Nenhum pedido enviado.');
+  const readReservation = async () => {
+    const result = await admin.from('deal_signatures').select(columns).eq('organization_id', org).eq('id', row.id)
+      .eq('deal_id', deal).eq('contact_id', contact).maybeSingle();
+    return result.data as ResultRow | null;
+  };
   const phone = splitPhone(signerIdentity.phone);
   const name = (tpl.name + ' - ' + draft.signer).slice(0, 255);
   let doc: ZapSignDoc;
@@ -121,35 +160,79 @@ export async function runAgentContract(admin: SupabaseClient, scope: Scope, inpu
     doc = await createTemplatePackage(client, tpl, { template_id: template, name, signer_name: draft.signer,
       ...(signerIdentity.email ? { signer_email: signerIdentity.email } : {}), signer_phone_country: phone.country || undefined,
       signer_phone_number: phone.number || undefined, data: draft.data, lang: 'pt-br', external_id: row.id,
-      send_automatic_email: false, send_automatic_whatsapp: false, signer_has_incomplete_fields: false });
+      send_automatic_email: false, send_automatic_whatsapp: false, signer_has_incomplete_fields: false }, undefined, confirmationDeadline(row.created_at));
     if (!doc?.token) throw new Error('Sem identificador do provedor.');
   } catch (error) {
-    // The provider might already have created it. Neither the agent nor the worker retries this row.
-    await admin.from('deal_signatures').update({ status: 'failed', ...(error instanceof PackageError ? {doc_token:error.docToken} : {}),
-      last_error: error instanceof PackageError ? error.message : 'Criação não confirmada. Conferir na ZapSign antes de nova tentativa.' })
-      .eq('organization_id', org).eq('id', row.id).eq('status', 'processing');
-    if (error instanceof PackageError) throw error;
-    throw new Error('Criação não confirmada. Peça à equipe para conferir na ZapSign; não repita o pedido.');
+    const incompletePackage = error instanceof PackageError ? error : null;
+    const wait = incompletePackage ? incompletePackage.awaitConfirmation : !isDefinitiveCreateError(error);
+    const failure = incompletePackage?.message ?? (error instanceof ZapSignError && error.status === 402
+      ? 'Confira o plano da API ZapSign do escritório.' : 'A ZapSign recusou o pedido. Solicite conferência da equipe antes de nova tentativa.');
+    // A failed HTTP exchange is not proof that no document exists. A verified
+    // webhook, or the deadline worker, may have already settled this exact row.
+    const evidence = incompletePackage ? {
+      ...(incompletePackage.docToken && { doc_token: incompletePackage.docToken }),
+      request: { ...request, package_unverified: true, package_attachment_models: incompletePackage.attachmentModels },
+    } : null;
+    const update = await admin.from('deal_signatures').update({
+      ...(!wait && { status: 'failed' }), ...evidence,
+      last_error: wait ? 'Aguardando confirmação da criação pela ZapSign.' : failure,
+    }).eq('organization_id', org).eq('id', row.id).eq('status', 'processing').select(columns).maybeSingle();
+    const reservation = (update.data as ResultRow | null) ?? await readReservation();
+    if (!update.data && evidence && reservation?.status === 'failed' && reservation.confirmation_timed_out_at &&
+        (!reservation.doc_token || reservation.doc_token === incompletePackage?.docToken)) {
+      // The deadline owns the handoff, but the late provider receipts still belong
+      // to this envelope. Preserve them without clearing the timeout or its reason.
+      const late = admin.from('deal_signatures').update(evidence).eq('organization_id', org).eq('id', row.id)
+        .eq('status', 'failed').eq('confirmation_timed_out_at', reservation.confirmation_timed_out_at);
+      await (reservation.doc_token ? late.eq('doc_token', reservation.doc_token) : late.is('doc_token', null));
+    }
+    if (wait && incompletePackage) {
+      const verified = await reconcileWaitingAgentPackage(admin, org, row.id).catch(() => null);
+      if (verified) return existing(verified, session, true);
+    }
+    if (reservation && (!['processing','failed'].includes(reservation.status) || reservation.confirmation_timed_out_at)) {
+      return existing(reservation, session, true);
+    }
+    if (!wait) throw new Error(failure);
+    return awaitingConfirmation(row.created_at);
   }
   const clientToken = agentContactToken(doc.signers ?? [],signerIdentity);
   const signers = (doc.signers ?? []).map(s => toStoredSigner(s, s.token === clientToken ? 'contact' : 'extra'));
   const contactSigner = signers.find(s=>s.role==='contact');
   const signUrl = contactSigner?.sign_url ?? null;
-  const { data: saved, error: saveError } = await admin.from('deal_signatures').update({
+  const confirmed = {
     doc_token: doc.token, doc_name: name, status: 'pending', sign_url: signUrl, signers, sent_via: 'link',
     last_error:signUrl ? null : 'Aguardando identificação do signatário do lead na ZapSign.', updated_at: new Date().toISOString(),
-  }).eq('organization_id', org).eq('id', row.id).eq('status', 'processing').select(columns).maybeSingle();
-  if (saveError) throw new Error('Confira o registro da ZapSign. Não repita a criação.');
+  };
+  const { data: saved, error: saveError } = await admin.from('deal_signatures').update(confirmed)
+    .eq('organization_id', org).eq('id', row.id).eq('status', 'processing').select(columns).maybeSingle();
+  if (saveError) {
+    const known = await readReservation();
+    return known ? existing(known, session, true) : awaitingConfirmation(row.created_at);
+  }
   if (!saved) {
+    const known = await readReservation();
+    if (known?.confirmation_timed_out_at) {
+      // Keep late proof for the team. The timeout marker prevents an automatic invitation.
+      if (known.status === 'failed' && (!known.doc_token || known.doc_token === doc.token)) {
+        const late = admin.from('deal_signatures').update(confirmed).eq('organization_id', org).eq('id', row.id)
+          .eq('status', 'failed').eq('confirmation_timed_out_at', known.confirmation_timed_out_at);
+        await (known.doc_token ? late.eq('doc_token', doc.token) : late.is('doc_token', null));
+      }
+      return existing(known, session, true);
+    }
     // The webhook may have claimed the token before our response. Fill a missing link
     // without changing its (possibly already signed) status or newer signer records.
-    if (contactSigner) {
+    if (contactSigner && known?.doc_token === doc.token && !known.sign_url) {
       const bound = await admin.rpc('bind_agent_contract_signer',{p_org:org,p_id:row.id,p_doc:doc.token,p_signer:contactSigner});
-      if (bound.error) throw new Error('Confira o vínculo do signatário na aba Contrato. Não repita a criação.');
+      if (!bound.error) {
+        const other = await readReservation();
+        if (other) return existing(other, session, true);
+      }
     }
-    const other = await findExisting(); if (other) return existing(other);
-    throw new Error('Confira a aba Contrato.');
+    return known ? existing(known, session, true) : awaitingConfirmation(row.created_at);
   }
   await recordEvent(admin, { id: row.id, organization_id: org, deal_id: deal, doc_name: name, doc_token: doc.token }, 'created', { origin: 'agent', agent_id: agent });
-  return { ok: true, criado: true, id_documento: doc.token, estado: 'aguardando assinatura', envio_do_link: signUrl ? 'programado na conversa' : 'aguardando link da ZapSign' };
+  if (saved.confirmation_timed_out_at || saved.confirmation_delivery_suppressed || !signUrl) return existing(saved as ResultRow, session, true);
+  return { ok: true, criado: true, id_documento: doc.token, estado: 'aguardando assinatura', envio_do_link: 'programado na conversa' };
 }

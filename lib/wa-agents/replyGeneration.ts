@@ -8,6 +8,7 @@ import { buildAgentTools, type AgentToolRuntime } from './tools';
 import type { AgentMediaKind, AgentRow } from './types';
 import { planMediaMarkers } from './mediaMarkers';
 import { readAgentVoiceScripts } from './voiceScript';
+import { contractTurnWait, type ContractTurnWait } from './contractConfirmation';
 
 export type CollectedToolCall = { tool: string; input: unknown; output?: unknown };
 type RecoveryFailureCode = 'invalid_slots' | 'internal_content' | 'parse_or_provider_failure';
@@ -30,6 +31,7 @@ export type GeneratedReply = {
   usage: unknown;
   finishReason: string;
   outputSafety: OutputSafety;
+  contractWait?: ContractTurnWait;
 };
 
 const RepairSchema = z.object({ replacements: z.array(z.object({ id: z.number().int().nonnegative(), text: z.string().max(4000) })).min(1).max(16) });
@@ -87,7 +89,10 @@ export async function generateAgentReply(input: {
     messages: input.messages,
     temperature: supportsTemperature(input.agent) ? input.agent.temperature : undefined,
     tools: agentTools,
-    stopWhen: [stepCountIs(MAX_STEPS), ({ steps }) => afterTools(steps.at(-1)?.toolCalls) === 'stop'],
+    stopWhen: [stepCountIs(MAX_STEPS), ({ steps }) => {
+      const last = steps.at(-1);
+      return !!last?.toolResults?.some(result => contractTurnWait(result.toolName, result.output)) || afterTools(last?.toolCalls) === 'stop';
+    }],
     prepareStep: ({ steps }) => afterTools(steps.at(-1)?.toolCalls) === 'answer' ? { toolChoice: 'none' } : {},
   });
   const toolCalls: CollectedToolCall[] = [];
@@ -121,6 +126,14 @@ export async function generateAgentReply(input: {
     outputTokens: result.totalUsage?.outputTokens ?? null,
     totalTokens: result.totalUsage?.totalTokens ?? null,
   };
+  const steps = result.steps.map((s, step) => ({ step, textChars: s.text?.length ?? 0, tools: s.toolCalls.map(c => c.toolName) }));
+  for (const call of toolCalls) {
+    const contractWait = contractTurnWait(call.tool, call.output);
+    if (contractWait) return {
+      text: '', segments: [], toolCalls, usage, finishReason: String(result.finishReason ?? ''), contractWait,
+      outputSafety: { status: 'passed', issues: [], duplicatesRemoved: 0, recoveryAttempted: false, steps },
+    };
+  }
   const stripped = stripSavedDataAnnotations(segments);
   segments = stripped.segments;
   let prepared = prepareReplyOutput(segments, voiceClips);
@@ -128,7 +141,7 @@ export async function generateAgentReply(input: {
     status: stripped.removed ? 'repaired' : 'passed', issues: prepared.issues,
     ...(stripped.removed > 0 && { savedDataAnnotationsRemoved: stripped.removed }),
     duplicatesRemoved: prepared.duplicatesRemoved, recoveryAttempted: false,
-    steps: result.steps.map((s, step) => ({ step, textChars: s.text?.length ?? 0, tools: s.toolCalls.map(c => c.toolName) })),
+    steps,
   };
   rememberBlockedSamples(outputSafety, segments, prepared.issues, 'original');
 

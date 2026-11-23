@@ -9,6 +9,10 @@ import { useQuery } from '@tanstack/react-query';
 export type SignerLite = { name: string; status: string; signed_at: string | null; role: string };
 
 export type Signature = {
+  await_provider_confirmation?: boolean;
+  confirmation_timed_out_at?: string | null;
+  confirmation_delivery_suppressed?: boolean;
+  agent_client_signed_at?: string | null;
   can_recover?: boolean;
   doc_token?: string | null;
   id: string;

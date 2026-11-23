@@ -15,6 +15,7 @@ import { loadLastInboundAt } from './lastInbound';
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { manualContractIssued } from '@/lib/zapsign/agentContractFact';
+import { contractConfirmationDue } from './contractConfirmation';
 import { loadFollowupCalendar } from './followupCalendarStore';
 import { nextFollowupWindow } from './followupCalendar';
 import { getServiceWindow } from '@/lib/whatsapp/serviceWindow';
@@ -35,6 +36,7 @@ type ConvRow = {
   organization_id: string;
   ai_agent_id: string;
   connection_id: string | null;
+  wa_phone: string;
   deal_id: string | null;
   contact_id: string | null;
   last_inbound_at: string | null;
@@ -117,7 +119,7 @@ export async function processFollowups(
 
       const { data: convsRaw } = await admin
         .from('wa_conversations')
-        .select('id, organization_id, ai_agent_id, connection_id, deal_id, contact_id, ai_state, ai_status_changed_at')
+        .select('id, organization_id, ai_agent_id, connection_id, wa_phone, deal_id, contact_id, ai_state, ai_status_changed_at')
         .eq('organization_id', a.organization_id)
         .eq('ai_agent_id', a.id)
         .eq('ai_status', 'active')
@@ -129,6 +131,7 @@ export async function processFollowups(
         try {
           conv.last_inbound_at = await loadLastInboundAt(admin, conv.organization_id, conv.id);
           if (await pendingRobotReturn(admin, conv.organization_id, conv.id)) continue;
+          if (agent.tools?.zapsign_template_token && await contractConfirmationDue(admin, conv.organization_id, conv.id, conv)) continue;
           // A reviewed manual contract supersedes this agent's collection
           // sequence. Inbound replies and the signature notice remain active.
           if (await manualContractIssued(admin, {
@@ -228,7 +231,7 @@ async function fireRule(admin: SupabaseClient, conv: ConvRow, rule: AgentFollowu
 export async function recoverConnectionFollowup(admin: SupabaseClient, job: PendingReply, start: () => void): Promise<RunResult> {
   const org = job.organization_id;
   const { data: conv, error } = await admin.from('wa_conversations')
-    .select('id,organization_id,ai_agent_id,connection_id,deal_id,contact_id,ai_state,ai_status_changed_at')
+    .select('id,organization_id,ai_agent_id,connection_id,wa_phone,deal_id,contact_id,ai_state,ai_status_changed_at')
     .eq('organization_id', org).eq('id', job.conversation_id).maybeSingle();
   if (error) throw new Error(error.message);
   const agent = await loadAgent(admin, org, job.agent_id);

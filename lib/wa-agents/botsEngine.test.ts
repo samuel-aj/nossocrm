@@ -139,7 +139,16 @@ function fakeDb(tables: Record<string, Row[]>) {
       },
       update: (p: Row) => ((op = 'update'), (patch = p), b),
       insert: (p: Row) => ((op = 'insert'), (patch = p), b),
-      eq: (c: string, v: unknown) => (filters.push(r => r[c] === v), b),
+      eq: (c: string, v: unknown) => (filters.push(r => {
+        const [column, key] = c.split('->>');
+        return key ? String((r[column] as Row | undefined)?.[key]) === v : r[column] === v;
+      }), b),
+      contains: (c: string, values: Row) => (filters.push(r => Object.entries(values).every(([k,v]) => (r[c] as Row | undefined)?.[k] === v)), b),
+      or: (filter: string) => {
+        if (filter !== 'status.eq.processing,and(status.eq.pending,sign_url.is.null,agent_client_signed_at.is.null)') throw new Error('Unexpected filter: ' + filter);
+        filters.push(r => r.status === 'processing' || (r.status === 'pending' && r.sign_url == null && r.agent_client_signed_at == null));
+        return b;
+      },
       neq: (c: string, v: unknown) => (filters.push(r => r[c] !== v), b),
       is: (c: string, v: unknown) => (filters.push(r => (r[c] ?? null) === v), b),
       not: (c: string, _op: string, v: unknown) => (filters.push(r => (r[c] ?? null) !== v), b),
@@ -342,6 +351,17 @@ describe('contrato manual antes de um envio proativo do robô', () => {
     await processBotRun(fakeDb(tables), r);
     expect(h.sent).toEqual([]);
     expect(tables.wa_bot_runs[0].status).toBe('cancelled');
+  });
+  it.each(['processing','pending'])('adia o robô se a confirmação da ZapSign está incompleta (%s)', async status => {
+    const { r, tables } = setup();
+    const created = Date.now();
+    tables.deal_signatures.push({ organization_id: ORG, deal_id: 'deal-1', contact_id: 'contact-1',
+      origin: 'agent', status, confirmation_delivery_suppressed: false, created_at: new Date(created).toISOString(),
+      request: { await_provider_confirmation: true, agent_delivery: 'conversation', agent_id: 'agent-1',
+        conversation_id: 'conv-1', connection_id: 'conn-a', recipient: '+5511988887777', confirmation_agent_state_at: null } });
+    await processBotRun(fakeDb(tables), r);
+    expect(h.sent).toEqual([]);
+    expect(tables.wa_bot_runs[0]).toMatchObject({ wake_at: new Date(created + 300_000).toISOString() });
   });
   it('não envia se a consulta do contrato falhar após o indicador digitando', async () => {
     const { r, tables } = setup();

@@ -121,16 +121,27 @@ function LatestDocument({ latest, fileUrl, older, dealId, canEdit }: { latest: S
           ? ` em ${DT.format(new Date(latest.refused_at))}`
           : '';
   const detail = latest.status === 'refused' && latest.refused_reason ? `: ${latest.refused_reason}` : latest.status === 'failed' && latest.last_error ? `: ${latest.last_error}` : latest.status === 'pending' && latest.last_error ? ` (${latest.last_error})` : '';
+  const waiting = latest.origin === 'agent' && latest.await_provider_confirmation &&
+    !latest.confirmation_timed_out_at && !latest.confirmation_delivery_suppressed &&
+    (latest.status === 'processing' || (latest.status === 'pending' && !latest.sign_url && !latest.agent_client_signed_at));
+  const lateLink = !!latest.confirmation_timed_out_at && latest.status === 'pending' && !!latest.sign_url;
+  let label = STATUS_LABEL[latest.status] ?? latest.status;
+  if (waiting) label = 'Aguardando confirmação da ZapSign (até 5 minutos)';
+  else if (latest.origin === 'agent' && latest.status === 'processing') label = 'Verificando criação pela IA';
+  else if (latest.origin === 'agent' && latest.status === 'failed') label = 'Criação não confirmada';
   return (
     <section aria-label="Documento mais recente" className={`rounded-xl border px-3 py-2.5 text-xs ${tone}`} role="status">
       <p className="flex items-start gap-2">
         <span className={`mt-[1px] shrink-0 ${iconTone}`}>{icon}</span>
         <span className="min-w-0">
-          <b>{latest.doc_name || latest.template_name || 'Documento'}</b>: {latest.origin === 'agent' && latest.status === 'processing' ? 'Verificando criação pela IA' : latest.origin === 'agent' && latest.status === 'failed' ? 'Criação não confirmada' : STATUS_LABEL[latest.status] ?? latest.status}
+          <b>{latest.doc_name || latest.template_name || 'Documento'}</b>: {label}
           {when}
-          {detail}
+          {waiting || lateLink ? null : detail}
         </span>
       </p>
+      {lateLink && (
+        <p className="mt-1 pl-6">A confirmação chegou após o prazo. O link está disponível para envio pela equipe.</p>
+      )}
       {latest.notices?.map(n => <p key={n.kind} className="mt-1 pl-6">
         <b>{n.kind === 'invite' ? 'Link de assinatura' : 'Acompanhamento da assinatura'}</b>
         {' · '}{n.note || (n.state === 'sent' ? 'Enviado na conversa' : 'Aguardando envio')}

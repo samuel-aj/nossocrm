@@ -114,6 +114,33 @@ describe('modelo composto do escritório', () => {
     expect(add).not.toHaveBeenCalled();
   });
 
+  it('não inicia um novo anexo no limite dos cinco minutos e conserva o recibo do anterior', async () => {
+    const client = new ZapSignClient({token:'fake',sandbox:true,fetchImpl:vi.fn()});
+    const cutoff = Date.now() + 300_000;
+    const clock = vi.spyOn(Date,'now').mockReturnValue(cutoff - 1);
+    vi.spyOn(client,'createDocFromTemplate').mockResolvedValue(doc);
+    vi.spyOn(client,'getDoc').mockResolvedValue({...doc, extra_docs:[]});
+    const add = vi.spyOn(client,'attachTemplate').mockImplementationOnce(async () => {
+      clock.mockReturnValue(cutoff);
+      return {token:'extra-0',name:'Procuração'};
+    });
+    await expect(createTemplatePackage(client,main,input,undefined,cutoff)).rejects.toMatchObject({
+      docToken:doc.token, attachmentModels:{'extra-0':'m0'}, awaitConfirmation:true,
+    });
+    expect(add).toHaveBeenCalledTimes(1);
+  });
+
+  it('distingue a recusa explícita do anexo da indisponibilidade do envelope recém-criado', async () => {
+    const client = new ZapSignClient({token:'fake',sandbox:true,fetchImpl:vi.fn()});
+    vi.spyOn(client,'createDocFromTemplate').mockResolvedValue(doc);
+    vi.spyOn(client,'getDoc').mockRejectedValueOnce(new ZapSignError('indisponível',404)).mockResolvedValue({...doc,extra_docs:[]});
+    const add = vi.spyOn(client,'attachTemplate').mockRejectedValue(new ZapSignError('rejeitado',422));
+    await expect(createTemplatePackage(client,main,input)).rejects.toMatchObject({docToken:doc.token, awaitConfirmation:true});
+    expect(add).not.toHaveBeenCalled();
+    await expect(createTemplatePackage(client,main,input)).rejects.toMatchObject({docToken:doc.token, awaitConfirmation:false});
+    expect(add).toHaveBeenCalledTimes(1);
+  });
+
   it('preserva a criação simples sem chamadas de anexo', async () => {
     const fetchImpl = vi.fn().mockResolvedValueOnce(Response.json(doc));
     const client = new ZapSignClient({token:'fake',sandbox:true,fetchImpl});

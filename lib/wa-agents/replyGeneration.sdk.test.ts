@@ -34,6 +34,26 @@ function queuedModel(responses: LanguageModelV3GenerateResult[]) {
 }
 
 describe('contrato com o AI SDK instalado', () => {
+  it.each([
+    [{ ok: true, aguardando_confirmacao_zapsign: true }, 'confirmation', 'criar'],
+    [{ ok: true, existente: true, aguarda_assinatura_no_atendimento: true }, 'delivery', 'preparar'],
+    [{ ok: true, aguardando_confirmacao_zapsign: true, prazo_confirmacao_encerrado: true }, 'team', 'criar'],
+  ] as const)('para na ferramenta enquanto o CRM trata o contrato (%s)', async (output, wait, modo) => {
+    const cancel = vi.fn();
+    const contract = vi.fn().mockResolvedValue(output);
+    const model = queuedModel([response([
+      { type: 'text', text: 'Já enviei o link. Vou encaminhar para a equipe. [vídeo]' },
+      { type: 'tool-call', toolCallId: 'cancel', toolName: 'cancelar_retorno', input: '{}' },
+      { type: 'tool-call', toolCallId: 'contract', toolName: 'contrato_zapsign', input: JSON.stringify({ modo, dados: {} }) },
+    ])]);
+    const result = await generateAgentReply({ ...input, model,
+      agent: { ...agent, tools: { ...agent.tools, zapsign_template_token: 'template', scheduled_return_bot_id: 'robot' } },
+      runtime: { contract, scheduledReturn: { cancel, schedule: vi.fn(), inspect: vi.fn() } } });
+    expect(result).toMatchObject({ contractWait: wait, text: '', segments: [], outputSafety: { recoveryAttempted: false } });
+    expect(contract).toHaveBeenCalledTimes(1);
+    expect(cancel).not.toHaveBeenCalled();
+    expect(model.doGenerateCalls).toHaveLength(1);
+  });
   const savedAnnotation = '[salvar_dados]\n' + JSON.stringify({
     documentos_rescisao: 'aguardando',
     tempo_carteira: 'dois anos',

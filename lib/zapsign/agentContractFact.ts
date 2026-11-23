@@ -7,7 +7,7 @@ export function clientHasSigned(s: Pick<SignatureRow,'status'|'signers'|'agent_c
 
 type ManualScope = { organizationId: string; dealId: string | null; contactId: string | null;
   templateToken: string | null | undefined; silentSince?: string | null };
-const factColumns = 'status, origin, request, doc_token, sent_via, sent_at, created_at, signers, agent_client_signed_at, notices:zapsign_agent_notices(kind,state)';
+const factColumns = 'status, origin, request, doc_token, sent_via, sent_at, created_at, signers, agent_client_signed_at, confirmation_timed_out_at, confirmation_delivery_suppressed, notices:zapsign_agent_notices(kind,state)';
 
 function issuedAt(contract: Pick<SignatureRow, 'created_at' | 'sent_at'>): number {
   // A stage can reserve a review row days before the team issues it. finishSend
@@ -57,6 +57,9 @@ export async function agentContractFact(db: SupabaseClient, org: string, convers
     current.status === 'pending' ? 'Documento criado. Assinatura do cliente pendente.' : 'Situação do contrato: ' + current.status;
   const notices = current.notices ?? [];
   const sent = (kind:string) => notices.some(n=>n.kind===kind && n.state==='sent');
+  if (current.origin === 'agent' && (current.confirmation_timed_out_at || current.confirmation_delivery_suppressed))
+    return 'Registro da ZapSign: a equipe assumiu a conferência e a entrega deste contrato. ' + status +
+      ' Consulte o documento existente antes de qualquer nova emissão.';
   if (current.origin !== 'agent') {
     const delivery = current.sent_at && current.sent_via && current.sent_via !== 'link'
       ? ' Convite enviado pela equipe via ' + current.sent_via + '.' : ' Link gerado; envio ao cliente não confirmado.';

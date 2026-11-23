@@ -79,6 +79,8 @@ export type SignatureRule = {
 
 /** O que o envio manual escolheu na hora (fica gravado na linha). */
 export type SignatureRequest = {
+  await_provider_confirmation?: boolean;
+  confirmation_agent_state_at?: string | null;
   confirmed_signer?: SignerIdentity;
   package_expected?: number;
   package_members?: { token: string; name: string }[];
@@ -110,6 +112,8 @@ export type SignatureRow = {
   stage_id: string | null;
   origin: 'rule' | 'manual' | 'agent';
   agent_client_signed_at?: string | null;
+  confirmation_timed_out_at?: string | null;
+  confirmation_delivery_suppressed?: boolean;
   requested_by: string | null;
   template_token: string | null;
   template_name: string | null;
@@ -457,6 +461,79 @@ function parentEnvelopeEvents(admin: SupabaseClient, org: string, id: string) {
     .not('doc_token','is',null);
 }
 
+/** After an ambiguous issuance, only a verified parent with every expected attachment can release the link. */
+export async function reconcileWaitingAgentPackage(
+  admin: SupabaseClient, org: string, id: string, deps: SendDeps = {}, event?: WebhookPayload,
+): Promise<SignatureRow | null> {
+  const read = async () => {
+    const result = await admin.from('deal_signatures').select('*').eq('organization_id', org)
+      .eq('origin', 'agent').eq('id', id).maybeSingle();
+    if (result.error) throw new Error(result.error.message);
+    return result.data as SignatureRow | null;
+  };
+  const row = await read();
+  const spec = row?.request;
+  if (!row || !spec?.await_provider_confirmation || !spec.package_expected) return null;
+  if (!spec.package_unverified) return spec.package_recovered ? row : null;
+  if (row.status !== 'processing' && !(row.status === 'failed' && row.confirmation_timed_out_at)) return null;
+  if (event?.parent_doc_token || (event?.external_id && event.external_id !== id)) return null;
+  if (row.doc_token && event?.token && row.doc_token !== event.token) return null;
+  let token = row.doc_token || event?.token;
+  if (!token) {
+    const parent = await parentEnvelopeEvents(admin, org, id).limit(1).maybeSingle();
+    if (parent.error) throw new Error(parent.error.message);
+    token = parent.data?.doc_token;
+  }
+  if (!token) return null;
+  const conflict = await parentEnvelopeEvents(admin, org, id).neq('doc_token', token).limit(1).maybeSingle();
+  if (conflict.error) throw new Error(conflict.error.message);
+  if (conflict.data) return null;
+  const members = spec.package_members;
+  if (!members || members.length !== spec.package_expected || new Set(members.map(m => m.token)).size !== members.length) return null;
+  const settings = await loadZapSignSettings(admin, org);
+  if (!settings) return null;
+  let doc: ZapSignDoc;
+  try {
+    doc = await (deps.client ?? clientFor(settings, deps.fetchImpl)).getDoc(token);
+    if (doc.token !== token || doc.external_id !== id || remainingAttachments(members, doc.extra_docs, spec.package_attachment_models).remaining.size) return null;
+  } catch {
+    // The provider may still be assembling the envelope. A subsequent webhook can confirm it.
+    return null;
+  }
+  const contact = agentContactToken(doc.signers ?? [], spec.agent_signer);
+  if (!contact || !['pending', 'signed', 'refused', 'expired', 'deleted'].includes(doc.status)) return null;
+  const signers = doc.signers.map(s => toStoredSigner(s, s.token === contact ? 'contact' : 'extra'));
+  const terminal = doc.status !== 'pending' ? doc.status :
+    ['signed', 'refused', 'expired', 'deleted'].find(s => event?.status === s || (s !== 'signed' && event?.event_type === 'doc_' + s));
+  const signingLink = signers.find(s => s.role === 'contact')?.sign_url;
+  if (!terminal && !signingLink) return null;
+  let update = admin.from('deal_signatures').update({
+    doc_token: token, doc_name: doc.name || row.doc_name, signers, sent_via: 'link',
+    // A terminal document goes directly through its normal webhook transition.
+    ...(terminal ? {} : { status: 'pending', sign_url: signingLink }),
+    request: { ...spec, package_unverified: false, package_recovered: true },
+    last_error: null, updated_at: nowIso(),
+  }).eq('organization_id', org).eq('origin','agent').eq('id', id).eq('status', row.status)
+    .eq('request->>package_unverified','true');
+  update = row.doc_token ? update.eq('doc_token', token) : update.is('doc_token', null);
+  const saved = await update.select('id').maybeSingle();
+  if (saved.error) throw new Error(saved.error.message);
+  if (!saved.data) {
+    const winner = await read();
+    // Expiry can win while the provider GET is in flight. Reconcile the same
+    // verified envelope for the team; the deadline marker blocks its invitation.
+    if (row.status === 'processing' && winner?.status === 'failed' && winner.confirmation_timed_out_at &&
+        winner.request?.package_unverified) return reconcileWaitingAgentPackage(admin, org, id, deps, event);
+    return winner?.doc_token === token && winner.request?.package_recovered ? winner : null;
+  }
+  await recordEvent(admin, { ...row, doc_token: token, doc_name: doc.name }, 'created', { origin: 'agent' });
+  if (terminal) {
+    await handleZapSignWebhook(admin, org, { ...event, event_type: 'doc_' + terminal, status: terminal,
+      token, external_id: id, signers: doc.signers, signed_file: doc.signed_file ?? event?.signed_file }, deps);
+  }
+  return read();
+}
+
 /** Reconcile a reviewed, manually issued package. Never issue, invite, or replay stage actions. */
 export async function recoverManualPackage(admin: SupabaseClient, scope: {
   organizationId: string; dealId: string; signatureId: string; userId: string; providerToken?: string;
@@ -541,7 +618,7 @@ export function toStoredSigner(s: ZapSignSigner, role: StoredSigner['role']): St
     name: s.name,
     email: s.email ?? null,
     phone: s.phone_number ? `+${s.phone_country ?? ''}${s.phone_number}` : null,
-    sign_url: s.sign_url ?? (s.token ? signerLink(s.token) : null),
+    sign_url: s.sign_url?.trim() || (s.token ? signerLink(s.token) : null),
     status: s.status,
     signed_at: s.signed_at ?? null,
     role,
@@ -847,28 +924,47 @@ export async function handleZapSignWebhook(
     if (reservation.error) throw new Error(reservation.error.message);
     // Only our completed assembly may make a package pending and release its URL.
     // A doc_created callback can race the POST for the principal or an attachment.
-    if (reservation.data?.request?.package_expected) {
+    if (reservation.data?.request?.package_expected && reservation.data.request.package_unverified && reservation.data.request.await_provider_confirmation) {
+      row = await reconcileWaitingAgentPackage(admin, orgId, payload.external_id, deps, payload);
+    }
+    if (!row && reservation.data?.request?.package_expected) {
       if (payload.event_type === 'doc_created' || payload.event_type === 'created_signer') return { action: 'awaiting_package' };
       throw new Error('Pacote em montagem. Reprocessar após a conferência dos anexos.');
     }
-    const contactToken = agentContactToken(payload.signers ?? [],reservation.data?.request?.agent_signer);
-    const incoming = (payload.signers ?? []).map(s => toStoredSigner(s, s.token === contactToken ? 'contact' : 'extra'));
-    const { data, error } = await admin.from('deal_signatures').update({ doc_token: docToken, status: 'pending',
-      doc_name: payload.name ?? null, signers: incoming, sign_url: incoming.find(s => s.role === 'contact')?.sign_url ?? null,
-      sent_via: 'link', last_error: null, updated_at: nowIso() })
-      .eq('organization_id', orgId).eq('origin', 'agent').eq('id', payload.external_id).is('doc_token', null)
-      .in('status', ['processing', 'failed']).select('*').maybeSingle();
-    if (error) throw new Error(error.message);
-    row = data as SignatureRow | null;
-    if (row) await recordEvent(admin, row, 'created', { origin: 'agent' });
-    else {
-      const reread = await admin.from('deal_signatures').select('*').eq('organization_id', orgId).eq('doc_token', docToken).maybeSingle();
-      if (reread.error) throw new Error(reread.error.message);
-      row = reread.data as SignatureRow | null;
+    if (!row) {
+      const contactToken = agentContactToken(payload.signers ?? [],reservation.data?.request?.agent_signer);
+      const incoming = (payload.signers ?? []).map(s => toStoredSigner(s, s.token === contactToken ? 'contact' : 'extra'));
+      // Bind a terminal callback without briefly creating an invitation before
+      // the signed/refused/expired/deleted transition below.
+      const terminal = ['signed','refused','recusado','expired','deleted'].includes(payload.status ?? '') ||
+        ['doc_refused','doc_deleted','doc_expired'].includes(payload.event_type ?? '');
+      const { data, error } = await admin.from('deal_signatures').update({ doc_token: docToken,
+        ...(!terminal && { status: 'pending', sign_url: incoming.find(s => s.role === 'contact')?.sign_url ?? null }),
+        doc_name: payload.name ?? null, signers: incoming,
+        sent_via: 'link', last_error: null, updated_at: nowIso() })
+        .eq('organization_id', orgId).eq('origin', 'agent').eq('id', payload.external_id).is('doc_token', null)
+        .in('status', ['processing', 'failed']).select('*').maybeSingle();
+      if (error) throw new Error(error.message);
+      row = data as SignatureRow | null;
+      if (row) await recordEvent(admin, row, 'created', { origin: 'agent' });
+      else {
+        const reread = await admin.from('deal_signatures').select('*').eq('organization_id', orgId).eq('doc_token', docToken).maybeSingle();
+        if (reread.error) throw new Error(reread.error.message);
+        row = reread.data as SignatureRow | null;
+      }
     }
   }
   if (!row) return { action: 'ignored_unknown_doc' };
-  if (row.request?.package_unverified || (row.status === 'failed' && row.request?.package_expected)) return { action: 'package_requires_review' };
+  if (row.request?.package_unverified && row.request.await_provider_confirmation && row.origin === 'agent') {
+    const recovered = await reconcileWaitingAgentPackage(admin, orgId, row.id, deps, payload);
+    if (!recovered) {
+      if (payload.event_type === 'doc_signed') throw new Error('Pacote ainda não confirmado. Reprocessar após a conferência dos anexos.');
+      return { action: 'awaiting_package', signatureId: row.id };
+    }
+    row = recovered;
+  }
+  if (row.request?.package_unverified || (row.status === 'failed' && row.request?.package_expected && !row.request.package_recovered))
+    return { action: 'package_requires_review' };
   const now = nowIso();
   const event = payload.event_type ?? '';
   const docStatus = (payload.status ?? '').toLowerCase();
@@ -880,7 +976,7 @@ export async function handleZapSignWebhook(
   const expected = row.request?.agent_delivery ? agentContactToken(incoming,row.request.agent_signer) : null;
   const signers: StoredSigner[] = (row.signers ?? []).map((s) => {
     const u = incoming.find((i) => i.token === s.token);
-    return u ? { ...s, role: u.token === expected ? 'contact' : s.role, status: s.status === 'signed' ? 'signed' : u.status, signed_at: u.signed_at ?? s.signed_at, sign_url: u.sign_url ?? s.sign_url } : s;
+    return u ? { ...s, role: u.token === expected ? 'contact' : s.role, status: s.status === 'signed' ? 'signed' : u.status, signed_at: u.signed_at ?? s.signed_at, sign_url: u.sign_url?.trim() || s.sign_url } : s;
   });
   for (const i of incoming) if (!signers.some((s) => s.token === i.token)) signers.push(toStoredSigner(i, i.token === expected ? 'contact' : 'extra'));
 
@@ -899,7 +995,7 @@ export async function handleZapSignWebhook(
     return { action: 'refused', signatureId: row.id };
   }
 
-  if (event === 'doc_deleted') {
+  if (event === 'doc_deleted' || docStatus === 'deleted') {
     if (row.status === 'deleted') return { action: 'already_deleted', signatureId: row.id };
     await admin.from('deal_signatures').update({ ...base, status: 'deleted' }).eq('id', row.id);
     await recordEvent(admin, row, 'deleted', {});

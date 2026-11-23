@@ -36,7 +36,7 @@ export async function GET(_req: Request, ctx: Ctx) {
     loadZapSignSettings(auth.admin, orgId),
     auth.admin
       .from('deal_signatures')
-      .select('id, origin, status, stage_id, template_name, doc_name, doc_token, sign_url, sent_via, sent_at, signed_at, refused_at, refused_reason, file_id, file_path, last_error, signers, created_at, package_unverified:request->package_unverified, package_recovered:request->package_recovered, notices:zapsign_agent_notices(kind,state,note)')
+      .select('id, origin, status, stage_id, template_name, doc_name, doc_token, sign_url, sent_via, sent_at, signed_at, refused_at, refused_reason, file_id, file_path, last_error, signers, created_at, await_provider_confirmation:request->await_provider_confirmation, confirmation_timed_out_at, confirmation_delivery_suppressed, agent_client_signed_at, package_unverified:request->package_unverified, package_recovered:request->package_recovered, notices:zapsign_agent_notices(kind,state,note)')
       .eq('organization_id', orgId)
       .eq('deal_id', dealId)
       .order('created_at', { ascending: false })

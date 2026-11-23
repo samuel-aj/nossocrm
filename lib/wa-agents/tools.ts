@@ -208,22 +208,28 @@ export function buildAgentTools(agent: AgentRow, runtime: AgentToolRuntime = {})
     });
   }
 
+  // generateText announces all inputs in a step before running its tools in parallel.
+  // A separate step is needed to change a scheduled return after checking a contract.
+  const contractSteps = new WeakSet<object>();
   if (agent.tools?.scheduled_return_bot_id && runtime.scheduledReturn) {
     const service = runtime.scheduledReturn;
     const safe = async (call: () => Promise<unknown>) => { try { return await call(); } catch (error) { return { ok: false, error: errorMessage(error) }; } };
+    const changeReturn = (messages: object, call: () => Promise<unknown>) => contractSteps.has(messages)
+      ? { ok: false, error: 'Aguarde o resultado da consulta ou criação do contrato antes de alterar o retorno.' } : safe(call);
     tools.consultar_retorno = tool({ description: 'Consulta a data/hora atual, fuso do escritório e retorno pendente. Consulte antes de interpretar amanhã ou outro prazo relativo. Se o cliente estiver em outro fuso, confirme o fuso dele.', inputSchema: z.object({}), execute: async () => safe(service.inspect) });
     tools.agendar_retorno = tool({
       description: 'Agenda ou remarca o robô configurado para esta conversa. Use SOMENTE após o cliente pedir ou confirmar claramente data e horário; resolva ambiguidades de dia, hora e fuso perguntando. confirmed=true significa que o cliente confirmou, nunca assuma. O horário combinado pode ser exceção ao calendário. Não encerre o agente nem use outra ação de transferência ao agendar. Só diga que está agendado se ok=true; repita a data e o fuso devolvidos. O robô pode reativar o agente com Entregar a agente.',
       inputSchema: ReturnTimeSchema,
-      execute: async input => safe(() => service.schedule(input)),
+      execute: async (input, { messages }) => changeReturn(messages, () => service.schedule(input)),
     });
-    tools.cancelar_retorno = tool({ description: 'Cancela o retorno ainda não iniciado quando o cliente pedir. Não encerra o atendimento.', inputSchema: z.object({}), execute: async () => safe(service.cancel) });
+    tools.cancelar_retorno = tool({ description: 'Cancela o retorno ainda não iniciado quando o cliente pedir. Não encerra o atendimento.', inputSchema: z.object({}), execute: async (_, { messages }) => changeReturn(messages, service.cancel) });
   }
   if (agent.tools?.zapsign_template_token && runtime.contract) {
     const contract = runtime.contract;
     tools.contrato_zapsign = tool({
       description: 'Antes de apresentar a ficha, use preparar. Em dados, use os nomes das variáveis e informe nome_signatario e telefone_signatario com o nome completo e o telefone com DDD de quem assina. Omita email_signatario se a pessoa não tiver e-mail. Reúna os dados que o cliente já informou por texto ou áudio. Separe as partes do endereço por vírgulas. Se a ferramenta ainda pedir um dado pessoal já informado em partes ou lido no documento, mostre o resumo numa ficha, com um campo por linha (ex.: Endereço: Rua das Flores, 120, Centro), e pergunte se os dados estão corretos. Após o aceite, prepare novamente. Pergunte apenas o que estiver faltando e use linguagem natural com o cliente. Para pendências do escritório, chame a equipe. Use solicitar_confirmacao como a pergunta de confirmação, uma única vez, e termine a resposta nela. Nunca peça para o cliente copiar ou repetir a ficha: uma resposta simples como sim, ok, confirmado ou tá certo já é o aceite. Após o aceite, use criar com os mesmos dados. Se preparar devolver ficha_confirmada, passe direto a criar. Só anuncie a criação quando a ferramenta confirmar. O CRM entrega o link e avisa quando o cliente assina. Mantenha o atendimento aberto.',
       inputSchema: z.object({ modo: z.enum(['preparar', 'criar']), dados: z.record(z.string().min(1).max(160), z.string().max(500)) }),
+      onInputAvailable: ({ messages }) => { contractSteps.add(messages); },
       execute: async input => { try { return await contract(input); } catch (e) { return { ok: false, erro: errorMessage(e) }; } },
     });
   }

@@ -22,6 +22,19 @@ vi.mock('@/features/zapsign/signatureTypes',async original=>({
 const deal={id:'lead',status:'stage'} as Deal;
 afterEach(()=>{cleanup();vi.unstubAllGlobals();vi.clearAllMocks();});
 
+it('indica a espera pela ZapSign e disponibiliza o link tardio para a equipe', () => {
+  const reservation = { id:'reserva', origin:'agent', doc_name:'Contrato', status:'pending',
+    await_provider_confirmation:true, created_at:'2026-11-19T12:00:00Z', sign_url:null };
+  mock.docs = [reservation];
+  const view = render(<ContractComposer deal={deal} canEdit={true}/>);
+  expect(screen.getByRole('status').textContent).toContain('Aguardando confirmação da ZapSign (até 5 minutos)');
+  expect(screen.queryByRole('button', {name:'Copiar link'})).toBeNull();
+  mock.docs = [{ ...reservation, confirmation_timed_out_at:'2026-11-19T12:05:00Z', sign_url:'https://teste.invalid/assinar' }];
+  view.rerender(<ContractComposer deal={deal} canEdit={true}/>);
+  expect(screen.getByRole('status').textContent).toContain('O link está disponível para envio pela equipe');
+  expect(screen.getByRole('button', {name:'Copiar link'})).toBeTruthy();
+});
+
 it('recupera o documento anterior pelo ID da tentativa, sem passar pela rota de emissão',async()=>{
   mock.docs=[
     {id:'novo',status:'pending',doc_name:'Contrato',created_at:'2026-11-08'},

@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-const h = vi.hoisted(() => ({ run: vi.fn(), create: vi.fn(), rules: [] as unknown[], claim: vi.fn(), manualContract: vi.fn() }));
+const h = vi.hoisted(() => ({ run: vi.fn(), create: vi.fn(), rules: [] as unknown[], claim: vi.fn(), manualContract: vi.fn(), contractDue: vi.fn() }));
 vi.mock('./beta', () => ({ isAiAgentsApproved: async () => true }));
 vi.mock('./context', () => ({ loadAgent: async () => ({ followups: h.rules, tools: { zapsign_template_token: 'template' } }) }));
 vi.mock('@/lib/zapsign/agentContractFact', () => ({ manualContractIssued: h.manualContract }));
+vi.mock('./contractConfirmation', () => ({ contractConfirmationDue: h.contractDue }));
 vi.mock('./engine', () => ({ runAgentOnConversation: h.run }));
 vi.mock('./bots', () => ({ createBotRun: h.create, runBotRunNow: vi.fn() }));
 import { processFollowups } from './followups';
@@ -27,6 +28,7 @@ beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-09T14:00:00Z'));
   vi.clearAllMocks(); h.claim.mockResolvedValue({ data: 'claimed' }); h.run.mockResolvedValue({ status: 'ok' });
   h.manualContract.mockResolvedValue(false);
+  h.contractDue.mockResolvedValue(null);
   h.rules = [60, 360, 1440].map(after_minutes => ({ id: String(after_minutes), after_minutes, kind: 'agent', instruction: 'retome', only_in_window: false }));
 });
 afterEach(() => vi.useRealTimers());
@@ -61,6 +63,14 @@ it('passes proactive scope to a follow-up robot', async () => {
   expect(h.create).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ proactive: {
     anchor: cycle, agentFollowup: { agentId: 'agent', templateToken: 'template' },
   }, conversationId: 'conv' }));
+});
+it.each(['bot', 'agent'])('preserva a tentativa %s durante a espera pelo provedor', async kind => {
+  h.rules = [{ id: 'one', after_minutes: 60, kind, bot_id: 'robot', instruction: 'retome', only_in_window: false }];
+  h.contractDue.mockResolvedValue(new Date(Date.now() + 120_000).toISOString());
+  expect((await processFollowups(db())).fired).toBe(0);
+  expect(h.claim).not.toHaveBeenCalled();
+  expect(h.run).not.toHaveBeenCalled();
+  expect(h.create).not.toHaveBeenCalled();
 });
 it.each(['agent', 'bot'])('does not run an old %s follow-up after the team issues this contract', async kind => {
   h.rules = [{ id: 'one', after_minutes: 60, kind, bot_id: 'robot', instruction: 'peça endereço', only_in_window: false }];

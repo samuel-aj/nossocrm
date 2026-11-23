@@ -49,6 +49,22 @@ beforeEach(()=>{
 });
 afterEach(()=>vi.unstubAllGlobals());
 describe('autonomia ZapSign (transportes simulados)',()=>{
+  it('não entrega um convite da sessão anterior após a equipe retomar o atendimento', async () => {
+    const s = setup('invite');
+    Object.assign(s.sig.request as Row, { await_provider_confirmation:true, confirmation_agent_state_at:'2026-11-19T12:00:00Z' });
+    Object.assign(s.conv, { ai_status_changed_at:'2026-11-19T12:02:00Z' });
+    await deliverAgentNotice(s.db, s.notice);
+    expect(s.job.state).toBe('cancelled');
+    expect(h.text).not.toHaveBeenCalled();
+  });
+  it.each(['invite', 'signed'] as const)('bloqueia aviso pendente (%s) após a transferência para a equipe', async kind => {
+    const s = setup(kind);
+    s.sig.confirmation_timed_out_at = new Date().toISOString();
+    await deliverAgentNotice(s.db, s.notice);
+    expect(s.job.state).toBe('cancelled');
+    expect(h.text).not.toHaveBeenCalled();
+    expect(h.template).not.toHaveBeenCalled();
+  });
   it('acompanha assinatura de contrato manual vinculado, mas nunca envia outro convite',async()=>{
     const s=setup('signed');
     s.sig.origin='manual';
