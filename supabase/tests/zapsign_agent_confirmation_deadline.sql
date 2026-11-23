@@ -80,8 +80,8 @@ BEGIN
 
   UPDATE public.wa_conversations SET ai_status='active',ai_status_changed_at=clock_timestamp() WHERE id=chat;
   taken_over := pg_temp.reserve_contract(chat,'1 minute');
-  UPDATE public.wa_conversations SET ai_status='paused',ai_status_changed_at=clock_timestamp(),ai_resume_at=NULL WHERE id=chat;
-  UPDATE public.wa_conversations SET ai_status='active',ai_status_changed_at=clock_timestamp() WHERE id=chat;
+  UPDATE public.wa_conversations SET ai_status='paused',ai_status_changed_at=ai_status_changed_at+interval '1 second',ai_resume_at=NULL WHERE id=chat;
+  UPDATE public.wa_conversations SET ai_status='active',ai_status_changed_at=ai_status_changed_at+interval '1 second' WHERE id=chat;
   SELECT count(*) INTO handoffs FROM public.crm_notification_events WHERE source_id=chat AND kind='human_handoff';
   UPDATE public.deal_signatures SET status='pending',doc_token=taken_over::text,sign_url='test:operator' WHERE id=taken_over;
   ASSERT (SELECT confirmation_delivery_suppressed AND confirmation_timed_out_at IS NULL FROM public.deal_signatures WHERE id=taken_over);
