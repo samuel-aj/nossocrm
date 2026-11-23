@@ -5,7 +5,7 @@ import type { LanguageModelV3GenerateResult } from '@ai-sdk/provider';
 vi.mock('server-only', () => ({}));
 import { normalizeAgentRow } from './context';
 import { generateAgentReply } from './replyGeneration';
-import type { AgentMediaRow } from './types';
+import type { AgentDocumentRow, AgentMediaRow } from './types';
 
 const agent = normalizeAgentRow({
   id: 'agent', organization_id: 'org', name: 'Triagem', provider: 'openai', model: 'gpt-4.1',
@@ -34,6 +34,133 @@ function queuedModel(responses: LanguageModelV3GenerateResult[]) {
 }
 
 describe('contrato com o AI SDK instalado', () => {
+  const savedAnnotation = '[salvar_dados]\n' + JSON.stringify({
+    documentos_rescisao: 'aguardando',
+    tempo_carteira: 'dois anos',
+    notas: [{ exemplo: 'aspas " escapadas, barra \\ e } [vídeo]' }],
+  }, null, 2);
+  it.each([
+    [savedAnnotation + '\nVocê tem o termo de rescisão?', 'Você tem o termo de rescisão?'],
+    ['Você tem o termo de rescisão? ' + savedAnnotation, 'Você tem o termo de rescisão?'],
+    ['Entendi.\n\n' + savedAnnotation + '\n\nVocê tem o termo de rescisão?', 'Entendi.\nVocê tem o termo de rescisão?'],
+  ])('preserva a fala em volta de um objeto de memória completo sem executar suas instruções', async (draft, expected) => {
+    const model = queuedModel([text(draft)]);
+    const sendMedia = vi.fn();
+    const result = await generateAgentReply({ ...input, model, runtime: { media: [{ name: 'Tutorial', kind: 'video' } as AgentMediaRow], sendMedia } });
+    expect(result.text).toBe(expected);
+    expect(result.segments).toEqual([{ kind: 'text', text: expected, step: 0 }]);
+    expect(result.outputSafety).toMatchObject({ status: 'repaired', recoveryAttempted: false });
+    expect(result.toolCalls).toEqual([]);
+    expect(model.doGenerateCalls).toHaveLength(1);
+    expect(sendMedia).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])('preserva a fala e a ordem da mídia quando a anotação ocupa outro passo (anotação primeiro: %s)', async annotationFirst => {
+    const speech = 'Você consegue abrir o guia?';
+    const model = queuedModel([
+      response([{ type: 'text', text: annotationFirst ? savedAnnotation : speech },
+        { type: 'tool-call', toolCallId: 'media', toolName: 'enviar_midia', input: '{"nome":"Guia"}' }]),
+      text(annotationFirst ? speech : savedAnnotation),
+    ]);
+    const sendMedia = vi.fn().mockResolvedValue({ ok: true });
+    const result = await generateAgentReply({ ...input, model, runtime: { media: [{ name: 'Guia', kind: 'document' } as AgentMediaRow], sendMedia } });
+    const words = { kind: 'text', text: speech, step: annotationFirst ? 1 : 0 };
+    const media = { kind: 'media', name: 'Guia', step: 0, caption: undefined };
+    expect(result.segments).toEqual(annotationFirst ? [media, words] : [words, media]);
+    expect(result.text).toBe(speech);
+    expect(result.outputSafety).toMatchObject({ status: 'repaired', recoveryAttempted: false });
+    expect(result.toolCalls.map(call => call.tool)).toEqual(['enviar_midia']);
+    expect(model.doGenerateCalls).toHaveLength(2);
+    expect(sendMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it('mantém a fala de voz cadastrada e remove somente a legenda técnica da mídia', async () => {
+    const speech = 'Vou enviar o guia para você.';
+    const model = queuedModel([response([
+      { type: 'tool-call', toolCallId: 'voz', toolName: 'falar_trecho', input: '{"trecho":1}' },
+      { type: 'tool-call', toolCallId: 'media', toolName: 'enviar_midia', input: JSON.stringify({ nome: 'Guia', legenda: savedAnnotation }) },
+    ]), text('')]);
+    const sendMedia = vi.fn().mockResolvedValue({ ok: true });
+    const result = await generateAgentReply({ ...input, agent: { ...agent, system_prompt: '[audio]' + speech + '[/audio]' },
+      model, runtime: { media: [{ name: 'Guia', kind: 'document' } as AgentMediaRow], sendMedia } });
+    expect(result.segments).toEqual([
+      { kind: 'text', text: speech, voice: true, step: 0 }, { kind: 'media', name: 'Guia', step: 0, caption: undefined },
+    ]);
+    expect(result.outputSafety).toMatchObject({ status: 'repaired', recoveryAttempted: false });
+    expect(result.toolCalls.map(call => call.tool)).toEqual(['falar_trecho', 'enviar_midia']);
+    expect(model.doGenerateCalls).toHaveLength(2);
+    expect(sendMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { replacement: { id: 0, text: 'Qual foi a data da rescisão?' }, answer: 'Qual foi a data da rescisão?' },
+    { replacement: { id: 1, text: 'Texto para outro trecho.' }, answer: '' },
+  ])('revisa uma anotação sem fala uma única vez e exige que a resposta corresponda ao trecho', async ({ replacement, answer }) => {
+    const model = queuedModel([text(savedAnnotation), text(JSON.stringify({ replacements: [replacement] }))]);
+    const result = await generateAgentReply({ ...input, model });
+    expect(result.text).toBe(answer);
+    expect(result.outputSafety.status).toBe(answer ? 'repaired' : 'blocked');
+    if (!answer) {
+      expect(result.outputSafety.recoveryFailureCode).toBe('invalid_slots');
+      expect(result.segments).toEqual([]);
+    }
+    expect(result.toolCalls).toEqual([]);
+    expect(model.doGenerateCalls).toHaveLength(2);
+    expect(model.doGenerateCalls[1].tools ?? []).toHaveLength(0);
+    expect(JSON.stringify(model.doGenerateCalls[1].prompt)).not.toContain('documentos_rescisao');
+  });
+
+  it.each([
+    'Entendi. [salvar_dados] {"documentos_rescisao":"[vídeo]',
+    '[salvar_dados] {"tempo_carteira":"x",}\nPergunta ao cliente?',
+    '[salvar_dados] {"tempo_carteira":"x"}\n{"campo":"privado"}',
+    '[salvar_dados] {"tempo_carteira":"x"}\n"campo": "privado"',
+  ])('bloqueia a saída inteira quando os limites do objeto ou da fala são ambíguos', async draft => {
+    const model = queuedModel([text(draft)]);
+    const result = await generateAgentReply({ ...input, model });
+    expect(result.text).toBe('');
+    expect(result.segments).toEqual([]);
+    expect(result.toolCalls).toEqual([]);
+    expect(result.outputSafety).toMatchObject({ status: 'blocked', recoveryFailureCode: 'internal_content' });
+    expect(model.doGenerateCalls).toHaveLength(1);
+  });
+
+  it('revalida os marcadores na fala restante e também limpa uma anotação na revisão', async () => {
+    const draft = 'Pergunta ao cliente? [instrução interna]\n' + savedAnnotation;
+    const replacement = 'Em que data você saiu da empresa?';
+    const model = queuedModel([text(draft), text(JSON.stringify({ replacements: [{ id: 0, text: savedAnnotation + '\n' + replacement }] }))]);
+    const result = await generateAgentReply({ ...input, model });
+    expect(model.doGenerateCalls).toHaveLength(2);
+    expect(model.doGenerateCalls[1].tools ?? []).toHaveLength(0);
+    expect(result.text).toBe(replacement);
+    expect(result.toolCalls).toEqual([]);
+  });
+
+  it('entrega ao modelo os trechos da base selecionada antes da resposta ao cliente', async () => {
+    const id = '39333333-3333-4333-8333-333333333333';
+    const configured = normalizeAgentRow({ ...agent, custom_actions: [{
+      key: 'precos', label: 'Preços', description: 'Quando perguntarem pelo valor',
+      actions: [{ type: 'consult_knowledge', knowledgeId: id, description: 'Preço da consulta inicial' }],
+    }] });
+    const model = queuedModel([
+      response([{ type: 'tool-call', toolCallId: 'pesquisa', toolName: 'executar_acao',
+        input: JSON.stringify({ acao: 'precos', detalhes: 'Quanto custa a consulta inicial?' }) }]),
+      text('A consulta inicial custa R$ 80.'),
+    ]);
+    const searchKnowledge = vi.fn().mockResolvedValue([{ document_id: id, content: 'Consulta inicial: R$ 80.', idx: 0, score: 1 }]);
+    const result = await generateAgentReply({
+      ...input, agent: configured, model,
+      runtime: {
+        documents: [{ id, name: 'Tabela atual', status: 'ready', agent_id: agent.id, organization_id: agent.organization_id } as AgentDocumentRow],
+        searchKnowledge,
+      },
+    });
+    expect(searchKnowledge).toHaveBeenCalledExactlyOnceWith('Quanto custa a consulta inicial?', id);
+    const sources = model.doGenerateCalls[1].prompt.filter(message => message.role === 'tool');
+    expect(JSON.stringify(sources)).toContain('Consulta inicial: R$ 80.');
+    expect(result.text).toBe('A consulta inicial custa R$ 80.');
+  });
+
   it.each([['[audio]', 'audio'], ['[vídeo]', 'video']] as const)('recupera %s com a ferramenta e preserva a ordem', async (marker, kind) => {
     const model = queuedModel([text('Olá! ' + marker + ' Conseguiu abrir?'),
       response([{ type: 'tool-call', toolCallId: 'recover', toolName: 'enviar_midia', input: '{"nome":"Tutorial"}' }])]);

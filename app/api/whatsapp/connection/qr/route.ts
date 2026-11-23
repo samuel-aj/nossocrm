@@ -8,6 +8,7 @@
 import { requireOrgUser, isOrgAdmin, json } from '@/lib/whatsapp/api';
 import { getConnectionsByOrg, upsertConnection } from '@/lib/whatsapp/service';
 import { getProvider, isBusinessConnection } from '@/lib/whatsapp';
+import { observeConnection } from '@/lib/whatsapp/connectionIncidents';
 import { ensureEvolutionInstance, registerWebhook } from '@/lib/whatsapp/admin';
 
 export async function GET(req: Request) {
@@ -36,6 +37,9 @@ export async function GET(req: Request) {
   }
 
   try {
+    if (conn.health_monitor_enabled === false) {
+      await observeConnection(auth.admin, conn.id, 'connecting', 'manual', new Date().toISOString(), 'pair_requested');
+    }
     let qr = await getProvider(conn).getQrCode();
 
     if (!qr.qrBase64 && qr.state !== 'connected') {

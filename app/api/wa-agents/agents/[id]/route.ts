@@ -35,6 +35,7 @@ import {
   validateAgentTriggers,
   validateAutoLead,
   validateHelperAgentIds,
+  validateKnowledgeActions,
   validationError,
 } from '../../_shared';
 
@@ -155,6 +156,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
       const helpers = await validateHelperAgentIds(auth.admin, orgId, uniqueIds(present.helper_agent_ids), id);
       if (!helpers.ok) return helpers.response;
       patch.helper_agent_ids = helpers.ids;
+    }
+    if (present.custom_actions) {
+      const issue = await validateKnowledgeActions(auth.admin, orgId, id, present.custom_actions);
+      if (issue) return issue;
     }
   } catch (err) {
     return json({ error: getErrorMessage(err, 'Falha ao validar os números') }, 500);

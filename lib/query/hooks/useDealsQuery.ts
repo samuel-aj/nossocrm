@@ -147,8 +147,8 @@ export const useDealsView = (filters?: DealsFilters) => {
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     refetchOnMount: 'always',
-    // Polling de 15s como fallback (ver comentário em useDealsByBoard).
-    refetchInterval: 15_000,
+    // Polling de 60s como fallback (ver comentário em useDealsByBoard).
+    refetchInterval: 60_000,
     enabled: !authLoading && !!user, // Only fetch when auth is ready
   });
 };
@@ -243,13 +243,15 @@ export const useDealsByBoard = (boardId: string) => {
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     refetchOnMount: 'always',
-    // Polling de 15s como fallback redundante: além do Realtime do Supabase
+    // Polling como fallback redundante: além do Realtime do Supabase
     // (useRealtimeSyncKanban), o Kanban refaz fetch a cada 15s enquanto
     // a aba está ativa. Garante que leads chegando via n8n/Typebot ou
     // qualquer outra fonte apareçam mesmo que a subscription realtime
     // tenha caído. `refetchIntervalInBackground: false` (default) pausa
     // o polling quando a aba está em segundo plano — não desperdiça API.
-    refetchInterval: 15_000,
+    // Era 15 s; a lista inteira a cada 15 s por aba chegou a 11% do tempo do
+    // banco (23/11/2026). O Realtime já traz o lead novo na hora; 60 s é a rede.
+    refetchInterval: 60_000,
     enabled: !authLoading && !!user && !!boardId && !boardId.startsWith('temp-'),
   });
 };

@@ -31,11 +31,12 @@ import {
   Webhook,
   HelpCircle,
   Bot,
+  BookOpen,
   UserPen,
   type LucideIcon,
 } from 'lucide-react';
 import { WEBHOOK_VARIABLE_GROUPS, withCustomFieldVariables } from '@/lib/wa-agents/catalog';
-import type { AgentAiVar, BotMinimal, EndAction, Outcome } from '@/lib/wa-agents/types';
+import type { AgentAiVar, AgentDocumentRow, BotMinimal, EndAction, Outcome } from '@/lib/wa-agents/types';
 import type { WaAgentListItem, WaAgentOptions } from './useWaAgents';
 import { RuleEditorModal, RuleList } from './RuleList';
 import { BTN_ICON, BTN_SMALL, Disclosure, Field, HELP_CLASS, INPUT_CLASS, TEXTAREA_CLASS } from './ui';
@@ -43,6 +44,10 @@ import { VarField } from './VarField';
 import { LeadChangesEditor, LossFields, type LeadChangeRow } from './LeadEditors';
 
 export type ActionType = EndAction['type'];
+export type KnowledgeChoices = {
+  documents: Pick<AgentDocumentRow, 'id' | 'name' | 'title' | 'status'>[];
+  message?: string;
+};
 
 export const ACTION_LABELS: Record<ActionType, string> = {
   handoff: 'Passar para outro agente',
@@ -50,6 +55,7 @@ export const ACTION_LABELS: Record<ActionType, string> = {
   stop: 'Encerrar e entregar ao atendente',
   start_bot: 'Transferir para um robô',
   note: 'Registrar nota no negócio',
+  consult_knowledge: 'Consultar base de conhecimento',
   move_stage: 'Mover para etapa',
   add_tag: 'Adicionar tag',
   update_lead: 'Atualizar campos do lead',
@@ -67,6 +73,7 @@ export const ACTION_ICONS: Record<ActionType, LucideIcon> = {
   stop: Hand,
   start_bot: Bot,
   note: StickyNote,
+  consult_knowledge: BookOpen,
   move_stage: ArrowRight,
   add_tag: Tag,
   update_lead: UserPen,
@@ -150,6 +157,8 @@ export function defaultAction(
       return { type, bot_id: bots[0]?.id ?? '' };
     case 'note':
       return { type };
+    case 'consult_knowledge':
+      return { type, knowledgeId: '', description: '' };
     case 'move_stage':
       return { type, stage_id: firstStage };
     case 'add_tag':
@@ -199,7 +208,8 @@ export function describeAction(
   action: EndAction,
   agents: WaAgentListItem[],
   options: WaAgentOptions | undefined,
-  bots: BotMinimal[] = []
+  bots: BotMinimal[] = [],
+  knowledge?: KnowledgeChoices
 ): string {
   const agentName = (id: string) =>
     id ? (agents.find((a) => a.id === id)?.name ?? 'agente não encontrado') : 'agente não escolhido';
@@ -216,6 +226,10 @@ export function describeAction(
     }
     case 'note':
       return action.title ? `registrar nota "${action.title}"` : 'registrar nota no negócio';
+    case 'consult_knowledge': {
+      const doc = knowledge?.documents.find((entry) => entry.id === action.knowledgeId);
+      return doc ? `consultar ${doc.title?.trim() || doc.name}` : 'consultar base de conhecimento';
+    }
     case 'move_stage': {
       const stage = findStage(options, action.stage_id);
       const motivo = action.loss_reason?.trim();
@@ -277,12 +291,14 @@ export function ActionSummary({
   agents,
   options,
   bots = [],
+  knowledge,
   emptyText,
 }: {
   actions: EndAction[];
   agents: WaAgentListItem[];
   options: WaAgentOptions | undefined;
   bots?: BotMinimal[];
+  knowledge?: KnowledgeChoices;
   emptyText: string;
 }) {
   if (actions.length === 0) return <p className="text-xs text-slate-500 dark:text-slate-400">{emptyText}</p>;
@@ -290,7 +306,7 @@ export function ActionSummary({
     <ul className="flex flex-wrap gap-1.5" aria-label="Ações">
       {actions.map((a, i) => {
         const Icon = actionIcon(a.type);
-        const text = describeAction(a, agents, options, bots);
+        const text = describeAction(a, agents, options, bots, knowledge);
         return (
           <li
             key={`${a.type}-${i}`}
@@ -409,6 +425,7 @@ function ActionFields({
   agents,
   options,
   bots,
+  knowledge,
   aiVars,
   onAiVarsChange,
   currentAgentId,
@@ -419,6 +436,7 @@ function ActionFields({
   agents: WaAgentListItem[];
   options: WaAgentOptions | undefined;
   bots: BotMinimal[];
+  knowledge?: KnowledgeChoices;
   aiVars: AgentAiVar[];
   onAiVarsChange: (vars: AgentAiVar[]) => void;
   currentAgentId: string | null | undefined;
@@ -460,6 +478,53 @@ function ActionFields({
           <p className={HELP_CLASS}>O agente encerra e este robô assume a conversa na sequência.</p>
         </div>
       );
+    case 'consult_knowledge': {
+      const documents = knowledge?.documents ?? [];
+      const ready = documents.filter((doc) => doc.status === 'ready');
+      const selected = documents.find((doc) => doc.id === action.knowledgeId);
+      const unavailable = action.knowledgeId && selected?.status !== 'ready';
+      const help = knowledge?.message
+        || (unavailable ? 'O documento selecionado está indisponível. Escolha um documento pronto na aba Conhecimento.' : null)
+        || (!ready.length ? 'Adicione um documento na aba Conhecimento e aguarde o processamento.' : null);
+      return (
+        <div className="space-y-2">
+          <Field label="Base de conhecimento" htmlFor={`${idPrefix}-document`} help={help}>
+            <NativeSelect
+              id={`${idPrefix}-document`}
+              className={INPUT_CLASS}
+              value={action.knowledgeId}
+              onChange={(e) => onChange({ ...action, knowledgeId: e.target.value })}
+              disabled={!ready.length}
+              required
+            >
+              <option value="">Selecione um documento</option>
+              {unavailable ? (
+                <option value={action.knowledgeId} disabled>
+                  {selected?.title?.trim() || selected?.name || 'Documento selecionado'} (indisponível)
+                </option>
+              ) : null}
+              {ready.map((doc) => (
+                <option key={doc.id} value={doc.id}>
+                  {doc.title?.trim() ? `${doc.title.trim()} (${doc.name})` : doc.name}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
+          <Field label="Descrição da base" htmlFor={`${idPrefix}-knowledge-description`}>
+            <textarea
+              id={`${idPrefix}-knowledge-description`}
+              className={TEXTAREA_CLASS}
+              rows={2}
+              value={action.description}
+              onChange={(e) => onChange({ ...action, description: e.target.value })}
+              maxLength={600}
+              required
+              placeholder="Ex.: consulte esta base para responder sobre os produtos, os preços e a política de descontos."
+            />
+          </Field>
+        </div>
+      );
+    }
     case 'note':
       return (
         <VarField
@@ -716,6 +781,7 @@ export const ActionsEditor: React.FC<{
   options: WaAgentOptions | undefined;
   /** Robôs da organização (ação "Transferir para um robô") */
   bots?: BotMinimal[];
+  knowledge?: KnowledgeChoices;
   /** Variáveis preenchidas pela IA do agente (compartilhadas pelos campos de texto) */
   aiVars?: AgentAiVar[];
   onAiVarsChange?: (vars: AgentAiVar[]) => void;
@@ -734,6 +800,7 @@ export const ActionsEditor: React.FC<{
   agents,
   options,
   bots = [],
+  knowledge,
   aiVars = [],
   onAiVarsChange = () => {},
   currentAgentId,
@@ -742,7 +809,7 @@ export const ActionsEditor: React.FC<{
   hiddenTypes = [],
   defaultType = 'note',
 }) => {
-  const visibleTypes = ACTION_TYPES.filter((t) => !hiddenTypes.includes(t));
+  const visibleTypes = ACTION_TYPES.filter((t) => !hiddenTypes.includes(t) && (t !== 'consult_knowledge' || knowledge));
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
@@ -781,8 +848,8 @@ export const ActionsEditor: React.FC<{
               onChange={(e) => setAction(defaultAction(e.target.value as ActionType, agents, options, currentAgentId, bots))}
             >
               {types.map((t) => (
-                <option key={t} value={t}>
-                  {actionLabel(t)}
+                <option key={t} value={t} disabled={t === 'consult_knowledge' && !currentAgentId}>
+                  {actionLabel(t)}{t === 'consult_knowledge' && !currentAgentId ? ' (salve o agente primeiro)' : ''}
                 </option>
               ))}
             </NativeSelect>
@@ -803,6 +870,7 @@ export const ActionsEditor: React.FC<{
                 agents={agents}
                 options={options}
                 bots={bots}
+                knowledge={knowledge}
                 aiVars={aiVars}
                 onAiVarsChange={onAiVarsChange}
                 currentAgentId={currentAgentId}

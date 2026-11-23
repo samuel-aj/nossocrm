@@ -23,6 +23,7 @@ import {
   validateAgentTriggers,
   validateAutoLead,
   validateHelperAgentIds,
+  validateKnowledgeActions,
   validationError,
 } from '../_shared';
 
@@ -101,6 +102,8 @@ export async function POST(req: Request) {
 
   let helperIds: string[] = [];
   try {
+    const knowledgeError = await validateKnowledgeActions(auth.admin, orgId, null, input.custom_actions);
+    if (knowledgeError) return knowledgeError;
     input.connection_ids = await dropDeletedConnections(auth.admin, input.connection_ids);
     if (!(await connectionsBelongToOrg(auth.admin, orgId, input.connection_ids))) {
       return connectionNotFoundError();

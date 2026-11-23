@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { usePersonalNotifications } from './usePersonalNotifications';
 import { NotificationPreferences } from './NotificationPreferences';
 import { NoticeContent, noticePanelClass, noticeTone } from './NoticeContent';
+import { useAuth } from '@/context/AuthContext';
 
 const getTimeAgo = (date: Date) => {
     const now = new Date();
@@ -23,6 +24,8 @@ const getTimeAgo = (date: Date) => {
  */
 export const NotificationPopover = () => {
     const { notifications, count, hasHighSeverity, markAsRead, markAllAsRead } = useSystemNotifications();
+    const { profile } = useAuth();
+    const canManageConnectionAlerts = profile?.role === 'admin' || profile?.role === 'super_admin';
     const personal = usePersonalNotifications();
     const personalTones = personal.notices.map(noticeTone);
     const indicatorClass = hasHighSeverity || personalTones.includes('red') ? 'bg-red-500'
@@ -120,6 +123,10 @@ export const NotificationPopover = () => {
 
                     <div className="px-4 py-3 border-b border-slate-100 dark:border-white/5">
                         <button className="text-sm font-medium text-primary-600 dark:text-primary-400 disabled:opacity-50" disabled={!personal.settings} onClick={()=>{setIsOpen(false);setPreferencesOpen(true);}}>Preferências de notificações</button>
+                        {canManageConnectionAlerts && <Link href="/conexao-whatsapp?aba=alertas" onClick={() => setIsOpen(false)}
+                            className="mt-1 block w-fit text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline">
+                            Configurar alertas de conexão
+                        </Link>}
                         {personal.loading && <p className="text-xs text-slate-500">Carregando preferências…</p>}
                         {personal.error && <p role="status" className="text-xs text-amber-600 mt-1">{personal.error}</p>}
                     </div>

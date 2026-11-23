@@ -23,6 +23,7 @@ import { agentHistoryText } from './replyOutput';
 import { voiceDelivery, VOICE_NOTICE } from './voiceDelivery';
 import { consultHelperAgent } from './helpers';
 import { searchKnowledge } from './knowledge';
+import { configuredKnowledgeIds } from './knowledgeActions';
 import { resolveAgentModel } from './model';
 import { loadAgentResources } from './resources';
 import { logRun } from './runs';
@@ -119,7 +120,7 @@ export function buildTestContext(input: {
 }
 
 /** Converte as mensagens do painel em mensagens do modelo (alternância garantida). */
-export function toModelMessages(messages: TestMessage[]): ModelMessage[] {
+export function toModelMessages(messages: TestMessage[], trigger: 'reply' | 'signature' = 'reply'): ModelMessage[] {
   const out: Array<{ role: 'user' | 'assistant'; content: string }> = [];
   for (const m of messages) {
     const rawText = (m.text ?? '').trim();
@@ -130,8 +131,10 @@ export function toModelMessages(messages: TestMessage[]): ModelMessage[] {
     if (last && last.role === role) last.content = `${last.content}\n${text}`;
     else out.push({ role, content: text });
   }
+  if (out[0]?.role === 'assistant') out.unshift({ role: 'user', content: '(início da conversa)' });
+  // The signature confirmation supplies its own next turn.
+  if (trigger === 'signature') return out;
   if (out.length === 0) out.push({ role: 'user', content: '(o sistema pediu que você inicie o atendimento agora)' });
-  else if (out[0].role === 'assistant') out.unshift({ role: 'user', content: '(início da conversa)' });
   if (out[out.length - 1].role === 'assistant') {
     out.push({ role: 'user', content: '(o sistema pediu que você continue o atendimento agora)' });
   }
@@ -169,7 +172,7 @@ async function testAgentReplyWithUsage(
 
   if (input.signatureEvent === 'signed' && agent.tools.zapsign_template_token) {
     const { composeSignedReply } = await import('@/lib/zapsign/agentSignedReply');
-    const text = await composeSignedReply(admin, agent, ctx, input.messages.map(m=>({role:m.role,content:m.text})), true);
+    const text = await composeSignedReply(admin, agent, ctx, toModelMessages(input.messages, 'signature'), true);
     return { text, lines:[text], toolCalls:[], usage:null, segments:[{kind:'text',text}], media:[] };
   }
   const resolved = await resolveAgentModel(admin, organizationId, agent);
@@ -186,7 +189,7 @@ async function testAgentReplyWithUsage(
 
   // Mesma injeção automática da conversa real: trechos para a última mensagem do lead
   let knowledge: KnowledgeHit[] = [];
-  if (resources.documents.length > 0 && lastUser) {
+  if (resources.documents.length > 0 && lastUser && !configuredKnowledgeIds(agent).size) {
     knowledge = await searchKnowledge(admin, { organizationId, agent, query: lastUser, limit: AUTO_KNOWLEDGE_LIMIT });
   }
   const system = buildSystemPrompt({ agent, ctx, resources, knowledge }) +
@@ -227,12 +230,12 @@ async function testAgentReplyWithUsage(
     documents: resources.documents,
     media: resources.media,
     helpers: resources.helpers,
-    searchKnowledge: async q => {
+    searchKnowledge: async (q, documentId) => {
       knowledgeCalls += 1;
       if (knowledgeCalls > MAX_KNOWLEDGE_CALLS_PER_RUN) {
         throw new Error(`Limite de ${MAX_KNOWLEDGE_CALLS_PER_RUN} consultas à base de conhecimento nesta resposta atingido: responda com o que já tem`);
       }
-      return searchKnowledge(admin, { organizationId, agent, query: q, limit: TOOL_KNOWLEDGE_LIMIT });
+      return searchKnowledge(admin, { organizationId, agent, query: q, limit: TOOL_KNOWLEDGE_LIMIT, documentId });
     },
     // No real delivery: the server retains receipts even if an API client omits history.
     sendMedia: async media => {

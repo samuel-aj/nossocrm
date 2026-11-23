@@ -12,7 +12,6 @@ import {
   getConnectionsByOrg,
   getConnectionByIdForOrg,
   upsertConnection,
-  updateConnectionStatus,
   type WaConnectionRow,
 } from '@/lib/whatsapp/service';
 import {
@@ -31,11 +30,16 @@ import {
 import { setupMetaWebhooks, validateMetaCredentials } from '@/lib/whatsapp/metaCloudSetup';
 import {
   enforceOneConnectionPerNumber,
+  phoneKey,
   findConnectedSameNumber,
   mergeConnectionConversations,
   repointConnectionRefs,
   tearDownEvolutionInstance,
 } from '@/lib/whatsapp/dedupe';
+
+import { getLineDiagnostics } from '@/lib/whatsapp/connectionDiagnostics';
+import { observeConnection } from '@/lib/whatsapp/connectionIncidents';
+import type { WhatsAppProvider } from '@/lib/whatsapp/providers/types';
 
 function mask(conn: WaConnectionRow) {
   return {
@@ -46,6 +50,7 @@ function mask(conn: WaConnectionRow) {
     phoneNumber: conn.phone_number,
     profileName: conn.profile_name,
     status: conn.status,
+    alertOwnerId: conn.health_alert_owner_id ?? null,
     forwardWebhookUrl: conn.forward_webhook_url ?? null,
   };
 }
@@ -82,52 +87,16 @@ export async function GET() {
   const auth = await requireOrgUser();
   if (!auth.ok) return auth.response;
 
-  const allConns = await getConnectionsByOrg(auth.admin, auth.user.organizationId);
-
-  // Status ao vivo POR conexão (meta_cloud é checagem local; Evolution é rede,
-  // em paralelo e com fallback pro status salvo). Consulta TODAS as conexões da
-  // org (e não só as visíveis) porque a regra de número único abaixo vale para a org.
-  const liveAll = await Promise.all(
-    allConns.map(async c => {
-      let status = c.status;
-      try {
-        const live = await getProvider(c).getConnectionState();
-        // Desconectada NO CRM fica desconectada mesmo que a Evolution diga "open" (instância
-        // zumbi responde open com a sessão morta): senão a tela "reconecta" sozinha e o Excluir
-        // nunca aparece. Reconectar de verdade passa pelo QR/webhook, não por esta leitura.
-        const zombie = c.status === 'disconnected' && live === 'connected';
-        if (live !== c.status && !zombie) {
-          await updateConnectionStatus(auth.admin, c.id, { status: live });
-          status = live;
-        }
-      } catch {
-        // provedor indisponível: mantém o último status salvo
-      }
-      return { conn: c, status };
-    })
-  );
-
-  // UM NÚMERO = UMA CONEXÃO: o mesmo celular pareado duas vezes partia o chat
-  // (cada mensagem caía numa conexão só). As repetidas somem aqui, com as
-  // conversas unificadas na que fica. A tela é avisada por `removed`.
-  const liveById = new Map(liveAll.map(w => [w.conn.id, w.status]));
-  const removed = await enforceOneConnectionPerNumber(
-    auth.admin,
-    auth.user.organizationId,
-    allConns,
-    c => liveById.get(c.id) ?? c.status
-  );
-  const removedIds = new Set(removed.map(r => r.id));
-
-  // Permissões de visualização: vendedor restrito só vê os números permitidos
-  const vis = await getVisibilityRules(auth.admin, auth.user.organizationId, auth.user.id, auth.user.role);
-  const allowedIds = new Set(
-    filterAllowedConnections(vis, allConns.filter(c => !removedIds.has(c.id))).map(c => c.id)
-  );
-  const withStatus = liveAll.filter(w => allowedIds.has(w.conn.id));
-  if (withStatus.length === 0) {
-    return json({ connected: false, connection: null, metaWebhook: null, connections: [], removed });
+  const orgId = auth.user.organizationId;
+  let allConns: WaConnectionRow[];
+  try {
+    allConns = await getConnectionsByOrg(auth.admin, orgId, true);
+  } catch {
+    return json({ error: 'Não foi possível consultar as conexões.' }, 503);
   }
+  const vis = await getVisibilityRules(auth.admin, orgId, auth.user.id, auth.user.role);
+  const allowed = filterAllowedConnections(vis, allConns);
+  if (!allowed.length) return json({ connected: false, connection: null, metaWebhook: null, connections: [], removed: [] });
 
   // Só pra ADMIN e só no modo API oficial: as credenciais salvas, pra tela de
   // edição abrir preenchida (o admin foi quem cadastrou o token — poder rever
@@ -147,54 +116,24 @@ export async function GET() {
         }
       : null;
 
-  // Saúde do envio: a Evolution pode dizer "open" com a sessão do WhatsApp morta (tudo
-  // responde 400). Se os últimos envios pela conexão (2 h) falharam todos, a tela mostra
-  // "Falha de envio" com o motivo e o botão de reiniciar, mesmo com status conectado.
-  const since = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
-  const healthOf = async (id: string) => {
-    try {
-      const { data } = await auth.admin
-        .from('wa_messages')
-        .select('status, error, created_at, wa_conversations!inner(connection_id)')
-        .eq('organization_id', auth.user.organizationId)
-        .eq('direction', 'out')
-        .eq('wa_conversations.connection_id', id)
-        .gte('created_at', since)
-        .order('created_at', { ascending: false })
-        .limit(5);
-      const rows = (data ?? []) as Array<{ status: string | null; error: string | null; created_at: string }>;
-      const failed = rows.filter(r => r.status === 'failed');
-      const failing = rows.length >= 2 && failed.length === rows.length;
-      return {
-        failing,
-        failedCount: failed.length,
-        lastError: failing ? (rows[0]?.error ?? null) : null,
-        lastAt: rows[0]?.created_at ?? null,
-      };
-    } catch {
-      return { failing: false, failedCount: 0, lastError: null, lastAt: null };
-    }
-  };
-  const healths = await Promise.all(withStatus.map(w => healthOf(w.conn.id)));
-
-  const connections = withStatus.map(({ conn: c, status }, i) => ({
-    ...mask(c),
-    status,
-    sendHealth: healths[i],
-    metaCredentials: credsOf(c),
+  const health = await getLineDiagnostics(auth.admin, orgId, allowed);
+  const connections = allowed.map((conn, i) => ({
+    ...mask(conn),
+    diagnostics: health[i],
+    metaCredentials: credsOf(conn),
   }));
-
-  // Conexão PADRÃO (compat com a UI antiga): primeira conectada, senão a mais antiga
-  const def = withStatus.find(w => w.status === 'connected') ?? withStatus[0];
-
-  return json({
-    connected: withStatus.some(w => w.status === 'connected'),
-    connection: { ...mask(def.conn), status: def.status },
-    metaWebhook: metaWebhookInfo(auth.user.role, def.conn),
-    metaCredentials: credsOf(def.conn),
+  // Os consumidores de chats/modelos usam o estado operacional. A tela de saúde usa diagnostics.
+  const def = allowed.find(c => c.status === 'connected') ?? allowed[0];
+  const result = json({
+    connected: allowed.some(c => c.status === 'connected'),
+    connection: connections.find(c => c.id === def.id),
+    metaWebhook: metaWebhookInfo(auth.user.role, def),
+    metaCredentials: credsOf(def),
     connections,
-    removed,
+    removed: [],
   });
+  result.headers.set('Cache-Control', 'private, no-store');
+  return result;
 }
 
 export async function POST(req: Request) {
@@ -202,6 +141,7 @@ export async function POST(req: Request) {
   if (!auth.ok) return auth.response;
   if (!isOrgAdmin(auth.user.role)) return json({ error: 'Forbidden' }, 403);
 
+  const requestedAt = new Date().toISOString();
   let body: {
     instanceName?: string;
     token?: string;
@@ -218,6 +158,7 @@ export async function POST(req: Request) {
     editingConnectionId?: string;
     /** Hub: com autoCreate, força criar OUTRA linha QR (não reusa a existente) */
     newNumber?: boolean;
+    connectionId?: string;
   };
   try {
     body = await req.json();
@@ -238,6 +179,29 @@ export async function POST(req: Request) {
   // qualquer quantidade); nada é derrubado implicitamente — só o Desconectar
   // explícito de cada linha. Lista atual da org guia nomes/reuso de vagas.
   const existing = await getConnectionsByOrg(auth.admin, auth.user.organizationId);
+
+  if (body.mode === 'finish_pairing') {
+    const target = existing.find(c => c.id === body.connectionId);
+    if (!target || isBusinessConnection(target)) return json({ error: 'Pareamento não encontrado.' }, 404);
+    if (target.health_monitor_enabled === false) return json({ error: 'A conexão foi desligada. Inicie um novo pareamento.' }, 409);
+    // A linha pode estar "open" logo após ler o QR, mesmo com outro aparelho pareado.
+    const provider = getProvider(target);
+    const checkedAt = new Date().toISOString();
+    const [check, identity] = await Promise.all([provider.checkConnectionHealth(), provider.getPairingIdentity?.()]).catch(() => [null, null] as const);
+    if (check?.state !== 'connected' || !identity?.phone) {
+      return json({ error: 'Não foi possível confirmar o número pareado. Confira o aparelho e tente novamente.' }, 409);
+    }
+    await observeConnection(auth.admin, target.id, 'connected', 'manual', checkedAt, 'pairing_confirmed', identity);
+    const paired = await getConnectionByIdForOrg(auth.admin, auth.user.organizationId, target.id);
+    if (!paired || paired.status !== 'connected' || paired.health_identity_mismatch_at || phoneKey(paired.phone_number) !== phoneKey(identity.phone)) {
+      return json({ error: 'Conexão não confirmada. Verifique se o aparelho usa o número original.' }, 409);
+    }
+    const numberKey = phoneKey(paired.phone_number);
+    if (!numberKey) return json({ error: 'O provedor não confirmou o número pareado.' }, 409);
+    const sameNumber = [...existing.filter(c => c.id !== paired.id && phoneKey(c.phone_number) === numberKey), paired];
+    const removed = await enforceOneConnectionPerNumber(auth.admin, auth.user.organizationId, sameNumber);
+    return json({ ok: true, removed });
+  }
 
   // Resultado do setup automático do meta_cloud (devolvido pra UI no fim).
   let metaSetup: {
@@ -283,9 +247,14 @@ export async function POST(req: Request) {
     // linha da org, a dedup por número vence (atualiza aquela linha).
     const editingId = (body.editingConnectionId || '').trim();
     const editing = editingId ? metaConns.find(c => c.id === editingId) ?? null : null;
-    // Desconectar LIMPA as credenciais da linha (meta_phone_number_id vira
-    // null): reconectar reaproveita essa "vaga" em vez de criar linha zumbi.
-    const emptySlot = metaConns.find(c => !c.meta_phone_number_id && c.status !== 'connected');
+    const verifiedPhone = phoneKey(check.displayPhoneNumber);
+    const sameIdentity = (c: WaConnectionRow) => Boolean(verifiedPhone && phoneKey(c.phone_number) === verifiedPhone);
+    if (editing?.last_connected_at && editing.meta_phone_number_id !== check.phoneNumberId && !sameIdentity(editing)) {
+      return json({ error: 'Este telefone é diferente do número original. Use “Conectar outro número” para manter as conversas separadas.' }, 409);
+    }
+    // Uma vaga antiga com histórico só pode ser reativada pelo mesmo telefone.
+    const emptySlot = metaConns.find(c => !c.meta_phone_number_id && c.status !== 'connected'
+      && (sameIdentity(c) || (!c.last_connected_at && !c.phone_number)));
     // Número JÁ conectado em OUTRA conexão da org (QR ou API): proíbe, senão o
     // chat se divide entre as duas. Editar a própria linha continua liberado.
     if (check.displayPhoneNumber) {
@@ -416,29 +385,29 @@ export async function POST(req: Request) {
       // webhook do app foi configurado agora apontando pro CRM.
       recebimentoOk: hooks.override || hooks.appWebhook === 'ok',
     };
-    // Já valida e grava o número na conexão (sem esperar o 1º evento).
-    await updateConnectionStatus(auth.admin, conn.id, {
-      status: 'connected',
-      phone_number: metaSetup.displayPhoneNumber
+    await observeConnection(auth.admin, conn.id, 'connected', 'manual', requestedAt, 'meta_validated', {
+      phone: metaSetup.displayPhoneNumber
         ? `+${metaSetup.displayPhoneNumber.replace(/\D/g, '')}`
         : undefined,
-      profile_name: metaSetup.verifiedName ?? undefined,
+      profileName: metaSetup.verifiedName,
     });
+    return json({ connection: { ...mask(conn), status: 'connected' }, metaSetup });
   }
 
   // HUB: nenhuma outra conexão é derrubada implicitamente ao conectar — QR e
   // API oficial convivem em qualquer quantidade; limpeza só pelo Desconectar
   // explícito de cada linha (DELETE ?id=).
 
-  let status = conn.status;
+  await observeConnection(auth.admin, conn.id, 'connecting', 'manual', requestedAt, 'connect_requested');
+  const checkedAt = new Date().toISOString();
+  let check: Awaited<ReturnType<WhatsAppProvider['checkConnectionHealth']>>;
   try {
-    const live = await getProvider(conn).getConnectionState();
-    await updateConnectionStatus(auth.admin, conn.id, { status: live });
-    status = live;
+    check = await getProvider(conn).checkConnectionHealth();
   } catch {
-    // segue com o status salvo
+    check = { state: 'unknown', reason: 'provider_unavailable' };
   }
-  return json({ connection: { ...mask(conn), status }, metaSetup });
+  await observeConnection(auth.admin, conn.id, check.state, 'poll', checkedAt, check.reason);
+  return json({ connection: { ...mask(conn), status: check.state }, metaSetup });
 }
 
 /**
@@ -484,6 +453,8 @@ export async function DELETE(req: Request) {
     : await getConnectionByOrg(auth.admin, auth.user.organizationId);
   if (!conn) return json({ error: 'Conexão não configurada' }, 404);
 
+  // Fecha o monitor antes do logout: o webhook de desconexão pode chegar durante a chamada.
+  await observeConnection(auth.admin, conn.id, 'disconnected', 'manual', new Date().toISOString(), 'operator_disconnect');
   if (purge) {
     // EXCLUIR: derruba a instância na Evolution (quando houver) e apaga a
     // LINHA. O histórico de conversas fica (FK é SET NULL) — excluir a
@@ -512,8 +483,6 @@ export async function DELETE(req: Request) {
     await auth.admin
       .from('wa_connections')
       .update({
-        status: 'disconnected',
-        phone_number: null,
         profile_name: null,
         instance_token: null,
         meta_phone_number_id: null,
@@ -531,7 +500,7 @@ export async function DELETE(req: Request) {
     await deleteEvolutionInstance(conn.instance_name);
     await auth.admin
       .from('wa_connections')
-      .update({ status: 'disconnected', phone_number: null, profile_name: null, instance_token: null })
+      .update({ profile_name: null, instance_token: null })
       .eq('id', conn.id);
     return json({ ok: true });
   }
@@ -554,6 +523,5 @@ export async function DELETE(req: Request) {
   // O número FICA gravado na linha: se a pessoa parear o mesmo número de novo
   // em outra conexão, a regra de número único reconhece esta linha e unifica
   // as conversas dela na nova (sem o número, o histórico ficava escondido).
-  await updateConnectionStatus(auth.admin, conn.id, { status: 'disconnected' });
   return json({ ok: true, migrated, logoutError });
 }

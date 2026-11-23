@@ -4,7 +4,8 @@
  * falham (sessão do WhatsApp morta). Devolve o estado depois do reinício.
  */
 import { requireOrgUser, isOrgAdmin, json } from '@/lib/whatsapp/api';
-import { getConnectionByIdForOrg, updateConnectionStatus } from '@/lib/whatsapp/service';
+import { getConnectionByIdForOrg } from '@/lib/whatsapp/service';
+import { observeConnection } from '@/lib/whatsapp/connectionIncidents';
 import { getProvider, isMetaCloudConnection } from '@/lib/whatsapp';
 import { isValidUUID } from '@/lib/supabase/utils';
 
@@ -27,6 +28,7 @@ export async function POST(req: Request) {
 
   const provider = getProvider(conn);
   if (!provider.restart) return json({ error: 'Este provedor não permite reiniciar' }, 400);
+  await observeConnection(auth.admin, id, 'connecting', 'manual', new Date().toISOString(), 'restart_requested');
   try {
     await provider.restart();
   } catch (e) {
@@ -34,16 +36,18 @@ export async function POST(req: Request) {
   }
 
   // A sessão volta em alguns segundos: espera um pouco pelo estado final
-  let status: string = 'connecting';
+  let check: Awaited<ReturnType<typeof provider.checkConnectionHealth>> = { state: 'connecting' };
+  let checkedAt = new Date().toISOString();
   for (let i = 0; i < 8; i++) {
     await sleep(1500);
+    checkedAt = new Date().toISOString();
     try {
-      status = await provider.getConnectionState();
+      check = await provider.checkConnectionHealth();
     } catch {
-      status = 'connecting';
+      check = { state: 'unknown', reason: 'provider_unavailable' };
     }
-    if (status === 'connected') break;
+    if (check.state === 'connected') break;
   }
-  await updateConnectionStatus(auth.admin, conn.id, { status });
-  return json({ ok: true, status });
+  await observeConnection(auth.admin, id, check.state, 'poll', checkedAt, check.reason);
+  return json({ ok: true, status: check.state });
 }

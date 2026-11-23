@@ -313,6 +313,10 @@ export async function executeActions(
   }
 ): Promise<OutcomeActionsResult> {
   const result: OutcomeActionsResult = {};
+  // A leitura precisa ocorrer dentro da ferramenta para o modelo receber os
+  // trechos antes de compor a resposta. Aqui aplicamos só os efeitos posteriores.
+  const effects = (input.actions ?? []).filter(action => action.type !== 'consult_knowledge');
+  if (!effects.length) return result;
   const origin =
     input.source.kind === 'outcome'
       ? { source: 'outcome', key: input.source.outcome.key }
@@ -331,7 +335,7 @@ export async function executeActions(
   const aiValues = await resolveAiVarValues(admin, {
     agent: input.agent,
     ctx: input.ctx,
-    actions: input.actions ?? [],
+    actions: effects,
     pushEvent,
   });
   assertUsageHealthy();
@@ -339,6 +343,7 @@ export async function executeActions(
   // Todas as ações rodam na ordem configurada; a falha de uma não impede as seguintes.
   // `pos` identifica qual delas (duas do mesmo tipo ficam distinguíveis no histórico).
   for (const [pos, action] of (input.actions ?? []).entries()) {
+    if (action.type === 'consult_knowledge') continue;
     assertUsageHealthy();
     const at = new Date().toISOString();
     if (input.renewLock) await input.renewLock();

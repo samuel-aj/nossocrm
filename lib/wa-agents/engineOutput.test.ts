@@ -1,6 +1,6 @@
 /** Full orchestration with fake DB/model/WhatsApp; no external effects. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentMediaRow, AgentRow } from './types';
+import type { AgentDocumentRow, AgentMediaRow, AgentRow } from './types';
 import type { ConversationContext } from './context';
 import type { SupabaseClient } from '@supabase/supabase-js';
 const h = vi.hoisted(() => ({
@@ -11,6 +11,7 @@ const h = vi.hoisted(() => ({
   ctx: null as ConversationContext | null, agent: null as AgentRow | null,
   db: null as unknown as SupabaseClient,
   media: [] as AgentMediaRow[],
+  documents: [] as AgentDocumentRow[], search: vi.fn(),
   messages: [] as Record<string, unknown>[],
 }));
 vi.mock('server-only', () => ({}));
@@ -25,7 +26,7 @@ vi.mock('ai', async original => ({ ...await original<typeof import('ai')>(), gen
 vi.mock('@/lib/supabase/server', () => ({ createStaticAdminClient: () => h.db }));
 vi.mock('@/lib/supabase/actorClient', () => ({ withActor: (db: unknown) => db }));
 vi.mock('@/lib/whatsapp', () => ({ getProvider: () => ({ sendText: h.send }) }));
-vi.mock('@/lib/whatsapp/service', () => ({ recordOutboundMessage: async (_db: unknown, input: { text: string }) => ({ body: input.text }), replicateOutboundToSiblings: async () => {} }));
+vi.mock('@/lib/whatsapp/service', () => ({ recordOutboundMessage: async (_db: unknown, input: { text: string }) => ({ id: 'receipt', body: input.text }), replicateOutboundToSiblings: async () => {} }));
 vi.mock('./context', async original => ({
   ...await original<typeof import('./context')>(),
   loadConversationContext: async () => structuredClone(h.ctx), loadAgent: async () => h.agent,
@@ -35,7 +36,8 @@ vi.mock('./context', async original => ({
 vi.mock('./model', async original => ({ ...await original<typeof import('./model')>(), resolveAgentModel: async () => ({ model: {}, modelId: 'fake' }) }));
 vi.mock('./beta', () => ({ isAiAgentsApproved: async () => true }));
 vi.mock('./autoLead', () => ({ ensureAutoLead: async () => {} }));
-vi.mock('./resources', () => ({ loadAgentResources: async () => ({ documents: [], media: h.media, helpers: [] }) }));
+vi.mock('./resources', () => ({ loadAgentResources: async () => ({ documents: h.documents, media: h.media, helpers: [] }) }));
+vi.mock('./knowledge', async original => ({ ...await original<typeof import('./knowledge')>(), searchKnowledge: h.search }));
 vi.mock('./actions', () => ({ executeCustomAction: h.action, executeOutcomeActions: h.outcome }));
 vi.mock('./webhooks', () => ({ dispatchAgentEvent: h.events }));
 vi.mock('./runs', () => ({ logRun: h.log }));
@@ -55,6 +57,7 @@ function fakeDb() {
   return {
     rpc: async (name: string, args?: Record<string, unknown>) => {
       if (name === 'wa_ai_claim_lock') { h.ctx!.conversation.ai_lock_until = new Date(Date.now() + 90_000).toISOString(); return { data: true }; }
+      if (name === 'wa_agent_connection_reply_decision') return { data: 'ready' };
       if (name === 'schedule_robot_return') {
         return args?.p_anchor === incoming.created_at
           ? { data: 'scheduled-return', error: null }
@@ -74,12 +77,13 @@ function fakeDb() {
         is: (k: string, v: unknown) => { rows = rows.filter(r => v === null ? r[k] == null : r[k] === v); return q; },
         in: (k: string, values: unknown[]) => { rows = rows.filter(r => values.includes(r[k])); return q; },
         gt: (k: string, v: string) => { rows = rows.filter(r => String(r[k]) > v); return q; }, lte: () => q, not: () => q,
+        gte: (k: string, v: string) => { rows = rows.filter(r => String(r[k]) >= v); return q; },
         order: (k: string, options: { ascending: boolean }) => { rows.sort((a,b) => String(a[k]).localeCompare(String(b[k])) * (options.ascending ? 1 : -1)); return q; },
         limit: (n: number) => { rows = rows.slice(0,n); return q; },
         maybeSingle: () => { single = true; return q; },
         then: (resolve: (r: unknown) => unknown) => {
           if (patch) rows.forEach(row => Object.assign(row, patch));
-          return Promise.resolve(resolve({ data: single ? rows[0] ?? null : rows, error: null }));
+          return Promise.resolve(resolve({ data: single ? rows[0] ?? null : rows, count: rows.length, error: null }));
         },
       };
       return q;
@@ -96,6 +100,7 @@ beforeEach(() => {
   incoming.created_at = at;
   h.calendar = null;
   h.media = [];
+  h.documents = [];
   h.messages = [];
   h.policyEnabled = false;
   h.budget.mockReset().mockResolvedValue({ blocked_at: null, policy: { enabled: false } }); h.block.mockResolvedValue(undefined);
@@ -113,6 +118,71 @@ beforeEach(() => {
   h.events.mockResolvedValue([]); h.log.mockResolvedValue('run');
 });
 const run = () => runAgentOnConversation({ organizationId: org, conversationId: 'conv', trigger: 'inbound', skipBuffer: true });
+
+describe('recuperação de desconexão com transporte falso', () => {
+  const input = { organizationId: org, conversationId:'conv', trigger:'inbound' as const,
+    triggerMessageId:'message', skipBuffer:true };
+  it('guarda a entrada uma vez por mensagem antes do modelo e das ações', async () => {
+    h.ctx!.connection!.status = 'disconnected';
+    const rpc = vi.spyOn(h.db,'rpc');
+    expect((await runAgentOnConversation(input)).connectionPending).toBe(true);
+    expect(rpc).toHaveBeenCalledWith('enqueue_wa_agent_connection_reply',expect.objectContaining({ p_inbound:'message',p_lines:null }));
+    expect(h.generate).not.toHaveBeenCalled(); expect(h.send).not.toHaveBeenCalled(); expect(h.action).not.toHaveBeenCalled();
+  });
+  it('só o restante da mensagem recusada sai na volta, e a ação pós-envio executa uma vez', async () => {
+    const rpc = vi.spyOn(h.db,'rpc');
+    h.generate.mockResolvedValue(draft('Primeira linha.\nSegunda linha.'));
+    h.send.mockResolvedValueOnce({ok:true,providerMessageId:'primeiro'})
+      .mockResolvedValueOnce({ok:false,error:'Evolution respondeu 400: Connection Closed'});
+    const first = await runAgentOnConversation(input);
+    expect(first.connectionPending).toBe(true);
+    const saved = rpc.mock.calls.find(([name])=>name==='enqueue_wa_agent_connection_reply')?.[1];
+    expect(saved).toMatchObject({p_lines:['Segunda linha.'],p_sent:['receipt']});
+    expect(h.action).not.toHaveBeenCalled();
+    const replay = await runAgentOnConversation({ ...input, recoveryId:'job',
+      recoveryLines: saved!.p_lines, recoveryAfterSend: saved!.p_after_send, recoverySentIds: saved!.p_sent });
+    expect(replay.status).toBe('ok'); expect(h.generate).toHaveBeenCalledTimes(1); expect(h.action).toHaveBeenCalledTimes(1);
+    expect(h.send.mock.calls.map(([m])=>m.text)).toEqual(['Primeira linha.','Segunda linha.','Segunda linha.']);
+  });
+  it('recusa o replay quando o provedor pode ter aceitado a mensagem', async () => {
+    const rpc = vi.spyOn(h.db,'rpc');
+    h.generate.mockResolvedValue(draft('Teste.',false));
+    h.send.mockRejectedValueOnce(new Error('socket timeout'));
+    expect((await runAgentOnConversation(input)).status).toBe('error');
+    expect(rpc).not.toHaveBeenCalledWith('enqueue_wa_agent_connection_reply',expect.anything());
+    expect(h.send).toHaveBeenCalledTimes(1);
+  });
+});
+
+it.each(['conversa', 'simulador'])('consulta a base configurada antes de responder na %s, sem busca global', async mode => {
+  const agent = h.agent!;
+  const id = '33333333-3333-4333-8333-333333333333';
+  agent.custom_actions = [{ key: 'precos', label: 'Preços', description: 'cliente perguntar pelo preço',
+    actions: [{ type: 'consult_knowledge', knowledgeId: id, description: 'Preços do catálogo' }] }];
+  h.documents = [{ id, agent_id: agent.id, organization_id: org, status: 'ready', name: 'Catálogo' } as AgentDocumentRow];
+  const detalhes = 'Qual é o preço do produto?';
+  const answer = 'O produto custa 27 reais.';
+  h.search.mockResolvedValue([{ content: answer, document_id: id, idx: 0, score: 1 }]);
+  h.generate.mockImplementation(async ({ tools }) => {
+    expect(tools.consultar_documentos).toBeUndefined();
+    const input = { acao: 'precos', detalhes };
+    const output = await tools.executar_acao.execute(input, {});
+    expect(output.consultas[0].trechos).toContain(answer);
+    return { text: answer, totalUsage: {}, finishReason: 'stop', steps: [
+      { text: '', toolCalls: [{ toolName: 'executar_acao', toolCallId: 'lookup', input }], toolResults: [{ toolCallId: 'lookup', output }] },
+      { text: answer, toolCalls: [], toolResults: [] },
+    ] };
+  });
+  if (mode === 'conversa') {
+    expect((await run()).status).toBe('ok');
+    expect(h.send.mock.calls.map(([message]) => message.text)).toEqual([answer]);
+  } else {
+    const result = await testAgentReply(h.db, { organizationId: org, agent, messages: [{ role: 'user', text: detalhes }] });
+    expect(result.text).toBe(answer);
+    expect(h.send).not.toHaveBeenCalled();
+  }
+  expect(h.search).toHaveBeenCalledExactlyOnceWith(h.db, expect.objectContaining({ organizationId: org, agent, query: detalhes, documentId: id }));
+});
 
 it('simulator blocks a registered video again after the customer replies, but allows another video', async () => {
   h.media = ['boas_vindas', 'proposta'].map(name => ({ name, id: name, kind: 'video', storage_path: `org/${name}.mp4` } as AgentMediaRow));
@@ -214,10 +284,19 @@ describe('validação no envio real e no simulador', () => {
   it('evento do simulador de assinatura gera a resposta do agente sem transporte nem ferramentas', async () => {
     h.agent!.tools = { ...h.agent!.tools, zapsign_template_token:'modelo' };
     h.generate.mockResolvedValue({text:'Parabéns pela assinatura! Posso ajudar com os próximos passos?'});
+    const annotation = '[salvar_dados] {"dados":{"confirmado":true}}';
     const r = await testAgentReply(h.db, {organizationId:org, agent:h.agent!, contractState:'invited',
-      signatureEvent:'signed', messages:[{role:'user',text:'Sim'},{role:'assistant',text:'Segue o link simulado.'}]});
+      signatureEvent:'signed', messages:[{role:'user',text:annotation},{role:'assistant',text:annotation},
+        {role:'assistant',text:'Segue o link simulado.'}]});
     expect(r.text).toContain('Parabéns'); expect(r.toolCalls).toEqual([]);
-    expect(h.generate).toHaveBeenCalledWith(expect.objectContaining({system:expect.stringContaining('assinatura completa')}));
+    expect(h.generate).toHaveBeenCalledWith(expect.objectContaining({
+      system: expect.stringContaining('assinatura completa'),
+      messages: [
+        { role: 'user', content: annotation },
+        { role: 'assistant', content: 'Segue o link simulado.' },
+        { role: 'user', content: expect.stringContaining('Evento interno do CRM') },
+      ],
+    }));
     expect(h.send).not.toHaveBeenCalled(); expect(h.action).not.toHaveBeenCalled();
   });
   it('retorno permanece vinculado à mensagem anterior quando cliente escreve durante montagem do histórico', async () => {
@@ -381,6 +460,71 @@ describe('validação no envio real e no simulador', () => {
     ]));
     expect(saved.output_text).toBeNull();
   });
+  it('avisa uma vez sobre a revisão dos áudios mesmo que o turno anterior tenha terminado de enviar depois deles', async () => {
+    const time = (hhmmss: string) => `2026-11-18T${hhmmss}.000Z`;
+    h.ctx!.conversation.ai_last_processed_at = time('11:10:00');
+    const firstAudio = { ...incoming, id: 'audio-1', created_at: time('11:10:39'), body: null, media_type: 'audio', transcription: 'Primeiro áudio' };
+    const secondAudio = { ...firstAudio, id: 'audio-2', created_at: time('11:10:42'), transcription: 'Segundo áudio' };
+    const priorReply = { ...incoming, direction: 'out', source: 'agent' };
+    h.messages = [firstAudio, secondAudio,
+      { ...priorReply, id: 'reply-1', created_at: time('11:10:57') },
+      { ...priorReply, id: 'reply-2', created_at: time('11:11:15') },
+    ];
+    h.generate.mockResolvedValueOnce(draft('[salvar_dados] {"campo_de_teste":"valor fictício"}', false));
+    h.generate.mockResolvedValueOnce({ output: { replacements: [{ id: 9, text: 'Resposta para outro trecho.' }] } });
+    const turn = { organizationId: org, conversationId: 'conv', trigger: 'inbound' as const, triggerMessageId: secondAudio.id, skipBuffer: true };
+    expect((await runAgentOnConversation(turn)).status).toBe('error');
+    expect(h.send.mock.calls.map(([m]) => m.text)).toEqual(['Vou encaminhar seu atendimento para a equipe conferir uma informação e continuar por aqui.']);
+    expect(h.ctx!.conversation).toMatchObject({ ai_status: 'paused', ai_resume_at: null });
+    expect(h.log.mock.calls[0][1].input_text).toBe('Primeiro áudio\nSegundo áudio');
+    expect(h.log.mock.calls[0][1].events).toContainEqual(expect.objectContaining({
+      type: 'output_checked', status: 'blocked', recoveryFailureCode: 'invalid_slots', savedDataAnnotationsRemoved: 1,
+    }));
+    expect(h.log.mock.calls[0][1].events).toContainEqual(expect.objectContaining({ type: 'human_handoff' }));
+    h.messages.push({ ...incoming, id: 'after-pause', created_at: time('11:56:00') });
+    expect(await handleInboundMessage({ organizationId: org, conversationId: 'conv', messageId: 'after-pause' }))
+      .toMatchObject({ status: 'skipped', reason: 'conversa paused' });
+    expect(h.send).toHaveBeenCalledTimes(1);
+    expect(h.generate).toHaveBeenCalledTimes(2);
+  });
+  it.each(['agent', 'crm', 'bot', 'api'])('preserva o alerta mas não envia aviso sobre uma saída %s surgida durante a geração', async source => {
+    const previous = { ...incoming, id: 'previous', direction: 'out', source: 'agent', created_at: '2026-10-01T12:01:00.000Z' };
+    h.messages = [previous];
+    h.generate.mockResolvedValueOnce(draft('[acao:proposta]'));
+    h.generate.mockImplementationOnce(async () => {
+      // Same database timestamp as an already visible outbound; only the ID distinguishes them.
+      h.messages.push({ ...previous, id: 'concurrent', source });
+      throw new Error('invalid output');
+    });
+    expect((await run()).status).toBe('error');
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.log.mock.calls[0][1].events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'human_handoff' }), expect.objectContaining({ type: 'output_review_notice_skipped' }),
+    ]));
+  });
+  it('uma resposta humana entre o inbound e a última saída do agente já registrada impede o aviso', async () => {
+    h.messages = [
+      { ...incoming, id: 'human', direction: 'out', source: 'crm', created_at: '2026-10-01T12:00:01.000Z' },
+      { ...incoming, id: 'old-agent', direction: 'out', source: 'agent', created_at: '2026-10-01T12:00:02.000Z' },
+    ];
+    h.generate.mockResolvedValueOnce(draft('[acao:proposta]')).mockRejectedValueOnce(new Error('invalid output'));
+    expect((await run()).status).toBe('error');
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.log.mock.calls[0][1].events).toContainEqual(expect.objectContaining({ type: 'human_handoff' }));
+  });
+  it('preserva a revisão manual e avisa a equipe se o cliente acrescenta uma mensagem durante a geração', async () => {
+    h.generate.mockResolvedValueOnce(draft('[acao:proposta]'));
+    h.generate.mockImplementationOnce(async () => {
+      h.messages.push({ ...incoming, id: 'additional', created_at: '2026-10-01T12:01:00.000Z' });
+      throw new Error('invalid output');
+    });
+    expect((await run()).status).toBe('error');
+    expect(h.ctx!.conversation).toMatchObject({ ai_status: 'paused', ai_resume_at: null });
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.log.mock.calls[0][1].events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'human_handoff' }), expect.objectContaining({ type: 'output_review_notice_skipped' }),
+    ]));
+  });
   it('não entrega o vídeo enfileirado nem aplica ações do rascunho bloqueado', async () => {
     h.media = [{id:'proposta',name:'proposta',kind:'video',storage_path:'fixture.mp4'} as AgentMediaRow];
     h.generate.mockImplementationOnce(async ({tools}) => {
@@ -477,6 +621,17 @@ describe('validação no envio real e no simulador', () => {
     expect(h.send).not.toHaveBeenCalled();
     expect(h.action).not.toHaveBeenCalled();
     expect(h.log.mock.calls[0][1].events.some((e:{type:string}) => e.type==='human_handoff')).toBe(false);
+  });
+  it('preserva a retomada manual do mesmo agente durante a geração', async () => {
+    h.generate.mockResolvedValueOnce(draft('[acao:proposta]'));
+    h.generate.mockImplementationOnce(async () => {
+      h.ctx!.conversation.ai_status_changed_at = '2026-11-18T15:20:00.000Z';
+      throw new Error('invalid output');
+    });
+    expect((await run()).status).toBe('error');
+    expect(h.ctx!.conversation.ai_status).toBe('active');
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.events.mock.calls[0][1].extra).toMatchObject({ code: 'AI_OUTPUT_BLOCKED', paused: false });
   });
   it('após recuperação envia apenas o texto corrigido e aplica a ação uma vez', async () => {
     h.generate.mockResolvedValueOnce(draft('{"dados":{"nome":"Teste"}}'));

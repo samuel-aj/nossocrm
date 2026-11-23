@@ -4,6 +4,7 @@ import { getTeamAccess, visibleLead } from '@/lib/permissions/teamAccessServer';
 import { getVisibilityRules, connectionAllowed } from '@/lib/permissions/server';
 import { DEFAULT_PREFERENCES, PreferencesSchema, type Preferences, type Notice } from './types';
 import { usageNotices } from '@/lib/ai-usage/notifications';
+import { connectionIncidentNotices } from './connectionIncidents';
 
 interface MessageRow {id:string;conversation_id:string;wa_timestamp:string|null}
 interface ConversationRow {id:string;deal_id:string|null;contact_id:string|null;connection_id:string|null;wa_name:string|null;wa_phone:string;label_ids:string[];assigned_owner_id:string|null}
@@ -39,8 +40,14 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
   const serverTime = new Date().toISOString();
   const ctx = await context(auth);
   const {preferences:p,access,rules} = ctx;
-  if (!p.messages && !p.leads && !p.alerts) return {events:[],serverTime,nextAfter:null};
   const upper = until && until < serverTime ? until : serverTime;
+  let connectionNoticesUnavailable = false;
+  const lineNotices = after ? [] : await connectionIncidentNotices(auth,rules,upper).catch(error => {
+    connectionNoticesUnavailable = true;
+    console.error('[notifications] avisos de conexão indisponíveis:',error);
+    return [];
+  });
+  if (!p.messages && !p.leads && !p.alerts) return {events:lineNotices,serverTime:upper,nextAfter:null,connectionNoticesUnavailable};
   // A usage block remains actionable after an offline interval. Load unresolved
   // notices on boot and each first page; stable IDs use the existing client dedupe.
   // Ordinary message/lead notifications retain their baseline and short window.
@@ -51,7 +58,7 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
     catch (error) { usageNoticesUnavailable = true; console.error('[notifications] alertas de consumo indisponíveis:', error); }
   }
   // On opening the CRM, recover recent handoffs that happened while the seller was offline.
-  if (!since && !p.alerts) return {events:budgetNotices,serverTime:upper,nextAfter:null,usageNoticesUnavailable};
+  if (!since && !p.alerts) return {events:[...lineNotices,...budgetNotices],serverTime:upper,nextAfter:null,usageNoticesUnavailable,connectionNoticesUnavailable};
   const lower = new Date(since ? Math.max(Date.parse(since),Date.now()-120_000) : Date.now()-86_400_000).toISOString();
   let query = auth.admin.from('crm_notification_events').select('id,kind,source_id,board_id,created_at')
     .eq('organization_id',auth.user.organizationId).gte('created_at',lower).lte('created_at',upper).order('id').limit(200);
@@ -131,6 +138,6 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
     }
   }
   // Usage alerts use stable prefixed IDs; CRM's bigint cursor stays exclusive to its own feed.
-  notices.push(...budgetNotices);
-  return {events:notices,serverTime:upper,nextAfter:events.length===200 ? String(events[events.length-1].id) : null,usageNoticesUnavailable};
+  notices.push(...lineNotices,...budgetNotices);
+  return {events:notices,serverTime:upper,nextAfter:events.length===200 ? String(events[events.length-1].id) : null,usageNoticesUnavailable,connectionNoticesUnavailable};
 }

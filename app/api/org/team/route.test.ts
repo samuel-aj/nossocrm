@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const m = vi.hoisted(() => ({ auth: vi.fn(), access: vi.fn(), rpc: vi.fn(), origin: vi.fn() }));
 vi.mock('@/lib/whatsapp/api', () => ({ requireOrgUser: m.auth, json: (body: unknown, status = 200) => Response.json(body, { status }) }));
-vi.mock('@/lib/permissions/teamAccessServer', () => ({ getTeamAccess: m.access }));
+vi.mock('@/lib/permissions/teamAccessServer', () => ({ getTeamAccess: m.access, forgetTeamAccess: () => undefined }));
 vi.mock('@/lib/security/sameOrigin', () => ({ isAllowedOrigin: m.origin }));
 import { POST } from './route';
 const id = '11111111-1111-4111-8111-111111111111';

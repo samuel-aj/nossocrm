@@ -3,7 +3,7 @@ import { checkConversationBudget } from '@/lib/ai-usage/budget';
 import { isAiAgentsApproved } from './beta';
 import { loadAgent } from './context';
 import { runAgentOnConversation } from './engine';
-import { checkProactiveFollowup, type ProactiveFollowup } from './proactiveFollowup';
+import { bindRecoveredHandoff, checkProactiveFollowup, type ProactiveFollowup } from './proactiveFollowup';
 
 export async function startStageFollowupAgent(admin: SupabaseClient, input: {
   organizationId: string; conversationId: string; agentId: string; instruction: string; proactive: ProactiveFollowup;
@@ -23,7 +23,9 @@ export async function startStageFollowupAgent(admin: SupabaseClient, input: {
   if (!activated) return { ok: false, reason: 'Conversa mudou ou está sob atendimento de outro robô' };
   const result = await runAgentOnConversation({
     organizationId: input.organizationId, conversationId: input.conversationId, agentId: input.agentId,
-    trigger: 'followup', proactive: input.proactive, forceReply: true, skipBuffer: true,
+    trigger: 'followup', proactive: input.proactive.connectionRecovery
+      ? await bindRecoveredHandoff(admin, input.organizationId, input.conversationId, input.proactive, input.agentId) : input.proactive,
+    forceReply: true, skipBuffer: true,
     followup: { instruction: input.instruction, silentFor: 'o período configurado nesta etapa' },
   });
   return result.status === 'ok' ? { ok: true } : { ok: false, reason: result.reason ?? 'Agente não executou o follow-up', deferredUntil: result.deferredUntil };

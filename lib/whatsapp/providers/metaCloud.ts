@@ -24,6 +24,7 @@ import type {
   WaConnectionState,
   SendTemplateInput,
 } from './types';
+import { metaErrorReason } from './metaCloudError';
 
 const DEFAULT_GRAPH_VERSION = 'v21.0';
 /** Versão usada só no recibo de leitura / "digitando" (ver readReceipt). */
@@ -31,12 +32,63 @@ const READ_RECEIPT_GRAPH_VERSION = (process.env.META_READ_RECEIPT_GRAPH_VERSION 
 
 interface MetaSendResponse {
   messages?: Array<{ id?: string }>;
-  error?: { message?: string; code?: number; error_data?: { details?: string } };
+  error?: { message?: string; code?: number; error_subcode?: number; error_data?: { details?: string } };
 }
 
 interface MetaMediaUploadResponse {
   id?: string;
-  error?: { message?: string; error_data?: { details?: string } };
+  error?: MetaSendResponse['error'];
+}
+
+interface MetaHealthError {
+  error_code?: number;
+  capabilities?: string[];
+}
+
+interface MetaHealthEntity {
+  entity_type?: string;
+  can_send_message?: string;
+  can_receive_call_sip?: string;
+  errors?: MetaHealthError[];
+}
+
+// These two codes describe SIP configuration, and do not say whether messaging works.
+function sipOnlyError(error: MetaHealthError | null): boolean {
+  if (Array.isArray(error?.capabilities) && error.capabilities.length) {
+    return error.capabilities.every(capability => String(capability).toLowerCase() === 'can_receive_call_sip');
+  }
+  return error?.error_code === 138024 || error?.error_code === 138025;
+}
+
+function messagingHealth(health?: { can_send_message?: string; entities?: MetaHealthEntity[] }): Awaited<ReturnType<WhatsAppProvider['checkConnectionHealth']>> {
+  const aggregate = health?.can_send_message;
+  const entities = Array.isArray(health?.entities) ? health.entities : [];
+  const messagingBlocked = entities.filter(entity => entity?.can_send_message === 'BLOCKED');
+  if (messagingBlocked.length) {
+    const errors = messagingBlocked.flatMap(entity => Array.isArray(entity.errors) ? entity.errors : []);
+    const reason = errors.filter(error => !sipOnlyError(error)).map(error => metaErrorReason({ code: error?.error_code })).find(Boolean);
+    return { state: 'disconnected', reason: reason ?? 'meta_health_blocked' };
+  }
+  const messagingLimited = entities.some(entity => entity?.can_send_message === 'LIMITED');
+  if (aggregate === 'AVAILABLE') return messagingLimited ? { state: 'connected', reason: 'meta_messaging_limited' } : { state: 'connected' };
+  if (aggregate !== 'BLOCKED' && aggregate !== 'LIMITED') return { state: 'unknown', reason: 'meta_health_unknown' };
+
+  // Meta's documented SIP example has aggregate BLOCKED, even though every messaging node is AVAILABLE.
+  // Override it only with complete phone-number health evidence and an actual calling restriction.
+  const complete = ['PHONE_NUMBER', 'WABA', 'BUSINESS', 'APP'].every(type => entities.some(entity => entity?.entity_type === type));
+  const messagingPermitted = complete && entities.every(entity => entity?.can_send_message === 'AVAILABLE' || entity?.can_send_message === 'LIMITED');
+  const matchingSipRestriction = entities.some(entity => entity?.can_receive_call_sip === aggregate);
+  const onlyCallingErrors = entities.every(entity => !Array.isArray(entity?.errors) || entity.errors.every(sipOnlyError));
+  if (messagingPermitted && matchingSipRestriction && onlyCallingErrors) {
+    return messagingLimited ? { state: 'connected', reason: 'meta_messaging_limited' } : { state: 'connected' };
+  }
+  return aggregate === 'LIMITED' ? { state: 'connected', reason: 'meta_messaging_limited' } : { state: 'disconnected', reason: 'meta_health_blocked' };
+}
+
+// Code 190 is an explicit OAuth rejection before acceptance, including a rejected media upload.
+function metaSendFailure(error: MetaSendResponse['error'], fallback: string): string {
+  if (error?.code === 190) return 'Número desconectado: a Meta recusou a credencial do número.';
+  return error?.error_data?.details || error?.message || fallback;
 }
 
 export class MetaCloudProvider implements WhatsAppProvider {
@@ -85,7 +137,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
     if (!res.ok || data?.error) {
       // A Meta detalha o motivo (ex.: fora da janela de 24h precisa de template).
       const err = data?.error;
-      const detail = err?.error_data?.details || err?.message || `Meta respondeu ${res.status}`;
+      const detail = metaSendFailure(err, `Meta respondeu ${res.status}`);
       return { ok: false, error: detail, raw: data };
     }
     return { ok: true, providerMessageId: data?.messages?.[0]?.id, raw: data };
@@ -179,7 +231,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
    * devolve o motivo exato se recusar (formato, tamanho...), em vez de baixar
    * o link depois, "adivinhar" o tipo e falhar em silêncio no recibo.
    */
-  private async uploadMedia(input: SendMediaInput): Promise<{ id?: string; error?: string }> {
+  private async uploadMedia(input: SendMediaInput): Promise<{ id?: string; error?: string; codes?: {code: number; error_subcode?: number} }> {
     let dl: Response;
     try {
       dl = await fetch(input.media, { cache: 'no-store', ...(input.signal ? { signal: input.signal } : {}) });
@@ -226,7 +278,8 @@ export class MetaCloudProvider implements WhatsAppProvider {
     }
     if (!res.ok || !data?.id) {
       const err = data?.error;
-      return { error: err?.error_data?.details || err?.message || `Meta recusou a mídia (HTTP ${res.status})` };
+      return { error: metaSendFailure(err, `Meta recusou a mídia (HTTP ${res.status})`),
+        ...(err?.code === 190 ? { codes: { code: err.code, error_subcode: err.error_subcode } } : {}) };
     }
     return { id: data.id };
   }
@@ -238,7 +291,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
     // Upload primeiro (validação imediata) e envio por media ID — sem depender
     // da Meta baixar link. Só imagem/vídeo/documento aceitam legenda.
     const up = await this.uploadMedia(input);
-    if (!up.id) return { ok: false, error: up.error || 'Falha ao subir a mídia pra Meta' };
+    if (!up.id) return { ok: false, error: up.error || 'Falha ao subir a mídia pra Meta', ...(up.codes ? { raw: { error: up.codes } } : {}) };
     const id = up.id;
 
     let media: Record<string, unknown>;
@@ -273,6 +326,23 @@ export class MetaCloudProvider implements WhatsAppProvider {
   // Cloud API é por credenciais, sem sessão/QR.
   async getConnectionState(): Promise<WaConnectionState> {
     return this.phoneNumberId && this.token ? 'connected' : 'disconnected';
+  }
+
+  async checkConnectionHealth(): ReturnType<WhatsAppProvider['checkConnectionHealth']> {
+    if (!this.phoneNumberId || !this.token) return { state: 'disconnected', reason: 'meta_missing_credentials' };
+    const res = await fetch(`https://graph.facebook.com/${this.graphVersion}/${encodeURIComponent(this.phoneNumberId)}?fields=health_status`, {
+      headers: { Authorization: `Bearer ${this.token}` }, cache: 'no-store', signal: AbortSignal.timeout(6000),
+    });
+    const data = await res.json().catch(() => null) as {
+      health_status?: { can_send_message?: string; entities?: MetaHealthEntity[] };
+      error?: MetaSendResponse['error'];
+    } | null;
+    if (data?.error || !res.ok) {
+      const code = metaErrorReason(data?.error);
+      if (data?.error?.code === 190) return { state: 'disconnected', reason: code };
+      return { state: 'unknown', reason: code?.replace('meta_code_', 'meta_query_code_') ?? `meta_query_http_${res.status}` };
+    }
+    return messagingHealth(data?.health_status);
   }
 
   async getQrCode(): Promise<QrResult> {

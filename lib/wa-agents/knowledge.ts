@@ -430,18 +430,20 @@ async function agentEmbeddingProfile(
   admin: SupabaseClient,
   organizationId: string,
   agentId: string,
-  exceptDocumentId?: string
+  scope: { exceptDocumentId?: string; documentId?: string } = {}
 ): Promise<{ model: string | null; chunks: number }> {
-  const { data } = await admin
+  let documents = admin
     .from('wa_ai_agent_documents')
-    .select('id, chunk_count, embedding_model')
+    .select('chunk_count, embedding_model')
     .eq('organization_id', organizationId)
     .eq('agent_id', agentId)
     .eq('status', 'ready');
+  if (scope.documentId) documents = documents.eq('id', scope.documentId);
+  if (scope.exceptDocumentId) documents = documents.neq('id', scope.exceptDocumentId);
+  const { data } = await documents;
   const counts = new Map<string, number>();
   let chunks = 0;
-  for (const d of (data ?? []) as Array<{ id: string; chunk_count: number; embedding_model: string | null }>) {
-    if (d.id === exceptDocumentId) continue;
+  for (const d of (data ?? []) as Array<{ chunk_count: number; embedding_model: string | null }>) {
     chunks += Number(d.chunk_count) || 0;
     if (d.embedding_model) counts.set(d.embedding_model, (counts.get(d.embedding_model) ?? 0) + (Number(d.chunk_count) || 1));
   }
@@ -548,7 +550,7 @@ async function processDocumentWithUsage(
     if (chunks.length === 0) throw new Error('O documento não tem texto aproveitável');
 
     // Teto de trechos por agente (somando os outros documentos prontos)
-    const profile = await agentEmbeddingProfile(admin, doc.organization_id, doc.agent_id, doc.id);
+    const profile = await agentEmbeddingProfile(admin, doc.organization_id, doc.agent_id, { exceptDocumentId: doc.id });
     if (profile.chunks + chunks.length > AGENT_CHUNKS_MAX_PER_AGENT) {
       throw new Error(
         `Limite de ${AGENT_CHUNKS_MAX_PER_AGENT} trechos por agente ultrapassado (este documento tem ${chunks.length}; os demais somam ${profile.chunks}). Remova documentos ou envie um arquivo menor.`
@@ -607,28 +609,41 @@ type MatchRow = { id: string; document_id: string; idx: number; content: string;
 type SearchRow = { id: string; document_id: string; idx: number; content: string; rank: number };
 
 /**
- * Busca trechos relevantes na base do agente: embute a pergunta com o mesmo
- * modelo dos trechos do agente (quando há chave) e usa wa_ai_match_chunks
- * (só trechos desse modelo, limiar por provedor); sem embedding ou sem
- * resultado, cai na busca por texto wa_ai_search_chunks. Nunca lança (devolve []).
+ * Busca trechos pelo embedding da pergunta ou, sem correspondência, por texto.
+ * Com documentId, as duas buscas classificam apenas os trechos daquele documento.
  */
 export async function searchKnowledge(
   admin: SupabaseClient,
-  input: { organizationId: string; agent: Pick<AgentRow, 'id' | 'organization_id'>; query: string; limit?: number }
+  input: {
+    organizationId: string;
+    agent: Pick<AgentRow, 'id' | 'organization_id'>;
+    query: string;
+    limit?: number;
+    documentId?: string;
+  }
 ): Promise<KnowledgeHit[]> {
   const query = (input.query ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_QUERY_CHARS);
   if (!query) return [];
   if (input.agent.organization_id !== input.organizationId) return [];
+  if (input.documentId !== undefined && !input.documentId.trim()) return [];
   const limit = Math.max(1, Math.min(input.limit ?? 5, 20));
+  const scope = {
+    p_org: input.organizationId,
+    p_agent: input.agent.id,
+    p_limit: limit,
+    ...(input.documentId ? { p_document: input.documentId } : {}),
+  };
 
   try {
     let embedded: EmbedTextsResult | null = null;
     try {
-      const profile = await agentEmbeddingProfile(admin, input.organizationId, input.agent.id);
-      embedded = await embedTexts(admin, input.organizationId, [query], {
-        prefer: profile.model,
-        abortSignal: AbortSignal.timeout(QUERY_EMBED_TIMEOUT_MS),
-      });
+      const profile = await agentEmbeddingProfile(admin, input.organizationId, input.agent.id, { documentId: input.documentId });
+      if (!input.documentId || profile.model) {
+        embedded = await embedTexts(admin, input.organizationId, [query], {
+          prefer: profile.model,
+          abortSignal: AbortSignal.timeout(QUERY_EMBED_TIMEOUT_MS),
+        });
+      }
     } catch (e) {
       console.error('[wa-agents] embedding da consulta falhou:', errorMessage(e));
     }
@@ -636,11 +651,9 @@ export async function searchKnowledge(
     const vector = embedded?.embeddings[0] ?? null;
     if (vector && embedded) {
       const minSimilarity = MIN_SIMILARITY[embedded.provider];
-      const { data, error } = await admin.rpc('wa_ai_match_chunks', {
-        p_org: input.organizationId,
-        p_agent: input.agent.id,
+      const { data, error } = await admin.rpc(input.documentId ? 'wa_ai_match_document_chunks' : 'wa_ai_match_chunks', {
+        ...scope,
         p_embedding: vector,
-        p_limit: limit,
         p_model: embedded.model,
       });
       if (error) console.error('[wa-agents] busca vetorial falhou:', error.message);
@@ -650,11 +663,9 @@ export async function searchKnowledge(
       if (hits.length > 0) return hits;
     }
 
-    const { data, error } = await admin.rpc('wa_ai_search_chunks', {
-      p_org: input.organizationId,
-      p_agent: input.agent.id,
+    const { data, error } = await admin.rpc(input.documentId ? 'wa_ai_search_document_chunks' : 'wa_ai_search_chunks', {
+      ...scope,
       p_query: query,
-      p_limit: limit,
     });
     if (error) {
       console.error('[wa-agents] busca por texto falhou:', error.message);

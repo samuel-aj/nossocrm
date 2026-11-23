@@ -14,6 +14,7 @@ import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { VisibilityRulesSchema, isUnrestricted } from '@/lib/permissions/types';
+import { forgetVisibilityRules } from '@/lib/permissions/server';
 import { UserRole } from '@/types/constants';
 
 export const runtime = 'nodejs';
@@ -146,6 +147,7 @@ export async function PUT(req: Request, ctx: Ctx) {
       .eq('organization_id', orgId)
       .eq('user_id', userId);
     if (error) return json({ error: error.message }, 500);
+    forgetVisibilityRules(orgId);
     return json({ ok: true, rules: null });
   }
 
@@ -160,6 +162,7 @@ export async function PUT(req: Request, ctx: Ctx) {
     { onConflict: 'organization_id,user_id' }
   );
   if (error) return json({ error: error.message }, 500);
+  forgetVisibilityRules(orgId);
 
   return json({ ok: true, rules });
 }

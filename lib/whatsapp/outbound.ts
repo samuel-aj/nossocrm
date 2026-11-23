@@ -1,6 +1,7 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { SendResult } from './providers/types';
+import { reportRejectedSend } from './connectionSendFailure';
 import { recordOutboundMessage, replicateOutboundToSiblings, type WaConnectionRow, type WaMessageRow } from './service';
 
 export type OutboundRecord = Parameters<typeof recordOutboundMessage>[1];
@@ -22,8 +23,10 @@ export async function dispatchOutbound(options: {
 }) {
   const { admin, connection, record, hooks } = options;
   await hooks?.beforeDispatch?.(record);
+  const startedAt = new Date().toISOString();
   const result = await options.send();
   await hooks?.afterDispatch?.(result);
+  if (!result.ok) await reportRejectedSend(admin, connection.id, result, startedAt);
   const message = await recordOutboundMessage(admin, {
     ...record,
     providerMessageId: result.providerMessageId,

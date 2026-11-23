@@ -84,6 +84,11 @@ export const EndActionSchema = z.discriminatedUnion('type', [
   /** Transfere o atendimento para um robô: o agente para e o robô assume a conversa */
   z.object({ type: z.literal('start_bot'), bot_id: z.string().uuid() }),
   z.object({ type: z.literal('note'), title: z.string().max(120).optional() }),
+  z.object({
+    type: z.literal('consult_knowledge'),
+    knowledgeId: z.string().uuid('Selecione um documento da base de conhecimento'),
+    description: z.string().trim().min(1, 'Descreva o conteúdo desta base').max(600),
+  }),
   /** loss_reason: motivo da perda quando a etapa de destino é a etapa de perda do quadro (aceita variáveis) */
   z.object({
     type: z.literal('move_stage'),
@@ -114,11 +119,15 @@ export const EndActionSchema = z.discriminatedUnion('type', [
 ]);
 export type EndAction = z.infer<typeof EndActionSchema>;
 
+const OutcomeActionSchema = EndActionSchema.refine(action => action.type !== 'consult_knowledge', {
+  message: 'A consulta à base de conhecimento só está disponível durante a conversa',
+});
+
 export const OutcomeSchema = z.object({
   key: z.string().regex(/^[a-z0-9_-]{1,40}$/),
   label: z.string().min(1).max(80),
   description: z.string().max(500).default(''),
-  actions: z.array(EndActionSchema).default([]),
+  actions: z.array(OutcomeActionSchema).default([]),
 });
 export type Outcome = z.infer<typeof OutcomeSchema>;
 
