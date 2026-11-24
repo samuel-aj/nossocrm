@@ -94,6 +94,7 @@ describe('resposta à conferência da ficha', () => {
     'aceita confirmação contextual: %s', reply => expect(review(reply).confirmed).toBe(true),
   );
   it.each(['Tudo certo?', 'Conferi a ficha', 'Não tenho dúvidas.', 'Pode fazer, mas quero mudar meu CEP.',
+    'Isso, agora tá certo?', 'Agora não, aguarde', 'Isso, agora tá certo, pode gerar, mas o número correto é 99',
     'Confirmo 👎', 'Sim, acho que os dados estão certos', 'Eu confirmo meus dados anteriores, esses não'])(
     'não emite na dúvida ou com ressalva: %s', reply => expect(review(reply).confirmed).toBe(false),
   );

@@ -3,8 +3,11 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { assertUsageHealthy } from '@/lib/ai-usage/context';
 import { buildSystemPrompt, type ConversationContext } from '@/lib/wa-agents/context';
 import { resolveAgentModel } from '@/lib/wa-agents/model';
+import { enforceOabForDelivery, lastCustomerText } from '@/lib/wa-agents/oabDelivery';
 import { internalOutputReason } from '@/lib/wa-agents/replyOutput';
 import type { AgentRow } from '@/lib/wa-agents/types';
+
+const signedNotice = 'Parabéns pela assinatura! Recebi a confirmação da ZapSign. Posso ajudar com alguma dúvida sobre os próximos passos?';
 
 /** Runs inside the caller's metered conversation or simulation. No side-effect tools. */
 export async function composeSignedReply(db: SupabaseClient, agent: AgentRow, ctx: ConversationContext, history: ModelMessage[], allSigned: boolean) {
@@ -18,6 +21,9 @@ export async function composeSignedReply(db: SupabaseClient, agent: AgentRow, ct
   });
   assertUsageHealthy();
   const text = result.text.trim();
-  return text && !internalOutputReason(text) && !text.includes('[SEM_RESPOSTA]') && !/https?:\/\//i.test(text) ? text :
-    'Parabéns pela assinatura! Recebi a confirmação da ZapSign. Posso ajudar com alguma dúvida sobre os próximos passos?';
+  if (!text || internalOutputReason(text) || text.includes('[SEM_RESPOSTA]') || /https?:\/\//i.test(text)) return signedNotice;
+  const checked = await enforceOabForDelivery(db, agent.organization_id, [{ kind: 'text', text }], lastCustomerText(history));
+  if (!checked.adjusted) return text;
+  const safeText = checked.segments.flatMap(segment => segment.kind === 'text' ? [segment.text] : []).join('\n');
+  return /\bassinatura\b/i.test(safeText) ? safeText : [signedNotice, safeText].filter(Boolean).join(' ');
 }

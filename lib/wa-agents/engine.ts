@@ -47,6 +47,7 @@ import { voiceDelivery, VOICE_NOTICE } from './voiceDelivery';
 import { resolveAgentModel } from './model';
 import { generateAgentReply, type CollectedToolCall } from './replyGeneration';
 import { segmentText } from './replyOutput';
+import { checkGeneratedOab, oabQuestionContext, oabSystemContext } from './oabDelivery';
 import { loadAgentResources } from './resources';
 import { logRun } from './runs';
 import { mergeSavedDataInto, NO_REPLY_TOKEN, sanitizeSavedData } from './savedData';
@@ -907,6 +908,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       if (fact) system += '\n\n' + fact;
     }
     const messages = await buildHistoryMessages(admin, ctx, agent.history_limit);
+    const oabInbound = oabQuestionContext(messages, inputText || undefined);
     if (input.forceReply && (messages.length === 0 || messages[messages.length - 1].role === 'assistant')) {
       messages.push({
         role: 'user',
@@ -1005,6 +1007,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     } else {
       const resolved = await resolveAgentModel(admin, organizationId, agent);
       modelId = resolved.modelId;
+      system += await oabSystemContext(admin, organizationId, oabInbound);
       await checkInbound();
       await beginDispatch();
       gen = await generateAgentReply({ model: resolved.model, agent, system, messages, runtime, followupInstruction: input.followup?.instruction,
@@ -1033,6 +1036,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       }[gen.contractWait];
       return await finish('ok', { reason, lines: [] });
     }
+    gen = await checkGeneratedOab(admin, organizationId, gen, oabInbound);
     const text = gen.text;
     outputText = text || null;
     pushEvent('output_checked', { ...gen.outputSafety });

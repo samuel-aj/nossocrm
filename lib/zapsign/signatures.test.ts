@@ -1169,6 +1169,7 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
     const original = fragments.join(', ');
     const updated = 'Rua das Acácias, 98, Vila Nova, Campo Grande MS';
     const correction = 'O número da casa tá errado, é 98 e não 88';
+    const acceptanceAfterCorrection = 'Isso, agora tá certo, pode gerar';
 
     it.each([
       ['uma mensagem em três linhas', ['Rua das Flores nº 564\nBairro São Francisco\nCampanha MG']],
@@ -1225,14 +1226,14 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
       chat.push(originalSummary, user(correction));
       const newSummary = await prepareReview({ [label]: updated }, updated);
       // The customer has not yet seen the new summary in this branch of the chat.
-      const premature = await simulateAgentContract(db.admin, ORG, scope.template, [...chat, user('Pode gerar')],
+      const premature = await simulateAgentContract(db.admin, ORG, scope.template, [...chat, user(acceptanceAfterCorrection)],
         { modo: 'criar', dados: { [label]: updated } });
       expect(premature).toMatchObject({ criado: false, solicitar_confirmacao: expect.stringContaining(updated) });
       // The tool produced a new key, but the assistant displayed the superseded number.
       const stale = await simulateAgentContract(db.admin, ORG, scope.template,
-        [...chat, { ...newSummary, text: originalSummary.text }, user('Tá tudo certo')], { modo: 'criar', dados: {} });
+        [...chat, { ...newSummary, text: originalSummary.text }, user(acceptanceAfterCorrection)], { modo: 'criar', dados: {} });
       expect(stale).not.toMatchObject({ criado: true });
-      chat.push(newSummary, user('Tá tudo certo'));
+      chat.push(newSummary, user(acceptanceAfterCorrection));
       expect(await simulateAgentContract(db.admin, ORG, scope.template, chat, { modo: 'criar', dados: {} }))
         .toMatchObject({ simulado: true, criado: true });
       expect(db.post).not.toHaveBeenCalled();
@@ -1266,7 +1267,7 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
       }
       const after = await ask('6', updated);
       expect(db.post).not.toHaveBeenCalled();
-      db.tables.wa_messages.push(msg('7', 'out', after, 6), msg('8', 'in', 'Pode gerar', 7));
+      db.tables.wa_messages.push(msg('7', 'out', after, 6), msg('8', 'in', acceptanceAfterCorrection, 7));
       expect(await runAgentContract(db.admin, { ...scope, inboundId: '8' }, { modo: 'criar', dados: {} }))
         .toMatchObject({ criado: true });
       expect(db.post).toHaveBeenCalledTimes(1);

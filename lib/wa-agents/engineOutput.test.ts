@@ -7,6 +7,7 @@ const h = vi.hoisted(() => ({
   voiceFile: vi.fn(), sendVoice: vi.fn(), notice: vi.fn(), transcribe: vi.fn(),
   generate: vi.fn(), history: vi.fn(), send: vi.fn(), action: vi.fn(), outcome: vi.fn(), events: vi.fn(), log: vi.fn(),
   confirmationDue: vi.fn(),
+  oabRegistrations: vi.fn(),
   calendar: null as Record<string, unknown> | null,
   budget: vi.fn(), block: vi.fn(), reserve: vi.fn(), dispatch: vi.fn(), settle: vi.fn(), policyEnabled: false,
   ctx: null as ConversationContext | null, agent: null as AgentRow | null,
@@ -16,6 +17,9 @@ const h = vi.hoisted(() => ({
   messages: [] as Record<string, unknown>[],
 }));
 vi.mock('server-only', () => ({}));
+vi.mock('./oabRegistry', async original => ({
+  ...await original<typeof import('./oabRegistry')>(), loadConfirmedOabRegistrations: h.oabRegistrations,
+}));
 vi.mock('./contractConfirmation', async original => ({
   ...await original<typeof import('./contractConfirmation')>(), contractConfirmationDue: h.confirmationDue,
 }));
@@ -124,6 +128,8 @@ beforeEach(() => {
   vi.clearAllMocks(); h.generate.mockReset();
   h.history.mockReset().mockResolvedValue([{ role: 'user', content: 'Sim' }]);
   incoming.created_at = at;
+  incoming.body = 'Sim';
+  h.oabRegistrations.mockReset().mockResolvedValue([]);
   h.calendar = null;
   h.media = [];
   h.documents = [];
@@ -145,6 +151,48 @@ beforeEach(() => {
   h.events.mockResolvedValue([]); h.log.mockResolvedValue('run');
 });
 const run = () => runAgentOnConversation({ organizationId: org, conversationId: 'conv', trigger: 'inbound', skipBuffer: true });
+
+describe('inscrição da OAB na saída do agente', () => {
+  const question = 'Qual a OAB da Dra. Ana Exemplo?';
+  const registered = { professionalName: 'Ana Exemplo', state: 'MS', number: '12345' };
+  const wrong = 'A inscrição da Dra. Ana Exemplo é OAB/MS 99999.';
+  it.each(['conversa', 'simulador'])('corrige o rascunho usando o cadastro do escritório na %s', async mode => {
+    incoming.body = question;
+    h.history.mockResolvedValue([{ role: 'user', content: question }]);
+    h.oabRegistrations.mockResolvedValue([registered]);
+    h.generate.mockResolvedValue(draft(wrong, false));
+    const output = mode === 'conversa' ? (await run()).lines :
+      (await testAgentReply(h.db, { organizationId: org, agent: h.agent!, messages: [{ role: 'user', text: question }] })).lines;
+    expect(output?.join(' ')).toMatch(/Ana Exemplo.*OAB\/MS 12345/);
+    expect(output?.join(' ')).not.toContain('99999');
+    expect(h.oabRegistrations).toHaveBeenCalledWith(h.db, org);
+    if (mode === 'conversa') expect(h.send.mock.calls.map(([m]) => m.text)).toEqual(output);
+    else expect(h.send).not.toHaveBeenCalled();
+  });
+  it('reconfere uma resposta pendente se o cadastro ficar indisponível antes da reconexão', async () => {
+    h.oabRegistrations.mockRejectedValue(new Error('offline'));
+    const result = await runAgentOnConversation({ organizationId: org, conversationId: 'conv', trigger: 'inbound',
+      triggerMessageId: 'message', skipBuffer: true, recoveryId: 'job', recoveryLines: [wrong] });
+    expect(result.status).toBe('ok');
+    expect(result.lines?.join(' ')).toMatch(/confirmar a inscrição/);
+    expect(h.send.mock.calls.map(([m]) => m.text)).toEqual(result.lines);
+    expect(h.generate).not.toHaveBeenCalled();
+  });
+  it('evita consultar o cadastro para respostas sobre outros assuntos', async () => {
+    h.generate.mockResolvedValue(draft('Recebi seu CPF.', false));
+    expect((await run()).lines).toEqual(['Recebi seu CPF.']);
+    expect(h.oabRegistrations).not.toHaveBeenCalled();
+  });
+  it('bloqueia o número avulso quando a tentativa de enviar a foto da OAB falha', async () => {
+    const failed = { toolName: 'enviar_midia', toolCallId: 'missing-image', input: { nome: 'oab_advogada' } };
+    h.generate.mockResolvedValue({ steps: [
+      { text: '', toolCalls: [failed], toolResults: [{ toolCallId: failed.toolCallId, output: { ok: false } }] },
+      { text: 'O número dela é 99999.', toolCalls: [], toolResults: [] },
+    ], totalUsage: {}, finishReason: 'stop' });
+    expect((await run()).lines?.join(' ')).toMatch(/confirmar a inscrição/);
+    expect(h.send.mock.calls.map(([m]) => m.text).join(' ')).not.toContain('99999');
+  });
+});
 
 describe('recuperação durável de entrada com transporte falso', () => {
   const key = { organizationId: org, conversationId: 'conv', messageId: 'message' };

@@ -17,6 +17,7 @@ import { McpSection } from './components/McpSection';
 import { ZapSignSection } from './components/ZapSignSection';
 import { Api4comPersonalCard, Api4comSection } from './components/Api4comSection';
 import { DataStorageSettings } from './components/DataStorageSettings';
+import { OabRegistrationSettings } from './components/OabRegistrationSettings';
 import AppearanceSettings from './components/AppearanceSettings';
 import { ProductsCatalogManager } from './components/ProductsCatalogManager';
 import { UserRole } from '@/types/constants';
@@ -67,6 +68,9 @@ const GeneralSettings: React.FC = () => {
             </span>
           }
         />
+        {profile?.organization_id && (profile.role === UserRole.ADMIN || profile.role === UserRole.SUPER_ADMIN) && (
+          <OabRegistrationSettings key={profile.organization_id} organizationId={profile.organization_id} />
+        )}
       </SettingsCard>
       <SettingsCard title="Navegação" icon={Compass}>
         <SettingsRow

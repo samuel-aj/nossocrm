@@ -21,6 +21,7 @@ export type OutputSafety = {
   duplicatesRemoved: number;
   savedDataAnnotationsRemoved?: number;
   returnReplyAdjusted?: boolean;
+  oabReplyAdjusted?: boolean;
   recoveryAttempted: boolean;
   recoveryError?: string;
   recoveryFailureCode?: RecoveryFailureCode;
