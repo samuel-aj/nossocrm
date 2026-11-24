@@ -70,6 +70,36 @@ const eslintConfig = defineConfig([
       'react-hooks/exhaustive-deps': 'off',
     },
   },
+
+  // Pendências que surgiram com eslint-config-next 16.4 (eslint-plugin-react-hooks 7.1 e a regra nova
+  // do @next/eslint-plugin-next). O código já existia assim; as regras continuam valendo no resto do
+  // projeto. Remover cada arquivo desta lista quando ele for corrigido.
+  {
+    files: [
+      "context/activities/ActivitiesContext.tsx",
+      "features/deals/lead/DealStageControl.tsx",
+      "features/deals/lead/LeadComposers.tsx",
+      "features/deals/lead/LeadPropertiesPanel.tsx",
+      "features/wa-agents/AgentTestChat.tsx",
+      "features/whatsapp/WhatsAppPairingPanel.tsx",
+    ],
+    rules: {
+      // Padrão "ref com o valor mais recente" (ref.current = x durante a renderização) e leitura de ref no render.
+      "react-hooks/refs": "off",
+    },
+  },
+  {
+    files: [
+      "app/(admin)/admin/page.tsx",
+      "app/install/wizard/page.tsx",
+      "app/select-org/page.tsx",
+      "components/OrgSwitcher.tsx",
+    ],
+    rules: {
+      // Recarga completa de propósito (troca de organização, instalador): não trocar por router.push sem revisar.
+      "@next/next/no-location-assign-relative-destination": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;
