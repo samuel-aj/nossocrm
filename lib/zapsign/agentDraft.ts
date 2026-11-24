@@ -177,7 +177,7 @@ const YES = new RegExp('^(?:' + [
   'sao esses (?:mesmo|os meus dados)', '(?:esses|estes) sao (?:os )?meus dados', '(?:esta|estou) de acordo', '(?:e )?assim mesmo',
   'sem problemas?', 'pode (?:sim )?(?:dar (?:andamento|continuidade)|emitir|fazer)(?: (?:ao |o )?contrato)?',
   'sim', 'ok(?:ay|ey)?', 'confirmo', 'confirmei', '(?:(?:esta|ta) )?confirmad[oa]s?',
-  '(?:(?:esta|ta|estao|tao) )?(?:(?:tudo|td) )?(?:cert[oa]s?|certinh[oa]s?|corret[oa]s?|perfeito|beleza)',
+  '(?:agora )?(?:(?:esta|ta|estao|tao) )?(?:(?:tudo|td) )?(?:cert[oa]s?|certinh[oa]s?|corret[oa]s?|perfeito|beleza)',
   '(?:esta|ta|tudo|td)(?: tudo)? (?:bom|bem|otimo|joia)',
   '(?:(?:todos )?os )?dados (?:(?:estao|tao) )?(?:certos|corretos)', 'a ficha (?:esta|ta) (?:certa|correta)',
   '(?:e )?isso(?: ai)?(?: mesmo)?', 'exato', 'exatamente', 'positivo', 'claro', 'com certeza', 'sem duvidas?', 'de acordo',

@@ -11,6 +11,7 @@ import type { ModelMessage } from 'ai';
 import { createUsageContext } from '@/lib/ai-usage/budget';
 import { assertUsageHealthy, runWithUsageContext } from '@/lib/ai-usage/context';
 import { buildSystemPrompt, type ConversationContext } from './context';
+import { checkGeneratedOab, oabQuestionContext, oabSystemContext } from './oabDelivery';
 import {
   generateAgentReply,
   MAX_HELPER_CALLS_PER_RUN,
@@ -261,7 +262,10 @@ async function testAgentReplyWithUsage(
 
   let generated: GeneratedReply | null = null;
   try {
-    const gen = await generateAgentReply({ model: resolved.model, agent, system, messages, runtime, inboundReturn: input.messages.at(-1)?.role === 'user' });
+    const oabInbound = oabQuestionContext(messages, lastUser);
+    const oabContext = await oabSystemContext(admin, organizationId, oabInbound);
+    const reply = await generateAgentReply({ model: resolved.model, agent, system: system + oabContext, messages, runtime, inboundReturn: input.messages.at(-1)?.role === 'user' });
+    const gen = await checkGeneratedOab(admin, organizationId, reply, oabInbound);
     assertUsageHealthy();
     generated = gen;
     if (gen.outputSafety.status === 'blocked') throw new Error('Resposta da IA bloqueada por conter dados internos. Revise o roteiro e tente novamente.');
