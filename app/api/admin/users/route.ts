@@ -1,4 +1,5 @@
 import { canManageTeam } from '@/lib/permissions/teamAccessServer';
+import { logSecurityEvent } from '@/lib/security/auditLog';
 import { safeErrorMessage } from '@/lib/security/safeError';
 import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
@@ -236,6 +237,15 @@ export async function POST(req: Request) {
         role,
         appUrl: origin,
       });
+      await logSecurityEvent({
+        action: 'team.member.added',
+        actorId: user.id,
+        organizationId: scoped.organization_id,
+        resourceType: 'user',
+        resourceId: existingAuthUser.id,
+        details: { email, role, via: 'conta já existente' },
+        severity: role === UserRole.ADMIN ? 'warning' : 'info',
+      }, req);
       return json({ ok: true, existing: true, emailSent, user: { id: existingAuthUser.id, email, role } }, 201);
     }
 
@@ -305,5 +315,14 @@ export async function POST(req: Request) {
     password,
   });
 
+  await logSecurityEvent({
+    action: 'team.member.added',
+    actorId: user.id,
+    organizationId: scoped.organization_id,
+    resourceType: 'user',
+    resourceId: userId,
+    details: { email, role, via: 'conta criada pelo admin' },
+    severity: role === UserRole.ADMIN ? 'warning' : 'info',
+  }, req);
   return json({ ok: true, emailSent, user: { id: userId, email, role } }, 201);
 }

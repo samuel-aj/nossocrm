@@ -1,4 +1,5 @@
 import { canManageTeam } from '@/lib/permissions/teamAccessServer';
+import { logSecurityEvent } from '@/lib/security/auditLog';
 import { safeErrorMessage } from '@/lib/security/safeError';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
@@ -84,6 +85,16 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
     : target.organization_id === scoped.organization_id || hasMembershipHere;
   if (!isMemberHere) return json({ error: 'Forbidden' }, 403);
 
+  const logRemoved = (removed: string) => logSecurityEvent({
+    action: 'team.member.removed',
+    actorId: user.id,
+    organizationId: scoped.organization_id,
+    resourceType: 'user',
+    resourceId: id,
+    details: { role: target.role, removed },
+    severity: 'warning',
+  }, req);
+
   if (targetIsSuperAdmin) {
     const { error: membershipError } = await admin
       .from('user_organizations')
@@ -91,6 +102,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
       .eq('user_id', id)
       .eq('organization_id', scoped.organization_id);
     if (membershipError) return json({ error: `Falha ao remover: ${membershipError.message}` }, 500);
+    await logRemoved('vínculo com a organização');
     return json({ ok: true, removedMembershipOnly: true });
   }
 
@@ -125,6 +137,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
       if (moveError) return json({ error: `Falha ao remover: ${moveError.message}` }, 500);
     }
 
+    await logRemoved('vínculo com a organização');
     return json({ ok: true, removedMembershipOnly: true });
   }
 
@@ -153,5 +166,6 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
     return json({ error: `Falha ao remover: ${message}` }, 500);
   }
 
+  await logRemoved('conta inteira');
   return json({ ok: true });
 }

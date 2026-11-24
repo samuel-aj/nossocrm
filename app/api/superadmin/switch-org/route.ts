@@ -71,7 +71,7 @@ export async function POST(req: Request) {
     resource_type: 'organization',
     resource_id: organizationId,
     details: { org_name: org.name },
-  });
+  }, req);
 
   return json({ ok: true, organization: org });
 }

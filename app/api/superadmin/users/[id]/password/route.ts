@@ -69,7 +69,7 @@ export async function POST(req: Request, ctx: Ctx) {
     resource_id: id,
     details: { email: target.email },
     severity: 'warning',
-  });
+  }, req);
 
   return json({ ok: true });
 }

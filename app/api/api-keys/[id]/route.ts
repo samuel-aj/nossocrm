@@ -4,6 +4,7 @@
  * Sempre restrito à organização atual do request (ver lib/apiKeys/server).
  */
 import { NextResponse } from 'next/server';
+import { logSecurityEvent } from '@/lib/security/auditLog';
 import { safeErrorMessage } from '@/lib/security/safeError';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
@@ -29,6 +30,16 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     .maybeSingle();
   if (error) return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
   if (!data) return NextResponse.json({ error: 'Chave não encontrada ou já revogada' }, { status: 404 });
+  const revoked = data as { name?: string | null; key_prefix?: string | null };
+  await logSecurityEvent({
+    action: 'api_key.revoked',
+    actorId: auth.userId,
+    organizationId: auth.organizationId,
+    resourceType: 'api_key',
+    resourceId: id,
+    details: { name: revoked.name ?? null, prefixo: revoked.key_prefix ?? null },
+    severity: 'warning',
+  }, req);
   return NextResponse.json({ data });
 }
 
@@ -48,5 +59,13 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
     .not('revoked_at', 'is', null);
   if (error) return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
   if (!count) return NextResponse.json({ error: 'Chave não encontrada ou ainda ativa' }, { status: 404 });
+  await logSecurityEvent({
+    action: 'api_key.revoked',
+    actorId: auth.userId,
+    organizationId: auth.organizationId,
+    resourceType: 'api_key',
+    resourceId: id,
+    details: { excluida: true },
+  }, req);
   return NextResponse.json({ ok: true });
 }

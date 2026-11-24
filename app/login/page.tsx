@@ -34,7 +34,17 @@ export default function LoginPage() {
                 password,
             })
 
-            if (error) throw error
+            if (error) {
+                // Tentativa recusada entra no registro de eventos críticos
+                // (melhor esforço: nunca atrapalha a mensagem de erro).
+                void fetch('/api/security/login-failed', {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ email }),
+                    keepalive: true,
+                }).catch(() => {})
+                throw error
+            }
             router.push('/select-org')
         } catch (err) {
             setError(getErrorMessage(err))
