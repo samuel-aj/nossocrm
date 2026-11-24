@@ -119,7 +119,9 @@ export const EndActionSchema = z.discriminatedUnion('type', [
 ]);
 export type EndAction = z.infer<typeof EndActionSchema>;
 
-const OutcomeActionSchema = EndActionSchema.refine(action => action.type !== 'consult_knowledge', {
+// O retorno `boolean` explícito impede que o zod (4.6+) estreite o tipo de saída pelo predicado
+// inferido pelo TypeScript; Outcome['actions'] continua sendo EndAction[] como na UI e nas rotas.
+const OutcomeActionSchema = EndActionSchema.refine((action): boolean => action.type !== 'consult_knowledge', {
   message: 'A consulta à base de conhecimento só está disponível durante a conversa',
 });
 
