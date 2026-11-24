@@ -32,6 +32,76 @@ async function claimed() {
   const conv = await conversation(), mid = await message(conv);
   return {conv, mid, job:(await immediate(mid,conv))[0]};
 }
+async function verifyIncidentWindow() {
+  // Cover the incident backlog and arrivals during promotion, including a retry
+  // whose previous reason has been replaced. Fresh arrivals after close are ordinary.
+  const oldConv = await conversation(), oldMsg = await message(oldConv);
+  const setWindow = open => scalar('select crm_internal.set_wa_unanswered_recovery_window($1)',[open]);
+  assert.equal(Number(await setWindow(true)),1);
+  const during = await conversation(), duringMsg = await message(during);
+  const retryConv = await conversation(), retryMid = await message(retryConv);
+  const retried = (await batch(retryConv))[0];
+  assert.equal(retried.recover_only_if_unanswered,true);
+  assert.equal(await finish(retried,'retry','pre_dispatch_timeout'),'pending');
+  await dueNow(retryMid);
+  const uncertainSend = await conversation(), failedMsg = await message(uncertainSend);
+  const inFlight = await conversation(), inFlightMid = await message(inFlight);
+  const overlapping = await conversation(), overlapMid = await message(overlapping);
+  const alreadyLocked = await conversation(), lockedMid = await message(alreadyLocked);
+  const providerEcho = await conversation(), echoMid = await message(providerEcho);
+  const independent = await conversation(), untouched = await message(independent);
+  const operator = await conversation(), operatorMid = await message(operator);
+  assert.equal(Number(await setWindow(false)),0);
+  // The human handled this item while the queue was stalled.
+  await message(operator,org,'out','crm','delivered');
+  assert.deepEqual(await batch(operator),[]);
+  assert.equal((await state(operatorMid))[0].reason,'already_answered');
+  // Agent & bot sends, and failure/timeout, can have effects sans cursor.
+  for (const [conv,mid,source,status] of [
+    [oldConv,oldMsg,'agent','sent'],[during,duringMsg,'bot','read'],
+    [retryConv,retryMid,'agent','queued'],[uncertainSend,failedMsg,'crm','failed'],
+    [providerEcho,echoMid,'echo','sent'],
+  ]) {
+    await message(conv,org,'out',source,status);
+    assert.deepEqual(await batch(conv),[]);
+    assert.equal((await state(mid))[0].state,'review');
+    assert.equal((await events(mid)).length,1);
+  }
+  await db.query("insert into wa_agent_connection_pending(organization_id,conversation_id,state) values($1,$2,'dispatching')",[org,overlapping]);
+  assert.deepEqual(await batch(overlapping),[]);
+  assert.equal((await state(overlapMid))[0].state,'review');
+  const lockEngine = conv => db.query("update wa_conversations set ai_lock_until=now()+interval '1 minute' where id=$1",[conv]);
+  await lockEngine(alreadyLocked);
+  assert.deepEqual(await batch(alreadyLocked),[]);
+  assert.equal((await state(lockedMid))[0].state,'review');
+  const held = (await batch(inFlight))[0];
+  assert.equal(await phase(held,'bots'),'ready');
+  assert.equal(await phase(held,'bots',true),'ready');
+  await lockEngine(inFlight);
+  await message(inFlight,org,'out','agent','delivered');
+  assert.equal(await phase(held,'dispatch'),'stale');
+  assert.equal((await state(inFlightMid))[0].state,'review');
+  assert.equal((await events(inFlightMid)).length,1);
+  // An unanswered marked entry still reaches dispatch exactly once.
+  const eligible = (await batch(independent))[0];
+  assert.equal(eligible.message_id,untouched);
+  assert.equal(eligible.recover_only_if_unanswered,true);
+  assert.equal(await phase(eligible,'bots'),'ready');
+  assert.equal(await phase(eligible,'bots',true),'ready');
+  await lockEngine(independent);
+  assert.equal(await phase(eligible,'dispatch'),'ready');
+  assert.equal(await finish(eligible,'done'),'done');
+  assert.deepEqual(await batch(independent),[]);
+  const ordinary = await conversation(), ordinaryMid = await message(ordinary);
+  await message(ordinary,org,'out','agent','sent');
+  const ordinaryJob = (await batch(ordinary))[0];
+  assert.equal(ordinaryJob.message_id,ordinaryMid);
+  assert.equal(ordinaryJob.recover_only_if_unanswered,false);
+  assert.equal(await finish(ordinaryJob,'done'),'done');
+  for (const role of ['anon','authenticated','service_role']) {
+    assert.equal(await scalar("select has_function_privilege($1,'crm_internal.set_wa_unanswered_recovery_window(boolean)','execute')",[role]),false);
+  }
+}
 try {
   await db.exec(await file('supabase/tests/wa_inbound_work.fixture.sql'));
   const team = await file('supabase/migrations/20260924183723_linked_super_admin_assignment.sql');
@@ -41,6 +111,8 @@ try {
   await db.exec(await file('supabase/migrations/20261124151357_wa_inbound_work.sql'));
   await db.exec(await file('supabase/migrations/20261124151410_wa_entry_recovery_notifications.sql'));
   await db.exec(await file('supabase/migrations/20261124184908_wa_inbound_recovery_bot_guard.sql'));
+  await db.exec(await file('supabase/migrations/20261124185333_wa_inbound_unanswered_only.sql'));
+  await db.exec(await file('supabase/migrations/20261124185500_wa_inbound_recovery_dispatch_lock.sql'));
   await db.exec(await file('supabase/tests/wa_entry_recovery_notifications.sql'));
   assert.deepEqual(await state(historic),[]);
   const cron = await scalar("select code from cron.jobs where name='wa-inbound-recovery'");
@@ -71,6 +143,8 @@ try {
   assert.equal(await phase(late,'bots'),'ready');
   assert.equal(await phase(late,'bots',true),'ready');
   assert.equal(await finish(late,'done'),'done');
+
+  await verifyIncidentWindow();
 
   const conv = await conversation(), mid = await message(conv);
   const [request] = await rows('select url,body from net.requests order by id desc limit 1');
