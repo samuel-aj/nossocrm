@@ -54,7 +54,8 @@ export default function LoginPage() {
     }
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-dark-bg relative overflow-hidden">
+        // pt-40 só com o aviso de instalação visível: reserva o topo para ele não cobrir o logo.
+        <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-dark-bg relative overflow-hidden [body:has([data-install-banner])_&]:pt-40">
             {/* Background Effects */}
             <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none">
                 <div className="absolute -top-[20%] -right-[10%] w-[50%] h-[50%] bg-primary-500/20 rounded-full blur-[120px]" />
@@ -64,12 +65,21 @@ export default function LoginPage() {
             <div className="max-w-md w-full relative z-10 px-4">
                 <div className="text-center mb-8">
                     <div className="flex justify-center mb-6">
+                        {/* Assinatura vertical da marca: violeta no tema claro, lavanda no escuro */}
                         <Image
-                            src="/logo-aj-v2.png"
+                            src="/logo-aj-vertical-claro.svg"
                             alt="Anúncio Jurídico"
                             width={160}
-                            height={160}
-                            className="object-contain"
+                            height={94}
+                            className="dark:hidden"
+                            priority
+                        />
+                        <Image
+                            src="/logo-aj-vertical-escuro.svg"
+                            alt="Anúncio Jurídico"
+                            width={160}
+                            height={94}
+                            className="hidden dark:block"
                             priority
                         />
                     </div>
