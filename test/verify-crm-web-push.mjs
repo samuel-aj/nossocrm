@@ -22,7 +22,7 @@ const message = (index, conversation = individual, direction = 'in', ageMinutes 
 try {
   await db.exec(await file('supabase/tests/crm_web_push.fixture.sql'));
   await db.exec(await file('supabase/migrations/20260918020850_personal_notifications.sql'));
-  await db.exec(await file('supabase/migrations/20261124202850_crm_web_push.sql'));
+  await db.exec(await file('supabase/migrations/20261124204817_crm_web_push.sql'));
   await query('insert into organizations values ($1,true),($2,true)', [orgA,orgB]);
   await query('insert into auth.users(id) values ($1),($2),($3)', [ana,bia,master]);
   await query("insert into profiles values ($1,$2,'vendedor'),($3,$2,'admin'),($4,$2,'super_admin')", [ana,orgA,bia,master]);
