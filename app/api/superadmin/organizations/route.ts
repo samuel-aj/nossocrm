@@ -164,7 +164,7 @@ export async function POST(req: Request) {
       resource_type: 'organization',
       resource_id: org.id,
       details: { org_name: org.name, admin_email: null },
-    });
+    }, req);
     return json({ ok: true, organization: org, admin: null });
   }
 
@@ -239,7 +239,7 @@ export async function POST(req: Request) {
     resource_type: 'organization',
     resource_id: org.id,
     details: { org_name: org.name, admin_email: adminEmail, existing_account: existingAccount },
-  });
+  }, req);
 
   return json({
     ok: true,

@@ -5,6 +5,7 @@
  * DELETE /api/whatsapp/connection  -> desconecta o número da org (logout; admin)
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { logSecurityEvent } from '@/lib/security/auditLog';
 import { requireOrgUser, isOrgAdmin, json } from '@/lib/whatsapp/api';
 import { filterAllowedConnections, getVisibilityRules } from '@/lib/permissions/server';
 import {
@@ -380,6 +381,15 @@ export async function POST(req: Request) {
   } catch (e) {
     return json({ error: `Falha ao salvar conexão: ${(e as Error).message}` }, 400);
   }
+  await logSecurityEvent({
+    action: 'whatsapp.connection.saved',
+    actorId: auth.user.id,
+    organizationId: auth.user.organizationId,
+    resourceType: 'wa_connection',
+    resourceId: conn.id,
+    details: { provider, instance: instanceName, editing: !!body.editingConnectionId, custom_server: !!baseUrl },
+    severity: 'warning',
+  }, req, auth.admin);
 
   // Recebimento: Evolution aponta o webhook da instância; meta_cloud faz o
   // setup AUTOMÁTICO na Meta (webhook do app se tiver App Secret, assinatura
@@ -480,6 +490,15 @@ export async function DELETE(req: Request) {
 
   // Fecha o monitor antes do logout: o webhook de desconexão pode chegar durante a chamada.
   await observeConnection(auth.admin, conn.id, 'disconnected', 'manual', new Date().toISOString(), 'operator_disconnect');
+  await logSecurityEvent({
+    action: 'whatsapp.connection.removed',
+    actorId: auth.user.id,
+    organizationId: auth.user.organizationId,
+    resourceType: 'wa_connection',
+    resourceId: conn.id,
+    details: { instance: conn.instance_name, excluida: purge },
+    severity: 'warning',
+  }, req, auth.admin);
   if (purge) {
     // EXCLUIR: derruba a instância na Evolution (quando houver) e apaga a
     // LINHA. O histórico de conversas fica (FK é SET NULL) — excluir a
