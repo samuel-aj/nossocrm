@@ -8,12 +8,13 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
-    setupFiles: ['test/setup.zapsign.ts'],
+    setupFiles: ['test/setup.zapsign.ts', 'test/setup.dom.ts'],
     include: [
       'app/api/public/v1/docs/route.test.ts',
       'app/auth/callback/route.test.ts',
       'lib/public-api/orgRefs.test.ts',
       'lib/security/safeError.test.ts',
+      'features/settings/components/LifecycleSettingsModal.test.tsx',
     ],
     testTimeout: 30_000,
   },

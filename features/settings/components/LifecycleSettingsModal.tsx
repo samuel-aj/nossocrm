@@ -2,6 +2,7 @@ import { NativeSelect } from '@/components/ui/NativeSelect';
 import React, { useState, useId } from 'react';
 import { X, Plus, Trash2, ArrowUp, ArrowDown, Check } from 'lucide-react';
 import { useCRM } from '@/context/CRMContext';
+import { useAuth } from '@/context/AuthContext';
 import { LifecycleStage } from '@/types';
 import { FocusTrap, useFocusReturn } from '@/lib/a11y';
 
@@ -34,6 +35,10 @@ export const LifecycleSettingsModal: React.FC<LifecycleSettingsModalProps> = ({ 
     useFocusReturn({ enabled: isOpen });
 
     const { lifecycleStages, addLifecycleStage, updateLifecycleStage, deleteLifecycleStage, reorderLifecycleStages, contacts } = useCRM();
+    // Os estágios são os mesmos para todos os escritórios: o banco só aceita
+    // alteração do super admin (segurança, 23/11/2026). Os demais só consultam.
+    const { profile } = useAuth();
+    const canEdit = profile?.role === 'super_admin';
     const [newStageName, setNewStageName] = useState('');
     const [isAdding, setIsAdding] = useState(false);
 
@@ -83,7 +88,7 @@ export const LifecycleSettingsModal: React.FC<LifecycleSettingsModalProps> = ({ 
 
                 <div className="relative z-10 w-full max-w-md bg-white dark:bg-slate-900 rounded-xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-800">
                     <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-800">
-                        <h3 id={headingId} className="font-bold text-slate-900 dark:text-white">Gerenciar Ciclos de Vida</h3>
+                        <h3 id={headingId} className="font-bold text-slate-900 dark:text-white">{canEdit ? 'Gerenciar Ciclos de Vida' : 'Ciclos de Vida'}</h3>
                         <button
                             onClick={onClose}
                             aria-label="Fechar modal"
@@ -94,15 +99,23 @@ export const LifecycleSettingsModal: React.FC<LifecycleSettingsModalProps> = ({ 
                     </div>
 
                     <div className="p-4 space-y-3 max-h-[60vh] overflow-y-auto">
-                        <div className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-                            Defina os estágios de maturidade dos seus contatos (ex: Lead, Cliente).
-                            A ordem aqui define a progressão no funil.
-                        </div>
+                        {canEdit ? (
+                            <div className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                                Defina os estágios de maturidade dos seus contatos (ex: Lead, Cliente).
+                                A ordem aqui define a progressão no funil.
+                            </div>
+                        ) : (
+                            <div role="note" className="text-xs text-slate-600 dark:text-slate-300 mb-4 p-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                                Estes são os estágios de maturidade dos contatos (ex: Lead, Cliente), na ordem do funil.
+                                Eles valem para todos os escritórios do CRM. Para mudar algum, fale com o suporte.
+                            </div>
+                        )}
 
                         {lifecycleStages.map((stage, index) => (
                             <div key={stage.id} className="flex items-center gap-3 p-2 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
                                 {/* Color */}
                                 <div className="relative h-6 w-6 flex-shrink-0">
+                                    {canEdit ? (
                                     <NativeSelect
                                         aria-label={`Cor do estágio ${stage.name}`}
                                         value={stage.color}
@@ -113,15 +126,22 @@ export const LifecycleSettingsModal: React.FC<LifecycleSettingsModalProps> = ({ 
                                             <option key={c} value={c}>{c.replace('bg-', '')}</option>
                                         ))}
                                     </NativeSelect>
+                                    ) : (
+                                        <span className={`${stage.color} block h-6 w-6 rounded-full`} aria-hidden="true" />
+                                    )}
                                 </div>
 
                                 {/* Name */}
-                                <input
-                                    type="text"
-                                    value={stage.name}
-                                    onChange={(e) => updateLifecycleStage(stage.id, { name: e.target.value })}
-                                    className="flex-1 bg-transparent text-sm font-medium text-slate-900 dark:text-white outline-none border-b border-transparent focus:border-primary-500 px-1"
-                                />
+                                {canEdit ? (
+                                    <input
+                                        type="text"
+                                        value={stage.name}
+                                        onChange={(e) => updateLifecycleStage(stage.id, { name: e.target.value })}
+                                        className="flex-1 bg-transparent text-sm font-medium text-slate-900 dark:text-white outline-none border-b border-transparent focus:border-primary-500 px-1"
+                                    />
+                                ) : (
+                                    <span className="flex-1 text-sm font-medium text-slate-900 dark:text-white px-1">{stage.name}</span>
+                                )}
 
                                 {/* Count Badge */}
                                 <span
@@ -132,6 +152,7 @@ export const LifecycleSettingsModal: React.FC<LifecycleSettingsModalProps> = ({ 
                                 </span>
 
                                 {/* Actions */}
+                                {canEdit && (
                                 <div className="flex items-center gap-1">
                                     <div className="flex flex-col">
                                         <button
@@ -165,11 +186,12 @@ export const LifecycleSettingsModal: React.FC<LifecycleSettingsModalProps> = ({ 
                                         <Trash2 size={14} />
                                     </button>
                                 </div>
+                                )}
                             </div>
                         ))}
 
                         {/* Add New */}
-                        {isAdding ? (
+                        {!canEdit ? null : isAdding ? (
                             <div className="flex items-center gap-3 p-2 border border-primary-200 dark:border-primary-800 rounded-lg bg-primary-50 dark:bg-primary-900/10 animate-in fade-in slide-in-from-top-2">
                                 <div className={`w-6 h-6 rounded-full bg-slate-300 dark:bg-slate-600`} />
                                 <input
