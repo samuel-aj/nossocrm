@@ -38,9 +38,9 @@ try {
   await db.exec(team.slice(0,team.indexOf('create or replace function public.vis_guard_deals')));
   await db.query('insert into organizations(id,beta) values ($1,true),($2,false)',[org,other]);
   const historic = await message(await conversation());
-  await db.exec(await file('supabase/migrations/20261124143252_wa_inbound_work.sql'));
-  await db.exec(await file('supabase/migrations/20261124230000_wa_entry_recovery_notifications.sql'));
-  await db.exec(await file('supabase/migrations/20261124173647_wa_inbound_recovery_bot_guard.sql'));
+  await db.exec(await file('supabase/migrations/20261124151357_wa_inbound_work.sql'));
+  await db.exec(await file('supabase/migrations/20261124151410_wa_entry_recovery_notifications.sql'));
+  await db.exec(await file('supabase/migrations/20261124184908_wa_inbound_recovery_bot_guard.sql'));
   await db.exec(await file('supabase/tests/wa_entry_recovery_notifications.sql'));
   assert.deepEqual(await state(historic),[]);
   const cron = await scalar("select code from cron.jobs where name='wa-inbound-recovery'");
