@@ -1567,7 +1567,7 @@ export async function processBotRun(adminRaw: SupabaseClient, run: BotRunRow): P
 /** Resposta do lead numa execução em 'waiting_reply'. */
 export async function handleBotReply(
   admin: SupabaseClient,
-  input: { run: BotRunRow; message: { id: string; body: string | null; transcription: string | null } }
+  input: { run: BotRunRow; message: { id: string; body: string | null; transcription: string | null }; strict?: boolean }
 ): Promise<void> {
   const { run, message } = input;
   try {
@@ -1578,7 +1578,7 @@ export async function handleBotReply(
     delete vars[PROACTIVE_VAR];
     if (vars[WAITING_STEP_VAR] && !vars[TEMPLATE_ROUTE_VAR]) vars[WAIT_RESOLUTION_VAR] = 'next';
     // Primeiro o update condicional; a trava só depois (não fica presa se outra instância já cuidou)
-    const { data } = await admin
+    const { data, error } = await admin
       .from('wa_bot_runs')
       .update({ vars, status: 'running', wake_at: nowIso(), updated_at: nowIso() })
       .eq('id', run.id)
@@ -1586,6 +1586,7 @@ export async function handleBotReply(
       .eq('status', 'waiting_reply')
       .select('*')
       .maybeSingle();
+    if (error) throw new Error(error.message);
     if (!data) return; // outra instância já cuidou
     // Sem a trava, o relógio (tick) pega a execução em 'running' com wake_at vencido
     const locked = await claimBotLock(admin, run.id, run.organization_id);
@@ -1593,6 +1594,7 @@ export async function handleBotReply(
     if (locked.status === 'waiting_reply') await handleBotTimeout(admin, locked);
     else await processBotRun(admin, locked);
   } catch (e) {
+    if (input.strict) throw e;
     console.error('[wa-agents] resposta ao robô falhou:', errorMessage(e));
   }
 }
@@ -1827,34 +1829,38 @@ export function pickMessageTriggeredBot<T extends MessageTriggerBot>(bots: T[], 
  */
 export async function startBotForInboundMessage(
   admin: SupabaseClient,
-  input: { organizationId: string; conversationId: string; messageId: string }
+  input: { organizationId: string; conversationId: string; messageId: string; beforeStart?: () => Promise<void> }
 ): Promise<{ started: boolean; botId?: string; runId?: string; reason: string }> {
   const { organizationId, conversationId, messageId } = input;
-  const { data: convRow } = await admin
+  const { data: convRow, error: convError } = await admin
     .from('wa_conversations')
     .select('id, connection_id, is_group')
     .eq('organization_id', organizationId)
     .eq('id', conversationId)
     .maybeSingle();
+  if (convError) throw new Error(convError.message);
   const conv = convRow as { id: string; connection_id: string | null; is_group?: boolean | null } | null;
   if (!conv) return { started: false, reason: 'conversa não encontrada' };
   if (conv.is_group) return { started: false, reason: 'grupo' };
   if (!conv.connection_id) return { started: false, reason: 'conversa sem número' };
 
-  const { data: botRows } = await admin
+  const { data: botRows, error: botError } = await admin
     .from('wa_bots')
     .select('id, name, enabled, trigger, connection_id, connection_ids, created_at')
     .eq('organization_id', organizationId)
     .eq('enabled', true);
+  if (botError) throw new Error(botError.message);
   const bots = ((botRows ?? []) as MessageTriggerBot[]).filter(b => b.trigger?.type === 'message_received');
   if (!bots.length) return { started: false, reason: 'nenhum robô com gatilho de mensagem' };
 
-  const { data: msgRow } = await admin
+  const { data: msgRow, error: messageError } = await admin
     .from('wa_messages')
     .select('id, direction, body, media_type, transcription')
     .eq('organization_id', organizationId)
+    .eq('conversation_id', conversationId)
     .eq('id', messageId)
     .maybeSingle();
+  if (messageError) throw new Error(messageError.message);
   const msg = msgRow as { id: string; direction: string; body: string | null; media_type: string | null; transcription: string | null } | null;
   if (!msg || msg.direction !== 'in') return { started: false, reason: 'mensagem não encontrada' };
   const text = (msg.body ?? '').trim() || (msg.transcription ?? '').trim();
@@ -1862,17 +1868,23 @@ export async function startBotForInboundMessage(
   const bot = pickMessageTriggeredBot(bots, conv.connection_id, text);
   if (!bot) return { started: false, reason: 'nenhum robô para esta mensagem' };
 
-  const { data: active } = await admin
+  const { data: active, error: activeError } = await admin
     .from('wa_bot_runs')
     .select('id')
     .eq('organization_id', organizationId)
     .eq('conversation_id', conversationId)
     .in('status', ['running', 'waiting_reply'])
     .limit(1);
+  if (activeError) throw new Error(activeError.message);
   if ((active ?? []).length > 0) return { started: false, botId: bot.id, reason: 'já há um robô rodando nesta conversa' };
 
+  await input.beforeStart?.();
   const created = await createBotRun(admin, { organizationId, botId: bot.id, conversationId, message: { id: msg.id, text } });
-  if (!created.ok || !created.run) return { started: false, botId: bot.id, reason: created.error ?? 'não foi possível iniciar o robô' };
+  if (!created.ok || !created.run) {
+    const reason = created.error ?? 'não foi possível iniciar o robô';
+    if (input.beforeStart) throw new Error(reason);
+    return { started: false, botId: bot.id, reason };
+  }
   await runBotRunNow(admin, created.run);
   return { started: true, botId: bot.id, runId: created.run.id, reason: 'robô iniciado pela mensagem' };
 }

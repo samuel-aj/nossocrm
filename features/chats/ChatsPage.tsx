@@ -582,7 +582,7 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
     [ownerDoLeadPorContato]
   );
 
-  const chatList = useMemo<ChatListItem[]>(() => {
+  const allChatItems = useMemo<ChatListItem[]>(() => {
     // DEDUP por telefone: contatos duplicados (mesmo número) viram UMA linha
     // só — fica o contato VINCULADO à conversa; sem vínculo, o mais antigo.
     const contactByKey = new Map<string, Contact>();
@@ -669,13 +669,16 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
 
     // grupos entram na mesma lista (em cima, por recência, junto das conversas)
     items.push(...groupItems);
+    return items;
+  }, [contacts, convsByPhone, groupItems, effectiveConn]);
 
+  const chatList = useMemo(() => {
     const q = norm(searchQuery.trim());
     const filtered = q
-      ? items.filter(c =>
+      ? allChatItems.filter(c =>
           norm(c.name).includes(q) || c.phone.includes(q) || norm(c.preview).includes(q) || norm(c.contact?.email || '').includes(q)
         )
-      : items;
+      : allChatItems;
 
     const byTab =
       filter === 'unread'
@@ -698,12 +701,12 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
     const byTag =
       tagFilter === 'all' ? byOwner : byOwner.filter(c => (c.labelIds ?? []).includes(tagFilter));
 
-    return byTag.sort((a, b) => {
+    return byTag.slice().sort((a, b) => {
       if (a.hasConv && b.hasConv) return (b.lastAt || '').localeCompare(a.lastAt || '');
       if (a.hasConv !== b.hasConv) return a.hasConv ? -1 : 1;
       return a.name.localeCompare(b.name, 'pt-BR');
     });
-  }, [contacts, convsByPhone, groupItems, searchQuery, filter, ownerFilter, tagFilter, responsavelEfetivo, effectiveConn]);
+  }, [allChatItems, searchQuery, filter, ownerFilter, tagFilter, responsavelEfetivo]);
 
   // Etiquetas DA ORGANIZAÇÃO (nome + cor): a mesma lista pra equipe inteira,
   // como no WhatsApp Business. A conversa guarda só os ids.
@@ -724,12 +727,16 @@ export const ChatsPage: React.FC<{ stagingDemo?: boolean }> = ({ stagingDemo = f
     const conversationId = searchParams?.get('conversation');
     const contactId = searchParams?.get('contact');
     if (!conversationId && !contactId) return;
-    const alvo = chatList.find(i => conversationId ? i.conversationId === conversationId || i.conversationIds?.includes(conversationId) : i.contactId === contactId);
-    if (!alvo) return;
+    const alvo = allChatItems.find(i => conversationId ? i.conversationId === conversationId || i.conversationIds?.includes(conversationId) : i.contactId === contactId);
+    if (!alvo) {
+      // A bell link may point to a different line than the sidebar's saved filter.
+      if (conversationId && effectiveConn !== 'all' && convsQ.isSuccess) setConnFilter('all');
+      return;
+    }
     const origin = conversationId ? convsQ.data?.data.find(c => c.id === conversationId) : null;
     setSelected(origin && !alvo.isGroup ? { ...alvo, initialSenderId: origin.connection_id } : alvo);
     window.history.replaceState({}, '', '/chats');
-  }, [searchParams, chatList, setSelected, convsQ.data]);
+  }, [searchParams, allChatItems, setSelected, effectiveConn, convsQ.data, convsQ.isSuccess]);
 
   const labels = useMemo(() => labelsQ.data?.labels ?? [], [labelsQ.data]);
   const labelById = useMemo(() => new Map(labels.map(l => [l.id, l])), [labels]);

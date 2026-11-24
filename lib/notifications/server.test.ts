@@ -6,7 +6,10 @@ vi.mock('@/lib/permissions/teamAccessServer',async()=>{
   const actual=await vi.importActual<typeof import('@/lib/permissions/teamAccessServer')>('@/lib/permissions/teamAccessServer');
   return {...actual,getTeamAccess:vi.fn()};
 });
-vi.mock('@/lib/permissions/server',()=>({getVisibilityRules:vi.fn(),connectionAllowed:(rules:{whatsapp:{connection_ids:string[]|null}}|null,id:string)=>!rules?.whatsapp.connection_ids || rules.whatsapp.connection_ids.includes(id)}));
+vi.mock('@/lib/permissions/server',async()=>{
+  const actual=await vi.importActual<typeof import('@/lib/permissions/server')>('@/lib/permissions/server');
+  return {...actual,getVisibilityRules:vi.fn()};
+});
 import {getTeamAccess} from '@/lib/permissions/teamAccessServer';
 import {getVisibilityRules} from '@/lib/permissions/server';
 import {DEFAULT_VISIBILITY_RULES} from '@/lib/permissions/types';
@@ -20,13 +23,14 @@ let tables:Record<string,Record<string,unknown>[]>;
 const queries:Array<{table:string;filters:Array<[string,unknown]>}>=[];
 function from(table:string) {
   const filters:Array<[string,unknown]>=[];queries.push({table,filters});
-  const q={select:()=>q,eq:(k:string,v:unknown)=>{filters.push([k,v]);return q;},is:()=>q,in:()=>q,gte:()=>q,lte:()=>q,gt:()=>q,order:()=>q,limit:()=>q,
+  const q={select:()=>q,eq:(k:string,v:unknown)=>{filters.push([k,v]);return q;},is:()=>q,in:(k:string,v:unknown)=>{filters.push([k,v]);return q;},gte:()=>q,lte:()=>q,gt:()=>q,order:()=>q,limit:()=>q,
     maybeSingle:()=>Promise.resolve({data:tables[table]?.[0] ?? null,error:null}),
     upsert:vi.fn().mockResolvedValue({error:null}),
     then:(resolve:(r:unknown)=>unknown)=>Promise.resolve({data:tables[table] ?? [],error:null}).then(resolve)};
   return q;
 }
-const auth={ok:true as const,user:{id:user,organizationId:org,role:'vendedor'},admin:{from}} as unknown as Parameters<typeof feed>[0];
+const rpc=vi.fn();
+const auth={ok:true as const,user:{id:user,organizationId:org,role:'vendedor'},admin:{from,rpc}} as unknown as Parameters<typeof feed>[0];
 const now=()=>new Date().toISOString();
 it('delivers connection incidents to the bell even if personal lead alerts are disabled',async()=>{
   tables.crm_notification_preferences[0].preferences={...DEFAULT_PREFERENCES,alerts:false};
@@ -53,10 +57,55 @@ it('entrega a análise humana ao responsável, inclusive ao reabrir o CRM, respe
 async function notices(){return (await feed(auth,now(),null,null)).events;}
 beforeEach(()=>{
   queries.length=0;
+  rpc.mockReset();
   vi.mocked(usageNotices).mockReset().mockResolvedValue([]);
   vi.mocked(getTeamAccess).mockResolvedValue({fullAccess:true,canManage:false,legacy:true,masterUserId:null,boards:[]});
   vi.mocked(getVisibilityRules).mockResolvedValue(null);
   tables={boards:[{id:'b',name:'Vendas'}],crm_notification_preferences:[{preferences:{...DEFAULT_PREFERENCES,messages:true,scope:'all',leads:true,boardIds:['11111111-1111-4111-8111-111111111111']}}],crm_notification_events:[{id:1,kind:'message',source_id:'m',created_at:now()}],wa_messages:[{id:'m',conversation_id:'c'}],wa_conversations:[{id:'c',contact_id:'contact',connection_id:'connection',wa_name:'Cliente',label_ids:[]}],deals:[{id:'d',title:'Lead',board_id:'b',owner_id:user,contact_id:'contact',is_won:false,is_lost:false}]};
+});
+
+describe('WhatsApp entry recovery alerts',()=>{
+  const adminAuth={...auth,user:{...auth.user,id:'admin',role:'admin'}};
+  const review={message_id:'incoming',conversation_id:'chat-id',contact_id:null,connection_id:'line',label_ids:['team'],owner_id:user,owner_role:'vendedor',reason:'attempts_exhausted'};
+  beforeEach(()=>{
+    tables.crm_notification_events=[{id:19,source_id:'incoming',kind:'wa_entry_recovery',created_at:now()}];
+    tables.crm_notification_preferences[0].preferences={...DEFAULT_PREFERENCES,messages:false,alerts:true};
+    tables.deals=[];
+    rpc.mockResolvedValue({data:[review],error:null});
+  });
+  it('routes an assigned chat without a lead to the owner, including on boot, without contact data',async()=>{
+    const first=(await feed(auth,null,null,null)).events;
+    expect(first).toEqual([expect.objectContaining({id:'19',kind:'alert',tone:'red',title:'Atendimento pendente no WhatsApp',
+      message:expect.stringContaining('tentativas'),href:'/chats?conversation=chat-id'})]);
+    expect(await notices()).toEqual(first);
+    expect(rpc).toHaveBeenCalledWith('wa_entry_recovery_details',{p_org:org,p_user:user,p_messages:['incoming']});
+    expect((await feed(adminAuth,null,null,null)).events).toEqual([]);
+  });
+  it('routes an unassigned chat only to administrators and distinguishes uncertainty from exhaustion or expiration',async()=>{
+    rpc.mockResolvedValue({data:[{...review,owner_id:null,owner_role:null,reason:'uncertain'}],error:null});
+    expect(await notices()).toEqual([]);
+    expect((await feed(adminAuth,null,null,null)).events).toMatchObject([{message:expect.stringContaining('confirmar'),href:'/chats?conversation=chat-id'}]);
+    rpc.mockResolvedValue({data:[{...review,reason:'expired'}],error:null});
+    expect(await notices()).toMatchObject([{message:expect.stringContaining('prazo')}]);
+  });
+  it('uses the administrator when the assigned seller cannot open a conversation without a lead',async()=>{
+    vi.mocked(getTeamAccess).mockImplementation(async(_db,_org,id)=>({fullAccess:id==='admin',canManage:false,legacy:false,masterUserId:null,boards:[]}));
+    expect(await notices()).toEqual([]);
+    expect((await feed(adminAuth,null,null,null)).events).toMatchObject([{id:'19',href:'/chats?conversation=chat-id'}]);
+  });
+  it('checks WhatsApp visibility, alert preferences and the current queue projection before delivery',async()=>{
+    vi.mocked(getVisibilityRules).mockResolvedValue({...DEFAULT_VISIBILITY_RULES,whatsapp:{connection_ids:['other'],label_ids:null,owner_user_ids:null}});
+    expect(await notices()).toEqual([]);
+    vi.mocked(getVisibilityRules).mockResolvedValue({...DEFAULT_VISIBILITY_RULES,whatsapp:{connection_ids:null,label_ids:['other'],owner_user_ids:null}});
+    expect(await notices()).toEqual([]);
+    vi.mocked(getVisibilityRules).mockResolvedValue(null);
+    rpc.mockResolvedValue({data:[],error:null});
+    expect(await notices()).toEqual([]);
+    rpc.mockClear();
+    tables.crm_notification_preferences[0].preferences={...DEFAULT_PREFERENCES,alerts:false};
+    expect(await notices()).toEqual([]);
+    expect(rpc).not.toHaveBeenCalled();
+  });
 });
 describe('personal notification security and audiences',()=>{
   it('entrega o aviso de áudio ao responsável mesmo com avisos de mensagens desligados',async()=>{
@@ -110,7 +159,7 @@ describe('durable usage alerts in the personal feed',()=>{
     expect(result.events).toEqual([oldNotice]);
     expect(result.nextAfter).toBeNull();
     expect(usageNotices).toHaveBeenCalledWith(auth.admin,auth.user,null,result.serverTime);
-    expect(queries.find(q=>q.table==='crm_notification_events')?.filters).toContainEqual(['kind','human_handoff']);
+    expect(queries.find(q=>q.table==='crm_notification_events')?.filters).toContainEqual(['kind',['human_handoff','wa_entry_recovery']]);
     expect(queries.some(q=>q.table==='wa_messages')).toBe(false);
   });
   it('keeps unresolved alerts after an offline interval and uses stable IDs on repeated polls',async()=>{

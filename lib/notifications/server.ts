@@ -5,6 +5,10 @@ import { getVisibilityRules, connectionAllowed } from '@/lib/permissions/server'
 import { DEFAULT_PREFERENCES, PreferencesSchema, type Preferences, type Notice } from './types';
 import { usageNotices } from '@/lib/ai-usage/notifications';
 import { connectionIncidentNotices } from './connectionIncidents';
+import { entryRecoveryNotices } from './entryRecovery';
+import { hasFullOperationalAccess } from '@/lib/permissions/teamRoles';
+
+const OFFLINE_ALERT_KINDS = ['human_handoff', 'wa_entry_recovery'];
 
 interface MessageRow {id:string;conversation_id:string;wa_timestamp:string|null}
 interface ConversationRow {id:string;deal_id:string|null;contact_id:string|null;connection_id:string|null;wa_name:string|null;wa_phone:string;label_ids:string[];assigned_owner_id:string|null}
@@ -57,16 +61,16 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
     try { budgetNotices = await usageNotices(auth.admin, auth.user, null, upper); }
     catch (error) { usageNoticesUnavailable = true; console.error('[notifications] alertas de consumo indisponíveis:', error); }
   }
-  // On opening the CRM, recover recent handoffs that happened while the seller was offline.
+  // On opening the CRM, recover recent requests for human attention.
   if (!since && !p.alerts) return {events:[...lineNotices,...budgetNotices],serverTime:upper,nextAfter:null,usageNoticesUnavailable,connectionNoticesUnavailable};
   const lower = new Date(since ? Math.max(Date.parse(since),Date.now()-120_000) : Date.now()-86_400_000).toISOString();
   let query = auth.admin.from('crm_notification_events').select('id,kind,source_id,board_id,created_at')
     .eq('organization_id',auth.user.organizationId).gte('created_at',lower).lte('created_at',upper).order('id').limit(200);
   if (after) query=query.gt('id',after);
-  if (!since) query=query.eq('kind','human_handoff');
+  if (!since) query=query.in('kind', OFFLINE_ALERT_KINDS);
   const {data: rows,error} = await query;
   if (error) throw error;
-  const events=(rows ?? []).filter(row=>since || row.kind==='human_handoff');
+  const events=(rows ?? []).filter(row=>since || OFFLINE_ALERT_KINDS.includes(row.kind));
   const alertIds=events.filter(e=>e.kind==='alert' && p.alerts).map(e=>e.source_id);
   const alerts=alertIds.length ? await auth.admin.from('deal_alert_events').select('id,deal_id,message,tone').eq('organization_id',auth.user.organizationId).in('id',alertIds).is('acknowledged_at',null) : {data:[],error:null};
   if(alerts.error) throw alerts.error;
@@ -96,7 +100,8 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
     ctx.boards.some(b=>b.id===d.board_id) && visibleLead(access,auth.user.id,d.board_id,d.owner_id) &&
     (!rules || !d.owner_id || rules.deals.scope==='all' || d.owner_id===auth.user.id ||
       (rules.deals.scope==='team' && rules.deals.team_user_ids.includes(d.owner_id)));
-  const notices:Notice[]=[];
+  const notices:Notice[]=p.alerts ? await entryRecoveryNotices(auth, rules,
+    hasFullOperationalAccess(auth.user.role, access.masterUserId === auth.user.id), events.filter(e=>e.kind==='wa_entry_recovery')) : [];
   for(const event of events) {
     if(event.kind==='alert') {
       const a=(alerts.data as Array<{id:string;deal_id:string;message:string;tone?:string}> | null)?.find(a=>a.id===event.source_id);
