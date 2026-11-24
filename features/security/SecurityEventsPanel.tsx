@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Loader2, RefreshCw, ShieldAlert } from 'lucide-react';
+import { Building2, CalendarDays, ChevronDown, ChevronRight, Gauge, Loader2, RefreshCw, ShieldAlert } from 'lucide-react';
 import { NativeSelect } from '@/components/ui/NativeSelect';
 import { detailLines, eventLabel, severityLabel } from './eventLabels';
+import { FilterField, FilterSelect, type FilterOption } from './FilterSelect';
 
 /**
  * Registro de segurança (só super admin): eventos críticos gravados pelo
@@ -26,16 +27,16 @@ type SecurityEventRow = {
 
 type Source = 'events' | 'auth';
 
-const PERIODS: Array<[string, string]> = [
-  ['24h', '24 horas'],
-  ['7d', '7 dias'],
-  ['30d', '30 dias'],
-  ['90d', '90 dias'],
+const PERIODS: FilterOption[] = [
+  { value: '24h', label: 'Últimas 24 horas' },
+  { value: '7d', label: 'Últimos 7 dias' },
+  { value: '30d', label: 'Últimos 30 dias' },
+  { value: '90d', label: 'Últimos 90 dias' },
 ];
-const SEVERITY_FILTERS: Array<[string, string]> = [
-  ['important', 'Importantes'],
-  ['critical', 'Só críticos'],
-  ['all', 'Tudo'],
+const SEVERITY_FILTERS: FilterOption[] = [
+  { value: 'important', label: 'Importantes', description: 'Atenção e críticos', dot: 'bg-amber-500' },
+  { value: 'critical', label: 'Só críticos', description: 'O que pede ação imediata', dot: 'bg-red-500' },
+  { value: 'all', label: 'Tudo', description: 'Inclui os informativos', dot: 'bg-slate-400' },
 ];
 
 const SEVERITY_STYLE: Record<string, string> = {
@@ -114,7 +115,7 @@ export function SecurityEventsPanel({ organizations }: { organizations: Array<{ 
     void load();
   }, [load]);
 
-  // Filtros curtos são botões lado a lado: um clique, sem lista suspensa.
+  // Abas "Eventos" e "Acessos".
   const groupClass = 'inline-flex items-center gap-0.5 rounded-lg bg-slate-100 dark:bg-white/5 p-0.5';
   const pillClass = (active: boolean) =>
     `px-3 py-1 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
@@ -145,7 +146,7 @@ export function SecurityEventsPanel({ organizations }: { organizations: Array<{ 
         Os registros ficam guardados por 180 dias e não podem ser alterados nem apagados pelo CRM.
       </p>
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-3">
         <div className={groupClass} role="tablist" aria-label="Tipo de registro">
           <button type="button" role="tab" aria-selected={source === 'events'} className={pillClass(source === 'events')} onClick={() => setSource('events')}>
             Eventos
@@ -154,30 +155,39 @@ export function SecurityEventsPanel({ organizations }: { organizations: Array<{ 
             Acessos
           </button>
         </div>
-        <div className={groupClass} role="group" aria-label="Período">
-          {PERIODS.map(([value, label]) => (
-            <button key={value} type="button" aria-pressed={period === value} className={pillClass(period === value)} onClick={() => setPeriod(value)}>
-              {label}
-            </button>
-          ))}
-        </div>
+        <FilterSelect
+          icon={<CalendarDays size={13} aria-hidden="true" />}
+          label="Período"
+          value={period}
+          onChange={setPeriod}
+          options={PERIODS}
+          widthClass="w-44"
+        />
         {source === 'events' && (
           <>
-            <div className={groupClass} role="group" aria-label="Gravidade">
-              {SEVERITY_FILTERS.map(([value, label]) => (
-                <button key={value} type="button" aria-pressed={severity === value} className={pillClass(severity === value)} onClick={() => setSeverity(value)}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            <NativeSelect aria-label="Organização" value={org} onChange={e => setOrg(e.target.value)} className="w-64 text-sm">
-              <option value="all">Todas as organizações</option>
-              {organizations.map(o => (
-                <option key={o.id} value={o.id}>
-                  {o.name}
-                </option>
-              ))}
-            </NativeSelect>
+            <FilterSelect
+              icon={<Gauge size={13} aria-hidden="true" />}
+              label="Gravidade"
+              value={severity}
+              onChange={setSeverity}
+              options={SEVERITY_FILTERS}
+              widthClass="w-40"
+            />
+            <FilterField icon={<Building2 size={13} aria-hidden="true" />} label="Organização">
+              <NativeSelect
+                aria-label="Organização"
+                value={org}
+                onChange={e => setOrg(e.target.value)}
+                className="w-60 rounded-l-none rounded-r-lg border-0 bg-transparent py-1.5 text-sm hover:border-0 focus-visible:ring-0 dark:border-0 dark:bg-transparent"
+              >
+                <option value="all">Todas</option>
+                {organizations.map(o => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            </FilterField>
           </>
         )}
       </div>
