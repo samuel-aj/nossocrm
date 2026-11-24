@@ -13,9 +13,10 @@
 // -> 200 { result?: any, error?: string, consentType?: string, retryAfter?: number }
 
 import { generateObject, generateText } from 'ai';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { getModel, type AIProvider } from '@/lib/ai/config';
 import { z } from 'zod';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { withTabOrg } from '@/lib/supabase/tabOrgScope';
 import { getResolvedPrompt } from '@/lib/ai/prompts/server';
@@ -177,7 +178,9 @@ export async function POST(req: Request) {
   const scoped = await withTabOrg({ id: user.id, role: profile.role, organization_id: profile.organization_id });
   if (!scoped) return json<AIActionResponse>({ error: 'Acesso negado a esta organização' }, 403);
 
-  const { data: orgSettings, error: orgError } = await supabase
+  // Chaves de IA: a coluna não é mais legível pela sessão do usuário (auditoria 23/11/2026);
+  // a org já foi conferida acima, então lê com a chave de serviço.
+  const { data: orgSettings, error: orgError } = await createStaticAdminClient()
     .from('organization_settings')
     .select('ai_enabled, ai_provider, ai_model, ai_google_key, ai_openai_key, ai_anthropic_key')
     .eq('organization_id', scoped.organization_id)
@@ -499,6 +502,6 @@ Responda em português.`,
     }
   } catch (err: any) {
     console.error('[api/ai/actions] Error:', err);
-    return json<AIActionResponse>({ error: err?.message || 'Internal Server Error' }, 200);
+    return json<AIActionResponse>({ error: safeErrorMessage(err) || 'Internal Server Error' }, 200);
   }
 }

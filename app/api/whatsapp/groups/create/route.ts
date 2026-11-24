@@ -8,6 +8,7 @@
  * conversa criada e o link.
  */
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { getConnectionByIdForOrg, getWaGroupsEnabled } from '@/lib/whatsapp/service';
 import { isMetaCloudConnection } from '@/lib/whatsapp';
 import { createMetaGroup, getMetaGroupInviteLink } from '@/lib/whatsapp/groups';
@@ -75,7 +76,7 @@ export async function POST(req: Request) {
     )
     .select('id')
     .single();
-  if (error || !conv) return json({ error: error?.message || 'Grupo criado na Meta, mas não foi possível registrar no CRM.' }, 500);
+  if (error || !conv) return json({ error: safeErrorMessage(error) || 'Grupo criado na Meta, mas não foi possível registrar no CRM.' }, 500);
 
   return json({
     ok: true,

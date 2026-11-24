@@ -11,6 +11,7 @@
  * }
  */
 import { json } from '@/lib/whatsapp/api';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { getConnectionsByOrg } from '@/lib/whatsapp/service';
 import { guardRoute } from '../_shared';
 
@@ -68,7 +69,7 @@ export async function GET() {
       .limit(200),
   ]);
   for (const res of [boardsRes, stagesRes, tagsRes, profilesRes, membersRes, productsRes, fieldsRes]) {
-    if (res.error) return json({ error: res.error.message }, 500);
+    if (res.error) return json({ error: safeErrorMessage(res.error) }, 500);
   }
 
   // Responsáveis: perfis da org + membros vinculados por user_organizations

@@ -1,4 +1,5 @@
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { logSuperAdminAction } from '@/lib/security/auditLog';
 import { findAuthUserByEmail } from '@/lib/supabase/authUsers';
@@ -47,14 +48,14 @@ export async function GET(req: Request) {
     .is('deleted_at', null)
     .order('created_at', { ascending: false });
 
-  if (orgsError) return json({ error: orgsError.message }, 500);
+  if (orgsError) return json({ error: safeErrorMessage(orgsError) }, 500);
 
   // Get user counts per org
   const { data: profiles, error: profilesError } = await admin
     .from('profiles')
     .select('organization_id, role');
 
-  if (profilesError) return json({ error: profilesError.message }, 500);
+  if (profilesError) return json({ error: safeErrorMessage(profilesError) }, 500);
 
   // Aggregate counts
   const orgCounts = new Map<string, { total: number; admins: number; vendedores: number }>();

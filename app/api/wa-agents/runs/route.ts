@@ -4,6 +4,7 @@
  * -> { runs: RunRow[], agents: Record<id, name> }
  */
 import { z } from 'zod';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { json } from '@/lib/whatsapp/api';
 import type { RunRow } from '@/lib/wa-agents/types';
 import { guardRoute, searchParamsToObject, validationError } from '../_shared';
@@ -44,8 +45,8 @@ export async function GET(req: Request) {
     query,
     auth.admin.from('wa_ai_agents').select('id, name').eq('organization_id', orgId),
   ]);
-  if (runsRes.error) return json({ error: runsRes.error.message }, 500);
-  if (agentsRes.error) return json({ error: agentsRes.error.message }, 500);
+  if (runsRes.error) return json({ error: safeErrorMessage(runsRes.error) }, 500);
+  if (agentsRes.error) return json({ error: safeErrorMessage(agentsRes.error) }, 500);
 
   const agents: Record<string, string> = {};
   for (const a of agentsRes.data ?? []) agents[String(a.id)] = String(a.name ?? '');

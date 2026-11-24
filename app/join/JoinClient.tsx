@@ -47,12 +47,8 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
 
         const payload = await res.json().catch(() => null)
         
-        // Log para debug
-        console.log('[JoinClient] Validation response:', { 
-          ok: res.ok, 
-          status: res.status, 
-          payload 
-        })
+        // Só o status (o corpo traz e-mail e escritório do convite)
+        if (process.env.NODE_ENV === 'development') console.log('[JoinClient] Validation response:', { ok: res.ok, status: res.status })
         
         if (!res.ok || !payload?.valid) {
           const errorMsg = payload?.error || 'Este convite não existe ou já foi utilizado.'

@@ -1,4 +1,5 @@
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { UserRole } from '@/types/constants';
 
@@ -83,7 +84,7 @@ export async function POST(req: Request) {
     .update(updates)
     .eq('id', profile.id);
 
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   return json({ ok: true, organization: org });
 }

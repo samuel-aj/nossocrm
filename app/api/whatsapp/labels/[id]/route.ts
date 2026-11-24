@@ -8,6 +8,7 @@
  * de a etiqueta ser da organização e não texto por conversa.
  */
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { isLabelColor, isTabelaAusente, normalizeLabelName, MAX_LABEL_NAME } from '@/lib/whatsapp/labels';
 
@@ -63,7 +64,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (/duplicate|unique/i.test(error.message)) {
       return json({ error: 'Já existe uma etiqueta com esse nome' }, 409);
     }
-    return json({ error: error.message }, 500);
+    return json({ error: safeErrorMessage(error) }, 500);
   }
   if (!data) return json({ error: 'Etiqueta não encontrada' }, 404);
   return json({ label: data });
@@ -85,7 +86,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
     if (isTabelaAusente(error)) {
       return json({ error: 'As etiquetas ainda não foram liberadas neste ambiente. Fale com o suporte.' }, 503);
     }
-    return json({ error: error.message }, 500);
+    return json({ error: safeErrorMessage(error) }, 500);
   }
 
   return json({ ok: true });

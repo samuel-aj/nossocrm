@@ -6,6 +6,7 @@
  *   DELETE -> { ok: true }  apaga a linha e o arquivo do bucket
  */
 import { json } from '@/lib/whatsapp/api';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { renameMediaMarkers } from '@/lib/wa-agents/context';
 import { loadAgentMedia, MEDIA_COLUMNS } from '@/lib/wa-agents/resources';
@@ -74,7 +75,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     .eq('id', mediaId)
     .select(MEDIA_COLUMNS)
     .maybeSingle();
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
   if (!data) return json({ error: 'Mídia não encontrada' }, 404);
 
   // Renomeou: os marcadores [[midia:nome antigo]] do roteiro passam a apontar para o nome novo
@@ -120,7 +121,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
     .eq('agent_id', id)
     .eq('id', mediaId)
     .maybeSingle();
-  if (findError) return json({ error: findError.message }, 500);
+  if (findError) return json({ error: safeErrorMessage(findError) }, 500);
   if (!existing) return json({ error: 'Mídia não encontrada' }, 404);
   const media = existing as AgentMediaRow;
 
@@ -129,7 +130,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
     .delete()
     .eq('organization_id', orgId)
     .eq('id', media.id);
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   // Só o original: a cópia em wa-media fica, porque as mensagens já enviadas apontam para ela
   if (media.storage_path.startsWith(`${orgId}/`)) await removeAgentFiles(auth.admin, [media.storage_path]);

@@ -52,7 +52,10 @@ interface WaConnectionInfo {
 /** Só pra admin (modo API oficial): credenciais salvas, pra edição abrir preenchida.
  *  A chave secreta em si nunca vem pro navegador: só se existe salva e o tamanho. */
 interface MetaCreds {
+  /** Sempre null desde 23/11/2026: o token não vem mais pro navegador. */
   token: string | null;
+  tokenSet?: boolean;
+  tokenLength?: number;
   phoneNumberId: string | null;
   wabaId: string | null;
   appId?: string | null;
@@ -440,7 +443,7 @@ export function WhatsAppConnectionSettings({ alertsOnly = false }: { alertsOnly?
   // ver/conferir o que está salvo) ou VAZIO pra conectar outro número.
   const openBizFormFor = (target: ConnWithCreds | null) => {
     const creds = target?.metaCredentials ?? null;
-    setBizToken(creds?.token ?? '');
+    setBizToken(creds?.tokenSet ? '•'.repeat(Math.min(creds.tokenLength || 24, 32)) : (creds?.token ?? ''));
     setBizNumberId(creds?.phoneNumberId ?? '');
     setBizWabaId(creds?.wabaId ?? '');
     setBizAppId(creds?.appId ?? '');
@@ -703,7 +706,8 @@ export function WhatsAppConnectionSettings({ alertsOnly = false }: { alertsOnly?
               // edição aponta a linha exata (trocar o Phone Number ID atualiza
               // a MESMA conexão em vez de criar uma segunda)
               editingConnectionId: editingConnId || undefined,
-              metaToken: bizToken.trim(),
+              // sentinela intacto = não reenviar (o servidor usa o token salvo)
+              metaToken: isSecretSentinel(bizToken) ? undefined : bizToken.trim(),
               metaNumberId: bizNumberId.trim(),
               metaBusinessId: bizWabaId.trim() || undefined,
               metaAppId: bizAppId.trim() || undefined,

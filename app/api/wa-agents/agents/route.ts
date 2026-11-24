@@ -7,6 +7,7 @@
  *           pipeline e auxiliares validados na org; segredo mascarado vira vazio)
  */
 import { json } from '@/lib/whatsapp/api';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { checkAgentApiKey } from '@/lib/wa-agents/model';
 import { AgentInputSchema, type AgentInput, type AgentMinimal, type AgentRow } from '@/lib/wa-agents/types';
 import {
@@ -76,7 +77,7 @@ export async function GET() {
       .select('*')
       .eq('organization_id', orgId)
       .order('created_at', { ascending: true });
-    if (error) return json({ error: error.message }, 500);
+    if (error) return json({ error: safeErrorMessage(error) }, 500);
     return json({ agents: ((data ?? []) as AgentRow[]).map(toAgentPublic) });
   }
 
@@ -86,7 +87,7 @@ export async function GET() {
     .eq('organization_id', orgId)
     .eq('enabled', true)
     .order('name', { ascending: true });
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
   return json({ agents: (data ?? []) as AgentMinimal[] });
 }
 
@@ -139,7 +140,7 @@ export async function POST(req: Request) {
     })
     .select('*')
     .single();
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   return json({ agent: toAgentPublic(data as AgentRow), ...(warning ? { warning } : {}) }, 201);
 }

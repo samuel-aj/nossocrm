@@ -110,6 +110,11 @@ export async function POST(req: Request) {
   if (!isAllowedOrigin(req)) {
     return Response.json({ error: 'Forbidden' }, { status: 403 });
   }
+  // Instalador desligado (produção): esta rota abria conexão Postgres para
+  // qualquer endereço enviado no corpo. Mesma trava das outras rotas do instalador.
+  if (process.env.INSTALLER_ENABLED === 'false') {
+    return Response.json({ error: 'Installer disabled' }, { status: 403 });
+  }
 
   const raw = await req.json().catch(() => null);
   const parsed = HealthCheckSchema.safeParse(raw);

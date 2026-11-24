@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { withTabOrg } from '@/lib/supabase/tabOrgScope';
 import { UserRole } from '@/types/constants';
@@ -48,7 +49,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ key: string }>
     .order('version', { ascending: false })
     .limit(20);
 
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   const active = (data || []).find((r) => r.is_active) || null;
   return json({ key, active, versions: data || [] });
@@ -93,7 +94,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ key: string 
     .eq('key', key)
     .eq('is_active', true);
 
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   return json({ ok: true });
 }

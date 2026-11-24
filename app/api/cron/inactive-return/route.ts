@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { createClient } from '@supabase/supabase-js';
 
 /**
@@ -42,7 +43,7 @@ export async function GET(request: Request) {
       .limit(500);
 
     if (findErr) {
-      return NextResponse.json({ error: findErr.message }, { status: 500 });
+      return NextResponse.json({ error: safeErrorMessage(findErr) }, { status: 500 });
     }
     if (!dueDeals || dueDeals.length === 0) {
       return NextResponse.json({ ok: true, returned: 0 });
@@ -56,7 +57,7 @@ export async function GET(request: Request) {
       .in('id', ids);
 
     if (updErr) {
-      return NextResponse.json({ error: updErr.message }, { status: 500 });
+      return NextResponse.json({ error: safeErrorMessage(updErr) }, { status: 500 });
     }
 
     // Reativa os contatos INATIVOS dos leads devolvidos — senão o carimbo

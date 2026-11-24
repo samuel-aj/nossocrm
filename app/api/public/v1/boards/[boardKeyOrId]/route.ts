@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { authPublicApi } from '@/lib/public-api/auth';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { isValidUUID } from '@/lib/supabase/utils';
@@ -23,7 +24,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ boardKeyOrI
   query = isValidUUID(value) ? query.eq('id', value) : query.eq('key', value);
 
   const { data, error } = await query.maybeSingle();
-  if (error) return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error), code: 'DB_ERROR' }, { status: 500 });
   if (!data) return NextResponse.json({ error: 'Board not found', code: 'NOT_FOUND' }, { status: 404 });
 
   return NextResponse.json({

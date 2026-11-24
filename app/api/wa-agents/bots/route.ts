@@ -1,4 +1,5 @@
 import { botResourceError } from '@/lib/wa-agents/botTemplateResources';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { botTemplateConnectionError } from '@/lib/wa-agents/templateConnections';
 /**
  * /api/wa-agents/bots
@@ -39,7 +40,7 @@ export async function GET() {
       .eq('organization_id', orgId)
       .eq('enabled', true)
       .order('name', { ascending: true });
-    if (error) return json({ error: error.message }, 500);
+    if (error) return json({ error: safeErrorMessage(error) }, 500);
     return json({ bots: (data ?? []) as BotMinimal[] });
   }
 
@@ -48,7 +49,7 @@ export async function GET() {
     .select('*')
     .eq('organization_id', orgId)
     .order('created_at', { ascending: true });
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   return json({ bots: ((data ?? []) as BotRow[]).map(toBotPublic) });
 }
@@ -97,7 +98,7 @@ export async function POST(req: Request) {
     })
     .select('*')
     .single();
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   return json({ bot: toBotPublic(data as BotRow) }, 201);
 }

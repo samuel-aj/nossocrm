@@ -4,6 +4,7 @@
  * Sempre restrito à organização atual do request (ver lib/apiKeys/server).
  */
 import { NextResponse } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { isValidUUID } from '@/lib/supabase/utils';
@@ -26,7 +27,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     .is('revoked_at', null)
     .select(API_KEY_COLUMNS)
     .maybeSingle();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
   if (!data) return NextResponse.json({ error: 'Chave não encontrada ou já revogada' }, { status: 404 });
   return NextResponse.json({ data });
 }
@@ -45,7 +46,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
     .eq('id', id)
     .eq('organization_id', auth.organizationId)
     .not('revoked_at', 'is', null);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
   if (!count) return NextResponse.json({ error: 'Chave não encontrada ou ainda ativa' }, { status: 404 });
   return NextResponse.json({ ok: true });
 }

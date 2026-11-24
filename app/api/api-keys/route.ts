@@ -11,6 +11,7 @@
  * client — nenhuma organização enxerga credenciais de outra.
  */
 import { NextResponse } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { z } from 'zod';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
@@ -29,7 +30,7 @@ export async function GET() {
     .select(API_KEY_COLUMNS)
     .eq('organization_id', auth.organizationId)
     .order('created_at', { ascending: false });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
   return NextResponse.json({ data: data ?? [] });
 }
 
@@ -55,6 +56,6 @@ export async function POST(req: Request) {
     })
     .select(API_KEY_COLUMNS)
     .single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
   return NextResponse.json({ data: { ...data, token } }, { status: 201 });
 }

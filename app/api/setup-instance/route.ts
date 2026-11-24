@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { UserRole } from '@/types/constants';
@@ -40,7 +41,7 @@ export async function POST(req: Request) {
 
   // Só permite setup se ainda não inicializado.
   const { data: isInitialized, error: initError } = await admin.rpc('is_instance_initialized');
-  if (initError) return json({ error: initError.message }, 500);
+  if (initError) return json({ error: safeErrorMessage(initError) }, 500);
   if (isInitialized) return json({ error: 'Instance already initialized' }, 403);
 
   const { data: organization, error: orgError } = await admin
@@ -50,7 +51,7 @@ export async function POST(req: Request) {
     .select('id, name')
     .single();
 
-  if (orgError) return json({ error: orgError.message }, 500);
+  if (orgError) return json({ error: safeErrorMessage(orgError) }, 500);
 
   const { data: userData, error: userError } = await admin.auth.admin.createUser({
     email,
@@ -64,7 +65,7 @@ export async function POST(req: Request) {
 
   if (userError) {
     await admin.from('organizations').delete().eq('id', organization.id);
-    return json({ error: userError.message }, 400);
+    return json({ error: safeErrorMessage(userError) }, 400);
   }
 
   const userId = userData.user.id;
@@ -86,7 +87,7 @@ export async function POST(req: Request) {
   if (profileError) {
     await admin.auth.admin.deleteUser(userId);
     await admin.from('organizations').delete().eq('id', organization.id);
-    return json({ error: profileError.message }, 400);
+    return json({ error: safeErrorMessage(profileError) }, 400);
   }
 
   return json({ ok: true, organization, user: { id: userId, email } }, 201);

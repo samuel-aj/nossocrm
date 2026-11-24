@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { withTabOrg } from '@/lib/supabase/tabOrgScope';
 import { getModel, type AIProvider } from '@/lib/ai/config';
@@ -97,7 +97,9 @@ export async function requireAITaskContext(req: Request): Promise<AITaskContext>
 
   const organizationId = scoped.organization_id;
 
-  const { data: orgSettings, error: orgError } = await supabase
+  // Chaves de IA: a coluna não é mais legível pela sessão do usuário (auditoria 23/11/2026);
+  // a org já foi conferida acima, então lê com a chave de serviço.
+  const { data: orgSettings, error: orgError } = await createStaticAdminClient()
     .from('organization_settings')
     .select('ai_enabled, ai_provider, ai_model, ai_google_key, ai_openai_key, ai_anthropic_key')
     .eq('organization_id', organizationId)

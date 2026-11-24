@@ -8,6 +8,7 @@
  * no banco).
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { z } from 'zod';
 import { isAiAgentsApproved } from '@/lib/wa-agents/beta';
 import { json } from '@/lib/whatsapp/api';
@@ -65,7 +66,7 @@ export async function GET(_req: Request, ctx: Ctx) {
   const { data, error } = await auth.admin.from('stage_followup_rules').select('*').eq('stage_id', stageId).maybeSingle();
   if (error) {
     if (/stage_followup_rules/.test(error.message)) return json({ rule: null, stats: null, pendingMigration: true });
-    return json({ error: error.message }, 500);
+    return json({ error: safeErrorMessage(error) }, 500);
   }
   const { data: sched } = await auth.admin
     .from('deal_followup_schedules')
@@ -131,7 +132,7 @@ export async function PUT(req: Request, ctx: Ctx) {
       if (/stage_followup_rules/.test(error.message)) {
         return json({ error: 'O follow-up por inatividade ainda não foi instalado no banco. Fale com o suporte.' }, 503);
       }
-      return json({ error: error.message }, 500);
+      return json({ error: safeErrorMessage(error) }, 500);
     }
     return json({ rule: data });
   } catch (err) {

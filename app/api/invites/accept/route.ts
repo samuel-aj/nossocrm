@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { findAuthUserByEmail } from '@/lib/supabase/authUsers';
@@ -139,7 +140,7 @@ export async function POST(req: Request) {
 
     if (updateError) {
       await releaseInvite();
-      return json({ error: updateError.message }, 400);
+      return json({ error: safeErrorMessage(updateError) }, 400);
     }
 
     userId = existingAuthUser.id;
@@ -161,7 +162,7 @@ export async function POST(req: Request) {
 
     if (createError) {
       await releaseInvite();
-      return json({ error: createError.message }, 400);
+      return json({ error: safeErrorMessage(createError) }, 400);
     }
 
     userId = authData.user.id;
@@ -189,7 +190,7 @@ export async function POST(req: Request) {
       await admin.auth.admin.deleteUser(userId);
     }
     await releaseInvite();
-    return json({ error: profileError.message }, 400);
+    return json({ error: safeErrorMessage(profileError) }, 400);
   }
 
   // Add to user_organizations junction table

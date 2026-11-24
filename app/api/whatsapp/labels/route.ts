@@ -9,6 +9,7 @@
  * está em todas as consultas.
  */
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import {
   DEFAULT_LABEL_COLOR,
@@ -42,7 +43,7 @@ export async function GET(req: Request) {
       console.warn('[labels] tabela wa_labels ausente (migração pendente)');
       return json({ labels: [] });
     }
-    return json({ error: error.message }, 500);
+    return json({ error: safeErrorMessage(error) }, 500);
   }
   return json({ labels: data ?? [] });
 }
@@ -86,7 +87,7 @@ export async function POST(req: Request) {
       if (existente) return json({ label: existente, jaExistia: true });
       return json({ error: 'Já existe uma etiqueta com esse nome' }, 409);
     }
-    return json({ error: error.message }, 500);
+    return json({ error: safeErrorMessage(error) }, 500);
   }
 
   return json({ label: data });

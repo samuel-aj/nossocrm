@@ -13,6 +13,7 @@
  *                            mídias em cascata) e os arquivos do bucket
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { normalizeTriggers } from '@/lib/wa-agents/context';
@@ -186,7 +187,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     .eq('organization_id', orgId)
     .select('*')
     .maybeSingle();
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
   if (!data) return json({ error: 'Agente não encontrado' }, 404);
 
   return json({ agent: toAgentPublic(data as AgentRow), ...(warning ? { warning } : {}) });
@@ -206,7 +207,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
     .eq('id', id)
     .eq('organization_id', orgId)
     .maybeSingle();
-  if (findError) return json({ error: findError.message }, 500);
+  if (findError) return json({ error: safeErrorMessage(findError) }, 500);
   if (!existing) return json({ error: 'Agente não encontrado' }, 404);
 
   // Conversas em andamento com este agente param (o atendente assume)
@@ -222,7 +223,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
     .eq('organization_id', orgId)
     .eq('ai_agent_id', id)
     .in('ai_status', ['active', 'paused', 'awaiting_approval']);
-  if (convError) return json({ error: convError.message }, 500);
+  if (convError) return json({ error: safeErrorMessage(convError) }, 500);
 
   // Outros agentes que o tinham como auxiliar (helper_agent_ids não tem chave estrangeira)
   try {
@@ -241,7 +242,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
     .filter(p => typeof p === 'string' && p.startsWith(`${orgId}/`));
 
   const { error } = await auth.admin.from('wa_ai_agents').delete().eq('id', id).eq('organization_id', orgId);
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   await removeAgentFiles(auth.admin, paths);
 

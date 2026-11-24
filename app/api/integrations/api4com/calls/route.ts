@@ -5,6 +5,7 @@
  * atende, disca para o cliente. A resposta só vem depois disso (até ~90 s).
  */
 import { z } from 'zod';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { json } from '@/lib/whatsapp/api';
 import { guardRoute, readJsonBody, validationError, getErrorMessage } from '@/app/api/wa-agents/_shared';
 import { startCall } from '@/lib/api4com/calls';
@@ -42,7 +43,7 @@ export async function POST(req: Request) {
     if (err instanceof Api4comError) {
       // 401 da API4com não é "sem sessão no CRM": vira 409 para a tela mostrar a mensagem
       const status = err.code === 'NOT_CONNECTED' || err.status === 401 ? 409 : err.status >= 400 && err.status < 600 ? err.status : 502;
-      return json({ error: err.message, code: err.code, call_id: err.rowId }, status);
+      return json({ error: safeErrorMessage(err), code: err.code, call_id: err.rowId }, status);
     }
     return json({ error: getErrorMessage(err, 'Falha ao ligar') }, 500);
   }

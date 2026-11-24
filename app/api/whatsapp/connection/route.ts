@@ -38,6 +38,8 @@ import {
 } from '@/lib/whatsapp/dedupe';
 
 import { getLineDiagnostics } from '@/lib/whatsapp/connectionDiagnostics';
+import { isPublicHttpUrl } from '@/lib/wa-agents/url';
+import { resolvesToPrivateAddress } from '@/lib/wa-agents/webhooks';
 import { observeConnection } from '@/lib/whatsapp/connectionIncidents';
 import type { WhatsAppProvider } from '@/lib/whatsapp/providers/types';
 
@@ -105,7 +107,12 @@ export async function GET() {
   const credsOf = (c: WaConnectionRow) =>
     admin && isBusinessConnection(c)
       ? {
-          token: c.instance_token,
+          // O token da Meta também não vai mais pro navegador (auditoria 23/11/2026):
+          // quem roubasse a sessão do admin levava um token que vale fora do CRM.
+          // A UI mostra bolinhas; intacto = o servidor mantém o token salvo.
+          token: null,
+          tokenSet: Boolean(c.instance_token),
+          tokenLength: c.instance_token?.length ?? 0,
           phoneNumberId: c.meta_phone_number_id,
           wabaId: c.meta_waba_id,
           appId: c.meta_app_id,
@@ -215,6 +222,8 @@ export async function POST(req: Request) {
     overrideError?: string;
     recebimentoOk?: boolean;
   } | null = null;
+  // Token efetivo do meta_cloud (o digitado ou, se a tela mandou o campo intacto, o salvo).
+  let resolvedMetaToken = '';
 
   if (body.mode === 'meta_cloud') {
     // MULTI-NÚMERO: conectar um número da API oficial é ADITIVO — nunca mexe
@@ -222,12 +231,22 @@ export async function POST(req: Request) {
     // MODO DIRETO (Cloud API da Meta, SEM Evolution): conexão por credenciais,
     // com setup AUTOMÁTICO: valida token/IDs (corrige IDs trocados), configura
     // o webhook e assina a WABA com callback exclusivo pro CRM. Nada manual.
-    const metaToken = (body.metaToken || '').trim();
+    let metaToken = (body.metaToken || '').trim();
     const metaNumberId = (body.metaNumberId || '').trim().replace(/\D/g, '');
     const wabaId = (body.metaBusinessId || '').trim().replace(/\D/g, '');
+    if (!metaToken) {
+      // Campo intacto na edição: usa o token já salvo da conexão desta org
+      // (a linha em edição ou a do mesmo Phone Number ID).
+      const saved = existing.find(c => isBusinessConnection(c) && (
+        (body.editingConnectionId && c.id === body.editingConnectionId) ||
+        (metaNumberId && c.meta_phone_number_id === metaNumberId)
+      ));
+      metaToken = saved?.instance_token?.trim() || '';
+    }
     if (!metaToken || !metaNumberId) {
       return json({ error: 'Token permanente e Phone Number ID da Meta são obrigatórios' }, 400);
     }
+    resolvedMetaToken = metaToken;
 
     // Valida ANTES de salvar: token com acesso + IDs na ordem certa (a tela
     // "Contas do WhatsApp" da BM mostra o WABA id — erro clássico de troca).
@@ -339,6 +358,12 @@ export async function POST(req: Request) {
     }
   }
   if (!instanceName) return json({ error: 'instanceName é obrigatório' }, 400);
+  // Servidor da Evolution digitado pelo admin (modo manual): o CRM chama esse
+  // endereço com a apikey, então ele precisa ser público (sem rede interna).
+  if (baseUrl && baseUrl === body.baseUrl?.trim()) {
+    const blocked = isPublicHttpUrl(baseUrl) ? await resolvesToPrivateAddress(baseUrl) : 'endereço não público';
+    if (blocked) return json({ error: `Servidor da Evolution recusado: ${blocked}` }, 400);
+  }
 
   let conn: WaConnectionRow;
   try {
@@ -365,7 +390,7 @@ export async function POST(req: Request) {
     const supabaseBase = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '');
     const callbackUrl = `${supabaseBase}/functions/v1/whatsapp-webhook-meta/${conn.webhook_secret}`;
     const hooks = await setupMetaWebhooks({
-      token: (body.metaToken || '').trim(),
+      token: resolvedMetaToken,
       wabaId: conn.meta_waba_id || '',
       // conn pós-upsert: valores recém-enviados OU os já salvos (reconexão
       // sem redigitar App ID/Chave Secreta continua com webhook automático)

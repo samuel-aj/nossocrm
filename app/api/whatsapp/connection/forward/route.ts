@@ -14,6 +14,7 @@
  * Body: { connectionId: string, url: string | null }  (null/'' = desligar)
  */
 import { requireOrgUser, isOrgAdmin, json } from '@/lib/whatsapp/api';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { getConnectionByIdForOrg } from '@/lib/whatsapp/service';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 
@@ -48,6 +49,6 @@ export async function PATCH(req: Request) {
     .from('wa_connections')
     .update({ forward_webhook_url: url || null })
     .eq('id', conn.id);
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
   return json({ ok: true, forwardWebhookUrl: url || null });
 }

@@ -4,6 +4,7 @@
  *   PUT -> { rule }                 cria ou altera (ligar vale só para quem entrar daqui em diante)
  */
 import { z } from 'zod';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { guardRoute, readJsonBody, validationError, getErrorMessage, stageBelongsToOrg } from '@/app/api/wa-agents/_shared';
@@ -66,7 +67,7 @@ export async function GET(_req: Request, ctx: Ctx) {
   const { data, error } = await auth.admin.from('stage_signature_rules').select('*').eq('stage_id', stageId).maybeSingle();
   if (error) {
     if (/stage_signature_rules/.test(error.message)) return json({ rule: null, stats: null, pendingMigration: true });
-    return json({ error: error.message }, 500);
+    return json({ error: safeErrorMessage(error) }, 500);
   }
   const [{ count: review }, { count: pending }, { count: signed }, settings] = await Promise.all([
     auth.admin.from('deal_signatures').select('id', { count: 'exact', head: true }).eq('stage_id', stageId).eq('origin', 'rule').eq('status', 'review'),
@@ -116,7 +117,7 @@ export async function PUT(req: Request, ctx: Ctx) {
     const { data, error } = await auth.admin.from('stage_signature_rules').upsert(row, { onConflict: 'stage_id' }).select('*').single();
     if (error) {
       if (/stage_signature_rules/.test(error.message)) return json({ error: 'A integração com a ZapSign ainda não foi instalada no banco. Fale com o suporte.' }, 503);
-      return json({ error: error.message }, 500);
+      return json({ error: safeErrorMessage(error) }, 500);
     }
     return json({ rule: data });
   } catch (err) {

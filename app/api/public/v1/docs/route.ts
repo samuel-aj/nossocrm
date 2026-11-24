@@ -2,6 +2,30 @@ import { NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 
+// Versão fixa com assinatura (SRI): se o CDN servir outro arquivo, o navegador não executa.
+const SWAGGER = 'https://unpkg.com/swagger-ui-dist@5.34.1';
+const SRI = {
+  css: 'sha384-4c3vsE5f+trhFyHrFrLM1fFGUn531NIaC7dcqEWIJdoRQJ5CkJbSuSCwXLpaS1KF',
+  bundle: 'sha384-XFYN47VzPiDY6qPtxYKg0nqUeW/upo20xf1j2SUE7gT/i35FJB4cuS/71Iegzk8Z',
+  preset: 'sha384-My2aDM4r2Mbm3ybHcubKm9O9U8FEjvF/O5nGvE9YK5dzqOTbWEKa79RPJ1krdMaF',
+};
+const DEFAULT_SPEC = '/api/public/v1/openapi.json';
+
+/**
+ * Só aceita especificação deste mesmo site, dentro da API pública. Antes o
+ * parâmetro `spec` ia direto para dentro de um <script>, e um link montado
+ * (`?spec=</script><script>...`) rodava código no domínio do CRM.
+ */
+function safeSpecUrl(raw: string | null): string {
+  if (!raw) return DEFAULT_SPEC;
+  return /^\/api\/public\/v1\/[A-Za-z0-9._/-]*$/.test(raw) && !raw.includes('..') ? raw : DEFAULT_SPEC;
+}
+
+/** JSON seguro para dentro de <script>: o sinal de menor vira \u003c e nunca fecha a tag. */
+function scriptJson(value: string): string {
+  return JSON.stringify(value).replace(/</g, '\\u003c');
+}
+
 function html(specUrl: string) {
   // Classic Swagger UI via CDN, with a cleaner look via CSS overrides.
   return `<!doctype html>
@@ -10,7 +34,7 @@ function html(specUrl: string) {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>NossoCRM Public API — Swagger</title>
-    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+    <link rel="stylesheet" href="${SWAGGER}/swagger-ui.css" integrity="${SRI.css}" crossorigin="anonymous" />
     <style>
       :root {
         --bg: #f6f7fb;
@@ -119,11 +143,11 @@ function html(specUrl: string) {
   <body>
     <div id="swagger-ui"></div>
 
-    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
+    <script src="${SWAGGER}/swagger-ui-bundle.js" integrity="${SRI.bundle}" crossorigin="anonymous"></script>
+    <script src="${SWAGGER}/swagger-ui-standalone-preset.js" integrity="${SRI.preset}" crossorigin="anonymous"></script>
     <script>
       window.ui = SwaggerUIBundle({
-        url: ${JSON.stringify(specUrl)},
+        url: ${scriptJson(specUrl)},
         dom_id: '#swagger-ui',
         deepLinking: true,
         presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
@@ -136,7 +160,7 @@ function html(specUrl: string) {
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const specUrl = url.searchParams.get('spec') || '/api/public/v1/openapi.json';
+  const specUrl = safeSpecUrl(url.searchParams.get('spec'));
 
   return new NextResponse(html(specUrl), {
     status: 200,

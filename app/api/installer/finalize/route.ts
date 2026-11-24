@@ -37,6 +37,7 @@ const Schema = z
  */
 export async function POST(req: Request) {
   if (!isAllowedOrigin(req)) return json({ error: 'Forbidden' }, 403);
+  if (process.env.INSTALLER_ENABLED === 'false') return json({ error: 'Installer disabled' }, 403);
 
   const raw = await req.json().catch(() => null);
   const parsed = Schema.safeParse(raw);

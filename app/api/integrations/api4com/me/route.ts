@@ -7,6 +7,7 @@
  * O token nunca volta inteiro para o navegador.
  */
 import { z } from 'zod';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { json } from '@/lib/whatsapp/api';
 import { guardRoute, readJsonBody, validationError, getErrorMessage } from '@/app/api/wa-agents/_shared';
 import { connectUser, disconnectUser, loadUserSettings, publicView } from '@/lib/api4com/calls';
@@ -55,8 +56,8 @@ export async function PUT(req: Request) {
   } catch (err) {
     if (err instanceof Api4comError) {
       if (err.status === 401 || err.status === 403) return json({ error: 'A API4com não aceitou o token. Confira se copiou o token de acesso inteiro, do seu usuário.' }, 400);
-      if (err.code === 'NO_EXTENSION') return json({ error: err.message }, 400);
-      if (err.code === 'PENDING_MIGRATION') return json({ error: err.message }, 503);
+      if (err.code === 'NO_EXTENSION') return json({ error: safeErrorMessage(err) }, 400);
+      if (err.code === 'PENDING_MIGRATION') return json({ error: safeErrorMessage(err) }, 503);
       return json({ error: `Não foi possível conectar: ${err.message}` }, 502);
     }
     return json({ error: getErrorMessage(err, 'Falha ao conectar') }, 500);

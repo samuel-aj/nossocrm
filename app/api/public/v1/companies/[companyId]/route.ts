@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { z } from 'zod';
 import { authPublicApi } from '@/lib/public-api/auth';
 import { createStaticAdminClient } from '@/lib/supabase/server';
@@ -31,7 +32,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ companyId: 
     .eq('id', companyId)
     .maybeSingle();
 
-  if (error) return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error), code: 'DB_ERROR' }, { status: 500 });
   if (!data) return NextResponse.json({ error: 'Company not found', code: 'NOT_FOUND' }, { status: 404 });
 
   return NextResponse.json({ data });
@@ -67,7 +68,7 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ companyId
     .select('id,name,website,industry,created_at,updated_at')
     .maybeSingle();
 
-  if (error) return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error), code: 'DB_ERROR' }, { status: 500 });
   if (!data) return NextResponse.json({ error: 'Company not found', code: 'NOT_FOUND' }, { status: 404 });
 
   return NextResponse.json({ data });

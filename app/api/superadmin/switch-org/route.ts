@@ -1,4 +1,5 @@
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { logSuperAdminAction } from '@/lib/security/auditLog';
 import { UserRole } from '@/types/constants';
@@ -61,7 +62,7 @@ export async function POST(req: Request) {
     .update({ organization_id: organizationId, updated_at: new Date().toISOString() })
     .eq('id', profile.id);
 
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   await logSuperAdminAction(admin, {
     action: 'superadmin.org.switch',

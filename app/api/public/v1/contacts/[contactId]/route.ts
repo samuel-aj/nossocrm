@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { z } from 'zod';
 import { authPublicApi } from '@/lib/public-api/auth';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { normalizeEmail, normalizePhone, normalizeText } from '@/lib/public-api/sanitize';
 import { sanitizeUUID } from '@/lib/supabase/utils';
+import { refBelongsToOrg } from '@/lib/public-api/orgRefs';
 
 export const runtime = 'nodejs';
 
@@ -61,7 +63,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ contactId: 
     .eq('id', contactId)
     .maybeSingle();
 
-  if (error) return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error), code: 'DB_ERROR' }, { status: 500 });
   if (!data) return NextResponse.json({ error: 'Contact not found', code: 'NOT_FOUND' }, { status: 404 });
 
   return NextResponse.json({ data });
@@ -95,6 +97,10 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ contactId
   if (parsed.data.notes !== undefined) updates.notes = normalizeText(parsed.data.notes);
   if (parsed.data.client_company_id !== undefined) {
     updates.client_company_id = parsed.data.client_company_id === null ? null : (sanitizeUUID(parsed.data.client_company_id) || null);
+    // Empresa precisa ser desta organização (a gravação ignora RLS).
+    if (updates.client_company_id && !(await refBelongsToOrg('crm_companies', updates.client_company_id, auth.organizationId))) {
+      return NextResponse.json({ error: 'Company not found', code: 'COMPANY_NOT_FOUND' }, { status: 422 });
+    }
   }
   if (parsed.data.birth_date !== undefined) {
     updates.birth_date = parsed.data.birth_date === null ? null : toIsoDateString(parsed.data.birth_date);
@@ -128,7 +134,7 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ contactId
     .select('id,name,email,phone,role,company_name,client_company_id,avatar,notes,status,stage,source,birth_date,last_interaction,last_purchase_date,total_value,created_at,updated_at')
     .maybeSingle();
 
-  if (error) return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error), code: 'DB_ERROR' }, { status: 500 });
   if (!data) return NextResponse.json({ error: 'Contact not found', code: 'NOT_FOUND' }, { status: 404 });
 
   return NextResponse.json({ data });

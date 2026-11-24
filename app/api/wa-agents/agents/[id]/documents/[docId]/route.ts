@@ -5,6 +5,7 @@
  *   DELETE -> { ok: true }   apaga os trechos, a linha e o arquivo do bucket
  */
 import { json } from '@/lib/whatsapp/api';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { DOCUMENT_COLUMNS, deleteDocumentChunks, loadDocument } from '@/lib/wa-agents/knowledge';
 import { AgentDocumentMetaSchema, type AgentDocumentRow } from '@/lib/wa-agents/types';
@@ -82,7 +83,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
     .delete()
     .eq('organization_id', orgId)
     .eq('id', document.id);
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   if (document.storage_path.startsWith(`${orgId}/`)) await removeAgentFiles(auth.admin, [document.storage_path]);
 

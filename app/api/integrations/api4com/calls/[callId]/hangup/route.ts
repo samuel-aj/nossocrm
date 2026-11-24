@@ -3,6 +3,7 @@
  *   -> { call }   pede à API4com para desligar; o webhook fecha o estado.
  */
 import { json } from '@/lib/whatsapp/api';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { guardRoute, getErrorMessage } from '@/app/api/wa-agents/_shared';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { hangupCall } from '@/lib/api4com/calls';
@@ -23,7 +24,7 @@ export async function POST(req: Request, ctx: Ctx) {
     if (!call) return json({ error: 'not found' }, 404);
     return json({ call });
   } catch (err) {
-    if (err instanceof Api4comError) return json({ error: err.message }, err.status >= 400 && err.status < 600 ? err.status : 502);
+    if (err instanceof Api4comError) return json({ error: safeErrorMessage(err) }, err.status >= 400 && err.status < 600 ? err.status : 502);
     return json({ error: getErrorMessage(err, 'Falha ao desligar') }, 500);
   }
 }

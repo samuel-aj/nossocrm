@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
@@ -60,7 +61,7 @@ export async function GET() {
     .select('name')
     .eq('organization_id', auth.profile.organization_id)
     .order('name', { ascending: true });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
   return NextResponse.json({ data: (data || []).map(r => r.name as string) });
 }
 
@@ -130,13 +131,13 @@ export async function DELETE(req: Request) {
     .update({ group_name: null })
     .eq('organization_id', auth.profile.organization_id)
     .eq('group_name', name);
-  if (ungroupError) return NextResponse.json({ error: ungroupError.message }, { status: 500 });
+  if (ungroupError) return NextResponse.json({ error: safeErrorMessage(ungroupError) }, { status: 500 });
   const { error, count } = await sb
     .from('custom_field_groups')
     .delete({ count: 'exact' })
     .eq('organization_id', auth.profile.organization_id)
     .eq('name', name);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
   if (!count) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   return NextResponse.json({ ok: true });
 }

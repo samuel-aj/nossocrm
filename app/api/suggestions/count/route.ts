@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
@@ -15,6 +16,6 @@ export async function GET() {
     .from('suggestions')
     .select('id', { count: 'exact', head: true });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
   return NextResponse.json({ count: count ?? 0 });
 }

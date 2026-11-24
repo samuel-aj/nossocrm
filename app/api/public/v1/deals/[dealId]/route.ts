@@ -1,4 +1,5 @@
 import { leadSourceSchema, leadSourceWrite, publicDealSource } from '@/lib/public-api/leadSource';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { authPublicApi } from '@/lib/public-api/auth';
@@ -8,6 +9,7 @@ import { isValidUUID, sanitizeUUID } from '@/lib/supabase/utils';
 import { normalizeText } from '@/lib/public-api/sanitize';
 import { moveStageByDealId } from '@/lib/public-api/dealsMoveStage';
 import { resolveOwnerId } from '@/lib/public-api/resolve';
+import { refBelongsToOrg } from '@/lib/public-api/orgRefs';
 
 export const runtime = 'nodejs';
 
@@ -94,7 +96,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ dealId: str
     .eq('id', dealId)
     .maybeSingle();
 
-  if (error) return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error), code: 'DB_ERROR' }, { status: 500 });
   if (!data) return NextResponse.json({ error: 'Deal not found', code: 'NOT_FOUND' }, { status: 404 });
 
   // Fetch related notes, items, board and stage names in parallel
@@ -157,7 +159,7 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
     .eq('id', dealId)
     .is('deleted_at', null)
     .maybeSingle();
-  if (currentError) return NextResponse.json({ error: currentError.message, code: 'DB_ERROR' }, { status: 500 });
+  if (currentError) return NextResponse.json({ error: safeErrorMessage(currentError), code: 'DB_ERROR' }, { status: 500 });
   if (!current) return NextResponse.json({ error: 'Deal not found', code: 'NOT_FOUND' }, { status: 404 });
 
   // Produtos (validação ANTES de aplicar qualquer update, p/ falhar limpo):
@@ -179,7 +181,7 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
           .select('id,name,price')
           .eq('organization_id', auth.organizationId)
           .in('id', productIds);
-        if (prodErr) return NextResponse.json({ error: prodErr.message, code: 'DB_ERROR' }, { status: 500 });
+        if (prodErr) return NextResponse.json({ error: safeErrorMessage(prodErr), code: 'DB_ERROR' }, { status: 500 });
         for (const p of prods || []) {
           productMap.set(p.id as string, { name: p.name as string, price: Number((p as any).price ?? 0) });
         }
@@ -227,6 +229,13 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
   if (parsed.data.contact_id !== undefined) updates.contact_id = sanitizeUUID(parsed.data.contact_id);
   if (parsed.data.client_company_id !== undefined) updates.client_company_id = parsed.data.client_company_id === null ? null : (sanitizeUUID(parsed.data.client_company_id) || null);
   if (parsed.data.loss_reason !== undefined) updates.loss_reason = parsed.data.loss_reason === null ? null : normalizeText(parsed.data.loss_reason);
+  // Contato e empresa precisam ser desta organização (a gravação ignora RLS).
+  if (updates.contact_id && !(await refBelongsToOrg('contacts', updates.contact_id, auth.organizationId))) {
+    return NextResponse.json({ error: 'Contact not found', code: 'CONTACT_NOT_FOUND' }, { status: 422 });
+  }
+  if (updates.client_company_id && !(await refBelongsToOrg('crm_companies', updates.client_company_id, auth.organizationId))) {
+    return NextResponse.json({ error: 'Company not found', code: 'COMPANY_NOT_FOUND' }, { status: 422 });
+  }
 
   // Responsável (owner): owner_id (null limpa) OU owner_email (resolve p/ id).
   if (parsed.data.owner_id !== undefined || parsed.data.owner_email !== undefined) {
@@ -293,7 +302,7 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
       .update(updates)
       .eq('organization_id', auth.organizationId)
       .eq('id', dealId);
-    if (updateError) return NextResponse.json({ error: updateError.message, code: 'DB_ERROR' }, { status: 500 });
+    if (updateError) return NextResponse.json({ error: safeErrorMessage(updateError), code: 'DB_ERROR' }, { status: 500 });
   }
 
   // Stage move (optional). Delegates to the shared helper so semantics match
@@ -372,7 +381,7 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ dealId: s
     .eq('organization_id', auth.organizationId)
     .eq('id', dealId)
     .maybeSingle();
-  if (finalErr) return NextResponse.json({ error: finalErr.message, code: 'DB_ERROR' }, { status: 500 });
+  if (finalErr) return NextResponse.json({ error: safeErrorMessage(finalErr), code: 'DB_ERROR' }, { status: 500 });
   if (!finalRow) return NextResponse.json({ error: 'Deal not found', code: 'NOT_FOUND' }, { status: 404 });
 
   const [boardRes, stageRes] = await Promise.all([

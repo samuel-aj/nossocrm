@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
@@ -47,7 +48,7 @@ export async function GET() {
     .eq('organization_id', auth.profile.organization_id)
     .maybeSingle();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
   const row = (data ?? {}) as Record<string, unknown>;
   return NextResponse.json({
     inactive_leads_enabled: !!row.inactive_leads_enabled,
@@ -163,7 +164,7 @@ export async function PATCH(req: Request) {
         { status: 503 }
       );
     }
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
   }
   return NextResponse.json({ ok: true, ...updates });
 }

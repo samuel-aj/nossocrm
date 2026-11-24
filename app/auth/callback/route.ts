@@ -10,7 +10,10 @@ import { NextResponse } from 'next/server'
 export async function GET(request: Request) {
     const { searchParams, origin } = new URL(request.url)
     const code = searchParams.get('code')
-    const next = searchParams.get('next') ?? '/dashboard'
+    // Só caminho interno: `next=@site.com` virava https://host@site.com e mandava
+    // o usuário recém-logado para outro site (auditoria 23/11/2026).
+    const rawNext = searchParams.get('next') ?? '/dashboard'
+    const next = /^\/(?![\/\\])[^@]*$/.test(rawNext) ? rawNext : '/dashboard'
 
     if (code) {
         const supabase = await createClient()

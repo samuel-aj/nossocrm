@@ -1,4 +1,5 @@
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { logSuperAdminAction } from '@/lib/security/auditLog';
 import { UserRole } from '@/types/constants';
@@ -69,8 +70,8 @@ export async function GET(req: Request, ctx: Ctx) {
     admin.from('organizations').select('id, name, is_active').is('deleted_at', null).order('name'),
     admin.from('user_organizations').select('organization_id, role').eq('user_id', id),
   ]);
-  if (orgsError) return json({ error: orgsError.message }, 500);
-  if (linksError) return json({ error: linksError.message }, 500);
+  if (orgsError) return json({ error: safeErrorMessage(orgsError) }, 500);
+  if (linksError) return json({ error: safeErrorMessage(linksError) }, 500);
 
   const roleByOrg = new Map((links || []).map(l => [l.organization_id as string, l.role as string]));
   const organizations = (orgs || []).map(o => ({
@@ -117,7 +118,7 @@ export async function PUT(req: Request, ctx: Ctx) {
     .from('organizations')
     .select('id')
     .is('deleted_at', null);
-  if (orgsError) return json({ error: orgsError.message }, 500);
+  if (orgsError) return json({ error: safeErrorMessage(orgsError) }, 500);
   const validOrgs = new Set((orgs || []).map(o => o.id as string));
 
   // Normaliza: 1 entrada por org, papel válido, org existente.
@@ -138,7 +139,7 @@ export async function PUT(req: Request, ctx: Ctx) {
     .from('user_organizations')
     .select('organization_id, role')
     .eq('user_id', id);
-  if (currentError) return json({ error: currentError.message }, 500);
+  if (currentError) return json({ error: safeErrorMessage(currentError) }, 500);
 
   const currentByOrg = new Map((current || []).map(l => [l.organization_id as string, l.role as string]));
   const removed = [...currentByOrg.keys()].filter(orgId => !desired.has(orgId));

@@ -7,6 +7,7 @@
  *           objeto do Storage, que prevalece sobre o corpo) -> 201 { media }
  */
 import { json } from '@/lib/whatsapp/api';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { isAgentFilePath } from '@/lib/wa-agents/files';
 import { loadAgentMedia, MEDIA_COLUMNS } from '@/lib/wa-agents/resources';
@@ -119,7 +120,7 @@ export async function POST(req: Request, ctx: Ctx) {
     })
     .select(MEDIA_COLUMNS)
     .single();
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   return json({ media: data as AgentMediaRow }, 201);
 }

@@ -3,7 +3,7 @@
 
 import { createAgentUIStreamResponse, UIMessage } from 'ai';
 import { createCRMAgent } from '@/lib/ai/crmAgent';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import type { CRMCallOptions } from '@/types/ai';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { withTabOrg } from '@/lib/supabase/tabOrgScope';
@@ -76,7 +76,17 @@ export async function POST(req: Request) {
 
     // 0. Parse request body early (we may need boardId to recover a missing profile.organization_id)
     const body = await req.json().catch(() => null);
-    const messages: UIMessage[] = (body?.messages ?? []) as UIMessage[];
+    // Teto por pedido (auditoria 23/11/2026): cada mensagem enviada vira custo na
+    // chave de IA da org. Ficam as últimas 40, começando por uma do usuário, e um
+    // pedido gigante é recusado.
+    const MAX_CHAT_MESSAGES = 40;
+    const MAX_CHAT_CHARS = 300_000;
+    const allMessages: UIMessage[] = Array.isArray(body?.messages) ? (body.messages as UIMessage[]) : [];
+    let messages: UIMessage[] = allMessages.slice(-MAX_CHAT_MESSAGES);
+    while (messages.length > 1 && messages[0]?.role !== 'user') messages = messages.slice(1);
+    if (JSON.stringify(messages).length > MAX_CHAT_CHARS) {
+        return new Response('Conversa grande demais. Comece uma nova conversa.', { status: 413 });
+    }
     const rawContext = (body?.context ?? {}) as Record<string, unknown>;
 
     // 1. Auth check
@@ -138,7 +148,9 @@ export async function POST(req: Request) {
     }
 
     // 3. Get AI settings (org-wide: organization_settings é a fonte de verdade)
-    const { data: orgSettings } = await supabase
+    // Chaves de IA: a coluna não é mais legível pela sessão do usuário (auditoria 23/11/2026);
+    // a org já foi conferida acima, então lê com a chave de serviço.
+    const { data: orgSettings } = await createStaticAdminClient()
         .from('organization_settings')
         .select('ai_enabled, ai_provider, ai_model, ai_google_key, ai_openai_key, ai_anthropic_key')
         .eq('organization_id', scoped.organization_id)
@@ -209,7 +221,7 @@ export async function POST(req: Request) {
 
     console.log('[AI Chat] 📨 Request received:', {
         messagesCount: messages?.length,
-        rawContext: rawContextSummary,
+        rawContextKeys: Object.keys(rawContextSummary),
         context: {
             organizationId: context.organizationId,
             boardId: context.boardId,
@@ -217,7 +229,6 @@ export async function POST(req: Request) {
             boardName: context.boardName,
             stagesCount: context.stages?.length,
             cockpitSnapshot: context.cockpitSnapshot ? '[provided]' : undefined,
-            userName: context.userName,
         },
         ai: {
             provider,

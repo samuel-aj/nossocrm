@@ -1,4 +1,5 @@
 import { readDbLeadSource } from '@/lib/deals/leadSource';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { leadSourceSchema, leadSourceWrite, publicDealSource } from '@/lib/public-api/leadSource';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -7,6 +8,7 @@ import { createStaticAdminClient } from '@/lib/supabase/server';
 import { withActor } from '@/lib/supabase/actorClient';
 import { decodeOffsetCursor, encodeOffsetCursor, parseLimit } from '@/lib/public-api/cursor';
 import { resolveBoardId, resolveBoardIdFromKey, resolveFirstStageId, resolveOwnerId } from '@/lib/public-api/resolve';
+import { quotePostgrestValue, refBelongsToOrg } from '@/lib/public-api/orgRefs';
 import { normalizeEmail, normalizePhone, normalizeText } from '@/lib/public-api/sanitize';
 import { isValidUUID, sanitizeUUID } from '@/lib/supabase/utils';
 
@@ -99,7 +101,7 @@ export async function GET(request: Request) {
   const from = offset;
   const to = offset + limit - 1;
   const { data, count, error } = await query.range(from, to);
-  if (error) return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error), code: 'DB_ERROR' }, { status: 500 });
 
   const total = count ?? 0;
   const nextOffset = to + 1;
@@ -171,12 +173,16 @@ async function upsertContactForDeal(opts: {
     .select('id')
     .eq('organization_id', opts.organizationId)
     .is('deleted_at', null);
-  if (email && phone) lookup = lookup.or(`email.eq.${email},phone.eq.${phone}`);
+  if (email && phone) lookup = lookup.or(`email.eq.${quotePostgrestValue(email)},phone.eq.${quotePostgrestValue(phone)}`);
   else if (email) lookup = lookup.eq('email', email);
   else lookup = lookup.eq('phone', phone);
 
   const existing = await lookup.maybeSingle();
   if (existing.error) throw existing.error;
+
+  // Empresa de outra organização é ignorada (a gravação ignora RLS).
+  let companyId = sanitizeUUID(opts.contact.client_company_id) || null;
+  if (companyId && !(await refBelongsToOrg('crm_companies', companyId, opts.organizationId))) companyId = null;
 
   const now = new Date().toISOString();
   const base: any = {
@@ -184,7 +190,7 @@ async function upsertContactForDeal(opts: {
     email,
     phone,
     role: normalizeText(opts.contact.role),
-    client_company_id: sanitizeUUID(opts.contact.client_company_id) || null,
+    client_company_id: companyId,
     updated_at: now,
   };
 
@@ -229,7 +235,7 @@ export async function POST(request: Request) {
       .eq('external_id', externalId)
       .is('deleted_at', null)
       .maybeSingle();
-    if (existing.error) return NextResponse.json({ error: existing.error.message, code: 'DB_ERROR' }, { status: 500 });
+    if (existing.error) return NextResponse.json({ error: safeErrorMessage(existing.error), code: 'DB_ERROR' }, { status: 500 });
     if (existing.data) {
       const d: any = existing.data;
       const [boardRes, stageRes, itemsRes] = await Promise.all([
@@ -277,7 +283,7 @@ export async function POST(request: Request) {
       .eq('organization_id', auth.organizationId)
       .eq('board_id', boardId)
       .maybeSingle();
-    if (stageErr) return NextResponse.json({ error: stageErr.message, code: 'DB_ERROR' }, { status: 500 });
+    if (stageErr) return NextResponse.json({ error: safeErrorMessage(stageErr), code: 'DB_ERROR' }, { status: 500 });
     if (!stageRow) {
       return NextResponse.json({ error: 'stage_id não pertence a esta organização/board', code: 'STAGE_NOT_FOUND' }, { status: 422 });
     }
@@ -298,7 +304,7 @@ export async function POST(request: Request) {
       .eq('organization_id', auth.organizationId)
       .is('deleted_at', null)
       .maybeSingle();
-    if (contactErr) return NextResponse.json({ error: contactErr.message, code: 'DB_ERROR' }, { status: 500 });
+    if (contactErr) return NextResponse.json({ error: safeErrorMessage(contactErr), code: 'DB_ERROR' }, { status: 500 });
     if (!contactRow) {
       return NextResponse.json({ error: 'contact_id não pertence a esta organização', code: 'CONTACT_NOT_FOUND' }, { status: 422 });
     }
@@ -323,7 +329,7 @@ export async function POST(request: Request) {
       .eq('organization_id', auth.organizationId)
       .is('deleted_at', null)
       .maybeSingle();
-    if (companyErr) return NextResponse.json({ error: companyErr.message, code: 'DB_ERROR' }, { status: 500 });
+    if (companyErr) return NextResponse.json({ error: safeErrorMessage(companyErr), code: 'DB_ERROR' }, { status: 500 });
     if (!companyRow) {
       return NextResponse.json({ error: 'client_company_id não pertence a esta organização', code: 'COMPANY_NOT_FOUND' }, { status: 422 });
     }
@@ -361,7 +367,7 @@ export async function POST(request: Request) {
         .select('id,name,price')
         .eq('organization_id', auth.organizationId)
         .in('id', productIds);
-      if (prodErr) return NextResponse.json({ error: prodErr.message, code: 'DB_ERROR' }, { status: 500 });
+      if (prodErr) return NextResponse.json({ error: safeErrorMessage(prodErr), code: 'DB_ERROR' }, { status: 500 });
       for (const p of prods || []) {
         productMap.set(p.id as string, { name: p.name as string, price: Number((p as any).price ?? 0) });
       }
@@ -495,7 +501,7 @@ export async function POST(request: Request) {
         }, { status: 200 });
       }
     }
-    return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(error), code: 'DB_ERROR' }, { status: 500 });
   }
 
   // Cria os itens (produtos) do deal na mesma chamada — dispensa o node /deals/{id}/items.
