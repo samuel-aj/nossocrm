@@ -26,6 +26,18 @@ type SecurityEventRow = {
 
 type Source = 'events' | 'auth';
 
+const PERIODS: Array<[string, string]> = [
+  ['24h', '24 horas'],
+  ['7d', '7 dias'],
+  ['30d', '30 dias'],
+  ['90d', '90 dias'],
+];
+const SEVERITY_FILTERS: Array<[string, string]> = [
+  ['important', 'Importantes'],
+  ['critical', 'Só críticos'],
+  ['all', 'Tudo'],
+];
+
 const SEVERITY_STYLE: Record<string, string> = {
   critical: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300',
   warning: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300',
@@ -44,7 +56,9 @@ const dateFormat = new Intl.DateTimeFormat('pt-BR', {
 export function SecurityEventsPanel({ organizations }: { organizations: Array<{ id: string; name: string }> }) {
   const [source, setSource] = useState<Source>('events');
   const [period, setPeriod] = useState('7d');
-  const [severity, setSeverity] = useState('all');
+  // Abre só no que importa (atenção + crítico); o informativo fica a um clique.
+  const [severity, setSeverity] = useState('important');
+  const [summary, setSummary] = useState<{ critical: number; warning: number } | null>(null);
   const [org, setOrg] = useState('all');
   const [events, setEvents] = useState<SecurityEventRow[]>([]);
   const [hasMore, setHasMore] = useState(false);
@@ -71,17 +85,21 @@ export function SecurityEventsPanel({ organizations }: { organizations: Array<{ 
       try {
         const res = await fetch(`/api/security/events?${params}`, { credentials: 'include' });
         const body = (await res.json().catch(() => null)) as
-          | { events?: SecurityEventRow[]; hasMore?: boolean; error?: string }
+          | { events?: SecurityEventRow[]; hasMore?: boolean; error?: string; summary?: { critical: number; warning: number } | null }
           | null;
         if (request !== requestRef.current) return;
         if (!res.ok) throw new Error(body?.error || 'Não foi possível carregar o registro.');
         const rows = body?.events ?? [];
         setEvents(prev => (before ? [...prev, ...rows] : rows));
         setHasMore(!!body?.hasMore);
+        if (!before) setSummary(body?.summary ?? null);
       } catch (e) {
         if (request !== requestRef.current) return;
         setError(e instanceof Error ? e.message : 'Não foi possível carregar o registro.');
-        if (!before) setEvents([]);
+        if (!before) {
+          setEvents([]);
+          setSummary(null);
+        }
       } finally {
         if (request === requestRef.current) {
           setLoading(false);
@@ -96,11 +114,13 @@ export function SecurityEventsPanel({ organizations }: { organizations: Array<{ 
     void load();
   }, [load]);
 
-  const tabClass = (active: boolean) =>
-    `px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+  // Filtros curtos são botões lado a lado: um clique, sem lista suspensa.
+  const groupClass = 'inline-flex items-center gap-0.5 rounded-lg bg-slate-100 dark:bg-white/5 p-0.5';
+  const pillClass = (active: boolean) =>
+    `px-3 py-1 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
       active
-        ? 'bg-primary-600 text-white'
-        : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10'
+        ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white'
+        : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
     }`;
 
   return (
@@ -125,30 +145,32 @@ export function SecurityEventsPanel({ organizations }: { organizations: Array<{ 
         Os registros ficam guardados por 180 dias e não podem ser alterados nem apagados pelo CRM.
       </p>
 
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <div className="flex items-center gap-1" role="tablist" aria-label="Tipo de registro">
-          <button type="button" role="tab" aria-selected={source === 'events'} className={tabClass(source === 'events')} onClick={() => setSource('events')}>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3">
+        <div className={groupClass} role="tablist" aria-label="Tipo de registro">
+          <button type="button" role="tab" aria-selected={source === 'events'} className={pillClass(source === 'events')} onClick={() => setSource('events')}>
             Eventos
           </button>
-          <button type="button" role="tab" aria-selected={source === 'auth'} className={tabClass(source === 'auth')} onClick={() => setSource('auth')}>
+          <button type="button" role="tab" aria-selected={source === 'auth'} className={pillClass(source === 'auth')} onClick={() => setSource('auth')}>
             Acessos
           </button>
         </div>
-        <NativeSelect aria-label="Período" value={period} onChange={e => setPeriod(e.target.value)} className="w-auto text-sm">
-          <option value="24h">Últimas 24 horas</option>
-          <option value="7d">Últimos 7 dias</option>
-          <option value="30d">Últimos 30 dias</option>
-          <option value="90d">Últimos 90 dias</option>
-        </NativeSelect>
+        <div className={groupClass} role="group" aria-label="Período">
+          {PERIODS.map(([value, label]) => (
+            <button key={value} type="button" aria-pressed={period === value} className={pillClass(period === value)} onClick={() => setPeriod(value)}>
+              {label}
+            </button>
+          ))}
+        </div>
         {source === 'events' && (
           <>
-            <NativeSelect aria-label="Gravidade" value={severity} onChange={e => setSeverity(e.target.value)} className="w-auto text-sm">
-              <option value="all">Toda gravidade</option>
-              <option value="critical">Crítico</option>
-              <option value="warning">Atenção</option>
-              <option value="info">Informativo</option>
-            </NativeSelect>
-            <NativeSelect aria-label="Organização" value={org} onChange={e => setOrg(e.target.value)} className="w-auto text-sm max-w-[16rem]">
+            <div className={groupClass} role="group" aria-label="Gravidade">
+              {SEVERITY_FILTERS.map(([value, label]) => (
+                <button key={value} type="button" aria-pressed={severity === value} className={pillClass(severity === value)} onClick={() => setSeverity(value)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <NativeSelect aria-label="Organização" value={org} onChange={e => setOrg(e.target.value)} className="w-64 text-sm">
               <option value="all">Todas as organizações</option>
               {organizations.map(o => (
                 <option key={o.id} value={o.id}>
@@ -160,13 +182,21 @@ export function SecurityEventsPanel({ organizations }: { organizations: Array<{ 
         )}
       </div>
 
+      {source === 'events' && summary && (
+        <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
+          No período: <strong className="text-red-600 dark:text-red-400">{summary.critical}</strong>{' '}
+          {summary.critical === 1 ? 'crítico' : 'críticos'} e{' '}
+          <strong className="text-amber-600 dark:text-amber-400">{summary.warning}</strong> de atenção.
+        </p>
+      )}
+
       {error && (
         <p role="alert" className="text-sm text-red-600 dark:text-red-400 mb-3">
           {error}
         </p>
       )}
 
-      {loading ? (
+      {loading && events.length === 0 ? (
         <div className="flex items-center gap-2 text-sm text-slate-500 py-6">
           <Loader2 size={16} className="animate-spin" aria-hidden="true" /> Carregando...
         </div>
@@ -174,10 +204,15 @@ export function SecurityEventsPanel({ organizations }: { organizations: Array<{ 
         <p className="text-sm text-slate-500 dark:text-slate-400 py-6">
           {source === 'auth'
             ? 'Nenhum acesso registrado pelo Supabase neste período. Os logs completos de login ficam no painel do Supabase, em Logs > Auth.'
-            : 'Nenhum evento neste período.'}
+            : severity === 'all'
+              ? 'Nenhum evento neste período.'
+              : 'Nenhum evento importante neste período. Para ver também os informativos, escolha "Tudo".'}
         </p>
       ) : (
-        <ul className="divide-y divide-slate-100 dark:divide-white/5">
+        <ul
+          aria-busy={loading}
+          className={`max-h-[28rem] overflow-y-auto overscroll-contain rounded-lg border border-slate-100 dark:border-white/5 divide-y divide-slate-100 dark:divide-white/5 transition-opacity ${loading ? 'opacity-50' : ''}`}
+        >
           {events.map(ev => {
             const open = expanded === ev.id;
             const lines = detailLines(ev.details);
@@ -237,12 +272,19 @@ export function SecurityEventsPanel({ organizations }: { organizations: Array<{ 
         </ul>
       )}
 
+      {!loading && events.length > 0 && (
+        <p className="mt-2 text-xs text-slate-400">
+          {events.length} {events.length === 1 ? 'registro carregado' : 'registros carregados'}
+          {hasMore ? '. Há mais registros antigos neste período.' : '.'}
+        </p>
+      )}
+
       {hasMore && !loading && (
         <button
           type="button"
           onClick={() => void load(events[events.length - 1]?.created_at)}
           disabled={loadingMore}
-          className="mt-3 text-sm font-medium text-primary-600 hover:text-primary-500 disabled:opacity-50 inline-flex items-center gap-1.5"
+          className="mt-1 text-sm font-medium text-primary-600 hover:text-primary-500 disabled:opacity-50 inline-flex items-center gap-1.5"
         >
           {loadingMore && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
           Carregar mais

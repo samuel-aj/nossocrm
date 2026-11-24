@@ -118,6 +118,18 @@ html, body {
   overflow-x: hidden;
 }
 
+/*
+ * Listas suspensas e modais (Radix) travam a rolagem do <body> e somam uma
+ * margem do tamanho da barra de rolagem, para a página não "pular" quando a
+ * barra some. Só que aqui a barra é do <html> (por causa do overflow-x acima) e
+ * não some: a margem sobrava e empurrava a página inteira para o lado em telas
+ * que rolam por inteiro, como a de super admin. Sem a margem, nada desloca.
+ */
+html body[data-scroll-locked] {
+  margin-right: 0 !important;
+  padding-right: 0 !important;
+}
+
 /* ========================================
  * Mobile only (< 768px)
  * ======================================== */

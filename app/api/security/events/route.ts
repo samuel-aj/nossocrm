@@ -5,7 +5,8 @@
  * admin. O navegador não lê a tabela direto: ela é trancada para a chave de
  * serviço (migração 20261124150000_seguranca_registro_eventos).
  *
- * Filtros: ?period=24h|7d|30d|90d  ?severity=info|warning|critical  ?org=<uuid>
+ * Filtros: ?period=24h|7d|30d|90d  ?org=<uuid>
+ *          ?severity=info|warning|critical|important (important = atenção + crítico)
  *          ?before=<ISO> (página seguinte)
  *          ?source=auth  -> acessos registrados pelo Supabase Auth (login,
  *                           logout, troca/recuperação de senha)
@@ -107,11 +108,24 @@ export async function GET(req: Request) {
     .gte('created_at', since)
     .order('created_at', { ascending: false })
     .limit(PAGE + 1);
-  if (SEVERITIES.has(severity)) query = query.eq('severity', severity);
-  if (org && isValidUUID(org)) query = query.eq('organization_id', org);
+  const orgFilter = org && isValidUUID(org) ? org : null;
+  if (severity === 'important') query = query.in('severity', ['warning', 'critical']);
+  else if (SEVERITIES.has(severity)) query = query.eq('severity', severity);
+  if (orgFilter) query = query.eq('organization_id', orgFilter);
   if (before && !Number.isNaN(Date.parse(before))) query = query.lt('created_at', new Date(before).toISOString());
 
-  const { data, error } = await query;
+  // Resumo do período (só na primeira página): quantos críticos e de atenção.
+  const countOf = async (level: 'critical' | 'warning') => {
+    let q = admin.from('audit_logs').select('id', { count: 'exact', head: true }).gte('created_at', since).eq('severity', level);
+    if (orgFilter) q = q.eq('organization_id', orgFilter);
+    const { count } = await q;
+    return count ?? 0;
+  };
+  const [{ data, error }, critical, warning] = await Promise.all([
+    query,
+    before ? null : countOf('critical'),
+    before ? null : countOf('warning'),
+  ]);
   if (error) return json({ error: safeErrorMessage(error, 'Não foi possível ler o registro.') }, 500);
   const all = (data ?? []) as AuditRow[];
   const rows = all.slice(0, PAGE);
@@ -141,5 +155,6 @@ export async function GET(req: Request) {
       user_agent: r.user_agent,
     })),
     hasMore: all.length > PAGE,
+    summary: before ? null : { critical, warning },
   });
 }
