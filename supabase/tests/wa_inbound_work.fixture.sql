@@ -19,6 +19,7 @@ create table wa_messages(id uuid primary key,organization_id uuid,conversation_i
 create table wa_bot_runs(organization_id uuid,conversation_id uuid,status text);
 create table wa_bots(organization_id uuid,enabled boolean,trigger jsonb,connection_ids uuid[],connection_id uuid);
 create table wa_ai_agents(organization_id uuid,enabled boolean,connection_ids uuid[],triggers jsonb);
+create table wa_ai_agent_runs(organization_id uuid,conversation_id uuid,trigger text,status text,duration_ms integer,created_at timestamptz default now());
 create table wa_agent_connection_pending(organization_id uuid,conversation_id uuid,inbound_id uuid);
 create table crm_notification_events(organization_id uuid,kind text check(kind in ('message','lead','alert','audio_transcription','human_handoff')),
   source_id uuid,created_at timestamptz default now());

@@ -40,6 +40,7 @@ try {
   const historic = await message(await conversation());
   await db.exec(await file('supabase/migrations/20261124143252_wa_inbound_work.sql'));
   await db.exec(await file('supabase/migrations/20261124230000_wa_entry_recovery_notifications.sql'));
+  await db.exec(await file('supabase/migrations/20261124173647_wa_inbound_recovery_bot_guard.sql'));
   await db.exec(await file('supabase/tests/wa_entry_recovery_notifications.sql'));
   assert.deepEqual(await state(historic),[]);
   const cron = await scalar("select code from cron.jobs where name='wa-inbound-recovery'");
@@ -66,6 +67,9 @@ try {
   assert.deepEqual(await scalar('select body from net.requests'),{job:'inbound_recovery'});
   const [late] = await batch(delayed);
   assert.equal(late.message_id,missed);
+  assert.equal(late.direct_wakeup,false);
+  assert.equal(await phase(late,'bots'),'ready');
+  assert.equal(await phase(late,'bots',true),'ready');
   assert.equal(await finish(late,'done'),'done');
 
   const conv = await conversation(), mid = await message(conv);
@@ -75,6 +79,7 @@ try {
   assert.deepEqual(await immediate(mid,conv,other),[]);
   assert.deepEqual(await immediate(mid,noRoute),[]);
   const [first] = await immediate(mid,conv);
+  assert.equal(first.direct_wakeup,true);
   assert.deepEqual(await immediate(mid,conv),[]);
   assert.equal(await phase(first,'bots'),'ready');
   assert.equal(await phase(first,'bots'),'stale');
@@ -99,6 +104,55 @@ try {
   const botMid = await message(bot,other), [botJob] = await immediate(botMid,bot,other);
   assert.equal(await phase(botJob,'bots'),'ready');
   assert.equal(await finish(botJob,'done'),'done');
+  // A notification lost or delayed must not replay this same bot over manual work.
+  for (const change of ['human','cursor','resume','bot_reply','paused']) {
+    const changed = await conversation(other,change==='paused'?'paused':'active',null);
+    await db.query("insert into wa_bot_runs values($1,$2,'waiting_reply')",[other,changed]);
+    const incoming = await message(changed,other);
+    if (change==='human') await message(changed,other,'out','crm','sent');
+    if (change==='cursor') await db.query('update wa_conversations set ai_last_processed_at=now() where id=$1',[changed]);
+    if (change==='resume') {
+      await db.query("update wa_conversations set ai_status='active',ai_status_changed_at=now(),ai_last_processed_at=now() where id=$1",[changed]);
+      await db.query("insert into wa_ai_agent_runs(organization_id,conversation_id,trigger,status) values($1,$2,'resume','ok')",[other,changed]);
+    }
+    if (change==='bot_reply') await message(changed,other,'out','bot','sent');
+    assert.deepEqual(await batch(changed),[],change);
+    assert.equal((await state(incoming))[0].state,'cancelled',change);
+    assert.deepEqual(await events(incoming),[],change);
+  }
+  const pendingBot = await conversation(other,'active',null);
+  await db.query("insert into wa_bot_runs values($1,$2,'waiting_reply')",[other,pendingBot]);
+  const pendingMessage = await message(pendingBot,other);
+  const [pendingRun] = await batch(pendingBot);
+  assert.equal(pendingRun.message_id,pendingMessage);
+  assert.equal(await phase(pendingRun,'bots'),'ready');
+  assert.equal(await finish(pendingRun,'done'),'done');
+  // A prior turn assigned the agent and replied after a second inbound arrived.
+  // Only the prior inbound was covered by the cursor. Run the second turn once.
+  const assignedDuringWait = await conversation(other,null,null);
+  await db.query("insert into wa_bot_runs values($1,$2,'waiting_reply')",[other,assignedDuringWait]);
+  const older = await message(assignedDuringWait,other), [olderRun] = await immediate(older,assignedDuringWait,other);
+  const newer = await message(assignedDuringWait,other);
+  await db.query("update wa_conversations set ai_status='active',ai_status_changed_at=now(),ai_agent_id=$2,ai_last_processed_at=(select created_at from wa_messages where id=$3) where id=$1",[assignedDuringWait,agent,older]);
+  await message(assignedDuringWait,other,'out','agent','sent');
+  await db.query("insert into wa_ai_agent_runs(organization_id,conversation_id,trigger,status) values($1,$2,'inbound','ok')",[other,assignedDuringWait]);
+  assert.equal(await finish(olderRun,'done'),'done');
+  const [newerRun] = await batch(assignedDuringWait);
+  assert.equal(newerRun.message_id,newer);
+  assert.equal(await phase(newerRun,'bots'),'ready');
+  assert.equal(await phase(newerRun,'bots',true),'ready');
+  assert.equal(await phase(newerRun,'dispatch'),'ready');
+  assert.equal(await finish(newerRun,'done'),'done');
+  assert.deepEqual(await batch(assignedDuringWait),[]);
+  // Changes after the lease is acquired are rechecked immediately before the bot.
+  const changedInFlight = await message(pendingBot,other), [inFlight] = await batch(pendingBot);
+  await message(pendingBot,other,'out','bot','sent');
+  assert.equal(await phase(inFlight,'bots'),'cancelled');
+  assert.equal((await state(changedInFlight))[0].reason,'already_answered');
+  const slowWake = id(messageNumber++);
+  await db.query("insert into wa_messages(id,organization_id,conversation_id,direction,wa_timestamp) values($1,$2,$3,'in',now()-interval '2 minutes')",[slowWake,other,bot]);
+  assert.deepEqual(await immediate(slowWake,bot,other),[]);
+  assert.equal((await state(slowWake))[0].reason,'manual_or_paused');
   const independent = await conversation(other,null,null);
   await db.query("insert into wa_bots values($1,true,'{\"type\":\"message_received\"}',array[$2::uuid],null)",[other,line]);
   assert.equal((await state(await message(independent,other)))[0].state,'pending');
@@ -127,6 +181,18 @@ try {
   const reviewer = id(600);
   await db.query("insert into profiles(id,organization_id,role) values($1,$2,'admin')",[reviewer,org]);
   const visible = mid => rows('select message_id from wa_entry_recovery_details($1,$2,array[$3::uuid])',[org,reviewer,mid]);
+  for (const beforeLease of [true,false]) {
+    const resumed = await conversation(), input = await message(resumed);
+    const held = beforeLease ? null : (await batch(resumed))[0];
+    await db.query("insert into wa_ai_agent_runs(organization_id,conversation_id,trigger,status) values($1,$2,'resume','error')",[org,resumed]);
+    if (held) assert.equal(await phase(held,'bots'),'stale');
+    assert.deepEqual(await batch(resumed),[]);
+    assert.equal((await state(input))[0].reason,'dispatch_uncertain');
+    assert.equal((await events(input)).length,1);
+    assert.deepEqual(await visible(input),[{message_id:input}]);
+    await message(resumed,org,'out','crm','sent');
+    assert.deepEqual(await visible(input),[]);
+  }
   for (const resolvedBy of ['cursor','operator']) {
     const partial = await claimed();
     assert.equal(await phase(partial.job,'dispatch'),'ready');
@@ -172,12 +238,10 @@ try {
   }
   const order = await conversation(), a = await message(order), b = await message(order);
   assert.deepEqual(await immediate(b,order),[]);
-  const [oldest] = await batch(order,10);
-  assert.equal(oldest.message_id,a);
-  assert.deepEqual(await batch(order),[]);
-  assert.equal(await finish(oldest,'cancelled'),'cancelled');
-  const [next] = await batch(order);
+  const [next] = await batch(order,10);
+  assert.equal((await state(a))[0].reason,'superseded');
   assert.equal(next.message_id,b);
+  assert.deepEqual(await batch(order),[]);
   assert.equal(await finish(next,'done'),'done');
   const exhausted = await claimed();
   let current = exhausted.job;
