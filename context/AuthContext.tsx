@@ -32,6 +32,7 @@ import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase/client';
 import { queryClient } from '@/lib/query';
 import { clearTabOrg, pinTabOrg, readTabOrg } from '@/lib/tabOrg';
+import { clearOtherPushConsents, openPushScope, refreshExistingPush, revokePushOnLogout } from '@/lib/notifications/pushDevice';
 import { installTabOrgFetch } from '@/lib/tabOrgFetch';
 import { loadAuthProfile } from '@/lib/supabase/authProfile';
 import type { OrganizationId } from '../types';
@@ -249,6 +250,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const acceptSession = (next: Session | null, signedOut = false) => {
             if (!active) return;
             const nextId = next?.user.id ?? null;
+            if (!nextId || nextId !== userIdRef.current) void clearOtherPushConsents(nextId).catch(() => {});
             if (nextId !== userIdRef.current || signedOut) {
                 cancelProfileRequest();
                 // Invalida também uma consulta antiga quando há troca de conta sem reload.
@@ -263,7 +265,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             userIdRef.current = nextId;
             setSession(next);
             setUser(next?.user ?? null);
-            if (nextId) void fetchProfile(nextId);
+            if (nextId) {
+                openPushScope(nextId);
+                void fetchProfile(nextId);
+            }
             else setLoading(false);
         };
 
@@ -296,7 +301,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
     }, [sb, fetchProfile, cancelProfileRequest]);
 
+    useEffect(() => {
+        if (!user?.id || !profile?.organization_id) return;
+        const controller = new AbortController();
+        void refreshExistingPush({userId: user.id, organizationId: profile.organization_id}, controller.signal).catch(() => {});
+        return () => controller.abort();
+    }, [user?.id, profile?.organization_id]);
+
     const signOut = async () => {
+        if (userIdRef.current && profileRef.current?.organization_id) {
+            await revokePushOnLogout({ userId: userIdRef.current, organizationId: profileRef.current.organization_id }).catch(() => {});
+        }
         if (sb) await sb.auth.signOut();
         cancelProfileRequest();
         userIdRef.current = null;

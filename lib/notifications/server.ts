@@ -11,8 +11,9 @@ import { hasFullOperationalAccess } from '@/lib/permissions/teamRoles';
 const OFFLINE_ALERT_KINDS = ['human_handoff', 'wa_entry_recovery'];
 
 interface MessageRow {id:string;conversation_id:string;wa_timestamp:string|null}
-interface ConversationRow {id:string;deal_id:string|null;contact_id:string|null;connection_id:string|null;wa_name:string|null;wa_phone:string;label_ids:string[];assigned_owner_id:string|null}
+interface ConversationRow {id:string;deal_id:string|null;contact_id:string|null;connection_id:string|null;wa_name:string|null;wa_phone:string;label_ids:string[];assigned_owner_id:string|null;created_at:string}
 interface DealRow {id:string;title:string;board_id:string;owner_id:string|null;contact_id:string|null;is_won:boolean;is_lost:boolean;created_at:string}
+type JournalEvent = { id: string | number; kind: string; source_id: string; board_id: string | null; created_at: string };
 type Auth = Extract<RequireOrgResult, {ok: true}>;
 export async function context(auth: Auth) {
   const {admin, user: u} = auth;
@@ -43,7 +44,7 @@ export async function saveSettings(auth: Auth, preferences: Preferences) {
 export async function feed(auth: Auth, since: string | null, after: string | null, until: string | null) {
   const serverTime = new Date().toISOString();
   const ctx = await context(auth);
-  const {preferences:p,access,rules} = ctx;
+  const {preferences:p,rules} = ctx;
   const upper = until && until < serverTime ? until : serverTime;
   let connectionNoticesUnavailable = false;
   const lineNotices = after ? [] : await connectionIncidentNotices(auth,rules,upper).catch(error => {
@@ -71,19 +72,28 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
   const {data: rows,error} = await query;
   if (error) throw error;
   const events=(rows ?? []).filter(row=>since || OFFLINE_ALERT_KINDS.includes(row.kind));
+  const notices = await visibleJournalNotices(auth, ctx, events);
+  // Usage alerts use stable prefixed IDs; CRM's bigint cursor stays exclusive to its own feed.
+  notices.push(...lineNotices,...budgetNotices);
+  return {events:notices,serverTime:upper,nextAfter:events.length===200 ? String(events[events.length-1].id) : null,usageNoticesUnavailable,connectionNoticesUnavailable};
+}
+
+/** Both the bell and mobile push resolve a journal ID against current access and preferences. */
+export async function visibleJournalNotices(auth: Auth, ctx: Awaited<ReturnType<typeof context>>, events: JournalEvent[], onUnlinkedMessage?: (conversationCreatedAt: string) => void): Promise<Notice[]> {
+  const { preferences:p, access, rules } = ctx;
   const alertIds=events.filter(e=>e.kind==='alert' && p.alerts).map(e=>e.source_id);
   const alerts=alertIds.length ? await auth.admin.from('deal_alert_events').select('id,deal_id,message,tone').eq('organization_id',auth.user.organizationId).in('id',alertIds).is('acknowledged_at',null) : {data:[],error:null};
   if(alerts.error) throw alerts.error;
   const alertDeals=alerts.data?.length ? await auth.admin.from('deals').select('id,title,board_id,owner_id,active_alert').eq('organization_id',auth.user.organizationId).in('id',alerts.data.map(a=>a.deal_id)).eq('owner_id',auth.user.id).is('deleted_at',null) : {data:[],error:null};
   if(alertDeals.error) throw alertDeals.error;
   const messageIds=events.filter(e=>(e.kind==='message' && p.messages) || (e.kind==='audio_transcription' && p.alerts)).map(e=>e.source_id);
-  const leadIds=events.filter(e=>e.kind==='lead' && p.leads && p.boardIds.includes(e.board_id)).map(e=>e.source_id);
+  const leadIds=events.filter(e=>e.kind==='lead' && p.leads && e.board_id !== null && p.boardIds.includes(e.board_id)).map(e=>e.source_id);
   const messages=messageIds.length ? await auth.admin.from('wa_messages').select('id,conversation_id,wa_timestamp').eq('organization_id',auth.user.organizationId).in('id',messageIds).eq('direction','in').is('deleted_at',null) : {data:[],error:null};
   if(messages.error) throw messages.error;
   const messageRows=(messages.data ?? []) as MessageRow[];
   const handoffIds=events.filter(e=>e.kind==='human_handoff' && p.alerts).map(e=>e.source_id);
   const convIds=[...new Set([...messageRows.map(m=>m.conversation_id), ...handoffIds])];
-  const conversations=convIds.length ? await auth.admin.from('wa_conversations').select('id,deal_id,contact_id,connection_id,wa_name,wa_phone,label_ids,assigned_owner_id').eq('organization_id',auth.user.organizationId).in('id',convIds).eq('is_group',false) : {data:[],error:null};
+  const conversations=convIds.length ? await auth.admin.from('wa_conversations').select('id,deal_id,contact_id,connection_id,wa_name,wa_phone,label_ids,assigned_owner_id,created_at').eq('organization_id',auth.user.organizationId).in('id',convIds).eq('is_group',false) : {data:[],error:null};
   if(conversations.error) throw conversations.error;
   const conversationRows=(conversations.data ?? []) as ConversationRow[];
   const contactIds=[...new Set(conversationRows.map(c=>c.contact_id).filter(Boolean))];
@@ -110,7 +120,7 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
       notices.push({id:String(event.id),kind:'alert',tone:a.tone==='red'?'red':'green',title:'Alerta do lead',message:`${d.title} · ${a.message}`,href:`/boards?board=${d.board_id}&deal=${d.id}`,createdAt:event.created_at});
     } else if(event.kind==='lead') {
       const d=leadRows.find(d=>d.id===event.source_id);
-      if(!d || !p.leads || !p.boardIds.includes(event.board_id) || d.board_id!==event.board_id || !allowed(d)) continue;
+      if(!d || !p.leads || !event.board_id || !p.boardIds.includes(event.board_id) || d.board_id!==event.board_id || !allowed(d)) continue;
       notices.push({id:String(event.id),kind:'lead',title:'Novo lead no board',message:`${d.title} · ${ctx.boards.find(b=>b.id===d.board_id)?.name}`,href:`/boards?board=${d.board_id}&deal=${d.id}`,createdAt:event.created_at});
     } else if(event.kind==='message' || event.kind==='audio_transcription' || event.kind==='human_handoff') {
       const audioFailed = event.kind==='audio_transcription';
@@ -136,13 +146,15 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
           href:`/chats?conversation=${c.id}`,createdAt:event.created_at});
         continue;
       }
+      if(!ds.length && !c.deal_id) {
+        onUnlinkedMessage?.(c.created_at);
+        continue;
+      }
       if(!ds.some(allowed) || (p.scope==='own' && effective?.owner_id!==auth.user.id)) continue;
       const owners=rules?.whatsapp.owner_user_ids;
-      if(owners && effective?.owner_id && effective.owner_id!==auth.user.id && !owners.includes(effective.owner_id)) continue;
-      notices.push({id:String(event.id),kind:'message',title:'Nova mensagem de lead',message:c.wa_name || c.wa_phone || 'Abra a conversa para ler',href:`/chats?conversation=${c.id}`,createdAt:event.created_at});
+      if(owners && (!effective?.owner_id || (effective.owner_id!==auth.user.id && !owners.includes(effective.owner_id)))) continue;
+      notices.push({id:String(event.id),kind:'message',conversationId:c.id,title:'Nova mensagem de lead',message:c.wa_name || c.wa_phone || 'Abra a conversa para ler',href:`/chats?conversation=${c.id}`,createdAt:event.created_at});
     }
   }
-  // Usage alerts use stable prefixed IDs; CRM's bigint cursor stays exclusive to its own feed.
-  notices.push(...lineNotices,...budgetNotices);
-  return {events:notices,serverTime:upper,nextAfter:events.length===200 ? String(events[events.length-1].id) : null,usageNoticesUnavailable,connectionNoticesUnavailable};
+  return notices;
 }

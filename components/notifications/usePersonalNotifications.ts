@@ -6,6 +6,7 @@ import {useAuth} from '@/context/AuthContext';
 import {deliverNotice,presentOnce,unlockNotificationSound} from '@/lib/notifications/delivery';
 import type {Notice,NotificationFeed,NotificationSettings,Preferences} from '@/lib/notifications/types';
 import { clearReadNotices, isOngoingNotice, reconcileUsageNotices } from '@/lib/notifications/history';
+import { receivesDevicePush } from '@/lib/notifications/pushDevice';
 
 async function api<T>(url:string,init?:RequestInit):Promise<T> {
   const r=await fetch(url,{cache:'no-store',...init}); const data=await r.json();
@@ -59,6 +60,9 @@ export function usePersonalNotifications() {
               const ongoing=[notice,...items].filter(isOngoingNotice);
               return {scope,items:[...ongoing,...ordinary]};
             });
+            // Keep it in the bell, but let this device's push deliver the sound/banner just once.
+            if(notice.kind==='message' && user && organizationId && await receivesDevicePush({userId:user.id,organizationId})) continue;
+            if(stopped) return;
             if(document.visibilityState==='visible') setToast({scope,notice});
             await presentOnce(scope,notice.id,()=>{if(!stopped) deliverNotice(notice,preferences,href=>router.push(href));});
           }

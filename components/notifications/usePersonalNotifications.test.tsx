@@ -4,7 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { DEFAULT_PREFERENCES, type Notice, type NotificationFeed } from '@/lib/notifications/types';
 
-const h = vi.hoisted(() => ({ org: 'org-one', router: { push: vi.fn() }, deliver: vi.fn() }));
+const h = vi.hoisted(() => ({ org: 'org-one', router: { push: vi.fn() }, deliver: vi.fn(), receivesPush: vi.fn() }));
+vi.mock('@/lib/notifications/pushDevice', () => ({ receivesDevicePush: h.receivesPush }));
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ user: { id: 'user' }, organizationId: h.org }) }));
 vi.mock('next/navigation', () => ({ useRouter: () => h.router }));
 vi.mock('@/lib/notifications/delivery', () => ({
@@ -19,6 +20,7 @@ let client: QueryClient;
 let feed: NotificationFeed;
 beforeEach(() => {
   vi.useFakeTimers(); h.org = 'org-one'; h.deliver.mockClear();
+  h.receivesPush.mockResolvedValue(false);
   feed = { events: [usage, ordinary], serverTime: '2026-10-23T10:00:01Z', nextAfter: null };
   vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(url.includes('preferences')
     ? { preferences: { ...DEFAULT_PREFERENCES, messages: true }, boards: [] } : feed)));
@@ -27,6 +29,15 @@ beforeEach(() => {
 afterEach(() => { cleanup(); client.clear(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 const wrapper = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 async function tick(ms = 20) { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); }
+
+it('keeps push-enabled messages in the bell without a second desktop or sound alert', async () => {
+  h.receivesPush.mockResolvedValue(true);
+  const { result } = renderHook(() => usePersonalNotifications(), { wrapper });
+  await tick();
+  expect(result.current.notices.map(n => n.id).sort()).toEqual(['block', 'message']);
+  expect(h.receivesPush).toHaveBeenCalledWith({ userId: 'user', organizationId: 'org-one' });
+  expect(h.deliver).toHaveBeenCalledTimes(1);
+});
 
 it('keeps an open connection incident visible and replaces it on recovery with personal alerts off', async () => {
   const incident: Notice = {...ordinary,id:'wa-line-open',kind:'alert',category:'connection_outage',title:'Falha na conexão do WhatsApp'};

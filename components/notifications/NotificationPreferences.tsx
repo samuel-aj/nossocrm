@@ -4,7 +4,9 @@ import {Modal} from '@/components/ui/Modal';
 import {FormCheckbox,FormSelect} from '@/components/ui/FormControls';
 import {unlockNotificationSound,playNotificationSound} from '@/lib/notifications/delivery';
 import type {NotificationSettings,Preferences} from '@/lib/notifications/types';
-export function NotificationPreferences({settings,onClose,onSave,onTest}:{settings:NotificationSettings;onClose:()=>void;onSave:(p:Preferences)=>Promise<void>;onTest:(p:Preferences)=>void}) {
+import type {PushScope} from '@/lib/notifications/pushDevice';
+import {PushDeviceSettings} from './PushDeviceSettings';
+export function NotificationPreferences({settings,deviceScope,onClose,onSave,onTest}:{settings:NotificationSettings;deviceScope?:PushScope;onClose:()=>void;onSave:(p:Preferences)=>Promise<void>;onTest:(p:Preferences)=>void}) {
   const [draft,setDraft]=useState(settings.preferences),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const [permission,setPermission]=useState(typeof Notification==='undefined' ? 'unsupported' : Notification.permission);
   const set=(patch:Partial<Preferences>)=>setDraft(p=>({...p,...patch}));
@@ -20,7 +22,7 @@ export function NotificationPreferences({settings,onClose,onSave,onTest}:{settin
       <div className="flex justify-end gap-3"><button className={button} onClick={onClose} disabled={busy}>Cancelar</button><button className="rounded-lg bg-primary-600 px-4 py-2 text-white text-sm font-medium disabled:opacity-50" disabled={busy || (draft.leads && !draft.boardIds.length)} onClick={async()=>{setBusy(true);setError('');try{await onSave(draft);onClose();}catch(e){setError(e instanceof Error ? e.message : 'Erro ao salvar.');}finally{setBusy(false);}}}>{busy?'Salvando…':'Salvar preferências'}</button></div>
     </div>}>
     <div className="space-y-6 text-slate-900 dark:text-slate-100">
-      <p className="text-sm text-slate-500">Suas preferências nesta organização. Os avisos funcionam enquanto o CRM estiver aberto, mesmo em outra aba.</p>
+      <p className="text-sm text-slate-500">Suas preferências de avisos neste escritório.</p>
       <div className="grid gap-6 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
       <div className="min-w-0 space-y-6">
       <section className="space-y-3">
@@ -39,6 +41,7 @@ export function NotificationPreferences({settings,onClose,onSave,onTest}:{settin
       <section className="min-w-0 space-y-3 border-t border-slate-200 dark:border-slate-700 pt-5 md:border-t-0 md:border-l md:pl-6 md:pt-0">
         <p className="text-sm font-medium">Onde avisar</p>
         <p className="text-xs text-slate-500">No CRM, os avisos aparecem na tela e ficam no sino durante esta sessão.</p>
+        {deviceScope && <PushDeviceSettings scope={deviceScope} messages={draft.messages} onEnableMessages={()=>set({messages:true})} />}
         <FormCheckbox label="Também no computador" checked={draft.desktop} onChange={enabled=>void desktop(enabled)}>Também no computador</FormCheckbox>
         {permission==='denied' && <p className="text-xs text-amber-600">Notificações bloqueadas neste navegador. Libere nas configurações do site para usar os avisos no computador.</p>}
         {permission==='unsupported' && <p className="text-xs text-amber-600">Este navegador não oferece avisos no computador. Os avisos no CRM continuam disponíveis.</p>}

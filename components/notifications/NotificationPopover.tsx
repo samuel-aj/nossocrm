@@ -24,7 +24,7 @@ const getTimeAgo = (date: Date) => {
  */
 export const NotificationPopover = () => {
     const { notifications, count, hasHighSeverity, markAsRead, markAllAsRead } = useSystemNotifications();
-    const { profile } = useAuth();
+    const { profile, user, organizationId } = useAuth();
     const canManageConnectionAlerts = profile?.role === 'admin' || profile?.role === 'super_admin';
     const personal = usePersonalNotifications();
     const personalTones = personal.notices.map(noticeTone);
@@ -190,7 +190,7 @@ export const NotificationPopover = () => {
                     </div>
                 </div>
             )}
-            {preferencesOpen && personal.settings && createPortal(<NotificationPreferences settings={personal.settings} onClose={()=>setPreferencesOpen(false)} onSave={personal.save} onTest={personal.test}/>, document.body)}
+            {preferencesOpen && personal.settings && createPortal(<NotificationPreferences key={`${user?.id}:${organizationId}`} settings={personal.settings} deviceScope={user && organizationId ? {userId:user.id,organizationId} : undefined} onClose={()=>setPreferencesOpen(false)} onSave={personal.save} onTest={personal.test}/>, document.body)}
             {personal.toast && createPortal(<div role="status" className={`fixed bottom-6 right-6 z-[11000] w-[calc(100%-3rem)] max-w-sm rounded-xl border p-4 shadow-xl ${noticePanelClass(personal.toast)}`}>
                 <button aria-label="Fechar aviso" className="absolute right-2 top-1 px-2 text-slate-500" onClick={personal.dismiss}>×</button>
                 <Link href={personal.toast.href} onClick={personal.dismiss} className="block pr-6"><NoticeContent notice={personal.toast} /></Link>

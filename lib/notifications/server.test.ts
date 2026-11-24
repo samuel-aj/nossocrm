@@ -14,6 +14,7 @@ import {getTeamAccess} from '@/lib/permissions/teamAccessServer';
 import {getVisibilityRules} from '@/lib/permissions/server';
 import {DEFAULT_VISIBILITY_RULES} from '@/lib/permissions/types';
 import {context,feed,saveSettings} from './server';
+import {loadAuthorizedPushMessage} from './pushEligibility';
 import {DEFAULT_PREFERENCES,PreferencesSchema} from './types';
 import {usageNotices} from '@/lib/ai-usage/notifications';
 import {connectionIncidentNotices} from './connectionIncidents';
@@ -108,6 +109,59 @@ describe('WhatsApp entry recovery alerts',()=>{
   });
 });
 describe('personal notification security and audiences',()=>{
+  const queued = { organization_id: org, user_id: user, event_id: '1', message_id: 'm' };
+  it('reconfere o filtro de leads e a revogação de acesso entre a chegada e o push', async () => {
+    rpc.mockResolvedValue({data:'vendedor',error:null});
+    tables.crm_notification_preferences[0].preferences={...DEFAULT_PREFERENCES,messages:true,scope:'own'};
+    expect(await loadAuthorizedPushMessage(auth.admin,queued)).toEqual({conversationId:'c'});
+    tables.deals[0].owner_id='colega';
+    expect(await loadAuthorizedPushMessage(auth.admin,queued)).toBeNull();
+    tables.crm_notification_preferences[0].preferences={...DEFAULT_PREFERENCES,messages:true,scope:'all'};
+    expect(await loadAuthorizedPushMessage(auth.admin,queued)).toEqual({conversationId:'c'});
+    vi.mocked(getVisibilityRules).mockResolvedValue({...DEFAULT_VISIBILITY_RULES,whatsapp:{connection_ids:[],label_ids:null,owner_user_ids:null}});
+    expect(await loadAuthorizedPushMessage(auth.admin,queued)).toBeNull();
+    rpc.mockResolvedValue({data:null,error:null});
+    expect(await loadAuthorizedPushMessage(auth.admin,queued)).toBeNull();
+  });
+  it('não envia push de histórico importado ou de lead excluído', async () => {
+    rpc.mockResolvedValue({data:'vendedor',error:null});
+    tables.wa_messages[0].wa_timestamp=new Date(Date.now()-300_000).toISOString();
+    expect(await loadAuthorizedPushMessage(auth.admin,queued)).toBeNull();
+    expect(queries.find(q=>q.table==='crm_notification_events')?.filters).toEqual(expect.arrayContaining([
+      ['organization_id',org],['id','1'],['source_id','m'],['kind','message'],
+    ]));
+    tables.wa_messages[0].wa_timestamp=now();
+    tables.wa_conversations[0].created_at=new Date(Date.now()-86_400_000).toISOString();
+    tables.deals=[];
+    expect(await loadAuthorizedPushMessage(auth.admin,queued)).toBeNull();
+  });
+  it('aguarda o vínculo do primeiro atendimento e revalida o responsável antes do push', async () => {
+    rpc.mockResolvedValue({data:'vendedor',error:null});
+    tables.crm_notification_preferences[0].preferences={...DEFAULT_PREFERENCES,messages:true,scope:'own'};
+    const [lead] = tables.deals;
+    tables.deals=[];
+    const chat = tables.wa_conversations[0];
+    chat.created_at=new Date(Date.now()-1000).toISOString();
+    chat.contact_id=null;
+    await expect(loadAuthorizedPushMessage(auth.admin,queued)).rejects.toThrow('aguarda o vínculo');
+    chat.contact_id=lead.contact_id;
+    tables.deals=[{...lead,owner_id:'outra-pessoa'}];
+    expect(await loadAuthorizedPushMessage(auth.admin,queued)).toBeNull();
+    tables.deals=[lead];
+    expect(await loadAuthorizedPushMessage(auth.admin,queued)).toEqual({conversationId:'c'});
+  });
+  it('encerra a espera pelo lead e mantém o bloqueio de canais restritos desde a primeira tentativa', async () => {
+    rpc.mockResolvedValue({data:'vendedor',error:null});
+    tables.deals=[];
+    tables.wa_conversations[0].created_at=new Date(Date.now()-1000).toISOString();
+    vi.mocked(getVisibilityRules).mockResolvedValue({...DEFAULT_VISIBILITY_RULES,whatsapp:{connection_ids:[],label_ids:null,owner_user_ids:null}});
+    expect(await loadAuthorizedPushMessage(auth.admin,queued)).toBeNull();
+    vi.mocked(getVisibilityRules).mockResolvedValue(null);
+    const old=new Date(Date.now()-310_000).toISOString();
+    tables.wa_conversations[0].created_at=old;
+    tables.crm_notification_events[0].created_at=old;
+    expect(await loadAuthorizedPushMessage(auth.admin,queued)).toBeNull();
+  });
   it('entrega o aviso de áudio ao responsável mesmo com avisos de mensagens desligados',async()=>{
     tables.crm_notification_events[0].kind='audio_transcription';
     tables.crm_notification_preferences[0].preferences={...DEFAULT_PREFERENCES,alerts:true,messages:false};

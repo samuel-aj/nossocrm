@@ -1,4 +1,4 @@
-import {fireEvent,render,screen} from '@testing-library/react';
+import {act,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {expect,it,vi} from 'vitest';
 import {NotificationPreferences} from './NotificationPreferences';
 import {DEFAULT_PREFERENCES} from '@/lib/notifications/types';
@@ -9,6 +9,26 @@ vi.mock('@/components/ui/FormControls',()=>({
   FormSelect:({label,value,onChange,options}:{label:string;value:string;onChange:(value:string)=>void;options:Array<{value:string;label:string}>})=><select aria-label={label} value={value} onChange={event=>onChange(event.target.value)}>{options.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}</select>,
 }));
 vi.mock('@/lib/notifications/delivery',()=>({unlockNotificationSound:vi.fn().mockResolvedValue(undefined),playNotificationSound:vi.fn()}));
+const device = vi.hoisted(() => ({
+  pushSupport: () => 'ready', readPushDevice: vi.fn(async () => ({ enabled: false, publicKey: 'test-key' })),
+  enablePushDevice: vi.fn(), disablePushDevice: vi.fn(),
+}));
+vi.mock('@/lib/notifications/pushDevice', () => device);
+
+it('applies the selected lead filter with the first explicit device opt-in',async()=>{
+  const onSave=vi.fn();
+  render(<NotificationPreferences settings={{preferences:DEFAULT_PREFERENCES,boards:[]}} deviceScope={{userId:'signed-in',organizationId:'office'}} onClose={vi.fn()} onSave={onSave} onTest={vi.fn()}/>);
+  const button=screen.getByRole('button',{name:'Ativar neste aparelho'});
+  await waitFor(()=>expect(button).toBeEnabled());
+  await act(async()=>{fireEvent.click(button);});
+  expect(screen.getByRole('checkbox',{name:'Novas mensagens de leads'})).toBeChecked();
+  const scope=screen.getByRole('combobox',{name:'Receber mensagens de'});
+  expect(scope).toHaveValue('own');
+  fireEvent.change(scope,{target:{value:'all'}});
+  expect(onSave).not.toHaveBeenCalled();
+  await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'Salvar preferências'}));});
+  expect(onSave).toHaveBeenCalledWith({...DEFAULT_PREFERENCES,messages:true,scope:'all'});
+});
 
 it('tests unsaved sound and volume without saving preferences',async()=>{
   const onTest=vi.fn(),onSave=vi.fn();

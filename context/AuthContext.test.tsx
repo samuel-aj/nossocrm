@@ -65,6 +65,21 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('AuthProvider profile recovery', () => {
+  it('opens a push link in its authorized office when the installed app restores a session', async () => {
+    const person='11111111-1111-4111-8111-111111111111', office='22222222-2222-4222-8222-222222222222', chat='33333333-3333-4333-8333-333333333333';
+    const previous=window.location.href;
+    try {
+      window.history.replaceState(null, '', '/chats?conversation='+chat+'&pushOrg='+office+'&pushUser='+person);
+      mocks.getSession.mockResolvedValue({data:{session:session(person)}});
+      mocks.query.mockResolvedValueOnce({data:row(person,'vendedor'),error:null})
+        .mockResolvedValueOnce({data:{role:'vendedor',organizations:{name:'Outro escritório'}},error:null});
+      render(<AuthProvider><Probe /></AuthProvider>);
+      await tick(0);
+      expect(mocks.query).toHaveBeenCalledWith('user_organizations',{user_id:person,organization_id:office});
+      expect(auth.profile?.organization_id).toBe(office);
+      expect(window.location.search).toBe('?conversation='+chat);
+    } finally { window.history.replaceState(null, '', previous); }
+  });
   it('loads normally from getSession when no initial auth event has arrived', async () => {
     mocks.getSession.mockResolvedValue({ data: { session: session() } });
     render(<AuthProvider><Probe /></AuthProvider>);
