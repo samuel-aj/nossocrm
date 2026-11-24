@@ -32,18 +32,7 @@ const LABELS: Record<string, string> = {
   'data.contacts.exported': 'Contatos exportados',
   'public_api.invalid_key': 'Chave de API inválida usada',
   'auth.login_failed': 'Senha recusada no login',
-  'auth.login': 'Login',
-  'auth.logout': 'Saída',
-  'auth.user_signedup': 'Conta criada',
-  'auth.user_invited': 'Convite enviado por e-mail',
-  'auth.invite_accepted': 'Convite por e-mail aceito',
-  'auth.user_deleted': 'Conta excluída',
-  'auth.user_modified': 'Dados da conta alterados',
-  'auth.user_recovery_requested': 'Recuperação de senha pedida',
-  'auth.user_updated_password': 'Senha alterada',
-  'auth.user_repeated_signup': 'Tentativa de cadastro repetido',
-  'auth.token_revoked': 'Sessão encerrada',
-  'auth.identity_unlinked': 'Login social desvinculado',
+  'auth.login': 'Login realizado',
 };
 
 export function eventLabel(action: string): string {

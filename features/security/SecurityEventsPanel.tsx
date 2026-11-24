@@ -8,8 +8,8 @@ import { FilterField, FilterSelect, type FilterOption } from './FilterSelect';
 
 /**
  * Registro de segurança (só super admin): eventos críticos gravados pelo
- * servidor e pelo banco, lidos por /api/security/events. A aba "Acessos" traz
- * o que o próprio Supabase Auth registra (login, saída, senha).
+ * servidor e pelo banco, lidos por /api/security/events. Login realizado é
+ * informativo: aparece ao escolher "Tudo" na gravidade.
  */
 
 type SecurityEventRow = {
@@ -25,8 +25,6 @@ type SecurityEventRow = {
   user_agent: string | null;
 };
 
-type Source = 'events' | 'auth';
-
 const PERIODS: FilterOption[] = [
   { value: '24h', label: 'Últimas 24 horas' },
   { value: '7d', label: 'Últimos 7 dias' },
@@ -36,7 +34,7 @@ const PERIODS: FilterOption[] = [
 const SEVERITY_FILTERS: FilterOption[] = [
   { value: 'important', label: 'Importantes', description: 'Atenção e críticos', dot: 'bg-amber-500' },
   { value: 'critical', label: 'Só críticos', description: 'O que pede ação imediata', dot: 'bg-red-500' },
-  { value: 'all', label: 'Tudo', description: 'Inclui os informativos', dot: 'bg-slate-400' },
+  { value: 'all', label: 'Tudo', description: 'Inclui logins e informativos', dot: 'bg-slate-400' },
 ];
 
 const SEVERITY_STYLE: Record<string, string> = {
@@ -55,7 +53,6 @@ const dateFormat = new Intl.DateTimeFormat('pt-BR', {
 });
 
 export function SecurityEventsPanel({ organizations }: { organizations: Array<{ id: string; name: string }> }) {
-  const [source, setSource] = useState<Source>('events');
   const [period, setPeriod] = useState('7d');
   // Abre só no que importa (atenção + crítico); o informativo fica a um clique.
   const [severity, setSeverity] = useState('important');
@@ -73,12 +70,9 @@ export function SecurityEventsPanel({ organizations }: { organizations: Array<{ 
   const load = useCallback(
     async (before?: string) => {
       const params = new URLSearchParams({ period });
-      if (source === 'auth') params.set('source', 'auth');
-      else {
-        if (severity !== 'all') params.set('severity', severity);
-        if (org !== 'all') params.set('org', org);
-        if (before) params.set('before', before);
-      }
+      if (severity !== 'all') params.set('severity', severity);
+      if (org !== 'all') params.set('org', org);
+      if (before) params.set('before', before);
       const request = ++requestRef.current;
       if (before) setLoadingMore(true);
       else setLoading(true);
@@ -108,21 +102,12 @@ export function SecurityEventsPanel({ organizations }: { organizations: Array<{ 
         }
       }
     },
-    [period, severity, org, source],
+    [period, severity, org],
   );
 
   useEffect(() => {
     void load();
   }, [load]);
-
-  // Abas "Eventos" e "Acessos".
-  const groupClass = 'inline-flex items-center gap-0.5 rounded-lg bg-slate-100 dark:bg-white/5 p-0.5';
-  const pillClass = (active: boolean) =>
-    `px-3 py-1 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
-      active
-        ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white'
-        : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
-    }`;
 
   return (
     <section className="bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-xl p-5 mt-6">
@@ -142,19 +127,11 @@ export function SecurityEventsPanel({ organizations }: { organizations: Array<{ 
         </button>
       </div>
       <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-        Ações críticas de todas as organizações: equipe, chaves, integrações, exportações e tentativas recusadas.
+        Ações críticas de todas as organizações: equipe, chaves, integrações, exportações, logins e tentativas recusadas.
         Os registros ficam guardados por 180 dias e não podem ser alterados nem apagados pelo CRM.
       </p>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-3">
-        <div className={groupClass} role="tablist" aria-label="Tipo de registro">
-          <button type="button" role="tab" aria-selected={source === 'events'} className={pillClass(source === 'events')} onClick={() => setSource('events')}>
-            Eventos
-          </button>
-          <button type="button" role="tab" aria-selected={source === 'auth'} className={pillClass(source === 'auth')} onClick={() => setSource('auth')}>
-            Acessos
-          </button>
-        </div>
         <FilterSelect
           icon={<CalendarDays size={13} aria-hidden="true" />}
           label="Período"
@@ -163,36 +140,32 @@ export function SecurityEventsPanel({ organizations }: { organizations: Array<{ 
           options={PERIODS}
           widthClass="w-44"
         />
-        {source === 'events' && (
-          <>
-            <FilterSelect
-              icon={<Gauge size={13} aria-hidden="true" />}
-              label="Gravidade"
-              value={severity}
-              onChange={setSeverity}
-              options={SEVERITY_FILTERS}
-              widthClass="w-40"
-            />
-            <FilterField icon={<Building2 size={13} aria-hidden="true" />} label="Organização">
-              <NativeSelect
-                aria-label="Organização"
-                value={org}
-                onChange={e => setOrg(e.target.value)}
-                className="w-60 rounded-l-none rounded-r-lg border-0 bg-transparent py-1.5 text-sm hover:border-0 focus-visible:ring-0 dark:border-0 dark:bg-transparent"
-              >
-                <option value="all">Todas</option>
-                {organizations.map(o => (
-                  <option key={o.id} value={o.id}>
-                    {o.name}
-                  </option>
-                ))}
-              </NativeSelect>
-            </FilterField>
-          </>
-        )}
+        <FilterSelect
+          icon={<Gauge size={13} aria-hidden="true" />}
+          label="Gravidade"
+          value={severity}
+          onChange={setSeverity}
+          options={SEVERITY_FILTERS}
+          widthClass="w-40"
+        />
+        <FilterField icon={<Building2 size={13} aria-hidden="true" />} label="Organização">
+          <NativeSelect
+            aria-label="Organização"
+            value={org}
+            onChange={e => setOrg(e.target.value)}
+            className="w-60 rounded-l-none rounded-r-lg border-0 bg-transparent py-1.5 text-sm hover:border-0 focus-visible:ring-0 dark:border-0 dark:bg-transparent"
+          >
+            <option value="all">Todas</option>
+            {organizations.map(o => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
+          </NativeSelect>
+        </FilterField>
       </div>
 
-      {source === 'events' && summary && (
+      {summary && (
         <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
           No período: <strong className="text-red-600 dark:text-red-400">{summary.critical}</strong>{' '}
           {summary.critical === 1 ? 'crítico' : 'críticos'} e{' '}
@@ -212,11 +185,9 @@ export function SecurityEventsPanel({ organizations }: { organizations: Array<{ 
         </div>
       ) : events.length === 0 && !error ? (
         <p className="text-sm text-slate-500 dark:text-slate-400 py-6">
-          {source === 'auth'
-            ? 'Nenhum acesso registrado pelo Supabase neste período. Os logs completos de login ficam no painel do Supabase, em Logs > Auth.'
-            : severity === 'all'
-              ? 'Nenhum evento neste período.'
-              : 'Nenhum evento importante neste período. Para ver também os informativos, escolha "Tudo".'}
+          {severity === 'all'
+            ? 'Nenhum evento neste período.'
+            : 'Nenhum evento importante neste período. Para ver também os informativos (como os logins), escolha "Tudo".'}
         </p>
       ) : (
         <ul
