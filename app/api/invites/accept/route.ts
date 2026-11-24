@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { logSecurityEvent } from '@/lib/security/auditLog';
 import { safeErrorMessage } from '@/lib/security/safeError';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
@@ -206,5 +207,14 @@ export async function POST(req: Request) {
     );
 
   // O convite já foi consumido atomicamente lá no começo (used_at = nowIso).
+  await logSecurityEvent({
+    action: 'team.invite.accepted',
+    actorId: userId,
+    organizationId: invite.organization_id,
+    resourceType: 'invite',
+    resourceId: invite.id,
+    details: { email, role: invite.role },
+    severity: invite.role === 'admin' ? 'warning' : 'info',
+  }, req);
   return json({ ok: true, user: { id: userId, email } });
 }

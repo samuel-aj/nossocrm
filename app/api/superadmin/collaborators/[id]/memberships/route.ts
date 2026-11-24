@@ -182,7 +182,7 @@ export async function PUT(req: Request, ctx: Ctx) {
       memberships: [...desired.entries()].map(([organizationId, role]) => ({ organizationId, role })),
     },
     severity: 'warning',
-  });
+  }, req);
 
   return json({
     ok: true,

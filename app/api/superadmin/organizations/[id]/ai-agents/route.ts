@@ -139,7 +139,7 @@ export async function POST(req: Request, ctx: Ctx) {
     resource_id: orgId,
     details: { org: (org as { name?: string }).name, enabled, desvinculadas },
     severity: 'warning',
-  });
+  }, req);
 
   return json({ ok: true, enabled, desvinculadas });
 }

@@ -94,7 +94,7 @@ export async function POST(req: Request) {
     resource_type: 'system',
     details: { promoted_user: user.email },
     severity: 'critical',
-  });
+  }, req);
 
   return json({
     ok: true,
