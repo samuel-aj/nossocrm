@@ -13,6 +13,7 @@
  * antigo não sumir (o organization_id deles muda ao trocar de org ativa).
  */
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
+import { safeErrorMessage } from '@/lib/security/safeError';
 
 interface ProfileRow {
   id: string;
@@ -45,8 +46,8 @@ export async function GET() {
       .limit(300),
     auth.admin.from('user_organizations').select('user_id, role').eq('organization_id', orgId),
   ]);
-  if (profilesRes.error) return json({ error: profilesRes.error.message }, 500);
-  if (membershipsRes.error) return json({ error: membershipsRes.error.message }, 500);
+  if (profilesRes.error) return json({ error: safeErrorMessage(profilesRes.error) }, 500);
+  if (membershipsRes.error) return json({ error: safeErrorMessage(membershipsRes.error) }, 500);
 
   const membershipRole = new Map<string, string>();
   for (const m of (membershipsRes.data ?? []) as Array<{ user_id: string | null; role: string | null }>) {

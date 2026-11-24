@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { withTabOrg } from '@/lib/supabase/tabOrgScope';
@@ -211,7 +212,7 @@ export async function POST(req: Request) {
       .is('deleted_at', null);
 
     if (companiesError) {
-      return NextResponse.json({ error: companiesError.message }, { status: 400 });
+      return NextResponse.json({ error: safeErrorMessage(companiesError) }, { status: 400 });
     }
 
     const companyIdByName = new Map<string, string>();
@@ -237,7 +238,7 @@ export async function POST(req: Request) {
         .select('id,name');
 
       if (createCompaniesError) {
-        return NextResponse.json({ error: createCompaniesError.message }, { status: 400 });
+        return NextResponse.json({ error: safeErrorMessage(createCompaniesError) }, { status: 400 });
       }
       for (const c of (createdCompanies || []) as Array<{ id: string; name: string }>) {
         if (c?.id && c?.name) companyIdByName.set(normalizeHeader(c.name), c.id);
@@ -266,7 +267,7 @@ export async function POST(req: Request) {
           .is('deleted_at', null);
 
         if (existingError) {
-          return NextResponse.json({ error: existingError.message }, { status: 400 });
+          return NextResponse.json({ error: safeErrorMessage(existingError) }, { status: 400 });
         }
         for (const c of (existing || []) as Array<{ id: string; email: string | null }>) {
           const em = (c.email || '').toLowerCase().trim();

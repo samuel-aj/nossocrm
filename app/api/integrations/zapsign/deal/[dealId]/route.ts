@@ -7,6 +7,7 @@
  *            ainda estava aguardando conferência (nada foi criado na ZapSign).
  */
 import { z } from 'zod';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { createClient } from '@/lib/supabase/server';
@@ -44,7 +45,7 @@ export async function GET(_req: Request, ctx: Ctx) {
   ]);
   if (error) {
     if (/deal_signatures/.test(error.message)) return json({ connected: false, signatures: [], pendingMigration: true });
-    return json({ error: error.message }, 500);
+    return json({ error: safeErrorMessage(error) }, 500);
   }
   const list = (data ?? []) as Array<Partial<SignatureRow> & { id: string; package_unverified?: boolean; package_recovered?: boolean }>;
   const withFile = list.find((s) => s.file_path);

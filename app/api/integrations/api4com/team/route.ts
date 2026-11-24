@@ -4,6 +4,7 @@
  * Quem da equipe já conectou a API4com. Nenhum token sai.
  */
 import { json } from '@/lib/whatsapp/api';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { guardRoute, getErrorMessage } from '@/app/api/wa-agents/_shared';
 
 export const runtime = 'nodejs';
@@ -22,7 +23,7 @@ export async function GET() {
       .order('verified_at', { ascending: false });
     if (error) {
       if (/api4com_user_settings/.test(error.message)) return json({ users: [], pendingMigration: true });
-      return json({ error: error.message }, 500);
+      return json({ error: safeErrorMessage(error) }, 500);
     }
     const rows = (data ?? []) as Row[];
     const ids = rows.map((r) => r.user_id);

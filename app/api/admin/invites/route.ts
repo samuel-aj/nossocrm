@@ -1,4 +1,5 @@
 import { canManageTeam } from '@/lib/permissions/teamAccessServer';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
@@ -61,7 +62,7 @@ export async function GET() {
     .limit(200)
     .order('created_at', { ascending: false });
 
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   return json({ invites: invites || [] });
 }
@@ -168,7 +169,7 @@ export async function POST(req: Request) {
           },
           { onConflict: 'user_id,organization_id' }
         );
-        if (linkError) return json({ error: linkError.message }, 500);
+        if (linkError) return json({ error: safeErrorMessage(linkError) }, 500);
         // Avisa por email (via n8n): "você foi adicionado à org X" + acesso.
         const { data: orgRow } = await admin
           .from('organizations')
@@ -202,7 +203,7 @@ export async function POST(req: Request) {
 
   if (error) {
     console.error('[admin/invites POST] Database error:', error);
-    return json({ error: error.message }, 500);
+    return json({ error: safeErrorMessage(error) }, 500);
   }
 
   let emailSent = false;

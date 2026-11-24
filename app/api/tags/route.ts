@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
@@ -45,7 +46,7 @@ export async function GET() {
     .eq('organization_id', auth.profile.organization_id)
     .order('name', { ascending: true });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
   return NextResponse.json({ data: (data || []).map(row => ({ ...row, color: legacyTagColor(row.color) })) });
 }
 
@@ -75,7 +76,7 @@ export async function POST(req: Request) {
       .from('wa_labels')
       .upsert(rows, { onConflict: 'organization_id,name_key', ignoreDuplicates: true })
       .select('id,name,color,created_at');
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
     return NextResponse.json({ data: (data || []).map(row => ({ ...row, color: legacyTagColor(row.color) })) });
   }
 

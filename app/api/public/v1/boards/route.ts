@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { authPublicApi } from '@/lib/public-api/auth';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { decodeOffsetCursor, encodeOffsetCursor, parseLimit } from '@/lib/public-api/cursor';
@@ -31,7 +32,7 @@ export async function GET(request: Request) {
 
   const { data, count, error } = await query.range(from, to);
   if (error) {
-    return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(error), code: 'DB_ERROR' }, { status: 500 });
   }
 
   const total = count ?? 0;

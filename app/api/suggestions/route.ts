@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
@@ -58,7 +59,7 @@ export async function GET() {
     .from('suggestions')
     .select('id, content, created_at, author_id, organization_id, status')
     .order('created_at', { ascending: false });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
 
   const suggestions = rows || [];
   if (suggestions.length === 0) return NextResponse.json({ data: [] });
@@ -116,7 +117,7 @@ export async function POST(req: Request) {
     .select('id, content, created_at, author_id, organization_id, status')
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
 
   return NextResponse.json({
     data: {

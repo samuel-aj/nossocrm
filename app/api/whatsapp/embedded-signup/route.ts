@@ -17,6 +17,7 @@
  * platform_config['meta_es_config_id'].
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { requireOrgUser, isOrgAdmin, json } from '@/lib/whatsapp/api';
 import { getConnectionsByOrg, upsertConnection } from '@/lib/whatsapp/service';
 import { observeConnection } from '@/lib/whatsapp/connectionIncidents';
@@ -122,7 +123,7 @@ export async function PATCH(req: Request) {
     const up = await auth.admin
       .from('platform_config')
       .upsert({ key: 'meta_es_config_id', value: configId, updated_at: now });
-    if (up.error) return json({ error: up.error.message }, 500);
+    if (up.error) return json({ error: safeErrorMessage(up.error) }, 500);
   }
   if (appSecret) {
     if (!/^[a-f0-9]{20,64}$/i.test(appSecret)) {
@@ -131,7 +132,7 @@ export async function PATCH(req: Request) {
     const up = await auth.admin
       .from('platform_config')
       .upsert({ key: 'meta_es_app_secret', value: appSecret, updated_at: now });
-    if (up.error) return json({ error: up.error.message }, 500);
+    if (up.error) return json({ error: safeErrorMessage(up.error) }, 500);
   }
   return json({ ok: true });
 }

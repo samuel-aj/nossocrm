@@ -11,6 +11,7 @@
  * available=false: a migração do histórico ainda não foi aplicada no banco.
  */
 import { createClient } from '@/lib/supabase/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { json, requireOrgUser } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
 
@@ -93,7 +94,7 @@ export async function GET(_req: Request, ctx: Ctx) {
   ]);
 
   const available = !evRes.error;
-  if (evRes.error && !isMissingTable(evRes.error.message)) return json({ error: evRes.error.message }, 500);
+  if (evRes.error && !isMissingTable(evRes.error.message)) return json({ error: safeErrorMessage(evRes.error) }, 500);
   const events = ((evRes.data ?? []) as EventRow[]).reverse();
   let acts = (actRes.data ?? []) as ActivityMetaRow[];
   if (actRes.error) {

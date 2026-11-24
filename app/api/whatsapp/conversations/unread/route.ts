@@ -1,4 +1,5 @@
 import { conversationAllowed } from '@/lib/permissions/conversationAccess';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { brPhoneVariants, normalizePhoneE164 } from '@/lib/phone';
 import { getConnectionByOrg } from '@/lib/whatsapp/service';
@@ -24,7 +25,7 @@ export async function GET() {
     colunas: 'contact_id, unread_count',
     somenteNaoLidas: true,
   });
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   const total = data.reduce((soma, c) => soma + (Number(c.unread_count) || 0), 0);
   return json({ total });
@@ -58,7 +59,7 @@ export async function POST(req: Request) {
       .eq('organization_id', auth.user.organizationId)
       .eq('id', conversationId)
       .or('unread_count.is.null,unread_count.eq.0');
-    if (error) return json({ error: error.message }, 500);
+    if (error) return json({ error: safeErrorMessage(error) }, 500);
     return json({ ok: true });
   }
 
@@ -71,13 +72,13 @@ export async function POST(req: Request) {
     colunas: 'id,contact_id,wa_phone,connection_id',
     connectionId: body?.connectionId && body.connectionId !== 'none' ? body.connectionId : null,
   });
-  if (visibilityError) return json({ error: visibilityError.message }, 500);
+  if (visibilityError) return json({ error: safeErrorMessage(visibilityError) }, 500);
   const variants = new Set(brPhoneVariants(phone).length ? brPhoneVariants(phone) : [phone]);
   const ids = visible.filter(c => variants.has(String(c.wa_phone)) && (body?.connectionId !== 'none' || !c.connection_id)).map(c => String(c.id));
   if (!ids.length) return json({ error: 'Conversa indisponível' }, 404);
   const { error } = await auth.admin.from('wa_conversations').update({ unread_count: 1 })
     .eq('organization_id', auth.user.organizationId).in('id', ids)
     .or('unread_count.is.null,unread_count.eq.0');
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
   return json({ ok: true });
 }

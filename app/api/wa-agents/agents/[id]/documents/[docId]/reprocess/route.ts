@@ -8,6 +8,7 @@
  * interrompida) pode ser reprocessado.
  */
 import { after } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { DOCUMENT_COLUMNS, loadDocument, processDocument, PROCESSING_STALE_MS } from '@/lib/wa-agents/knowledge';
@@ -39,7 +40,7 @@ export async function POST(req: Request, ctx: Ctx) {
     .eq('id', existing.id);
   claim = existing.status === 'processing' ? claim.eq('status', 'processing').lt('updated_at', staleBefore) : claim.neq('status', 'processing');
   const { data, error } = await claim.select(DOCUMENT_COLUMNS).maybeSingle();
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
   if (!data) {
     return json({ error: 'O documento ainda está sendo processado. Aguarde terminar antes de reprocessar.', code: 'PROCESSING' }, 409);
   }

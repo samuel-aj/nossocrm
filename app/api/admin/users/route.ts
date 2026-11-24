@@ -1,4 +1,5 @@
 import { canManageTeam } from '@/lib/permissions/teamAccessServer';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
@@ -55,8 +56,8 @@ export async function GET() {
       .eq('organization_id', orgId)
       .limit(500),
   ]);
-  if (membershipsRes.error) return json({ error: membershipsRes.error.message }, 500);
-  if (profilesRes.error) return json({ error: profilesRes.error.message }, 500);
+  if (membershipsRes.error) return json({ error: safeErrorMessage(membershipsRes.error) }, 500);
+  if (profilesRes.error) return json({ error: safeErrorMessage(profilesRes.error) }, 500);
 
   const membershipRoleByUser = new Map<string, string | null>();
   for (const m of membershipsRes.data || []) membershipRoleByUser.set(m.user_id, m.role ?? null);
@@ -75,7 +76,7 @@ export async function GET() {
       .from('profiles')
       .select('id, email, role, organization_id, created_at, first_name, last_name, nickname')
       .in('id', missingIds);
-    if (extraErr) return json({ error: extraErr.message }, 500);
+    if (extraErr) return json({ error: safeErrorMessage(extraErr) }, 500);
     for (const p of extra || []) profileById.set(p.id, p);
   }
 
@@ -221,7 +222,7 @@ export async function POST(req: Request) {
         { user_id: existingAuthUser.id, organization_id: scoped.organization_id, role },
         { onConflict: 'user_id,organization_id' }
       );
-      if (linkError) return json({ error: linkError.message }, 400);
+      if (linkError) return json({ error: safeErrorMessage(linkError) }, 400);
       // Avisa por email (via n8n): "você foi adicionado à org X" + acesso.
       const { data: orgRow } = await admin
         .from('organizations')
@@ -245,7 +246,7 @@ export async function POST(req: Request) {
       email_confirm: true,
       user_metadata: userMetadata,
     });
-    if (updateError) return json({ error: updateError.message }, 400);
+    if (updateError) return json({ error: safeErrorMessage(updateError) }, 400);
     userId = existingAuthUser.id;
   } else {
     const { data: authData, error: createError } = await admin.auth.admin.createUser({
@@ -254,7 +255,7 @@ export async function POST(req: Request) {
       email_confirm: true,
       user_metadata: userMetadata,
     });
-    if (createError) return json({ error: createError.message }, 400);
+    if (createError) return json({ error: safeErrorMessage(createError) }, 400);
     userId = authData.user.id;
   }
 
@@ -276,7 +277,7 @@ export async function POST(req: Request) {
     if (!existingAuthUser) {
       await admin.auth.admin.deleteUser(userId);
     }
-    return json({ error: profileError.message }, 400);
+    return json({ error: safeErrorMessage(profileError) }, 400);
   }
 
   await admin.from('user_organizations').upsert(

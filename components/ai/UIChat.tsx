@@ -252,14 +252,15 @@ export function UIChat({
         }
     }, [isOpen]);
 
-    // DEBUG: Log status changes
+    // Diagnóstico só em desenvolvimento: no navegador do cliente o console não
+    // mostra o que a pessoa digita nem detalhes internos (auditoria 23/11/2026).
     useEffect(() => {
-        console.log('[UIChat] Status:', status, 'Error:', error);
+        if (process.env.NODE_ENV === 'development') console.log('[UIChat] Status:', status, 'Error:', error);
     }, [status, error]);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        console.log('[UIChat] Submit attempt:', { input, status, canSend });
+        if (process.env.NODE_ENV === 'development') console.log('[UIChat] Submit attempt:', { status, canSend });
         if (!canSend) return;
         if (input.trim()) {
             sendMessage({ text: input });
@@ -1130,7 +1131,9 @@ export function UIChat({
                                         return null;
                                     }
 
-                                    console.log('[UIChat] 🔧 Handling tool part:', { type: partType, state: toolPart.state, name: toolName });
+                                    if (process.env.NODE_ENV === 'development') {
+                                        console.log('[UIChat] 🔧 Handling tool part:', { type: partType, state: toolPart.state, name: toolName });
+                                    }
 
                                     if (toolPart.state === 'approval-requested') {
                                         const toolInput = toolPart.input ?? toolPart.args;

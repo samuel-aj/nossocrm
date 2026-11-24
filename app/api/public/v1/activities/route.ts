@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { z } from 'zod';
 import { authPublicApi } from '@/lib/public-api/auth';
 import { createStaticAdminClient } from '@/lib/supabase/server';
@@ -48,7 +49,7 @@ export async function GET(request: Request) {
   const from = offset;
   const to = offset + limit - 1;
   const { data, count, error } = await query.range(from, to);
-  if (error) return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error), code: 'DB_ERROR' }, { status: 500 });
 
   const total = count ?? 0;
   const nextOffset = to + 1;
@@ -106,7 +107,7 @@ export async function POST(request: Request) {
     .insert(insertPayload)
     .select('id,title,description,type,date,completed,deal_id,contact_id,client_company_id,created_at')
     .single();
-  if (error) return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error), code: 'DB_ERROR' }, { status: 500 });
   return NextResponse.json({ data, action: 'created' }, { status: 201 });
 }
 

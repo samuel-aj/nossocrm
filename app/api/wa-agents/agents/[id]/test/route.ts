@@ -12,6 +12,7 @@
  * salva continuam vindo do banco.
  */
 import { z } from 'zod';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { randomUUID } from 'node:crypto';
 import { createUsageContext } from '@/lib/ai-usage/budget';
 import { runWithUsageContext } from '@/lib/ai-usage/context';
@@ -100,7 +101,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     });
     return json({ ...result, sessionId });
   } catch (err) {
-    if (err instanceof WaAgentError) return json({ error: err.message, code: err.code, sessionId }, 400);
+    if (err instanceof WaAgentError) return json({ error: safeErrorMessage(err), code: err.code, sessionId }, 400);
     console.error('[wa-agents/test]', err);
     return json({ error: getErrorMessage(err, 'Falha ao testar o agente'), sessionId }, 500);
   }

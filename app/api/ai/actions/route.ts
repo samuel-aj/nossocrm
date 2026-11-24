@@ -13,6 +13,7 @@
 // -> 200 { result?: any, error?: string, consentType?: string, retryAfter?: number }
 
 import { generateObject, generateText } from 'ai';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { getModel, type AIProvider } from '@/lib/ai/config';
 import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
@@ -501,6 +502,6 @@ Responda em português.`,
     }
   } catch (err: any) {
     console.error('[api/ai/actions] Error:', err);
-    return json<AIActionResponse>({ error: err?.message || 'Internal Server Error' }, 200);
+    return json<AIActionResponse>({ error: safeErrorMessage(err) || 'Internal Server Error' }, 200);
   }
 }

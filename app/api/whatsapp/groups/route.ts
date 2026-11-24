@@ -8,6 +8,7 @@
  * Escrita: admin.
  */
 import { requireOrgUser, isOrgAdmin, json } from '@/lib/whatsapp/api';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { getWaGroupsEnabled } from '@/lib/whatsapp/service';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 
@@ -37,6 +38,6 @@ export async function PATCH(req: Request) {
     },
     { onConflict: 'organization_id' }
   );
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
   return json({ ok: true, enabled: body.enabled });
 }

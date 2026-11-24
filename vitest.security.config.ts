@@ -13,6 +13,7 @@ export default defineConfig({
       'app/api/public/v1/docs/route.test.ts',
       'app/auth/callback/route.test.ts',
       'lib/public-api/orgRefs.test.ts',
+      'lib/security/safeError.test.ts',
     ],
     testTimeout: 30_000,
   },

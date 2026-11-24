@@ -6,6 +6,7 @@
  * por usuário restringido; quem não aparece vê tudo).
  */
 import { requireOrgUser, json, isOrgAdmin } from '@/lib/whatsapp/api';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { normalizeVisibilityRules } from '@/lib/permissions/types';
 
 export const runtime = 'nodejs';
@@ -25,7 +26,7 @@ export async function GET() {
     if (/user_visibility_rules/i.test(error.message) && /(does not exist|schema cache)/i.test(error.message)) {
       return json({ rules: [] });
     }
-    return json({ error: error.message }, 500);
+    return json({ error: safeErrorMessage(error) }, 500);
   }
 
   return json({

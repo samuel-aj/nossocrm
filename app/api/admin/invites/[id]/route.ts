@@ -1,4 +1,5 @@
 import { canManageTeam } from '@/lib/permissions/teamAccessServer';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { createClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { UserRole } from '@/types/constants';
@@ -49,7 +50,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
     .eq('id', id)
     .eq('organization_id', scoped.organization_id);
 
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   return json({ ok: true });
 }

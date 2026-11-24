@@ -4,6 +4,7 @@
  * -> { runs: BotRunRow[], bots: Record<id, name> }
  */
 import { z } from 'zod';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { json } from '@/lib/whatsapp/api';
 import type { BotRunRow } from '@/lib/wa-agents/types';
 import { guardRoute, searchParamsToObject, validationError } from '../_shared';
@@ -36,8 +37,8 @@ export async function GET(req: Request) {
     query,
     auth.admin.from('wa_bots').select('id, name').eq('organization_id', orgId),
   ]);
-  if (runsRes.error) return json({ error: runsRes.error.message }, 500);
-  if (botsRes.error) return json({ error: botsRes.error.message }, 500);
+  if (runsRes.error) return json({ error: safeErrorMessage(runsRes.error) }, 500);
+  if (botsRes.error) return json({ error: safeErrorMessage(botsRes.error) }, 500);
 
   const bots: Record<string, string> = {};
   for (const b of botsRes.data ?? []) bots[String(b.id)] = String(b.name ?? '');

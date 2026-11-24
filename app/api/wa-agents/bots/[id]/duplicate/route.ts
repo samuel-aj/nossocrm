@@ -8,6 +8,7 @@
  * eles só precisam ser únicos dentro do próprio robô.
  */
 import { json } from '@/lib/whatsapp/api';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { isValidUUID } from '@/lib/supabase/utils';
 import type { BotRow } from '@/lib/wa-agents/types';
 import { guardRoute, toBotPublic } from '../../../_shared';
@@ -30,7 +31,7 @@ export async function POST(req: Request, ctx: Ctx) {
     .eq('id', id)
     .eq('organization_id', orgId)
     .maybeSingle();
-  if (readError) return json({ error: readError.message }, 500);
+  if (readError) return json({ error: safeErrorMessage(readError) }, 500);
   if (!original) return json({ error: 'Robô não encontrado' }, 404);
   const bot = original as BotRow;
 
@@ -58,7 +59,7 @@ export async function POST(req: Request, ctx: Ctx) {
     })
     .select('*')
     .single();
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   return json({ bot: toBotPublic(data as BotRow) }, 201);
 }

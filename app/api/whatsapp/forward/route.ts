@@ -1,4 +1,5 @@
 import { conversationAllowed } from '@/lib/permissions/conversationAccess';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { reportRejectedSend } from '@/lib/whatsapp/connectionSendFailure';
 /**
  * POST /api/whatsapp/forward -> encaminha mensagens do chat para outros contatos
@@ -91,7 +92,7 @@ export async function POST(req: Request) {
     .in('id', messageIds)
     .is('deleted_at', null)
     .order('created_at', { ascending: true });
-  if (msgErr) return json({ error: msgErr.message }, 500);
+  if (msgErr) return json({ error: safeErrorMessage(msgErr) }, 500);
   for (const conversationId of new Set((rows || []).map(m => m.conversation_id))) {
     if (!(await conversationAllowed(auth.admin, auth.user, { id: conversationId }))) return json({ error: 'Mensagem indisponível' }, 404);
   }

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { isValidUUID } from '@/lib/supabase/utils';
@@ -35,7 +36,7 @@ async function assertVisibleSuggestion(
     .select('id, organization_id')
     .eq('id', id)
     .maybeSingle();
-  if (error) return { ok: false as const, status: 500, error: error.message };
+  if (error) return { ok: false as const, status: 500, error: safeErrorMessage(error) };
   if (!data) return { ok: false as const, status: 404, error: 'Not found' };
   if (profile.role !== 'super_admin' && data.organization_id !== profile.organization_id) {
     return { ok: false as const, status: 404, error: 'Not found' };
@@ -64,7 +65,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   if (error) {
     // Voto duplicado e idempotente: o usuario ja votou.
     if (/duplicate key|unique/i.test(error.message)) return NextResponse.json({ ok: true });
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
   }
   return NextResponse.json({ ok: true });
 }
@@ -86,6 +87,6 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
     .eq('suggestion_id', id)
     .eq('user_id', auth.profile.id);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

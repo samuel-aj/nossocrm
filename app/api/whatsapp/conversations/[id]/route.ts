@@ -1,4 +1,5 @@
 import { conversationAllowed } from '@/lib/permissions/conversationAccess';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { getTeamAccess, visibleLead } from '@/lib/permissions/teamAccessServer';
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
@@ -26,7 +27,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
   if (isLabelEdit || ('dealId' in body && body.dealId)) {
     const { data: conversation, error: convError } = await auth.admin.from('wa_conversations')
       .select('contact_id,is_group,deal_id').eq('organization_id', orgId).eq('id', id).maybeSingle();
-    if (convError) return json({ error: convError.message }, 500);
+    if (convError) return json({ error: safeErrorMessage(convError) }, 500);
     if (!conversation) return json({ error: 'Conversa indisponível' }, 404);
     expectedDealId = conversation.deal_id ?? null;
     if (!isLabelEdit && conversation.is_group) return json({ error: 'Grupos não podem ter lead vinculado' }, 400);
@@ -36,7 +37,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (targetDealId) {
       const { data: deal, error: dealError } = await auth.admin.from('deals')
         .select('id,contact_id,board_id,owner_id').eq('organization_id', orgId).eq('id', targetDealId).is('deleted_at', null).maybeSingle();
-      if (dealError) return json({ error: dealError.message }, 500);
+      if (dealError) return json({ error: safeErrorMessage(dealError) }, 500);
       if (!deal || (!isLabelEdit && (!conversation.contact_id || deal.contact_id !== conversation.contact_id))) return json({ error: 'Lead indisponível para esta conversa' }, 404);
       const access = await getTeamAccess(auth.admin, orgId, auth.user.id);
       if (!visibleLead(access, auth.user.id, deal.board_id, deal.owner_id)) return json({ error: 'Lead indisponível para esta conversa' }, 404);
@@ -47,7 +48,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
   if (requested.length) {
     const unique = [...new Set(requested)];
     const { data, error } = await auth.admin.from('wa_labels').select('id').eq('organization_id', orgId).in('id', unique);
-    if (error) return json({ error: error.message }, 500);
+    if (error) return json({ error: safeErrorMessage(error) }, 500);
     if (data?.length !== unique.length) return json({ error: 'Etiqueta indisponível nesta organização; atualize a lista' }, 400);
   }
 
@@ -63,7 +64,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (isLabelEdit) update = expectedDealId ? update.eq('deal_id', expectedDealId) : update.is('deal_id', null);
     return update.select('id,label_ids,deal_id,deal_link_mode').maybeSingle();
   });
-  if (error) return json({ error: error.message }, ['23514', '23503'].includes(error.code ?? '') ? 400 : error.code === '40001' ? 409 : 500);
+  if (error) return json({ error: safeErrorMessage(error) }, ['23514', '23503'].includes(error.code ?? '') ? 400 : error.code === '40001' ? 409 : 500);
   if (!data) return json({ error: isLabelEdit ? 'Vínculo da conversa mudou; atualize e tente novamente' : 'Conversa não encontrada' }, isLabelEdit ? 409 : 404);
   return json({ ok: true, conversation: Array.isArray(data) ? data[0] : data });
 }

@@ -7,6 +7,7 @@
  * A execução é criada na hora e processada em segundo plano (after).
  */
 import { after } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { z } from 'zod';
 import { json } from '@/lib/whatsapp/api';
 import { createStaticAdminClient } from '@/lib/supabase/server';
@@ -41,7 +42,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     .eq('id', id)
     .eq('organization_id', orgId)
     .maybeSingle();
-  if (botError) return json({ error: botError.message }, 500);
+  if (botError) return json({ error: safeErrorMessage(botError) }, 500);
   if (!bot) return json({ error: 'Robô não encontrado' }, 404);
   if (!bot.connection_id) {
     return json({ error: 'Escolha o número que envia as mensagens do robô antes de iniciar', code: 'NO_CONNECTION' }, 400);
@@ -67,7 +68,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       .eq('organization_id', orgId)
       .is('deleted_at', null)
       .maybeSingle();
-    if (dealError) return json({ error: dealError.message }, 500);
+    if (dealError) return json({ error: safeErrorMessage(dealError) }, 500);
     if (!deal) return json({ error: 'Negócio não encontrado' }, 404);
     contactId = (deal.contact_id as string | null) ?? undefined;
   }

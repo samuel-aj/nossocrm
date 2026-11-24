@@ -18,6 +18,7 @@
  * primeira mensagem.
  */
 import { NextResponse } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { z } from 'zod';
 import { authPublicApi } from '@/lib/public-api/auth';
 import { normalizePhone } from '@/lib/public-api/sanitize';
@@ -102,7 +103,7 @@ export async function POST(request: Request) {
     })
     .eq('id', conv.id)
     .eq('organization_id', orgId);
-  if (error) return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error), code: 'DB_ERROR' }, { status: 500 });
 
   return NextResponse.json({ ok: true, conversation_id: conv.id, phone: conv.wa_phone, status: body.status });
 }

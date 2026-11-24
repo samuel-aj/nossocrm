@@ -1,4 +1,5 @@
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { logSuperAdminAction } from '@/lib/security/auditLog';
 import { UserRole } from '@/types/constants';
@@ -87,7 +88,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     .update(updates)
     .eq('id', id);
 
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   await logSuperAdminAction(admin, {
     action: 'superadmin.org.update',
@@ -124,7 +125,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
     .update({ is_active: false, deleted_at: new Date().toISOString() })
     .eq('id', id);
 
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   await logSuperAdminAction(admin, {
     action: 'superadmin.org.delete',

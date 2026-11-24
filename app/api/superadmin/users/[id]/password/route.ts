@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { logSuperAdminAction } from '@/lib/security/auditLog';
@@ -54,7 +55,7 @@ export async function POST(req: Request, ctx: Ctx) {
     .select('id, email, organization_id')
     .eq('id', id)
     .maybeSingle();
-  if (targetError) return json({ error: targetError.message }, 500);
+  if (targetError) return json({ error: safeErrorMessage(targetError) }, 500);
   if (!target) return json({ error: 'Usuário não encontrado' }, 404);
 
   const { error: updateError } = await admin.auth.admin.updateUserById(id, { password: parsed.data.password });

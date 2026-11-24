@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { createClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { withTabOrg } from '@/lib/supabase/tabOrgScope';
@@ -40,7 +41,7 @@ export async function GET() {
     .select('key, enabled, updated_at')
     .eq('organization_id', scoped.organization_id);
 
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   const flags: Record<string, boolean> = {};
   for (const row of data || []) flags[row.key] = Boolean(row.enabled);
@@ -107,7 +108,7 @@ export async function POST(req: Request) {
       { onConflict: 'organization_id,key' }
     );
 
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
   return json({ ok: true });
 }
 

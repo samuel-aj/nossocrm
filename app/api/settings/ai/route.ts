@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { withTabOrg } from '@/lib/supabase/tabOrgScope';
@@ -66,7 +67,7 @@ export async function GET() {
     .maybeSingle();
 
   if (orgError) {
-    return json({ error: orgError.message }, 500);
+    return json({ error: safeErrorMessage(orgError) }, 500);
   }
 
   const aiEnabled = typeof orgSettings?.ai_enabled === 'boolean' ? orgSettings.ai_enabled : true;
@@ -190,7 +191,7 @@ export async function POST(req: Request) {
     .upsert(dbUpdates, { onConflict: 'organization_id' });
 
   if (upsertError) {
-    return json({ error: upsertError.message }, 500);
+    return json({ error: safeErrorMessage(upsertError) }, 500);
   }
 
   return json({ ok: true });

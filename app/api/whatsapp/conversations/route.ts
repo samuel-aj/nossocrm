@@ -1,4 +1,5 @@
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { getConnectionByOrg } from '@/lib/whatsapp/service';
 import { isColunaLabelIdsAusente } from '@/lib/whatsapp/labels';
 import { listVisibleConversations } from '@/lib/whatsapp/visibleConversations';
@@ -51,7 +52,7 @@ export async function GET(req: Request) {
     resultado = await listVisibleConversations(auth.admin, auth.user, { colunas: COLUNAS_BASE, connectionId });
   }
   const { data, error, groupsEnabled } = resultado;
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   // Foto de perfil: endereço FIXO servido por /api/whatsapp/avatars/[id], que
   // o navegador guarda em cache. NÃO assinar aqui: a lista recarrega sozinha e

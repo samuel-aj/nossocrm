@@ -6,6 +6,7 @@
  * movimento do lead abre a conferência antes de enviar). Nada do token sai.
  */
 import { json } from '@/lib/whatsapp/api';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { guardRoute, getErrorMessage } from '@/app/api/wa-agents/_shared';
 import { loadZapSignSettings } from '@/lib/zapsign/signatures';
 
@@ -23,7 +24,7 @@ export async function GET() {
       .select('stage_id, template_name')
       .eq('organization_id', orgId)
       .eq('enabled', true);
-    if (error && !/stage_signature_rules/.test(error.message)) return json({ error: error.message }, 500);
+    if (error && !/stage_signature_rules/.test(error.message)) return json({ error: safeErrorMessage(error) }, 500);
     return json({
       connected: true,
       sandbox: settings.sandbox,

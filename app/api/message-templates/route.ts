@@ -1,4 +1,5 @@
 import { getTemplateMedia, readTemplateMedia, uploadMetaTemplateSample } from '@/lib/whatsapp/templateMedia';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import type { TemplateHeaderType } from '@/lib/templateMedia';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -104,7 +105,7 @@ export async function GET() {
     .eq('organization_id', auth.profile.organization_id)
     .order('created_at', { ascending: true });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
   return NextResponse.json({ data: (data || []).map(mapRow) });
 }
 

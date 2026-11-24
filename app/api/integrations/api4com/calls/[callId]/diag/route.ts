@@ -6,6 +6,7 @@
  * para investigar áudio ruim. Não tem dado pessoal: só números e estados.
  */
 import { json } from '@/lib/whatsapp/api';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { guardRoute, readJsonBody, getErrorMessage } from '@/app/api/wa-agents/_shared';
 import { isValidUUID } from '@/lib/supabase/utils';
 
@@ -32,12 +33,12 @@ export async function POST(req: Request, ctx: Ctx) {
       .eq('organization_id', auth.user.organizationId)
       .eq('id', callId)
       .maybeSingle();
-    if (error) return json({ error: error.message }, 500);
+    if (error) return json({ error: safeErrorMessage(error) }, 500);
     const row = data as { id: string; user_id: string; metadata: Record<string, unknown> | null } | null;
     if (!row || row.user_id !== auth.user.id) return json({ error: 'not found' }, 404);
     const metadata = { ...(row.metadata ?? {}), diag: { ...(diag as Record<string, unknown>), saved_at: new Date().toISOString() } };
     const { error: upErr } = await auth.admin.from('api4com_calls').update({ metadata }).eq('id', row.id).eq('organization_id', auth.user.organizationId);
-    if (upErr) return json({ error: upErr.message }, 500);
+    if (upErr) return json({ error: safeErrorMessage(upErr) }, 500);
     return json({ ok: true });
   } catch (err) {
     return json({ error: getErrorMessage(err, 'Falha ao guardar o resumo da ligação') }, 500);

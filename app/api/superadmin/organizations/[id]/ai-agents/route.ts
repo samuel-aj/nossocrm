@@ -1,4 +1,5 @@
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { logSuperAdminAction } from '@/lib/security/auditLog';
 import { UserRole } from '@/types/constants';
@@ -87,7 +88,7 @@ export async function POST(req: Request, ctx: Ctx) {
     },
     { onConflict: 'organization_id,key' }
   );
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   // A chave ANTIGA da beta também vale como liberação (organizações que já
   // usavam antes). Ao REVOGAR é preciso desligar as duas, senão a antiga

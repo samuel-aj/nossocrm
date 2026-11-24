@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { z } from 'zod';
 import { authPublicApi } from '@/lib/public-api/auth';
 import { createStaticAdminClient } from '@/lib/supabase/server';
@@ -100,7 +101,7 @@ export async function GET(request: Request) {
   const from = offset;
   const to = offset + limit - 1;
   const { data, count, error } = await query.range(from, to);
-  if (error) return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error), code: 'DB_ERROR' }, { status: 500 });
 
   const total = count ?? 0;
   const nextOffset = to + 1;
@@ -183,7 +184,7 @@ export async function POST(request: Request) {
   else if (phone) lookup = lookup.eq('phone', phone);
 
   const existing = await lookup.maybeSingle();
-  if (existing.error) return NextResponse.json({ error: existing.error.message, code: 'DB_ERROR' }, { status: 500 });
+  if (existing.error) return NextResponse.json({ error: safeErrorMessage(existing.error), code: 'DB_ERROR' }, { status: 500 });
 
   const now = new Date().toISOString();
   const payload: any = {
@@ -213,7 +214,7 @@ export async function POST(request: Request) {
       .eq('id', existing.data.id)
       .select('id,name,email,phone,role,company_name,client_company_id,avatar,notes,status,stage,source,birth_date,last_interaction,last_purchase_date,total_value,created_at,updated_at')
       .single();
-    if (error) return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
+    if (error) return NextResponse.json({ error: safeErrorMessage(error), code: 'DB_ERROR' }, { status: 500 });
     return NextResponse.json({ data: data, action: 'updated' });
   }
 
@@ -234,7 +235,7 @@ export async function POST(request: Request) {
     .insert(insertPayload)
     .select('id,name,email,phone,role,company_name,client_company_id,avatar,notes,status,stage,source,birth_date,last_interaction,last_purchase_date,total_value,created_at,updated_at')
     .single();
-  if (error) return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error), code: 'DB_ERROR' }, { status: 500 });
   return NextResponse.json({ data, action: 'created' }, { status: 201 });
 }
 

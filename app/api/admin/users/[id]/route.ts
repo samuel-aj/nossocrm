@@ -1,4 +1,5 @@
 import { canManageTeam } from '@/lib/permissions/teamAccessServer';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { UserRole } from '@/types/constants';
@@ -52,7 +53,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
     .eq('id', id)
     .maybeSingle();
 
-  if (targetError) return json({ error: targetError.message }, 500);
+  if (targetError) return json({ error: safeErrorMessage(targetError) }, 500);
   if (!target) return json({ error: 'User not found' }, 404);
   const { data: settings, error: settingsError } = await admin.from('org_team_settings').select('master_user_id').eq('organization_id', scoped.organization_id).maybeSingle();
   if (settingsError) return json({ error: 'Falha ao consultar o Mestre' }, 500);

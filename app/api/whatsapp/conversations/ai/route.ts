@@ -1,4 +1,5 @@
 import { conversationAllowed } from '@/lib/permissions/conversationAccess';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { isValidUUID } from '@/lib/supabase/utils';
@@ -48,7 +49,7 @@ export async function POST(req: Request) {
     .eq('organization_id', auth.user.organizationId)
     .select('id')
     .maybeSingle();
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
   if (!data) return json({ error: 'Conversa não encontrada' }, 404);
   return json({ ok: true, status });
 }

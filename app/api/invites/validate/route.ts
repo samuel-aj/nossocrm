@@ -1,4 +1,5 @@
 import { createStaticAdminClient } from '@/lib/supabase/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 
 function json<T>(body: T, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -33,7 +34,7 @@ export async function GET(req: Request) {
 
   if (error) {
     console.error('[invites/validate] Database error:', error);
-    return json({ valid: false, error: error.message }, 500);
+    return json({ valid: false, error: safeErrorMessage(error) }, 500);
   }
   
   if (!invite) {

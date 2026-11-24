@@ -7,6 +7,7 @@
  * -> { data: [{ id, name, enabled, connection_id }] }
  */
 import { NextResponse } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { authPublicApi } from '@/lib/public-api/auth';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 
@@ -22,7 +23,7 @@ export async function GET(request: Request) {
     .select('id, name, enabled, connection_id')
     .eq('organization_id', auth.organizationId)
     .order('name', { ascending: true });
-  if (error) return NextResponse.json({ error: error.message, code: 'DB_ERROR' }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error), code: 'DB_ERROR' }, { status: 500 });
 
   return NextResponse.json({
     data: (data ?? []).map(b => ({

@@ -9,6 +9,7 @@
  * confere antes de enviar.
  */
 import { z } from 'zod';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { json } from '@/lib/whatsapp/api';
 import { createClient } from '@/lib/supabase/server';
 import { guardRoute, readJsonBody, validationError, getErrorMessage } from '@/app/api/wa-agents/_shared';
@@ -52,7 +53,7 @@ export async function POST(req: Request) {
     });
     return json(result);
   } catch (err) {
-    if (err instanceof AiFillError) return json({ error: err.message, code: err.code }, err.status);
+    if (err instanceof AiFillError) return json({ error: safeErrorMessage(err), code: err.code }, err.status);
     console.error('[zapsign/ai-fill] falha', err);
     return json({ error: getErrorMessage(err, 'A IA não conseguiu preencher agora. Tente de novo.') }, 502);
   }

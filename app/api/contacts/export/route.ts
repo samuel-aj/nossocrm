@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { createClient } from '@/lib/supabase/server';
 import { withTabOrg } from '@/lib/supabase/tabOrgScope';
 import { stringifyCsv, withUtf8Bom, type CsvDelimiter } from '@/lib/utils/csv';
@@ -99,7 +100,7 @@ export async function GET(req: Request) {
         .range(from, to);
 
       if (error) {
-        return NextResponse.json({ error: error.message }, { status: 400 });
+        return NextResponse.json({ error: safeErrorMessage(error) }, { status: 400 });
       }
 
       const chunk = (data || []) as any[];
@@ -127,7 +128,7 @@ export async function GET(req: Request) {
           .is('deleted_at', null);
 
         if (companiesError) {
-          return NextResponse.json({ error: companiesError.message }, { status: 400 });
+          return NextResponse.json({ error: safeErrorMessage(companiesError) }, { status: 400 });
         }
         for (const c of (companies || []) as Array<{ id: string; name: string }>) {
           companyNameById.set(c.id, c.name || '');

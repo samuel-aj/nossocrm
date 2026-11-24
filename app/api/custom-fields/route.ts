@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
@@ -77,7 +78,7 @@ export async function GET() {
     .select('id,key,label,type,options,entity_type,group_name,created_at')
     .eq('organization_id', auth.profile.organization_id)
     .order('created_at', { ascending: true });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
   return NextResponse.json({ data: (data || []).map(mapRow) });
 }
 
@@ -112,7 +113,7 @@ export async function POST(req: Request) {
       .from('custom_field_definitions')
       .upsert(rows, { onConflict: 'key,organization_id', ignoreDuplicates: false })
       .select('id,key,label,type,options,entity_type,group_name,created_at');
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
     return NextResponse.json({ data: (data || []).map(mapRow) });
   }
 

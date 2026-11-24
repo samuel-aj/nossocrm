@@ -1,4 +1,5 @@
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { logSuperAdminAction } from '@/lib/security/auditLog';
 import { UserRole } from '@/types/constants';
@@ -44,7 +45,7 @@ export async function GET(req: Request) {
     .eq('role', UserRole.SUPER_ADMIN)
     .order('created_at', { ascending: true });
 
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   const list = superAdmins || [];
   if (list.length === 0) return json({ collaborators: [] });
@@ -58,8 +59,8 @@ export async function GET(req: Request) {
       .in('user_id', list.map(p => p.id)),
     admin.from('organizations').select('id, name').is('deleted_at', null),
   ]);
-  if (linksError) return json({ error: linksError.message }, 500);
-  if (orgsError) return json({ error: orgsError.message }, 500);
+  if (linksError) return json({ error: safeErrorMessage(linksError) }, 500);
+  if (orgsError) return json({ error: safeErrorMessage(orgsError) }, 500);
 
   const orgName = new Map((orgs || []).map(o => [o.id as string, o.name as string]));
   const byUser = new Map<string, { organization_id: string; name: string; role: string }[]>();
@@ -174,7 +175,7 @@ export async function DELETE(req: Request) {
     .update({ role: UserRole.ADMIN })
     .eq('id', userId);
 
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   await logSuperAdminAction(admin, {
     action: 'superadmin.user.demote',

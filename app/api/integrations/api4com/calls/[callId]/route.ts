@@ -3,6 +3,7 @@
  *   -> { call }   estado atual da ligação (a tela consulta enquanto ela dura)
  */
 import { json } from '@/lib/whatsapp/api';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { guardRoute, getErrorMessage } from '@/app/api/wa-agents/_shared';
 import { isValidUUID } from '@/lib/supabase/utils';
 import type { CallRow } from '@/lib/api4com/shared';
@@ -19,7 +20,7 @@ export async function GET(_req: Request, ctx: Ctx) {
   if (!isValidUUID(callId)) return json({ error: 'not found' }, 404);
   try {
     const { data, error } = await auth.admin.from('api4com_calls').select('*').eq('organization_id', auth.user.organizationId).eq('id', callId).maybeSingle();
-    if (error) return json({ error: error.message }, 500);
+    if (error) return json({ error: safeErrorMessage(error) }, 500);
     const call = data as CallRow | null;
     if (!call) return json({ error: 'not found' }, 404);
     if (call.user_id !== auth.user.id && !auth.isAdmin) return json({ error: 'Esta ligação é de outra pessoa.' }, 403);

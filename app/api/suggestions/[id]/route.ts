@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
@@ -52,7 +53,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     .select('id, status')
     .maybeSingle();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
   if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   return NextResponse.json({ data });
 }
@@ -75,7 +76,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
     .eq('id', id)
     .maybeSingle();
 
-  if (findError) return NextResponse.json({ error: findError.message }, { status: 500 });
+  if (findError) return NextResponse.json({ error: safeErrorMessage(findError) }, { status: 500 });
   if (!suggestion) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const isSuperAdmin = auth.profile.role === 'super_admin';
@@ -87,6 +88,6 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
   }
 
   const { error } = await sb.from('suggestions').delete().eq('id', id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

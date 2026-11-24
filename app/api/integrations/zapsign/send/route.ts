@@ -13,6 +13,7 @@
  *   que já existe desta etapa.
  */
 import { z } from 'zod';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
@@ -166,7 +167,7 @@ export async function POST(req: Request) {
     const status = outcome.status === 'pending' ? 200 : outcome.status === 'failed' ? 502 : 409;
     return json({ signature: row, outcome }, status);
   } catch (err) {
-    if (err instanceof UnconfirmedEnvelopeError) return json({error:err.message,unconfirmed_attempts:err.attempts},409);
+    if (err instanceof UnconfirmedEnvelopeError) return json({error:safeErrorMessage(err),unconfirmed_attempts:err.attempts},409);
     return json({ error: getErrorMessage(err, 'Falha ao enviar para assinatura') }, 500);
   }
 }

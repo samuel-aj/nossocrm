@@ -16,6 +16,7 @@
  * tentando de novo a cada abertura.
  */
 import { requireOrgUser, json } from '@/lib/whatsapp/api';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { getProvider } from '@/lib/whatsapp';
 import { getConnectionByIdForOrg } from '@/lib/whatsapp/service';
@@ -45,7 +46,7 @@ export async function POST(req: Request) {
     .or(`avatar_synced_at.is.null,avatar_synced_at.lt.${limite}`)
     .order('last_message_at', { ascending: false, nullsFirst: false })
     .limit(LOTE);
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   const lista = (conversas ?? []) as Array<{
     id: string;

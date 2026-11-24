@@ -1,4 +1,5 @@
 import { canManageTeam } from '@/lib/permissions/teamAccessServer';
+import { safeErrorMessage } from '@/lib/security/safeError';
 /**
  * PUT /api/org/visibility/[userId]  (admin da organização)
  *   { rules: VisibilityRules } -> { ok, rules | null }
@@ -145,7 +146,7 @@ export async function PUT(req: Request, ctx: Ctx) {
       .delete()
       .eq('organization_id', orgId)
       .eq('user_id', userId);
-    if (error) return json({ error: error.message }, 500);
+    if (error) return json({ error: safeErrorMessage(error) }, 500);
     return json({ ok: true, rules: null });
   }
 
@@ -159,7 +160,7 @@ export async function PUT(req: Request, ctx: Ctx) {
     },
     { onConflict: 'organization_id,user_id' }
   );
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   return json({ ok: true, rules });
 }

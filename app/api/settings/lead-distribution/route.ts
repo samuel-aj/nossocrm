@@ -6,6 +6,7 @@
  * quanto cada pessoa recebeu. Leitura: qualquer membro. Escrita: admin.
  */
 import { z } from 'zod';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { withTabOrg } from '@/lib/supabase/tabOrgScope';
@@ -256,7 +257,7 @@ export async function POST(req: Request) {
     })),
     { onConflict: 'organization_id,user_id' }
   );
-  if (upsert.error) return json({ error: upsert.error.message }, 500);
+  if (upsert.error) return json({ error: safeErrorMessage(upsert.error) }, 500);
 
   // Quem não é mais membro daqui sai do rodízio (senão continuaria recebendo)
   const idsValidos = new Set(validos.map(p => p.userId));
@@ -325,7 +326,7 @@ export async function POST(req: Request) {
     },
     { onConflict: 'organization_id' }
   );
-  if (settings.error) return json({ error: settings.error.message }, 500);
+  if (settings.error) return json({ error: safeErrorMessage(settings.error) }, 500);
 
   return json({ ok: true });
 }

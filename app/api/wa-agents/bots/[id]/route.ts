@@ -1,4 +1,5 @@
 import { botResourceError } from '@/lib/wa-agents/botTemplateResources';
+import { safeErrorMessage } from '@/lib/security/safeError';
 import { botTemplateConnectionError } from '@/lib/wa-agents/templateConnections';
 /**
  * /api/wa-agents/bots/[id]  (admin)
@@ -42,7 +43,7 @@ export async function GET(_req: Request, ctx: Ctx) {
     .eq('id', id)
     .eq('organization_id', auth.user.organizationId)
     .maybeSingle();
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
   if (!data) return json({ error: 'Robô não encontrado' }, 404);
 
   return json({ bot: toBotPublic(data as BotRow) });
@@ -157,7 +158,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     .eq('organization_id', orgId)
     .select('*')
     .maybeSingle();
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
   if (!data) return json({ error: 'Robô não encontrado' }, 404);
 
   return json({ bot: toBotPublic(data as BotRow) });
@@ -177,7 +178,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
     .eq('id', id)
     .eq('organization_id', orgId)
     .maybeSingle();
-  if (findError) return json({ error: findError.message }, 500);
+  if (findError) return json({ error: safeErrorMessage(findError) }, 500);
   if (!existing) return json({ error: 'Robô não encontrado' }, 404);
 
   // Execuções em andamento ou esperando resposta são canceladas
@@ -187,10 +188,10 @@ export async function DELETE(req: Request, ctx: Ctx) {
     .eq('organization_id', orgId)
     .eq('bot_id', id)
     .in('status', ['running', 'waiting_reply']);
-  if (runsError) return json({ error: runsError.message }, 500);
+  if (runsError) return json({ error: safeErrorMessage(runsError) }, 500);
 
   const { error } = await auth.admin.from('wa_bots').delete().eq('id', id).eq('organization_id', orgId);
-  if (error) return json({ error: error.message }, 500);
+  if (error) return json({ error: safeErrorMessage(error) }, 500);
 
   return json({ ok: true });
 }
